@@ -199,6 +199,281 @@ pub(super) fn inline_cursor_call_sites(
     changed.then_some(source)
 }
 
+/// Inline internal helpers whose signature carries a struct that holds a pointer.
+///
+/// Logical SPIR-V has no first-class resource pointer, so a helper that receives or returns an
+/// aggregate with a `ptr` member cannot keep that pointer across its function boundary: the emitter
+/// has nowhere to put it and the loads through it lose their source. CoreImage's generated kernels
+/// do exactly this -- `_ci_sampler_builder` packs the kernel's `sampler` and a pointer to its
+/// transform into a `coreimage::Sampler_h`, and the stage helper unpacks them -- and they were
+/// translated with the sampler replaced by the read-sampler placeholder and every transform load
+/// replaced by a null constant, so each tap sampled texel (0, 0). Moving those helpers into the
+/// entry puts the `insertvalue`/`extractvalue` pair in one function, where the pointer is a value
+/// the emitter already traces.
+pub(super) fn inline_pointer_aggregate_helpers(
+    san_ll: &str,
+    entry_name: Option<&str>,
+) -> PointerConsumerInlining {
+    let unchanged = || PointerConsumerInlining {
+        source: san_ll.to_string(),
+        requires_relooper: false,
+    };
+    let Some(items) = parse_items(san_ll) else {
+        return unchanged();
+    };
+    let pointer_structs = pointer_carrying_struct_types(san_ll);
+    if pointer_structs.is_empty() {
+        return unchanged();
+    }
+    let targets = items
+        .iter()
+        .filter_map(|item| {
+            let Item::Func(function) = item else {
+                return None;
+            };
+            let signature = parse_def_header(&function.header)?;
+            (signature.internal
+                && struct_type_tokens(&function.header).any(|name| pointer_structs.contains(name)))
+            .then_some(signature.name)
+        })
+        .collect::<HashSet<_>>();
+    if targets.is_empty() {
+        return unchanged();
+    }
+    match try_inline(san_ll, Some((&targets, "", entry_name))) {
+        Some(source) if source != san_ll => PointerConsumerInlining {
+            source: forward_pointer_extracts(&source),
+            requires_relooper: true,
+        },
+        _ => unchanged(),
+    }
+}
+
+/// One aggregate-building or -reading SSA definition: `insertvalue` carries the aggregate it
+/// updates, the inserted element's type and value, and its index path; `extractvalue` carries the
+/// aggregate it reads and its path.
+enum AggregateDef {
+    Insert {
+        aggregate: String,
+        element_ty: String,
+        element: String,
+        path: Vec<u32>,
+    },
+    Extract {
+        aggregate: String,
+        path: Vec<u32>,
+    },
+}
+
+fn aggregate_def(line: &str) -> Option<(String, AggregateDef)> {
+    let (result, rhs) = line.split_once(" = ")?;
+    let result = result.trim().to_string();
+    let rhs = rhs.trim();
+    let opcode = rhs.split_whitespace().next()?;
+    let operands = split_top_level(rhs[opcode.len()..].trim_start(), ',');
+    let value_of = |typed: &str| {
+        super::lex::split_top_level_whitespace(typed.trim())
+            .last()
+            .map(|token| token.to_string())
+    };
+    match opcode {
+        "insertvalue" => {
+            let element = operands.get(1)?.trim();
+            let element_value = value_of(element)?;
+            let element_ty = element[..element.len() - element_value.len()]
+                .trim()
+                .to_string();
+            Some((
+                result,
+                AggregateDef::Insert {
+                    aggregate: value_of(operands.first()?)?,
+                    element_ty,
+                    element: element_value,
+                    path: crate::native::tir::resolve_aggregate_indices(line, "insertvalue")?,
+                },
+            ))
+        }
+        "extractvalue" => Some((
+            result,
+            AggregateDef::Extract {
+                aggregate: value_of(operands.first()?)?,
+                path: crate::native::tir::resolve_aggregate_indices(line, "extractvalue")?,
+            },
+        )),
+        _ => None,
+    }
+}
+
+/// What `value` holds at `path`, when an `insertvalue` in this body put a pointer there. Walks
+/// inserts that do not cover the path to the aggregate they updated, and folds an `extractvalue`
+/// source into the path it reads. `None` whenever the chain leaves this body or the slot was not
+/// written by a whole-pointer insert.
+fn inserted_pointer_at(
+    defs: &HashMap<String, AggregateDef>,
+    value: &str,
+    path: &[u32],
+    depth: usize,
+) -> Option<String> {
+    if depth > 256 {
+        return None;
+    }
+    match defs.get(value)? {
+        AggregateDef::Insert {
+            aggregate,
+            element_ty,
+            element,
+            path: inserted,
+        } => {
+            if inserted.as_slice() == path {
+                element_ty.starts_with("ptr").then(|| element.clone())
+            } else if path.starts_with(inserted) {
+                inserted_pointer_at(defs, element, &path[inserted.len()..], depth + 1)
+            } else if inserted.starts_with(path) {
+                None
+            } else {
+                inserted_pointer_at(defs, aggregate, path, depth + 1)
+            }
+        }
+        AggregateDef::Extract {
+            aggregate,
+            path: read,
+        } => {
+            let mut full = read.clone();
+            full.extend_from_slice(path);
+            inserted_pointer_at(defs, aggregate, &full, depth + 1)
+        }
+    }
+}
+
+/// Replace every `extractvalue` that reads back a pointer an `insertvalue` in the same body stored,
+/// with that pointer. After [`inline_pointer_aggregate_helpers`] the pack and the unpack share a
+/// body, but the emitter still sees the pointer only through a struct it cannot hold; forwarding
+/// the extract hands each consumer the pointer itself -- the kernel's own `sampler`, the
+/// argument-buffer address -- which it already knows how to trace.
+fn forward_pointer_extracts(san_ll: &str) -> String {
+    let Some(items) = parse_items(san_ll) else {
+        return san_ll.to_string();
+    };
+    let mut changed = false;
+    let items = items
+        .into_iter()
+        .map(|item| {
+            let Item::Func(function) = item else {
+                return item;
+            };
+            let defs = function
+                .body
+                .iter()
+                .filter_map(|line| aggregate_def(line))
+                .collect::<HashMap<_, _>>();
+            let mut forwarded = HashMap::new();
+            for (result, def) in &defs {
+                if let AggregateDef::Extract { aggregate, path } = def {
+                    if let Some(pointer) = inserted_pointer_at(&defs, aggregate, path, 0) {
+                        forwarded.insert(result.clone(), pointer);
+                    }
+                }
+            }
+            if forwarded.is_empty() {
+                return Item::Func(function);
+            }
+            // A forwarded pointer may itself be a forwarded extract.
+            let resolve = |mut name: String| {
+                let mut hops = 0;
+                while let Some(next) = forwarded.get(&name) {
+                    name = next.clone();
+                    hops += 1;
+                    if hops > 256 {
+                        break;
+                    }
+                }
+                name
+            };
+            let value_map = forwarded
+                .keys()
+                .map(|name| (name.clone(), resolve(name.clone())))
+                .collect::<HashMap<_, _>>();
+            let no_labels = HashMap::new();
+            changed = true;
+            Item::Func(FuncBlock {
+                header: function.header,
+                body: function
+                    .body
+                    .iter()
+                    .filter(|line| {
+                        line.split_once(" = ")
+                            .is_none_or(|(result, _)| !value_map.contains_key(result.trim()))
+                    })
+                    .map(|line| rename_line(line, &value_map, &no_labels))
+                    .collect(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if changed {
+        render(&items, san_ll.ends_with('\n'))
+    } else {
+        san_ll.to_string()
+    }
+}
+
+/// The named struct types (`%"struct.x"` / `%struct.x`) whose definition holds a `ptr`, directly or
+/// through another named struct, to a fixpoint.
+fn pointer_carrying_struct_types(san_ll: &str) -> HashSet<String> {
+    let definitions = san_ll
+        .lines()
+        .filter_map(|line| {
+            let (name, body) = line.split_once(" = type ")?;
+            name.starts_with('%')
+                .then(|| (name.trim().to_string(), body.to_string()))
+        })
+        .collect::<Vec<_>>();
+    let mut carrying = HashSet::new();
+    loop {
+        let before = carrying.len();
+        for (name, body) in &definitions {
+            if carrying.contains(name) {
+                continue;
+            }
+            let holds_pointer = body
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .any(|word| word == "ptr")
+                || struct_type_tokens(body).any(|inner| carrying.contains(inner));
+            if holds_pointer {
+                carrying.insert(name.clone());
+            }
+        }
+        if carrying.len() == before {
+            return carrying;
+        }
+    }
+}
+
+/// Every named struct type token in `text`: `%"quoted name"` or `%struct.name`.
+fn struct_type_tokens(text: &str) -> impl Iterator<Item = &str> {
+    let mut rest = text;
+    std::iter::from_fn(move || loop {
+        let start = rest.find('%')?;
+        let tail = &rest[start + 1..];
+        if let Some(quoted) = tail.strip_prefix('"') {
+            let end = quoted.find('"')?;
+            let token = &rest[start..start + 1 + 1 + end + 1];
+            rest = &rest[start + 1 + 1 + end + 1..];
+            if token.starts_with("%\"struct.") || token.starts_with("%\"class.") {
+                return Some(token);
+            }
+            continue;
+        }
+        let end = tail
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '_'))
+            .unwrap_or(tail.len());
+        let token = &rest[start..start + 1 + end];
+        rest = &rest[start + 1 + end..];
+        if token.starts_with("%struct.") || token.starts_with("%class.") {
+            return Some(token);
+        }
+    })
+}
+
 // ---------------------------------------------------------------------------------------------
 // Module model
 // ---------------------------------------------------------------------------------------------
@@ -1111,8 +1386,9 @@ fn find_inlinable_call(
     for (i, line) in body.iter().enumerate() {
         if let Some(c) = parse_call(line) {
             if internal.contains_key(&c.callee)
-                && selected_pointer
-                    .is_none_or(|selected| c.args.iter().any(|argument| argument == selected))
+                && selected_pointer.is_none_or(|selected| {
+                    selected.is_empty() || c.args.iter().any(|argument| argument == selected)
+                })
             {
                 return Some(i);
             }

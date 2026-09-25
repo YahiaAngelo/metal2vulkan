@@ -105,6 +105,9 @@ fn emit_vulkan_spirv_inner(
     // first emission so no unrepresentable standalone pointer crosses a SPIR-V function boundary.
     let pointer_consumers = inline::inline_pointer_select_consumers(&san_ll, entry_name);
     let san_ll = pointer_consumers.source;
+    // Helpers that pass a pointer inside a struct have the same boundary problem one level down.
+    let pointer_aggregates = inline::inline_pointer_aggregate_helpers(&san_ll, entry_name);
+    let san_ll = pointer_aggregates.source;
     if retry_debug {
         eprintln!("[retry-debug] native emit: AIR normalizations complete; typed parse start");
     }
@@ -130,7 +133,9 @@ fn emit_vulkan_spirv_inner(
             // Splicing a multi-block helper into its caller enlarges the entry CFG exactly as the
             // pointer-consumer inliner does; select the bounded whole-CFG constructor from that
             // fact.
-            pointer_consumers.requires_relooper || spliced_calls > 0,
+            pointer_consumers.requires_relooper
+                || pointer_aggregates.requires_relooper
+                || spliced_calls > 0,
         ) {
             Ok(emitted) => return Ok(emitted),
             Err(failure) => failure,
