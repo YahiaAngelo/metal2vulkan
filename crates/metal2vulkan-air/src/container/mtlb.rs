@@ -318,7 +318,13 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Metallib<'_>, Error> {
     if at != entries_end {
         return Err(container_error(ContainerError::BadOffset, 32));
     }
-    let (extended, _) = tags::read_list(file, at, file.len())?;
+    // iOS's runtime-compiled metallibs (an iOS 26 guest's Metal) have no extended header: the
+    // public-metadata section starts where the function list ends.
+    let (extended, _) = if at as u64 == header.public_metadata.offset {
+        (Vec::new(), at)
+    } else {
+        tags::read_list(file, at, file.len())?
+    };
     let mut linkage = linkage(file, &extended)?;
     if header.file_type == FILE_TYPE_DYNAMIC {
         let section = header.bitcode;
