@@ -1951,6 +1951,9 @@ fn gep_offset_indexed(
     Ok((konst, terms))
 }
 
+/// The alignment of a buffer's bind offset Apple's GPUs accept ([`select_access`]).
+const BIND_OFFSET_ALIGN: u64 = 4;
+
 fn select_access(
     cx: &mut SelectCx<'_>,
     ptr: Value,
@@ -1960,7 +1963,17 @@ fn select_access(
     m: &mut Meter,
 ) -> Result<Access, Error> {
     let (targets, null, blob_check) = blob_roots(cx, ptr, value.is_some(), m)?;
-    let align = align.map_or(1, |a| a.bytes());
+    // The access's alignment promises the Metal address's, but that address includes the
+    // buffer's bind offset, which Apple's GPUs take at any multiple of 4 (an iOS app binds
+    // constants at 4-byte offsets: the wallpaper's `float4x4`s at `16k + 4`). So an access
+    // through a bound buffer trusts at most 4-byte alignment: a 16-byte leaf is four words, not
+    // one `uvec4` unit at `offset / 16`, which would read 4 bytes before it.
+    let align = align
+        .map_or(1, |a| a.bytes())
+        .min(match targets.is_empty() {
+            true => u64::MAX,
+            false => BIND_OFFSET_ALIGN,
+        });
     let leaf = leaf::leaf_of(cx.entry, cx.profile, &cx.memory.layouts, ty, align)?;
     access_with_leaf(cx, ptr, value, leaf, targets, null, blob_check)
 }

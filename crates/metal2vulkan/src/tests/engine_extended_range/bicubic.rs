@@ -286,6 +286,10 @@ fn a_bicubic_sample_s_slots_join_the_variants() {
 /// of its texels was built) as at a slot of another format. On every committed profile, the
 /// lowering refuses that variant by the same rule (`metal::bicubic::runtime_cubic_measured`), a
 /// device without `samplerAnisotropy` (`vk12-floor`) an anisotropic one alike.
+///
+/// vphone-linux: the plan no longer refuses such a word; it names the variant of the nearest
+/// measured one (`metal::bicubic::runtime_cubic_nearest`). The variant the raw word would name is
+/// still refused by the lowering, as checked here.
 #[test]
 fn an_unmeasured_cubic_sampler_is_refused_before_any_variant() {
     let bc = match llvm_assemble(&engine_dir().join("xr_bicubic.ll")) {
@@ -332,16 +336,11 @@ fn an_unmeasured_cubic_sampler_is_refused_before_any_variant() {
             assert!(word & SamplerWord::CUBIC != 0, "{state}");
             for (pf, form) in formats {
                 let what = format!("a cubic sampler with {state}, {pf:?}, on {stem}");
-                match plain.plan(&dev, &sampled_state(pf, sampler).shape()) {
-                    Err(crate::error::BindError::Unsupported(u)) => {
-                        assert_eq!(
-                            (&u.feature, &u.needs),
-                            (&want.feature, &want.needs),
-                            "{what}"
-                        )
-                    }
-                    other => panic!("{what}: planned {:?}", other.map(|p| p.variant)),
-                }
+                // vphone-linux: the plan samples it as the nearest measured state
+                // (`metal::bicubic::runtime_cubic_nearest`) instead of refusing it.
+                plain
+                    .plan(&dev, &sampled_state(pf, sampler).shape())
+                    .unwrap_or_else(|e| panic!("{what}: {e}"));
                 // The variant the word would name refuses it.
                 let mut inputs = LowerInputs::new();
                 inputs

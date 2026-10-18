@@ -191,8 +191,11 @@ use std::ops::Range;
 
 /// The OSTypes of the full-range surfaces (the module docs): a texture over a surface of any other
 /// OSType reads its codes as video range.
-const FULL_RANGE: [&[u8; 4]; 9] = [
+const FULL_RANGE: [&[u8; 4]; 10] = [
     b"420f", b"422f", b"444f", b"xf20", b"xf22", b"xf44", b"pf20", b"pf22", b"pf44",
+    // vphone-linux: iOS's private two-plane RGB 4:4:4 surface, which the `RGB8_444_2P` textures
+    // of its compositor and widget renderers read as codes.
+    b"_RB4",
 ];
 /// The first byte of the OSTypes of CoreVideo's lossless compressed surfaces (`'&8v0'`, `'&xv2'`
 /// and their kin), whose planes hold compressed blocks, which Metal reads as nothing found here.

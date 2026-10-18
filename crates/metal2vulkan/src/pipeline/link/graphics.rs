@@ -527,8 +527,9 @@ pub fn graphics_state(
             // `color_writes::check` holds to the pipeline's.)
             // Nor is a two-plane YCbCr attachment's, whose texels Metal holds as halves and the
             // attachment as the function's floats.
+            // vphone-linux: a rendered YCbCr attachment's input reads its render shadow, the
+            // floats its pass loaded and its draws left (`texture/ycbcr_image.rs`).
             if metal::format::rotated_channels(attachment.pixel_format)
-                || metal::format::ycbcr_renders(attachment.pixel_format)
                 || metal::format::ycbcr_pass_refused(attachment.pixel_format)
             {
                 let refused = Unsupported::not_implemented(Feature::Format);

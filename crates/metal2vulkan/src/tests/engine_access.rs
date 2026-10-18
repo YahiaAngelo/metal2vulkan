@@ -1997,9 +1997,11 @@ fn every_view_of_a_written_slot_stays_writable() {
                     .filter(|(_, slot)| slot.index == 0)
                     .map(|(id, _)| *id)
                     .collect();
+                // vphone-linux: a 16-byte leaf through a bound buffer moves word by word
+                // (`lower::access::BIND_OFFSET_ALIGN`), so it adds no `uvec4` view.
                 assert_eq!(
                     data.len(),
-                    if has.has(bytes) { 2 } else { 1 },
+                    if bytes != 16 && has.has(bytes) { 2 } else { 1 },
                     "{what}: views of data"
                 );
                 // The layout counts the slot's views as its binding's variables.
@@ -2059,7 +2061,10 @@ fn sixteen_byte_leaves_move_as_one_uvec4() {
             };
             check_l3(&bc, k.name, &p, &what);
             let (plan, m) = typed_module(&bc, k.name, &p).unwrap_or_else(|e| panic!("{what}: {e}"));
-            let vec4 = k.align >= 16;
+            // vphone-linux: an access through a bound buffer trusts at most 4-byte alignment
+            // (`lower::access::BIND_OFFSET_ALIGN`: Apple's GPUs take bind offsets at any multiple
+            // of 4), so every 16-byte leaf here, `data`'s and `out`'s, moves word by word.
+            let vec4 = false;
             // A load kernel stores the loaded leaf to `out` at alignment 16.
             assert_eq!(
                 views_of(&m, 0),
@@ -2068,7 +2073,7 @@ fn sixteen_byte_leaves_move_as_one_uvec4() {
             );
             assert_eq!(
                 views_of(&m, 1),
-                if k.store.is_none() { 2 } else { 0 },
+                if k.store.is_none() { 1 } else { 0 },
                 "{what}: views of out"
             );
             let a = compile(&bc, k.name, &p).unwrap_or_else(|e| panic!("{what}: {e}"));
@@ -2076,7 +2081,7 @@ fn sixteen_byte_leaves_move_as_one_uvec4() {
                 .iter()
                 .filter(|o| **o == OP_STORE)
                 .count();
-            let want = if k.store.is_some() && !vec4 { 4 } else { 1 };
+            let want = if vec4 { 1 } else { 4 };
             assert_eq!(stores, want, "{what}: stores");
             let data = pattern(48);
             for r in VEC4_RESIDUALS {
@@ -2180,11 +2185,9 @@ fn a_constant_vector_is_one_uvec4_of_its_uniform_view() {
             assert_eq!(form, BufferForm::Descriptor(want), "{what}");
             link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{what}: L3: {e}"));
             let (plan, m) = typed_module(&bc, "constant_vec4", &p).expect("module");
-            assert_eq!(
-                views_of(&m, 0),
-                if standard { 2 } else { 1 },
-                "{what}: views of in"
-            );
+            // vphone-linux: read word by word (`lower::access::BIND_OFFSET_ALIGN`), so the
+            // uniform view is the only one.
+            assert_eq!(views_of(&m, 0), 1, "{what}: views of in");
             let data = pattern(512);
             let base = p
                 .fields()
