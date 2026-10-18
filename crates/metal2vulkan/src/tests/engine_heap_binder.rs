@@ -2590,15 +2590,15 @@ fn a_listed_cubic_sampler_is_planned_beside_a_stage_that_tests_it() {
     assert_eq!(flags(C) & SamplerWord::CUBIC, SamplerWord::CUBIC);
     assert_eq!(flags(B) & SamplerWord::CUBIC, 0);
     assert_eq!(flags(0), 0, "the null entry is no cubic sampler");
-    // Without the test, a listed cubic sampler is refused; a list without one is planned.
+    // Without the test, a listed cubic sampler is planned too (vphone-linux: held, sampling
+    // linear); so is a list without one.
     let Some(mut untested) = argument_sampler_pipeline(&dev, "argument_sampler_sample") else {
         return;
     };
     untested.dependencies.retain(|d| d.fact != tests);
-    match untested.plan(&dev, &state.shape()) {
-        Err(BindError::Unsupported(u)) => assert_eq!(u.feature, Feature::SamplerBicubicFilter),
-        other => panic!("{:?}", other.map(|_| ())),
-    }
+    untested
+        .plan(&dev, &state.shape())
+        .expect("an untested cubic sampler is held");
     let plain = sampler_state(vec![argument_sampler(SamplerDescriptor::new(), B)]);
     untested
         .plan(&dev, &plain.shape())
@@ -2694,5 +2694,6 @@ fn late_argument_samplers_fit_twice_the_class_and_the_plan_s_checks() {
     });
     let plan = untested.plan(&dev, &encoded.shape()).expect("plan");
     assert!(relisted(&plan, &with(linear)).is_some());
-    assert_eq!(relisted(&plan, &with(cubic)), None, "beside no test");
+    // vphone-linux: an untested cubic sampler is held, sampling linear.
+    assert!(relisted(&plan, &with(cubic)).is_some(), "beside no test");
 }

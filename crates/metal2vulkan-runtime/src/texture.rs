@@ -373,6 +373,17 @@ pub(super) struct TextureShared {
     ///
     /// [`facts`]: Texture::facts
     storage_formats: OnceLock<Vec<metal2vulkan::vk::Format>>,
+    /// An ASTC texture held as RGBA8 texels on a device without ASTC (vphone-linux): its block
+    /// footprint, set by the consumer that made it ([`Texture::set_astc_blocks`]), which decodes
+    /// the blocks it writes.
+    astc_blocks: OnceLock<[u32; 2]>,
+    /// The format a consumer's stand-in of another format reports ([`Texture::set_reported_format`]).
+    reported_format: OnceLock<PixelFormat>,
+    /// What a consumer keeps with a stand-in ([`Texture::set_consumer_data`]).
+    consumer_data: OnceLock<Box<dyn std::any::Any + Send + Sync>>,
+    /// The ASTC blocks written into such a texture, by (level, slice): the whole level's blocks,
+    /// rows of blocks tightly packed ([`Texture::astc_shadow`]).
+    astc_shadow: std::sync::Mutex<std::collections::HashMap<(u64, u64), Vec<u8>>>,
 }
 
 impl Drop for TextureShared {
@@ -4648,6 +4659,10 @@ impl Texture {
             render_shadow: Mutex::new(None),
             heap,
             storage_formats: OnceLock::new(),
+            astc_blocks: OnceLock::new(),
+            reported_format: OnceLock::new(),
+            consumer_data: OnceLock::new(),
+            astc_shadow: std::sync::Mutex::default(),
         }));
         if let Some(objects) = texture.0.storage.objects() {
             objects.object_made();
@@ -5254,6 +5269,46 @@ impl Texture {
     /// `pixelFormat`.
     pub fn pixel_format(&self) -> PixelFormat {
         self.0.record.pixel_format
+    }
+
+    /// Marks the texture as an ASTC texture held as RGBA8 texels, of blocks `width` x `height`
+    /// texels (vphone-linux): the consumer decodes what it writes. Set once, after making it.
+    pub fn set_astc_blocks(&self, width: u32, height: u32) {
+        let _ = self.0.astc_blocks.set([width, height]);
+    }
+
+    /// The ASTC block footprint [`Texture::set_astc_blocks`] set, `None` for any other texture.
+    pub fn astc_blocks(&self) -> Option<[u32; 2]> {
+        self.0.astc_blocks.get().copied()
+    }
+
+    /// Marks the texture as a consumer's stand-in for one of `format`, which its consumer reports
+    /// in place of the texture's own (vphone-linux).
+    pub fn set_reported_format(&self, format: PixelFormat) {
+        let _ = self.0.reported_format.set(format);
+    }
+
+    /// The format [`Texture::set_reported_format`] set, `None` for any other texture.
+    pub fn reported_format(&self) -> Option<PixelFormat> {
+        self.0.reported_format.get().copied()
+    }
+
+    /// Keeps `data` with the texture for its consumer (vphone-linux: a stand-in's surface).
+    pub fn set_consumer_data(&self, data: Box<dyn std::any::Any + Send + Sync>) {
+        let _ = self.0.consumer_data.set(data);
+    }
+
+    /// What [`Texture::set_consumer_data`] kept.
+    pub fn consumer_data(&self) -> Option<&(dyn std::any::Any + Send + Sync)> {
+        self.0.consumer_data.get().map(|b| &**b)
+    }
+
+    /// The blocks kept of an ASTC stand-in's level and slice, for `f` to read or write: the
+    /// level's whole block array (zero blocks until written), which a consumer keeps as it
+    /// decodes writes and answers reads of blocks from.
+    pub fn astc_shadow<R>(&self, level: u64, slice: u64, f: impl FnOnce(&mut Vec<u8>) -> R) -> R {
+        let mut map = self.0.astc_shadow.lock().unwrap_or_else(|e| e.into_inner());
+        f(map.entry((level, slice)).or_default())
     }
 
     /// `width`: of the texture's first level.

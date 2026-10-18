@@ -215,9 +215,23 @@ pub(super) enum ShadowSource {
         image: vk::Image,
         /// The copy back's staging buffer, kernel and dispatch (boxed, as `Converted`'s).
         write_back: Box<YCbCrWriteBack>,
+        /// vphone-linux: where a render shadow's copy in loads the texture's texels from, in
+        /// place of its clear: the texture's converted image, its conversion run first.
+        load: Option<YCbCrLoad>,
         /// The texture's format, which a refusal names.
         pixel_format: PixelFormat,
     },
+}
+
+/// A render shadow's load (vphone-linux): the texture's own converted image and its copies,
+/// whose conversion the shadow's copy in runs before it blits the image into the shadow.
+pub(crate) struct YCbCrLoad {
+    /// The texture's copies (`ShadowSource::Converted`).
+    pub(crate) copies: Arc<ShadowCopies>,
+    /// The texture's converted image.
+    pub(crate) image: vk::Image,
+    /// Its size.
+    pub(crate) extent: [u32; 2],
 }
 
 /// The `VkBuffer` a shadow's bytes lie in.
@@ -722,6 +736,9 @@ impl ShadowCopy {
             Step::Into if converted => {
                 vk::PipelineStageFlags2::TRANSFER | vk::PipelineStageFlags2::COMPUTE_SHADER
             }
+            Step::Into if encoded => {
+                vk::PipelineStageFlags2::TRANSFER | vk::PipelineStageFlags2::COMPUTE_SHADER
+            }
             Step::Back if encoded => {
                 vk::PipelineStageFlags2::TRANSFER | vk::PipelineStageFlags2::COMPUTE_SHADER
             }
@@ -749,8 +766,41 @@ impl ShadowCopy {
                 Step::Back | Step::Keep(_) | Step::Merge(_) => Vec::new(),
             };
         }
-        if let ShadowSource::YCbCrWrite { write_back, .. } = &c.source {
+        if let ShadowSource::YCbCrWrite {
+            write_back, load, ..
+        } = &c.source
+        {
             return match &self.step {
+                // A load: the conversion of the planes into the texture's image, then its blit
+                // into the shadow.
+                Step::Into if load.is_some() => {
+                    let l = load.as_ref().unwrap();
+                    let ShadowSource::Converted { conversion, .. } = &l.copies.source else {
+                        unreachable!("a render shadow's load is of a converted texture")
+                    };
+                    let mut uses = conversion.uses(
+                        Use::reads(
+                            truth,
+                            c.tracked,
+                            range,
+                            Access::new(
+                                vk::PipelineStageFlags2::COMPUTE_SHADER,
+                                vk::AccessFlags2::SHADER_STORAGE_READ,
+                            ),
+                        ),
+                        &l.copies,
+                    );
+                    uses.push(Use::writes(
+                        c.shadow_key,
+                        c.tracked,
+                        c.shadow_range.clone(),
+                        Access::new(
+                            vk::PipelineStageFlags2::BLIT,
+                            vk::AccessFlags2::TRANSFER_WRITE,
+                        ),
+                    ));
+                    uses
+                }
                 // A clear of every texel: nothing of the truth is read.
                 Step::Into => vec![Use::writes(
                     c.shadow_key,
@@ -819,8 +869,50 @@ impl ShadowCopy {
                 buffer,
                 image,
                 write_back,
+                load,
                 ..
             } => {
+                if let (true, Some(l)) = (into_shadow, load) {
+                    let ShadowSource::Converted {
+                        buffer: from,
+                        conversion,
+                        ..
+                    } = &l.copies.source
+                    else {
+                        return;
+                    };
+                    let layers = vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: 0,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    };
+                    let [w, h] = l.extent.map(|n| n as i32);
+                    let corners = [vk::Offset3D { x: 0, y: 0, z: 0 }, vk::Offset3D { x: w, y: h, z: 1 }];
+                    let blit = vk::ImageBlit {
+                        src_subresource: layers,
+                        src_offsets: corners,
+                        dst_subresource: layers,
+                        dst_offsets: corners,
+                    };
+                    // SAFETY: the caller's contract; the conversion writes the texture's image,
+                    // which the barrier orders before the blit of it into the shadow, both of
+                    // one size and in `GENERAL`.
+                    unsafe {
+                        conversion.record(device, command_buffer, from.raw());
+                        Barrier::everything().record(device, command_buffer);
+                        device.cmd_blit_image(
+                            command_buffer,
+                            l.image,
+                            vk::ImageLayout::GENERAL,
+                            *image,
+                            vk::ImageLayout::GENERAL,
+                            &[blit],
+                            vk::Filter::NEAREST,
+                        );
+                    }
+                    return;
+                }
                 if into_shadow {
                     let range = vk::ImageSubresourceRange {
                         aspect_mask: vk::ImageAspectFlags::COLOR,

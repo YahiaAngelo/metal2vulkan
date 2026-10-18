@@ -153,7 +153,7 @@ use std::ops::Range;
 /// `pf20`, `pf22` and `pf44`, the same packed three to a 32-bit word. A format reads a surface
 /// whose chroma plane holds its own: a 4:2:0 format a 4:2:2 or 4:4:4 surface's, a 4:2:2 format a
 /// 4:4:4 one's, each at the surface's rows.
-const SURFACES: [(&[u8; 4], u32, bool, YCbCrRange, ChromaSubsampling); 18] = {
+const SURFACES: [(&[u8; 4], u32, bool, YCbCrRange, ChromaSubsampling); 19] = {
     use ChromaSubsampling::{Chroma420 as C420, Chroma422 as C422, Chroma444 as C444};
     [
         (b"420v", 8, false, YCbCrRange::Video, C420),
@@ -174,6 +174,9 @@ const SURFACES: [(&[u8; 4], u32, bool, YCbCrRange, ChromaSubsampling); 18] = {
         (b"pf22", 10, true, YCbCrRange::Full, C422),
         (b"p444", 10, true, YCbCrRange::Video, C444),
         (b"pf44", 10, true, YCbCrRange::Full, C444),
+        // vphone-linux: iOS's private two-plane RGB 4:4:4 surface, which the `RGB8_444_2P`
+        // textures of its compositor and widget renderers read as codes.
+        (b"_RB4", 8, false, YCbCrRange::Full, C444),
     ]
 };
 /// What the planes' offsets and rows are multiples of: Metal's GPU reads a plane from its offset

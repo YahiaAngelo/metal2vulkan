@@ -1269,8 +1269,7 @@ pub(super) fn layout(
         // it to the pass (`DontCare`), stores it, and resolves nothing: a load (its texels then
         // the planes' converted reads), another store and a resolve are not measured.
         if ycbcr_renders(texture.pixel_format())
-            && (color.load_action == LoadAction::Load
-                || color.store_action != StoreAction::Store
+            && (color.store_action != StoreAction::Store
                 || color.resolve_texture.is_some()
                 || color.store_action_options != StoreActionOptions::NONE)
         {

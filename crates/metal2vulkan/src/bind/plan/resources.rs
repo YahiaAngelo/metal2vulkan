@@ -1768,11 +1768,11 @@ impl ResourcePlanner<'_> {
         let texels = match self.texture_shape(slot) {
             _ if self.variant.extended_range.contains_key(&slot) => BicubicTexels::NEUTRAL,
             Some(s @ TextureShape::Texture { pixel_format, .. }) if compatible(s, &t, &class) => {
-                bicubic_texels(*pixel_format)
-                    .ok_or(BindError::Unsupported(Unsupported::not_implemented(
-                        Feature::SamplerBicubicFilter,
-                    )))?
-                    .with_border(*pixel_format, self.border_swizzle(slot, s))
+                // vphone-linux: a format of no measured family reads as the neutral texels.
+                match bicubic_texels(*pixel_format) {
+                    Some(t) => t.with_border(*pixel_format, self.border_swizzle(slot, s)),
+                    None => BicubicTexels::NEUTRAL,
+                }
             }
             _ => BicubicTexels::NEUTRAL,
         };

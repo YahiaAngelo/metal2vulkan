@@ -166,6 +166,40 @@ const RGB: u32 = 0b0111;
 const RGBA: u32 = 0b1111;
 const A: u32 = 0b1000;
 
+/// vphone-linux: the nearest word [`runtime_cubic_measured`] holds measured: `word` without a mip
+/// filter, anisotropy or another reduction, `MirrorClampToEdge` axes clamped to the edge, and an
+/// unnamed border color transparent black. A bicubic sample through an unmeasured state is
+/// approximated by the measured one instead of refused.
+pub(crate) fn runtime_cubic_nearest(word: u32) -> u32 {
+    use crate::metal::sampler::SamplerWord;
+    use crate::metal::{SamplerAddressMode, SamplerBorderColor};
+    let mut w = word & !(SamplerWord::MIP_FILTER | SamplerWord::ANISOTROPIC | SamplerWord::REDUCTION);
+    for (shift, mask) in SamplerWord::ADDRESS_SHIFT.into_iter().zip(SamplerWord::ADDRESS) {
+        let mode = SamplerAddressMode::try_from((w & mask) >> shift);
+        if !matches!(
+            mode,
+            Ok(SamplerAddressMode::ClampToEdge
+                | SamplerAddressMode::Repeat
+                | SamplerAddressMode::MirrorRepeat
+                | SamplerAddressMode::ClampToZero
+                | SamplerAddressMode::ClampToBorderColor)
+        ) {
+            w = (w & !mask) | ((SamplerAddressMode::ClampToEdge as u32) << shift);
+        }
+    }
+    let border = SamplerBorderColor::try_from((w & SamplerWord::BORDER) >> SamplerWord::BORDER_SHIFT);
+    if !matches!(
+        border,
+        Ok(SamplerBorderColor::TransparentBlack
+            | SamplerBorderColor::OpaqueBlack
+            | SamplerBorderColor::OpaqueWhite)
+    ) {
+        w = (w & !SamplerWord::BORDER)
+            | ((SamplerBorderColor::TransparentBlack as u32) << SamplerWord::BORDER_SHIFT);
+    }
+    w
+}
+
 /// Whether Metal's bicubic filter is measured through a runtime sampler whose min or mag filter
 /// is `Cubic` and whose word (`metal::sampler::SamplerWord`, its `CUBIC_STATE` bits or all of
 /// them) is `word`, whatever a function samples through it: no mip filter, isotropic, the

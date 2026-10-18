@@ -137,7 +137,11 @@ impl Device {
             return Err(gap());
         }
         let mut plan = crate::image_plan::ImagePlan {
-            usage: plan.usage | ImageUsageFlags::SAMPLED | ImageUsageFlags::STORAGE,
+            // Blitted from too, into a render shadow's load (vphone-linux).
+            usage: plan.usage
+                | ImageUsageFlags::SAMPLED
+                | ImageUsageFlags::STORAGE
+                | ImageUsageFlags::TRANSFER_SRC,
             ..plan
         };
         // Written through a view of another format: mutable, viewed as that format too (an image
@@ -336,6 +340,7 @@ impl Texture {
                 alias: texels.buffer.alias().map(|alias| alias.key),
                 image: image.raw.get(),
                 write_back: Box::new(write_back),
+                load: None,
                 pixel_format: pf,
             },
             shadow_key: image.identity.key,
@@ -378,9 +383,15 @@ impl Texture {
         let pf = self.0.record.pixel_format;
         let gap =
             || Error::Unsupported(Unsupported::not_implemented(Feature::Format).naming_format(pf));
-        let Storage::Shadow { texels, copies, .. } = &self.0.storage else {
+        let Storage::Shadow {
+            texels,
+            copies,
+            image: parent,
+        } = &self.0.storage
+        else {
             return Err(gap());
         };
+        let parent_image = parent.raw.get();
         let ShadowSource::Converted { conversion, .. } = &copies.source else {
             return Err(gap());
         };
@@ -465,6 +476,11 @@ impl Texture {
                 alias: texels.buffer.alias().map(|alias| alias.key),
                 image: image.raw.get(),
                 write_back: Box::new(write_back),
+                load: Some(crate::shadow::YCbCrLoad {
+                    copies: Arc::clone(copies),
+                    image: parent_image,
+                    extent: planes.size,
+                }),
                 pixel_format: pf,
             },
             shadow_key: image.identity.key,

@@ -706,7 +706,10 @@ impl SamplerAdmission {
     /// Whether the plan may list a sampler of shape `s` beside its stages' cubic tests: one
     /// that is not cubic, or every stage tests, or no array samples through it.
     fn cubic_held(&self, s: &SamplerShape) -> bool {
-        !s.cubic || self.cubic || self.uses().next().is_none()
+        // vphone-linux: an untested cubic sampler is held too, sampling through its Vulkan
+        // sampler (linear): an approximation of Metal's bicubic filter, not a refusal.
+        let _ = (s, self.cubic);
+        true
     }
 
     /// Whether the plan holds a state of shape `s` on `profile` as it holds a listed one: `s`
@@ -973,11 +976,6 @@ impl<'a> HeapPlanner<'a> {
                 cubic: sampler_tables.iter().all(|&(stage, ..)| tested(stage)),
                 opaque_black: false,
             };
-            if !a.shapes.iter().all(|s| admission.cubic_held(s)) {
-                return Err(BindError::Unsupported(Unsupported::not_implemented(
-                    Feature::SamplerBicubicFilter,
-                )));
-            }
             if !sampler_uses.is_empty() {
                 opaque_black |= a.shapes.iter().any(|s| s.opaque_black_border);
             }

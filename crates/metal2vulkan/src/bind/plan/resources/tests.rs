@@ -920,12 +920,8 @@ fn bicubic_texels_follow_the_bound_format() {
     let neutral = u64::from(BicubicTexels::NEUTRAL.0);
     assert_eq!(plan(None), Ok(neutral));
     assert_eq!(plan(Some(PixelFormat::RGBA8Uint)), Ok(neutral));
-    assert_eq!(
-        plan(Some(PixelFormat::BC1RGBA)),
-        Err(BindError::Unsupported(Unsupported::not_implemented(
-            Feature::SamplerBicubicFilter
-        )))
-    );
+    // vphone-linux: a format of no measured family reads as the neutral texels, not a refusal.
+    assert_eq!(plan(Some(PixelFormat::BC1RGBA)), Ok(neutral));
 }
 
 /// A combined binding with the cube-gradient bit (a cube's explicit gradients in Metal's isotropic

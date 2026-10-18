@@ -439,6 +439,8 @@ pub(crate) fn cubic_variant(
                 .get(&slot.stage)
                 .and_then(|s| s.samplers.get(&slot.index))?;
             let word = bound.word.0 & SamplerWord::CUBIC_STATE;
+            // vphone-linux: an unmeasured state samples as the nearest measured one.
+            let word = crate::metal::bicubic::runtime_cubic_nearest(word);
             bound.shape.cubic.then(
                 || match crate::metal::bicubic::runtime_cubic_measured(word) {
                     true => Ok((slot, word)),

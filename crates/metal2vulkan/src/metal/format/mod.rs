@@ -190,9 +190,12 @@ impl FormatEmulation {
             FormatEmulation::YCbCr => {
                 matches!(usage, U::SampledImage | U::SampledImageFilterLinear)
             }
-            FormatEmulation::YCbCrRendered | FormatEmulation::YCbCrPassRefused => {
-                usage == U::ColorAttachment
+            // vphone-linux: a rendered one blends too, in its float render shadow, which its
+            // pass loads (`texture/ycbcr_image.rs`).
+            FormatEmulation::YCbCrRendered => {
+                matches!(usage, U::ColorAttachment | U::ColorAttachmentBlend)
             }
+            FormatEmulation::YCbCrPassRefused => usage == U::ColorAttachment,
             FormatEmulation::XChannel => matches!(
                 usage,
                 U::SampledImage
@@ -1829,7 +1832,15 @@ pub fn ycbcr_writes_stored(pf: PixelFormat) -> bool {
 pub fn ycbcr_renders(pf: PixelFormat) -> bool {
     // Every such layout is held ([`ycbcr`]), whose representation asks this.
     ycbcr_format(pf)
-        .is_some_and(|f| !f.packed && matches!(f.bits, 8 | 10) && f.reads == YCbCrReads::Converted)
+        .is_some_and(|f| {
+            !f.packed
+                && matches!(f.bits, 8 | 10)
+                && (f.reads == YCbCrReads::Converted
+                    // vphone-linux: a 4:4:4 code format (`RGB8_444_2P`, iOS's compositor's),
+                    // whose store is a write of every texel's codes, unmeasured.
+                    || (f.reads == YCbCrReads::Codes
+                        && f.subsampling == ChromaSubsampling::Chroma444))
+        })
 }
 
 /// Whether `pf` is a packed 10-bit two-plane YCbCr format this crate holds ([`ycbcr`]), whose
