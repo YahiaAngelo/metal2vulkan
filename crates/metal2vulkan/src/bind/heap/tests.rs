@@ -1045,12 +1045,16 @@ fn a_late_cubic_sampler_is_listed_with_its_cubic_bit_beside_tested_stages() {
         flags(tables),
         vec![(0, 0), (0, 0), (1, linear_word), (2, cubic_word)]
     );
-    // Beside a stage that does not test: not the plan's.
+    // Beside a stage that does not test: listed too (vphone-linux: an untested cubic sampler
+    // is held, sampling linear), its flags as beside tested stages.
     let untested = template(&listed(&[linear]), false);
-    assert_eq!(
+    let tables =
         relisted_sampler_tables(&untested, &profile, &listed(&[linear, cubic]), placement)
-            .expect("late"),
-        None
+            .expect("late")
+            .expect("held");
+    assert_eq!(
+        flags(tables),
+        vec![(0, 0), (0, 0), (1, linear_word), (2, cubic_word)]
     );
     // Encoded with one: a late one of its shape is relisted, its flags cubic.
     let with = template(&listed(&[linear, cubic]), true);

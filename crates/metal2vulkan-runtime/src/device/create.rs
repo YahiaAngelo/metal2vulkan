@@ -454,6 +454,23 @@ pub(super) unsafe extern "system" fn deliver(
         text: text(data.p_message),
         degradation: None,
     };
+    // vphone-linux diagnostic: with M2V_VALIDATION_BACKTRACE=<file>, each validation error is
+    // appended to the file with the backtrace of the call that met it.
+    if message.kind.validation && message.severity == MessageSeverity::Error {
+        if let Some(path) = std::env::var_os("M2V_VALIDATION_BACKTRACE") {
+            use std::io::Write as _;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = writeln!(
+                    f,
+                    "=== pid {} {}\n{}\n{}\n",
+                    std::process::id(),
+                    message.id_name,
+                    message.text,
+                    std::backtrace::Backtrace::force_capture()
+                );
+            }
+        }
+    }
     // A driver diagnostic the device's driver facts measure this thread's current call to
     // report is withheld, and counted (`driver_facts.rs`).
     if crate::driver_facts::withholds(&message) {
