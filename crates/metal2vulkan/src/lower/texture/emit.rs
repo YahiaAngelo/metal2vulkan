@@ -16,7 +16,7 @@ use crate::spirv::ir::{
     MemAccess, MemoryOrder, Scope, Semantics, TexelMemory, Type as SType, UnOp,
 };
 
-use super::half::{HalfForm, TexelLanes};
+use super::half::{HalfForm, TexelLanes, TexelOrigin};
 use super::slice::Slice;
 use super::{
     Coord, ImageDecl, ImageRef, QueryKind, QueryOp, Read, TexelClass, TexelConv, TexelForm,
@@ -909,7 +909,7 @@ fn from_image(
     let x = match (half, float) {
         (Some(h), _) => {
             let lanes = TexelLanes::Texel.value(fb)?;
-            h.convert(fb, x, HalfForm::Read, lanes)?
+            h.convert(fb, x, (HalfForm::Read, lanes), TexelOrigin::Image)?
         }
         (None, Some(f)) => {
             let lanes = TexelLanes::Texel.value(fb)?;
@@ -1189,6 +1189,8 @@ pub(crate) const SRGB_FILTERED_WORDS: u32 = SRGB_RAW_WORDS + 400;
 pub(crate) struct HalfClass {
     routine: FuncId,
     class: ClassOf,
+    /// The slot's `PlainHalfTexels` specialization, where it declares one.
+    plain: Option<SValue>,
 }
 
 /// Where a [`HalfClass`]'s class comes from.
@@ -1202,19 +1204,45 @@ enum ClassOf {
 
 impl HalfClass {
     /// The held `half` texel of image texel `x` (a `vec4` of `f32`) under access form `form`,
-    /// its lanes `lanes` (`half::TexelLanes::code`).
+    /// its lanes `lanes` (`half::TexelLanes::code`). An image instruction's texel (`origin`) of a
+    /// slot that declares `PlainHalfTexels` converts by the plain arm where the specialization
+    /// holds and by the routine where it does not, one selection construct on it, so
+    /// specialization keeps one of them (`half` module docs).
     pub(crate) fn convert(
         self,
         fb: &mut FunctionBuilder<'_>,
         x: SValue,
-        form: HalfForm,
-        lanes: SValue,
+        (form, lanes): (HalfForm, SValue),
+        origin: TexelOrigin,
     ) -> BResult<SValue> {
         let class = match self.class {
             ClassOf::Slot(c) => fb.module().const_value(c)?,
             ClassOf::Heap(v) => v,
         };
-        super::half::convert(fb, self.routine, x, class, (form, lanes))
+        use crate::lower::arith::legal::{FloatFmt, Form, Held};
+        use crate::spirv::error::{BuildError, OperandRule};
+        let routine = self.routine;
+        let plain = match (origin, self.plain) {
+            (TexelOrigin::Image, Some(plain)) => plain,
+            _ => return super::half::convert(fb, routine, x, class, (form, lanes)),
+        };
+        let half = Form {
+            held: Held::Float(FloatFmt::Half),
+            lanes: 4,
+        };
+        let then: ArmFn<'_, ()> = Box::new(move |fb, _| {
+            let v = narrow::round_texel_plain(fb, half, x)?;
+            Ok(ArmEnd::FallThrough(vec![v]))
+        });
+        let other: ArmFn<'_, ()> = Box::new(move |fb, _| {
+            let v = super::half::convert(fb, routine, x, class, (form, lanes))?;
+            Ok(ArmEnd::FallThrough(vec![v]))
+        });
+        let Merged(merged) = fb.if_(&mut (), plain, then, Some(other))?;
+        merged.first().copied().ok_or(BuildError::Operand {
+            op: crate::spv::Op::Phi,
+            rule: OperandRule::Arity,
+        })
     }
 }
 
@@ -1336,6 +1364,7 @@ pub(crate) fn half_class(cx: &EmitCx<'_>, image: &ImageRef, texel: TexelForm) ->
     Some(HalfClass {
         routine: t.half_routine?,
         class: ClassOf::Slot(t.half_format.get(&index).copied()?),
+        plain: t.plain_half.get(&index).copied(),
     })
 }
 
@@ -1359,6 +1388,7 @@ pub(crate) fn heap_half_class(
     Ok(Some(HalfClass {
         routine,
         class: ClassOf::Heap(class),
+        plain: None,
     }))
 }
 
@@ -3897,7 +3927,10 @@ fn slice_texel(fb: &mut FunctionBuilder<'_>, form: TexelForm, v: SValue) -> BRes
 
 /// Copy imageblock slice `s` to its texture: a counted loop over the block's cells, `k` the cell
 /// `(k mod bw, k / bw)` of a `bw · bh` block clipped to the imageblock, whose element at the
-/// field's offset is written at `coord + (x, y)`, discarded outside the texture.
+/// field's offset is written at `coord + (x, y)`, discarded outside the texture. A cooperative
+/// slice (`super::cooperative`) runs in every invocation: cells `k = lin, lin + n, ...`, `lin`
+/// the invocation's index in the threadgroup and `n` its threads, then a workgroup barrier over
+/// the arena, so that no invocation stores a cell before every share is written.
 fn slice<'c>(cx: &mut EmitCx<'c>, fb: &mut FunctionBuilder<'_>, s: &Slice) -> BResult<()> {
     let Loaded {
         decl,
@@ -3924,9 +3957,13 @@ fn slice<'c>(cx: &mut EmitCx<'c>, fb: &mut FunctionBuilder<'_>, s: &Slice) -> BR
     };
     let n = fb.binary(BinOp::IMul, bw, bh)?;
     let u = u32_ty(fb)?;
-    let zero = fb.u32_const(0)?;
-    let var = fb.local_var(u, Some(zero))?;
+    let (first, step) = match s.cooperative {
+        true => shares(cx, fb)?,
+        false => (u32s(fb, 1, 0)?, u32s(fb, 1, 1)?),
+    };
+    let var = fb.local_var(u, None)?;
     let counter = fb.var_ptr(var)?;
+    fb.store(counter, first, MemAccess::default())?;
     let dims = coord_len(&decl);
     let s = *s;
     let mem = texel_memory(cx, fb, &s.image)?;
@@ -3962,39 +3999,46 @@ fn slice<'c>(cx: &mut EmitCx<'c>, fb: &mut FunctionBuilder<'_>, s: &Slice) -> BR
             Ok(ArmEnd::Exits)
         });
         fb.if_(cx, done, exit, None)?;
-        let one = u32s(fb, 1, 1)?;
-        let next = fb.binary(BinOp::IAdd, k, one)?;
+        let next = fb.binary(BinOp::IAdd, k, step)?;
         fb.store(counter, next, MemAccess::default())?;
         let x = fb.binary(BinOp::UMod, k, bw)?;
         let y = fb.binary(BinOp::UDiv, k, bw)?;
         let cell = imageblock::cell_offset(cx, fb, x, y, s.cell_bytes)?;
         let field = u32s(fb, 1, s.field)?;
         let off = fb.binary(BinOp::IAdd, cell, field)?;
-        let v = imageblock::load(cx, fb, s.leaf, s.contained, off)?;
-        let held = slice_texel(fb, s.texel, v)?;
-        let form = TexelForm {
-            conv: s.texel.conv,
-            lanes: 4,
+        let (texel, twin) = match s.bits {
+            Some(leaf) => {
+                let v = imageblock::load(cx, fb, leaf, s.contained, off)?;
+                (cell_bits(fb, &decl, s.texel.lanes, v)?, None)
+            }
+            None => {
+                let v = imageblock::load(cx, fb, s.leaf, s.contained, off)?;
+                let held = slice_texel(fb, s.texel, v)?;
+                let form = TexelForm {
+                    conv: s.texel.conv,
+                    lanes: 4,
+                };
+                let test = NanTest::for_modes(&cx.plan.families.arith.modes);
+                let texel = to_image(fb, &decl, form, held, cx.decl.families.arith.srgb, test)?;
+                let twin = match twin {
+                    Some((is_bits, img)) => Some(TwinWrite {
+                        is_bits,
+                        img,
+                        bits: half_bits(fb, form, held)?,
+                    }),
+                    None => None,
+                };
+                let texel = match is_half {
+                    Some(half) => heap_halves(fb, half, form, texel)?,
+                    None => texel,
+                };
+                let texel = match is_small {
+                    Some(small) => heap_halves(fb, small, form, texel)?,
+                    None => texel,
+                };
+                (half_nan_texel(fb, (s.half_nans, kept), form, texel)?, twin)
+            }
         };
-        let test = NanTest::for_modes(&cx.plan.families.arith.modes);
-        let texel = to_image(fb, &decl, form, held, cx.decl.families.arith.srgb, test)?;
-        let twin = match twin {
-            Some((is_bits, img)) => Some(TwinWrite {
-                is_bits,
-                img,
-                bits: half_bits(fb, form, held)?,
-            }),
-            None => None,
-        };
-        let texel = match is_half {
-            Some(half) => heap_halves(fb, half, form, texel)?,
-            None => texel,
-        };
-        let texel = match is_small {
-            Some(small) => heap_halves(fb, small, form, texel)?,
-            None => texel,
-        };
-        let texel = half_nan_texel(fb, (s.half_nans, kept), form, texel)?;
         let ty = vec(fb, u, dims)?;
         let delta = if dims == 2 {
             fb.composite_construct(ty, &[x, y])?
@@ -4028,7 +4072,61 @@ fn slice<'c>(cx: &mut EmitCx<'c>, fb: &mut FunctionBuilder<'_>, s: &Slice) -> BR
         fb.if_(cx, inb, then, None)?;
         Ok(())
     });
-    fb.loop_(cx, LoopSpec::default(), body)
+    fb.loop_(cx, LoopSpec::default(), body)?;
+    if s.cooperative {
+        let flags = crate::air::intrinsics::MemFlags {
+            threadgroup_imageblock: true,
+            ..Default::default()
+        };
+        let sem = crate::lower::sync::barrier::semantics(
+            flags,
+            MemoryOrder::AcquireRelease,
+            memory_model(cx.plan),
+        );
+        fb.control_barrier(Scope::Workgroup, Scope::Workgroup, sem)?;
+    }
+    Ok(())
+}
+
+/// The `HalfBits` image texel of a `half` slice's cell bits `v` (`lanes` 16-bit lanes, each
+/// zero-extended in a `u32`): the lanes, a 0 (the half `+0.0`) for each lane the element lacks,
+/// and RGBX's green in the fourth channel, the texel [`to_image`] makes of the cell's widened
+/// halves.
+fn cell_bits(
+    fb: &mut FunctionBuilder<'_>,
+    decl: &ImageDecl,
+    lanes: u8,
+    v: SValue,
+) -> BResult<SValue> {
+    let form = TexelForm {
+        conv: TexelConv::I16 { signed: false },
+        lanes,
+    };
+    let x = slice_texel(fb, form, v)?;
+    match decl.x_channel {
+        true => x_channel_write(fb, x),
+        false => Ok(x),
+    }
+}
+
+/// A cooperative slice's first cell and step: the invocation's index in the threadgroup and the
+/// threadgroup's threads.
+fn shares(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>) -> BResult<(SValue, SValue)> {
+    use crate::lower::dispatch::KernelBuiltin;
+    let decl: &crate::lower::emit::Declared = cx.decl;
+    let Some(k) = decl.families.dispatch.kernel.as_ref() else {
+        return Err(cx.fail("a cooperative slice write outside a kernel"));
+    };
+    let lin = k.value(fb, KernelBuiltin::ThreadIndexInThreadgroup, &mut |fb| {
+        cx.push_field(fb, crate::pipeline::sym::PushField::DispatchRegion)
+    })?;
+    let threads = k.running_threads(fb)?;
+    let tx = fb.composite_extract(threads, &[0])?;
+    let ty_ = fb.composite_extract(threads, &[1])?;
+    let tz = fb.composite_extract(threads, &[2])?;
+    let txy = fb.binary(BinOp::IMul, tx, ty_)?;
+    let n = fb.binary(BinOp::IMul, txy, tz)?;
+    Ok((lin, n))
 }
 
 fn query(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, q: &QueryOp) -> BResult<SValue> {

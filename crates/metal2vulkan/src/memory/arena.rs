@@ -5,8 +5,9 @@
 //! the floor representation : no explicit-layout or narrow storage feature is needed.
 //!
 //! - **Threadgroup arena** (`Workgroup`): the static threadgroup globals at the offsets the memory
-//!   plan gives them, then the `[[threadgroup(n)]]` regions, each 16-byte aligned. A region's
-//!   length is the specialization constant `SpecKey::TgLength(n)`
+//!   plan gives them (but those it holds as typed `Workgroup` objects of their own,
+//!   `memory::plan::SharedPlan`), then the `[[threadgroup(n)]]` regions, each 16-byte aligned. A
+//!   region's length is the specialization constant `SpecKey::TgLength(n)`
 //!   (`RuntimeFact::ThreadgroupMemoryLength`) declared through `lower::dispatch`, so the region
 //!   offsets and the arena's length are `OpSpecConstantOp` sums ([`declare_threadgroup`]). Sub-word
 //!   stores are two relaxed `Workgroup`-scope word atomics: neighbouring bytes other

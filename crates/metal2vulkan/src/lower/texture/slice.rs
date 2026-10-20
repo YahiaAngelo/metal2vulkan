@@ -25,9 +25,12 @@
 //!
 //! The copy is one counted loop over the block's cells in the writing invocation (a builder
 //! loop), each iteration a contained arena leaf load
-//! (`access::imageblock::load`) and a texture write. A block past the imageblock's extent in
-//! either axis is clipped to it (the cells past it are not the imageblock's; Metal leaves them
-//! undefined).
+//! (`access::imageblock::load`) and a texture write. A `half` element written to a slot that
+//! stores each channel's half bits (`StorageImageClass::HalfBits`) loads the cells' bits as 16-bit
+//! integers and writes them as they are: the texel the widening and `narrow::to_bits` would give,
+//! since the two are inverse on every bit pattern (a NaN's sign and payload included). A block
+//! past the imageblock's extent in either axis is clipped to it (the cells past it are not the
+//! imageblock's; Metal leaves them undefined).
 //!
 //! Only these are pinned (else `Unsupported{Imageblocks, NotImplemented}`): the origin operand the
 //! constant zero, the trailing flag the constant `false`, the flag a constant, a field pointer
@@ -45,7 +48,8 @@
 //! element's class is the group's from another operation (no slot has a format input to give it).
 
 use crate::air::intrinsics::{Elem, TexRole, Texture};
-use crate::air::ir::{Value, ValueId};
+use crate::air::ir::{InstId, Value, ValueId};
+use crate::budget::Meter;
 use crate::error::{Error, Feature, RuntimeInput, Unsupported};
 use crate::lower::access::imageblock;
 use crate::lower::arith::legal::held_on;
@@ -98,6 +102,13 @@ pub struct Slice {
     /// Each texel of a half-float member stores its bits through the heap group's unsigned
     /// integer twin where the handle's class names one (`super::Write::heap_bits`).
     pub heap_bits: bool,
+    /// Every invocation of the workgroup writes a strided share of the cells, then a workgroup
+    /// barrier (`super::cooperative`); else the writing invocation writes them all.
+    pub cooperative: bool,
+    /// A `half` element written to a slot that stores each channel's half bits
+    /// (`StorageImageClass::HalfBits`): the cells loaded as this leaf of 16-bit integers, each
+    /// lane the channel's bits as they are.
+    pub bits: Option<Leaf>,
 }
 
 impl Slice {
@@ -119,6 +130,7 @@ impl Slice {
             } else {
                 0
             }
+            + if self.cooperative { 24 } else { 0 }
             + 320
     }
 }
@@ -186,12 +198,13 @@ fn heap_integer_class(cx: &SelectCx<'_>, group: u32) -> Result<TexelClass, Error
     }
 }
 
-/// Select a slice write to `image`, a texture slot or a heap element.
+/// Select slice write `call` to `image`, a texture slot or a heap element.
 pub(super) fn select(
     cx: &mut SelectCx<'_>,
-    t: &Texture,
+    (call, t): (InstId, &Texture),
     ops: &Operands<'_>,
     image: ImageRef,
+    m: &mut Meter,
 ) -> Result<TextureStrategy, Error> {
     let elem = t
         .texel
@@ -333,7 +346,41 @@ pub(super) fn select(
         true => super::half_nans(cx, image, (false, heap_bits))?,
         false => super::HalfNans::Held,
     };
+    // A `half` element to a slot of half bits, its NaNs as held: the cells' bits as they are.
+    let bits = match conv == TexelConv::F16
+        && class == StorageImageClass::HalfBits
+        && !image.heap()
+        && matches!(half_nans, super::HalfNans::Held | super::HalfNans::Kept)
+    {
+        true => Some(Leaf {
+            form: Form {
+                held: held_on(
+                    cx.profile,
+                    Held::Int {
+                        bits: 16,
+                        container: 32,
+                    },
+                )?,
+                lanes,
+            },
+            bytes,
+            path,
+        }),
+        false => None,
+    };
     mark(cx, image, |u| u.write = true);
+    // Every invocation shares the write where its guard selects local id 0 at a uniform point.
+    let cooperative = match super::cooperative::guard(cx, call, m)? {
+        Some(cond) => {
+            let v = cx
+                .values
+                .inst(cond)
+                .ok_or_else(|| cx.invariant("a guard without a value"))?;
+            cx.families.texture.cooperative.insert(v);
+            true
+        }
+        None => false,
+    };
     Ok(TextureStrategy::ImageblockSlice(Box::new(Slice {
         image,
         at,
@@ -350,5 +397,7 @@ pub(super) fn select(
         heap_small_floats,
         half_nans,
         heap_bits,
+        cooperative,
+        bits,
     })))
 }

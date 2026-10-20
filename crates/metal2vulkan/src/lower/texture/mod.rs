@@ -116,6 +116,7 @@
 mod absent;
 mod alpha;
 mod atomic;
+mod cooperative;
 mod emit;
 pub mod float_texel;
 pub mod half;
@@ -985,6 +986,9 @@ pub struct TexturePlan {
     /// (`ExtendedRange::HEAP_READ`): `false` a `float` one, `true` a `half` one. The module
     /// defines that decode's routine for each ([`heap_raw::define`]).
     pub heap_raw: BTreeSet<bool>,
+    /// The guard conditions of the slice writes every invocation shares (`cooperative`): each
+    /// one's branch is taken by every invocation, so its condition is emitted as `true`.
+    pub cooperative: BTreeSet<ValueId>,
     /// Which families the module's `half` routine tells apart ([`half_families`]): every
     /// measured one, or on a device that samples through Metal's own texture unit only those
     /// whose `half` is not Metal's `float` texel rounded to nearest even.
@@ -1067,6 +1071,9 @@ pub struct Declared {
     /// The module's routine of that conversion ([`half::define`]), defined once where a slot
     /// takes it.
     pub half_routine: Option<FuncId>,
+    /// The `PlainHalfTexels` specialization constant of each slot of those on a device whose
+    /// routine tells apart Metal's sampler's families alone (`half::HalfFamilies::MetalSampler`).
+    pub plain_half: BTreeMap<u32, SValue>,
     /// The module's routine converting one texel to a `float` result by the class
     /// ([`float_texel::define`]), defined once where a slot takes it.
     pub float_routine: Option<FuncId>,
@@ -1303,6 +1310,15 @@ pub fn declare(
         }
         if s.half_format && d.half_routine.is_none() {
             d.half_routine = Some(half::define(mb, plan.families.texture.half_families)?);
+        }
+        if s.half_format && half::takes_plain_arm(mb, plan.families.texture.half_families) {
+            let b = mb.ty(SType::Bool)?;
+            let c = mb.spec(
+                crate::pipeline::sym::SpecKey::PlainHalfTexels(s.slot),
+                b,
+                ConstBits(1),
+            )?;
+            d.plain_half.insert(*index, mb.const_value(c)?);
         }
         if s.float_format && d.float_routine.is_none() {
             d.float_routine = Some(float_texel::define(mb)?);
@@ -2292,7 +2308,7 @@ pub fn select(
         let group = heap_group(cx, tex, m)?;
         if slice {
             // A slice write to a heap element writes it as a heap write does.
-            return slice::select(cx, t, &ops, ImageRef::Heap { group, handle });
+            return slice::select(cx, (at, t), &ops, ImageRef::Heap { group, handle }, m);
         }
         if sampling {
             // The heap element through a separate heap sampler; its residency is refused (an LOD
@@ -2330,7 +2346,7 @@ pub fn select(
     if slice {
         return match target {
             HandleTarget::One(Candidate::Texture(index)) => {
-                slice::select(cx, t, &ops, ImageRef::Slot(index))
+                slice::select(cx, (at, t), &ops, ImageRef::Slot(index), m)
             }
             // A slice write to a switched or null texture is not modelled yet.
             _ => Err(Unsupported::not_implemented(Feature::Imageblocks).into()),
