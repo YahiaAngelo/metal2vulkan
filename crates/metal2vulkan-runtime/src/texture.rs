@@ -61,6 +61,7 @@ use super::attributes::PurgeableState;
 use super::binding_view::{binding_view, texture_facts, views_as, VkView};
 use super::buffer::{Buffer, CallerMemory, HostPages, MemoryHold, NotedTexture};
 use super::buffer_texture::{Texels, TexelsHome};
+use super::churn_counts::{Owned, Recycled};
 use super::clear_value;
 use super::color_resolve::KeptResolves;
 use super::command_buffer::CommandBuffer;
@@ -92,6 +93,7 @@ use super::neutral::Neutrals;
 use super::pvrtc::{
     cpu_order_of_rows, holds_blocks, image_block_extent, image_region, is_pvrtc, rows_of_cpu_order,
 };
+use super::recycle::{self, ImageMaking, Recycler};
 use super::resource::{Identity, ObjectId, ResourceKey};
 use super::resource_ids::{Holder, IdHold, IdPlacement, IdSpace, ResourceId};
 use super::shadow::ShadowCopies;
@@ -141,6 +143,7 @@ use std::ops::Range;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::time::Instant;
 use wrapped::WrappedImage;
 
 mod attached_reads;
@@ -192,6 +195,8 @@ pub(super) struct TextureState {
     pub(super) mipmaps: Mutex<MipmapChecks>,
     /// The neutral images and samplers bindings take where nothing is bound (`neutral.rs`).
     pub(super) neutrals: Mutex<Neutrals>,
+    /// Parked images, and the makings of the live recyclable ones (`recycle.rs`).
+    pub(super) recycled: Mutex<Recycler<vk::Image, ImageMaking>>,
     /// The placeholder images of the colors a render pass instance leaves out of its subpass for
     /// the pixel interlock (`storage_placeholder.rs`).
     pub(super) storage_placeholders: Mutex<Placeholders>,
@@ -246,6 +251,7 @@ impl TextureState {
             ),
             mipmaps: Mutex::new(MipmapChecks::new()),
             neutrals: Mutex::new(Neutrals::default()),
+            recycled: Mutex::new(Recycler::new(recycle::IMAGES)),
             storage_placeholders: Mutex::new(Placeholders::default()),
             usage_answers: Mutex::new(UsageAnswers::default()),
             format_answers: Mutex::new(HashMap::new()),
@@ -395,6 +401,14 @@ impl Drop for TextureShared {
     /// Then the texture object is gone, as Metal frees it: the caller's range token drops with the
     /// last object over its image or texels (`ObjectsToken`).
     fn drop(&mut self) {
+        let (owned, device) = match (&self.storage, &self.heap) {
+            (Storage::Image(image), Some(_)) => (Owned::TextureInHeap, &image.device),
+            (Storage::Image(image), None) => (Owned::TextureImage, &image.device),
+            (Storage::Shadow { image, .. }, _) => (Owned::TextureShadow, &image.device),
+            (Storage::Alias { image, .. }, _) => (Owned::TextureAlias, &image.device),
+            (Storage::Texels(texels), _) => (Owned::TextureTexels, texels.buffer.device()),
+        };
+        device.shared().counts.churn.released(owned);
         let id = self.id.id().0;
         if id != 0 {
             let (device, keeper): (&Device, Option<Box<dyn Any + Send + Sync>>) =
@@ -1150,6 +1164,13 @@ impl Drop for Image {
         let shared = self.device.shared();
         // A held image's scheduler state goes with it (`texture/held_depth.rs`).
         shared.textures.held.remove(self.identity.key);
+        let owned = match &self.owner {
+            Owner::Runtime { .. } => Owned::ImageOwnMemory,
+            Owner::Buffer { .. } => Owned::ImageInBuffer,
+            Owner::Heap(_) | Owner::HeapTwin => Owned::ImageInHeap,
+            _ => Owned::ImageOther,
+        };
+        shared.counts.churn.released(owned);
         let (image, memory) = self.owner.releases();
         // An image that took its storage form is in the form's memory: the memory it was made in
         // goes with its first `VkImage`, which the switch's command buffer holds until it
@@ -1160,12 +1181,13 @@ impl Drop for Image {
         // own; the image only where it made it.
         // An image presenting a stand-in destroys its own `VkImage` where it kept one, and
         // never the stand-in's.
-        let raw = match &*lock(&self.detached) {
-            Some(detached) => detached.own,
-            None => Some(self.raw.get()),
+        let (raw, detached) = match &*lock(&self.detached) {
+            Some(detached) => (detached.own, true),
+            None => (Some(self.raw.get()), false),
         };
         // The kept resolve objects go before the views they were made of.
         self.resolves.clear();
+        // SAFETY: as above.
         unsafe {
             for &view in lock(&self.views).values() {
                 release::object(shared.vk(), view);
@@ -1173,12 +1195,52 @@ impl Drop for Image {
             for &view in lock(&self.own_views).values() {
                 release::object(shared.vk(), view);
             }
-            if let Some(raw) = raw.filter(|_| image) {
-                release::object(shared.vk(), raw);
-            }
         }
-        if let Some(placement) = memory {
-            lock(&shared.memory).free(shared.vk(), placement);
+        // An image the recycler noted goes to it, its memory with it, unless it is no longer the
+        // image of its making alone (`recycle.rs`).
+        let shareable = matches!(
+            self.owner,
+            Owner::Runtime {
+                shareable: true,
+                ..
+            }
+        );
+        let own = raw.filter(|_| image);
+        let parked = match (own, memory) {
+            (Some(raw), Some(placement)) => {
+                let mut recycled = lock(&shared.textures.recycled);
+                match recycled.holds(raw) {
+                    true if !detached && !shareable && self.form.placement().is_none() => {
+                        let now = Instant::now();
+                        recycled.park(raw, placement.handed_over(), now).ok()
+                    }
+                    true => {
+                        recycled.forget(raw);
+                        None
+                    }
+                    false => None,
+                }
+            }
+            (Some(raw), None) => {
+                lock(&shared.textures.recycled).forget(raw);
+                None
+            }
+            (None, _) => None,
+        };
+        match parked {
+            Some(gone) => {
+                shared.counts.churn.parked(Recycled::Image);
+                self.device.let_go_parked(gone);
+            }
+            None => {
+                if let Some(raw) = own {
+                    // SAFETY: as above.
+                    unsafe { release::object(shared.vk(), raw) };
+                }
+                if let Some(placement) = memory {
+                    lock(&shared.memory).free(shared.vk(), placement);
+                }
+            }
         }
         if let Owner::Caller(wrapped) = &self.owner {
             shared.interop.wrapped.forget(wrapped);
@@ -2682,6 +2744,43 @@ impl Device {
         Ok((raw, placement))
     }
 
+    /// [`placed_image`](Self::placed_image)'s image, or a parked image of the same making
+    /// (`recycle.rs`), noted as one the recycler may park as it goes.
+    fn recycled_image(
+        &self,
+        plan: &ImagePlan,
+        texture_type: TextureType,
+        class: MemoryClass,
+        sharing: Sharing<'_>,
+    ) -> Result<(vk::Image, Placement), Error> {
+        let shared = self.shared();
+        let making = ImageMaking {
+            plan: plan.clone(),
+            texture_type,
+            class,
+            families: sharing.families().to_vec(),
+        };
+        let (taken, gone) = lock(&shared.textures.recycled).take(&making, Instant::now());
+        self.let_go_parked(gone);
+        if let Some(taken) = taken {
+            shared.counts.churn.taken(Recycled::Image);
+            return Ok(taken);
+        }
+        let (raw, placement) = self.placed_image(plan, texture_type, class, sharing)?;
+        lock(&shared.textures.recycled).made(raw, making);
+        Ok((raw, placement))
+    }
+
+    /// Destroy the parked images the recycler let go of, `gone`.
+    fn let_go_parked(&self, gone: recycle::Gone<vk::Image>) {
+        if gone.is_empty() {
+            return;
+        }
+        let shared = self.shared();
+        shared.counts.churn.evicted(Recycled::Image, gone.len());
+        recycle::destroy(shared.vk(), &mut lock(&shared.memory), gone);
+    }
+
     /// [`placed_image`](Self::placed_image)'s image of `plan` with host-transfer usage, and that
     /// plan, where the device copies on the host (`texture/host_copy.rs`), the plan's format has
     /// `HOST_IMAGE_TRANSFER` at optimal tiling, and the device makes and places the image so (in
@@ -2794,7 +2893,7 @@ impl Device {
                 };
                 let sharing = sharing.unwrap_or_else(|| self.shared().sharing());
                 let (raw, placement) =
-                    self.placed_image(&plan, layout.texture_type, class, sharing)?;
+                    self.recycled_image(&plan, layout.texture_type, class, sharing)?;
                 (plan, raw, placement, false)
             }
         };
