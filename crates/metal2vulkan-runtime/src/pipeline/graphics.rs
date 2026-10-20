@@ -25,7 +25,7 @@ use crate::degradation::BoundFormats;
 use crate::error::{internal, vulkan, Error};
 use crate::render_target::{PassShape, RenderPassObject};
 use crate::shader_cache::driver::Making;
-use crate::shader_cache::REPORTED_STAGES;
+use crate::shader_cache::{found_in_cache, REPORTED_STAGES};
 use ash::vk;
 use metal2vulkan::cache::Hash256;
 use metal2vulkan::cache::SpecializationKey;
@@ -119,6 +119,34 @@ pub(crate) fn keyed_assembly(
     };
     let primitive_restart = primitive_restart && !dynamic.contains(&D::PRIMITIVE_RESTART_ENABLE);
     (topology, primitive_restart)
+}
+
+/// The topology a graphics making's record is named by (`shader_cache/driver.rs`): a line
+/// topology names it as the triangle topology of its shape, so a state's line and triangle
+/// pipelines of an otherwise equal key share one record; every other topology names its own.
+///
+/// The topology class enters no stage's code there on MoltenVK 1.4.1, which keys a converted
+/// stage by its SPIR-V (`MVKShaderModule`'s key, its code's size and hash) and its conversion
+/// configuration (`MVKPipelineCache::getShaderLibraryImpl`, which takes the first entry whose
+/// `SPIRVToMSLConversionConfiguration::matches`); the topology reaches that configuration through
+/// `enable_point_size_builtin` alone, set for the point class (`MVKGraphicsPipeline::
+/// isRenderingPoints`). So a line pipeline made after its triangle sibling takes the sibling's
+/// converted stages from the shared record, where a record of its own made it convert them
+/// again from SPIR-V (120 ms and more for a 271k-word fragment module). Points keep their own
+/// record: their stages convert otherwise. A record is a cache the driver may use or not: one
+/// whose driver compiles the two classes apart holds both pipelines once both are made, which
+/// costs a larger record, never a wrong pipeline.
+fn record_topology(
+    topology: metal2vulkan::vk::PrimitiveTopology,
+) -> metal2vulkan::vk::PrimitiveTopology {
+    use metal2vulkan::vk::PrimitiveTopology as T;
+    match topology {
+        T::LINE_LIST => T::TRIANGLE_LIST,
+        T::LINE_STRIP => T::TRIANGLE_STRIP,
+        T::LINE_LIST_WITH_ADJACENCY => T::TRIANGLE_LIST_WITH_ADJACENCY,
+        T::LINE_STRIP_WITH_ADJACENCY => T::TRIANGLE_STRIP_WITH_ADJACENCY,
+        other => other,
+    }
 }
 
 /// The render encoder's state a pipeline takes as static state where it does not make it
@@ -969,12 +997,17 @@ impl VariantObjects {
         let mut stages = [vk::PipelineCreationFeedback::default(); REPORTED_STAGES];
         let mut reported_stages = 0;
         let driver_reports = shared.shader_cache.driver_reports() && libraries.is_none();
-        // Its record is named by the variant's content and what this making adds to it.
+        // Its record is named by the variant's content and what this making adds to it, a line
+        // topology as its triangle sibling's (`record_topology`).
+        let sibling = (record_topology(key.topology) != key.topology).then(|| GraphicsKey {
+            topology: record_topology(key.topology),
+            ..key.clone()
+        });
         let making = self
             .making("graphics")
             .text(&pipeline.vertex_input)
             .text(graphics)
-            .text(key);
+            .text(sibling.as_ref().unwrap_or(key));
         // The diagnostics the device's driver is measured to report as it makes this pipeline,
         // withheld inside its creation alone (`driver_facts.rs`).
         let expected: Vec<_> = self
@@ -1010,21 +1043,30 @@ impl VariantObjects {
                         .map(|(raw, linked)| (raw, Some(linked)))
                 }
                 None => {
-                    let mut info = infos.whole();
+                    let info = infos.whole();
                     let count = info.stage_count as usize;
                     reported_stages = if count <= REPORTED_STAGES { count } else { 0 };
-                    let mut feedback = vk::PipelineCreationFeedbackCreateInfo::default()
-                        .pipeline_creation_feedback(&mut whole)
-                        .pipeline_stage_creation_feedbacks(&mut stages[..reported_stages]);
-                    if driver_reports {
-                        info = info.push_next(&mut feedback);
-                    }
                     let making_at = split.then(std::time::Instant::now);
                     let _ = creation_log::take_record();
-                    let made = shared.make_pipelines(making, |cache| {
+                    // With what the driver reports of the making: a pipeline found in its
+                    // record's cache reads no data back (`shader_cache/driver.rs`).
+                    let made = shared.make_pipelines_reported(making, |cache| {
+                        let reported = &mut stages[..reported_stages];
+                        let mut feedback = vk::PipelineCreationFeedbackCreateInfo::default()
+                            .pipeline_creation_feedback(&mut whole)
+                            .pipeline_stage_creation_feedbacks(reported);
+                        let mut info = info;
+                        if driver_reports {
+                            info = info.push_next(&mut feedback);
+                        }
                         // SAFETY: every pointer in `info` outlives the call; the pipeline
                         // cache is the making's own, destroyed once the call returned.
-                        unsafe { shared.vk().create_graphics_pipelines(cache, &[info], None) }
+                        let made =
+                            unsafe { shared.vk().create_graphics_pipelines(cache, &[info], None) };
+                        let found = driver_reports
+                            .then(|| found_in_cache(&whole, &stages[..reported_stages]))
+                            .flatten();
+                        (made, found)
                     });
                     if let Some(at) = making_at {
                         let record = creation_log::record_text(creation_log::take_record());
@@ -1234,6 +1276,37 @@ mod tests {
             FixedState::without_dynamic(a, &[DynamicState::CULL_MODE]),
             FixedState::without_dynamic(c, &[DynamicState::CULL_MODE])
         );
+    }
+
+    /// A line topology names its making's record as the triangle topology of its shape; the
+    /// point, triangle and patch topologies name their own (`record_topology`).
+    #[test]
+    fn a_line_topology_names_its_triangle_sibling_s_record() {
+        use metal2vulkan::vk::PrimitiveTopology as T;
+        for (topology, named) in [
+            (T::POINT_LIST, T::POINT_LIST),
+            (T::LINE_LIST, T::TRIANGLE_LIST),
+            (T::LINE_STRIP, T::TRIANGLE_STRIP),
+            (T::TRIANGLE_LIST, T::TRIANGLE_LIST),
+            (T::TRIANGLE_STRIP, T::TRIANGLE_STRIP),
+            (T::TRIANGLE_FAN, T::TRIANGLE_FAN),
+            (T::LINE_LIST_WITH_ADJACENCY, T::TRIANGLE_LIST_WITH_ADJACENCY),
+            (
+                T::LINE_STRIP_WITH_ADJACENCY,
+                T::TRIANGLE_STRIP_WITH_ADJACENCY,
+            ),
+            (
+                T::TRIANGLE_LIST_WITH_ADJACENCY,
+                T::TRIANGLE_LIST_WITH_ADJACENCY,
+            ),
+            (
+                T::TRIANGLE_STRIP_WITH_ADJACENCY,
+                T::TRIANGLE_STRIP_WITH_ADJACENCY,
+            ),
+            (T::PATCH_LIST, T::PATCH_LIST),
+        ] {
+            assert_eq!(super::record_topology(topology), named, "{topology:?}");
+        }
     }
 
     /// Where a pipeline makes the topology and restart dynamic, every Metal primitive type keys
