@@ -226,6 +226,29 @@ impl Gpu for Native {
             .expect("newTextureWithDescriptor:offset:")
     }
 
+    fn buffer_texture(
+        &self,
+        buffer: &Self::Buffer,
+        (width, height): (usize, usize),
+        offset: usize,
+        bytes_per_row: usize,
+    ) -> Self::Texture {
+        // SAFETY: plain sizes.
+        let descriptor = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                MTLPixelFormat::BGRA8Unorm,
+                width,
+                height,
+                false,
+            )
+        };
+        descriptor.setUsage(MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead);
+        descriptor.setStorageMode(MTLStorageMode::Shared);
+        buffer
+            .newTextureWithDescriptor_offset_bytesPerRow(&descriptor, offset, bytes_per_row)
+            .expect("newTextureWithDescriptor:offset:bytesPerRow:")
+    }
+
     fn texture(&self, format: Format, width: usize, height: usize, target: bool) -> Self::Texture {
         // SAFETY: plain sizes.
         let descriptor = unsafe {
@@ -555,6 +578,36 @@ impl Gpu for Native {
             },
             0x5a,
         );
+        blit.endEncoding();
+    }
+
+    fn upload(
+        &self,
+        command_buffer: &Self::CommandBuffer,
+        source: &Self::Buffer,
+        textures: &[&Self::Texture],
+        (width, height): (usize, usize),
+        bytes_per_row: usize,
+    ) {
+        let blit = command_buffer
+            .blitCommandEncoder()
+            .expect("blitCommandEncoder");
+        for texture in textures {
+            // SAFETY: the region lies in the buffer and in the texture (the workload's).
+            unsafe {
+                blit.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                    source,
+                    0,
+                    bytes_per_row,
+                    bytes_per_row * height,
+                    MTLSize { width, height, depth: 1 },
+                    texture,
+                    0,
+                    0,
+                    MTLOrigin { x: 0, y: 0, z: 0 },
+                )
+            };
+        }
         blit.endEncoding();
     }
 

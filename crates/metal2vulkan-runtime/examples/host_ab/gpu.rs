@@ -89,6 +89,16 @@ pub trait Gpu {
         height: usize,
         offset: usize,
     ) -> Self::Texture;
+    /// `newTextureWithDescriptor:offset:bytesPerRow:` of `buffer`: a 2D `BGRA8Unorm` texture of
+    /// one level that passes render to and the shaders read, its rows `bytes_per_row` apart from
+    /// `offset`, as a window surface's texture over its memory.
+    fn buffer_texture(
+        &self,
+        buffer: &Self::Buffer,
+        size: (usize, usize),
+        offset: usize,
+        bytes_per_row: usize,
+    ) -> Self::Texture;
     /// A 2D texture of one level: a render target of `Private` storage, or a `Shared` one the
     /// shaders read.
     fn texture(&self, format: Format, width: usize, height: usize, target: bool) -> Self::Texture;
@@ -210,6 +220,17 @@ pub trait Gpu {
 
     /// A blit encoder of one `fillBuffer:range:value:` over the buffer's first `length` bytes.
     fn fill(&self, command_buffer: &Self::CommandBuffer, buffer: &Self::Buffer, length: usize);
+    /// A blit encoder of `copyFromBuffer:...toTexture:...` into each of `textures`, a
+    /// `width` x `height` region from the start of `source`, its rows `bytes_per_row` apart, as a
+    /// compositor uploads its windows' contents.
+    fn upload(
+        &self,
+        command_buffer: &Self::CommandBuffer,
+        source: &Self::Buffer,
+        textures: &[&Self::Texture],
+        size: (usize, usize),
+        bytes_per_row: usize,
+    );
 
     fn commit(&self, command_buffer: &Self::CommandBuffer);
     /// `waitUntilCompleted`, then a check that it completed without error.

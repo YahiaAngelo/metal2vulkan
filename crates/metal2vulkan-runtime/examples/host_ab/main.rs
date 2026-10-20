@@ -69,7 +69,12 @@
 //!   `Placement` heap, and the first 22 a dispatch of the tiny kernel; the last waited for. Per
 //!   frame: the encoding thread's wall time through the last commit, the whole frame's, the
 //!   encoding thread's CPU time and the process's. The runtime's alone (`drag_no_copy_*`): the
-//!   same over a heap of host pages, as a guest's heap is.
+//!   same over a heap of host pages, as a guest's heap is, and (`drag_heap_surfaces_*`) again
+//!   with textures Metal may optimize, each pass's draws sampling three other surfaces, as a
+//!   compositor's do, the frame's first command buffer uploading a window's contents into every
+//!   other surface in one blit encoder first. Then (`drag_surfaces_*`) the surfaces as textures
+//!   over host pages, a no-copy buffer each, their rows padded, as a guest's window surfaces
+//!   are, composited and uploaded into alike.
 //! - `memory`: `newBufferWithLength:` and `newBufferWithBytes:` of 4 KiB, 1 MiB and 64 MiB,
 //!   `newBufferWithBytesNoCopy:` of 1 MiB and 64 MiB, and a 1024x1024 `RGBA8Unorm` `Shared`
 //!   texture's `replaceRegion` and `getBytes`.
@@ -248,7 +253,10 @@ fn child(side: &str, options: &Options) {
                  requirement_images_made {} arena_pools_made {} owned_descriptor_pools {} \
                  draws_settled {} stage_tables_read {} graphics_pipelines_looked_up {} \
                  draws_pushing_set_zero {} set_zero_writes_pushed {} set_zero_sets_reused {} \
-                 signed_depth_switch_ons {} sign_strips {} magnitude_stand_in_passes {}",
+                 signed_depth_switch_ons {} sign_strips {} magnitude_stand_in_passes {} \
+                 completed_waits {} bare_starts {} submit_infos {} finales_folded {} \
+                 finales_apart {} pending_none {} pending_one {} pending_two_three {} \
+                 pending_four_more {}",
                 c.queue_submissions,
                 c.command_buffers_submitted,
                 c.commands_replayed.cmd_pipeline_barrier,
@@ -269,6 +277,15 @@ fn child(side: &str, options: &Options) {
                 c.signed_depth_switch_ons,
                 c.sign_strips,
                 c.magnitude_stand_in_passes,
+                c.completed_waits,
+                c.bare_starts,
+                c.submit_infos,
+                c.finales_folded,
+                c.finales_apart,
+                c.batches_with_none_pending,
+                c.batches_with_one_pending,
+                c.batches_with_two_or_three_pending,
+                c.batches_with_four_or_more_pending,
             );
             eprintln!("runtime commands replayed: {:?}", c.commands_replayed);
         }

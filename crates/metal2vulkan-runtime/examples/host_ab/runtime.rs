@@ -223,6 +223,26 @@ impl Gpu for Runtime {
             .expect("new_texture_at_offset")
     }
 
+    fn buffer_texture(
+        &self,
+        buffer: &rt::Buffer,
+        (width, height): (usize, usize),
+        offset: usize,
+        bytes_per_row: usize,
+    ) -> rt::Texture {
+        let mut descriptor = rt::TextureDescriptor::texture_2d(
+            PixelFormat::BGRA8Unorm,
+            width as u64,
+            height as u64,
+            false,
+        );
+        descriptor.usage = TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ;
+        descriptor.resource_options = rt::ResourceOptions::shared();
+        buffer
+            .new_texture(&descriptor, offset as u64, bytes_per_row as u64)
+            .expect("new_texture over a buffer")
+    }
+
     fn texture(&self, format: Format, width: usize, height: usize, target: bool) -> rt::Texture {
         let mut descriptor = rt::TextureDescriptor::texture_2d(
             pixel_format(format),
@@ -532,6 +552,35 @@ impl Gpu for Runtime {
             .expect("blit_command_encoder");
         blit.fill_buffer(buffer, 0..length as u64, 0x5a)
             .expect("fill_buffer");
+        blit.end_encoding().expect("end_encoding");
+    }
+
+    fn upload(
+        &self,
+        command_buffer: &rt::CommandBuffer,
+        source: &rt::Buffer,
+        textures: &[&rt::Texture],
+        (width, height): (usize, usize),
+        bytes_per_row: usize,
+    ) {
+        let mut blit = command_buffer
+            .blit_command_encoder()
+            .expect("blit_command_encoder");
+        for texture in textures {
+            blit.copy_from_buffer_to_texture(
+                source,
+                0,
+                bytes_per_row as u64,
+                (bytes_per_row * height) as u64,
+                rt::Size::new(width as u64, height as u64, 1),
+                texture,
+                0,
+                0,
+                rt::Origin::new(0, 0, 0),
+                rt::BlitOption::None,
+            )
+            .expect("copy_from_buffer_to_texture");
+        }
         blit.end_encoding().expect("end_encoding");
     }
 
