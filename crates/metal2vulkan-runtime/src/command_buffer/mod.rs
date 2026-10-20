@@ -502,11 +502,11 @@ pub(super) struct State {
     pub(super) capture_tallies: Vec<CaptureTally>,
     /// The index pool of the commands' index bounds and rewrite passes (`index_bounds.rs`,
     /// `index_rewrite.rs`), once a draw needs it: its counter in the arena, starting at 0, and
-    /// the block of the device's its indices lie in (`gpu_pools.rs`).
+    /// its lease of its queue's block, which its indices lie in (`gpu_pools.rs`).
     index_pool: Option<(Upload, PoolLease)>,
     /// The records pool of the commands' scanned emulated mesh draws (`render/mesh.rs`), once a
-    /// draw needs it: a block of the device's (`gpu_pools.rs`); the scans' cursor is a status
-    /// word.
+    /// draw needs it: its lease of its queue's block (`gpu_pools.rs`); the scans' cursor is a
+    /// status word.
     mesh_pool: Option<PoolLease>,
     /// The emulated mesh draws numbered so far, each by its order.
     mesh_draws: u32,
@@ -1290,9 +1290,10 @@ impl State {
     /// The command buffer's index pool (`index_bounds.rs`, `index_rewrite.rs`), taken when a
     /// draw first needs it: its counter, `IndexBoundsPass::POOL_HEADER_BYTES` of the arena, zero;
     /// and the block its indices lie in, from the block's
-    /// `IndexBoundsPass::POOL_HEADER_BYTES` on, leased from the device (`gpu_pools.rs`): the
-    /// block's `VkBuffer` and bytes, the header's included.
-    pub(super) fn index_pool(&mut self, device: &Device) -> Result<IndexPool, Error> {
+    /// `IndexBoundsPass::POOL_HEADER_BYTES` on, its queue's (`queue`, the command buffer's
+    /// `CommandQueue::id`), leased from the device (`gpu_pools.rs`): the block's `VkBuffer` and
+    /// bytes, the header's included.
+    pub(super) fn index_pool(&mut self, device: &Device, queue: u64) -> Result<IndexPool, Error> {
         if let Some((counter, block)) = &self.index_pool {
             return Ok(IndexPool::of(counter, block));
         }
@@ -1300,7 +1301,7 @@ impl State {
         let counter = self
             .uploads
             .upload(device, &vec![0; header as usize], header)?;
-        let block = device.lease_pool(PoolKind::Index)?;
+        let block = device.lease_pool(PoolKind::Index, queue)?;
         let pool = IndexPool::of(&counter, &block);
         self.index_pool = Some((counter, block));
         Ok(pool)
@@ -1310,11 +1311,15 @@ impl State {
     /// budget, leased when a scanned emulated mesh draw first needs it, a host step's replay of
     /// one among them (`gpu_pools.rs`): its `VkBuffer` and bytes. Its words need no value before
     /// the scans reserve them.
-    pub(super) fn mesh_pool(&mut self, device: &Device) -> Result<(vk::Buffer, u64), Error> {
+    pub(super) fn mesh_pool(
+        &mut self,
+        device: &Device,
+        queue: u64,
+    ) -> Result<(vk::Buffer, u64), Error> {
         if let Some(pool) = &self.mesh_pool {
             return Ok((pool.raw(), pool.bytes()));
         }
-        let pool = device.lease_pool(PoolKind::MeshRecords)?;
+        let pool = device.lease_pool(PoolKind::MeshRecords, queue)?;
         let leased = (pool.raw(), pool.bytes());
         self.mesh_pool = Some(pool);
         Ok(leased)
@@ -3279,11 +3284,11 @@ impl CommandBufferShared {
     }
 
     /// Finish the command buffer with `result` (or the failure of a batch): take the device's
-    /// trail mark (`trails.rs`), set its status, decode its status words, release its uploads,
-    /// run its completed handlers on this thread, give its queue's slot back, release what it
-    /// retained and its encoders' logs, then open its gate, which releases its waiters once the
-    /// transition's [`Hold`] (and every other) is gone, and they wait for the trails below the
-    /// mark. Waits from inside these steps answer as [`own`] says.
+    /// trail mark (`trails.rs`), set its status, decode its status words, run its completed
+    /// handlers on this thread, give its queue's slot back, release its uploads, pools and heap
+    /// versions, what it retained and its encoders' logs, then open its gate, which releases its
+    /// waiters once the transition's [`Hold`] (and every other) is gone, and they wait for the
+    /// trails below the mark. Waits from inside these steps answer as [`own`] says.
     fn complete(self: &Arc<Self>, result: Result<(), CommandBufferError>) {
         // A capture replay found a primitive whose reach was not measured: its pass rewrote
         // every tile, announced once the lock is let go (below).
@@ -3293,6 +3298,8 @@ impl CommandBufferShared {
         // Its command pool, where it settled, whose primary the device's spares begin ahead once
         // its completed handlers ran (below).
         let mut settled_pool = None;
+        // The heap versions its commands bound, let go of once its completed handlers ran.
+        let released_versions;
         {
             let mut state = lock(&self.state);
             // Every trail of the work it waited for (a pipeline's making, a twin's decode) was
@@ -3400,17 +3407,15 @@ impl CommandBufferShared {
             self.answer(&state);
             state.status_words = None;
             state.capture_tallies.clear();
-            state.index_pool = None;
-            state.mesh_pool = None;
-            state.uploads.clear();
-            state.heaps.clear();
+            // Its heap versions, uploads, pools and descriptor pools go once its completed
+            // handlers ran (below).
+            released_versions = state.heaps.clear();
             // Its work ended: a detach waiting for it goes on (`detach.rs`).
             state.submitted_holds.clear();
             // Its work ended (its fences were signaled, or its queues drained after a failed
             // wait), so nothing of its pools is pending: its command pool goes to the device's
-            // spares whatever its status, never released on this thread (`spares.rs`); a command
-            // buffer that completed gives back its descriptor pools too, one that failed releases
-            // them here.
+            // spares whatever its status, never released on this thread (`spares.rs`); its
+            // descriptor pools go once its completed handlers ran (below).
             if let Some(pool) = state.pool.take() {
                 // None of the pool's command buffers is recording where it completed and ended
                 // every one the pool handed out: a recording it left unused leaves one so.
@@ -3431,11 +3436,6 @@ impl CommandBufferShared {
                     let shared = self.device.shared();
                     shared.spares.give_command_pool(shared, pool, settled);
                 }
-            }
-            if state.status == CommandBufferStatus::Completed {
-                state.descriptors.give_back();
-            } else {
-                state.descriptors.release();
             }
             state.unplaced();
             parked = state.parked > 0;
@@ -3517,6 +3517,31 @@ impl CommandBufferShared {
             drop(residencies);
             let check = lock(&self.state).check.take();
             drop(check);
+            // Then the runtime's own: its uploads, its index and mesh records pools' blocks, its
+            // heap versions and its descriptor pools, none of them the program's, last. Each may
+            // take a driver's lock as it goes (MoltenVK's `vkDestroyBuffer`, `vkFreeMemory` and
+            // `vkDestroyDescriptorPool` take the lock of its device's residency set, which its
+            // `vkBindBufferMemory` holds across a commit that took 24 to 39 ms for a 1 GiB block
+            // on the M3 Max, `gpu_pools.rs`), so they go after the completed handlers, which wait
+            // for none of them, and after what the program's commands used.
+            let (uploads, index_pool, mesh_pool, mut descriptors, completed) = {
+                let mut state = lock(&self.state);
+                (
+                    state.uploads.take(),
+                    state.index_pool.take(),
+                    state.mesh_pool.take(),
+                    state.descriptors.take(),
+                    state.status == CommandBufferStatus::Completed,
+                )
+            };
+            drop((uploads, index_pool, mesh_pool, released_versions));
+            // A command buffer that completed gives its descriptor pools back to the device's
+            // spares; one that failed releases them.
+            if completed {
+                descriptors.give_back();
+            } else {
+                descriptors.release();
+            }
         }
         self.gate.finish();
         // Its pool's primary begun ahead, where no command buffer took the pool since

@@ -103,6 +103,9 @@ pub(crate) struct Counters {
     visibility_queries_begun: AtomicU64,
     indirect_draws_recorded: AtomicU64,
     indirect_records_read: AtomicU64,
+    gpu_pool_blocks_made: AtomicU64,
+    gpu_pool_blocks_released: AtomicU64,
+    gpu_pool_leases_peak: AtomicU64,
     internal_submissions: AtomicU64,
     queue_submissions: AtomicU64,
     submit_infos: AtomicU64,
@@ -771,6 +774,26 @@ impl Counters {
     pub(crate) fn indirect_records_read(&self, count: u64) {
         self.indirect_records_read
             .fetch_add(count, Ordering::Relaxed);
+    }
+
+    /// A command buffer's lease made its queue's block of a GPU pool: the queue held none
+    /// (`gpu_pools.rs`).
+    pub(crate) fn gpu_pool_block_made(&self) {
+        self.gpu_pool_blocks_made.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A lease of a queue's block of a GPU pool began, `leased` leases holding it now, this one's
+    /// included (`gpu_pools.rs`).
+    pub(crate) fn gpu_pool_leased(&self, leased: u64) {
+        self.gpu_pool_leases_peak
+            .fetch_max(leased, Ordering::Relaxed);
+    }
+
+    /// A queue's block of a GPU pool was released before the device's teardown: no lease held it
+    /// for too long, or its queue went (`gpu_pools.rs`).
+    pub(crate) fn gpu_pool_block_released(&self) {
+        self.gpu_pool_blocks_released
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// A host step's variant made immutable samplers no live set had (`pipeline/objects.rs`).
@@ -2458,6 +2481,20 @@ pub struct WorkCounts {
     /// `IndirectCommandCheck`) or `IndirectCommandBuffer::commands` reads it; a setter's own
     /// read of the command it changes is not counted.
     pub indirect_records_read: u64,
+    /// Blocks of the GPU pools made: a queue's index pool block (for its index bounds passes and
+    /// index rewrites) or its mesh records pool block, made by the first command buffer of the
+    /// queue that needs one where the queue holds none. A queue's command buffers share its block
+    /// of each kind, so a queue makes one while it keeps using them. Each block is a sixty-fourth
+    /// of the device's largest device-local heap. Those made less those released are the blocks
+    /// the device holds.
+    pub gpu_pool_blocks_made: u64,
+    /// Blocks of the GPU pools released before the device's teardown: a queue's block no command
+    /// buffer held for two seconds, released as another lease of its kind ended, or the block of
+    /// a queue that went.
+    pub gpu_pool_blocks_released: u64,
+    /// The most command buffers that held one queue's block of a GPU pool at once: between each
+    /// one's first pass that needs it and its completion.
+    pub gpu_pool_leases_peak: u64,
     /// Internal submissions made (`device/submit.rs`), each one a host call waits for: a host
     /// copy through the GPU, a clear of a live buffer, a neutral's making.
     pub internal_submissions: u64,
@@ -3634,6 +3671,9 @@ impl Device {
             visibility_queries_begun: counters.visibility_queries_begun.load(Ordering::Relaxed),
             indirect_draws_recorded: counters.indirect_draws_recorded.load(Ordering::Relaxed),
             indirect_records_read: counters.indirect_records_read.load(Ordering::Relaxed),
+            gpu_pool_blocks_made: counters.gpu_pool_blocks_made.load(Ordering::Relaxed),
+            gpu_pool_blocks_released: counters.gpu_pool_blocks_released.load(Ordering::Relaxed),
+            gpu_pool_leases_peak: counters.gpu_pool_leases_peak.load(Ordering::Relaxed),
             internal_submissions: counters.internal_submissions.load(Ordering::Relaxed),
             queue_submissions: counters.queue_submissions.load(Ordering::Relaxed),
             submit_infos: counters.submit_infos.load(Ordering::Relaxed),

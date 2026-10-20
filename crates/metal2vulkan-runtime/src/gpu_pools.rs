@@ -10,17 +10,41 @@
 //!   pool's within a `u32` of bytes, its counter's. Not a constant of the runtime's: a device of
 //!   twice the memory has pools of twice the bytes. Before, the index pool was 1 MiB on every
 //!   device.
-//! - **Leased per command buffer, made lazily.** The first pass of a command buffer that needs a
-//!   pool takes the device's spare block of its kind, or makes one; the command buffer holds the
-//!   [`PoolLease`] until it completes, or until it is dropped unsubmitted, and then the block is
-//!   given back. No other command buffer gets a block while it is leased, so command buffers in
-//!   flight at once each have their own. The device keeps at most one spare of each kind (the
-//!   blocks are all one size, so the spare is any given back while none is idle); a block given
-//!   back beside a spare is released. A command buffer that reaches no pass of a pool takes none.
+//! - **One block of each kind per queue, shared by its command buffers** ([`QueueBlocks`]). The
+//!   first pass of a command buffer that needs a pool leases its queue's block of that kind,
+//!   which the first lease of the queue makes; the command buffer holds the [`PoolLease`] until
+//!   it completes (its completed handlers ran, `command_buffer/mod.rs`), or until it is dropped
+//!   unsubmitted. Every command buffer of the queue reserves from the block's start (each one's
+//!   counter, or cursor, is its own), so they overwrite one another's reservations, in order:
+//!   - The queue's batches go to its `VkQueue` in commit order, a command buffer's after every
+//!     batch of the command buffers committed before it (`scheduler/mod.rs`, the order), so no
+//!     other command buffer of the queue lies between a command buffer's batches.
+//!   - Every command that writes a pool's bytes (an index bounds plan and fill, an index
+//!     rewrite's dispatches, an emulated mesh draw's and a tessellation draw's scan) runs after a
+//!     `Barrier::everything` its own command buffer records before it, from `ALL_COMMANDS` and
+//!     `MEMORY_WRITE`. Vulkan applies that barrier's first scope to every command submitted to
+//!     the `VkQueue` before it, earlier command buffers' included ("The first synchronization
+//!     scope and access scope of each memory dependency defined by pDependencyInfo are applied
+//!     to operations that occurred earlier in submission order", `vkCmdPipelineBarrier2`): so a
+//!     command buffer's writes wait for the earlier ones' draws, which read the block (a write
+//!     after a read needs only that execution dependency), and for their writes (the memory
+//!     dependency). The barrier was there before; sharing adds no wait.
+//!   - Queues sharing a `VkQueue` interleave their batches there (`scheduler/mod.rs`, many
+//!     logical queues), so a block is the queue's, not the `VkQueue`'s.
+//!
+//!   A queue's block goes once no lease held it for [`QUIET`] or longer, as a later lease of its
+//!   kind ends on any queue, or as the queue goes. Before, each command buffer in flight had a
+//!   block of its own: two in flight at once made and released one a round, and keeping them made
+//!   none but held as many as were in flight. A block of 1 GiB (a sixty-fourth of a 64 GiB heap)
+//!   took 24 to 29 ms to make on the M3 Max (MoltenVK 1.4.1, macOS 27.0.1), 35 to 39 ms while the
+//!   GPU ran, all of it MoltenVK's commit of the block to its device's residency set inside
+//!   `vkBindBufferMemory`, under the lock its `vkDestroyBuffer` and `vkFreeMemory` take too, and
+//!   wired its 1 GiB of host memory whatever the GPU wrote of it.
 //! - **Raw.** A block is a `VkBuffer` bound to private memory, outside the Metal address space,
-//!   not a `Buffer`, which would hold the device from the device's own spare (as the mipmap
-//!   scratch's, `mipmap_scratch.rs`). The device releases its spares as it is destroyed.
-//! - **Not cleared.** Nothing reads a pool's bytes before a pass of the command buffer wrote them:
+//!   not a `Buffer`, which would hold the device from the device's own blocks (as the mipmap
+//!   scratch's, `mipmap_scratch.rs`). The device releases the blocks left as it is destroyed.
+//! - **Not cleared.** Nothing reads a pool's bytes before a pass of the same command buffer wrote
+//!   them:
 //!   the index pool's counter lies in the command buffer's upload arena (zero as it is uploaded),
 //!   and its block holds only the indices the fills and writes place (the block's first
 //!   `IndexBoundsPass::POOL_HEADER_BYTES` are never read); the records pool's cursor is a status
@@ -33,14 +57,20 @@
 use super::device::lock;
 use super::error::Error;
 use super::memory::Memory;
-use super::mipmap_scratch::{Block, Spare, Take};
+use super::mipmap_scratch::Block;
 use super::upload::Upload;
 use super::Device;
 use ash::vk;
 use metal2vulkan::bind::IndexBoundsPass;
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 /// The share of the largest device-local heap a pool takes: one part in this many.
 const POOL_SHARE: u64 = 64;
+
+/// How long a queue's block stays without a lease before the end of another lease of its kind
+/// releases it (the module docs).
+pub(super) const QUIET: Duration = Duration::from_secs(2);
 
 /// The bytes of a pool of a device with `properties`' heaps, whose storage bindings reach
 /// `max_range` bytes and whose allocations `max_allocation`, behind `header` bytes the block
@@ -88,15 +118,118 @@ impl PoolKind {
     }
 }
 
-/// A device's pools: each kind's bytes and its spare block (the module docs).
+/// One queue's block of a kind and the leases holding it.
+#[derive(Debug)]
+struct Slot<T> {
+    block: Option<T>,
+    /// The leases holding the block now.
+    leases: usize,
+    /// When the last lease ended, where none holds the block.
+    idle_since: Instant,
+}
+
+/// The blocks of one kind, one for each queue that leased one, the decisions pure so that the
+/// CPU tests cover them (the module docs).
+#[derive(Debug)]
+pub(super) struct QueueBlocks<T> {
+    /// By the queue's identity (`CommandQueue::id`).
+    slots: BTreeMap<u64, Slot<T>>,
+}
+
+impl<T> Default for QueueBlocks<T> {
+    fn default() -> QueueBlocks<T> {
+        QueueBlocks {
+            slots: BTreeMap::new(),
+        }
+    }
+}
+
+impl<T> QueueBlocks<T> {
+    /// A lease of `queue`'s block: what `raw` reads of it, and the leases holding it now, this
+    /// one's included; `None` where the queue holds none, and the lease makes one ([`made`]).
+    ///
+    /// [`made`]: Self::made
+    pub(super) fn take<R>(&mut self, queue: u64, raw: impl FnOnce(&T) -> R) -> Option<(R, usize)> {
+        let slot = self.slots.get_mut(&queue)?;
+        let block = slot.block.as_ref()?;
+        slot.leases += 1;
+        Some((raw(block), slot.leases))
+    }
+
+    /// `block`, made for a lease of `queue`, which held none: what `raw` reads of the queue's
+    /// block, the leases holding it now, and the block to release, `block` itself where another
+    /// lease of the queue made one meanwhile.
+    pub(super) fn made<R>(
+        &mut self,
+        queue: u64,
+        block: T,
+        now: Instant,
+        raw: impl FnOnce(&T) -> R,
+    ) -> (R, usize, Option<T>) {
+        let slot = self.slots.entry(queue).or_insert(Slot {
+            block: None,
+            leases: 0,
+            idle_since: now,
+        });
+        let (read, extra) = match &slot.block {
+            Some(held) => (raw(held), Some(block)),
+            None => (raw(slot.block.insert(block)), None),
+        };
+        slot.leases += 1;
+        (read, slot.leases, extra)
+    }
+
+    /// A lease of `queue`'s block ended at `now`: the blocks to release, each queue's that no
+    /// lease held for [`QUIET`] or longer.
+    pub(super) fn give(&mut self, queue: u64, now: Instant) -> Vec<T> {
+        if let Some(slot) = self.slots.get_mut(&queue) {
+            slot.leases = slot.leases.saturating_sub(1);
+            if slot.leases == 0 {
+                slot.idle_since = now;
+            }
+        }
+        let quiet: Vec<u64> = (self.slots.iter())
+            .filter(|(_, slot)| {
+                slot.leases == 0 && now.saturating_duration_since(slot.idle_since) >= QUIET
+            })
+            .map(|(&queue, _)| queue)
+            .collect();
+        quiet
+            .into_iter()
+            .filter_map(|queue| self.slots.remove(&queue).and_then(|slot| slot.block))
+            .collect()
+    }
+
+    /// `queue` went, so no lease holds its block: the block, to release.
+    pub(super) fn forget(&mut self, queue: u64) -> Option<T> {
+        self.slots.remove(&queue).and_then(|slot| slot.block)
+    }
+
+    /// Every block, as the device is destroyed.
+    pub(super) fn drain(&mut self) -> Vec<T> {
+        let slots = std::mem::take(&mut self.slots);
+        slots.into_values().filter_map(|slot| slot.block).collect()
+    }
+
+    /// The blocks held.
+    #[cfg(test)]
+    pub(super) fn blocks(&self) -> usize {
+        self.slots
+            .values()
+            .filter(|slot| slot.block.is_some())
+            .count()
+    }
+}
+
+/// A device's pools: each kind's bytes and its queues' blocks (the module docs).
 #[derive(Default)]
 pub(super) struct GpuPools {
     /// The index pool's bytes of indices, behind its header.
     pub(super) index_bytes: u64,
     /// The mesh records pool's bytes.
     pub(super) mesh_bytes: u64,
-    index: std::sync::Mutex<Spare<Block>>,
-    mesh: std::sync::Mutex<Spare<Block>>,
+    index: std::sync::Mutex<QueueBlocks<Block>>,
+    mesh: std::sync::Mutex<QueueBlocks<Block>>,
 }
 
 impl GpuPools {
@@ -110,7 +243,7 @@ impl GpuPools {
         }
     }
 
-    fn spare(&self, kind: PoolKind) -> &std::sync::Mutex<Spare<Block>> {
+    fn blocks(&self, kind: PoolKind) -> &std::sync::Mutex<QueueBlocks<Block>> {
         match kind {
             PoolKind::Index => &self.index,
             PoolKind::MeshRecords => &self.mesh,
@@ -125,27 +258,31 @@ impl GpuPools {
         }
     }
 
-    /// Release the spares as the device is destroyed.
+    /// Release the blocks as the device is destroyed.
     pub(super) fn destroy(&self, device: &ash::Device, memory: &mut Memory) {
         for kind in [PoolKind::Index, PoolKind::MeshRecords] {
-            lock(self.spare(kind)).destroy(device, memory);
+            for block in lock(self.blocks(kind)).drain() {
+                // SAFETY: the device is idle, so no command uses the block.
+                unsafe { block.release(device, memory) };
+            }
         }
     }
 }
 
-/// A command buffer's lease of a block of a pool, given back to its device as it drops (the
-/// module docs).
+/// A command buffer's lease of its queue's block of a pool, which ends as it drops (the module
+/// docs).
 pub(super) struct PoolLease {
     device: Device,
     kind: PoolKind,
-    block: Option<Block>,
+    queue: u64,
+    raw: vk::Buffer,
     bytes: u64,
 }
 
 impl PoolLease {
     /// The leased block's buffer.
     pub(super) fn raw(&self) -> vk::Buffer {
-        self.block.as_ref().map_or(vk::Buffer::null(), Block::raw)
+        self.raw
     }
 
     /// The block's bytes.
@@ -165,15 +302,13 @@ impl std::fmt::Debug for PoolLease {
 
 impl Drop for PoolLease {
     fn drop(&mut self) {
-        let Some(block) = self.block.take() else {
-            return;
-        };
         let shared = self.device.shared();
-        let released = lock(shared.gpu_pools.spare(self.kind)).give(block, self.bytes);
-        if let Some(block) = released {
+        let released = lock(shared.gpu_pools.blocks(self.kind)).give(self.queue, Instant::now());
+        for block in released {
             // SAFETY: a lease ends when its command buffer completes or is dropped unsubmitted,
-            // and the spare is leased to none, so no command uses either block.
+            // and no lease holds a block released, so no command uses it.
             unsafe { block.release(shared.vk(), &mut lock(&shared.memory)) };
+            shared.counts.gpu_pool_block_released();
         }
     }
 }
@@ -210,27 +345,55 @@ impl IndexPool {
 }
 
 impl Device {
-    /// A lease of a block of `kind` for a command buffer: the device's spare, or a new block
-    /// (the module docs). Refused as memory is.
-    pub(super) fn lease_pool(&self, kind: PoolKind) -> Result<PoolLease, Error> {
+    /// A lease of `queue`'s block of `kind` for a command buffer of that queue (its
+    /// `CommandQueue::id`), which the queue's first lease makes (the module docs). Refused as
+    /// memory is.
+    pub(super) fn lease_pool(&self, kind: PoolKind, queue: u64) -> Result<PoolLease, Error> {
         let shared = self.shared();
         let bytes = shared.gpu_pools.block_bytes(kind);
-        let taken = lock(shared.gpu_pools.spare(kind)).take(bytes);
-        let block = match taken {
-            Take::Reuse(block, _) => block,
-            Take::Make(stale) => {
-                if let Some(block) = stale {
-                    // SAFETY: the spare was leased to none, so no command uses it.
-                    unsafe { block.release(shared.vk(), &mut lock(&shared.memory)) };
+        let taken = lock(shared.gpu_pools.blocks(kind)).take(queue, Block::raw);
+        let (raw, leases) = match taken {
+            Some(taken) => taken,
+            None => {
+                // Made without the lock: a lease of another queue, or one ending, waits for no
+                // making.
+                let block = self.make_block(bytes, kind.usage())?;
+                shared.counts.gpu_pool_block_made();
+                let (raw, leases, extra) = lock(shared.gpu_pools.blocks(kind)).made(
+                    queue,
+                    block,
+                    Instant::now(),
+                    Block::raw,
+                );
+                if let Some(extra) = extra {
+                    // SAFETY: made just now, the block was never bound to a command.
+                    unsafe { extra.release(shared.vk(), &mut lock(&shared.memory)) };
+                    shared.counts.gpu_pool_block_released();
                 }
-                self.make_block(bytes, kind.usage())?
+                (raw, leases)
             }
         };
+        shared.counts.gpu_pool_leased(leases as u64);
         Ok(PoolLease {
             device: self.clone(),
             kind,
-            block: Some(block),
+            queue,
+            raw,
             bytes,
         })
+    }
+
+    /// `queue` went: no lease holds its blocks, which are released (the module docs).
+    pub(super) fn forget_queue_pools(&self, queue: u64) {
+        let shared = self.shared();
+        for kind in [PoolKind::Index, PoolKind::MeshRecords] {
+            let block = lock(shared.gpu_pools.blocks(kind)).forget(queue);
+            if let Some(block) = block {
+                // SAFETY: every command buffer of the queue holds it, so none is left, and no
+                // command uses the block.
+                unsafe { block.release(shared.vk(), &mut lock(&shared.memory)) };
+                shared.counts.gpu_pool_block_released();
+            }
+        }
     }
 }
