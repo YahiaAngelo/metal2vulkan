@@ -823,6 +823,19 @@ pub(crate) fn storage_form(
             .ok_or(Error::InvalidDescriptor(DescriptorError::ColorAttachment {
                 index: color,
             }))?;
+    // vphone-linux: a two-plane YCbCr attachment a pass renders (`format::ycbcr_renders`, iOS's
+    // 4:4:4 `RGB8_444_2P`, which its widget renderer reads back) renders into its texture's
+    // `RGBA32Float` render shadow (the runtime's `texture/ycbcr_image.rs`), which is the target
+    // the pass binds, storage usage included: its fetch reads and writes the shadow's floats, as
+    // an `RGBA32Float` attachment's does, and the shadow's write-back stores their codes.
+    let attachment = if crate::metal::format::ycbcr_renders(attachment.pixel_format) {
+        FetchedAttachment {
+            pixel_format: crate::metal::PixelFormat::RGBA32Float,
+            ..attachment
+        }
+    } else {
+        attachment
+    };
     let pf = attachment.pixel_format;
     let usages = BTreeSet::from([FormatUsage::ColorAttachment]);
     let mapping = crate::metal::format::vk_format(pf, &usages, p)?;
