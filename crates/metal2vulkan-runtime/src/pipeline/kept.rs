@@ -44,8 +44,25 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
-/// The most released variant instances kept.
+/// The most released variant instances kept by default.
 pub(crate) const KEPT: usize = 16;
+
+/// vphone-linux: the limit in use: `M2V_KEPT_PIPELINES` where set, else 256. An iOS guest's
+/// SpringBoard releases and makes again a few hundred pipeline states as home-screen pages leave
+/// and come back; with 16 kept, paging between two pages made 231 `VkPipeline`s and 244 shader
+/// modules in 26 s. Each instance holds at most its variant's immutable samplers against the
+/// device's limit (4000 on NVIDIA), so a few hundred stay well inside it.
+fn kept_limit() -> usize {
+    static LIMIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        std::env::var("M2V_KEPT_PIPELINES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|&n: &usize| n > 0)
+            .unwrap_or(256)
+            .max(KEPT.min(1))
+    })
+}
 
 /// The compiled pipeline a variant is of: the device memo's key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -271,7 +288,7 @@ impl Entries {
                 pipelines: Vec::new(),
             },
         };
-        while entries.len() >= KEPT {
+        while entries.len() >= kept_limit() {
             if let Some(oldest) = entries.pop_front() {
                 oldest.destroy(shared);
             }
