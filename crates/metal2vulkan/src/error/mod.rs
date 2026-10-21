@@ -780,6 +780,16 @@ pub enum DriverDeviation {
     /// pipeline's synthesized geometry stages, which store the first vertex's at every vertex,
     /// and is refused on a device without `geometryShader`.
     MetalFirstVertexIndices,
+    /// The device runs a fragment function's quads whole, its helper invocations taking part in
+    /// every group operation, as Metal runs a fragment function's helper threads
+    /// (`VkProperty::MetalFullQuads`): the driver hands the fragment function to Metal, whose
+    /// simdgroup functions read, combine and count a quad's helpers wherever the primitive or the
+    /// target cuts the quad. Vulkan gives that only under `RequireFullQuadsKHR`
+    /// (`shaderQuadControl`). Where the profile takes it and lacks `shaderQuadControl`, a
+    /// fragment function whose group operations observe other lanes declares no such mode and
+    /// requires the property in place of the feature. Unmeasured, such a function needs the
+    /// feature.
+    MetalFullQuads,
 }
 
 /// A defect of a device's driver in a command the runtime records for itself, never in a
@@ -910,6 +920,13 @@ pub enum RuntimeDriverDefect {
     /// that bakes samplers records in a `VkCommandBuffer` of its own there, as one whose pipeline
     /// is still being made does.
     ImmutableSamplersLostAfterCopies,
+    /// `vkGetDescriptorSetLayoutSupport` answers `VK_FALSE` for a descriptor set layout the driver
+    /// makes and runs: one of exactly `maxPerSetDescriptors` descriptors, which Vulkan guarantees
+    /// `VK_TRUE`, and every one past it, however far within the update-after-bind limits the
+    /// driver reports. Nothing is refused: the runtime makes such a layout there (a heap's set 1)
+    /// as the driver runs it, announced (`set-past-layout-support`), and Vulkan's validation layer
+    /// reports it (`VUID-vkCreateDescriptorSetLayout-support-09582`).
+    SetLayoutSupportUnderstated,
 }
 
 /// One device capability a refusal can name.
