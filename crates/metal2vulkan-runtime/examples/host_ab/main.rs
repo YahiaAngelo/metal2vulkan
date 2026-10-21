@@ -132,7 +132,8 @@
 //!   all. Per frame, as `many_draws`; `icb_draws_any_type_*`: the same, the kernel reading the
 //!   draws' primitive type (triangles) from a buffer, where the runtime cannot tell the type from
 //!   the kernel's code and so reads the records on the host. On the runtime's side, the commands
-//!   drawn on the GPU alone and the records read on the host per frame (`rt_*`).
+//!   drawn on the GPU alone, the records read on the host, and the draws and pipeline barriers
+//!   recorded per frame (`rt_*`).
 //!
 //! Options: `--rounds N` (3), `--draws N` (2000), `--timed N` (30), `--latency N` (200),
 //! `--heavy-iterations N` (64), `--heavy-runs N` (15), `--many-draws N` (6000), `--frames N`
@@ -299,7 +300,8 @@ fn child(side: &str, options: &Options) {
                  requirement_images_made {} arena_pools_made {} owned_descriptor_pools {} \
                  draws_settled {} stage_tables_read {} graphics_pipelines_looked_up {} \
                  draws_pushing_set_zero {} set_zero_writes_pushed {} set_zero_sets_reused {} \
-                 set_zero_sets_found {} signed_depth_switch_ons {} sign_strips {} \
+                 set_zero_sets_found {} draw_shapes_reused {} signed_depth_switch_ons {} \
+                 sign_strips {} \
                  magnitude_stand_in_passes {} \
                  completed_waits {} bare_starts {} submit_infos {} finales_folded {} \
                  finales_apart {} pending_none {} pending_one {} pending_two_three {} \
@@ -325,6 +327,7 @@ fn child(side: &str, options: &Options) {
                 c.set_zero_writes_pushed,
                 c.set_zero_sets_reused,
                 c.set_zero_sets_found,
+                c.draw_shapes_reused,
                 c.signed_depth_switch_ons,
                 c.sign_strips,
                 c.magnitude_stand_in_passes,
