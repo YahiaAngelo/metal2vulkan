@@ -769,7 +769,12 @@ the device has it (`replay_preprocess_generated`). Draws of primitives under the
 pipeline replay on the device through `draw_replay_preprocess`: one indirect draw per command
 and primitive type the execution names, the pipeline compiled as its replay variant
 (`VariantKey::replay_bindings`), whose vertex and fragment functions read each command's buffers
-from the slot tables the preprocess writes. A kernel that encodes commands writes the records at
+from the slot tables the preprocess writes. Draws of one list type or points whose fragment function
+reads no buffer and no `[[primitive_id]]` may instead merge into one draw (`DrawReplay::merged`):
+two merge passes (`draw_merge_module`) write each command's first vertex in the merged draw, and
+the vertex function, compiled as its merged variant (`VariantKey::merged_draws`), finds its
+command by that prefix and runs the command's vertex, instance and buffers, in the commands'
+order. A kernel that encodes commands writes the records at
 `bind::indirect_commands::records_address` of the buffer's ID, outside every Metal address.
 
 ## 7. Caching
@@ -2742,7 +2747,10 @@ each item named states the rule in full.
 - **Render commands the GPU may write run on the GPU alone** where the commit can tell from what
   the records may hold (`IndirectCommandBuffer::command_writes`) that every command is a draw of one
   primitive type under the encoder's pipeline state, which the buffer inherits with none of its
-  buffers: one indirect draw per command, in order, from what a preprocess wrote. Otherwise, and
+  buffers: one indirect draw per command, in order, from what a preprocess wrote; and where the
+  commands draw points, lines or triangles, the state's vertex function writes no memory and its
+  fragment function reads no buffer and no `[[primitive_id]]`, one merged draw for the whole range,
+  in the commands' order, whatever its count (`WorkCounts::merged_draw_commands`). Otherwise, and
   where what the records may hold grew by the time the pass's batch is ready to submit, a host step
   records the pass.
 - **A checked execution states what its check looks for**
