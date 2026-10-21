@@ -1314,8 +1314,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   its home layout at its end.
 - `metal2vulkan-degrade-host-replayed-indirect-commands` (performance).
   `HostReplayedIndirectCommands`: An execution of an indirect command buffer that an encoder made
-  resident for writing: the GPU may write the records it runs, so they are known only once the work
-  before it completed. Cost: one GPU-to-CPU round trip per execution: its command buffer's work
+  resident for writing, or that lies inside a block of command predication or reads its range from
+  a buffer, which the GPU cannot run alone: one with the caller's check
+  (`execute_commands_in_buffer_checked`), of a range read from a buffer, of a buffer that inherits
+  the encoder's buffers, or whose records may name a pipeline state whose kernel observes its
+  threadgroup partition or fetches `[[stage_in]]` attributes. The GPU may write the records it
+  runs, so they are known only once the work before it completed. Cost: one GPU-to-CPU round trip per execution: its command buffer's work
   before it, and every batch submitted before that on any queue, completes before the CPU records
   its commands from their records and submits the rest; the device's scheduler submits nothing else
   while it records them, and the first command of a threadgroup size or threadgroup lengths its
@@ -2705,6 +2709,10 @@ each item named states the rule in full.
   (`CommandBuffer::add_executed_commands_handler`, no Metal counterpart): a handler is called each
   time the runtime reads an execution's records, at `commit`, in a host step, or not at all for an
   execution the GPU alone runs.
+- **An execution the GPU alone runs orders its commands one after another in a serial encoder**,
+  where Metal orders them only where their uses meet: the uses are the records', which the GPU
+  writes. In a concurrent encoder its commands run together where no route that wrote the records
+  may set a barrier (`IndirectCommandBuffer::command_writes`), and one after another otherwise.
 - **Command predication** (`encode_start_if`, `encode_start_else`, `encode_end_if` and the
   while and do-while loops) runs Metal's blocks and loops. A loop is laid down as 64 copies (16
   inside another loop); one that runs past them fails its command buffer
