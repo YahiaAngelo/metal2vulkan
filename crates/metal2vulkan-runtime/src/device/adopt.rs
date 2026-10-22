@@ -252,11 +252,13 @@ impl Device {
             .collect();
         named.extend(raw.device_extensions.iter().map(CString::as_c_str));
         let memory_reads = MemoryReads::of(family, named);
+        let extensions = raw.device_extensions.clone();
         let parts = Parts {
             instance: Arc::new(InstanceShared {
                 entry,
                 raw: instance,
                 api_version: raw.instance_api_version,
+                extensions: Vec::new(),
                 owned: false,
                 messenger: None,
                 relay: None,
@@ -272,6 +274,7 @@ impl Device {
             compile,
             description: enabled,
             enabled: raw.enabled,
+            extensions,
             creation_feedback: raw
                 .device_extensions
                 .iter()

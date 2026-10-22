@@ -21,7 +21,7 @@ use metal2vulkan::vk::DriverId;
 use metal2vulkan_runtime::{
     BlitOption, Buffer, BufferContents, BufferDescriptor, CommandBuffer, CommandBufferError,
     CommandBufferStatus, CommandQueue, CopyProblem, CpuCacheMode, Deallocator, DebugMessage,
-    Device, Error, EventRef, HazardTrackingMode, HostMemory, Invalid, LayerSetting,
+    Degradation, Device, Error, EventRef, HazardTrackingMode, HostMemory, Invalid, LayerSetting,
     LayerSettingValue, Nil, Origin, Problem, PurgeableState, Region, ResourceOptions, Size,
     StorageMode, TextureDescriptor,
 };
@@ -405,6 +405,10 @@ pub(super) fn gpu_fill(
     blit.end_encoding().unwrap();
     run(&command_buffer);
 }
+
+/// The kind a no-copy buffer over pages the process maps read-only, made from its dma-buf source,
+/// announces once (`dma_buf_imports`'s `read_only_pages_are_made_from_the_source`, on Linux).
+pub(super) const READ_ONLY_PAGES: [Degradation; 1] = [Degradation::ReadOnlyPagesWritten];
 
 /// Bytes `i % 251` from `start`.
 pub(super) fn counting(len: usize, start: usize) -> Vec<u8> {
@@ -1539,6 +1543,49 @@ fn a_read_only_page_is_refused_on_linux_and_read_elsewhere() {
             let buffer = made.unwrap();
             assert_eq!(gpu_read(&queue, &buffer, 0..GUEST_PAGE as u64), bytes);
             eprintln!("runtime read-only page: made, read");
+        }
+    });
+}
+
+/// Pages whose write permission the caller vouches for (`HostMemory::assume_writable`): a buffer
+/// over them asks the kernel about none of their mappings (`WorkCounts::host_mappings_queried`),
+/// where a buffer over the same kind of pages without the vouching asks about each on Linux (one
+/// mapping here) and nothing elsewhere; both are made, and the GPU reads and writes their bytes.
+#[test]
+fn vouched_pages_are_imported_with_no_mapping_asked() {
+    on_device(|device| {
+        let queue = device.new_command_queue().unwrap();
+        let queried = || device.work_counts().host_mappings_queried;
+        for vouched in [false, true] {
+            let memory = Mapping::anonymous(GUEST_PAGE);
+            let bytes = counting(GUEST_PAGE, if vouched { 7 } else { 8 });
+            memory.write(0, &bytes);
+            let before = queried();
+            // SAFETY: the mapping outlives the buffer, writable while it lives.
+            let buffer = unsafe {
+                let host = HostMemory::new(memory.pointer());
+                let host = if vouched {
+                    host.assume_writable()
+                } else {
+                    host
+                };
+                device.new_buffer_with_bytes_no_copy(
+                    host,
+                    GUEST_PAGE as u64,
+                    ResourceOptions::default(),
+                    None,
+                )
+            }
+            .unwrap();
+            let asked = queried() - before;
+            let expected = u64::from(cfg!(target_os = "linux") && !vouched);
+            assert_eq!(asked, expected, "vouched {vouched}: mappings asked");
+            assert_eq!(gpu_read(&queue, &buffer, 0..GUEST_PAGE as u64), bytes);
+            gpu_fill(&queue, &buffer, 0..64, 0x6b);
+            // SAFETY: the mapping lives, and no command writes it now.
+            let written = unsafe { std::slice::from_raw_parts(memory.pointer().as_ptr(), 64) };
+            assert_eq!(written, [0x6b; 64], "vouched {vouched}: the GPU's write");
+            eprintln!("runtime vouched {vouched}: {asked} mappings asked");
         }
     });
 }

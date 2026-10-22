@@ -282,16 +282,21 @@ driver's. Each is open work.
   i915, RADV, lavapipe): pages mapped over the buffer's addresses after it was made (`mmap` with
   `MAP_FIXED`) are what its later command buffers read and write, where Metal's buffer keeps the
   pages it was made over. `HostMemory::new`'s contract forbids such a remap under a live buffer,
-  and no notice tells of it. An import of dma-bufs (`HostMemory::with_dma_buf`) keeps its pages on
-  every driver, but is taken only where the device refuses the pointer.
+  and no notice tells of it. On RADV (Mesa 26.2.4, the Radeon 780M and the RX 7900 XTX) a file's
+  pages mapped so over a live pointer import of anonymous pages lose the device: its next
+  submission is rejected whatever it uses ("The CS has been rejected"): amdgpu's userptr takes
+  only pages with no file behind them, and each submission lists every memory the device
+  imported. No exact form exists once the pages are gone, and `Device::host_range_remapped` does
+  not release such an import. An import of dma-bufs (`HostMemory::with_dma_buf`) keeps its pages
+  on every driver, but is taken only where the device refuses the pointer.
 - **A no-copy buffer's pointer import that stays live costs RADV's every kernel submission per
   page**: amdgpu gets every page of each live pointer import again in each command submission
   (the RX 7900 XTX under Linux 7.0.0: the scheduler thread's CPU per command buffer of a
   guest-shaped frame 18 us with none, 328 us with 275 imports of 512 KiB, 1144 us with 275 of
   2 MiB). An idle one is released where `DriverFact::PointerImportsFollowTheirAddress` holds (the
-  780M under Mesa 26.2.4), but one whose Metal address was handed out, or any on a device not
-  measured with the fact, stays live. 275 kept dma-buf imports of 512 KiB each cost 54-56 us per
-  command buffer there (no other size measured).
+  780M and the RX 7900 XTX under Mesa 26.2.4), but one whose Metal address was handed out, or any
+  on a device not measured with the fact, stays live. 275 kept dma-buf imports of 512 KiB each
+  cost 54-56 us per command buffer there (no other size measured).
 - **A runtime sampler's nearest sample of an 8-bit sRGB texture under native sampling.** On a
   device that samples the format, the sample keeps the device's sRGB decode (announced as
   `SrgbTexelDecode`), where the table's exact decode of the one texel it reads would cost little:

@@ -39,7 +39,7 @@ use super::key_hash::KeyMap;
 use super::rebind::Taken;
 use super::replay::Replay;
 use super::residency::{Residency, Used};
-use super::resource::ResourceKey;
+use super::resource::{ObjectId, ResourceKey};
 use super::texture::{Texture, TextureMemory, TextureShared};
 use super::Device;
 use std::collections::{BTreeSet, HashSet};
@@ -168,6 +168,31 @@ impl Owner {
         }
     }
 
+    /// The identity of what [`of_buffer`](Self::of_buffer) answers: its heap's, or the buffer's.
+    fn id_of_buffer(buffer: &Buffer) -> ObjectId {
+        buffer.heap().map_or(buffer.object_id(), Heap::object_id)
+    }
+
+    /// The identity of what [`of_texture`](Self::of_texture) answers.
+    fn id_of_texture(texture: &Texture) -> ObjectId {
+        match texture.memory() {
+            TextureMemory::Heap(heap) => heap.object_id(),
+            TextureMemory::Buffer(buffer) => Owner::id_of_buffer(buffer),
+            TextureMemory::Own(texture) => texture.object_id(),
+        }
+    }
+
+    /// The identity of what owns the memory of `used`, a resource made resident, as
+    /// [`Listing::resident`] lists it; `None` for one it lists nothing of.
+    fn id_of_resident(used: &Used) -> Option<ObjectId> {
+        match used {
+            Used::Buffer(buffer) => Some(Owner::id_of_buffer(buffer)),
+            Used::Texture(texture) => Some(Owner::id_of_texture(texture)),
+            Used::Heap { heap, .. } => Some(heap.object_id()),
+            Used::IndirectCommandBuffer(icb) => icb.heap().map(Heap::object_id),
+        }
+    }
+
     /// Whether the owner lives.
     fn lives(&self) -> bool {
         match self {
@@ -208,7 +233,8 @@ pub(super) struct Owners {
 
 #[derive(Default)]
 struct Registry {
-    owners: KeyMap<ResourceKey, Owner>,
+    /// Each key's owner, with the owner's identity.
+    owners: KeyMap<ResourceKey, (Owner, ObjectId)>,
     /// The size at which the next insertion drops the gone owners' entries.
     prune_at: usize,
 }
@@ -217,22 +243,23 @@ struct Registry {
 const PRUNE_FLOOR: usize = 256;
 
 impl Owners {
-    /// Keep `key` with `owner`, unless the key has one (a texture over a buffer of the program's
-    /// may share the buffer's key: the buffer owns it).
-    fn insert(&self, key: ResourceKey, owner: Owner) {
+    /// Keep `key` with `owner`, whose identity is `id`, unless the key has one (a texture over a
+    /// buffer of the program's may share the buffer's key: the buffer owns it).
+    fn insert(&self, key: ResourceKey, owner: Owner, id: ObjectId) {
         let mut registry = lock(&self.inner);
         if registry.owners.len() >= registry.prune_at {
-            registry.owners.retain(|_, owner| owner.lives());
+            registry.owners.retain(|_, (owner, _)| owner.lives());
             registry.prune_at = (2 * registry.owners.len()).max(PRUNE_FLOOR);
         }
-        registry.owners.entry(key).or_insert(owner);
+        registry.owners.entry(key).or_insert((owner, id));
     }
 
     /// Keep a buffer the program made, by its key: a heap's buffer has its heap's, which
     /// `HeapKeys` holds.
     pub(super) fn buffer(&self, buffer: &Buffer) {
         if buffer.heap().is_none() {
-            self.insert(buffer.identity().key, Owner::of_buffer(buffer));
+            let id = Owner::id_of_buffer(buffer);
+            self.insert(buffer.identity().key, Owner::of_buffer(buffer), id);
         }
     }
 
@@ -240,7 +267,8 @@ impl Owners {
     /// the memory its texels lie in: where that key is a buffer's (a texture buffer, an image
     /// aliasing a buffer's bytes) the buffer or its heap has it already.
     pub(super) fn texture(&self, texture: &Texture) {
-        self.insert(texture.use_key(), Owner::of_texture(texture));
+        let id = Owner::id_of_texture(texture);
+        self.insert(texture.use_key(), Owner::of_texture(texture), id);
     }
 
     /// Add the owners of `keys` that a commit lists among the live buffers once used to
@@ -248,9 +276,11 @@ impl Owners {
     fn reached<'a>(&self, keys: impl IntoIterator<Item = &'a ResourceKey>, reached: &mut Reached) {
         let registry = lock(&self.inner);
         let owners = keys.into_iter().filter_map(|key| registry.owners.get(key));
-        reached
-            .0
-            .extend(owners.filter(|owner| owner.reached()).cloned());
+        reached.0.extend(
+            owners
+                .filter(|(owner, _)| owner.reached())
+                .map(|(owner, _)| owner.clone()),
+        );
     }
 
     /// Add the owners of `keys` to `used`.
@@ -258,13 +288,53 @@ impl Owners {
         let owners: Vec<Owner> = {
             let registry = lock(&self.inner);
             keys.iter()
-                .filter_map(|key| registry.owners.get(key).cloned())
+                .filter_map(|key| registry.owners.get(key).map(|(owner, _)| owner.clone()))
                 .collect()
         };
         for owner in &owners {
             owner.list(used);
         }
     }
+
+    /// Whether one of `keys` has a live owner among `objects`, by its identity: no owner is held,
+    /// so none is let go under this lock.
+    fn names_any<'a>(
+        &self,
+        keys: impl IntoIterator<Item = &'a ResourceKey>,
+        objects: &[ObjectId],
+    ) -> bool {
+        let registry = lock(&self.inner);
+        keys.into_iter()
+            .filter_map(|key| registry.owners.get(key))
+            .any(|(owner, id)| objects.contains(id) && owner.lives())
+    }
+}
+
+/// Whether what `keys` name, or `residency` made resident, has an owner among `objects`, as
+/// [`CommandBuffer::used_resources`] would list it: the device's owners of the keys (`shared`), the
+/// heaps among them, and the residency's resources and heaps, each by its identity, with no
+/// handle cloned.
+pub(super) fn names_any<'a>(
+    shared: &super::device::DeviceShared,
+    keys: impl IntoIterator<Item = &'a ResourceKey> + Clone,
+    residency: Option<&Residency>,
+    objects: &[ObjectId],
+) -> bool {
+    if objects.is_empty() {
+        return false;
+    }
+    if shared.owners.names_any(keys.clone(), objects) || shared.heap_keys.names_any(keys, objects) {
+        return true;
+    }
+    let Some(residency) = residency else {
+        return false;
+    };
+    let among = |id: ObjectId| objects.contains(&id);
+    residency
+        .resources()
+        .filter_map(Owner::id_of_resident)
+        .any(among)
+        || residency.used_heaps().map(Heap::object_id).any(among)
 }
 
 /// What the commands of a committing command buffer's encoders that run use and a command reaches
@@ -479,6 +549,30 @@ impl CommandBuffer {
         // Released without the lock: what it holds may be a resource's last handle.
         drop(ended);
         listed
+    }
+}
+
+impl CommandBuffer {
+    /// Whether the commands of its ended encoders use any of `objects`, the identities
+    /// ([`Buffer::object_id`], [`Texture::object_id`], [`Heap::object_id`]) of what
+    /// [`used_resources`](Self::used_resources) would list: a runtime extension, no Metal call.
+    /// Answered without the listing: no handle is cloned or held, and the list's resources are
+    /// those of [`used_resources`](Self::used_resources), each as what owns the memory it lies in
+    /// (a heap for a resource placed in it, the buffer a texture is over, the texture a view was
+    /// made from), so a buffer placed in a heap is never among them, its heap is. False once the
+    /// command buffer completed, and for an empty `objects`.
+    pub fn uses(&self, objects: &[ObjectId]) -> bool {
+        self.settle_end();
+        self.state().uses(self.device().shared(), None, objects)
+    }
+
+    /// Whether the commands of its ended encoders at `encoders` (their places, the index of
+    /// [`ended_encoders`](Self::ended_encoders)) use any of `objects`, as their
+    /// [`EndedEncoder::used_resources`] would list them, answered as [`uses`](Self::uses) answers:
+    /// a runtime extension, no Metal call. False for a range past its ended encoders.
+    pub fn encoders_use(&self, encoders: std::ops::Range<usize>, objects: &[ObjectId]) -> bool {
+        self.settle_end();
+        (self.state()).uses(self.device().shared(), Some(encoders), objects)
     }
 }
 

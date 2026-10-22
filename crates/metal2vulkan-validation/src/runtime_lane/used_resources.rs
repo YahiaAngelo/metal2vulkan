@@ -24,8 +24,8 @@ use crate::candidate::engine::ComputeOutput;
 use metal2vulkan::metal::{PixelFormat, ResourceUsage, TextureUsage};
 use metal2vulkan_runtime::{
     BlitOption, Buffer, CommandBuffer, CommandBufferStatus, Device, EncoderKind, EventRef, Heap,
-    HeapDescriptor, HeapType, LoadAction, Origin, RenderPassDescriptor, ResourceOptions, Size,
-    StoreAction, Texture, TextureDescriptor, UsedResources,
+    HeapDescriptor, HeapType, LoadAction, ObjectId, Origin, RenderPassDescriptor, ResourceOptions,
+    Size, StoreAction, Texture, TextureDescriptor, UsedResources,
 };
 use std::collections::HashSet;
 use std::time::Duration;
@@ -75,14 +75,29 @@ impl Listed {
     }
 }
 
+impl Listed {
+    /// The identities of what it lists.
+    fn ids(&self) -> HashSet<ObjectId> {
+        let buffers = self.buffers.iter().map(Buffer::object_id);
+        let textures = self.textures.iter().map(Texture::object_id);
+        buffers
+            .chain(textures)
+            .chain(self.heaps.iter().map(Heap::object_id))
+            .collect()
+    }
+}
+
 /// Require `command_buffer`'s ended encoders to be of `kinds`, after one event wait and no
 /// signal, each listing what `each` expects of it (none where `each` is shorter), and their
-/// union to be the command buffer's list.
+/// union to be the command buffer's list. The identity answers (`CommandBuffer::uses`,
+/// `CommandBuffer::encoders_use`) are the listings', for every object any of them lists: an
+/// encoder uses an object another lists only where it lists it too.
 fn check_encoders(command_buffer: &CommandBuffer, kinds: &[EncoderKind], each: &[Listed]) {
     let ended = command_buffer.ended_encoders();
     let reported: Vec<_> = ended.iter().map(|encoder| encoder.kind).collect();
     assert_eq!(reported, kinds);
     let mut union = Listed::default();
+    let mut listings = Vec::new();
     for (at, encoder) in ended.into_iter().enumerate() {
         assert_eq!(
             (encoder.event_waits_before, encoder.event_signals_before),
@@ -93,8 +108,25 @@ fn check_encoders(command_buffer: &CommandBuffer, kinds: &[EncoderKind], each: &
         let want = each.get(at).cloned().unwrap_or_default();
         assert_eq!(listed, want, "encoder {at}");
         union.join(&listed);
+        listings.push(listed.ids());
     }
     assert_eq!(Listed::of(command_buffer.used_resources()), union);
+    let every: HashSet<ObjectId> = each.iter().flat_map(Listed::ids).collect();
+    for id in &every {
+        assert_eq!(
+            command_buffer.uses(&[*id]),
+            union.ids().contains(id),
+            "{id:?}"
+        );
+        for (at, listed) in listings.iter().enumerate() {
+            let used = command_buffer.encoders_use(at..at + 1, &[*id]);
+            assert_eq!(used, listed.contains(id), "encoder {at}, {id:?}");
+        }
+    }
+    let all: Vec<ObjectId> = every.iter().copied().collect();
+    assert_eq!(command_buffer.uses(&all), !union.ids().is_empty());
+    assert!(!command_buffer.uses(&[]));
+    assert!(!command_buffer.encoders_use(kinds.len()..kinds.len() + 1, &all));
 }
 
 /// A `SIDE` x `SIDE` `RGBA8Unorm` texture descriptor of `usage` and `options`.
@@ -275,6 +307,14 @@ fn a_command_buffer_lists_each_kind_of_use_until_it_completes() {
         kinds.push(EncoderKind::Blit);
         assert_eq!(Listed::of(command_buffer.used_resources()), expected);
         check_encoders(&command_buffer, &kinds, &each);
+        // What is placed in a heap is used as its heap, and a view as its texture: neither's own
+        // identity is among what the command buffer uses.
+        let unlisted = [
+            in_heap.object_id(),
+            heap_texture.object_id(),
+            view.object_id(),
+        ];
+        assert!(!command_buffer.uses(&unlisted));
 
         // An attachment: a color attachment, cleared and stored.
         let target = device
@@ -306,6 +346,7 @@ fn a_command_buffer_lists_each_kind_of_use_until_it_completes() {
             .unwrap();
         let listed = Listed::of(command_buffer.used_resources());
         assert!(!listed.buffers.contains(&idle) && !listed.textures.contains(&idle_texture));
+        assert!(!command_buffer.uses(&[idle.object_id(), idle_texture.object_id()]));
         assert_eq!(listed, expected);
         check_encoders(&command_buffer, &kinds, &each);
 
@@ -323,6 +364,8 @@ fn a_command_buffer_lists_each_kind_of_use_until_it_completes() {
             Listed::default()
         );
         check_encoders(&command_buffer, &kinds, &[]);
+        let ids: Vec<ObjectId> = expected.ids().into_iter().collect();
+        assert!(!command_buffer.uses(&ids), "uses nothing once completed");
         eprintln!(
             "USED buffers {}, textures {}, heaps {} listed while committed",
             expected.buffers.len(),

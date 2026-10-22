@@ -4703,6 +4703,25 @@ impl Texture {
             .map_or(0, |place| place.offset)
     }
 
+    /// `allocatedSize`, for a texture made from an automatic or placement heap (or a view of one):
+    /// the bytes its range of the heap takes, the size [`Device::heap_texture_size_and_align`]
+    /// answers for its descriptor, which placed it, with no query. Metal answers so (an M3 Max
+    /// under macOS 27.0.1, plain and validated, in both kinds of heap): a heap texture's
+    /// `allocatedSize` is `heapTextureSizeAndAlignWithDescriptor:`'s size, a view's is its
+    /// texture's, and a texture buffer's is its row of texels. So it is Metal's where the size
+    /// query's answer is (larger where the device's image needs more, as that answer is).
+    ///
+    /// `None` for any other texture: outside a heap, Metal answers its GPU's own allocation (the
+    /// layout rounded up to 16-KiB pages past 16 KiB), which the runtime does not model, and a
+    /// sparse heap's texture's answer is not measured.
+    pub fn allocated_size(&self) -> Option<u64> {
+        if let Some(buffer) = self.heap_texels() {
+            return Some(buffer.length());
+        }
+        self.0.heap.as_ref()?;
+        self.heap_place().map(|place| place.size)
+    }
+
     /// `makeAliasable`: a heap texture's bytes may be another resource's from now on. An
     /// automatic heap gives its range to the next resource it places; a placement heap's texture
     /// is aliasable from the start, so nothing changes. Using the texture after is the program's

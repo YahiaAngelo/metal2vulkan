@@ -23,8 +23,11 @@
 //! same requirements, and a query of parameters asked before takes the answer kept for them
 //! ([`RequirementAnswers`]); elsewhere each query makes its image, as alignment is not fixed. A
 //! plan and a tiling fix every parameter of the image a query makes (`ImagePlan::create_info`, the
-//! device's sharing, and the tiling's initial layout), so they are the key. The device's limits for
-//! the image are checked at every query all the same.
+//! device's sharing, and the tiling's initial layout), so they are the key. A kept answer is the
+//! whole query's: it is kept only once the device's limits for the image took it, and those limits
+//! (`vkGetPhysicalDeviceImageFormatProperties2`) are the physical device's for the same
+//! parameters, so a query answered from it asks nothing more (`WorkCounts::requirement_limits_asked`
+//! counts the limits asked).
 
 use crate::image_plan::ImagePlan;
 use ash::vk;

@@ -869,7 +869,7 @@ Cheap items a plain app calls first, then medium pieces by how often a plain app
 | Item | Kind | Status | Counterpart or note |
 |---|---|---|---|
 | `MTLAllocation` | protocol | implemented | `Buffer` (runtime) |
-| `MTLAllocation.allocatedSize` | property | missing | S: a buffer's, texture's or heap's allocated bytes (`IndirectCommandBuffer` and `VisibleFunctionTable` answer it) |
+| `MTLAllocation.allocatedSize` | property | missing | S: a buffer's, texture's or heap's allocated bytes (`IndirectCommandBuffer` and `VisibleFunctionTable` answer it, and `Texture::allocated_size` a heap's texture's) |
 
 ### MTLArgument.h
 
@@ -1294,7 +1294,7 @@ Cheap items a plain app calls first, then medium pieces by how often a plain app
 | `MTLComputePipelineDescriptor.optimizeForPersistentKernel` | property | missing | L: persistent kernels (macOS 27): forward progress and contention hints, unmeasured |
 | `MTLComputePipelineState` | protocol | implemented | `ComputePipelineState` (runtime) |
 | `MTLComputePipelineState.label` | property | implemented | `ComputePipelineState::label` (runtime) |
-| `MTLComputePipelineState.reflection` | property | missing | S: the state's reflection after creation (macOS 15); the runtime gives it at creation (`new_compute_pipeline_state_with_reflection`) |
+| `MTLComputePipelineState.reflection` | property | missing | S: the state's reflection after creation (macOS 26), nil for a state a device made, set only by Metal 4's compiler; the runtime gives the creation's answer at creation (`new_compute_pipeline_state_with_reflection`) and after it (`ComputePipelineState::compiled_reflection`) |
 | `MTLComputePipelineState.functionHandleWithName:` | method | missing | S: a handle by function name; the runtime takes the `Function` (`ComputePipelineState::function_handle`) |
 | `MTLComputePipelineState.functionHandleWithBinaryFunction:` | method | implemented | `ComputePipelineState::function_handle` (runtime) |
 | `MTLComputePipelineState.newComputePipelineStateWithBinaryFunctions:error:` | method | implemented | `ComputePipelineState::new_compute_pipeline_state_with_additional_binary_functions` (runtime) |
@@ -2253,7 +2253,7 @@ Cheap items a plain app calls first, then medium pieces by how often a plain app
 | `MTLRenderPipelineState` | protocol | implemented | `RenderPipelineState` (runtime) |
 | `MTLRenderPipelineState.label` | property | implemented | `RenderPipelineState::label` (runtime) |
 | `MTLRenderPipelineState.device` | property | implemented | `RenderPipelineState::device` (runtime) |
-| `MTLRenderPipelineState.reflection` | property | missing | S: the state's reflection after creation (macOS 15); the runtime gives it at creation (`new_render_pipeline_state_with_reflection`) |
+| `MTLRenderPipelineState.reflection` | property | missing | S: the state's reflection after creation (macOS 26), nil for a state a device made, set only by Metal 4's compiler; the runtime gives the creation's answer at creation (`new_render_pipeline_state_with_reflection`) and after it (`RenderPipelineState::compiled_reflection`) |
 | `MTLRenderPipelineState.functionHandleWithName:stage:` | method | missing | S: a handle by function name; the runtime takes the `Function` (`RenderPipelineState::function_handle`) |
 | `MTLRenderPipelineState.functionHandleWithBinaryFunction:stage:` | method | implemented | `RenderPipelineState::function_handle` (runtime) |
 | `MTLRenderPipelineState.newRenderPipelineStateWithBinaryFunctions:error:` | method | implemented | `RenderPipelineState::new_render_pipeline_state_with_additional_binary_functions` (runtime) |

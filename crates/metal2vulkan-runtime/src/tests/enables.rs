@@ -535,3 +535,34 @@ fn a_listed_extension_s_features_are_enabled_or_the_device_refused() {
     // Another extension takes no structure.
     assert!(listed_structures(&names(&[c"VK_KHR_swapchain"])).is_empty());
 }
+
+/// An optional extension (`DeviceOptions::optional_device_extensions`) whose feature structure
+/// the runtime knows is enabled, with its structure and every feature set, only where the device
+/// has every feature; one the device lacks a feature of is left out, never refused; one of no
+/// known structure is enabled as it is.
+#[test]
+fn an_optional_extension_is_enabled_only_with_its_features() {
+    let names =
+        |names: &[&CStr]| -> Vec<CString> { names.iter().map(|&name| name.to_owned()).collect() };
+    let swapchain = 1_000_275_000;
+    let fifo = 1_000_361_000;
+    let mut enables =
+        Enables::of(&EnableSet::new(), ApiVersion::V1_3, &BTreeSet::new(), &[]).unwrap();
+    let before = chained(&mut enables);
+    enables.enable_where_featured(
+        &names(&[
+            c"VK_KHR_swapchain",
+            c"VK_EXT_swapchain_maintenance1",
+            c"VK_EXT_present_mode_fifo_latest_ready",
+        ]),
+        |feature| feature != "presentModeFifoLatestReady",
+    );
+    let after = chained(&mut enables);
+    assert!(after.contains(&swapchain) && !after.contains(&fifo));
+    assert_eq!(after.len(), before.len() + 1);
+    let enabled: Vec<&CStr> = enables.names().collect();
+    assert_eq!(
+        enabled,
+        [c"VK_KHR_swapchain", c"VK_EXT_swapchain_maintenance1"]
+    );
+}

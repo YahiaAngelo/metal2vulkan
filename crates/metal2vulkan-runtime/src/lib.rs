@@ -117,6 +117,8 @@ mod host_aliases;
 mod host_memory;
 #[cfg(unix)]
 mod host_residency;
+#[cfg(unix)]
+mod host_shared_pointers;
 mod image_barrier;
 mod image_plan;
 mod index_bounds;

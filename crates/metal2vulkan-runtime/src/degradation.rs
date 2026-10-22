@@ -1714,6 +1714,16 @@ degradations! {
             "the deallocator runs once every command buffer that may still reach the pages \
              (through a texture over them, or a table of the live buffers it holds) lets go of \
              them, where Metal's runs at the release; the pages stay mapped until then";
+        /// A no-copy buffer, heap or rebind was made over host pages the process maps
+        /// read-only, from the caller's dma-buf source (`HostMemory::with_dma_buf`): on Linux,
+        /// where drivers pin a pointer's imported pages for writing, such pages are imported only
+        /// as dma-bufs of their pages, whose memory the GPU writes. Announced once per device, by
+        /// the call that makes it, or at each such call where `DeviceOptions::announce_each`
+        /// asks.
+        ReadOnlyPagesWritten = "read-only-pages-written", Precision,
+            "the GPU's writes through it reach the pages, and the CPU then reads them there, \
+             where after Metal's GPU writes into pages the process maps read-only the CPU reads \
+             them as they were (an M3 Max under macOS 27.0.1, private and shared memory alike)";
         /// Batches of command buffers committed on one queue that the scheduler found ready
         /// together, or held while two or more earlier submissions of their queue ran, went to the
         /// driver in one `vkQueueSubmit`, only the last signalling its queue's timeline and their

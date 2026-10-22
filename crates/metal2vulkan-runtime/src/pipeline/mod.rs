@@ -251,6 +251,10 @@ pub(super) struct Program {
     /// The descriptor the state was made from, for its fields other than the kernel (the stage
     /// input descriptor, the threadgroup limit, and the rest), which every variant compiles under.
     descriptor: Kernel,
+    /// That descriptor with its kernel or tile function as its creation compiled it (`base`'s,
+    /// `StageSource::Compiled`), whose compile kept what the pipeline's reflection states of it
+    /// ([`ComputePipelineState::compiled_reflection`]).
+    compiled: Kernel,
     /// The variant compiled at creation: under the empty key, or under stand-ins for the storage
     /// textures' formats it needs (`stand_in`).
     base: Arc<Variant>,
@@ -523,7 +527,7 @@ impl Device {
             Kernel::Tile(_) => return Err(internal("a compute state of a tile descriptor")),
         };
         let reflection = match options.options.reflects() {
-            true => Some(made.reflection(&options.budget()).map_err(device_error)?),
+            true => Some(state.kernel_reflection(made, &options.budget())?),
             false => None,
         };
         Ok((state, reflection))
@@ -633,7 +637,7 @@ impl ComputePipelineState {
         }?;
         let sources = Sources::creation(device, options, used);
         let profile = device.compile_device().profile();
-        let (found, key) = stand_in::compile_with_stand_ins(profile, |key| {
+        let ((found, compiled), key) = stand_in::compile_with_stand_ins(profile, |key| {
             Variant::compiled(&sources, function, &kernel, key)
         })
         .map_err(|error| compile_error(device, error))?;
@@ -693,6 +697,7 @@ impl ComputePipelineState {
                 device: device.clone(),
                 function: function.clone(),
                 descriptor: kernel.clone(),
+                compiled,
                 base,
                 stand_in,
                 others: Mutex::new(Lru::counted(VARIANTS)),
@@ -925,6 +930,61 @@ impl ComputePipelineState {
     /// then does a dispatch reach a resident heap's textures.
     pub(super) fn reads_texture_handles(&self) -> bool {
         !handle_stages(&self.0.base.pipeline.layout, RenderStages::TILE).is_empty()
+    }
+
+    /// The pipeline's reflection, as its creation's out-parameter answers it where the options ask
+    /// for one ([`Device::new_compute_pipeline_state_with_reflection`]): a runtime extension, at
+    /// any time after the creation. Metal's `reflection` property (macOS 26) answers nil for a
+    /// state an `MTLDevice` made; this is the creation's answer. The stage input descriptor's
+    /// buffers, then the kernel's arguments, of the entry its constants specialized: read from what
+    /// the kernel's compile at the creation kept, with no decode of its AIR. Refused as the
+    /// creation's reflection is: an argument whose answer Metal's has not been measured for
+    /// (`Unsupported`, `Feature::Reflection`, naming its type, which the kernel's AIR is decoded
+    /// again to name).
+    pub fn compiled_reflection(&self) -> Result<ComputePipelineReflection, Error> {
+        match &self.0.descriptor {
+            Kernel::Compute(made) => {
+                self.kernel_reflection(made, &metal2vulkan::Budget::standard())
+            }
+            Kernel::Tile(_) => Err(internal("a compute state of a tile descriptor")),
+        }
+    }
+
+    /// The reflection of the pipeline of `made`, the descriptor the state was made from (with its
+    /// dynamic libraries), from its compiled kernel ([`Program::compiled`]); where that kept no
+    /// answer, `made`'s, decoded under `budget`, which names the argument it refuses.
+    fn kernel_reflection(
+        &self,
+        made: &ComputePipelineDescriptor,
+        budget: &metal2vulkan::Budget,
+    ) -> Result<ComputePipelineReflection, Error> {
+        let Kernel::Compute(compiled) = &self.0.compiled else {
+            return Err(internal("a compute state of a tile descriptor"));
+        };
+        match compiled.reflection(budget) {
+            Err(metal2vulkan::error::Error::Unsupported(u)) if u.feature == Feature::Reflection => {
+                made.reflection(budget).map_err(device_error)
+            }
+            answer => answer.map_err(device_error),
+        }
+    }
+
+    /// The tile pipeline's reflection of a tile pipeline's state ([`RenderPipelineState::compiled_reflection`]), as its
+    /// compute pipeline's [`compiled_reflection`](Self::compiled_reflection).
+    pub(super) fn tile_reflection(
+        &self,
+        budget: &metal2vulkan::Budget,
+    ) -> Result<metal2vulkan::reflection::RenderPipelineReflection, Error> {
+        let (Kernel::Tile(made), Kernel::Tile(compiled)) = (&self.0.descriptor, &self.0.compiled)
+        else {
+            return Err(internal("a tile state of a compute descriptor"));
+        };
+        match compiled.reflection(budget) {
+            Err(metal2vulkan::error::Error::Unsupported(u)) if u.feature == Feature::Reflection => {
+                made.reflection(budget).map_err(device_error)
+            }
+            answer => answer.map_err(device_error),
+        }
     }
 
     /// Whether the kernel may encode, reset or copy indirect commands: a runtime extension, with
@@ -1361,7 +1421,7 @@ impl Variant {
         descriptor: &Kernel,
         key: VariantKey,
     ) -> Result<Arc<Variant>, Error> {
-        let found = Variant::compiled(&Sources::later(device), function, descriptor, &key)
+        let (found, _) = Variant::compiled(&Sources::later(device), function, descriptor, &key)
             .map_err(|error| compile_error(device, error))?;
         Variant::of(device, key, found)
     }
@@ -1371,23 +1431,22 @@ impl Variant {
     /// compiled under one budget. The function compiles under the descriptor's stage input
     /// descriptor or color attachment formats ([`Kernel::inputs`]), and the pipeline under its
     /// other fields, held to the device's compiler word bound from `descriptor`, which holds the
-    /// function ([`Kernel::fit`]). A refusal is the compile layer's.
+    /// function ([`Kernel::fit`]); with `descriptor` holding the function as compiled. A refusal is
+    /// the compile layer's.
     fn compiled(
         sources: &Sources<'_>,
         function: &FunctionDescriptor,
         descriptor: &Kernel,
         key: &VariantKey,
-    ) -> Result<Remembered<ComputePipeline, Variant>, metal2vulkan::error::Error> {
+    ) -> Result<(Remembered<ComputePipeline, Variant>, Kernel), metal2vulkan::error::Error> {
         let compile = sources.device().compile_device();
         let budget = sources.budget();
         let inputs = descriptor.inputs(key);
         let function_key = compile.function_compile_key(function, &inputs);
         let compiled = sources.function(function, &inputs, (&function_key, None), &budget)?;
-        sources.kernel(
-            &descriptor.with_stage(StageSource::Compiled(compiled)),
-            (descriptor, &inputs),
-            &budget,
-        )
+        let compiled = descriptor.with_stage(StageSource::Compiled(compiled));
+        let found = sources.kernel(&compiled, (descriptor, &inputs), &budget)?;
+        Ok((found, compiled))
     }
 
     /// The variant of `key` of what the memo or a compile `found`: the live variant, or one made

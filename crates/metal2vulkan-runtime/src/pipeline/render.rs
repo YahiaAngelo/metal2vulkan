@@ -932,6 +932,25 @@ impl RenderPipelineState {
         Ok(accesses.at(stages, index))
     }
 
+    /// The pipeline's reflection, as its creation's out-parameter answers it where the options
+    /// ask for one ([`Device::new_render_pipeline_state_with_reflection`] and the mesh and tile
+    /// forms): a runtime extension, at any time after the creation. Metal's `reflection` property
+    /// (macOS 26) answers nil for a state an `MTLDevice` made; this is the creation's answer, each
+    /// stage's bindings of the entry its constants specialized. A drawing state's is the one the
+    /// device's shader cache keeps for its descriptor's key, which the creation's out-parameter
+    /// keeps too: its functions' AIR is decoded only where neither the memo nor the cache's
+    /// directory holds it. A tile pipeline's is read from what its tile function's compile at the
+    /// creation kept, with no decode. A mesh pipeline's decodes its functions' AIR. Refused as the
+    /// creation's reflection is (`Unsupported` with `Feature::Reflection` for an argument whose
+    /// answer Metal's has not been measured for, `Compile` for the decode's errors).
+    pub fn compiled_reflection(&self) -> Result<RenderPipelineReflection, Error> {
+        let budget = metal2vulkan::Budget::standard();
+        match &self.0 {
+            Kind::Graphics(state) => state.reflection(&budget),
+            Kind::Tile(state) => state.kernel().tile_reflection(&budget),
+        }
+    }
+
     /// Whether the graphics state's function of `stage` may write a texture; `false` for a tile
     /// pipeline's state.
     fn stage_writes_textures(&self, stage: metal2vulkan::pipeline::Stage) -> bool {
@@ -1668,15 +1687,34 @@ impl GraphicsState {
         self.0.drawn.as_ref().unwrap_or(&self.0.descriptor)
     }
 
-    /// Its functions' texture slots and their accesses, from the reflection of the descriptor it
-    /// was made from (with the dynamic libraries its creation loaded) the first time.
+    /// Its functions' texture slots and their accesses, from its reflection
+    /// ([`reflection`](Self::reflection)) the first time.
     fn texture_accesses(&self) -> Result<&TextureAccesses, Error> {
-        TextureAccesses::remembered(&self.0.texture_accesses, |budget| {
-            match &self.0.descriptor {
-                StateDescriptor::Vertex(descriptor) => descriptor.reflection(budget),
-                StateDescriptor::Mesh(descriptor) => descriptor.reflection(budget),
+        TextureAccesses::remembered(&self.0.texture_accesses, |budget| self.reflection(budget))
+    }
+
+    /// The pipeline's reflection ([`RenderPipelineState::compiled_reflection`]) of the descriptor
+    /// it draws as (with the dynamic libraries its creation loaded), as its creation's
+    /// out-parameter answers it: a drawing pipeline's the shader cache's for the descriptor's key,
+    /// worked out under `budget` and kept where it holds none; a mesh pipeline's worked out under
+    /// `budget`.
+    pub(crate) fn reflection(
+        &self,
+        budget: &metal2vulkan::Budget,
+    ) -> Result<RenderPipelineReflection, Error> {
+        match self.descriptor() {
+            StateDescriptor::Vertex(descriptor) => {
+                let device = &self.0.device;
+                let compile = device.compile_device();
+                let key = compile.render_descriptor_key(descriptor);
+                let cache = &device.shared().shader_cache;
+                (cache.render_reflection(compile, &key, || descriptor.reflection(budget)))
+                    .map_err(device_error)
             }
-        })
+            StateDescriptor::Mesh(descriptor) => {
+                descriptor.reflection(budget).map_err(device_error)
+            }
+        }
     }
 
     /// The state a patch draw an indirect command scales runs on (`None` for a state that does

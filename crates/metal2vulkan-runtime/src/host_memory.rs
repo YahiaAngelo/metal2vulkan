@@ -21,17 +21,22 @@
 //!   alignment above the host page whose rounding would take pages the range does not touch, an
 //!   offset in the pages that misses the buffer's memory alignment, no memory type both allow, or
 //!   a driver that refuses the pointer.
-//! - **Pages the process cannot write** are refused typed on Linux, before the buffer's own import
+//! - **Pages the process cannot write** are refused typed on Linux, before the buffer's own import,
+//!   unless the caller gave a dma-buf source the device can use: then they are imported from it
+//!   alone, never by their pointer, and the device announces `read-only-pages-written`, as the
+//!   GPU's writes reach them where Metal's leave the CPU's view of them as it was
 //!   ([`refuse_unwritable`] asks the kernel for the process's own mappings over the window, with
 //!   `PROCMAP_QUERY` on `/proc/self/maps`, a file kept open for them (`kept_maps`), or reads
 //!   that file's lines where the kernel predates the query, Linux 6.11;
 //!   `WorkCounts::host_mappings_queried`). A buffer that lies in a live
 //!   import of the same bytes (`host_aliases.rs`) asks nothing: it pins no page, that import's
 //!   making asked for the same window, and [`HostMemory::new`]'s contract keeps imported pages
-//!   writable. Linux drivers pin user pages for writing: NVIDIA failed a read-only page as out of
-//!   device memory, RADV refused it, and ANV imported it and lost the device at the GPU's first
-//!   read. lavapipe read one, so there the rule refuses a little more than the driver would. On
-//!   macOS, MoltenVK hands the range to Metal, which reads read-only pages, so there is no check.
+//!   writable. Nor does one over pages whose write permission the caller vouched for
+//!   ([`HostMemory::assume_writable`]). Linux drivers pin user pages for writing: NVIDIA failed
+//!   a read-only page as out of device memory, RADV refused it, and ANV imported it and lost the
+//!   device at the GPU's first read. lavapipe read one, so there the rule refuses a little more
+//!   than the driver would. On macOS, MoltenVK hands the range to Metal, which reads read-only
+//!   pages, so there is no check.
 //! - **What drivers answered**. Private anonymous memory was imported on every venue measured. RADV
 //!   refused shared memory typed: anonymous shared memory, and any mapping of a file, a shared
 //!   memory object or a `memfd` among them (QEMU's `memory-backend-memfd,share=on` guest RAM). It
@@ -117,6 +122,9 @@ use std::sync::Mutex;
 pub struct HostMemory {
     pointer: NonNull<u8>,
     source: Option<Source>,
+    /// The caller vouched that the process maps every page writable
+    /// ([`HostMemory::assume_writable`]), so the runtime asks the kernel nothing of them.
+    writable: bool,
 }
 
 /// What a [`HostMemory`] may carry besides its pointer: a [`DmaBufSource`] where the system has
@@ -141,6 +149,7 @@ impl std::fmt::Debug for HostMemory {
         f.debug_struct("HostMemory")
             .field("pointer", &self.pointer)
             .field("dma_buf", &self.source.is_some())
+            .field("writable", &self.writable)
             .finish()
     }
 }
@@ -168,14 +177,17 @@ impl HostMemory {
     /// pages for writing, and one (ANV) imported a read-only page and then lost the device at the
     /// GPU's first read. So on Linux the pages also stay writable while they are imported: RADV
     /// failed every command buffer submitted after a page of an import was made read-only
-    /// (`mprotect`). Some drivers also refuse shared memory (RADV refused anonymous shared
-    /// memory and mappings of shared memory objects, `memfd` mappings among them); private memory
-    /// imports everywhere measured. [`HostMemory::with_dma_buf`] imports such memory where the
-    /// device imports dma-bufs.
+    /// (`mprotect`). With a dma-buf source ([`HostMemory::with_dma_buf`]) pages the process maps
+    /// read-only are instead imported from the source alone, announced
+    /// (`read-only-pages-written`). Some drivers also refuse shared memory (RADV refused anonymous
+    /// shared memory and mappings of shared memory objects, `memfd` mappings among them); private
+    /// memory imports everywhere measured. [`HostMemory::with_dma_buf`] imports such memory where
+    /// the device imports dma-bufs.
     pub unsafe fn new(pointer: NonNull<u8>) -> HostMemory {
         HostMemory {
             pointer,
             source: None,
+            writable: false,
         }
     }
 
@@ -220,6 +232,29 @@ impl HostMemory {
         HostMemory {
             pointer,
             source: Some(source),
+            writable: false,
+        }
+    }
+
+    /// This memory, its write permission vouched for by the caller: a runtime extension, for a
+    /// caller that knows how its pages are mapped. On Linux the runtime then asks the kernel
+    /// nothing of the pages before it imports their pointer, where it otherwise asks about every
+    /// mapping over them (`PROCMAP_QUERY`, one call per mapping per import, each taking the
+    /// process's memory-map lock; `WorkCounts::host_mappings_queried` counts none of them). Off
+    /// Linux nothing is asked either way, and this changes nothing.
+    ///
+    /// # Safety
+    ///
+    /// As well as [`HostMemory::new`]'s contract (or [`HostMemory::with_dma_buf`]'s): every host
+    /// page the buffer's bytes touch is mapped by this process with write permission when the
+    /// buffer (or heap, or rebind) is made over them, and stays so while they are imported. The
+    /// Vulkan import of a page the process cannot write is undefined on drivers that pin pages
+    /// for writing (one lost its device at the GPU's first read of such a page), which the
+    /// runtime's own check would have refused.
+    pub unsafe fn assume_writable(self) -> HostMemory {
+        HostMemory {
+            writable: true,
+            ..self
         }
     }
 
@@ -228,9 +263,10 @@ impl HostMemory {
         self.pointer
     }
 
-    /// The pointer, and the dma-buf source where the caller gave one.
-    pub(super) fn into_parts(self) -> (NonNull<u8>, Option<Source>) {
-        (self.pointer, self.source)
+    /// The pointer, the dma-buf source where the caller gave one, and whether the caller vouched
+    /// for the pages' write permission ([`HostMemory::assume_writable`]).
+    pub(super) fn into_parts(self) -> (NonNull<u8>, Option<Source>, bool) {
+        (self.pointer, self.source, self.writable)
     }
 }
 

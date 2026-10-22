@@ -315,12 +315,13 @@ impl Drop for HeapShared {
 /// their uses' keys (`EncoderCore::end_with_replay`).
 #[derive(Default)]
 pub(super) struct HeapKeys {
-    heaps: Mutex<KeyMap<ResourceKey, Weak<HeapShared>>>,
+    /// Each heap held weakly, with its identity.
+    heaps: Mutex<KeyMap<ResourceKey, (Weak<HeapShared>, ObjectId)>>,
 }
 
 impl HeapKeys {
-    fn register(&self, key: ResourceKey, heap: Weak<HeapShared>) {
-        lock(&self.heaps).insert(key, heap);
+    fn register(&self, key: ResourceKey, heap: Weak<HeapShared>, id: ObjectId) {
+        lock(&self.heaps).insert(key, (heap, id));
     }
 
     fn forget(&self, key: ResourceKey) {
@@ -334,7 +335,7 @@ impl HeapKeys {
         mut found: impl FnMut(WeakHeap),
     ) {
         let heaps = lock(&self.heaps);
-        for heap in keys.into_iter().filter_map(|key| heaps.get(key)) {
+        for (heap, _) in keys.into_iter().filter_map(|key| heaps.get(key)) {
             found(WeakHeap(heap.clone()));
         }
     }
@@ -343,8 +344,21 @@ impl HeapKeys {
     pub(super) fn among(&self, keys: impl IntoIterator<Item = ResourceKey>) -> Vec<Heap> {
         let heaps = lock(&self.heaps);
         keys.into_iter()
-            .filter_map(|key| heaps.get(&key)?.upgrade().map(Heap))
+            .filter_map(|key| heaps.get(&key)?.0.upgrade().map(Heap))
             .collect()
+    }
+
+    /// Whether one of `keys` names a live heap among `objects`, by its identity: no heap is held,
+    /// so none is let go under this lock.
+    pub(super) fn names_any<'a>(
+        &self,
+        keys: impl IntoIterator<Item = &'a ResourceKey>,
+        objects: &[ObjectId],
+    ) -> bool {
+        let heaps = lock(&self.heaps);
+        keys.into_iter()
+            .filter_map(|key| heaps.get(key))
+            .any(|(heap, id)| objects.contains(id) && heap.strong_count() > 0)
     }
 }
 
@@ -613,7 +627,10 @@ impl Device {
             object_id: ObjectId::new(),
             placed: Mutex::new(Placed::default()),
         });
-        self.shared().heap_keys.register(key, Arc::downgrade(&heap));
+        let id = heap.object_id;
+        self.shared()
+            .heap_keys
+            .register(key, Arc::downgrade(&heap), id);
         Heap(heap)
     }
 

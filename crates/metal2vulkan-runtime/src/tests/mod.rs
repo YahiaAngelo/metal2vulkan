@@ -57,10 +57,14 @@ mod descriptor_arena;
 mod detach_lost;
 mod device;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod device_registry;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod dispatch_pending;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod draw_shape_notices;
 mod driver_defects;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod dropped_usage;
 mod enables;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod encoder_holds;
@@ -86,6 +90,8 @@ mod gate;
 mod gpu_pools;
 mod gpu_time;
 mod heap;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod heap_allocated_size;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod heap_refused_notice;
 mod heap_sets;
@@ -134,6 +140,8 @@ mod multisample_buffer_layouts;
 mod nan_signs;
 mod noted_apart;
 mod numbered_samplers;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod optional_extensions;
 mod options;
 mod own;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
@@ -170,6 +178,8 @@ mod shadow_host_writes;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod shadow_merge_read;
 mod shadow_stencil;
+#[cfg(all(unix, any(m2v_gpu, m2v_cpu_icd)))]
+mod shared_pointers;
 mod sorted_chunks;
 mod spares;
 mod sparse;

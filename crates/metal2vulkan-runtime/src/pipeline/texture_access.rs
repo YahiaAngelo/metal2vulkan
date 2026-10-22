@@ -1,10 +1,10 @@
 //! The texture slots of a render pipeline state's functions, and how each function accesses them
 //! ([`RenderPipelineState::texture_access`](crate::RenderPipelineState::texture_access)). The
 //! answers come from the pipeline's reflection, which the `reflection:` out-parameter of
-//! Metal's creation calls gives too. They are read from the descriptor the state was made from
-//! the first time someone asks, and kept while the state lives.
+//! Metal's creation calls gives too. They are read from the state's reflection
+//! (`RenderPipelineState::compiled_reflection`) the first time someone asks, and kept while the
+//! state lives.
 
-use crate::device::device_error;
 use crate::error::Error;
 use metal2vulkan::metal::{BindingAccess, BindingType, RenderStages};
 use metal2vulkan::reflection::{Binding, RenderPipelineReflection};
@@ -61,12 +61,10 @@ impl TextureAccesses {
     /// `memo`'s accesses, from `reflect`'s reflection (under the standard budget) the first time.
     pub(crate) fn remembered(
         memo: &TextureAccessMemo,
-        reflect: impl FnOnce(&Budget) -> Result<RenderPipelineReflection, metal2vulkan::error::Error>,
+        reflect: impl FnOnce(&Budget) -> Result<RenderPipelineReflection, Error>,
     ) -> Result<&TextureAccesses, Error> {
         memo.get_or_init(|| {
-            reflect(&Budget::standard())
-                .map(|reflection| TextureAccesses::of(&reflection))
-                .map_err(device_error)
+            reflect(&Budget::standard()).map(|reflection| TextureAccesses::of(&reflection))
         })
         .as_ref()
         .map_err(Clone::clone)

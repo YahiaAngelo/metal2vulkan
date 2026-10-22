@@ -45,6 +45,7 @@
 use super::{lock, CommandBuffer, CommandBufferShared, State};
 use crate::error::{invalid, CommandBufferError, Error, Problem};
 use crate::exit_guard;
+use crate::resource::ObjectId;
 use crate::used_resources::{union_of, EncoderKind, UsedResources};
 use std::num::NonZeroU64;
 use std::ops::Range;
@@ -104,6 +105,14 @@ impl Submission<'_> {
         // Released without the lock: what it holds may be a resource's last handle.
         drop(records);
         used
+    }
+
+    /// Whether its encoders' commands use any of `objects`, the identities of what
+    /// [`used_resources`](Self::used_resources) would list, answered without listing it, as
+    /// [`CommandBuffer::uses`] answers: no handle is cloned or held.
+    pub fn uses(&self, objects: &[ObjectId]) -> bool {
+        let shared = self.command_buffer.device().shared();
+        (self.command_buffer.state()).uses(shared, Some(self.encoders.clone()), objects)
     }
 }
 

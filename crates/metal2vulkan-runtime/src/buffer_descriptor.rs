@@ -13,6 +13,7 @@ use super::address_pool::AddressPool;
 #[cfg(unix)]
 use super::buffer::Pages;
 use super::buffer::{usage, Buffer, BufferParts, HostCell, Lying, Modes, Owner, ReadApart};
+use super::degradation::Degradation;
 use super::device::lock;
 use super::error::MemoryKind;
 use super::error::{internal, invalid, nil, vulkan, Error, Problem, RuntimeGap};
@@ -29,6 +30,7 @@ use super::rebind::RebindProblem;
 use super::texture::stand_in::TextureImages;
 use super::texture::Remade;
 use super::values::{ResourceOptions, StorageMode};
+use super::work_counts::Counters;
 use super::Device;
 use crate::release;
 use ash::vk;
@@ -441,7 +443,7 @@ impl Device {
             .host_import
             .as_ref()
             .map_err(|unsupported| Error::Unsupported(unsupported.clone()))?;
-        let (pointer, source) = memory.into_parts();
+        let (pointer, source, writable) = memory.into_parts();
         let host = host_window(call, importer, pointer, length, source)?;
         let window = host.window;
         if of_heap && window.offset != 0 {
@@ -473,7 +475,8 @@ impl Device {
         // Only a buffer that imports its pages pins them, and so has their writability asked: one
         // that lies in a live import pins none, that import's making asked for the same window,
         // and the pages stay writable while imported (`HostMemory::new`).
-        refuse_unwritable(&window, &shared.counts)?;
+        let host = writability_settled(host, writable, &shared.counts)?;
+        let unwritable = host.unwritable;
         // SAFETY: the window lies in the pages of the caller's bytes, which stay mapped
         // (`HostMemory::new`), and the source's pieces hold them (`HostMemory::with_dma_buf`). No
         // lock of the runtime's is held.
@@ -501,6 +504,9 @@ impl Device {
                     )
                 }?,
             };
+        if unwritable {
+            self.degrade_read_only_pages(call, pointer, length);
+        }
         let (address, reserved) = match self.place_window(placement, &window, length) {
             Ok(held) => held,
             Err(error) => {
@@ -585,7 +591,7 @@ impl Device {
             .host_import
             .as_ref()
             .map_err(|unsupported| Error::Unsupported(unsupported.clone()))?;
-        let (pointer, source) = memory.into_parts();
+        let (pointer, source, writable) = memory.into_parts();
         let host = host_window(call, importer, pointer, length, source)?;
         let window = host.window;
         if heap.is_some() && window.offset != 0 {
@@ -621,7 +627,8 @@ impl Device {
             Some(import) => (self.pages_in_import(import), Remade::default()),
             None => {
                 // Only pages imported here are pinned, and so have their writability asked.
-                refuse_unwritable(&window, &shared.counts)?;
+                let host = writability_settled(host, writable, &shared.counts)?;
+                let unwritable = host.unwritable;
                 // Whether an import alive now holds every page of them: counted once the import
                 // is made (`WorkCounts::host_rebind_imports_covered`).
                 let unit = importer.page.max(importer.alignment);
@@ -672,6 +679,9 @@ impl Device {
                         (host, placement, remade)
                     }
                 };
+                if unwritable {
+                    self.degrade_read_only_pages(call, pointer, length);
+                }
                 let pages = self.host_pages(
                     host.raw,
                     placement,
@@ -845,6 +855,7 @@ impl Device {
             window,
             by_pointer,
             source,
+            unwritable: _,
         } = host;
         let refusal = match by_pointer {
             // SAFETY: the caller's.
@@ -868,7 +879,7 @@ impl Device {
     ///
     /// The window's `size` bytes are host memory of this process that stays mapped until the
     /// placement is freed.
-    unsafe fn import_pointer(
+    pub(super) unsafe fn import_pointer(
         &self,
         importer: &Importer,
         pointer: NonNull<u8>,
@@ -945,9 +956,24 @@ impl Device {
         match source {}
     }
 
+    /// Announce that `call` made the `length` bytes at `pointer`, over pages the process maps
+    /// read-only, from the caller's dma-buf source, whose memory the GPU writes
+    /// (`Degradation::ReadOnlyPagesWritten`).
+    fn degrade_read_only_pages(&self, call: &'static str, pointer: NonNull<u8>, length: u64) {
+        self.degrade(Degradation::ReadOnlyPagesWritten, || {
+            (
+                format!("{call} over {length:#x} bytes at {pointer:p}"),
+                "the process maps some of their pages read-only, which Linux drivers do not \
+                 import by pointer, so they are imported as dma-bufs of their pages from the \
+                 caller's source"
+                    .to_owned(),
+            )
+        });
+    }
+
     /// Release `buffer` and its `placement`, an import made for a buffer or rebind that is not
     /// made after all: the `VkBuffer` first, once its sparse binding completed.
-    fn discard_import(&self, buffer: HostBuffer, placement: Placement) {
+    pub(super) fn discard_import(&self, buffer: HostBuffer, placement: Placement) {
         let shared = self.shared();
         placement.settle();
         // SAFETY: the buffer is unused, and its binding completed.
@@ -1097,6 +1123,35 @@ struct HostWindow {
     by_pointer: bool,
     /// The caller's dma-buf source, where it gave one and the device imports dma-bufs.
     source: Option<Source>,
+    /// The process cannot write every page, so they go to the source alone
+    /// ([`writability_settled`]).
+    unwritable: bool,
+}
+
+/// `host`, its pages' write permission settled, for a call that imports them itself (not a
+/// buffer that lies in a live import of them): Linux drivers pin a pointer's imported pages for
+/// writing, so where the process cannot write one of them ([`refuse_unwritable`]) the pointer is
+/// not imported, and the pages go to the caller's dma-buf source where it gave one the device can
+/// use (a dma-buf of the pages pins nothing of the process's mapping, and the GPU's writes reach
+/// the pages: `unwritable`, announced), else are refused. Pages whose write permission the caller
+/// vouched for (`vouched`, `HostMemory::assume_writable`) are not asked about.
+fn writability_settled(
+    host: HostWindow,
+    vouched: bool,
+    counts: &Counters,
+) -> Result<HostWindow, Error> {
+    if vouched {
+        return Ok(host);
+    }
+    match refuse_unwritable(&host.window, counts) {
+        Ok(()) => Ok(host),
+        Err(error) if refused(&error) && host.source.is_some() => Ok(HostWindow {
+            by_pointer: false,
+            unwritable: true,
+            ..host
+        }),
+        Err(error) => Err(error),
+    }
 }
 
 /// The host pages a no-copy object of `length` bytes at `pointer` imports on the device of
@@ -1124,6 +1179,7 @@ fn host_window(
         window,
         by_pointer,
         source,
+        unwritable: false,
     })
 }
 

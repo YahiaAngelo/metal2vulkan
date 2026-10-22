@@ -1308,6 +1308,40 @@ impl Enables {
         Ok(())
     }
 
+    /// Enables each of the caller's optional extensions `names` (`DeviceOptions::
+    /// optional_device_extensions`, each listed by the device), where `reported`
+    /// ([`listed_reported`] of their [`listed_structures`]) says the device has every feature of
+    /// its structure that the runtime knows ([`LISTED`]), chaining the structure with those
+    /// features set; an extension of no known structure is enabled as it is. One the device lacks
+    /// a feature of is left out.
+    pub(super) fn enable_where_featured(
+        &mut self,
+        names: &[CString],
+        reported: impl Fn(&'static str) -> bool,
+    ) {
+        for name in names {
+            let structure = LISTED
+                .iter()
+                .find(|(known, _)| *known == name.as_c_str())
+                .map(|&(_, structure)| structure);
+            if let Some(structure) = structure {
+                let features = || {
+                    LISTED_FEATURES
+                        .iter()
+                        .filter(move |feature| feature.structure == structure)
+                };
+                if !features().all(|feature| reported(feature.name)) {
+                    continue;
+                }
+                for feature in features() {
+                    *(feature.member)(&mut self.chain) = vk::TRUE;
+                }
+                self.linked.insert(structure);
+            }
+            self.push_name(name.clone());
+        }
+    }
+
     /// The names of the extensions it enables.
     pub(super) fn names(&self) -> impl Iterator<Item = &CStr> {
         self.names.iter().map(CString::as_c_str)
