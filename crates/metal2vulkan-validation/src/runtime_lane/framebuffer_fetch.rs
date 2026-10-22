@@ -140,6 +140,7 @@ mod bgra;
 mod blend16;
 mod blend8;
 mod coverage_chain;
+mod generic_blend;
 mod planes;
 mod returned_depth;
 mod returned_stencil;

@@ -469,10 +469,10 @@ fn fetch_state(read: &[u32], formats: &[PixelFormat], blending: bool) -> Lowerin
 /// Each color index a function reads is read in an ordered form wherever the device has one. With
 /// rasterization-order color attachment access it is one input attachment with a `FramebufferFetch`
 /// fact. With only the ordered pixel interlock it is one storage image read (and written) inside
-/// the interlock, under its pipeline's state (standalone, the function needs that state); where
-/// that state blocks the storage form (a blend of a format whose blend the shader does not compute),
-/// it is refused with the blocker; a 16-bit float or 8-bit unorm attachment's blend the shader
-/// computes. With neither, it is refused naming both. Every compiled module passes L3.
+/// the interlock, under its pipeline's state (standalone, the function needs that state); a
+/// blended attachment's blend the shader computes, Metal's of a 16-bit float or 8-bit unorm one,
+/// the generic one, noted `UnmeasuredFetchBlend`, of another. With neither, it is refused naming
+/// both. Every compiled module passes L3.
 #[test]
 fn framebuffer_fetch_reads_in_an_ordered_form_where_the_device_has_one() {
     let Some(bc) = fixture("fragment_fetch") else {
@@ -543,41 +543,36 @@ fn framebuffer_fetch_reads_in_an_ordered_form_where_the_device_has_one() {
                     .unwrap_or_else(|e| panic!("{entry} on {stem}: L3: {e}"));
                 assert_eq!(storage_attachments(&a), colors, "{entry} on {stem}");
                 assert!(attachments(&a).is_empty(), "{entry} on {stem}");
-                // Blending the written color 0 blocks its storage form where the shader computes
-                // no blend of its format (`R32Float`): refused with that reason. A 16-bit float or
-                // 8-bit unorm one's blend the shader computes, as Metal's.
+                // Blending the written color 0: the shader computes the blend, Metal's of a 16-bit
+                // float or 8-bit unorm one, the generic one, noted, of another (`R32Float`).
                 let blended = fetch_state(colors, formats, true);
-                if matches!(
+                let a = compile_with(&bc, entry, &strict, &blended)
+                    .unwrap_or_else(|e| panic!("{entry} on {stem}: blended: {e}"));
+                link_and_validate(&a, &strict)
+                    .unwrap_or_else(|e| panic!("{entry} on {stem}: blended: L3: {e}"));
+                assert_eq!(storage_attachments(&a), colors, "{entry} on {stem}");
+                assert!(
+                    a.facts.iter().any(|f| matches!(
+                        f,
+                        RuntimeFact::InterlockedFramebufferFetch {
+                            color: 0,
+                            blend: Some(_),
+                            ..
+                        }
+                    )),
+                    "{entry} on {stem}: {:?}",
+                    a.facts
+                );
+                let generic = !matches!(
                     formats[0],
                     PixelFormat::RGBA16Float | PixelFormat::RGBA8Unorm
-                ) {
-                    let a = compile_with(&bc, entry, &strict, &blended)
-                        .unwrap_or_else(|e| panic!("{entry} on {stem}: blended: {e}"));
-                    link_and_validate(&a, &strict)
-                        .unwrap_or_else(|e| panic!("{entry} on {stem}: blended: L3: {e}"));
-                    assert_eq!(storage_attachments(&a), colors, "{entry} on {stem}");
-                    assert!(
-                        a.facts.iter().any(|f| matches!(
-                            f,
-                            RuntimeFact::InterlockedFramebufferFetch {
-                                color: 0,
-                                blend: Some(_),
-                                ..
-                            }
-                        )),
-                        "{entry} on {stem}: {:?}",
-                        a.facts
-                    );
-                    continue;
-                }
-                match compile_with(&bc, entry, &strict, &blended) {
-                    Err(Error::Unsupported(u)) => assert_eq!(
-                        (u.feature, u.needs),
-                        (Feature::FramebufferFetch, Needs::NotImplemented),
-                        "{entry} on {stem}"
-                    ),
-                    other => panic!("{entry} on {stem}: {:?}", other.map(|_| ())),
-                }
+                );
+                assert_eq!(
+                    a.precision.contains(&PrecisionNote::UnmeasuredFetchBlend),
+                    generic,
+                    "{entry} on {stem}: {:?}",
+                    a.precision
+                );
             } else {
                 forms[2] += 1;
                 // Each entry writes the color it reads first: the interlock's alternative names
