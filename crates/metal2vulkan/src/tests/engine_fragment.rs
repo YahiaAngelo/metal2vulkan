@@ -2449,7 +2449,8 @@ fn a_premultiplied_blend_into_an_extended_range_attachment_is_computed_in_the_sh
 /// color and alpha: color 0 a written storage attachment, the fact naming the blend and its rounded
 /// math, and no dual-source output (`dualSrcBlend` not required); under a write mask of no channel
 /// it is made too, the second output stored nowhere. Under fast math the same pipeline is refused
-/// `DualSource`, and so is the blend of a function without fast math that writes no second output.
+/// `DualSource`; the blend of a function that writes no second output is refused as Metal refuses
+/// its pipeline, `InvalidDescriptor(ColorAttachment)`.
 /// Into each of the six extended-range formats, unblended (the raw texel through the interface) or
 /// blended premultiplied over (the storage form's blend, which reads no second source), with and
 /// without fast math, the function's two outputs make the pipeline, the second stored nowhere: no
@@ -2584,7 +2585,9 @@ fn a_second_source_blend_without_fast_math_reads_the_second_output() {
             ),
         }
         match pipeline(&safe, "stage_io_fragment_point") {
-            Err(Error::Unsupported(u)) if dual_source(&u) => {}
+            Err(Error::InvalidDescriptor(crate::error::DescriptorError::ColorAttachment {
+                index: 0,
+            })) => {}
             r => panic!("{stem}: no second output: {:?}", r.map(|_| ())),
         }
         // A second output no blend reads, into each extended-range format: stored nowhere.

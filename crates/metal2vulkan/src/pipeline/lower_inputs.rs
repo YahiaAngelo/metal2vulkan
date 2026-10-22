@@ -1366,6 +1366,28 @@ impl BlendEquation {
             alpha_operation: c.alpha_blend_operation,
         })
     }
+
+    /// Whether a factor reads the fragment's second output (`[[color(n), index(1)]]`): dual-source
+    /// blending.
+    pub(crate) fn reads_second_source(&self) -> bool {
+        use metal::BlendFactor as F;
+        [
+            self.source_rgb,
+            self.destination_rgb,
+            self.source_alpha,
+            self.destination_alpha,
+        ]
+        .into_iter()
+        .any(|f| {
+            matches!(
+                f,
+                F::Source1Color
+                    | F::OneMinusSource1Color
+                    | F::Source1Alpha
+                    | F::OneMinusSource1Alpha
+            )
+        })
+    }
 }
 
 impl LoweringInputs {

@@ -29,7 +29,9 @@
 use std::collections::BTreeMap;
 
 use crate::air::ir::TypeId as AirTypeId;
-use crate::error::{Attachment, Error, ExtendedRangeBlend, Feature, RuntimeInput, Unsupported};
+use crate::error::{
+    Attachment, DescriptorError, Error, ExtendedRangeBlend, Feature, RuntimeInput, Unsupported,
+};
 use crate::lower::arith::{extended_range, Form};
 use crate::lower::emit::EmitCx;
 use crate::lower::select::SelectCx;
@@ -142,16 +144,19 @@ pub(super) fn plan(cx: &mut SelectCx<'_>) -> Result<(), Error> {
             extended_range::Blend::for_output(&eq, form, fetch::written(kept), (output, math))
                 .map_err(tied)?;
         // A blend of the second source reads the function's index-1 output, four `half` or
-        // `float` lanes as the first's.
+        // `float` lanes as the first's. Without one, Metal refuses the pipeline ("Fragment shader
+        // does not write to render target color(0), index(1) that is required for blending").
         if blend.reads_second() {
-            let refused = match fetch::second_output4(cx, color).map_err(tied)? {
-                Some(Some(_)) => None,
-                Some(None) => Some(ExtendedRangeBlend::Output),
-                None => Some(ExtendedRangeBlend::DualSource),
-            };
-            if let Some(gap) = refused {
-                let refused = Unsupported::not_implemented(Feature::ExtendedRangeBlend(gap));
-                return Err(tied(refused.into()));
+            match fetch::second_output4(cx, color).map_err(tied)? {
+                Some(Some(_)) => {}
+                Some(None) => {
+                    let gap = Feature::ExtendedRangeBlend(ExtendedRangeBlend::Output);
+                    return Err(tied(Unsupported::not_implemented(gap).into()));
+                }
+                None => {
+                    let invalid = DescriptorError::ColorAttachment { index: color };
+                    return Err(Error::InvalidDescriptor(invalid));
+                }
             }
         }
         if blend.reads_constant() {

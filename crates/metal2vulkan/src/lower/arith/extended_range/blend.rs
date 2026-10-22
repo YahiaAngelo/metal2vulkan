@@ -1252,6 +1252,43 @@ impl Blend {
         Ok(b)
     }
 
+    /// Metal's blend `eq` of a four-lane output of a module of math `math`, blended in `arith`
+    /// (the output's type), into an 8-bit sRGB attachment of format `pf` (`R8Unorm_sRGB`,
+    /// `RG8Unorm_sRGB`, `RGBA8Unorm_sRGB`, `BGRA8Unorm_sRGB`) storing the channels `written` of
+    /// four, computed by [`blend_srgb8`]: the 8-bit unorm blend of the format's unorm twin
+    /// ([`Blend::unorm8`]) over the destination as a fetch reads it, Metal's twelve-bit decode of
+    /// each color byte and alpha's byte over 255, the result stored by Metal's sRGB encode. Plain
+    /// Metal on the M3 Max under macOS 27.0.1 (our own MSL, random sources and texel bytes, `half4`
+    /// and `float4` outputs, fast and safe math, each of the four formats): every channel of
+    /// premultiplied and source-alpha over, the blend color's lerps, a blue-only and an
+    /// alpha-only write mask, a sum, and a minimum and maximum is that arithmetic's. Where the
+    /// 8-bit unorm blend is not built (a factor of the second source; under fast math, a format
+    /// without alpha's lerp, common factor or contracted pair), the rounded forms
+    /// ([`BlendMath::Rounded`]): Metal's without fast math (a second source's and the formats
+    /// without alpha's measured so), a near-equivalent under it. The flag is whether the blend is
+    /// Metal's: the 8-bit unorm blend, or the rounded forms without fast math.
+    pub fn srgb8(
+        eq: &BlendEquation,
+        pf: PixelFormat,
+        written: ColorWriteMask,
+        (math, arith): (BlendMath, BlendArith),
+    ) -> Result<(Blend, bool), Error> {
+        let (twin, has_alpha) = match pf {
+            PixelFormat::R8UnormSRGB => (PixelFormat::R8Unorm, false),
+            PixelFormat::RG8UnormSRGB => (PixelFormat::RG8Unorm, false),
+            PixelFormat::RGBA8UnormSRGB => (PixelFormat::RGBA8Unorm, true),
+            PixelFormat::BGRA8UnormSRGB => (PixelFormat::BGRA8Unorm, true),
+            _ => return Err(Unsupported::not_implemented(Feature::FramebufferFetch).into()),
+        };
+        if let Ok(b) = Blend::unorm8(eq, twin, written, (math, arith)) {
+            return Ok((b, true));
+        }
+        let family = Family::Unorm8(arith);
+        let rounded = BlendMath::Rounded;
+        let b = planned_for(eq, (has_alpha, family), written, (false, rounded))?;
+        Ok((b, math == rounded))
+    }
+
     /// Metal's blend `eq` of a four-lane output of a module of math `math` into a packed 16-bit
     /// unorm attachment (`B5G6R5Unorm`, `A1BGR5Unorm`, `ABGR4Unorm`, `BGR5A1Unorm`) storing the
     /// channels `written` of four, computed by [`blend_packed16`] in `half` arithmetic whatever the
@@ -2191,7 +2228,40 @@ pub fn blend_unorm8(
 ) -> BResult<Value> {
     let s = clamped(fb, s, (0.0, 1.0))?;
     let d = unorm8_tile_value(fb, texel, arith)?;
-    clamped_blend(fb, b, arith, (s, d), color)
+    clamped_blend(fb, b, arith, (s, None, d), color)
+}
+
+/// Metal's blend `b` ([`Blend::srgb8`]) of a four-lane output `s` (a `vec4` of `f32`: a `half4`
+/// output's `half`s, or a `float4` one) over `decoded`, the 8-bit sRGB attachment's texel as a
+/// fetch reads it (a `vec4` of `f32`: each color byte's twelve-bit step over 4095 and the alpha
+/// byte over 255, correctly rounded, `math::unpack` of `unorm4x8_srgb`; a channel the format lacks
+/// 0, alpha 1), in `arith`: a `vec4` of `f32` holding each blended lane, a `half`
+/// (`BlendArith::Half`) or a `float` (`BlendArith::Float`), which the caller stores by Metal's
+/// sRGB encode. The output, and `s1`, the second source (the function's second output, where `b`
+/// reads it, [`Blend::reads_second`]), are clamped to `[0, 1]` first, a NaN to 0, and the
+/// destination read rounded to the arithmetic's type: each `f32` the decode gives rounds to the
+/// `half` its exact quotient does (no step over 4095 and no byte over 255 lies within an `f32`
+/// rounding of a `half` midpoint; every one is checked,
+/// `lower::arith::tests::blend8::an_srgb_step_s_half_is_its_quotient_s`). `color`, the blend
+/// color, reads as [`blend_unorm8`]'s.
+pub fn blend_srgb8(
+    fb: &mut FunctionBuilder<'_>,
+    b: &Blend,
+    arith: BlendArith,
+    (s, s1, decoded): (Value, Option<Value>, Value),
+    color: Option<Value>,
+) -> BResult<Value> {
+    let f = floats();
+    let s = clamped(fb, s, (0.0, 1.0))?;
+    let s1 = match s1 {
+        Some(v) => Some(clamped(fb, v, (0.0, 1.0))?),
+        None => None,
+    };
+    let d = match arith {
+        BlendArith::Half => half_of(fb, f, decoded)?,
+        BlendArith::Float => decoded,
+    };
+    clamped_blend(fb, b, arith, (s, s1, d), color)
 }
 
 /// The generic blend `b` ([`Blend::generic`]) of a four-lane output `s` (a `vec4` of `f32`) over
@@ -2252,14 +2322,15 @@ pub fn blend_generic(
     lanes(fb, b, &inputs)
 }
 
-/// Blend `b` of the clamped output `s` over the destination `d`, both `vec4`s of `f32` in
-/// `arith`, the blend color `color` clamped to `[0, 1]` (a NaN 0) and rounded to `arith`, and
-/// its one minus that of the read: [`blend_unorm8`]'s and [`blend_packed16`]'s arithmetic.
+/// Blend `b` of the clamped output `s` (and second source `s1`, where `b` reads it) over the
+/// destination `d`, `vec4`s of `f32` in `arith`, the blend color `color` clamped to `[0, 1]` (a
+/// NaN 0) and rounded to `arith`, and its one minus that of the read: [`blend_unorm8`]'s,
+/// [`blend_srgb8`]'s and [`blend_packed16`]'s arithmetic.
 fn clamped_blend(
     fb: &mut FunctionBuilder<'_>,
     b: &Blend,
     arith: BlendArith,
-    (s, d): (Value, Value),
+    (s, s1, d): (Value, Option<Value>, Value),
     color: Option<Value>,
 ) -> BResult<Value> {
     let f = floats();
@@ -2291,7 +2362,7 @@ fn clamped_blend(
         constant,
         sf: None,
         math: b.math,
-        s1: None,
+        s1,
         arith,
         negates_one_minus: false,
     };
@@ -2314,7 +2385,7 @@ pub fn blend_packed16(
     let f = floats();
     let s = clamped(fb, s, (0.0, 1.0))?;
     let s = half_of(fb, f, s)?;
-    clamped_blend(fb, b, BlendArith::Half, (s, d), color)
+    clamped_blend(fb, b, BlendArith::Half, (s, None, d), color)
 }
 
 /// Metal's read of each lane of `texel` (a `vec4` of `f32`, an 8-bit unorm texel as the storage

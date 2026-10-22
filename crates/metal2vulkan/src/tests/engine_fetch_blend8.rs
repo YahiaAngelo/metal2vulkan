@@ -17,7 +17,8 @@
 //! subpass, its stages passing L3. Before the shader computed the
 //! blend, each was refused `NotImplemented(FramebufferFetch)` at color 0. Other blends (the blend
 //! color's among them) and write masks that keep channels compile the same way; a blend that reads
-//! the second source is refused `NotImplemented(ExtendedRangeBlend(DualSource))`. No GPU is used.
+//! the second source of a function that writes none is refused as Metal refuses its pipeline
+//! (`InvalidDescriptor(ColorAttachment)`). No GPU is used.
 //!
 //! `llvm-as` assembles the fixtures; a missing tool skips visibly.
 
@@ -25,7 +26,7 @@ use std::path::Path;
 
 use crate::budget::Budget;
 use crate::device::{Device, DeviceDescription, DevicePolicy, DeviceProfile};
-use crate::error::{Attachment, Error, ExtendedRangeBlend, Feature, Needs};
+use crate::error::{DescriptorError, Error, Needs};
 use crate::library::{FunctionArtifact, Library};
 use crate::metal::{BlendFactor, BlendOperation, ColorWriteMask, PixelFormat};
 use crate::pipeline::artifact::PrecisionNote;
@@ -246,6 +247,89 @@ fn a_blended_eight_bit_unorm_fetch_computes_metals_blend() {
     assert!(anv, "no ANV profile compiled the guest's shape");
 }
 
+/// A blended 8-bit four-channel sRGB attachment (`RGBA8Unorm_sRGB`, `BGRA8Unorm_sRGB`): on every
+/// committed profile that orders fetch through the pixel interlock alone, each function compiles
+/// in the storage form through the format's `R32_UINT` view with the blend it computes (Metal's
+/// 8-bit unorm blend over the decoded texel, encoded: `extended_range::Blend::srgb8`), rounded
+/// without fast math, and announces nothing, a write mask that keeps channels and the blend color
+/// too; and its module passes L3. Before, each was refused `NotImplemented(FramebufferFetch)`.
+/// The second source's blend (the owned fixture `engine/fbl_fetch_dual`, fast math), which Metal's
+/// 8-bit unorm blend does not build, takes its rounded forms, noted `UnmeasuredFetchBlend`.
+#[test]
+fn a_blended_four_channel_srgb_fetch_computes_metals_blend() {
+    let (Some(fast), Some(safe), Some(dual)) = (
+        assembled("fbl_fetch_blend8"),
+        assembled("fbl_fetch_blend8_safe"),
+        assembled("fbl_fetch_dual"),
+    ) else {
+        return;
+    };
+    use BlendFactor as F;
+    let entries = [
+        (&fast, "fbl8_over_loaded", false),
+        (&fast, "fbl8_over_loaded_float", false),
+        (&safe, "fbl8_safe_loaded", true),
+        (&safe, "fbl8_safe_loaded_float", true),
+    ];
+    let lerp = BlendEquation {
+        source_rgb: F::BlendColor,
+        destination_rgb: F::OneMinusBlendColor,
+        ..OVER
+    };
+    let states = [
+        (OVER, ColorWriteMask::ALL),
+        (OVER, ColorWriteMask::RED.union(ColorWriteMask::ALPHA)),
+        (lerp, ColorWriteMask::ALL),
+    ];
+    let second = BlendEquation {
+        source_rgb: F::Source1Color,
+        destination_rgb: F::OneMinusSource1Color,
+        source_alpha: F::Source1Alpha,
+        destination_alpha: F::OneMinusSource1Alpha,
+        ..OVER
+    };
+    let mut checked = 0;
+    for (stem, p) in committed_profiles().expect("profiles") {
+        if !crate::lower::fragment::interlock_orders(&p) {
+            continue;
+        }
+        for pf in [PixelFormat::RGBA8UnormSRGB, PixelFormat::BGRA8UnormSRGB] {
+            for (eq, mask) in states {
+                let inputs = state(&p, pf, eq, mask);
+                for &(bc, entry, rounded) in &entries {
+                    let what = format!("{stem} {pf:?} {eq:?} {mask:?} {entry}");
+                    let a = compile_with(bc, entry, &p, &inputs)
+                        .unwrap_or_else(|e| panic!("{what}: {e}"));
+                    assert_eq!(fetched(&a), Some((true, Some(eq), rounded)), "{what}");
+                    for note in NOTES
+                        .into_iter()
+                        .chain([PrecisionNote::UnmeasuredFetchBlend])
+                    {
+                        assert!(!a.precision.contains(&note), "{what}: {:?}", a.precision);
+                    }
+                    link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{what}: L3: {e}"));
+                    checked += 1;
+                }
+            }
+            let inputs = state(&p, pf, second, ColorWriteMask::ALL);
+            for entry in ["fbd_dual_half", "fbd_dual_float"] {
+                let what = format!("{stem} {pf:?} {entry}");
+                let a = compile_with(&dual, entry, &p, &inputs)
+                    .unwrap_or_else(|e| panic!("{what}: {e}"));
+                assert_eq!(fetched(&a), Some((true, Some(second), false)), "{what}");
+                assert!(
+                    a.precision.contains(&PrecisionNote::UnmeasuredFetchBlend),
+                    "{what}: {:?}",
+                    a.precision
+                );
+                link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{what}: L3: {e}"));
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 0, "no interlock profile took the storage form");
+}
+
 /// Other blends and write masks of an 8-bit unorm attachment: on every committed profile that
 /// orders fetch through the pixel interlock alone, each compiles in the storage form with the
 /// blend it computes, rounded without fast math, and announces nothing; one reading the blend
@@ -354,11 +438,13 @@ fn another_eight_bit_unorm_blend_or_mask_computes_metals_blend() {
     assert!(checked > 0, "no interlock profile took the storage form");
 }
 
-/// A blend of an 8-bit unorm attachment that reads the second source is not measured, nor built
-/// generically: on every committed profile that orders fetch through the pixel interlock alone it
-/// is refused `NotImplemented(ExtendedRangeBlend(DualSource))` at color 0.
+/// A blend of an 8-bit unorm attachment that reads the second source, of a function that writes no
+/// second output: Metal refuses the pipeline ("Fragment shader does not write to render target
+/// color(0), index(1) that is required for blending", plain Metal on the M3 Max under macOS
+/// 27.0.1), and on every committed profile that orders fetch through the pixel interlock alone it
+/// is refused so, `InvalidDescriptor(ColorAttachment)` of color 0.
 #[test]
-fn an_eight_bit_unorm_second_source_blend_stays_refused() {
+fn a_second_source_blend_without_its_output_is_refused_as_metal_refuses_it() {
     let Some(fast) = assembled("fbl_fetch_blend8") else {
         return;
     };
@@ -382,14 +468,7 @@ fn an_eight_bit_unorm_second_source_blend_stays_refused() {
             let inputs = state(&p, PixelFormat::BGRA8Unorm, eq, ColorWriteMask::ALL);
             let what = format!("{stem} {eq:?}");
             match compile_with(&fast, "fbl8_over_loaded", &p, &inputs) {
-                Err(Error::Unsupported(u)) if u.needs == Needs::NotImplemented => {
-                    let dual = Feature::ExtendedRangeBlend(ExtendedRangeBlend::DualSource);
-                    assert_eq!(u.feature, dual, "{what}");
-                    assert_eq!(
-                        u.location.as_ref().and_then(|at| at.attachment()),
-                        Some(Attachment::Color(0)),
-                        "{what}"
-                    );
+                Err(Error::InvalidDescriptor(DescriptorError::ColorAttachment { index: 0 })) => {
                     checked += 1;
                 }
                 Err(e) if device_gap(&e) => eprintln!("{what}: {e}"),

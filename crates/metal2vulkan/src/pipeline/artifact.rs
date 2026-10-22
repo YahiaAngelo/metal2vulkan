@@ -1765,8 +1765,8 @@ pub enum PrecisionNote {
     /// normalized, 10-bit, packed float or `A8Unorm` format, among others), an 8-bit unorm one
     /// written by an output of fewer than four lanes, and a 16-bit float or 8-bit unorm one under a
     /// blend of the second source or beside a second (index 1) output. No Vulkan blend applies to
-    /// a storage write,
-    /// so the shader computes the pipeline's blend itself: in `float`, each factor, product and sum
+    /// a storage write, so the shader computes the pipeline's blend itself: in `float`, each
+    /// factor, product and sum
     /// rounded to nearest even, a factor of zero keeping its product, the source and the blend
     /// color clamped first to a normalized format's range (`[0, 1]`, `[-1, 1]`; a NaN to its low
     /// end) as Vulkan's blend clamps them, an output's missing lane zero, the result stored through
@@ -1775,7 +1775,12 @@ pub enum PrecisionNote {
     /// that fuses a product within that product's rounding, and one of a format of fewer bits than
     /// a `float` within the format's own rounding of the result where Metal's arithmetic is at
     /// least as fine. A factor of the second source reads the function's second output, clamped as
-    /// the source. Validation derives no tolerance from it.
+    /// the source. An 8-bit sRGB attachment (`RGBA8Unorm_sRGB`, `BGRA8Unorm_sRGB`) under a blend of
+    /// the second source, in a module compiled with fast math, records it too: there the shader
+    /// computes Metal's 8-bit unorm blend's rounded forms over the decoded texel, in the output's
+    /// type, and stores the result by Metal's sRGB encode (`extended_range::Blend::srgb8`), which
+    /// is Metal's without fast math; under fast math Metal regroups the blend, unmeasured.
+    /// Validation derives no tolerance from it.
     UnmeasuredFetchBlend,
 }
 

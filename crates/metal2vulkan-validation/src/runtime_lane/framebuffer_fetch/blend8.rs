@@ -32,6 +32,11 @@
 //! encoder's color past each end, blue alone stored, and alpha alone stored, against the
 //! arithmetic `Blend::unorm8` names for each, each channel the mask leaves out its code; checked as
 //! above.
+//!
+//! The four-channel 8-bit sRGB formats (`BGRA8Unorm_sRGB`, `RGBA8Unorm_sRGB`) under premultiplied
+//! over and those blends: the same arithmetic over the texel as a fetch decodes it, encoded by
+//! Metal's table (`Blend::srgb8`, measured on the M3 Max); asserted on a device that fetches
+//! through the pixel interlock.
 
 use super::{form, library, through_inputs};
 use crate::runtime_lane::degrade_notices::counts;
@@ -530,16 +535,13 @@ type State = (
     Option<Form>,
 );
 
-/// Other blends, write masks and the blend color, into `BGRA8Unorm`: Metal's arithmetic (plain
-/// Metal on the M3 Max under macOS 27.0.1) is each color lane's and alpha's form `Blend::unorm8`
-/// names; a channel the mask leaves out keeps its code. Each draw's channels are Metal's where it
-/// announces none of [`NOTES`], and on a device that fetches through the pixel interlock it
-/// announces none.
-#[test]
-fn other_blends_masks_and_the_blend_color_store_metals_blend() {
+/// The blends, write masks and blend colors [`other_blends_masks_and_the_blend_color_store_metals_blend`]
+/// and [`a_blended_four_channel_srgb_fetch_stores_metals_blend`] draw, each with Metal's arithmetic
+/// for its color and alpha lanes (`Blend::unorm8`'s forms).
+fn states() -> [State; 4] {
     use BlendFactor as F;
     use BlendOperation as O;
-    let states: [State; 4] = [
+    [
         // Source alpha over: the color's source product rounded first, alpha a lerp of the
         // source alpha from the destination's.
         (
@@ -610,7 +612,17 @@ fn other_blends_masks_and_the_blend_color_store_metals_blend() {
                 }
             }),
         ),
-    ];
+    ]
+}
+
+/// Other blends, write masks and the blend color, into `BGRA8Unorm`: Metal's arithmetic (plain
+/// Metal on the M3 Max under macOS 27.0.1) is each color lane's and alpha's form `Blend::unorm8`
+/// names; a channel the mask leaves out keeps its code. Each draw's channels are Metal's where it
+/// announces none of [`NOTES`], and on a device that fetches through the pixel interlock it
+/// announces none.
+#[test]
+fn other_blends_masks_and_the_blend_color_store_metals_blend() {
+    let states = states();
     let kinds = NOTES.map(Degradation::from_precision_note);
     let (messages, _cache, lane) = lane_with(|options| {
         options.announce_each = kinds.into_iter().collect();
@@ -681,6 +693,160 @@ fn other_blends_masks_and_the_blend_color_store_metals_blend() {
                 let what = format!("{entry} {color:?} {alpha:?} {mask:?} {bc:?}");
                 checked(&lane, (&what, pf), &noted, &wrong);
                 drawn += 1;
+            }
+        }
+    }
+    assert!(drawn > 0, "no draw on {device}");
+    let _ = messages.take_notices();
+    quiet(lane, &messages);
+}
+
+/// Metal's sRGB byte of each twelve-bit index (the first indices of `bind::color_write_table`,
+/// Metal's encode thresholds).
+pub(super) static SRGB_BYTES: std::sync::LazyLock<Vec<u8>> = std::sync::LazyLock::new(|| {
+    let first: Vec<u32> = metal2vulkan::bind::color_write_table()
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .map(|e| u32::from_le_bytes([e[0], e[1], e[2], e[3]]))
+        .collect();
+    (0..4096u32)
+        .map(|i| (1..256).rev().find(|&b| first[b] <= i).unwrap_or(0) as u8)
+        .collect()
+});
+
+/// A blended 8-bit four-channel sRGB attachment (`BGRA8Unorm_sRGB`, `RGBA8Unorm_sRGB`) fetched,
+/// on the device the cfg selects, through each fixture's loaded `half4` and `float4`: premultiplied
+/// over and [`states`]' blends, masks and blend colors. Metal's answer (plain Metal on the M3 Max
+/// under macOS 27.0.1, our own MSL of this shape, random sources and texel bytes, every one of
+/// these states, both outputs, fast and safe math, both formats: every channel) is the 8-bit unorm
+/// blend's arithmetic over the texel as a fetch reads it, each color byte's twelve-bit step over
+/// 4095 and alpha's byte over 255 rounded to the output's type, the result's color bytes by
+/// Metal's sRGB encode (the exact product with 4095 rounded to nearest, through its thresholds)
+/// and alpha's by its unorm write. The texels' codes cover every byte in each channel. On a device
+/// that fetches through the pixel interlock (RADV, ANV, NVIDIA, MoltenVK) the function computes
+/// that blend itself, exactly, announcing none of [`NOTES`], which is asserted with every channel;
+/// through input attachments (lavapipe) the device blends, and what it announces and how many
+/// texels are Metal's is printed. Each draw prints a `FETCH-BLEND8` line.
+#[test]
+fn a_blended_four_channel_srgb_fetch_stores_metals_blend() {
+    use BlendFactor as F;
+    use BlendOperation as O;
+    // Premultiplied over: `fma(d, 1 - a, s)` under fast math, `s + d (1 - a)` without.
+    let over_form: Form = |(float, safe), l| {
+        let m = rounded(float, 1.0 - l.sa);
+        match safe {
+            false => fused(float, (l.d, m, l.s)),
+            true => rounded(float, l.s + rounded(float, l.d * m)),
+        }
+    };
+    let over: State = (
+        [(F::One, F::OneMinusSourceAlpha, O::Add); 2],
+        ColorWriteMask::ALL,
+        [0.0; 4],
+        Some(over_form),
+        Some(over_form),
+    );
+    let kinds = NOTES.map(Degradation::from_precision_note);
+    let (messages, _cache, lane) = lane_with(|options| {
+        options.announce_each = kinds.into_iter().collect();
+    });
+    let device = lane.device.name();
+    let bytes = &*SRGB_BYTES;
+    let formats: [(PixelFormat, &[usize]); 2] = [
+        (PixelFormat::BGRA8UnormSRGB, &[2, 1, 0, 3]),
+        (PixelFormat::RGBA8UnormSRGB, &[0, 1, 2, 3]),
+    ];
+    let mut drawn = 0;
+    for fixture in &FIXTURES {
+        let library = library(&lane, fixture.stem);
+        for (pf, order) in formats {
+            for &(entry, output) in &fixture.cases[..2] {
+                for ([color, alpha], mask, bc, color_form, alpha_form) in
+                    std::iter::once(over).chain(states())
+                {
+                    let mut blended = ColorAttachmentDescriptor::new(pf);
+                    blended.blending_enabled = true;
+                    (
+                        blended.source_rgb_blend_factor,
+                        blended.destination_rgb_blend_factor,
+                        blended.rgb_blend_operation,
+                    ) = color;
+                    (
+                        blended.source_alpha_blend_factor,
+                        blended.destination_alpha_blend_factor,
+                        blended.alpha_blend_operation,
+                    ) = alpha;
+                    blended.write_mask = mask;
+                    let Some(state) = pipeline(&lane, (&library, fixture), entry, blended) else {
+                        continue;
+                    };
+                    let (texels, sources) = data(output);
+                    let data = (output, texels.as_slice(), sources.as_slice());
+                    let (read, noted) = draw((&lane, &messages), &state, (pf, order), data, bc);
+                    let float = output == Output::Float;
+                    let read_as = |x: f64| rounded(float, clamp01(x));
+                    // A code as Metal's blend reads it: a color byte's step over 4095, alpha's
+                    // byte over 255, rounded to the arithmetic's type.
+                    let decoded = |c: usize, code: u8| match c < 3 {
+                        true => {
+                            let step = crate::runtime_lane::srgb_step(u32::from(code));
+                            rounded(float, f64::from(step) / 4095.0)
+                        }
+                        false => rounded(float, f64::from(code) / 255.0),
+                    };
+                    let mut wrong = Vec::new();
+                    for (i, &codes) in texels.iter().enumerate() {
+                        let got = &read[4 * i..4 * i + 4];
+                        let s = returned(output, order, (i, codes), &sources);
+                        let operands = |c: usize| Operands {
+                            s: read_as(s[c]),
+                            sa: read_as(s[3]),
+                            d: decoded(c, codes[c]),
+                            da: decoded(3, codes[3]),
+                            c: read_as(f64::from(bc[c])),
+                            ca: read_as(f64::from(bc[3])),
+                        };
+                        let want: Vec<u8> = order
+                            .iter()
+                            .map(|&c| {
+                                let form = if c < 3 { color_form } else { alpha_form };
+                                let bit = [
+                                    ColorWriteMask::RED,
+                                    ColorWriteMask::GREEN,
+                                    ColorWriteMask::BLUE,
+                                    ColorWriteMask::ALPHA,
+                                ][c];
+                                match form.filter(|_| mask.contains(bit)) {
+                                    Some(form) => {
+                                        let v = clamp01(form((float, fixture.safe), operands(c)));
+                                        match c < 3 {
+                                            true => bytes[(v * 4095.0).round_ties_even() as usize],
+                                            false => (v * 255.0).round_ties_even() as u8,
+                                        }
+                                    }
+                                    None => codes[c],
+                                }
+                            })
+                            .collect();
+                        if got != want.as_slice() {
+                            wrong.push((i, got.to_vec(), want));
+                        }
+                    }
+                    let what = format!("{entry} {color:?} {alpha:?} {mask:?} {bc:?}");
+                    if through_inputs(&lane) {
+                        println!(
+                            "FETCH-BLEND8 {what} {pf:?} | {device} | through {} | Metal's {}/{} \
+                             texels | announced {noted:?}",
+                            form(&lane),
+                            TEXELS - wrong.len(),
+                            TEXELS,
+                        );
+                    } else {
+                        checked(&lane, (&what, pf), &noted, &wrong);
+                    }
+                    drawn += 1;
+                }
             }
         }
     }

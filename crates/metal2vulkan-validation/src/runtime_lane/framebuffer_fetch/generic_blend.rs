@@ -36,7 +36,11 @@
 //! fast and safe math) the model holds every channel of `RGBA32Float` without fast math and of
 //! `RGBA8Unorm` of `float4` outputs, and `RGBA16Unorm`'s within one code; Metal blends
 //! `RGBA16Float` in `half` and writes it toward zero, so there the model is a code off in about
-//! half the channels, and further where a `half` step overflows.
+//! half the channels, and further where a `half` step overflows. Into `RGBA8Unorm_sRGB` too: the
+//! function computes the 8-bit unorm blend's rounded forms over the decoded texel in the output's
+//! type, encoded by Metal's table (`Blend::srgb8`), which the model's `float` blend of the decoded
+//! texel, encoded by that table, meets within one code; Metal's without fast math, and within one
+//! code of the fast-math fixture's on our probe.
 
 use super::{form, library, through_inputs};
 use crate::runtime_lane::degrade_notices::counts;
@@ -75,6 +79,8 @@ enum Layout {
     Unorm8,
     Rgb10a2,
     A8,
+    /// `RGBA8Unorm_sRGB`: each color byte Metal's twelve-bit step over 4095, alpha's over 255.
+    Srgb8,
 }
 
 impl Layout {
@@ -83,7 +89,7 @@ impl Layout {
         match self {
             Layout::Float32 => 16,
             Layout::Half16 | Layout::Unorm16 => 8,
-            Layout::Snorm8 | Layout::Unorm8 | Layout::Rgb10a2 => 4,
+            Layout::Snorm8 | Layout::Unorm8 | Layout::Rgb10a2 | Layout::Srgb8 => 4,
             Layout::A8 => 1,
         }
     }
@@ -93,7 +99,9 @@ impl Layout {
         match self {
             Layout::Float32 | Layout::Half16 => None,
             Layout::Snorm8 => Some(-1.0),
-            Layout::Unorm16 | Layout::Unorm8 | Layout::Rgb10a2 | Layout::A8 => Some(0.0),
+            Layout::Unorm16 | Layout::Unorm8 | Layout::Rgb10a2 | Layout::A8 | Layout::Srgb8 => {
+                Some(0.0)
+            }
         }
     }
 
@@ -119,6 +127,10 @@ impl Layout {
                 })
             }
             Layout::A8 => [0.0, 0.0, 0.0, f32::from(b[0]) / 255.0],
+            Layout::Srgb8 => std::array::from_fn(|c| match c {
+                3 => f32::from(b[3]) / 255.0,
+                _ => crate::runtime_lane::srgb_step(u32::from(b[c])) as f32 / 4095.0,
+            }),
         }
     }
 
@@ -132,7 +144,7 @@ impl Layout {
                 .map(|c| i64::from(u16::from_le_bytes([b[2 * c], b[2 * c + 1]])))
                 .collect(),
             Layout::Snorm8 => b.iter().map(|&x| i64::from(x as i8)).collect(),
-            Layout::Unorm8 => b.iter().map(|&x| i64::from(x)).collect(),
+            Layout::Unorm8 | Layout::Srgb8 => b.iter().map(|&x| i64::from(x)).collect(),
             Layout::Rgb10a2 => {
                 let w = u32::from_le_bytes(b.try_into().unwrap());
                 vec![
@@ -165,6 +177,15 @@ impl Layout {
                 code(v[3], 0.0, 3.0),
             ],
             Layout::A8 => vec![code(v[3], 0.0, 255.0)],
+            Layout::Srgb8 => (0..4)
+                .map(|c| match c {
+                    3 => code(v[3], 0.0, 255.0),
+                    _ => {
+                        let index = code(v[c], 0.0, 4095.0) as usize;
+                        i64::from(super::blend8::SRGB_BYTES[index])
+                    }
+                })
+                .collect(),
         }
     }
 }
@@ -580,8 +601,9 @@ fn a_blended_fetch_of_another_format_stores_the_generic_blend() {
 }
 
 /// A blend of the second source, read from the function's second output (the owned fixture
-/// `fbl_fetch_dual`), into a 32-bit float, a 16-bit float, a 16-bit unorm and an 8-bit unorm
-/// target: each draw announces `unmeasured-fetch-blend` and stores the model's channels, as above.
+/// `fbl_fetch_dual`), into a 32-bit float, a 16-bit float, a 16-bit unorm, an 8-bit unorm and an
+/// 8-bit sRGB target: each draw announces `unmeasured-fetch-blend` and stores the model's channels,
+/// as above.
 #[test]
 fn a_second_source_blend_of_a_fetched_attachment_stores_the_generic_blend() {
     let kind = Degradation::from_precision_note(PrecisionNote::UnmeasuredFetchBlend);
@@ -595,6 +617,7 @@ fn a_second_source_blend_of_a_fetched_attachment_stores_the_generic_blend() {
         (PixelFormat::RGBA16Float, Layout::Half16),
         (PixelFormat::RGBA16Unorm, Layout::Unorm16),
         (PixelFormat::RGBA8Unorm, Layout::Unorm8),
+        (PixelFormat::RGBA8UnormSRGB, Layout::Srgb8),
     ];
     let mut drawn = 0;
     for format in formats {

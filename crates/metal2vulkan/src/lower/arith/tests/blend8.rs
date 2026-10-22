@@ -176,6 +176,41 @@ fn a_code_s_half_is_its_product_s() {
     }
 }
 
+/// The `half` nearest `n / d` (a quotient in `[2^-14, 1]`, or zero), from the exact quotient:
+/// `n` scaled to eleven significant bits over `d`, rounded to nearest even by the remainder.
+fn exact_half(n: u64, d: u64) -> f64 {
+    if n == 0 {
+        return 0.0;
+    }
+    // No quotient but 1 lies near a power of two, so the `f64`'s exponent is the quotient's.
+    let e = (n as f64 / d as f64).log2().floor() as i32;
+    assert!(e >= -14, "{n} / {d} is no normal half");
+    let scaled = n << (10 - e);
+    let (mut q, r) = (scaled / d, scaled % d);
+    if 2 * r > d || (2 * r == d && q % 2 == 1) {
+        q += 1;
+    }
+    q as f64 * 2f64.powi(e - 10)
+}
+
+/// An 8-bit sRGB destination read in `half` (`blend_srgb8`): the `half` of the `f32` nearest each
+/// twelve-bit step over 4095 (the decode of a color byte) and each byte over 255 (alpha's), as the
+/// decode gives it correctly rounded, is the `half` nearest the exact quotient: for every step and
+/// byte, so the read rounds once, as Metal's.
+#[test]
+fn an_srgb_step_s_half_is_its_quotient_s() {
+    for d in [4095u64, 255] {
+        for n in 0..=d {
+            let near = n as f32 / d as f32;
+            assert_eq!(
+                f64_to_f16(f64::from(near)),
+                f64_to_f16(exact_half(n, d)),
+                "{n} / {d}"
+            );
+        }
+    }
+}
+
 /// `half_of` rounds to `half` as Metal does under each `half` rounding: to nearest even, half
 /// denormals kept, an infinity from 65520 up, the sign of a zero kept. Over every finite `half` of
 /// either sign: the `half` itself, the `f32`s beside it, the midpoint to the next `half` up in

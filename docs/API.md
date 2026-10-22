@@ -2516,7 +2516,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   the source and the blend color clamped first to a normalized format's range (a NaN to its low
   end), an output's missing lane zero, and the result stored through the device's conversion.
   Metal's blend arithmetic for these formats is not measured, so the bound is not known. A factor
-  of the second source reads the function's second output, clamped as the source.
+  of the second source reads the function's second output, clamped as the source. An 8-bit sRGB
+  attachment (`RGBA8Unorm_sRGB`, `BGRA8Unorm_sRGB`) under a blend of the second source, in a
+  module compiled with fast math, announces it too: the shader computes Metal's 8-bit unorm
+  blend's rounded forms over the decoded texel, in the output's type, and stores the result by
+  Metal's sRGB encode, Metal's without fast math; under fast math Metal regroups the blend,
+  unmeasured.
 - `metal2vulkan-degrade-fp8-value` (precision). `PrecisionNote::Fp8Value`: An 8-bit float converts
   to an integer from the format's documented value with Metal's saturating float-to-integer rule,
   where Metal's device here answers otherwise: Metal on Apple M3 compiles these reads but extends
