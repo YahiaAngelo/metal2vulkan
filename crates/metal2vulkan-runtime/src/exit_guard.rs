@@ -417,6 +417,9 @@ calls! {
     CreateSampler => c"vkCreateSampler",
     CreateShaderModule => c"vkCreateShaderModule",
     CreateDescriptorSetLayout => c"vkCreateDescriptorSetLayout",
+    // Asked before a heap's set layout past `maxPerSetDescriptors` is made
+    // (`pipeline::objects::layout_support`).
+    GetDescriptorSetLayoutSupport => c"vkGetDescriptorSetLayoutSupport",
     CreatePipelineLayout => c"vkCreatePipelineLayout",
     CreateComputePipelines => c"vkCreateComputePipelines",
     // A render host step's ([`HOST_STEP`]): an executed render command's draw into a secondary
@@ -540,6 +543,7 @@ pub(crate) const HOST_STEP: &[Call] = &[
     Call::CreateSampler,
     Call::CreateShaderModule,
     Call::CreateDescriptorSetLayout,
+    Call::GetDescriptorSetLayoutSupport,
     Call::CreatePipelineLayout,
     Call::CreateComputePipelines,
     // A making's own pipeline cache, seeded from its record and read for its save
