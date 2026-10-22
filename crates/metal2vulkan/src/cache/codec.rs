@@ -1189,6 +1189,7 @@ codec_enum! {
         ZeroedColor { color, format },
         DroppedColor { color },
         DepthClampRange,
+        RotatedWeights,
         ConstantLanes { slot },
         FunctionTableRange { addressed },
         TestedStorageWrites { early_tests, early_variant },

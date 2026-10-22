@@ -303,6 +303,13 @@ pub struct VariantKey {
     /// The plan of a pipeline compiled under it states it.
     #[cfg_attr(feature = "serde", serde(default))]
     pub depth_clamp_range: bool,
+    /// The fragment function's triangles are drawn with Metal's last vertex first
+    /// (`BindShape::rotated_weights`, `LoweringInputs::rotated_weights`): the variant a listed
+    /// triangle draw under Apple's last provoking vertex runs, whose `[[barycentric_coord]]` reads
+    /// take Metal's weights back from the drawn triangle's. The plan of a pipeline compiled under
+    /// it states it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub rotated_weights: bool,
     /// Whether the draw's render pass depth is `Depth16Unorm`, where the render pipeline's depth
     /// format says otherwise (`BindShape::depth16_pass`): plain Metal stores into the pass's depth
     /// whatever format the pipeline names, so the variant's fragment stage writes Metal's 16-bit
@@ -543,6 +550,7 @@ impl VariantKey {
             && self.dropped_colors.is_empty()
             && self.kept_imageblock_bytes.is_none()
             && !self.depth_clamp_range
+            && !self.rotated_weights
             && self.depth16_pass.is_none()
             && !self.depth16_biased
             && self.depth16_bias_raises.is_none()
@@ -689,6 +697,7 @@ impl VariantKey {
             out.zeroed_colors = self.zeroed_colors.clone();
             out.dropped_colors = self.dropped_colors.clone();
             out.depth_clamp_range = self.depth_clamp_range;
+            out.rotated_weights = self.rotated_weights;
             out.read_only_tests = self.read_only_tests;
             out.shader_tests = self.shader_tests;
             out.shader_stencil = self.shader_stencil;

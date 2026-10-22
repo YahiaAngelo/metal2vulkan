@@ -89,12 +89,14 @@ pub enum Place {
     Element0,
     /// An aggregate of this many members, one per array element (`ClipDistance`).
     Spread(u32),
-    /// The leading lanes of a vector input, this many (1 or 2): a `float` or `float2` read of the
-    /// three barycentric weights.
-    Prefix(u8),
-    /// A `float3` read of the three barycentric weights: the variable's first two lanes, and
-    /// `1 - (x + y)` of them as the third, which is Metal's third weight (see `input_builtin`).
-    Weights,
+    /// A read of this many (1 to 3) leading lanes of Metal's three barycentric weights, of a
+    /// variable whose first two lanes are the first two weights of the primitive as drawn
+    /// (`BaryCoordKHR`, or the `float2` of `IoRole::Barycentric`): `1 - (x + y)` of the first
+    /// two is Metal's third weight (see `input_builtin`). Where `rotated`
+    /// (`LoweringInputs::rotated_weights`), the primitive is a triangle drawn with Metal's last
+    /// vertex first, `(c, a, b)` for Metal's `(a, b, c)`, so Metal's first two weights are the
+    /// variable's second lane and `1 - (x + y)` of its first two.
+    Weights { lanes: u8, rotated: bool },
 }
 
 /// How an AIR value (a parameter or an output part) reaches its interface object.
@@ -738,7 +740,7 @@ pub fn param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<(), Error> {
         {
             refuse_int64_interface(cx.entry, ty)?;
             let f = form_on(cx.entry, cx.profile, ty)?;
-            let (perspective, place) = barycentric_read(*i, f)?;
+            let (perspective, place) = barycentric_read(*i, f, cx.inputs.rotated_weights)?;
             if !frag.geometry_shader {
                 return Err(Unsupported::needs_any_of(
                     Feature::Barycentrics,
@@ -761,6 +763,7 @@ pub fn param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<(), Error> {
             sp.interface.varyings_at_pixel |= at_pixel || by_device;
             sp.center_varyings_by_device |= by_device;
             let object = barycentric_weights(sp, perspective)?;
+            note_rotated_weights(cx, place);
             Link {
                 object,
                 place,
@@ -784,6 +787,7 @@ pub fn param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<(), Error> {
                 quad_primitive = true;
                 cx.facts.insert(RuntimeFact::QuadPrimitiveIds);
             }
+            note_rotated_weights(cx, place);
             if contract == StageBuiltin::FragCoord {
                 at_pixel = cx.inputs.multisampled;
                 let depth = reads_depth_lanes(cx, b.param);
@@ -1538,22 +1542,32 @@ fn barycentric_weights(sp: &mut StageIoPlan, perspective: bool) -> Result<usize,
 }
 
 /// The perspective and place of a `[[barycentric_coord]]` read of interpolation `i` into form
-/// `f`. Metal declares the weights at the pixel center (MSL 5.2.3.4) and reads them there under
-/// every qualifier: a `centroid` or `sample` one reads the center's (Metal probes on the Apple M3
-/// Max, macOS 27.0.1, at one sample and at four). A `float` or `float2` reads the leading
-/// weights, a `float3` all three ([`Place::Weights`]).
-fn barycentric_read(i: AirInterp, f: Form) -> Result<(bool, Place), Error> {
+/// `f`, of a triangle drawn with Metal's last vertex first where `rotated`
+/// (`LoweringInputs::rotated_weights`). Metal declares the weights at the pixel center (MSL
+/// 5.2.3.4) and reads them there under every qualifier: a `centroid` or `sample` one reads the
+/// center's (Metal probes on the Apple M3 Max, macOS 27.0.1, at one sample and at four). A
+/// `float` or `float2` reads the leading weights, a `float3` all three ([`Place::Weights`]).
+fn barycentric_read(i: AirInterp, f: Form, rotated: bool) -> Result<(bool, Place), Error> {
     let AirInterp::Smooth { perspective, .. } = i else {
         return Err(not_lowered());
     };
     let place = match f.held {
-        Held::Float(ff) if ff.container() == 32 && f.lanes == 3 => Place::Weights,
-        Held::Float(ff) if ff.container() == 32 && (1..3).contains(&f.lanes) => {
-            Place::Prefix(f.lanes)
-        }
+        Held::Float(ff) if ff.container() == 32 && (1..=3).contains(&f.lanes) => Place::Weights {
+            lanes: f.lanes,
+            rotated,
+        },
         _ => return Err(not_lowered()),
     };
     Ok((perspective, place))
+}
+
+/// Records that the fragment function reads `[[barycentric_coord]]` through `place` of a triangle
+/// drawn with Metal's last vertex first (`LoweringInputs::rotated_weights`), which its plans
+/// state (`RuntimeFact::RotatedWeights`).
+fn note_rotated_weights(cx: &mut SelectCx<'_>, place: Place) {
+    if let Place::Weights { rotated: true, .. } = place {
+        cx.facts.insert(RuntimeFact::RotatedWeights);
+    }
 }
 
 /// Records that the device interpolates a fragment input of interpolation `interp`: a smooth one
@@ -1869,8 +1883,10 @@ fn input_builtin(
             // pixel of every topology on the RTX 5080 Laptop GPU), its third the device's own
             // (there 42 of 574 pixels `1 - (x + y)`, and a line's exactly 0), so a `float3` read
             // takes the first two and computes the third ([`Place::Weights`]). Both orders are
-            // the primitive's vertex order, Vulkan's first-vertex order, which is Metal's.
-            let (perspective, place) = barycentric_read(i, f)?;
+            // the primitive's vertex order, Vulkan's first-vertex order, which is Metal's; a
+            // triangle drawn with Metal's last vertex first takes them rotated back
+            // (`LoweringInputs::rotated_weights`).
+            let (perspective, place) = barycentric_read(i, f, cx.inputs.rotated_weights)?;
             // `param` reads the weights from a varying without `fragmentShaderBarycentric`.
             if !frag.barycentric {
                 return Err(cx.invariant("a barycentric builtin without the feature"));

@@ -672,6 +672,7 @@ fn the_inputs_encoding_is_the_earlier_derived_debug() {
                 .replace(", dropped_colors: {}", "")
                 .replace(", kept_imageblock_bytes: None", "")
                 .replace(", depth_clamp_range: false", "")
+                .replace(", rotated_weights: false", "")
                 .replace(", swizzled_storage: {}", "")
                 .replace(", addressed_function_tables: false", "")
                 .replace(", unattached_colors: {}", "")

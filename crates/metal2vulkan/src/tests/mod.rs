@@ -112,6 +112,7 @@ mod engine_render_target_slice;
 mod engine_rgbx_storage;
 mod engine_roll;
 mod engine_rotated_colors;
+mod engine_rotated_weights;
 mod engine_sampler;
 mod engine_sampler_completion;
 mod engine_sampler_fetched;
