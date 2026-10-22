@@ -691,18 +691,67 @@ fn writes_primitive_ids(pipeline: &DrawingState) -> bool {
     })
 }
 
-/// Refuses (`NotImplemented(PrivatePrimitives)`) a draw of `pipeline` of a private type drawn as
-/// its program's list where `[[primitive_id]]` would read other than Metal's: under a vertex
-/// function that computes it into its varying, from a vertex index the list's indices are not.
-/// Answers whether the draw is of quads or a quad strip whose fragment function reads it
-/// (`BindState::quad_primitive_ids`), which runs the variant that reads the quad's, as Metal
-/// counts one primitive a quad where the list draws two triangles.
-fn private_primitive_ids(pipeline: &DrawingState, program: RewriteProgram) -> Result<bool, Error> {
-    if writes_primitive_ids(pipeline) {
-        return Err(Error::NotImplemented(RuntimeGap::PrivatePrimitives));
+/// How a draw of one of Metal's private types, drawn as its program's list, binds
+/// (`BindState::quad_primitive_ids`, `BindState::private_list`); the default for every other
+/// draw.
+#[derive(Clone, Copy, Default)]
+pub(super) struct PrivateForm {
+    /// Quads or a quad strip whose fragment function reads `[[primitive_id]]`: the variant that
+    /// reads the quad's, as Metal counts one primitive a quad where the list draws two triangles.
+    quad_primitive_ids: bool,
+    /// The pulled list form (`VariantKey::private_list`): each list position run once without
+    /// indices, its index and Metal's base vertex read at the list's address. Metal runs the vertex
+    /// function once per vertex of its list for these types (its probes' counts on the M3 Max,
+    /// macOS 27.0.1), where Vulkan's indexed list draw may run a vertex once for every primitive
+    /// that shares it: the form for a vertex function that writes memory, and for one that writes
+    /// the primitive ID's varying, whose index the list's positions are. Also for a direct draw
+    /// without indices whose last vertex ID passes `i32::MAX`: an indexed list's base vertex
+    /// (`vertexOffset`, an `int32_t`) cannot carry a start past it, and Vulkan states no sum of an
+    /// index and the base past it, where the form adds them in the vertex function, wrapping as
+    /// Metal's vertex IDs do (its probes from vertex starts 2^31 - 3, 2^31 + 3 and 2^32 - 4).
+    private_list: bool,
+}
+
+impl PrivateForm {
+    /// The form of `draw` of `pipeline` of a private type, listed by `program`.
+    fn of(pipeline: &DrawingState, program: RewriteProgram, draw: &DrawCall) -> PrivateForm {
+        let graphics = &pipeline.base().graphics;
+        let quads = matches!(program, RewriteProgram::Quads | RewriteProgram::QuadStrip);
+        let far = matches!(*draw, DrawCall::Primitives { vertex_start, vertex_count, .. }
+            if u64::from(vertex_start) + u64::from(vertex_count) > 1 << 31);
+        PrivateForm {
+            quad_primitive_ids: quads && graphics.reads_primitive_id,
+            private_list: writes_primitive_ids(pipeline) || graphics.vertex_writes_memory || far,
+        }
     }
-    let quads = matches!(program, RewriteProgram::Quads | RewriteProgram::QuadStrip);
-    Ok(quads && pipeline.base().graphics.reads_primitive_id)
+}
+
+/// The draw the binder instantiates for `draw` of a private type in the private list form, of
+/// `program`'s list: a direct draw's list from its first index (the word after Metal's base vertex)
+/// as first vertex, with its instances and base instance; an indirect draw as given, whose list
+/// the GPU counts.
+fn listed_call(program: RewriteProgram, draw: &DrawCall) -> DrawCall {
+    let listed = |count: u32, instance_count, base_instance| DrawCall::Primitives {
+        vertex_start: 1,
+        vertex_count: u32::try_from(program.capacity(u64::from(count))).unwrap_or(u32::MAX),
+        instance_count,
+        base_instance,
+    };
+    match *draw {
+        DrawCall::Primitives {
+            vertex_count,
+            instance_count,
+            base_instance,
+            ..
+        } => listed(vertex_count, instance_count, base_instance),
+        DrawCall::Indexed {
+            index_count,
+            instance_count,
+            base_instance,
+            ..
+        } => listed(index_count, instance_count, base_instance),
+        other => other,
+    }
 }
 
 /// What a draw settles from the encoder's state before its bind state
@@ -7081,9 +7130,9 @@ impl RenderLowering {
         let provoking = self.provoking(call, &pipeline, assembly, &draw);
         let rotated_weights = provoking.rotates_weights(assembly, &pipeline);
         let restarted = self.restarted(assembly, &draw, provoking);
-        let quad_primitive_ids = match assembly {
-            Assembly::Private(program) => private_primitive_ids(&pipeline, program)?,
-            _ => false,
+        let private = match assembly {
+            Assembly::Private(program) => PrivateForm::of(&pipeline, program, &draw),
+            _ => PrivateForm::default(),
         };
         let assembly = restarted.map_or(assembly, |r| r.assembly());
         // Its settings, and the memo entry its draw state and pipeline are found and kept in
@@ -7160,7 +7209,7 @@ impl RenderLowering {
                 &pipeline,
                 &settings,
                 primitive_id_indices,
-                quad_primitive_ids,
+                private,
                 rotated_weights,
             ),
             (&pass_start, &sampler_maps),
@@ -7294,7 +7343,12 @@ impl RenderLowering {
             }
         }
         // Over the last draw's commands, in their storage (`LiveBind::commands`).
-        plan.instantiate_draw_into(&live.state, &draw, &mut live.commands)
+        // A private type's list in the private list form is drawn without indices (`listed_call`).
+        let bound = match (private.private_list, restarted) {
+            (true, Some(restarted)) => listed_call(restarted.program, &draw),
+            _ => draw,
+        };
+        plan.instantiate_draw_into(&live.state, &bound, &mut live.commands)
             .map_err(Error::Bind)?;
         // A mesh draw's own key, its residual form where the plan's is (`RenderVariant::plan`).
         if let Some(own) = live.commands.specialization.as_mut() {
@@ -7384,6 +7438,7 @@ impl RenderLowering {
                         &mut self.core,
                         ((restarted.program, restarted.order), restarted.gap.gap()),
                         (vertex_start, vertex_count),
+                        private.private_list,
                     )?;
                     (None, Some(Listed::Written(list)))
                 }
@@ -7397,7 +7452,11 @@ impl RenderLowering {
                     },
                     Some(index),
                     None,
-                ) if restarted.program.gathers() && index.in_place() && !self.replaying => {
+                ) if restarted.program.gathers()
+                    && index.in_place()
+                    && !self.replaying
+                    && !private.private_list =>
+                {
                     let size = restarted.index_size.unwrap_or(4);
                     let arguments = index_rewrite::Arguments::Direct {
                         count: index_count,
@@ -7433,6 +7492,7 @@ impl RenderLowering {
                                 (
                                     (restarted.program, restarted.restart, restarted.order),
                                     restarted.gap.gap(),
+                                    false,
                                 ),
                                 Some(index),
                                 &arguments,
@@ -7488,6 +7548,7 @@ impl RenderLowering {
                         (
                             (restarted.program, restarted.restart, restarted.order),
                             restarted.gap.gap(),
+                            private.private_list,
                         ),
                         index,
                         &arguments,
@@ -7856,6 +7917,17 @@ impl RenderLowering {
         }
         if let Some(header) = self.replayed.as_ref().and_then(|r| r.merged_header()) {
             tables = tables.with_merged_header(header);
+        }
+        // A private type's list in the private list form is read at its address, which the device
+        // gives the list's memory where it has device addresses, as the form needs.
+        if capture.is_none() && variant.key().private_list {
+            let address = match (&listed, &rewrite) {
+                (Some(list), _) => list.address(),
+                (_, Some(pass)) => pass.address(),
+                _ => None,
+            };
+            let address = address.ok_or(Error::NotImplemented(RuntimeGap::PrivatePrimitives))?;
+            tables = tables.with_indices(address);
         }
         // A de-indexed draw's vertex function reads its indices in place, at their address.
         if capture.is_none() && variant.key().primitive_id_indices.is_some() {
@@ -8366,8 +8438,8 @@ impl RenderLowering {
         let sized = device.shared().sized_index_bind;
         let one = |draw| ([draw; 2], 1);
         // A list the CPU or a gather run wrote draws as the indexed draw of it the binder's draw
-        // becomes.
-        let listed_draw = match &listed {
+        // becomes; in the private list form, as the binder's draw.
+        let listed_draw = match listed.as_ref().filter(|_| !private.private_list) {
             Some(list) => Some(
                 list.draw(commands.draw, sized)
                     .ok_or_else(|| internal("a written list of another draw"))?,
@@ -9346,8 +9418,8 @@ impl RenderLowering {
 
     /// Bring `live`, the encoder's kept bind state, to the bind state a draw of `pipeline` under
     /// `settings` binds in, reading its indices as `primitive_id_indices` says (`BindState::
-    /// primitive_id_indices`, [`primitive_id_indices`]), its quads' primitive IDs as
-    /// `quad_primitive_ids` says (`BindState::quad_primitive_ids`, [`private_primitive_ids`]),
+    /// primitive_id_indices`, [`primitive_id_indices`]), a private type's list as `private` says
+    /// (`BindState::quad_primitive_ids` and `private_list`, [`PrivateForm`]),
     /// its triangles' barycentric weights as `rotated_weights` says (`BindState::rotated_weights`,
     /// `render/provoking.rs`),
     /// its vertex, object and mesh tables
@@ -9362,11 +9434,11 @@ impl RenderLowering {
     fn settle_draw(
         &self,
         live: &mut LiveBind,
-        (pipeline, settings, primitive_id_indices, quad_primitive_ids, rotated_weights): (
+        (pipeline, settings, primitive_id_indices, private, rotated_weights): (
             &DrawingState,
             &DrawSettings,
             Option<IndexType>,
-            bool,
+            PrivateForm,
             bool,
         ),
         (pass_start, sampler_maps): (&PassStartTables, &SamplerMaps),
@@ -9409,7 +9481,8 @@ impl RenderLowering {
             );
             reshape.field(&mut state.depth16_bias_raises, settings.depth16_bias_raises);
             reshape.field(&mut state.primitive_id_indices, primitive_id_indices);
-            reshape.field(&mut state.quad_primitive_ids, quad_primitive_ids);
+            reshape.field(&mut state.quad_primitive_ids, private.quad_primitive_ids);
+            reshape.field(&mut state.private_list, private.private_list);
             reshape.field(&mut state.rotated_weights, rotated_weights);
             reshape.field_from(&mut state.dropped_colors, &colors.dropped);
             reshape.field_from(&mut state.extended_shadows, shadows);

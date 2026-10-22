@@ -266,8 +266,8 @@ use super::RenderCall;
 use super::RenderCommandEncoder;
 use super::{
     index_size, Assembly, Before, DrawBuffers, DrawingState, IndexedDraw, Instance,
-    InterlockedStorage, Next, PatchDraw, PendingDraw, Piece, RenderLowering, RenderStateKind,
-    PASS_DRAW_STAGES,
+    InterlockedStorage, Next, PatchDraw, PendingDraw, Piece, PrivateForm, RenderLowering,
+    RenderStateKind, PASS_DRAW_STAGES,
 };
 use crate::amplification::Amplification;
 use crate::argument_table::ArgumentTable;
@@ -1805,7 +1805,7 @@ impl RenderLowering {
         let sampler_maps = self.sampler_maps(state, &pass_start)?;
         let settled = self.settle_draw(
             &mut lock(&live),
-            (state, &settings, None, false, false),
+            (state, &settings, None, PrivateForm::default(), false),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut None),
             (&function_tables, &mut None),

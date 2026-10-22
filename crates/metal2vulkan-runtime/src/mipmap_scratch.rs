@@ -94,6 +94,12 @@ impl Block {
         self.raw
     }
 
+    /// The device address of the block's byte 0, where it was made addressed
+    /// ([`Device::make_block`]) on a device that enables `bufferDeviceAddress`.
+    pub(super) fn address(&self) -> Option<u64> {
+        self.placement.address
+    }
+
     /// Release the buffer and its memory.
     ///
     /// # Safety
@@ -181,7 +187,7 @@ impl Device {
                     // SAFETY: the spare was leased to none, so no command uses it.
                     unsafe { block.release_in_section(shared) };
                 }
-                match self.make_block(need, MIPMAP_USAGE) {
+                match self.make_block(need, MIPMAP_USAGE, false) {
                     Ok(block) => (block, need),
                     Err(Error::OutOfMemory(_)) => return Ok(None),
                     Err(error) => return Err(error),
@@ -196,11 +202,13 @@ impl Device {
     }
 
     /// A block of `size` bytes in private memory, of `usage` (a filter chain's
-    /// [`MIPMAP_USAGE`]; a command buffer's pool's, `gpu_pools.rs`).
+    /// [`MIPMAP_USAGE`]; a command buffer's pool's, `gpu_pools.rs`), with a device address where
+    /// `addressed` and the device has device addresses (`memory::allocate_addressed`).
     pub(super) fn make_block(
         &self,
         size: u64,
         usage: vk::BufferUsageFlags,
+        addressed: bool,
     ) -> Result<Block, Error> {
         if self.is_lost() {
             return Err(Error::DeviceLost);
@@ -214,12 +222,22 @@ impl Device {
         let raw = unsafe { raw_device.create_buffer(&info, None) }.map_err(vulkan)?;
         // SAFETY: `raw` is a live buffer of this device.
         let requirements = unsafe { raw_device.get_buffer_memory_requirements(raw) };
-        let allocated = crate::memory::allocate(
-            &shared.memory,
-            raw_device,
-            &requirements,
-            MemoryClass::Private,
-        );
+        let allocated = if addressed {
+            crate::memory::allocate_addressed(
+                &shared.memory,
+                raw_device,
+                &requirements,
+                MemoryClass::Private,
+                &shared.counts,
+            )
+        } else {
+            crate::memory::allocate(
+                &shared.memory,
+                raw_device,
+                &requirements,
+                MemoryClass::Private,
+            )
+        };
         let placed = allocated.and_then(|placement| {
             // SAFETY: the placement meets the buffer's requirements and is bound nowhere
             // else.

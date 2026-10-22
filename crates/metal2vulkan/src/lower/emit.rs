@@ -228,6 +228,9 @@ enum Invariant {
     /// An indexed capture form's raw index (`stage_io::read_captured_index`), read at entry
     /// (`stage_io::emit_entry`): the index buffer is read-only to the draw.
     CapturedIndex,
+    /// The private list form's base vertex (`stage_io::read_listed_base`), read at entry
+    /// (`stage_io::emit_entry`): the list is read-only to the draw.
+    ListedBase,
 }
 
 impl<'a> EmitCx<'a> {
@@ -367,6 +370,25 @@ impl<'a> EmitCx<'a> {
         }
         let v = crate::lower::stage_io::read_captured_index(self, fb)?;
         self.remember(fb, Invariant::CapturedIndex, v);
+        Ok(v)
+    }
+
+    /// The private list form's base vertex, read once where it dominates, as
+    /// [`EmitCx::captured_index`] reads the index.
+    pub(crate) fn listed_base(&mut self, fb: &mut FunctionBuilder<'_>) -> BResult<SValue> {
+        let first = fb.entry_block();
+        let read = self
+            .memo
+            .iter()
+            .find(|(k, _, at)| *k == Invariant::ListedBase && Some(*at) == first);
+        if let Some(&(_, v, _)) = read {
+            return Ok(v);
+        }
+        if let Some(v) = self.recall(fb, Invariant::ListedBase) {
+            return Ok(v);
+        }
+        let v = crate::lower::stage_io::read_listed_base(self, fb)?;
+        self.remember(fb, Invariant::ListedBase, v);
         Ok(v)
     }
 

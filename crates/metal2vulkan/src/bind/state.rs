@@ -117,6 +117,13 @@ pub struct BindState {
     /// `false` for every other draw.
     #[cfg_attr(feature = "serde", serde(default))]
     pub quad_primitive_ids: bool,
+    /// The draw is of one of Metal's private primitive types, drawn in the pulled list form
+    /// (`VariantKey::private_list`): without indices, each position of the list the consumer
+    /// writes (Metal's base vertex in the word before its first index) run once, from the list's
+    /// first index as first vertex. Part of the shape (`BindShape::private_list`); `false` for
+    /// every other draw.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub private_list: bool,
     /// Where the heap arrays (set 1) hold the command's heap members and argument samplers
     /// ([`HeapPlacement`]). Only the instantiated tables and the elements the consumer writes
     /// ([`BindingPlan::heap_elements`]) depend on it, so it is not part of the shape.
@@ -722,6 +729,7 @@ impl BindState {
             depth16_bias_raises: self.depth16_bias_raises,
             primitive_id_indices: self.primitive_id_indices,
             quad_primitive_ids: self.quad_primitive_ids,
+            private_list: self.private_list,
         }
     }
 
@@ -777,6 +785,7 @@ impl BindState {
             depth16_bias_raises,
             primitive_id_indices,
             quad_primitive_ids,
+            private_list,
         } = shape;
         let tables = self.stages.iter().filter(|(_, t)| !t.has_empty_shape());
         tables.clone().count() == stages.len()
@@ -808,6 +817,7 @@ impl BindState {
             && self.depth16_bias_raises == *depth16_bias_raises
             && self.primitive_id_indices == *primitive_id_indices
             && self.quad_primitive_ids == *quad_primitive_ids
+            && self.private_list == *private_list
             // Last: the one field compared through a shape made of it.
             && match self.used_resources.is_empty() {
                 true => used.is_empty(),
@@ -1668,6 +1678,10 @@ pub struct BindShape {
     /// variant that reads the quad's (`VariantKey::quad_primitive_ids`).
     #[cfg_attr(feature = "serde", serde(default))]
     pub quad_primitive_ids: bool,
+    /// `BindState.private_list`: a draw of one of Metal's private primitive types in the pulled
+    /// list form runs the variant that draws it so (`VariantKey::private_list`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub private_list: bool,
 }
 
 impl BindShape {

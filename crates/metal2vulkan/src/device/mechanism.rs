@@ -184,6 +184,7 @@ pub fn mechanism(fact: &RuntimeFact, profile: &DeviceProfile) -> Mechanism {
         // A render pipeline compiled under the merged-draws variant; its plans state it.
         RuntimeFact::MergedDraws => Mechanism::Variant,
         RuntimeFact::QuadPrimitiveIds => Mechanism::Variant,
+        RuntimeFact::PrivateList => Mechanism::Variant,
         // The function marks the `ExecutionStatus` buffer its `ExecutionStatus` fact binds; the
         // consumer reads the bit after the command buffer.
         RuntimeFact::AbsentArgumentRead { .. } => Mechanism::None,

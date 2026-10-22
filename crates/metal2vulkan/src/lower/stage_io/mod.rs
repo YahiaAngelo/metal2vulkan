@@ -47,7 +47,10 @@
 //!   that read their indices at the draw's index address as the indexed capture form does
 //!   ([`CapturedIndex`]), whose first vertex is 0. A vertex function that writes memory is
 //!   refused there (it would run once per index), and so are the draws the binder cannot run
-//!   so (`NotImplemented(PrimitiveId)`).
+//!   so (`NotImplemented(PrimitiveId)`). A draw of one of Metal's private primitive types in the
+//!   private list form (`LoweringInputs::private_list`) runs its list's positions from its first
+//!   vertex without indices, each once, as Metal runs them: the same `(VertexIndex - first) / n`
+//!   is its list primitive's index.
 //!   A post-tessellation vertex function emulated on a device without `tessellationShader` writes
 //!   the same varying under that field, from another source: its patch's position in the draw
 //!   (`lower::tessellation::emulated`), which a fragment function compiled under the field reads
@@ -576,10 +579,18 @@ pub(crate) const CAPTURE_RECORD_BYTES: u64 = 32;
 /// `PushField::CaptureLayout` is not 0: a line or triangle strip) and the raw index is the type's
 /// all-ones value, the invocation stores its record's restart flag alone and returns before any
 /// fetch or instruction of the body, as Metal shades no vertex there.
+///
+/// In the private list form (`LoweringInputs::private_list`, `first` is the draw's first vertex)
+/// the draw runs its list from `first` without indices: the raw index, a `u32`, lies at
+/// `PushField::CaptureIndexAddress + 4 · VertexIndex` all the same, Metal's base vertex at
+/// `PushField::CaptureIndexAddress + 4 · (first - 1)`, the word before the list (read once at
+/// entry), which the vertex adds in place of the layout's; nothing restarts, and no layout is
+/// read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CapturedIndex {
     pub vertex: usize,
     pub ty: crate::metal::IndexType,
+    pub first: Option<FirstVertex>,
 }
 
 /// The words a vertex function's index read adds: its input builtin's variable, decorations and
@@ -1158,7 +1169,12 @@ pub fn emit_entry(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>) -> BResult<
     // every use, and a strip's restart index's return before the body.
     if let Some(c) = cx.plan.families.stage_io.captured_index {
         let raw = cx.captured_index(fb)?;
-        skip_restart(cx, fb, c, raw)?;
+        match c.first {
+            Some(_) => {
+                cx.listed_base(fb)?;
+            }
+            None => skip_restart(cx, fb, c, raw)?,
+        }
     }
     // A merged draw's vertex finds its corner's command before the body, which every read of the
     // command's values and slot table follows.
@@ -1275,8 +1291,7 @@ pub fn param_value(
             return ops::mask(fb, form, x);
         }
         Some(Source::CapturedBaseVertex(form)) => {
-            let layout = cx.push_field(fb, PushField::CaptureLayout)?;
-            let x = fb.composite_extract(layout, &[0, 3])?;
+            let x = captured_base_vertex(cx, fb)?;
             return ops::mask(fb, form, x);
         }
         Some(Source::Merged { value, form }) => {
@@ -2052,15 +2067,98 @@ pub(crate) fn read_captured_index(
 }
 
 /// The vertex an indexed capture form's function runs ([`CapturedIndex`]): its raw index plus
-/// the layout's base vertex, wrapping as `u32`s.
+/// the base vertex ([`captured_base_vertex`]), wrapping as `u32`s.
 pub(super) fn captured_vertex(
     cx: &mut EmitCx<'_>,
     fb: &mut FunctionBuilder<'_>,
 ) -> BResult<SValue> {
     let raw = cx.captured_index(fb)?;
-    let layout = cx.push_field(fb, PushField::CaptureLayout)?;
-    let base = fb.composite_extract(layout, &[0, 3])?;
+    let base = captured_base_vertex(cx, fb)?;
     fb.binary(BinOp::IAdd, raw, base)
+}
+
+/// The base vertex of a form that reads its draw's indices ([`CapturedIndex`]): the layout's
+/// (lane 3 of `PushField::CaptureLayout`), or the private list form's word before its list.
+fn captured_base_vertex(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>) -> BResult<SValue> {
+    match cx
+        .plan
+        .families
+        .stage_io
+        .captured_index
+        .and_then(|c| c.first)
+    {
+        Some(_) => cx.listed_base(fb),
+        None => {
+            let layout = cx.push_field(fb, PushField::CaptureLayout)?;
+            fb.composite_extract(layout, &[0, 3])
+        }
+    }
+}
+
+/// The private list form's base vertex ([`CapturedIndex`]), loaded in the open block: the `u32`
+/// at `PushField::CaptureIndexAddress + 4 · (first - 1)`, the word before the list's first
+/// index, `first` the draw's first vertex, in 64 bits. [`EmitCx::listed_base`] reads it once
+/// where it dominates.
+pub(crate) fn read_listed_base(
+    cx: &mut EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+) -> BResult<SValue> {
+    let Some(first) = cx
+        .plan
+        .families
+        .stage_io
+        .captured_index
+        .and_then(|c| c.first)
+    else {
+        return Err(cx.fail("a list's base vertex read without its plan"));
+    };
+    let first = load_first_vertex(cx, fb, first)?;
+    let u64_ = fb.module().ty(SType::Int {
+        width: 64,
+        signed: false,
+    })?;
+    let u32_ = fb.module().ty(SType::Int {
+        width: 32,
+        signed: false,
+    })?;
+    let k64 = |fb: &mut FunctionBuilder<'_>, x: u64| -> BResult<SValue> {
+        let k = fb.module().constant(Constant::Scalar {
+            ty: u64_,
+            bits: ConstBits(x),
+        })?;
+        fb.module().const_value(k)
+    };
+    let first = fb.convert(ConvOp::UConvert, first, u64_)?;
+    let four = k64(fb, 4)?;
+    let offset = fb.binary(BinOp::IMul, first, four)?;
+    let offset = fb.binary(BinOp::ISub, offset, four)?;
+    let base = cx.push_field(fb, PushField::CaptureIndexAddress)?;
+    let at = fb.binary(BinOp::IAdd, base, offset)?;
+    let place = fb.device_place(at, u32_)?;
+    fb.load(
+        place,
+        MemAccess {
+            aligned: Some(4),
+            ..MemAccess::default()
+        },
+    )
+}
+
+/// The draw's first vertex, read where `first` says ([`FirstVertex`]): `None` for
+/// [`FirstVertex::Zero`].
+fn load_first_vertex(
+    cx: &mut EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+    first: FirstVertex,
+) -> BResult<SValue> {
+    match first {
+        FirstVertex::Builtin { index } => fetch::load_builtin(cx, fb, index),
+        FirstVertex::Push => {
+            let bases = cx.push_field(fb, PushField::BaseVertexInstance)?;
+            fb.composite_extract(bases, &[0])
+        }
+        FirstVertex::Zero => crate::memory::leaf::k32(fb, 0),
+    }
 }
 
 /// Output `o`'s part of the returned value `x`, as it is stored: its field, the amplification's

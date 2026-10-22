@@ -424,6 +424,15 @@ pub struct VariantKey {
     /// (`RuntimeFact::QuadPrimitiveIds`).
     #[cfg_attr(feature = "serde", serde(default))]
     pub quad_primitive_ids: bool,
+    /// A draw of one of Metal's private primitive types drawn in the pulled list form
+    /// (`BindShape::private_list`): the variant's vertex function runs each position of the
+    /// consumer's list once, without indices, reading its index and Metal's base vertex at the
+    /// list's address (`LoweringInputs::private_list`). The runtime asks for it for such a draw
+    /// whose vertex function writes memory or the primitive ID's varying, or whose vertex start
+    /// a list's base vertex cannot carry, and the plan of a pipeline compiled under it states it
+    /// (`RuntimeFact::PrivateList`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub private_list: bool,
     /// Extended-range color attachments whose `half` shadow the draw's render pass instance
     /// holds (`BindShape::extended_shadows`): the variant's fragment function reads and writes
     /// each through the interlocked storage form against the shadow as Metal's tile value
@@ -565,6 +574,7 @@ impl VariantKey {
             && self.captured_positions.is_none()
             && self.primitive_id_indices.is_none()
             && !self.quad_primitive_ids
+            && !self.private_list
             && self.extended_shadows.is_empty()
             && self.cross_class.is_empty()
             && self.anisotropic_samplers.is_empty()
@@ -713,6 +723,7 @@ impl VariantKey {
             .filter(|_| stage == crate::pipeline::sym::Stage::Vertex);
         out.quad_primitive_ids =
             self.quad_primitive_ids && stage == crate::pipeline::sym::Stage::Fragment;
+        out.private_list = self.private_list && stage == crate::pipeline::sym::Stage::Vertex;
         out.kept_imageblock_bytes = self
             .kept_imageblock_bytes
             .filter(|_| stage == crate::pipeline::sym::Stage::Kernel);

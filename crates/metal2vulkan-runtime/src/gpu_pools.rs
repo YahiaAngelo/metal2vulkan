@@ -120,6 +120,14 @@ impl PoolKind {
             PoolKind::MeshRecords => vk::BufferUsageFlags::STORAGE_BUFFER,
         }
     }
+
+    /// Whether the kind's blocks have a device address where the device has device addresses:
+    /// the index pool's, whose lists the private list form reads at their address
+    /// (`index_rewrite.rs`). It costs the block's memory a buffer of addresses, made once per
+    /// memory block (`memory::allocate_addressed`), and nothing per lease.
+    fn addressed(self) -> bool {
+        matches!(self, PoolKind::Index)
+    }
 }
 
 /// One queue's block of a kind and the leases holding it.
@@ -280,6 +288,7 @@ pub(super) struct PoolLease {
     kind: PoolKind,
     queue: u64,
     raw: vk::Buffer,
+    address: Option<u64>,
     bytes: u64,
 }
 
@@ -287,6 +296,12 @@ impl PoolLease {
     /// The leased block's buffer.
     pub(super) fn raw(&self) -> vk::Buffer {
         self.raw
+    }
+
+    /// The device address of the leased block's byte 0, where its kind's blocks have one
+    /// ([`PoolKind::addressed`]) on a device with device addresses.
+    pub(super) fn address(&self) -> Option<u64> {
+        self.address
     }
 
     /// The block's bytes.
@@ -333,6 +348,9 @@ pub(super) struct IndexPool {
     pub(super) block: vk::Buffer,
     /// The block's bytes, its unused header's included.
     pub(super) bytes: u64,
+    /// The device address of the block's byte 0, where the device has device addresses: a list
+    /// in the private list form is read there (`index_rewrite.rs`).
+    pub(super) address: Option<u64>,
 }
 
 impl IndexPool {
@@ -342,6 +360,7 @@ impl IndexPool {
             counter: counter.clone(),
             block: block.raw(),
             bytes: block.bytes(),
+            address: block.address(),
         }
     }
 
@@ -358,20 +377,17 @@ impl Device {
     pub(super) fn lease_pool(&self, kind: PoolKind, queue: u64) -> Result<PoolLease, Error> {
         let shared = self.shared();
         let bytes = shared.gpu_pools.block_bytes(kind);
-        let taken = lock(shared.gpu_pools.blocks(kind)).take(queue, Block::raw);
-        let (raw, leases) = match taken {
+        let read = |block: &Block| (block.raw(), block.address());
+        let taken = lock(shared.gpu_pools.blocks(kind)).take(queue, read);
+        let ((raw, address), leases) = match taken {
             Some(taken) => taken,
             None => {
                 // Made without the lock: a lease of another queue, or one ending, waits for no
                 // making.
-                let block = self.make_block(bytes, kind.usage())?;
+                let block = self.make_block(bytes, kind.usage(), kind.addressed())?;
                 shared.counts.gpu_pool_block_made();
-                let (raw, leases, extra) = lock(shared.gpu_pools.blocks(kind)).made(
-                    queue,
-                    block,
-                    Instant::now(),
-                    Block::raw,
-                );
+                let (raw, leases, extra) =
+                    lock(shared.gpu_pools.blocks(kind)).made(queue, block, Instant::now(), read);
                 if let Some(extra) = extra {
                     // SAFETY: made just now, the block was never bound to a command.
                     if unsafe { extra.release_in_section(shared) } {
@@ -387,6 +403,7 @@ impl Device {
             kind,
             queue,
             raw,
+            address,
             bytes,
         })
     }

@@ -256,6 +256,7 @@ fn states() -> Vec<BindState> {
         with(|s| s.depth16_bias_raises = Some(true)),
         with(|s| s.depth16_bias_raises = Some(false)),
         with(|s| s.quad_primitive_ids = true),
+        with(|s| s.private_list = true),
     ]
 }
 

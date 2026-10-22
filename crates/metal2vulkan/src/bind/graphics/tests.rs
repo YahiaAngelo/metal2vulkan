@@ -606,6 +606,7 @@ fn instantiation_bounds_a_draw_by_its_index_buffer() {
         shader_tests: None,
         capture: None,
         deindexed: None,
+        private_list: false,
         storage_kept: 0,
         color_write_rules: Vec::new(),
     };
@@ -655,6 +656,7 @@ fn a_draw_of_no_index_binds_inside_the_buffer() {
         shader_tests: None,
         capture: None,
         deindexed: None,
+        private_list: false,
         storage_kept: 0,
         color_write_rules: Vec::new(),
     };
@@ -739,6 +741,7 @@ fn an_unbounded_indexed_indirect_draw_reads_its_arguments() {
         shader_tests: None,
         capture: None,
         deindexed: None,
+        private_list: false,
         storage_kept: 0,
         color_write_rules: Vec::new(),
     };
@@ -797,6 +800,7 @@ fn draws_bind_vertex_buffers_at_aligned_offsets_with_their_windows() {
         shader_tests: None,
         capture: None,
         deindexed: None,
+        private_list: false,
         storage_kept: 0,
         color_write_rules: Vec::new(),
     };
@@ -888,6 +892,7 @@ fn inline_vertex_bytes_bind_the_strides_a_dynamic_layout_reads() {
         shader_tests: None,
         capture: None,
         deindexed: None,
+        private_list: false,
         storage_kept: 0,
         color_write_rules: Vec::new(),
     };
@@ -1522,6 +1527,7 @@ fn mesh_template(flat: bool, multiples: Vec<u32>) -> GraphicsTemplate {
         shader_tests: None,
         capture: None,
         deindexed: None,
+        private_list: false,
         storage_kept: 0,
         color_write_rules: Vec::new(),
     }

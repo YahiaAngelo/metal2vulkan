@@ -658,6 +658,7 @@ fn the_inputs_encoding_is_the_earlier_derived_debug() {
                 .replace(", primitive_id_varying: false", "")
                 .replace(", primitive_id_indices: None", "")
                 .replace(", quad_primitive_ids: false", "")
+                .replace(", private_list: false", "")
                 .replace(", amplification_draws: None", "")
                 .replace(", color_writes: {}", "")
                 .replace(", primitive_varyings: {}", "")

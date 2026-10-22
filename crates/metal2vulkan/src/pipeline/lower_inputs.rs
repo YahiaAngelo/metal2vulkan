@@ -289,6 +289,25 @@ pub struct LoweringInputs {
     /// ID's varying (`primitive_id_varying`), compiles as without it.
     #[cfg_attr(feature = "serde", serde(default))]
     pub quad_primitive_ids: bool,
+    /// The draw is the list a consumer writes for one of Metal's private primitive types (a line
+    /// loop, a triangle fan, quads, a quad strip), drawn without indices in the pulled list form
+    /// (`VariantKey::private_list`): `list length` vertices from vertex `first`, Vulkan's first
+    /// vertex (read as the primitive ID's `first` is: the `BaseVertex` builtin with
+    /// `shaderDrawParameters`, lane 0 of `PushField::BaseVertexInstance` without). The vertex at
+    /// `VertexIndex` reads its raw index, a `u32`, at `PushField::CaptureIndexAddress +
+    /// 4 · VertexIndex`, and Metal's base vertex at `PushField::CaptureIndexAddress + 4 · (first -
+    /// 1)`, the word before the list's first; it runs `raw + base vertex` (wrapping as `u32`s),
+    /// which `[[vertex_id]]` and every per-vertex attribute, all pulled, read, and
+    /// `[[base_vertex]]` reads that word. So each list position runs the vertex function once,
+    /// as Metal runs it for these types (once per vertex of its list: Metal probes on the M3 Max,
+    /// macOS 27.0.1), whatever vertex reuse the device does, and any `u32` vertex start or base
+    /// vertex is drawn: a vertex function that writes memory, or the primitive ID's varying
+    /// (`primitive_id_varying`, its `(VertexIndex - first) / n` the list primitive's), runs as
+    /// Metal's. Refused on a device without device addresses (`Feature::PrivatePrimitives`). The
+    /// function's pipeline states it (`RuntimeFact::PrivateList`). Any other function compiles
+    /// as without it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub private_list: bool,
     /// The function's render pipeline draws each vertex amplification as a draw of its own
     /// (`VariantKey::amplification_draws`), where Vulkan multiview cannot draw the encoder's
     /// mappings as Metal renders them. Under it a vertex or fragment function reads its

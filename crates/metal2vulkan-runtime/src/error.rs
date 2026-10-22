@@ -1416,12 +1416,11 @@ pub enum RuntimeGap {
     RestartedStrip,
     /// A draw of one of Metal's private primitive types (`DrawPrimitiveType`: a line loop, a
     /// triangle fan, quads, a quad strip), which the runtime draws as the list Metal draws, where
-    /// that list cannot be drawn as Metal draws: a direct draw without indices from a vertex start
-    /// past `i32::MAX`, which the list's base vertex cannot carry, or whose list a `u32` cannot
-    /// count; a draw over indices or from indirect arguments the index rewrite pass cannot draw,
-    /// as for `RestartedStrip`; and a pipeline whose vertex function computes `[[primitive_id]]`
-    /// into a varying (a device whose fragment stage cannot declare it), from vertex indices the
-    /// list's are not.
+    /// that list cannot be drawn as Metal draws: a direct draw without indices whose list a `u32`
+    /// cannot count; a draw over indices or from indirect arguments the index rewrite pass cannot
+    /// draw, as for `RestartedStrip`; and a draw in the private list form (a vertex function that
+    /// writes memory or computes `[[primitive_id]]` into a varying, or a direct draw whose last
+    /// vertex ID passes `i32::MAX`) whose list has no device address.
     PrivatePrimitives,
     /// A draw under Apple's last provoking vertex (`setProvokingVertexMode:` 1) on a device
     /// without `VK_EXT_provoking_vertex`'s last vertex, which the runtime draws as the list of its

@@ -56,6 +56,7 @@ feature	TexelBuffer	app	texture buffers past a device's texel-buffer limits
 feature	RasterOrderGroups	rare	raster order groups
 feature	FramebufferFetch	system	programmable blending (framebuffer fetch); macOS 26.6.2's login reaches it (two WindowServer and RenderBox pipelines fetch RGB10A8_2P_XR10 attachments, the consumer's boots)
 feature	PrimitiveId	rare	primitive_id on a device without geometry or tessellation shaders, in an indexed draw or behind a mesh function
+feature	PrivatePrimitives	rare	a private primitive type drawn in the pulled list form (a vertex function that writes memory or the primitive_id varying, a vertex start past 2^31) on a device without device addresses
 feature	VertexAmplification	rare	vertex amplification
 feature	LayeredRendering	rare	layered rendering on a device without its features
 feature	ClipDistance	rare	clip distances on a device without them
@@ -218,7 +219,7 @@ budget	Time	none	a translation past its deadline: a defect of ours to fix on any
 gap	LibrarySource	app	a library compiled from Metal source (newLibraryWithSource:); the runtime takes metallibs and AIR
 gap	RestartedStrip	none	a strip after the Apple-private setPrimitiveRestartEnabled:index: whose rewrite pass cannot run as Metal draws
 gap	ProvokingVertex	none	a draw after the Apple-private setProvokingVertexMode: 1, on a device without the last provoking vertex, whose rotated list cannot draw as Metal draws
-gap	PrivatePrimitives	none	a draw of an Apple-private primitive type (OpenGL on Metal's quads and kin) whose list cannot draw as Metal draws: a primitive_id varying, a vertex start past 2^31
+gap	PrivatePrimitives	none	a draw of an Apple-private primitive type (OpenGL on Metal's quads and kin) whose list cannot draw as Metal draws: a list past a u32 or one storage range, indices or arguments an unordered earlier draw wrote
 gap	PrimitiveIdIndices	rare	an indexed draw of a primitive_id pipeline, on a device without geometry or tessellation shaders, whose indices the encoder wrote since its last barrier
 feature	PrivateRenderState	none	Apple-private pipeline fields of OpenGL on Metal (no public header)
 gap	SurfaceDepthStencil	rare	a blit of the stencil of a Depth32Float_Stencil8 texture over a plane of an IOSurface with planes, or a pass on an X32_Stencil8 one's view as Depth32Float_Stencil8

@@ -196,7 +196,14 @@
 //!   vertices from 0, layout `[0, index count, base instance, base vertex]`, its indices read in
 //!   the vertex stage at `PushHole::CaptureIndexAddress`; any other draw of that variant is
 //!   `NeedsVariant` without it. A strip, an indirect indexed draw, indices past their buffer and
-//!   an indexed draw of a plan without the form are `NotImplemented(PrimitiveId)`. A direct
+//!   an indexed draw of a plan without the form are `NotImplemented(PrimitiveId)`. A draw of one
+//!   of Metal's private primitive types in the private list form (`BindShape::private_list`,
+//!   `VariantKey::private_list`) is the consumer's list, which it draws without indices from the
+//!   list's first index as first vertex whatever the call it gave: its vertices per primitive are
+//!   its list's, twice that where the list holds Metal's quads as two triangles a quad
+//!   (`BindState::quad_primitive_ids`), and it leaves `PushHole::CaptureIndexAddress` to the
+//!   consumer (its list's address, whose word before its first index holds Metal's base
+//!   vertex). A direct
 //!   draw of a multiview plan whose last instance index exceeds `maxMultiviewInstanceIndex` is
 //!   `Unsupported{VertexAmplification; Limit}`. `DrawCommands.uses` lists the draw's index buffer
 //!   and indirect arguments.
@@ -1079,6 +1086,13 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
         .dependencies
         .iter()
         .any(|d| d.fact == RuntimeFact::QuadPrimitiveIds);
+    // A draw of one of Metal's private primitive types the consumer draws in the pulled list
+    // form: the variant that runs it so.
+    let private_list = shape.private_list;
+    let compiled_list = p
+        .dependencies
+        .iter()
+        .any(|d| d.fact == RuntimeFact::PrivateList);
     let route = route(
         &shape.vertex_amplification,
         p.graphics.max_vertex_amplification_count,
@@ -2515,6 +2529,7 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
     variant.captured_positions = captured_positions;
     variant.primitive_id_indices = primitive_id_indices;
     variant.quad_primitive_ids = quad_primitive_ids;
+    variant.private_list = private_list;
     // Tables that may pass `maxStorageBufferRange`: the variant that reads them at their
     // addresses (and a pipeline compiled so states it).
     variant.addressed_function_tables = crate::bind::heap::addressed_function_tables(
@@ -2553,7 +2568,8 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
                 || compiled_tests != read_only_tests
                 || compiled_shader_tests != shader_tests
                 || compiled_shader_stencil != shader_stencil
-                || compiled_quads != quad_primitive_ids,
+                || compiled_quads != quad_primitive_ids
+                || compiled_list != private_list,
             amplifications,
             indirect_first_instance_missing: !profile
                 .fields()
@@ -2587,6 +2603,7 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
                 .then_some(ShaderTestsTemplate),
             capture: captured_positions,
             deindexed: primitive_id_indices,
+            private_list,
             storage_kept: storage_kept(p)?,
             color_write_rules: p.graphics.color_write_rules.clone(),
         }),
@@ -4062,11 +4079,13 @@ fn capture_draw(
 /// indirect draw's from its arguments as the GPU draws it. An indexed draw shares a vertex among
 /// primitives, whose flat inputs read it alike: it runs `from_zero`, its indices drawn as
 /// vertices from 0 (the de-indexed or the indexed capture form, [`capture_draw`]), and is
-/// otherwise `NotImplemented(PrimitiveId)`.
+/// otherwise `NotImplemented(PrimitiveId)`. A draw in the private list form (`listed`) is the
+/// consumer's list, run without indices whatever its call: twice that where it lists Metal's
+/// quads or quad strip as two triangles a quad (`quads`), whose primitive Metal counts once.
 fn vertices_per_primitive(
     draw: &DrawCall,
     primitive: Option<metal::PrimitiveType>,
-    from_zero: bool,
+    (from_zero, listed, quads): (bool, bool, bool),
 ) -> Result<u32, BindError> {
     let per_primitive = match primitive.ok_or(BindError::MissingPrimitiveType)? {
         metal::PrimitiveType::Triangle => 3,
@@ -4076,6 +4095,8 @@ fn vertices_per_primitive(
         | metal::PrimitiveType::TriangleStrip => 1,
     };
     match draw {
+        _ if listed && quads => Ok(2 * per_primitive),
+        _ if listed => Ok(per_primitive),
         DrawCall::Primitives { .. } | DrawCall::Indirect { indexed: None, .. } => Ok(per_primitive),
         DrawCall::Indexed { .. } if from_zero => Ok(per_primitive),
         _ => Err(not_implemented(Feature::PrimitiveId)),
@@ -4363,9 +4384,9 @@ fn instantiate(
                 }
                 PushField::VerticesPerPrimitive => {
                     let from_zero = capture.as_ref().is_some_and(|c| c.command.is_some());
+                    let form = (from_zero, t.private_list, state.quad_primitive_ids);
                     FieldBytes::of(
-                        &vertices_per_primitive(draw, state.primitive_type, from_zero)?
-                            .to_le_bytes(),
+                        &vertices_per_primitive(draw, state.primitive_type, form)?.to_le_bytes(),
                     )
                 }
                 // An emulated tessellation draw's first chunk (`TessellationDispatch::draw`

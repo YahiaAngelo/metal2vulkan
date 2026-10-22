@@ -490,7 +490,14 @@ Where Metal's rules differ from Vulkan's, the pipeline gives Metal's answer:
   buffer, a vertex function that writes memory in that form, and a mesh pipeline.
   A draw of Metal's private quads or quad strip, which the consumer lists as two triangles a quad
   (`BindState::quad_primitive_ids`), runs the fragment variant that reads `PrimitiveId` shifted
-  right by one (`VariantKey::quad_primitive_ids`), as Metal counts one primitive a quad.
+  right by one (`VariantKey::quad_primitive_ids`), as Metal counts one primitive a quad. A
+  private type's draw whose vertex function writes the varying, or writes memory (Metal runs it
+  once for each vertex of its list, where an indexed draw may run a shared vertex once), runs the
+  private list form (`VariantKey::private_list`, `BindShape::private_list`; needs device
+  addresses): the consumer draws its list without indices from its first index as first vertex,
+  and the vertex function reads each position's index, and Metal's base vertex in the word before
+  the list, at the list's address (`PushHole::CaptureIndexAddress`), adding them as Metal's vertex
+  ID wraps, so each position runs once and the positions count Metal's primitives.
   Behind an emulated post-tessellation vertex function the varying carries the patch's position
   in its draw (tessellation, below).
 - A device draws to at most the lesser of its `maxColorAttachments` and

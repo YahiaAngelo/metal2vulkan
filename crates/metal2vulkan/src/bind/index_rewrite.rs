@@ -82,7 +82,8 @@
 //! | 8 to 12 | the consumer | a direct draw's Metal arguments (`MTLDrawIndexedPrimitivesIndirectArguments`: count, instances, first index 0, base vertex, base instance); 0 for an indirect draw, whose arguments are read from the Metal buffer |
 //! | 13 | the consumer | 1 for a draw without indices, whose arguments are `MTLDrawPrimitivesIndirectArguments` (count, instances, vertex start, base instance), else 0 |
 //! | 14 | the consumer | the order ([`RewriteOrder::word`]): 0 first, 1 last, 2 last first |
-//! | 16 to 20 | the place dispatch | the draw's `VkDrawIndexedIndirectCommand` ([`IndexRewritePass::DRAW_OFFSET`]) |
+//! | 15 | the consumer | 1 for a list drawn in the private list form ([`IndexRewritePass::listed`]): Metal's base vertex in the word before the list, the draw without indices, else 0 |
+//! | 16 to 20 | the place dispatch | the draw's `VkDrawIndexedIndirectCommand` ([`IndexRewritePass::DRAW_OFFSET`]), or in the private list form its `VkDrawIndirectCommand` (the list's indices, instances, its first index's word as first vertex, base instance) and a 0 |
 //! | 21 | the place dispatch | the primitives written |
 //! | 22 to 25 | the place dispatch | the output's first word, 1 where the draw is written, the primitives before those past the walk, and those past it |
 //! | 32 on | the count and place dispatches | three words per group: its primitives (where its first piece's positions before it are even), then those before it; its primitives where they are odd, then the start of the piece it begins in (0 for none); the start of its last piece (0 for none) |
@@ -603,6 +604,17 @@ impl IndexRewritePass {
         self
     }
 
+    /// The pass of a list drawn in the private list form (`VariantKey::private_list`): the
+    /// output holds Metal's base vertex (the draw's, its vertex start without indices) in the
+    /// word before the list's first index, which an owned output's capacity counts too, and the
+    /// draw at [`DRAW_OFFSET`](Self::DRAW_OFFSET) is a `VkDrawIndirectCommand` of the list's
+    /// positions, its first vertex the list's first index in the output (from the pool's index
+    /// region where pooled) and its first instance Metal's base instance.
+    pub fn listed(mut self) -> IndexRewritePass {
+        self.parameters[Parameter::Listed as usize] = 1;
+        self
+    }
+
     /// The parameters as the bytes to upload at the rewrite words' start.
     pub fn parameter_bytes(&self) -> Vec<u8> {
         self.parameters
@@ -628,6 +640,8 @@ enum Parameter {
     Sequential = 13,
     /// The order ([`RewriteOrder::word`]).
     Order = 14,
+    /// 1 for a list drawn in the private list form ([`IndexRewritePass::listed`]).
+    Listed = 15,
 }
 
 /// The pass's words in the rewrite words, by index.
@@ -1096,6 +1110,8 @@ struct DrawWalk {
     groups: Value,
     /// The order's word ([`RewriteOrder::word`]).
     order: Value,
+    /// 1 where the list is drawn in the private list form, else 0.
+    listed: Value,
     program: RewriteProgram,
 }
 
@@ -1113,6 +1129,8 @@ impl DrawWalk {
         let groups = load_at(f, g.words, Parameter::Groups as u32)?;
         let sequential = load_at(f, g.words, Parameter::Sequential as u32)?;
         let order = load_at(f, g.words, Parameter::Order as u32)?;
+        let listed = load_at(f, g.words, Parameter::Listed as u32)?;
+        let listed = f.glsl(GlslOp::UMin, &[listed, one])?;
         let most = k(f, IndexRewritePass::MAX_GROUPS)?;
         let groups = f.glsl(GlslOp::UMin, &[groups, most])?;
         let groups = f.glsl(GlslOp::UMax, &[groups, one])?;
@@ -1174,6 +1192,7 @@ impl DrawWalk {
             pooled,
             groups,
             order,
+            listed,
             program,
         })
     }
@@ -1605,8 +1624,12 @@ fn place_phase(f: &mut FunctionBuilder<'_>, g: Globals, d: DrawWalk, lin: Value)
             _ => primitives,
         };
         // The output's indices, where they fit a `u32`: where the product's high word is 0
-        // (`replay::checked_mul`, whose docs say why).
+        // (`replay::checked_mul`, whose docs say why). In the private list form Metal's base
+        // vertex takes a word before them.
         let (written, past) = checked_mul(f, primitives, vk_, zero)?;
+        let words_needed = f.binary(BinOp::IAdd, written, d.listed)?;
+        let wrapped = f.binary(BinOp::ULessThan, words_needed, written)?;
+        let past = f.binary(BinOp::LogicalOr, past, wrapped)?;
         let countable = f.unary(UnOp::LogicalNot, past)?;
         // Placed in the pool's room, or in the draw's own region.
         let counter_ptr = word_ptr(f, g.output, zero)?;
@@ -1616,20 +1639,22 @@ fn place_phase(f: &mut FunctionBuilder<'_>, g: Globals, d: DrawWalk, lin: Value)
         let four = k(f, 4)?;
         let room = f.binary(BinOp::UDiv, room, four)?;
         let room = f.select(d.pooled, room, d.capacity)?;
-        let fits = f.binary(BinOp::ULessThanEqual, written, room)?;
+        let fits = f.binary(BinOp::ULessThanEqual, words_needed, room)?;
         let ok = f.binary(BinOp::LogicalAnd, countable, fits)?;
         let reserve = f.binary(BinOp::LogicalAnd, ok, d.pooled)?;
         when(f, reserve, move |f| {
             let four = k(f, 4)?;
-            let bytes = f.binary(BinOp::IMul, written, four)?;
+            let bytes = f.binary(BinOp::IMul, words_needed, four)?;
             let next = f.binary(BinOp::IAdd, used, bytes)?;
             f.store(counter_ptr, next, MemAccess::default())
         })?;
+        // The list's first index, past the base vertex's word in the private list form.
         let first_index = f.binary(BinOp::UDiv, used, four)?;
         let first_index = f.select(d.pooled, first_index, zero)?;
+        let first_index = f.binary(BinOp::IAdd, first_index, d.listed)?;
         let header = k(f, (IndexRewritePass::POOL_HEADER_BYTES / 4) as u32)?;
         let pool_base = f.binary(BinOp::IAdd, header, first_index)?;
-        let base_word = f.select(d.pooled, pool_base, zero)?;
+        let base_word = f.select(d.pooled, pool_base, first_index)?;
         let ok_word = f.select(ok, one, zero)?;
         for (word, value) in [
             (Output::Base, base_word),
@@ -1641,7 +1666,12 @@ fn place_phase(f: &mut FunctionBuilder<'_>, g: Globals, d: DrawWalk, lin: Value)
         }
         let drawn = f.select(ok, written, zero)?;
         let primitives_drawn = f.select(ok, primitives, zero)?;
-        for (i, value) in [drawn, d.instances, first_index, d.base, d.base_instance]
+        // An indexed draw's `VkDrawIndexedIndirectCommand`, or in the private list form a
+        // `VkDrawIndirectCommand` of the list's positions from its first index as first vertex.
+        let listed = f.binary(BinOp::INotEqual, d.listed, zero)?;
+        let fourth = f.select(listed, d.base_instance, d.base)?;
+        let fifth = f.select(listed, zero, d.base_instance)?;
+        for (i, value) in [drawn, d.instances, first_index, fourth, fifth]
             .into_iter()
             .enumerate()
         {
@@ -1735,6 +1765,17 @@ fn write_phase(
     let written = load_at(f, g.words, Output::Written as u32)?;
     let ok = f.binary(BinOp::INotEqual, written, zero)?;
     let base_word = load_at(f, g.words, Output::Base as u32)?;
+    // In the private list form, Metal's base vertex in the word before the list, written once.
+    let listed = f.binary(BinOp::INotEqual, d.listed, zero)?;
+    let base_too = f.binary(BinOp::LogicalAnd, ok, listed)?;
+    let group0 = f.binary(BinOp::IEqual, at.group, zero)?;
+    let base_too = f.binary(BinOp::LogicalAnd, base_too, first)?;
+    let base_too = f.binary(BinOp::LogicalAnd, base_too, group0)?;
+    when(f, base_too, move |f| {
+        let one = k(f, 1)?;
+        let before = f.binary(BinOp::ISub, base_word, one)?;
+        contained_store(f, g.output, before, d.base)
+    })?;
     let v = program.vertices();
     // A fan's first index, every triangle's first vertex.
     let hub = match program {
