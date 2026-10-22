@@ -597,7 +597,7 @@ fn listeners_hear_reached_and_later_values() {
     on_device(|device| {
         let queue = device.new_command_queue().unwrap();
         let event = device.new_shared_event().unwrap();
-        let listener = SharedEventListener::new().unwrap();
+        let listener = SharedEventListener::new();
         let (send, receive) = mpsc::channel();
         event.set_signaled_value(3);
         for (name, at) in [("passed", 2), ("later", 5)] {
@@ -802,6 +802,129 @@ fn a_scheduled_handler_signals_a_shared_event() {
         completed(&scheduled);
         completed(&waiting);
         assert_eq!(gate.signaled_value(), 1);
+    });
+}
+
+/// A command buffer's scheduled signal (`encode_signal_event_scheduled`) sets its value before the
+/// status reads `Scheduled`, before every scheduled handler runs (one added before it too) and
+/// before `wait_until_scheduled` returns, as Metal's does (an M3 Max, macOS 27.0.1), and releases
+/// another queue's wait for the value. A value below the event's changes nothing, and two signals
+/// end at the higher. One held for an event the host has not set is not scheduled, and its signal
+/// waits with it. Encoded with an encoder open it is refused (Metal asserts); after the commit it
+/// does nothing, as Metal's.
+#[test]
+fn a_scheduled_signal_sets_its_value_as_the_command_buffer_is_scheduled() {
+    on_device(|device| {
+        let (first, second) = (
+            device.new_command_queue().unwrap(),
+            device.new_command_queue().unwrap(),
+        );
+        // Before the status and every scheduled handler.
+        let event = device.new_shared_event().unwrap();
+        let command_buffer = first.command_buffer().unwrap();
+        let (send, receive) = mpsc::channel();
+        for name in ["added before", "added after"] {
+            if name == "added after" {
+                command_buffer
+                    .encode_signal_event_scheduled(&event, 5)
+                    .unwrap();
+            }
+            let (send, event) = (send.clone(), event.clone());
+            command_buffer
+                .add_scheduled_handler(Box::new(move |buffer: &CommandBuffer| {
+                    let _ = send.send((name, event.signaled_value(), buffer.status()));
+                }))
+                .unwrap();
+        }
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_scheduled().unwrap();
+        assert_eq!(
+            event.signaled_value(),
+            5,
+            "at wait_until_scheduled's return"
+        );
+        let scheduled = CommandBufferStatus::Scheduled;
+        assert_eq!(
+            receive.recv_timeout(WAIT),
+            Ok(("added before", 5, scheduled))
+        );
+        assert_eq!(
+            receive.recv_timeout(WAIT),
+            Ok(("added after", 5, scheduled))
+        );
+        completed(&command_buffer);
+
+        // Releasing a wait on another queue.
+        let gate = device.new_shared_event().unwrap();
+        let scratch = device.new_buffer(BIG, ResourceOptions::private()).unwrap();
+        let waiting = second.command_buffer().unwrap();
+        waiting
+            .encode_wait_for_event(EventRef::from(&gate), 2)
+            .unwrap();
+        let mut encoder = waiting.blit_command_encoder().unwrap();
+        encoder.fill_buffer(&scratch, 0..BIG, 2).unwrap();
+        encoder.end_encoding().unwrap();
+        waiting.commit().unwrap();
+        let signalling = blit(&first, |encoder| {
+            encoder.fill_buffer(&scratch, 0..BIG, 1).unwrap()
+        });
+        signalling.encode_signal_event_scheduled(&gate, 2).unwrap();
+        signalling.commit().unwrap();
+        completed(&signalling);
+        completed(&waiting);
+        assert_eq!(gate.signaled_value(), 2);
+
+        // Values only rise.
+        let floor = device.new_shared_event().unwrap();
+        floor.set_signaled_value(10);
+        let rising = device.new_shared_event().unwrap();
+        let command_buffer = first.command_buffer().unwrap();
+        command_buffer
+            .encode_signal_event_scheduled(&floor, 4)
+            .unwrap();
+        for value in [6, 3] {
+            command_buffer
+                .encode_signal_event_scheduled(&rising, value)
+                .unwrap();
+        }
+        command_buffer.commit().unwrap();
+        completed(&command_buffer);
+        assert_eq!((floor.signaled_value(), rising.signaled_value()), (10, 6));
+
+        // Held for an event: not scheduled, and nor is its signal.
+        let held_for = device.new_shared_event().unwrap();
+        let later = device.new_shared_event().unwrap();
+        let held = first.command_buffer().unwrap();
+        held.encode_wait_for_event(EventRef::from(&held_for), 1)
+            .unwrap();
+        held.encode_signal_event_scheduled(&later, 3).unwrap();
+        held.commit().unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(held.status(), CommandBufferStatus::Committed);
+        assert_eq!(later.signaled_value(), 0);
+        held_for.set_signaled_value(1);
+        completed(&held);
+        assert_eq!(later.signaled_value(), 3);
+
+        // Refused with an encoder open; after the commit, nothing.
+        let command_buffer = first.command_buffer().unwrap();
+        let mut encoder = command_buffer.blit_command_encoder().unwrap();
+        encoder.fill_buffer(&scratch, 0..64, 1).unwrap();
+        assert_eq!(
+            command_buffer.encode_signal_event_scheduled(&later, 9),
+            Err(invalid(
+                "encode_signal_event_scheduled",
+                Problem::EncoderOpen
+            ))
+        );
+        encoder.end_encoding().unwrap();
+        command_buffer.commit().unwrap();
+        assert_eq!(
+            command_buffer.encode_signal_event_scheduled(&later, 9),
+            Ok(())
+        );
+        completed(&command_buffer);
+        assert_eq!(later.signaled_value(), 3);
     });
 }
 

@@ -69,8 +69,8 @@ use super::indirect_dispatch::{
 use super::indirect_execute::{self, Execute, ExecutionRange};
 use super::pending_dispatch::{PendingDispatch, Recording};
 use super::pipeline::{
-    flat_dispatch, BufferForms, ComputePipelineState, RawPipeline, RegionKey, RegionPipeline,
-    Variant, VariantObjects,
+    flat_dispatch, BufferForms, ComputePipelineState, Planned, RawPipeline, RegionKey,
+    RegionPipeline, Variant, VariantObjects,
 };
 use super::predication::{Captures, Event};
 use super::pvrtc::degrade_unreadable;
@@ -178,6 +178,9 @@ pub struct ComputeCommandEncoder {
     dispatches: usize,
     /// What its last dispatch settled ([`DispatchMemo`]).
     memo: DispatchMemo,
+    /// The residency's generation as a command last noted the heaps of what it made resident
+    /// (`command_encoded`): no command notes them again before it changes.
+    heaps_noted: Option<u64>,
 }
 
 /// The state of a compute encoder a command ran with, which a predicated loop's copies replay it
@@ -242,6 +245,7 @@ impl CommandBuffer {
                 .then(|| self.device().shared().scheduler.spare_logs().compute()),
             dispatches: 0,
             memo: DispatchMemo::default(),
+            heaps_noted: None,
         })
     }
 }
@@ -270,6 +274,7 @@ impl ComputeCommandEncoder {
             log: None,
             dispatches: 0,
             memo: DispatchMemo::default(),
+            heaps_noted: None,
         })
     }
 
@@ -1259,8 +1264,13 @@ impl ComputeCommandEncoder {
     /// Once a command was encoded, note the heaps the encoder used; and where it reads texture
     /// handles from memory (`reads`), the textures it reaches whose blocks a carrier holds.
     fn command_encoded(&mut self, reads: bool) {
-        // The command, encoded, used the heaps of what the encoder made resident.
-        self.core.touch_heaps(self.residency.heaps());
+        // The command, encoded, used the heaps of what the encoder made resident: noted once a
+        // change of it, as an earlier command noted those it held then.
+        let generation = self.residency.generation();
+        if self.heaps_noted != Some(generation) {
+            self.core.touch_heaps(self.residency.heaps());
+            self.heaps_noted = Some(generation);
+        }
         if !reads {
             return;
         }
@@ -1537,16 +1547,15 @@ fn apart_samplers(device: &Device, objects: &VariantObjects) -> bool {
 /// What a dispatch settles before it binds ([`settle_dispatch`]): the device's sampler states it
 /// lists (less those at IDs no set-1 sampler array of the variant holds, `unlisted` saying so:
 /// `heap_sets::fit_samplers`), the visible-function tables its state made, its runtime samplers'
-/// address-mode maps, its bind state, and the variant it runs on with its plan, for `dispatch`.
+/// address-mode maps, its bind state, and what it planned: the state's shape, and the variant it
+/// runs on with its plan, for `planned.dispatch`.
 pub(super) struct SettledDispatch {
     argument_samplers: Vec<SamplerState>,
     function_tables: Vec<VisibleFunctionTable>,
     unlisted: Option<(u64, u64)>,
     sampler_maps: SamplerMaps,
     state: BindState,
-    variant: Arc<Variant>,
-    plan: Arc<BindingPlan>,
-    dispatch: Dispatch,
+    planned: Arc<Planned>,
 }
 
 /// A flat indirect call and its preprocess's description (`indirect_dispatch.rs`).
@@ -1555,7 +1564,10 @@ type Flat<'a> = Option<(FlatCall<'a>, FlatIndirect)>;
 /// What a dispatch of `tables`, of `direct` group counts or of a flat indirect call (`gpu`),
 /// settles ([`SettledDispatch`]) with `function_tables`, its state's, and `samplers`, the
 /// device's sampler states: the flat call's preprocess description beside it, and `None` where
-/// the GPU path does not take an indirect dispatch (`indirect_dispatch.rs`).
+/// the GPU path does not take an indirect dispatch (`indirect_dispatch.rs`). A direct dispatch
+/// whose bind state has the shape the state's last direct dispatch planned, of the same dispatch
+/// and buffer forms, takes what that one planned ([`Planned`]); one that plans keeps what it
+/// planned for the next.
 fn settle_dispatch<'a>(
     tables: &DispatchTables<'_>,
     (direct, gpu): (Option<Dispatch>, Option<FlatCall<'a>>),
@@ -1570,37 +1582,67 @@ fn settle_dispatch<'a>(
     let mut unlisted = None;
     // Its runtime samplers' address modes as the textures they sample map them.
     let sampler_maps = tables.sampler_maps()?;
-    let (state, variant, plan, dispatch, flat) = loop {
+    let last = match direct {
+        Some(dispatch) => pipeline
+            .planned()
+            .filter(|last| last.dispatch == dispatch && last.forms == tables.forms),
+        None => None,
+    };
+    let (state, planned, as_before, flat) = loop {
         let mut state = tables.bind_state(&argument_samplers, &function_tables);
         sampler_maps.apply(&mut state);
-        let (variant, plan, dispatch, flat) = match (direct, gpu) {
-            (Some(dispatch), _) => {
-                let (variant, plan) = pipeline.settle(&state.shape(), &dispatch, tables.forms)?;
-                (variant, plan, dispatch, None)
+        let last = last.as_ref().filter(|last| state.has_shape(&last.shape));
+        let (planned, as_before, flat) = match (last, direct, gpu) {
+            (Some(last), ..) => (Arc::clone(last), true, None),
+            (None, Some(dispatch), _) => {
+                let shape = state.shape();
+                let (variant, plan) = pipeline.settle(&shape, &dispatch, tables.forms)?;
+                let planned = Planned {
+                    shape: Arc::new(shape),
+                    dispatch,
+                    forms: tables.forms,
+                    variant,
+                    plan,
+                    made: OnceLock::new(),
+                };
+                (Arc::new(planned), false, None)
             }
-            (None, Some(gpu)) => match settle_indirect(pipeline, gpu, &state.shape())? {
-                Some((variant, plan, indirect)) => {
-                    let dispatch = flat_dispatch(indirect.threads_per_threadgroup);
-                    (variant, plan, dispatch, Some((gpu, indirect)))
-                }
-                None => return Ok(None),
-            },
-            (None, None) => return Err(internal("a dispatch of no counts")),
+            (None, None, Some(gpu)) => {
+                let shape = state.shape();
+                let Some((variant, plan, indirect)) = settle_indirect(pipeline, gpu, &shape)?
+                else {
+                    return Ok(None);
+                };
+                let planned = Planned {
+                    shape: Arc::new(shape),
+                    dispatch: flat_dispatch(indirect.threads_per_threadgroup),
+                    forms: tables.forms,
+                    variant,
+                    plan,
+                    made: OnceLock::new(),
+                };
+                (Arc::new(planned), false, Some((gpu, indirect)))
+            }
+            (None, None, None) => return Err(internal("a dispatch of no counts")),
         };
-        let set = variant.pipeline().layout.sets.get(1);
+        let set = planned.variant.pipeline().layout.sets.get(1);
         if heap_sets::fit_samplers(set, &mut argument_samplers, &mut unlisted) {
-            break (state, variant, plan, dispatch, flat);
+            break (state, planned, as_before, flat);
         }
     };
+    match (as_before, direct) {
+        (true, _) => (pipeline.device().shared().counts).dispatch_planned_as_before(),
+        // A flat dispatch's variant and plan are the flat path's: none a direct one takes.
+        (false, Some(_)) => pipeline.keep_planned(Arc::clone(&planned)),
+        (false, None) => {}
+    }
     let settled = SettledDispatch {
         argument_samplers,
         function_tables,
         unlisted,
         sampler_maps,
         state,
-        variant,
-        plan,
-        dispatch,
+        planned,
     };
     Ok(Some((settled, flat)))
 }
@@ -1616,15 +1658,22 @@ fn settle_dispatch<'a>(
 ///   (a texture's and a sampler's facts, fixed as it is made; a buffer's length, base and
 ///   addresses, which only a no-copy buffer's move changes: `buffer::host_cells_moved`), of the
 ///   threadgroup lengths, imageblock size and stage-in region set, of what the encoder made
-///   resident (nothing: a dispatch of an encoder that made a resource or a heap resident takes no
-///   memo), of the device's live sampler states (`Device::sampler_slots_changed`), of the
-///   state's visible-function tables (none: a dispatch of a state that made one takes no memo),
-///   and of the sampler maps, which are the table's and the residency's.
+///   resident (its generation, which every change of it draws anew, `Residency::generation`;
+///   what a used resource states of it beyond that, its buffers' addresses, which only a no-copy
+///   buffer's move changes, and whether each indirect command buffer holds its ID's slot, which a
+///   buffer made later with the ID takes: `Residency::holds_slots_as`), of the device's live
+///   sampler states (`Device::sampler_slots_changed`), of the state's visible-function tables
+///   (none: a dispatch of a state that made one takes no memo), and of the sampler maps, which
+///   are the table's and the residency's.
 /// - **The variant and plan** are `ComputePipelineState::settle`'s of the shape, the dispatch and
 ///   the buffer forms; **the commands** are the plan's instantiation for the state and the
 ///   dispatch, their regions keyed by the variant for the device (`Variant::keyed_regions`).
 /// - **A region's `VkPipeline`** found made is its variant's for the region's key, which its
 ///   making never changes; regions not all made are looked up again at the next dispatch.
+/// - **A dispatch that settles again** (another table, another residency) takes the variant, the
+///   plan and the made `VkPipeline`s of the state's last direct dispatch that planned where its
+///   bind state has that one's shape ([`Planned`], [`settle_dispatch`]): so does one whose
+///   buffers' offsets alone moved, and an encoder's first dispatch of the state.
 #[derive(Default)]
 pub(super) struct DispatchMemo(Option<Arc<KeptDispatch>>);
 
@@ -1637,6 +1686,8 @@ pub(super) struct KeptDispatch {
     imageblock: ImageblockSize,
     stage_in_region: Option<StageInRegion>,
     forms: BufferForms,
+    /// The residency's generation (`Residency::generation`).
+    residency: u64,
     /// `buffer::host_cells_moved` and `Device::sampler_slots_changed` as it was settled.
     counted: (u64, u64),
     settled: SettledDispatch,
@@ -1657,12 +1708,14 @@ impl DispatchMemo {
         let kept = self.0.as_ref()?;
         let same = kept.pipeline == *tables.pipeline
             && kept.stamp == tables.table.stamp()
-            && kept.settled.dispatch == *dispatch
+            && kept.settled.planned.dispatch == *dispatch
             && kept.counted == counted
             && kept.forms == tables.forms
             && kept.imageblock == tables.imageblock
             && kept.stage_in_region == tables.stage_in_region
-            && kept.threadgroup_lengths == *tables.threadgroup_lengths;
+            && kept.threadgroup_lengths == *tables.threadgroup_lengths
+            && kept.residency == tables.residency.generation()
+            && (tables.residency).holds_slots_as(&kept.settled.state.used_resources);
         same.then(|| Arc::clone(kept))
     }
 
@@ -1681,6 +1734,7 @@ impl DispatchMemo {
             imageblock: tables.imageblock,
             stage_in_region: tables.stage_in_region,
             forms: tables.forms,
+            residency: tables.residency.generation(),
             counted,
             settled,
             commands: OnceLock::new(),
@@ -1714,14 +1768,9 @@ fn record(
     // The live visible-function tables the pipeline state made: the encoder's, or an indirect
     // command's own state's.
     let function_tables = pipeline.function_tables();
-    // An encoder's own direct dispatch, of a state that made no table, in an encoder that made
-    // nothing resident, takes the memo.
+    // An encoder's own direct dispatch, of a state that made no table, takes the memo.
     let memo = match (memo, direct) {
-        (Some(memo), Some(dispatch))
-            if function_tables.is_empty() && tables.residency.is_empty() =>
-        {
-            Some((memo, dispatch))
-        }
+        (Some(memo), Some(dispatch)) if function_tables.is_empty() => Some((memo, dispatch)),
         _ => None,
     };
     let mut fresh = None;
@@ -1770,10 +1819,15 @@ fn record(
         unlisted,
         sampler_maps,
         state,
+        planned,
+    } = settled;
+    let Planned {
+        shape,
         variant,
         plan,
         dispatch,
-    } = settled;
+        ..
+    } = &**planned;
     let (unlisted, dispatch) = (*unlisted, *dispatch);
     let interface = &variant.pipeline().interface;
     core.device().degrade_argument_pixel_samplers(
@@ -1834,7 +1888,7 @@ fn record(
         core.executed(|| {
             Execution::new(
                 ExecutedPipeline::Compute(Arc::clone(variant.shared_pipeline())),
-                Arc::new(state.shape()),
+                Arc::clone(shape),
                 Vec::new(),
             )
         });
@@ -1956,11 +2010,19 @@ fn record(
     // Where the driver loses a layout's baked samplers after a copy in the same
     // `VkCommandBuffer` (`RuntimeDriverDefect::ImmutableSamplersLostAfterCopies`), a variant that
     // bakes them records in one of its own, as one being made does.
+    // Those the memo's entry holds, else those found made for what the dispatch planned, of its
+    // regions' keys ([`Planned`]).
     let kept_made = (kept.as_ref())
         .and_then(|kept| kept.made.get())
+        .or_else(|| planned.made_for(commands))
         .filter(|_| !apart_samplers(&device, &objects));
     let (pipelines, pending) = match (own.filter(|_| !core.encodes_again()), kept_made) {
-        (Some(_), Some(made)) => (made.clone(), None),
+        (Some(_), Some(made)) => {
+            if let Some(kept) = &kept {
+                drop(kept.made.set(made.clone()));
+            }
+            (made.clone(), None)
+        }
         (Some(dispatch), None) => {
             let begun: Vec<_> = commands
                 .regions
@@ -1979,9 +2041,18 @@ fn record(
                 .collect();
             match made {
                 Some(made) if !apart_samplers(&device, &objects) => {
-                    // Kept with the entry, which the next dispatch of its inputs takes.
+                    // Kept with the entry, which the next dispatch of its inputs takes, and with
+                    // what it planned, which the next dispatch of its shape takes.
                     if let Some(kept) = &kept {
                         drop(kept.made.set(made.clone()));
+                    }
+                    // Not a key's residual form, which serves only while its own is made.
+                    let own = (begun.iter().zip(&made)).all(|((key, _), made)| {
+                        planned.made.get().is_none() && variant.made_as(key, made)
+                    });
+                    if own {
+                        let keys = begun.iter().map(|(key, _)| key.clone()).collect();
+                        drop(planned.made.set((keys, made.clone())));
                     }
                     (made, None)
                 }
@@ -2091,7 +2162,7 @@ fn record(
                 core.executed(|| {
                     Execution::made_later(
                         ExecutedPipeline::Compute(Arc::clone(variant.shared_pipeline())),
-                        Arc::new(state.shape()),
+                        Arc::clone(shape),
                         creation,
                     )
                 });
@@ -2109,7 +2180,7 @@ fn record(
             core.executed(|| {
                 Execution::new(
                     ExecutedPipeline::Compute(Arc::clone(variant.shared_pipeline())),
-                    Arc::new(state.shape()),
+                    Arc::clone(shape),
                     pipelines.iter().map(|made| made.created_in).collect(),
                 )
             });

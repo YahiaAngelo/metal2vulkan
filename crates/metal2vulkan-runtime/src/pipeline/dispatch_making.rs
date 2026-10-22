@@ -76,6 +76,13 @@ impl RegionKey {
             required_subgroup_size: region.required_subgroup_size,
         }
     }
+
+    /// Whether it is `region`'s key, [`of`](Self::of) it.
+    pub(crate) fn is_of(&self, region: &DispatchRegion) -> bool {
+        self.specialization == region.specialization
+            && self.stage_flags == region.stage_flags
+            && self.required_subgroup_size == region.required_subgroup_size
+    }
 }
 
 impl Variant {
@@ -132,6 +139,12 @@ impl Variant {
                 }
             }
         }
+    }
+
+    /// Whether `made` is the `VkPipeline` made for `key` itself, not its residual form's, which a
+    /// dispatch takes while `key`'s is being made ([`residual_made`](Self::residual_made)).
+    pub(crate) fn made_as(&self, key: &RegionKey, made: &Arc<RawPipeline>) -> bool {
+        (self.pipelines.made(key)).is_some_and(|own| Arc::ptr_eq(&own, made))
     }
 
     /// The made `VkPipeline` of `key`'s residual form, each of its uniform views read at its

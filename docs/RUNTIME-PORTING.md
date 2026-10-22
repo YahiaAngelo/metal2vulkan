@@ -138,6 +138,7 @@ narrow refusal that the call's rustdoc describes.
 | `compute_encoder` | `computeCommandEncoder` | `CommandBuffer::compute_command_encoder` |
 | `device` | `device` | `CommandBuffer::device` |
 | `encode_signal` | `encodeSignalEvent:value:` | `CommandBuffer::encode_signal_event` |
+| `encode_signal_when_scheduled` | `encodeSignalEventScheduled:value:` (SPI) | `CommandBuffer::encode_signal_event_scheduled` |
 | `encode_wait` | `encodeWaitForEvent:value:` | `CommandBuffer::encode_wait_for_event` |
 | `error` | `error` | `CommandBuffer::error` |
 | `render_encoder` | `renderCommandEncoderWithDescriptor:` | `CommandBuffer::render_command_encoder` *(partial)* |
@@ -577,7 +578,6 @@ These items have no single runtime call. The consumer builds them from the calls
 | Item | How |
 |---|---|
 | `BlitCmd::CopyTextureRegionOptions` | options 0 is `BlitCommandEncoder::copy_from_texture_to_texture`; a public `BlitOption` goes through a buffer (`copy_from_texture_to_buffer`, then `copy_from_buffer_to_texture`) |
-| `CommandBuffer::encode_signal_when_scheduled` | `CommandBuffer::add_scheduled_handler`, whose handler calls `SharedEvent::set_signaled_value` |
 | `RateMap::reset` | a new map: `Device::new_rasterization_rate_map` |
 | `RenderCmd::SetDepthClipModeSpi` | the public `RenderCommandEncoder::set_depth_clip_mode` |
 | `RenderCmd::SetPrimitiveRestartEnabled` | `RenderCommandEncoder::set_primitive_restart_enabled`: indexed strips restart at the index as Metal takes it for their index type, and only there |

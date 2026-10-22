@@ -26,10 +26,13 @@
 //!   new `SharedEvent` of the same event. Opening it on another device is refused: Vulkan
 //!   semaphores do not cross devices unless exported, which the runtime does not do.
 //! - **Listeners** run notifications on a thread of their own, one after another in the order they
-//!   came due. A notification for a value already reached comes due at once (measured on Metal).
+//!   came due, started as the first notification is asked for: a listener no notification is
+//!   asked of starts no thread, as Metal's runs its blocks on a dispatch queue, whose threads
+//!   come and go with the work. A notification for a value already reached comes due at once
+//!   (measured on Metal).
 
 use super::device::{lock, Device};
-use super::error::{vulkan, Error, MemoryKind, RuntimeGap};
+use super::error::{vulkan, Error, RuntimeGap};
 use super::event_timeline::{EventTimeline, Signal, WaitFor};
 use super::exit_guard::{self, Call};
 use crate::release;
@@ -250,8 +253,9 @@ impl EventShared {
         lock(&self.state).timeline.value()
     }
 
-    /// The host set `value`.
-    fn set(self: &Arc<Self>, value: u64) {
+    /// The host set `value`: [`SharedEvent::set_signaled_value`]'s, and a command buffer's
+    /// scheduled signal's (`CommandBuffer::encode_signal_event_scheduled`).
+    pub(super) fn set(self: &Arc<Self>, value: u64) {
         let due = {
             let mut state = lock(&self.state);
             if !state.timeline.set(value) {
@@ -302,6 +306,8 @@ impl EventShared {
         value: u64,
         block: SharedEventNotification,
     ) {
+        // Its thread runs from now on, so the notification runs as it comes due.
+        listener.start();
         let notification = Notification {
             value,
             listener: listener.clone(),
@@ -484,9 +490,12 @@ impl SharedEventHandle {
 }
 
 /// A Metal shared event listener (`MTLSharedEventListener`): a thread of its own that runs the
-/// notifications posted to it, one after another. Cheap to clone (a retain); `Send + Sync`. The
-/// thread ends once every handle is gone, including those that pending notifications hold, and
-/// what was posted ran.
+/// notifications posted to it, one after another, started as the first one is asked for
+/// ([`SharedEvent::notify_listener`]; none for a listener never asked one). Cheap to clone (a
+/// retain); `Send + Sync`. The thread ends once every handle is gone, including those that pending
+/// notifications hold, and what was posted ran. Metal runs the blocks on a dispatch queue of its
+/// own, which a listener made with `initWithDispatchQueue:` names: the runtime has no form of that
+/// initializer.
 #[derive(Clone)]
 pub struct SharedEventListener(Arc<ListenerHandle>);
 
@@ -509,7 +518,7 @@ impl Drop for ListenerHandle {
     }
 }
 
-type Job = Box<dyn FnOnce() + Send>;
+pub(super) type Job = Box<dyn FnOnce() + Send>;
 
 struct ListenerQueue {
     jobs: Mutex<Jobs>,
@@ -520,33 +529,65 @@ struct Jobs {
     posted: VecDeque<Job>,
     /// Every handle is gone: nothing more can be posted.
     closed: bool,
+    /// The thread was started ([`SharedEventListener::start`]).
+    started: bool,
+}
+
+impl Default for SharedEventListener {
+    fn default() -> SharedEventListener {
+        SharedEventListener::new()
+    }
 }
 
 impl SharedEventListener {
-    /// `[[MTLSharedEventListener alloc] init]`: a listener with a thread of its own; refused when
-    /// the host cannot start one.
-    pub fn new() -> Result<SharedEventListener, Error> {
+    /// `[[MTLSharedEventListener alloc] init]`: a listener whose thread starts as its first
+    /// notification is asked for. Where the host cannot start the thread then, each later
+    /// notification asked for or come due tries again, and those come due wait for it.
+    pub fn new() -> SharedEventListener {
         let queue = Arc::new(ListenerQueue {
             jobs: Mutex::new(Jobs {
                 posted: VecDeque::new(),
                 closed: false,
+                started: false,
             }),
             wake: Condvar::new(),
         });
-        {
-            let queue = Arc::clone(&queue);
-            exit_guard::spawn(
-                std::thread::Builder::new().name("metal2vulkan-listener".into()),
-                move || listen(&queue),
-            )
-            .map_err(|_| Error::OutOfMemory(MemoryKind::Host))?;
-        }
-        Ok(SharedEventListener(Arc::new(ListenerHandle { queue })))
+        SharedEventListener(Arc::new(ListenerHandle { queue }))
     }
 
-    fn post(&self, job: Job) {
-        lock(&self.0.queue.jobs).posted.push_back(job);
-        self.0.queue.wake.notify_all();
+    /// Start the thread unless it started.
+    fn start(&self) {
+        Self::start_under(&self.0.queue, &mut lock(&self.0.queue.jobs));
+    }
+
+    /// Start `queue`'s thread unless it started, under its jobs' lock (`jobs`): one thread
+    /// starts, whatever thread asks.
+    fn start_under(queue: &Arc<ListenerQueue>, jobs: &mut Jobs) {
+        if jobs.started {
+            return;
+        }
+        let listening = Arc::clone(queue);
+        let started = exit_guard::spawn(
+            std::thread::Builder::new().name("metal2vulkan-listener".into()),
+            move || listen(&listening),
+        );
+        jobs.started = started.is_ok();
+    }
+
+    /// Post `job`, after the jobs posted before it; the thread started where it has not.
+    pub(super) fn post(&self, job: Job) {
+        let queue = &self.0.queue;
+        let mut jobs = lock(&queue.jobs);
+        jobs.posted.push_back(job);
+        Self::start_under(queue, &mut jobs);
+        drop(jobs);
+        queue.wake.notify_all();
+    }
+
+    /// Whether its thread was started.
+    #[cfg(test)]
+    pub(crate) fn started(&self) -> bool {
+        lock(&self.0.queue.jobs).started
     }
 }
 

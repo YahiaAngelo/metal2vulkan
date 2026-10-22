@@ -60,7 +60,17 @@
 //!   shadowed texture is copied in and back as at a slot.
 //! - **Tokens.** A resource has one token in the encoder, its position in the order the encoder
 //!   first used it, and the union of every usage it was used with; so a plan's shape changes
-//!   only when the encoder uses another resource or widens a usage.
+//!   only when the encoder uses another resource or widens a usage. A resource is found among
+//!   those made resident by its identity, so `useResources:count:usage:` of `n` resources costs
+//!   `n` lookups, whatever the encoder made resident before.
+//! - **Generations.** Each change of what a residency holds (a resource made resident, a usage or
+//!   stage widened, a heap used or widened, a live table given or taken) gives it a generation no
+//!   other residency of the process had ([`Residency::generation`]): a compute encoder's dispatch
+//!   that finds the generation, and every other input, its last dispatch settled with takes what
+//!   that one settled (`compute.rs`, `DispatchMemo`), and its residency's share of the bind state
+//!   (the used resources, their shape and the plan's commands) is made once per change. What a
+//!   used resource states besides (a buffer's addresses, an indirect command buffer's hold on
+//!   its ID's slot) changes outside the residency: the memo keys on those apart.
 //! - **Stages.** A render encoder makes a resource resident for the render stages it names
 //!   (`useResource:usage:stages:`, `useHeap:stages:`), joined as the usages are: a draw's
 //!   functions reach it in those of their stages alone (the binder's `UsedResource::stages`), and
@@ -70,13 +80,23 @@
 use super::buffer::{Buffer, ReadApart};
 use super::heap::Heap;
 use super::indirect_command_buffer::IndirectCommandBuffer;
+use super::key_hash::KeyMap;
 use super::live_buffers::LiveTable;
 use super::resource::ResourceRef;
 use super::texture::Texture;
 use metal2vulkan::bind::{ResidentRange, ResourceClass, UsedResource};
 use metal2vulkan::metal::{RenderStages, ResourceUsage};
 use metal2vulkan::pipeline::{BindingSource, PipelineLayout, Stage, SyntheticBinding};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+/// The generation last given to a residency of the process ([`Residency::generation`]).
+static GENERATIONS: AtomicU64 = AtomicU64::new(0);
+
+/// A generation no residency of the process had.
+fn next_generation() -> u64 {
+    GENERATIONS.fetch_add(1, Ordering::Relaxed) + 1
+}
 
 /// A resource an encoder made resident.
 #[derive(Clone)]
@@ -97,12 +117,24 @@ pub(super) enum Used {
 #[derive(Clone, Default)]
 pub(super) struct Residency {
     used: Vec<(Used, ResourceUsage, RenderStages)>,
+    /// Each resource of `used` by its identity, with its token.
+    tokens: KeyMap<Used, u32>,
+    /// The tokens of the indirect command buffers among `used`.
+    indirect: Vec<u32>,
+    /// The tokens of the textures among `used`: a command's look at the textures made resident
+    /// costs their count, not every resource's.
+    textures: Vec<u32>,
     /// The heaps the encoder used, each with the render stages it used it in and the number of
     /// the first of its textures not made resident yet (`Heap::textures_from`).
     heaps: Vec<HeapUse>,
+    /// Each heap of `heaps` by its place there.
+    heap_places: KeyMap<Heap, usize>,
     /// A command buffer's: the device's live buffers at its commit, which an address in no
     /// resource made resident resolves against (`live_buffers.rs`).
     live: Option<Arc<LiveTable>>,
+    /// The module docs' generation: 0 while it holds nothing it was given, else one no other
+    /// residency of the process had, drawn at its last change.
+    generation: u64,
 }
 
 /// A heap an encoder used (`Residency::heaps`).
@@ -117,6 +149,44 @@ impl Residency {
     /// Whether it holds nothing: no resource, heap or live table.
     pub(super) fn is_empty(&self) -> bool {
         self.used.is_empty() && self.heaps.is_empty() && self.live.is_none()
+    }
+
+    /// Its generation (the module docs): equal to another residency's only where neither changed
+    /// since one was cloned from the other, or both hold nothing they were given.
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Whether each indirect command buffer made resident holds its ID's slot as `used`, the bind
+    /// state's used resources made of it ([`used_resources`](Self::used_resources)), states: a
+    /// buffer made later with the ID takes the slot (`address.rs`) without changing the residency.
+    pub(super) fn holds_slots_as(&self, used: &[UsedResource]) -> bool {
+        self.indirect.iter().all(|&token| {
+            let stated = used
+                .get(token as usize)
+                .map(|used| used.gpu_address.is_some());
+            match self.used.get(token as usize) {
+                Some((Used::IndirectCommandBuffer(icb), ..)) => stated == Some(icb.holds_id_slot()),
+                _ => false,
+            }
+        })
+    }
+
+    /// The heap used at `heap`'s place in `heaps`, if the encoder used it.
+    fn heap_use(&mut self, heap: &Heap) -> Option<&mut HeapUse> {
+        let place = *self.heap_places.get(heap)?;
+        self.heaps.get_mut(place)
+    }
+
+    /// Note `heap`'s first use, in render `stages`, its textures before number `next` made
+    /// resident.
+    fn push_heap(&mut self, heap: &Heap, stages: RenderStages, next: u64) {
+        self.heap_places.insert(heap.clone(), self.heaps.len());
+        self.heaps.push(HeapUse {
+            heap: heap.clone(),
+            stages,
+            next,
+        });
     }
 
     /// Make `resource` resident with `usage` in render `stages` (none for a compute encoder),
@@ -148,18 +218,20 @@ impl Residency {
     /// (the caller then holds them until the command buffer completes).
     pub(super) fn use_heap(&mut self, heap: &Heap, stages: RenderStages) -> Vec<Used> {
         let (textures, next) = heap.textures_from(0);
-        let stages = match self.heaps.iter_mut().find(|used| used.heap == *heap) {
+        let stages = match self.heap_use(heap) {
             Some(used) => {
-                used.stages = used.stages.union(stages);
+                let widened = used.stages.union(stages);
+                let changed = widened != used.stages || used.next != next;
+                used.stages = widened;
                 used.next = next;
-                used.stages
+                if changed {
+                    self.generation = next_generation();
+                }
+                widened
             }
             None => {
-                self.heaps.push(HeapUse {
-                    heap: heap.clone(),
-                    stages,
-                    next,
-                });
+                self.push_heap(heap, stages, next);
+                self.generation = next_generation();
                 stages
             }
         };
@@ -199,6 +271,8 @@ impl Residency {
             let (textures, next) = used.heap.textures_from(used.next);
             used.next = next;
             made.extend(textures.into_iter().map(|texture| (texture, used.stages)));
+            // The number it looks from on: what a later look reads.
+            self.generation = next_generation();
         }
         made.into_iter()
             .filter_map(|(texture, stages)| {
@@ -222,17 +296,16 @@ impl Residency {
         }
         for heap in &ended.heaps {
             let stages = reach(heap.stages);
-            match self.heaps.iter_mut().find(|had| had.heap == heap.heap) {
+            match self.heap_use(&heap.heap) {
                 Some(had) => {
                     had.stages = had.stages.union(stages);
                     had.next = had.next.min(heap.next);
                 }
-                None => self.heaps.push(HeapUse {
-                    heap: heap.heap.clone(),
-                    stages,
-                    next: heap.next,
-                }),
+                None => self.push_heap(&heap.heap, stages, heap.next),
             }
+        }
+        if !ended.heaps.is_empty() {
+            self.generation = next_generation();
         }
     }
 
@@ -245,6 +318,9 @@ impl Residency {
         }
         for heap in &mut self.heaps {
             heap.stages = RenderStages::empty();
+        }
+        if !self.is_empty() {
+            self.generation = next_generation();
         }
         self
     }
@@ -276,19 +352,30 @@ impl Residency {
     pub(super) fn past<'a>(&'a self, other: &'a Residency) -> impl Iterator<Item = &'a Used> {
         (self.used.iter())
             .map(|(used, ..)| used)
-            .filter(|used| !other.used.iter().any(|(had, ..)| same(had, used)))
+            .filter(|used| !other.tokens.contains_key(used))
     }
 
     /// `used` resident with `usage` in `stages`, joined to the usage and stages it had: `used`,
     /// when it is new here.
     fn join(&mut self, used: Used, usage: ResourceUsage, stages: RenderStages) -> Option<Used> {
-        let had = self.used.iter_mut().find(|(had, ..)| same(had, &used));
-        if let Some((_, had_usage, had_stages)) = had {
-            *had_usage = had_usage.union(usage);
-            *had_stages = had_stages.union(stages);
+        if let Some(&token) = self.tokens.get(&used) {
+            let (_, had_usage, had_stages) = &mut self.used[token as usize];
+            let (usage, stages) = (had_usage.union(usage), had_stages.union(stages));
+            if (usage, stages) != (*had_usage, *had_stages) {
+                (*had_usage, *had_stages) = (usage, stages);
+                self.generation = next_generation();
+            }
             return None;
         }
+        let token = u32::try_from(self.used.len()).expect("fewer than 2^32 resources resident");
+        match used {
+            Used::IndirectCommandBuffer(_) => self.indirect.push(token),
+            Used::Texture(_) => self.textures.push(token),
+            Used::Buffer(_) | Used::Heap { .. } => {}
+        }
+        self.tokens.insert(used.clone(), token);
         self.used.push((used.clone(), usage, stages));
+        self.generation = next_generation();
         Some(used)
     }
 
@@ -348,6 +435,7 @@ impl Residency {
     pub(super) fn with_live(self, live: Arc<LiveTable>) -> Residency {
         Residency {
             live: Some(live),
+            generation: next_generation(),
             ..self
         }
     }
@@ -356,7 +444,15 @@ impl Residency {
     /// holds no table of them, whose pages a release or a rebind lets go until the command
     /// buffer is first submitted.
     pub(super) fn without_live(self) -> Residency {
-        Residency { live: None, ..self }
+        let generation = match self.live {
+            Some(_) => next_generation(),
+            None => self.generation,
+        };
+        Residency {
+            live: None,
+            generation,
+            ..self
+        }
     }
 
     /// The ranges of its buffers, heaps (their own buffers) and indirect command buffers'
@@ -404,53 +500,49 @@ impl Residency {
     /// ended encoders made resident, each with its usage and, for a render encoder, its render
     /// stages (a compute encoder names none).
     pub(super) fn shadows(&self, render: bool) -> Residency {
-        let used = (self.used.iter())
-            .filter(|(used, ..)| matches!(used, Used::Texture(t) if t.shadow().is_some()))
-            .map(|(used, usage, stages)| {
-                let stages = if render {
-                    *stages
-                } else {
-                    RenderStages::empty()
-                };
-                (used.clone(), *usage, stages)
-            })
-            .collect();
-        Residency {
-            used,
-            heaps: Vec::new(),
-            live: None,
+        let mut shadows = Residency::default();
+        let shadowed = (self.used.iter())
+            .filter(|(used, ..)| matches!(used, Used::Texture(t) if t.shadow().is_some()));
+        for (used, usage, stages) in shadowed {
+            let stages = match render {
+                true => *stages,
+                false => RenderStages::empty(),
+            };
+            shadows.join(used.clone(), *usage, stages);
         }
+        shadows
+    }
+
+    /// The textures made resident, each with its usage and render stages.
+    fn resident_textures(&self) -> impl Iterator<Item = (&Texture, ResourceUsage, RenderStages)> {
+        self.textures
+            .iter()
+            .filter_map(|&token| match self.used.get(token as usize) {
+                Some((Used::Texture(texture), usage, stages)) => Some((texture, *usage, *stages)),
+                _ => None,
+            })
     }
 
     /// The textures made resident.
     pub(super) fn textures(&self) -> impl Iterator<Item = &Texture> {
-        self.used.iter().filter_map(|(used, ..)| match used {
-            Used::Texture(texture) => Some(texture),
-            Used::Buffer(_) | Used::Heap { .. } | Used::IndirectCommandBuffer(_) => None,
-        })
+        self.resident_textures().map(|(texture, ..)| texture)
     }
 
     /// The textures made resident that a render command whose functions read texture handles
     /// from memory in render `stages` reaches: those made resident in one of those stages.
     pub(super) fn textures_reached(&self, stages: RenderStages) -> impl Iterator<Item = &Texture> {
-        self.used
-            .iter()
-            .filter_map(move |(used, _, made)| match used {
-                Used::Texture(texture) if made.intersects(stages) => Some(texture),
-                _ => None,
-            })
+        self.resident_textures()
+            .filter(move |(_, _, made)| made.intersects(stages))
+            .map(|(texture, ..)| texture)
     }
 
     /// The textures made resident, each with whether a function's use of it may write: its
     /// usage writes, or neither reads nor writes, which a plan takes as both (the plan's used
     /// resources, `metal2vulkan::bind`).
     pub(super) fn textures_written(&self) -> impl Iterator<Item = (&Texture, bool)> {
-        self.used.iter().filter_map(|(used, usage, _)| match used {
-            Used::Texture(texture) => {
-                let reads = usage.intersects(ResourceUsage::READ | ResourceUsage::SAMPLE);
-                Some((texture, usage.contains(ResourceUsage::WRITE) || !reads))
-            }
-            Used::Buffer(_) | Used::Heap { .. } | Used::IndirectCommandBuffer(_) => None,
+        self.resident_textures().map(|(texture, usage, _)| {
+            let reads = usage.intersects(ResourceUsage::READ | ResourceUsage::SAMPLE);
+            (texture, usage.contains(ResourceUsage::WRITE) || !reads)
         })
     }
 
@@ -469,14 +561,30 @@ impl Residency {
     }
 }
 
-/// Whether `a` and `b` are one resource.
-fn same(a: &Used, b: &Used) -> bool {
-    match (a, b) {
-        (Used::Buffer(a), Used::Buffer(b)) => a == b,
-        (Used::Texture(a), Used::Texture(b)) => a == b,
-        (Used::Heap { heap: a, .. }, Used::Heap { heap: b, .. }) => a == b,
-        (Used::IndirectCommandBuffer(a), Used::IndirectCommandBuffer(b)) => a == b,
-        _ => false,
+// Two are equal where they are one resource: a heap by the heap alone.
+impl PartialEq for Used {
+    fn eq(&self, other: &Used) -> bool {
+        match (self, other) {
+            (Used::Buffer(a), Used::Buffer(b)) => a == b,
+            (Used::Texture(a), Used::Texture(b)) => a == b,
+            (Used::Heap { heap: a, .. }, Used::Heap { heap: b, .. }) => a == b,
+            (Used::IndirectCommandBuffer(a), Used::IndirectCommandBuffer(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Used {}
+
+impl std::hash::Hash for Used {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Used::Buffer(buffer) => buffer.hash(state),
+            Used::Texture(texture) => texture.hash(state),
+            Used::Heap { heap, .. } => heap.hash(state),
+            Used::IndirectCommandBuffer(icb) => icb.hash(state),
+        }
     }
 }
 

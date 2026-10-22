@@ -150,23 +150,41 @@ fn a_command_buffer_with_no_handler_finishes_where_its_completion_is_seen() {
     drop(device);
 }
 
-/// [`ROUNDS`] command buffers of `queue`, each a fill of 16 bytes, with a scheduled handler where
-/// `handler`, each committed and waited for before the next: how many were scheduled where their
-/// last batch was submitted.
-fn scheduled_where_submitted(device: &Device, queue: &CommandQueue, handler: bool) -> u64 {
+/// What a command buffer of [`scheduled_where_submitted`] has besides its fill.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Besides {
+    Nothing,
+    ScheduledHandler,
+    /// A scheduled signal of the shared event, of the round's number and one.
+    ScheduledSignal,
+}
+
+/// [`ROUNDS`] command buffers of `queue`, each a fill of 16 bytes with what `besides` says, each
+/// committed and waited for before the next: how many were scheduled where their last batch was
+/// submitted. Each scheduled signal set its value by its wait's return.
+fn scheduled_where_submitted(device: &Device, queue: &CommandQueue, besides: Besides) -> u64 {
     let target = device.new_buffer(16, ResourceOptions::shared()).unwrap();
+    let event = device.new_shared_event().unwrap();
     let before = device.work_counts().scheduled_where_submitted;
     for round in 0..ROUNDS {
         let command_buffer = queue.command_buffer().unwrap();
         let mut blit = command_buffer.blit_command_encoder().unwrap();
         blit.fill_buffer(&target, 0..16, round as u8).unwrap();
         blit.end_encoding().unwrap();
-        if handler {
-            command_buffer
+        match besides {
+            Besides::Nothing => {}
+            Besides::ScheduledHandler => command_buffer
                 .add_scheduled_handler(Box::new(|_: &CommandBuffer| {}))
-                .unwrap();
+                .unwrap(),
+            Besides::ScheduledSignal => command_buffer
+                .encode_signal_event_scheduled(&event, round + 1)
+                .unwrap(),
         }
         command_buffer.commit().unwrap();
+        command_buffer.wait_until_scheduled().unwrap();
+        if besides == Besides::ScheduledSignal {
+            assert_eq!(event.signaled_value(), round + 1);
+        }
         command_buffer.wait_until_completed().unwrap();
     }
     device.work_counts().scheduled_where_submitted - before
@@ -174,18 +192,25 @@ fn scheduled_where_submitted(device: &Device, queue: &CommandQueue, handler: boo
 
 /// Command buffers with no scheduled handler are scheduled where their last batch is submitted:
 /// at least one of [`ROUNDS`] (the one before's transition to `Completed` may still hold its
-/// queue's context as the next one's last batch goes, which is then posted behind it). Those with
-/// a scheduled handler never are.
+/// queue's context as the next one's last batch goes, which is then posted behind it), those with
+/// a scheduled signal too, which wakes no handler thread. Those with a scheduled handler never
+/// are.
 #[test]
 fn a_command_buffer_with_no_scheduled_handler_is_scheduled_where_submitted() {
     let scratch = Scratch::new();
     let device = device(&scratch.0);
     let queue = device.new_command_queue().unwrap();
-    let plain = scheduled_where_submitted(&device, &queue, false);
+    let plain = scheduled_where_submitted(&device, &queue, Besides::Nothing);
     println!("scheduled where submitted: {plain} of {ROUNDS} with no handler");
     assert!(plain >= 1, "none of {ROUNDS} was scheduled where submitted");
+    let signalled = scheduled_where_submitted(&device, &queue, Besides::ScheduledSignal);
+    println!("scheduled where submitted: {signalled} of {ROUNDS} with a scheduled signal");
+    assert!(
+        signalled >= 1,
+        "none of {ROUNDS} was scheduled where submitted"
+    );
     assert_eq!(
-        scheduled_where_submitted(&device, &queue, true),
+        scheduled_where_submitted(&device, &queue, Besides::ScheduledHandler),
         0,
         "a command buffer with a scheduled handler was scheduled off its queue's handler thread"
     );

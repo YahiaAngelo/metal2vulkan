@@ -206,6 +206,7 @@ pub(crate) struct Counters {
     set_zero_sets_found: AtomicU64,
     draw_shapes_reused: AtomicU64,
     dispatches_settled_as_before: AtomicU64,
+    dispatches_planned_as_before: AtomicU64,
     baked_sampler_dispatches_apart: AtomicU64,
     host_deallocators_delayed: AtomicU64,
     host_import_releases_posted: AtomicU64,
@@ -1485,6 +1486,13 @@ impl Counters {
     /// (`compute::DispatchMemo`).
     pub(crate) fn dispatch_settled_as_before(&self) {
         self.dispatches_settled_as_before
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A direct dispatch that settled a bind state of the shape its state's last direct dispatch
+    /// planned and took what that one planned (`pipeline::Planned`).
+    pub(crate) fn dispatch_planned_as_before(&self) {
+        self.dispatches_planned_as_before
             .fetch_add(1, Ordering::Relaxed);
     }
 
@@ -2809,6 +2817,11 @@ pub struct WorkCounts {
     pub scheduler_wakes_host: u64,
     /// Sleeps that ended at the thread's longest wait with nothing having woken it.
     pub scheduler_sleep_slices: u64,
+    /// Passes the scheduler's thread made over its order (`scheduler/mod.rs`): one takes in what
+    /// was committed and submits what is ready; one more follows a submission check or a host
+    /// step the thread ran without its lock, a waker's nudge during a pass, and a pass that
+    /// stopped after a few submissions.
+    pub scheduler_passes: u64,
     /// Of `scheduler_sleeps`, those on the GPU: in one wait for the event values every head's
     /// checks wait for to land, or for the scheduler's nudge, which a commit, a host signal or a
     /// stop signals (`scheduler/mod.rs`; not on MoltenVK). A value landed wakes it as a
@@ -3229,10 +3242,19 @@ pub struct WorkCounts {
     /// Compute encoders' dispatches that took the bind state, variant, plan, commands and made
     /// `VkPipeline`s their encoder's last dispatch settled, rather than settling them again:
     /// those of the same pipeline state, dispatch, table (no call changed it since), threadgroup
-    /// lengths, imageblock size and stage-in region, in an encoder that made nothing resident, of
-    /// a state that made no visible-function table, while no no-copy buffer moved and no sampler
-    /// state was made or went (`compute::DispatchMemo`).
+    /// lengths, imageblock size and stage-in region, in an encoder whose residency did not change
+    /// since (no resource made resident, no usage widened, no heap used), of a state that made no
+    /// visible-function table, while no no-copy buffer moved, no sampler state was made or went
+    /// and no buffer took a resident indirect command buffer's ID (`compute::DispatchMemo`).
     pub dispatches_settled_as_before: u64,
+    /// Direct dispatches that settled their bind state again (another table, another residency,
+    /// another encoder) into one of the shape their pipeline state's last direct dispatch that
+    /// planned planned, of the same dispatch and buffer forms, and took that one's variant and
+    /// plan rather than planning them again, and its regions' made `VkPipeline`s where their keys
+    /// are the same (`pipeline::Planned`): a dispatch whose buffers' offsets alone moved, and an
+    /// encoder's first dispatch of a state dispatched before, for two. Not counted in
+    /// `dispatches_settled_as_before`.
+    pub dispatches_planned_as_before: u64,
     /// Dispatches of a kernel's variant whose layout bakes immutable samplers (constexpr
     /// samplers'), their pipelines made, recorded in a `VkCommandBuffer` of their own, as a
     /// dispatch whose pipeline is still being made is (`pending_dispatch.rs`): on a device whose
@@ -3955,6 +3977,7 @@ impl Device {
             scheduler_wakes_host: by_host,
             scheduler_sleep_slices: by_slice,
             scheduler_gpu_waits: gpu_waits,
+            scheduler_passes: self.shared().scheduler.passes(),
             wakes_completion_waiters: completion_wakes,
             wakes_handler_threads: handler_wakes,
             wakes_command_buffer_waiters: command_buffer_wakes,
@@ -4083,6 +4106,8 @@ impl Device {
             set_zero_sets_found: counters.set_zero_sets_found.load(Ordering::Relaxed),
             draw_shapes_reused: counters.draw_shapes_reused.load(Ordering::Relaxed),
             dispatches_settled_as_before: (counters.dispatches_settled_as_before)
+                .load(Ordering::Relaxed),
+            dispatches_planned_as_before: (counters.dispatches_planned_as_before)
                 .load(Ordering::Relaxed),
             baked_sampler_dispatches_apart: (counters.baked_sampler_dispatches_apart)
                 .load(Ordering::Relaxed),

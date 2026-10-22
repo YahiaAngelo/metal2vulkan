@@ -579,7 +579,7 @@ fn child() {
         }
         "listener_exits" => {
             let event = device.new_shared_event().unwrap();
-            let listener = SharedEventListener::new().unwrap();
+            let listener = SharedEventListener::new();
             let in_listener = messages.clone();
             event.notify_listener(
                 &listener,
@@ -627,7 +627,7 @@ fn child() {
             {
                 let queue = device.new_command_queue().unwrap();
                 let event = device.new_shared_event().unwrap();
-                let listener = SharedEventListener::new().unwrap();
+                let listener = SharedEventListener::new();
                 event.notify_listener(
                     &listener,
                     1,

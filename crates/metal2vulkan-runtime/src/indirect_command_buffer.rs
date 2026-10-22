@@ -1071,6 +1071,12 @@ impl PartialEq for IndirectCommandBuffer {
 
 impl Eq for IndirectCommandBuffer {}
 
+impl std::hash::Hash for IndirectCommandBuffer {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::ptr::hash(Arc::as_ptr(&self.0), state);
+    }
+}
+
 impl IndirectCommandBuffer {
     /// The records' bytes: the header, then each command's record.
     fn bytes(&self) -> Result<*mut u8, Error> {

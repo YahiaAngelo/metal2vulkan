@@ -65,6 +65,7 @@ mod enables;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod encoder_holds;
 mod error_kinds;
+mod event_listener;
 mod event_timeline;
 mod exactness;
 mod exit_guard;
