@@ -110,7 +110,10 @@ compile does. `DevicePolicy::default()` is `DevicePolicy::UNTRUSTED`:
   format has Metal's rule at its sample count by that rule in one more render pass instance after
   the pass (`shader-resolve`). On MoltenVK the device's resolve is Metal's own under either value,
   and an attachment a fetching pass's sample planes hold as it ends resolves from them by Metal's
-  rule under either.
+  rule under either. An extended-range attachment (`BGR10_XR`, `BGRA10_XR`, their sRGB twins,
+  `RGB10A2Unorm_sRGB`), held in raw codes no device averages, resolves after the pass under either
+  value, on every device: a linear form's colors by Metal's rule, its alpha and an sRGB form's
+  colors by a near-equivalent (`extended-range-resolve`).
 - **Batches of a queue ordered by their ends** (`BatchOrderPolicy::Ends`, the runtime's choice; no
   pipeline differs). On ANV, RADV and NVIDIA's driver, each measured to start no kernel submission
   of a `VkQueue` before the one before it completed, each batch of command buffers ends with a
@@ -597,6 +600,16 @@ through `StatusBits::MESH_GRID_PAST_LIMITS`, or a fold of more pieces than
 `MeshArguments::OBJECT_PIECES` (only under task limits below Vulkan's required least), its `past`.
 A direct object grid past the task limits of a device that does not fold is refused naming the
 limit.
+
+Without the extension, an indirect draw with an object function first dispatches an object
+arguments pass (`MeshDispatch::object_arguments`, `bind::mesh_object_arguments_module`, one
+invocation over the scan's bindings): it reads Metal's arguments, reserves the object threadgroups'
+slots in the command buffer's records pool, and writes the object function's
+`VkDispatchIndirectCommand` into the work buffer (`MeshDispatch::OBJECT_DISPATCH_OFFSET`). A grid
+Metal's GPU discards sets `StatusBits::MESH_GRID_DISCARDED`; one past the device's compute limits,
+or whose threads per grid wrap along an axis (Metal reports the wrapped grid, which the object
+dispatch cannot), sets `MESH_GRID_PAST_LIMITS`; slots the rest of the pool cannot hold set
+`MESH_RECORDS_OVERFLOW`. Each draws nothing.
 
 ### Tile pipelines
 
@@ -1511,6 +1524,19 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   equal depths is measured at 2 and 4 samples. Cost: the resolve applies the rules Metal's resolve
   follows at 2 and 4 samples (or the device's average, for a format without them), which no Metal
   answer confirms at this count.
+- `metal2vulkan-degrade-extended-range-resolve` (precision). `ExtendedRangeResolve`: A multisample
+  resolve of an extended-range color attachment whose resolve Metal averages from values finer than
+  the codes the attachment holds (`BGRA10_XR`'s alpha, an `_sRGB` twin's color,
+  `RGB10A2Unorm_sRGB`'s channels): the crate-owned resolve writes a near-equivalent from the codes
+  where a pixel's samples differ, and Metal's code where they hold one. Measured against Metal's
+  resolve on the M3 Max under macOS 27.0.1 (4096 texels per format at 2 and 4 samples, each sample
+  its own value): `BGRA10_XR`'s alpha Metal's in 84% and 88% of texels and within a code in every
+  one; an `_sRGB` twin's color in 81% and 85% of channels and within a code in 99.5%, at most 7
+  codes off where the samples' values nearly cancel; `RGB10A2Unorm_sRGB`'s colors in 83% and 87%,
+  within 2, and its alpha in 94% and 97%, within one. A linear form's color is Metal's rule, every
+  texel. Cost: where a pixel's samples differ, a resolved alpha, or an sRGB color, can differ from
+  Metal's by a code (an sRGB color by a few where the samples' values nearly cancel): Metal averages
+  values finer than the codes the attachment holds.
 - `metal2vulkan-degrade-dont-care-store` (precision). `DontCareStore`: An attachment stored with
   `DontCare` (or the multisampled attachment of `MultisampleResolve`) is Vulkan's `DONT_CARE`, where
   Apple's GPU keeps the earlier texels unless its tiler overflows. Not a texture over a buffer: Metal
@@ -3055,7 +3081,11 @@ each item named states the rule in full.
   host, holding the batches after it on its queue (and those on other queues that use what the
   loop uses), and nothing encoded before the loop runs again. A loop without bound runs on, as
   Metal's does, after the program let go of its queue and device too, until the process ends or
-  the device is lost. Work inside a loop the runtime records apart (an indirect dispatch or
+  the device is lost. A loop running again stops, as Metal's does, at the GPU's recovery from a
+  fault or a hang of another queue's command buffer (primitive type 9; one behind the loop on
+  its own queue waits for it, a known gap in docs/FAST-PATHS.md): a fault's fails its command
+  buffer as a victim (`GpuRecoveryVictim`), a hang's ends it with no error, and nothing after the
+  loop runs. Work inside a loop the runtime records apart (an indirect dispatch or
   an indirect command buffer's execution a host step records) is recorded again in each such
   run, after another round trip to the host where its first recording waited for the work
   before it. A condition word past its buffer reads
@@ -3137,6 +3167,14 @@ each item named states the rule in full.
   where the GPU ran just before (127 of 142), run where it was idle before (the first fault after
   3 s idle), and run in part in some shapes (an encoder after an event signal, a command buffer
   committed right after). The runtime does not model the GPU's idle state.
+- **A fault that later failing encoders follow fails with the fault's error, in their time**: it
+  reads `Scheduled` no sooner than 6.86 ms after the GPU reached the fault, and completes no
+  sooner than 6.86 ms after that for each later fault, then 27.5 ms for a hang, past which
+  nothing adds; its queue's command buffers committed meanwhile run nothing where a hang follows
+  the fault, as during a hang. On an M3 Max (macOS 27.0.1, 88 command buffers) Metal's read
+  `Scheduled` 14.3 to 21.0 ms after its commit, once the GPU recovered from the fault, and
+  completed 25.8 to 29.1 ms after that where a hang followed the fault. One that hangs first fails
+  as the hang alone does (30 of 30), the GPU never reaching the fault.
 - **A queue's second caused GPU error revokes it, as Metal's does**, and only an event wait held
   across the revocation is answered unmeasured. Measured on the M3 Max (macOS 27.0.1, about sixty
   command buffers): page faults and hangs (`CommandBufferError::PageFault`, `GpuHang`) count

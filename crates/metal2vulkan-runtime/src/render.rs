@@ -301,6 +301,7 @@ use super::linear_attachment;
 use super::linear_merge::LinearMerge;
 use super::live_bind::{Emptied, LiveBind, Reshape};
 use super::nan_clear::{keeps_nan_sign, NanClears, NanDepthWrite};
+use super::owned_kernel::OwnedModule;
 use super::pipeline::Settled;
 use super::pipeline::{BufferForms, DrawPipeline};
 use super::pipeline::{DrawDynamic, RawPipeline, RenderVariant, VariantObjects};
@@ -8880,8 +8881,33 @@ impl RenderLowering {
                     })
                     .unwrap_or_default();
                 let pipelines = variant.mesh_pipelines(specialization, &formats)?;
-                let object = match (dispatch.object_groups, pipelines.object) {
-                    (Some(groups), Some(pipeline)) => Some((pipeline, groups)),
+                // An indirect draw with an object function: its object arguments pass, and its
+                // object dispatch from the work buffer, where the pass writes it.
+                let arguments = match (dispatch.object_arguments, indirect) {
+                    (Some(range), Some(source)) => Some(mesh::Scan::new(
+                        &mut self.core,
+                        OwnedModule::MeshObjectArguments,
+                        work,
+                        Some((source.raw, range)),
+                    )?),
+                    (None, _) => None,
+                    (Some(_), None) => {
+                        return Err(internal("an object arguments pass without its arguments"))
+                    }
+                };
+                let launch = match (dispatch.object_groups, &arguments) {
+                    (Some(groups), None) => Some(mesh::Launch::Direct(groups)),
+                    (None, Some(_)) => {
+                        let (raw, at) = work.at(MeshDispatch::OBJECT_DISPATCH_OFFSET);
+                        Some(mesh::Launch::Indirect(raw, at))
+                    }
+                    (None, None) => None,
+                    (Some(_), Some(_)) => {
+                        return Err(internal("an object dispatch of both launches"));
+                    }
+                };
+                let object = match (launch, pipelines.object) {
+                    (Some(launch), Some(pipeline)) => Some((pipeline, launch)),
                     (None, _) => None,
                     (Some(_), None) => {
                         return Err(internal("an object dispatch without the object's pipeline"))
@@ -8897,7 +8923,12 @@ impl RenderLowering {
                                 return Err(internal("a mesh scan without its arguments"))
                             }
                         };
-                        let scan = mesh::Scan::new(&mut self.core, work, arguments)?;
+                        let scan = mesh::Scan::new(
+                            &mut self.core,
+                            OwnedModule::MeshScan,
+                            work,
+                            arguments,
+                        )?;
                         let (raw, at) = work.at(MeshDispatch::DISPATCH_OFFSET);
                         (Some(scan), mesh::Launch::Indirect(raw, at))
                     }
@@ -8909,6 +8940,7 @@ impl RenderLowering {
                     offsets: live.offsets.clone(),
                     heap: heap_set,
                     push,
+                    arguments,
                     object,
                     scan,
                     pipeline: pipelines.mesh,

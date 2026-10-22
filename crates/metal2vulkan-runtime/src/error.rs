@@ -1507,19 +1507,6 @@ pub enum RuntimeGap {
         /// The descriptor's pixel format.
         pixel_format: PixelFormat,
     },
-    /// The multisample resolve (`MultisampleResolve`, `StoreAndMultisampleResolve`) of a color
-    /// attachment of an extended-range format (`BGRA10_XR`, `BGR10_XR` and their `_sRGB` twins),
-    /// which Metal makes. The runtime holds such an attachment's raw codes and builds no resolve of
-    /// them. Metal's, measured on an M3 Max under macOS 27.0.1 at 2 and 4 samples: `BGR10_XR`'s
-    /// channels and `BGRA10_XR`'s color are the average of the samples' stored 10-bit codes,
-    /// rounded half up (every texel probed); `BGRA10_XR`'s alpha is near the average of the
-    /// samples' alphas as `half` values clamped to `[0, 1]`, and the `_sRGB` twins' color near the
-    /// encoded average of the samples' linear values (not fitted to the code). Both of those read
-    /// the values the fragment function wrote, which the stored codes do not keep.
-    ExtendedRangeResolve {
-        /// The attachment's pixel format.
-        pixel_format: PixelFormat,
-    },
     /// A blit copy between a buffer and a multisampled texture (`copyFromBuffer:...toTexture:`
     /// into, or `copyFromTexture:...toBuffer:` out of, a texture of more than one sample).
     /// Vulkan copies no multisampled image to or from a buffer (its `vkCmdCopyBufferToImage` and
@@ -1615,8 +1602,9 @@ pub enum CommandBufferError {
     /// the command buffer fails (`NotImplemented(SamplerBicubicFilter)`'s reach, decided where the
     /// function ran). A command buffer whose functions never reach such a sampler runs as Metal's.
     CubicArgumentSampler,
-    /// An emulated mesh draw's records did not fit the rest of the command buffer's mesh records
-    /// pool, or its vertices passed a `u32`: such draws drew nothing. Metal draws them; the
+    /// An emulated mesh draw's records, or an emulated indirect draw's object slots (one per object
+    /// threadgroup, the grid and payload its object function writes), did not fit the rest of the
+    /// command buffer's mesh records pool, or its vertices passed a `u32`: such draws drew nothing. Metal draws them; the
     /// runtime's pool is the device's budget, so nothing is drawn short silently. The first such
     /// draw, as its scan saw it.
     MeshRecordsOverflow(MeshRecordsOverflow),
@@ -1632,7 +1620,10 @@ pub enum CommandBufferError {
     /// as the GPU wrote it, past the task stage's limits (`maxTaskWorkGroupCount`,
     /// `maxTaskWorkGroupTotalCount`), or a mesh grid past the mesh stage's; on one that folds them,
     /// a grid of more pieces than `MeshArguments::OBJECT_PIECES` (only under task limits below
-    /// Vulkan's required least). Nothing is drawn short silently. A direct draw of such a grid on
+    /// Vulkan's required least); on a device without `VK_EXT_mesh_shader` (the emulation), an
+    /// indirect draw's object grid past the device's `maxComputeWorkGroupCount`, or one whose
+    /// threads per grid along an axis reach 2^32 (Metal reports the wrapped grid, which the
+    /// emulation's dispatch cannot). Nothing is drawn short silently. A direct draw of such a grid on
     /// a device that does not fold is refused as it is encoded (`Unsupported{MeshShading}` naming
     /// the limit). Not Metal's failure: an object grid Metal's GPU discards is
     /// [`GpuRecoveryVictim`](Self::GpuRecoveryVictim).
@@ -1960,7 +1951,8 @@ pub struct MeshRecordsOverflow {
     pub draw: u32,
     /// Its object threadgroups (1 for a pipeline without an object function).
     pub object_threadgroups: u32,
-    /// The mesh threadgroups it launched, saturated at `u32::MAX`.
+    /// The mesh threadgroups it launched, saturated at `u32::MAX`; 0 where its object slots did
+    /// not fit, before any launched.
     pub mesh_threadgroups: u32,
     /// The bytes of the command buffer's records pool, the device's budget.
     pub budget: u64,

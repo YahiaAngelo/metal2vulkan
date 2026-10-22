@@ -66,6 +66,7 @@ metal2vulkan-degrade-extended-range-bits-kept
 metal2vulkan-degrade-extended-range-blend-source
 metal2vulkan-degrade-extended-range-blends-stored-codes
 metal2vulkan-degrade-extended-range-float-blend-source
+metal2vulkan-degrade-extended-range-resolve
 metal2vulkan-degrade-f16-fma-double-rounding
 metal2vulkan-degrade-f16-int-conv-double-rounding
 metal2vulkan-degrade-fast-math-rewrites

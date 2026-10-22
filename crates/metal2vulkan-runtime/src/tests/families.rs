@@ -770,8 +770,8 @@ fn rows_built_since_are_exact_or_the_compile_layer_s() {
 /// A format Metal makes no multisample texture of answers neither MSAA nor resolve on any
 /// committed profile, as `new_texture` refuses the texture the probe stands for: the two-plane
 /// extended-range formats (Metal's validation stops one) and the two-plane YCbCr ones. A one-plane
-/// extended-range format still answers MSAA as its held format does, and no resolve, which the
-/// render pass refuses. The stencil view `X32Stencil8` answers neither a filter nor a resolve, as
+/// extended-range format answers MSAA as its held format does, and a resolve where it answers
+/// MSAA, which the crate-owned resolve makes (`color_resolve.rs`). The stencil view `X32Stencil8` answers neither a filter nor a resolve, as
 /// Apple's tables list neither. Nor do the padded 10-bit formats, whose multisample texture Metal's
 /// validation stops.
 #[test]
@@ -844,9 +844,11 @@ fn formats_without_a_made_multisample_texture_or_a_modelled_resolve_answer_neith
             PixelFormat::BGR10XR,
             PixelFormat::BGR10XRSRGB,
         ] {
-            assert!(
-                !found(pf).contains(FormatCapability::Resolve),
-                "{stem}: {pf:?} answers a resolve the render pass refuses"
+            let capabilities = found(pf);
+            assert_eq!(
+                capabilities.contains(FormatCapability::Resolve),
+                capabilities.contains(FormatCapability::Msaa),
+                "{stem}: {pf:?} resolves where it multisamples"
             );
         }
         // The stencil view of the combined format: MSAA as the combined format, which it

@@ -309,8 +309,14 @@
 //!     draw are indirect from the work buffer, and the records lie in the command buffer's
 //!     records pool, where a draw that does not fit draws nothing and fails the command buffer
 //!     (`StatusReport::mesh_records_overflow`). Neither asks for its arguments on the CPU.
-//!   - An indirect draw of a pipeline with an object function is not implemented: its object
-//!     threadgroups, which size its work buffer, are GPU-written.
+//!   - An indirect draw of a pipeline with an object function, whose object threadgroups only the
+//!     GPU knows, runs an object arguments pass first (`mesh_object_arguments_module`,
+//!     `MeshDispatch::object_arguments`): it reads Metal's arguments, reserves the object
+//!     threadgroups' slots and offsets in the records pool (`lower::mesh::work::SLOTS`), and
+//!     writes the object dispatch, which reads its counts from the work buffer; then the scan as
+//!     above. A grid Metal's GPU discards, one past the compute limits or whose threads per grid
+//!     wrap, and one whose slots the pool cannot hold draw nothing and say so in the command
+//!     buffer's `ExecutionStatus`.
 
 use std::collections::BTreeMap;
 
@@ -625,12 +631,18 @@ impl Default for DrawCommands {
 /// - creates a compute pipeline of each of the pipeline's `COMPUTE` modules (the object
 ///   function's first, where it has one), under the pipeline's layout and the draw's
 ///   `DrawCommands::specialization`;
+/// - for an indirect draw with an object function ([`object_arguments`](Self::object_arguments)),
+///   dispatches [`mesh_object_arguments_module`](crate::bind::mesh_object_arguments_module) (one
+///   workgroup) under the scan's bindings first: it reads Metal's arguments, reserves the draw's
+///   slots and offsets in the records pool, and writes the object dispatch's
+///   `VkDispatchIndirectCommand` at [`OBJECT_DISPATCH_OFFSET`](Self::OBJECT_DISPATCH_OFFSET);
 /// - with an object function, binds its pipeline and the draw's sets at the compute bind point,
 ///   records the push writes whose stages are `COMPUTE`, and `vkCmdDispatch` of
-///   [`object_groups`](Self::object_groups);
+///   [`object_groups`](Self::object_groups), or, for an indirect draw, `vkCmdDispatchIndirect`
+///   from the work buffer at [`OBJECT_DISPATCH_OFFSET`](Self::OBJECT_DISPATCH_OFFSET);
 /// - for [`MeshGroups::Scanned`], dispatches [`MeshScanModule`](crate::bind::MeshScanModule)
-///   (one workgroup) over the work buffer, the command buffer's `ExecutionStatus` buffer and the
-///   arguments the variant names;
+///   (one workgroup) over the work buffer, the command buffer's `ExecutionStatus` buffer, the
+///   arguments the variant names and the records;
 /// - binds the mesh function's pipeline and the draw's sets, records the push writes whose
 ///   stages are `COMPUTE`, and dispatches its threadgroups: `vkCmdDispatch` of
 ///   [`MeshGroups::Direct`]'s counts (nothing where one is 0), or `vkCmdDispatchIndirect` from
@@ -652,8 +664,13 @@ pub struct MeshDispatch {
     /// The work buffer's bytes, at least 16.
     pub work_bytes: u64,
     /// The object function's threadgroups, the object dispatch's group counts; `None` for a
-    /// pipeline without an object function.
+    /// pipeline without an object function, and for an indirect draw with one.
     pub object_groups: Option<[u32; 3]>,
+    /// An indirect draw with an object function: the range of the Metal indirect buffer its
+    /// object arguments pass binds at `MeshScanModule::ARGUMENTS_BINDING`, from the arguments'
+    /// offset aligned down to `minStorageBufferOffsetAlignment` through their 12 bytes (the work
+    /// buffer's `OBJECT_ARGUMENTS` word names where they begin). `None` for any other draw.
+    pub object_arguments: Option<BufferRange>,
     /// The mesh threadgroups.
     pub mesh: MeshGroups,
     /// The records.
@@ -670,6 +687,9 @@ impl MeshDispatch {
     pub const DISPATCH_OFFSET: u64 = 4 * crate::lower::mesh::work::DISPATCH as u64;
     /// The byte of the work buffer where the draw's `VkDrawIndirectCommand` lies.
     pub const DRAW_OFFSET: u64 = 4 * crate::lower::mesh::work::DRAW as u64;
+    /// The byte of the work buffer where the object dispatch's `VkDispatchIndirectCommand` lies,
+    /// which the object arguments pass writes ([`object_arguments`](Self::object_arguments)).
+    pub const OBJECT_DISPATCH_OFFSET: u64 = 4 * crate::lower::mesh::work::OBJECT_DISPATCH as u64;
 }
 
 /// Where an emulated mesh draw's mesh threadgroups come from ([`MeshDispatch`]).
@@ -3343,7 +3363,8 @@ fn mesh_draw(
     let (command, dispatch) = match &t.records {
         None => (command, None),
         Some(r) => {
-            let (command, dispatch) = emulated_draw(r, t.object.is_some(), draw, groups, launches)?;
+            let (command, dispatch) =
+                emulated_draw(r, t.object.is_some(), draw, (groups, lo), launches)?;
             (command, Some(dispatch))
         }
     };
@@ -3431,8 +3452,8 @@ fn mesh_draw(
 
 /// The draw and the compute work of an emulated mesh draw `draw` under `r` ([`MeshDispatch`]),
 /// of a pipeline with an object function where `object`: `groups` are the first stage's
-/// threadgroups of a direct draw (`None` for an indirect one), and a draw that `launches`
-/// nothing runs nothing and draws nothing.
+/// threadgroups of a direct draw (`None` for an indirect one), `lo` the threads of an object
+/// threadgroup, and a draw that `launches` nothing runs nothing and draws nothing.
 ///
 /// - A direct draw without an object function is the host's: `G` mesh threadgroups (refused as
 ///   a group count where they pass a `u32`), their records exactly (`maxStorageBufferRange`,
@@ -3444,13 +3465,15 @@ fn mesh_draw(
 ///   work buffer must be bindable whole, else refused naming `maxStorageBufferRange` with its
 ///   bytes), and an indirect draw without one reads Metal's arguments in the scan: both are
 ///   scanned, their records in the command buffer's pool.
-/// - An indirect draw with an object function is not implemented: its object threadgroups,
-///   which size its work buffer, are GPU-written.
+/// - An indirect draw with an object function, of object threadgroups of `lo` threads, runs the
+///   object arguments pass first (`MeshDispatch::object_arguments`), which reads Metal's
+///   arguments, reserves the slots and offsets of its object threadgroups in the pool, and writes
+///   the object dispatch, which reads its counts from the work buffer; then the scan, as above.
 fn emulated_draw(
     r: &RecordsTemplate,
     object: bool,
     draw: &DrawCall,
-    groups: Option<[u32; 3]>,
+    (groups, lo): (Option<[u32; 3]>, [u32; 3]),
     launches: bool,
 ) -> Result<(vk::DrawCommand, MeshDispatch), BindError> {
     use crate::lower::mesh::work;
@@ -3478,6 +3501,18 @@ fn emulated_draw(
         }
         Ok(bytes)
     };
+    // The range of Metal's arguments at `offset` a pass binds, from the offset aligned down to
+    // `minStorageBufferOffsetAlignment`, and the arguments' byte in it.
+    let arguments_range = |offset: u64| {
+        let a = r.alignment.max(4);
+        let start = offset - offset % a;
+        let residual = offset - start;
+        let range = BufferRange {
+            offset: start,
+            range: residual + 12,
+        };
+        (range, residual)
+    };
     let scanned = |objects: u32, object_groups, arguments| -> Result<_, BindError> {
         let command = vk::DrawCommand::DrawIndirect {
             offset: MeshDispatch::DRAW_OFFSET,
@@ -3488,6 +3523,7 @@ fn emulated_draw(
             work: header(objects),
             work_bytes: work_bytes(u64::from(objects))?,
             object_groups,
+            object_arguments: None,
             mesh: MeshGroups::Scanned { arguments },
             records: MeshRecordsRegion::Pool,
         };
@@ -3537,6 +3573,7 @@ fn emulated_draw(
                 work: w,
                 work_bytes: work_bytes(1)?,
                 object_groups: None,
+                object_arguments: None,
                 mesh: MeshGroups::Direct(folded),
                 records: MeshRecordsRegion::Exact(bytes),
             };
@@ -3553,19 +3590,28 @@ fn emulated_draw(
             let DrawCall::MeshThreadgroupsIndirect { indirect, .. } = *draw else {
                 return Err(internal(format!("an indirect mesh draw of {draw:?}")));
             };
-            let a = r.alignment.max(4);
-            let start = indirect.offset - indirect.offset % a;
-            let residual = indirect.offset - start;
-            let range = BufferRange {
-                offset: start,
-                range: residual + 12,
-            };
+            let (range, residual) = arguments_range(indirect.offset);
             let mut out = scanned(1, None, Some(range))?;
             let word = u32::try_from(residual / 4 + 1).map_err(|_| count_past())?;
             out.1.work[work::ARGUMENTS as usize] = word;
             Ok(out)
         }
-        (true, None) if launches => Err(not_implemented(Feature::MeshShading)),
+        // Metal's arguments are the object grid: the object arguments pass reads them, reserves
+        // the slots in the pool and writes the object dispatch; then the scan.
+        (true, None) if launches => {
+            let DrawCall::MeshThreadgroupsIndirect { indirect, .. } = *draw else {
+                return Err(internal(format!("an indirect mesh draw of {draw:?}")));
+            };
+            let range = arguments_range(indirect.offset);
+            let mut out = scanned(0, None, None)?;
+            let word = u32::try_from(range.1 / 4 + 1).map_err(|_| count_past())?;
+            let packed = crate::lower::dispatch::pack_nominal(lo)
+                .ok_or_else(|| internal(format!("object threadgroups of {lo:?} threads")))?;
+            out.1.work[work::OBJECT_ARGUMENTS as usize] = word;
+            out.1.work[work::OBJECT_THREADS as usize] = packed;
+            out.1.object_arguments = Some(range.0);
+            Ok(out)
+        }
         // A draw that launches nothing: no step runs, and nothing is drawn.
         (_, _) => {
             let command = vk::DrawCommand::Draw {
@@ -3580,6 +3626,7 @@ fn emulated_draw(
                 work: w,
                 work_bytes: work_bytes(1)?,
                 object_groups: None,
+                object_arguments: None,
                 mesh: MeshGroups::Direct([0; 3]),
                 records: MeshRecordsRegion::Exact(MIN_RECORDS_BYTES),
             };
@@ -4781,11 +4828,11 @@ fn instantiate(
         Some(indices) => uses.push(indices),
         None => draw_uses(uses, draw, overrun, t.tessellation.as_ref()),
     }
-    // An indirect mesh draw's arguments pass, or an emulated one's scan, reads Metal's 12 bytes
-    // in the compute stage.
-    let scanned = mesh_dispatch
-        .as_ref()
-        .is_some_and(|d| matches!(d.mesh, MeshGroups::Scanned { arguments: Some(_) }));
+    // An indirect mesh draw's arguments pass, or an emulated one's scan or object arguments pass,
+    // reads Metal's 12 bytes in the compute stage.
+    let scanned = mesh_dispatch.as_ref().is_some_and(|d| {
+        matches!(d.mesh, MeshGroups::Scanned { arguments: Some(_) }) || d.object_arguments.is_some()
+    });
     if scanned || mesh_arguments.is_some() {
         uses.push(ResourceUse {
             resource: UseTarget::Indirect,

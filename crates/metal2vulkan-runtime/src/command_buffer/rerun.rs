@@ -39,13 +39,15 @@
 //!   once the check ends: they read what the laying leaves.
 //! - **Ends.** As Metal's GPU runs a loop without bound on after the program let go of every
 //!   handle of its queue and its device, so does the thread, which holds the command buffer, and
-//!   through it the queue and the device. It stops only at a lost device, a failed submission,
-//!   wait or recording (each failing the command buffer as its submission or host step would),
-//!   or the process's exit, which it never holds up: it waits in slices of [`WAIT_SLICE`], each
-//!   inside a section of the exit guard, and does nothing more once the guard closes. Each run
-//!   again is counted (`WorkCounts::predicated_loop_runs_again`).
+//!   through it the queue and the device. It stops only at a lost device, the GPU's recovery
+//!   from a fault or a hang anywhere on the device, as Metal's loop does (`recovery.rs`), a
+//!   failed submission, wait or recording (each failing the command buffer as its submission or
+//!   host step would), or the process's exit, which it never holds up: it waits in slices of
+//!   [`WAIT_SLICE`], each inside a section of the exit guard, and does nothing more once the
+//!   guard closes. Each run again is counted (`WorkCounts::predicated_loop_runs_again`).
 
 use super::gate::Hold;
+use super::recovery::{self, Recovery};
 use super::{
     command_pool, recording_error, step_error, submission_error, CommandBuffer, CommandBufferShared,
 };
@@ -177,6 +179,8 @@ enum Round {
     Ended,
     /// The command buffer fails so.
     Failed(CommandBufferError),
+    /// The loop stopped with no error, and nothing after it runs (`recovery.rs`).
+    Cut,
     /// The process is exiting: the thread does nothing more.
     Exiting,
 }
@@ -482,12 +486,17 @@ fn nothing() -> RecordedSegment {
 }
 
 /// The loop's decision before each run again: `None` where it runs again; else how it ends
-/// without running. It stops once its device is lost (the module docs).
+/// without running. It stops once its device is lost (the module docs), and at the GPU's
+/// recovery from a fault (as a victim) or a hang (cut) since its command buffer's first
+/// submission (`recovery.rs`).
 fn before_round(buffer: &CommandBufferShared) -> Option<Round> {
     if buffer.device.is_lost() {
         return Some(Round::Failed(CommandBufferError::DeviceLost));
     }
-    None
+    match recovery::recovered(buffer)? {
+        Recovery::Fault => Some(Round::Failed(CommandBufferError::GpuRecoveryVictim)),
+        Recovery::Hang => Some(Round::Cut),
+    }
 }
 
 /// The check's thread (the module docs): run the laying again until the loop ends, or the check
@@ -515,6 +524,10 @@ fn run_again(check: &LoopCheck, buffer: Hold<CommandBufferShared>) {
                 Round::Ended => break (None, true),
                 // A recording it left unended leaves the pool to be reset.
                 Round::Failed(error) => break (Some(error), false),
+                Round::Cut => {
+                    recovery::cut(&buffer, check);
+                    break (None, true);
+                }
                 // What it holds stays held to the process's end, as the scheduler's does.
                 Round::Exiting => {
                     std::mem::forget(arenas);

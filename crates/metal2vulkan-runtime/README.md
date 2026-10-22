@@ -243,7 +243,9 @@ Calls Metal does not have, for a consumer that emulates a Metal device:
   9, draws nothing and fails the command buffer as Metal's GPU does: a hang
   (`CommandBufferError::GpuHang`), a page fault or a victim of the GPU's recovery
   (`GpuRecoveryVictim`), by the draw's form, running nothing from its encoder on (docs/API.md,
-  "Accepted differences", for the timing and the race over the encoders after a fault);
+  "Accepted differences", for the timing and the race over the encoders after a fault); one that
+  fails at more than one encoder fails with the first one's error, in the time Metal's GPU takes
+  to reach and recover from each;
   a queue's second hang or page fault revokes it, as Metal's does: its later command buffers fail
   at their commit (`AccessRevoked`). A kernel's draw of a value past the header's draws points,
   as Metal's does.

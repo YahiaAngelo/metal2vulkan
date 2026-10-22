@@ -461,6 +461,9 @@ pub(super) struct DeviceShared {
     /// The trails its threads open between a signal and their last let-go of what they held for
     /// the work, which a command buffer's waiters wait for (`trails.rs`).
     pub(crate) trails: Arc<crate::trails::Trails>,
+    /// Its GPU's recoveries from faults and hangs, which end a predicated loop running meanwhile
+    /// (`command_buffer/recovery.rs`).
+    pub(crate) recoveries: Arc<crate::command_buffer::recovery::Recoveries>,
     /// Its graphics pipeline libraries, by part and content, where it links its render
     /// pipelines from libraries (`pipeline/libraries.rs`, `create.rs`); `None` where it makes
     /// each whole.
@@ -1729,6 +1732,7 @@ impl Device {
             pipeline_pool: Default::default(),
             reaper: Default::default(),
             trails: Arc::default(),
+            recoveries: Arc::default(),
             libraries: graphics_pipeline_library.then(Default::default),
         });
         // A CPU device runs the work submitted to it on the process's own threads: the exit hook

@@ -41,6 +41,7 @@ pub(super) mod kept_barriers;
 pub(super) mod own;
 mod protection;
 pub(super) mod rebound_use;
+pub(super) mod recovery;
 mod reencode;
 pub(super) mod rerun;
 pub(super) mod revocation;
@@ -106,7 +107,7 @@ use checks::{Checks, SubmissionCheck};
 use completion::Submitted;
 use first_submission::{Listing, Live};
 use gate::{Gate, Hold};
-use hang::{Hang, Held};
+use hang::{Hang, Held, Later};
 use metal2vulkan::bind::{
     ExecutionStatus, IndexBoundsPass, ReplayFaults, ResidentRange, ResidentSet, RootTable,
     StatusReport,
@@ -1223,6 +1224,8 @@ impl State {
     /// it on (`faulted`, `Failure::with_faults`); where nothing failed it from an earlier encoder
     /// and no earlier encoder faulted, the work before the encoder signals the fault's hold and
     /// what follows waits for it (`hang.rs`), so the command buffer completes when Metal's does.
+    /// Where an earlier encoder faulted, the GPU reaches this one once it recovered: the earlier
+    /// fault's hold counts it (`Hang::fails_later`).
     pub(super) fn fault(
         &mut self,
         encoder: usize,
@@ -1230,7 +1233,11 @@ impl State {
         device: &Device,
     ) -> Result<(), Error> {
         if self.fails_from.is_none() && self.hang.is_none() {
-            self.hold(device, encoder, Held::Fault)?;
+            self.hold(device, encoder, Held::Fault(Later::default()))?;
+        } else if !self.faulted.contains_key(&encoder) {
+            if let Some(hang) = &mut self.hang {
+                hang.fails_later(false);
+            }
         }
         self.faulted.entry(encoder).or_insert(error);
         Ok(())
@@ -1240,9 +1247,13 @@ impl State {
     /// (`hang.rs`): the command buffer fails from it on with `CommandBufferError::GpuHang`, and,
     /// where nothing failed it from an earlier encoder, the work before the encoder signals the
     /// hang's event and what follows waits for the hang's hold. Where an earlier encoder faulted,
-    /// the GPU never reaches it: it fails from the fault (`State::fault`).
+    /// it fails from the fault with the fault's error (`State::fault`), and the GPU reaches it
+    /// once it recovered: the fault's hold counts it (`Hang::fails_later`).
     pub(super) fn hang_from(&mut self, encoder: usize, device: &Device) -> Result<(), Error> {
         if !self.faulted.is_empty() {
+            if let Some(hang) = &mut self.hang {
+                hang.fails_later(true);
+            }
             return Ok(());
         }
         if self.fails_from.is_none() && self.hang.is_none() {

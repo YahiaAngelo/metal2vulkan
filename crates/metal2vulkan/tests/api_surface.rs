@@ -677,6 +677,7 @@ surface! {
         fn chroma_decode_module;
         enum ChromaDecode N;
         fn mesh_scan_module;
+        fn mesh_object_arguments_module;
         struct MeshScanModule N;
         fn mesh_arguments_module;
         fn fold_object_grid;

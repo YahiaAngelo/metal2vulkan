@@ -16,6 +16,14 @@
 //! format by Metal's multisample resolve store action), elsewhere a recorded near-equivalent,
 //! announced as `device-rounded-resolve`.
 //!
+//! An extended-range attachment (`BGR10_XR`, `BGRA10_XR`, their `_sRGB` twins and
+//! `RGB10A2Unorm_sRGB`, the forms Metal multisamples) is held in its raw format's codes, which no
+//! device's resolve averages, so it resolves by the crate-owned resolve at every count and under
+//! either policy ([`extended`]: `bind::ColorResolveFormat::extended_range`, whose docs state
+//! Metal's measured rule and the near-equivalents of the channels the codes cannot give, announced
+//! as `extended-range-resolve`), from any source below; an image that takes neither input
+//! attachment usage nor a copy is refused, as no other resolve reads it.
+//!
 //! The choice is made with the attachment's resolve ([`exact`], `resolve.rs`), so the pass's
 //! shape (`render_target.rs`) leaves such a resolve out of its subpass from its first instance:
 //! the pass's last instance stores the attachment's samples, and after the pass one render pass
@@ -91,7 +99,9 @@ use crate::shader_cache::driver::Making;
 use ash::vk;
 use metal2vulkan::bind::{color_resolve_modules, ColorResolveFormat, PlanesCopy, ResolveSource};
 use metal2vulkan::device::{DriverFact, FormatUsage, ResolvePolicy};
-use metal2vulkan::error::Feature;
+use metal2vulkan::error::{Feature, Unsupported};
+use metal2vulkan::metal::format::ExtendedRange;
+use metal2vulkan::metal::PixelFormat;
 use metal2vulkan::vk::{
     ComponentMapping, Format, FormatFeatureFlags2, ImageAspectFlags, ImageUsageFlags, ImageViewType,
 };
@@ -125,16 +135,43 @@ pub(super) fn average_is_metals(device: &Device, samples: u32) -> bool {
             .contains(&DriverFact::ColorResolveAverageIsMetals)
 }
 
-/// The exact resolve of the color attachment `source`, where the runtime resolves it so: [`exact`]
-/// of its format and samples, where the resolve may read its samples: through its image's input
-/// attachment usage, or from a copy of them into a scratch image that has it ([`copied`]), unless
-/// its sample planes hold them (the module docs).
+/// The resolve of a multisampled color attachment of the extended-range format `pf`, held in its
+/// raw format's codes, which no device's resolve averages: the crate-owned one at every count and
+/// under either `ResolvePolicy` (the module docs). `None` for another format.
+pub(super) fn extended(pf: PixelFormat) -> Option<ColorResolveFormat> {
+    ExtendedRange::of(pf).and_then(ColorResolveFormat::extended_range)
+}
+
+/// The crate-owned resolve of a color attachment of pixel format `pf`, held in `format`, at
+/// `samples` on `device`: an extended-range format's ([`extended`]) at every count past one, else
+/// [`exact`].
+pub(super) fn shader_rules(
+    device: &Device,
+    pf: PixelFormat,
+    format: Format,
+    samples: u32,
+) -> Option<ColorResolveFormat> {
+    match extended(pf) {
+        Some(rules) => (samples > 1).then_some(rules),
+        None => exact(device, format, samples),
+    }
+}
+
+/// The crate-owned resolve of the color attachment `source`, where the runtime resolves it so:
+/// [`shader_rules`] of its format and samples, where the resolve may read its samples: through its
+/// image's input attachment usage, or from a copy of them into a scratch image that has it
+/// ([`copied`]), unless its sample planes hold them (the module docs). An extended-range
+/// attachment's image that takes neither is refused: no other resolve reads its codes.
 pub(super) fn of_attachment(
     device: &Device,
     source: &Target,
 ) -> Result<Option<ColorResolveFormat>, Error> {
-    match exact(device, source.format, source.samples) {
+    let pf = source.texture.pixel_format();
+    match shader_rules(device, pf, source.format, source.samples) {
         Some(rules) if takes_input(source)? || copied(device, source)? => Ok(Some(rules)),
+        Some(_) if extended(pf).is_some() => Err(Error::Unsupported(Unsupported::not_implemented(
+            Feature::Format,
+        ))),
         _ => Ok(None),
     }
 }
@@ -190,15 +227,16 @@ pub(super) fn resolve_planes(layout: &mut PassLayout, last_storage: &[u32]) {
     }
 }
 
-/// `plan` with input attachment usage, where the runtime may resolve its image by the exact
+/// `plan` with input attachment usage, where the runtime may resolve its image by the crate-owned
 /// resolve reading it as an input attachment: a multisampled color attachment whose format and
-/// samples [`exact`] resolves on `device`. `None` where it has the usage already, or needs none.
+/// samples [`shader_rules`] resolves on `device`. `None` where it has the usage already, or needs
+/// none.
 pub(super) fn input_candidate(plan: &ImagePlan, device: &Device) -> Option<ImagePlan> {
     let usage = plan.usage;
     let samples = plan.samples.as_raw();
     let candidate = usage.contains(ImageUsageFlags::COLOR_ATTACHMENT)
         && !usage.contains(ImageUsageFlags::INPUT_ATTACHMENT)
-        && exact(device, plan.format, samples).is_some();
+        && shader_rules(device, plan.pixel_format, plan.format, samples).is_some();
     candidate.then(|| ImagePlan {
         usage: usage | ImageUsageFlags::INPUT_ATTACHMENT,
         ..plan.clone()

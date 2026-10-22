@@ -305,6 +305,12 @@ driver's. Each is open work.
   then, fails the command buffer as the encoder's draw does (`render/executions.rs`); failing it
   from inside the host step that meets the record, its earlier encoders run, is not built.
 
+- **A command buffer committed behind a running predicated loop on the loop's own queue waits for
+  the loop to end**, as every batch of a queue waits for the ones before it, where Metal's GPU
+  runs it meanwhile: a fault or hang in it ends the loop there on Metal (`recovery.rs`), and in
+  the runtime it waits, for good behind a loop without bound. A fault or hang on another queue
+  ends the loop as Metal's does.
+
 - **A no-copy buffer imported by its pointer follows a remap of its pages** on a driver whose
   pointer imports follow their address (`DriverFact::PointerImportsFollowTheirAddress`: ANV on
   i915, RADV, lavapipe): pages mapped over the buffer's addresses after it was made (`mmap` with
@@ -444,9 +450,11 @@ driver's. Each is open work.
   `drawIndirectCount` (no committed profile), an indirect draw's object grid past the task stage's
   limits fails its command buffer (`CommandBufferError::MeshGridPastLimits`, drawing nothing) and
   a direct one is refused (`Unsupported{MeshShading}` naming the limit). The emulation (MoltenVK,
-  ANV on the Iris Xe) refuses an indirect draw with an object function
-  (`NotImplemented(MeshShading)`) and a direct object grid past the compute stage's limits or
-  whose work buffer passes `maxStorageBufferRange` (`Unsupported{MeshShading}` naming the limit).
+  ANV on the Iris Xe) refuses a direct object grid past the compute stage's limits or whose work
+  buffer passes `maxStorageBufferRange` (`Unsupported{MeshShading}` naming the limit), and fails
+  the command buffer of an indirect one past the compute limits, or whose threads per grid wrap
+  along an axis (its object dispatch cannot report Metal's wrapped grid), with
+  `CommandBufferError::MeshGridPastLimits`.
 - **An object threadgroup that sets a mesh grid Metal launches nothing for keeps its own writes.**
   On the M3 Max such a threadgroup's device writes (an atomic add before the set) do not land
   either, while the draw's other threadgroups run; the runtime runs the threadgroup and launches

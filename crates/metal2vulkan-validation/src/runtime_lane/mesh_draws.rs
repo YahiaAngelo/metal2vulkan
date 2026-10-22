@@ -41,9 +41,10 @@
 //! be Metal's there too: the object function's compute dispatch writes each object threadgroup's
 //! grid and payload, a scan places their mesh threadgroups (or an indirect draw's, from Metal's
 //! arguments), and the mesh function's compute dispatch writes records that a synthesized vertex
-//! stage draws. There the grid case's indirect draw draws; the object case's indirect draw is
-//! refused (`NotImplemented(MeshShading)`), and so is a partial object threadgroup, as on a device
-//! with the extension.
+//! stage draws. There indirect draws draw too: an object function's through an object arguments
+//! pass, which reads Metal's arguments, reserves the object threadgroups' slots in the records
+//! pool and writes the object dispatch's grid. A partial object threadgroup is refused
+//! (`NotImplemented(MeshShading)`), as on a device with the extension.
 
 use super::degrade_notices::{assert_made_once, made_mesh_kinds};
 use super::gpu_times::read_kinds;
@@ -492,8 +493,8 @@ fn mesh_draws_store_metals_words() {
     );
 }
 
-/// Each object case draws the words Metal drew (the module docs), but the indirect one and those
-/// that leave a partial object threadgroup, refused, and each of [`OBJECT_PAST_CASES`] nothing; a
+/// Each object case draws the words Metal drew (the module docs), but those that leave a partial
+/// object threadgroup, refused, and each of [`OBJECT_PAST_CASES`] nothing; a
 /// device without `VK_EXT_mesh_shader` announces its emulated draws once ([`EMULATED_MESH`]), and
 /// another none.
 #[test]
@@ -524,14 +525,6 @@ fn object_draws_store_metals_words() {
             });
             let metals = metals(OBJECT_ANSWERS, case);
             match (draw, drawn) {
-                // The emulation's indirect draw with an object function.
-                (Draw::Indirect(..), Err(Error::Bind(BindError::Unsupported(u))))
-                    if u.feature == Feature::MeshShading
-                        && u.needs == Needs::NotImplemented
-                        && emulates(&lane.device) =>
-                {
-                    eprintln!("{case} on {name}: refused, emulated; Metal's: {metals:?}")
-                }
                 (Draw::Threads(..), Err(Error::Bind(BindError::Unsupported(u))))
                     if u.feature == Feature::MeshShading && u.needs == Needs::NotImplemented =>
                 {
@@ -753,8 +746,9 @@ const PAST_GRID: [u32; 3] = [(1 << 29) + 1, 1, 1];
 /// Each of [`OBJECT_GRID_CASES`] leaves Metal's words on a device with `VK_EXT_mesh_shader`, its
 /// grid folded into the task stage's limits where it passes them, and each draw of [`PAST_GRID`]
 /// draws nothing and fails its command buffer as Metal's GPU discards it, a direct one from its
-/// encoder on; the emulation refuses what passes its compute limits, and its indirect draws
-/// (`Unsupported{MeshShading}`), printed.
+/// encoder on. The emulation refuses a direct grid past its compute limits
+/// (`Unsupported{MeshShading}`), and an indirect one past them, or whose threads per grid wrap
+/// along an axis, draws nothing and fails its command buffer (`MeshGridPastLimits`), each printed.
 #[test]
 fn object_grids_run_as_metal_runs_them() {
     let cache = ScratchCache::new().unwrap();
@@ -836,13 +830,27 @@ fn object_grids_run_as_metal_runs_them() {
             );
             (drawn, command_buffer.error(), words, what, tail)
         };
-        // The emulation's refusals: an indirect draw with an object function, and a grid past its
-        // compute limits.
+        // The emulation's refusal of a direct grid past its compute limits.
         let refused = |drawn: &Result<(), Error>| match drawn {
             Err(Error::Bind(BindError::Unsupported(u))) if u.feature == Feature::MeshShading => {
                 emulates(&device)
             }
             _ => false,
+        };
+        // An indirect grid the emulation cannot dispatch as Metal runs it: an axis past its
+        // compute limits, or whose threads per grid reach 2^32 (Metal reports the wrapped grid).
+        let limits = device
+            .compile_device()
+            .profile()
+            .limits()
+            .max_compute_work_group_count;
+        let undispatched = |c: &GridCase| {
+            emulates(&device)
+                && !c.direct
+                && !c.groups.contains(&0)
+                && (0..3).any(|i| {
+                    c.groups[i] > limits[i] || u64::from(c.groups[i]) * c.threads[i] >= 1 << 32
+                })
         };
         for c in &OBJECT_GRID_CASES {
             // The threadgroups Metal ran.
@@ -856,6 +864,17 @@ fn object_grids_run_as_metal_runs_them() {
             }
             if let Err(e) = drawn {
                 panic!("{what}: {e}");
+            }
+            if undispatched(c) {
+                eprintln!("{what}: past the emulation's dispatch: {error:?}");
+                assert_eq!(
+                    error,
+                    Some(CommandBufferError::MeshGridPastLimits),
+                    "{what}"
+                );
+                assert_eq!(words, RAN_NONE, "{what}");
+                assert!(tail, "{what}: the encoder after the draw's");
+                continue;
             }
             assert_eq!(error, None, "{what}");
             assert_eq!(words, c.words, "{what}");

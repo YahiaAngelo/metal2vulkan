@@ -406,6 +406,8 @@ mod extended_range_blends;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod extended_range_planes;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod extended_range_resolve;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod extended_range_samples;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod extended_range_targets;

@@ -1311,6 +1311,10 @@ mod bind_serde_round_trips {
                 work: vec![1, 0, 0, 2],
                 work_bytes: 112,
                 object_groups: Some([2, 1, 1]),
+                object_arguments: Some(crate::bind::BufferRange {
+                    offset: 0,
+                    range: 12,
+                }),
                 mesh: crate::bind::MeshGroups::Scanned {
                     arguments: Some(crate::bind::BufferRange {
                         offset: 64,

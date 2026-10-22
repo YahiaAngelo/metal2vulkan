@@ -1,6 +1,7 @@
 //! A command buffer's GPU pools: the index pool its index bounds and index rewrite passes reserve
 //! indices in (`index_bounds.rs`, `index_rewrite.rs`), and the records pool its scanned emulated
-//! mesh draws reserve records in (`render/mesh.rs`). The GPU decides how much of each a command
+//! mesh draws reserve records in, and their indirect draws with an object function their object
+//! slots (`render/mesh.rs`). The GPU decides how much of each a command
 //! buffer takes (an indirect draw's count, an object stage's grids), after the draws that read
 //! them were recorded, so a pool is one block bound for the whole command buffer.
 //!

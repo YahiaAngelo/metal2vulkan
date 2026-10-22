@@ -753,6 +753,23 @@ degradations! {
             "the resolve applies the rules Metal's resolve follows at 2 and 4 samples (or the \
              device's average, for a format without them), which no Metal answer confirms at \
              this count";
+        /// A multisample resolve of an extended-range color attachment whose resolve Metal
+        /// averages from values finer than the codes the attachment holds (`BGRA10_XR`'s alpha,
+        /// an `_sRGB` twin's color, `RGB10A2Unorm_sRGB`'s channels;
+        /// `bind::ColorResolveFormat::extended_range`): the crate-owned resolve
+        /// (`color_resolve.rs`) writes a near-equivalent from the codes where a pixel's samples
+        /// differ, and Metal's code where they hold one. Measured against Metal's resolve on the
+        /// M3 Max under macOS 27.0.1 (our probe `xr`, 4096 texels per format at 2 and 4 samples,
+        /// each sample its own value): `BGRA10_XR`'s alpha Metal's in 84% and 88% of texels and
+        /// within a code in every one; an `_sRGB` twin's color in 81% and 85% of channels and
+        /// within a code in 99.5%, at most 7 codes off where the samples' values nearly cancel;
+        /// `RGB10A2Unorm_sRGB`'s colors in 83% and 87%, within 2, and its alpha in 94% and 97%,
+        /// within one (`runtime_lane::extended_range_resolve`). A linear form's color is Metal's
+        /// rule, every texel.
+        ExtendedRangeResolve = "extended-range-resolve", Precision,
+            "where a pixel's samples differ, a resolved alpha, or an sRGB color, can differ from \
+             Metal's by a code (an sRGB color by a few where the samples' values nearly cancel): \
+             Metal averages values finer than the codes the attachment holds";
         /// An attachment stored with `DontCare` (or the multisampled attachment of
         /// `MultisampleResolve`) is Vulkan's `DONT_CARE`, where Apple's GPU keeps the earlier
         /// texels unless its tiler overflows. Only on a driver measured to keep the earlier texel
@@ -4063,10 +4080,18 @@ impl Device {
                         color.target.samples
                     ),
                     format!(
-                        "the device's `AVERAGE` resolve of {:?} at {} samples is not measured to \
-                         be Metal's{}",
-                        color.target.format,
-                        color.target.samples,
+                        "{}{}",
+                        match color_resolve::extended(color.target.texture.pixel_format()) {
+                            Some(_) => format!(
+                                "no device's resolve averages the codes {:?} holds",
+                                color.target.format
+                            ),
+                            None => format!(
+                                "the device's `AVERAGE` resolve of {:?} at {} samples is not \
+                                 measured to be Metal's",
+                                color.target.format, color.target.samples
+                            ),
+                        },
                         match copied {
                             true => {
                                 "; the attachment's image takes no input attachment usage, so its \
@@ -4075,6 +4100,28 @@ impl Device {
                             false => "",
                         }
                     ),
+                )
+            });
+        }
+        // An extended-range resolve whose rule the codes cannot give (`color_resolve.rs`).
+        let near = colors.clone().find(|color| {
+            color
+                .resolve
+                .as_ref()
+                .and_then(|r| r.shader)
+                .is_some_and(|rules| !rules.exact())
+        });
+        if let Some(color) = near {
+            self.degrade(Degradation::ExtendedRangeResolve, || {
+                (
+                    format!(
+                        "a resolve of a {:?} color attachment of {} samples",
+                        color.target.texture.pixel_format(),
+                        color.target.samples
+                    ),
+                    "Metal averages the samples' values, finer than the codes the attachment \
+                     holds; the resolve averages the codes"
+                        .to_owned(),
                 )
             });
         }

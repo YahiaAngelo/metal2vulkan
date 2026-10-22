@@ -427,7 +427,8 @@ pub(super) fn stand_in_as(
     }
     // The exact color resolve reads a multisampled color attachment as an input attachment
     // (`color_resolve.rs`).
-    let resolved = multisampled && color_resolve::exact(device, format, target.samples).is_some();
+    let resolved = multisampled
+        && color_resolve::shader_rules(device, pixel_format, format, target.samples).is_some();
     if color && (framebuffer_fetch::through_inputs(profile) || resolved) {
         usage |= ImageUsageFlags::INPUT_ATTACHMENT;
     }
