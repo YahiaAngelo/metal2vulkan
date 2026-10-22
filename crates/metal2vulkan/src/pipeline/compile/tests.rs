@@ -677,6 +677,8 @@ fn the_inputs_encoding_is_the_earlier_derived_debug() {
                 .replace(", addressed_function_tables: false", "")
                 .replace(", unattached_colors: {}", "")
                 .replace(", sample_mask: None", "")
+                .replace(", alpha_test: None", "")
+                .replace(", depth_compare_clamp_mask: 0", "")
                 .replace(", read_only_tests: false", "")
                 .replace(", shader_tests: false", "")
                 .replace(", shader_stencil: false", "")
