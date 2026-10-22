@@ -1,20 +1,25 @@
 //! A predicated loop's runs again (`command_buffer/rerun.rs`) record the work its laying left
 //! apart with descriptor sets and uploads of the check's own arenas, let go once each run
 //! completed: the command buffer's own upload arena holds no more after forty runs than after
-//! three.
+//! three, and a descriptor arena lent so takes every set, its pools reset and taken again run
+//! after run.
 //!
 //! A device test: compiled only under the validation crate's GPU safety cfgs (`m2v_gpu`,
 //! `m2v_cpu_icd`), on the kind of device the cfg selects. The kernel is `scale_and_offset` of the
 //! owned fixture `validation/fixtures/public/examples/runtime_examples.ll` (`llvm-as`):
 //! `output[i] = input[i] * scale + i`.
 
+use crate::descriptor_arena::{DescriptorArena, SetNeeds};
+use crate::device::lock;
 use crate::{
     CommandBufferStatus, ComputePipelineState, Device, DeviceKind, DeviceOptions,
     IndirectCommandBufferDescriptor, PipelineOptions, ResourceOptions, Size,
 };
+use ash::vk;
 use metal2vulkan::metal::{IndirectCommandType, ResourceUsage};
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, StageSource};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// The longest the test waits for the loop's runs again, and for its command buffer.
@@ -142,4 +147,48 @@ fn a_loop_run_again_holds_no_more_uploads_each_run() {
     // SAFETY: the output's first words, which no command buffer writes now.
     let words = unsafe { std::slice::from_raw_parts(contents.as_ptr().cast::<f32>(), 4) };
     assert_eq!(words, [0.0, 3.0, 6.0, 9.0]);
+}
+
+/// A descriptor arena lent another (`DescriptorArena::lend`, as a run again's work apart records)
+/// allocates every set from the lent one and opens no pool of its own; the lent one's pools,
+/// reset after each of twenty runs of forty sets (`DescriptorArena::reset`, as each run again
+/// completed), take every later run's sets: the pools the first run opened are all it ever opens.
+#[test]
+fn a_lent_descriptor_arena_takes_every_set_and_its_reset_opens_no_pool() {
+    let device = device();
+    let raw = device.shared().vk();
+    let bindings = [vk::DescriptorSetLayoutBinding::default()
+        .binding(0)
+        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+        .descriptor_count(1)
+        .stage_flags(vk::ShaderStageFlags::COMPUTE)];
+    let info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
+    // SAFETY: `info` is live for the call.
+    let layout = unsafe { raw.create_descriptor_set_layout(&info, None) }.unwrap();
+    let needs = SetNeeds {
+        counts: vec![(vk::DescriptorType::STORAGE_BUFFER.as_raw(), 1)],
+        flags: vk::DescriptorPoolCreateFlags::empty(),
+    };
+    let mut own = DescriptorArena::default();
+    let lent = Arc::new(Mutex::new(DescriptorArena::default()));
+    own.lend(Some(Arc::clone(&lent)));
+    let mut opened = None;
+    for run in 0..20 {
+        for _ in 0..40 {
+            own.allocate(&device, layout, &needs).unwrap();
+        }
+        assert_eq!(
+            own.pools(),
+            0,
+            "run {run}: a set from the arena's own pools"
+        );
+        let made = device.work_counts().arena_pools_made;
+        assert_eq!(*opened.get_or_insert(made), made, "run {run} opened a pool");
+        lock(&lent).reset().unwrap();
+    }
+    own.lend(None);
+    assert!(lock(&lent).pools() > 0);
+    drop(lent);
+    // SAFETY: no set of the layout is in use, and its arenas' pools are gone.
+    unsafe { raw.destroy_descriptor_set_layout(layout, None) };
 }

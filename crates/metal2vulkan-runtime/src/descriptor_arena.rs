@@ -289,6 +289,12 @@ impl DescriptorArena {
         }
     }
 
+    /// How many pools it holds (a device test's measure).
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+    pub(crate) fn pools(&self) -> usize {
+        self.pools.len()
+    }
+
     /// Reset every pool, for the sets of the commands recorded next: no command uses their sets
     /// any more (the run again of a predicated loop's check completed, `command_buffer/rerun.rs`).
     /// Inside a section of the exit guard. Refused as `vkResetDescriptorPool` refuses, the pools
