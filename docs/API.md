@@ -3004,6 +3004,8 @@ each item named states the rule in full.
   `RenderPipelineState::unique_identifier`, `IndirectCommandBuffer::unique_identifier`) are
   nonzero and unique among live objects, laid out by Metal's rule where it was measured
   (`plain-state-unique-identifier`, `unmeasured-unique-identifier` where it differs).
+  `IndirectCommandBuffer::identifier_unmeasured` (no Metal counterpart) answers, without
+  announcing, whether a buffer's identifier is one that notice names.
 
 **Indirect command buffers**
 

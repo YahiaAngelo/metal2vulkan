@@ -102,7 +102,7 @@ use super::shadow_copy_back::{self, with_word_view, WordView};
 use super::shadow_merge::{with_unorm_view, UnormView};
 use super::sharing::Sharing;
 use super::sparse::emulated::TileMapBuffer;
-use super::sparse::texture::{sparse_refusal, SparseExtras, SparseImage, SparseShape};
+use super::sparse::texture::{sparse_refusal, SparseExtras, SparseImage, SparseShape, Zeroing};
 use super::sparse::SparsePageSize;
 use super::sparse::SparseProblem;
 use super::storage_placeholder::Placeholders;
@@ -1624,14 +1624,14 @@ impl Device {
     /// residency of its type and sample count, and the format's sparse properties listing its
     /// aspects for its usage); else an ordinary image whose unmapped tiles the runtime keeps at
     /// zero, where no function reads an image's own residency (the device does not enable
-    /// `shaderResourceResidency`) and a copy writes the image (single-sampled, `TRANSFER_DST`),
-    /// with its tile map where its type has one. A cube texture has none: a slot that reads
-    /// residency from a tile map refuses it as it is bound (`NotImplemented(SparseTileMaps)`), and
-    /// every other read is the image's, zero at an unmapped tile. Refused otherwise: where a
-    /// function may read the image's residency, as `sparse_refusal` names what the device lacks (an
-    /// ordinary image would answer resident everywhere at a slot of the sparse arm and through a
-    /// handle); where the emulation cannot zero the texture (a multisampled one, which no copy
-    /// writes), `NotImplemented(SparseTileMaps)`. Each of the descriptor's refusals comes first.
+    /// `shaderResourceResidency`), with its tile map where its type has one. A cube or
+    /// multisampled texture has none: a slot that reads residency from a tile map refuses it as it
+    /// is bound (`NotImplemented(SparseTileMaps)`), and every other read is the image's, zero at an
+    /// unmapped tile. Either way the runtime zeroes its unmapped texels (`Device::sparse_zeroing`).
+    /// Refused otherwise: where a function may read the image's residency, as `sparse_refusal`
+    /// names what the device lacks (an ordinary image would answer resident everywhere at a slot
+    /// of the sparse arm and through a handle); where the runtime cannot zero the texture, as
+    /// `Device::sparse_zeroing` refuses it. Each of the descriptor's refusals comes first.
     pub(crate) fn plan_sparse_texture(
         &self,
         call: &'static str,
@@ -1676,8 +1676,9 @@ impl Device {
             .shared()
             .textures
             .facts(self.compile_device().profile());
-        let (plan, twin) = plan_texture_images(&layout, descriptor.image_usage(), false, &facts)
-            .map_err(|refusal| image_error(call, refusal))?;
+        let (mut plan, twin) =
+            plan_texture_images(&layout, descriptor.image_usage(), false, &facts)
+                .map_err(|refusal| image_error(call, refusal))?;
         if twin.is_some() {
             // A depth twin would need its own memory bound alike.
             return Err(Error::NotImplemented(RuntimeGap::SparseHeaps));
@@ -1701,9 +1702,7 @@ impl Device {
         };
         let tile = shape.tile(page);
         let first = super::sparse::first_mipmap_in_tail(shape.extent, shape.levels, tile);
-        // A copy writes a single-sampled image that takes transfers: the runtime zeroes its
-        // unmapped texels, so its device units bind while any tile of theirs is mapped.
-        let zeroed = shape.samples == 1 && plan.usage.contains(ImageUsageFlags::TRANSFER_DST);
+        let zeroing = self.sparse_zeroing(&mut plan)?;
         let view_formats = plan.ash_view_formats();
         let mut list = vk::ImageFormatListCreateInfo::default();
         let info =
@@ -1711,9 +1710,9 @@ impl Device {
         let backing = match self.check_sparse_image(&info, mask) {
             Ok(()) => SparseBacking::Bound,
             Err(need) if self.reads_image_residency() => return Err(sparse_refusal(need)),
-            // A texture whose type has no tile map (a cube) is made without one: a slot that
-            // reads residency from a map refuses it as it is bound (`binding.rs`).
-            Err(_) if !zeroed => return Err(Error::NotImplemented(RuntimeGap::SparseTileMaps)),
+            // A texture whose type has no tile map (a cube, a multisampled one) is made without
+            // one: a slot that reads residency from a map refuses it as it is bound
+            // (`binding.rs`).
             Err(need) => SparseBacking::Emulated { need },
         };
         Ok(SparsePlan {
@@ -1723,9 +1722,37 @@ impl Device {
             mask,
             tile,
             first,
-            zeroed,
+            zeroing,
             backing,
         })
+    }
+
+    /// How the runtime zeroes the unmapped texels of a sparse texture of `plan`, which takes the
+    /// usage that needs: a single-sampled image that takes transfers by copies of zeros; a
+    /// multisampled one, which no copy writes, by clears in a render pass of its level and layer,
+    /// where a clear writes every texel of it (`clears_to_zero`: it takes transfers, which its
+    /// first clear and a move's copies need, and its format is an attachment's), made an
+    /// attachment. Refused otherwise (`NotImplemented(SparseTileMaps)`: the runtime writes such an
+    /// image's texels no other way), and a multisampled texture past the device's framebuffers
+    /// (`Unsupported(Feature::RenderTargetSize)`, as a pass is).
+    fn sparse_zeroing(&self, plan: &mut ImagePlan) -> Result<Zeroing, Error> {
+        if plan.samples.as_raw() == 1 {
+            return match plan.usage.contains(ImageUsageFlags::TRANSFER_DST) {
+                true => Ok(Zeroing::Copies),
+                false => Err(Error::NotImplemented(RuntimeGap::SparseTileMaps)),
+            };
+        }
+        if !self.clears_to_zero(plan) {
+            return Err(Error::NotImplemented(RuntimeGap::SparseTileMaps));
+        }
+        let [width, height, _] = plan.extent;
+        super::render_pass::framebuffer_fits([width, height], 1, self.shared().max_framebuffer)
+            .map_err(Error::Unsupported)?;
+        plan.usage |= match image_aspects(plan.format).contains(ImageAspectFlags::COLOR) {
+            true => ImageUsageFlags::COLOR_ATTACHMENT,
+            false => ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+        };
+        Ok(Zeroing::Clears)
     }
 
     /// A sparse texture of `descriptor` in sparse heap `heap`, held as
@@ -1749,7 +1776,7 @@ impl Device {
             mask,
             tile,
             first,
-            zeroed,
+            zeroing,
             backing,
         } = self.plan_sparse_texture(CALL, descriptor, sparse_heap.page)?;
         let cache = descriptor.resource_options.cpu_cache_mode()?;
@@ -1761,7 +1788,7 @@ impl Device {
         let tile_map = TileMapBuffer::new(self, &shape, plan.layers, tile, first)?;
         let extras = SparseExtras {
             zeros: sparse_heap.zeros()?,
-            zeroed,
+            zeroing,
             tile_map,
         };
         if let SparseBacking::Emulated { need } = backing {
@@ -1863,10 +1890,10 @@ impl Device {
         Ok(texture)
     }
 
-    /// The image of an emulated sparse texture of `plan` and `shape` from `heap`, which
-    /// [`plan_sparse_texture`](Self::plan_sparse_texture) found a copy writes and its tile map lays
-    /// out: an ordinary image in memory of its own, its unmapped tiles zeroed by the runtime (by
-    /// the copies of zeros its first move notes, made by the device's next submission), in the
+    /// The image of an emulated sparse texture of `plan` and `shape` from `heap`, as
+    /// [`plan_sparse_texture`](Self::plan_sparse_texture) planned it: an ordinary image in memory
+    /// of its own, its unmapped tiles zeroed by the runtime (by the copies of zeros its first move
+    /// notes, or a multisampled one's clear, made by the device's next submission), in the
     /// `UNDEFINED` layout until that move. Refused as an ordinary texture is.
     fn new_emulated_texture(
         &self,
@@ -1911,9 +1938,11 @@ impl Device {
             unsafe { release::object(raw_device, raw) };
             return Err(vulkan(error));
         }
-        // Moved, and zeroed where the runtime zeroes it, by the device's next submission.
+        // Moved, and zeroed, by the device's next submission.
         let first = FirstMove::new(raw, plan.format, vk::ImageLayout::UNDEFINED, None);
-        let first = if extras.zeroed {
+        let first = if extras.zeroing == Zeroing::Clears {
+            first.cleared()
+        } else {
             let units = copy_units(plan.format, plan.pixel_format);
             let volume = shape.texture_type == TextureType::Type3D;
             let (length, copies) = zero_copies(
@@ -1933,8 +1962,6 @@ impl Device {
                     return Err(error);
                 }
             }
-        } else {
-            first
         };
         let sparse = SparseImage::over_image(heap, (shape, plan.layers), mask, placement, extras);
         let sparse = match sparse {
@@ -3514,9 +3541,10 @@ impl Heap {
     /// the texture and no function reads an image's own residency (the device does not enable
     /// `shaderResourceResidency`; MoltenVK, which binds no sparse memory), it is an ordinary image
     /// whose unmapped tiles the runtime keeps at zero: Metal's answers. A blit's or a render pass's
-    /// writes into unmapped tiles are zeroed again after it, as Metal drops them; a multisampled
-    /// texture, which no copy writes, keeps each block's tiles all mapped or all unmapped instead.
-    /// Its storage is the heap's (`Private`), its CPU cache mode the descriptor's, its tracking
+    /// writes into unmapped tiles are zeroed again after it, as Metal drops them. The runtime
+    /// zeroes a single-sampled texture by copies, and a multisampled one, which no copy writes, by
+    /// clears in a render pass, its image made an attachment of its format, as Metal's reads zero
+    /// where unmapped (the M3 Max at 2x and 4x). Its storage is the heap's (`Private`), its CPU cache mode the descriptor's, its tracking
     /// mode the heap's, as Metal's are. Refused: what [`Device::new_texture`] refuses; a storage
     /// mode other than the heap's (stopped by Metal even without validation) and a dual-plane
     /// format (validation stops it; the stencil's mapping is not measured) (`Invalid`); a 1D, 1D
@@ -3524,8 +3552,10 @@ impl Heap {
     /// make sparse where a function may read the image's residency
     /// (`Unsupported(Feature::SparseTextures)`, naming what it lacks, or
     /// `NotImplemented(SparseTileMaps)` where it binds no sparse memory, as [`Device::new_heap`]
-    /// refuses); a multisampled texture that would be an ordinary image, which no copy writes
-    /// (`NotImplemented(SparseTileMaps)`); a `Depth32Float` texture that would need a depth twin
+    /// refuses); a texture whose unmapped texels the runtime cannot zero: a single-sampled one of a
+    /// format the device copies nothing into, a multisampled one of a format it does not clear and
+    /// render (`NotImplemented(SparseTileMaps)`), or past its framebuffers
+    /// (`Unsupported(Feature::RenderTargetSize)`); a `Depth32Float` texture that would need a depth twin
     /// (`NotImplemented(SparseHeaps)`); a two-plane extended-range format (`RGB10A8_2P_XR10` and
     /// its twin, `NotImplemented(Format)`).
     ///
@@ -3620,8 +3650,8 @@ pub(crate) enum SparseBacking {
 }
 
 /// A sparse texture planned (`Device::plan_sparse_texture`): its layout, its image's plan, its
-/// shape and aspects, Metal's tile and `firstMipmapInTail`, whether a copy writes its image, and
-/// how the runtime holds it.
+/// shape and aspects, Metal's tile and `firstMipmapInTail`, how the runtime zeroes its texels, and
+/// how it holds it.
 pub(crate) struct SparsePlan {
     layout: TextureLayout,
     plan: ImagePlan,
@@ -3629,7 +3659,7 @@ pub(crate) struct SparsePlan {
     mask: vk::ImageAspectFlags,
     tile: [u64; 3],
     first: u64,
-    zeroed: bool,
+    zeroing: Zeroing,
     pub(crate) backing: SparseBacking,
 }
 

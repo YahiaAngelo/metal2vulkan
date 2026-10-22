@@ -8,10 +8,7 @@
 //! tile ([`UnitGrid::move_boxes`]), zeroes the texels of each Metal unit it unmaps inside a unit
 //! that stays bound ([`UnitGrid::unmapped_boxes`]), and unbinds a unit when the last of its Metal
 //! units unmaps. An unmapped tile inside a bound unit therefore reads zero, Metal's answer; a unit
-//! that holds no mapped tile reads the device's value. Where the runtime cannot zero a texture's
-//! texels (a multisampled image, which no copy writes), every update keeps each device unit's Metal
-//! units all mapped or all unmapped instead ([`UnitGrid::check_exact`], [`UnitGrid::check_move`]),
-//! and a heap that fills inside one fails its batch (`CommandBufferError::SparseHeapSplit`).
+//! that holds no mapped tile reads the device's value.
 
 use super::emulated::Written;
 use super::texture::{SparseShape, VkSparseLayout};
@@ -408,10 +405,10 @@ impl UnitGrid {
 
     /// The texel boxes a move of Metal unit `from` of this grid to Metal unit `to` of grid
     /// `destination` copies, each source box with its destination: each level of the unit, from
-    /// its origin, in the extent both hold. None where the two grids' formats or tiles differ (a
-    /// move Metal's validation stops), or where one unit is a tail and the other a tile (a move
-    /// it takes): Metal's destination reads the moved bytes in another layout, and the runtime's
-    /// reads zero there (a near-equivalent).
+    /// its origin, in the extent both hold. None where the two grids' formats, sample counts or
+    /// tiles differ (a move Metal's validation stops), or where one unit is a tail and the other a
+    /// tile (a move it takes): Metal's destination reads the moved bytes in another layout, and
+    /// the runtime's reads zero there (a near-equivalent).
     pub(crate) fn move_boxes(
         &self,
         from: MetalUnit,
@@ -419,6 +416,7 @@ impl UnitGrid {
         to: MetalUnit,
     ) -> Vec<(TexelBox, TexelBox)> {
         if self.shape.pixel_format != destination.shape.pixel_format
+            || self.shape.samples != destination.shape.samples
             || self.tile != destination.tile
             || from.is_tail() != to.is_tail()
         {
@@ -533,54 +531,6 @@ impl UnitGrid {
             origin.map(|axis| axis as u32),
             size.map(|axis| axis as u32),
         ))
-    }
-
-    /// Whether every device unit `units` touch lies wholly in `units`: an update of them binds
-    /// whole device units, as a texture the runtime cannot zero needs.
-    pub(crate) fn check_exact(&self, units: &[MetalUnit]) -> bool {
-        let all: HashSet<MetalUnit> = units.iter().copied().collect();
-        let touched: BTreeSet<VkUnit> = units
-            .iter()
-            .flat_map(|&unit| self.vk_units_of(unit))
-            .collect();
-        touched.into_iter().all(|vk_unit| {
-            self.metal_units_of(vk_unit)
-                .iter()
-                .all(|unit| all.contains(unit))
-        })
-    }
-
-    /// Whether a move of `pairs` (each a unit of this grid and the unit of `to` it moves to)
-    /// keeps every device unit wholly mapped or wholly unmapped, whatever is mapped when it runs:
-    /// the source units cover whole device units of this grid and the destination units whole
-    /// device units of `to`, and the units of each source device unit all move into one
-    /// destination device unit and fill it, so each pair of device units moves whole or not at
-    /// all (for a texture the runtime cannot zero).
-    pub(crate) fn check_move(&self, to: &UnitGrid, pairs: &[(MetalUnit, MetalUnit)]) -> bool {
-        let sources: Vec<MetalUnit> = pairs.iter().map(|&(source, _)| source).collect();
-        let destinations: Vec<MetalUnit> =
-            pairs.iter().map(|&(_, destination)| destination).collect();
-        if !self.check_exact(&sources) || !to.check_exact(&destinations) {
-            return false;
-        }
-        let moved: HashMap<MetalUnit, MetalUnit> = pairs.iter().copied().collect();
-        let touched: BTreeSet<VkUnit> = sources
-            .iter()
-            .flat_map(|&unit| self.vk_units_of(unit))
-            .collect();
-        touched.into_iter().all(|vk_unit| {
-            let units = self.metal_units_of(vk_unit);
-            let targets: BTreeSet<VkUnit> = units
-                .iter()
-                .filter_map(|unit| moved.get(unit))
-                .flat_map(|&unit| to.vk_units_of(unit))
-                .collect();
-            let mut targets = targets.into_iter();
-            match (targets.next(), targets.next()) {
-                (Some(target), None) => to.metal_units_of(target).len() == units.len(),
-                _ => false,
-            }
-        })
     }
 
     /// The bytes of memory `unit` binds.

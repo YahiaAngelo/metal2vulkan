@@ -1315,13 +1315,6 @@ pub enum Feature {
     SparseTextures {
         missing: SparseNeed,
     },
-    /// A sparse texture's mapping update (`updateTextureMapping:` and its array form, or a move
-    /// of mappings) that covers part of one of the device's sparse blocks or of its mip tail, of
-    /// a texture whose texels no copy writes (a multisampled texture): binding the block would
-    /// leave its unmapped tiles' texels undefined where Metal reads them zero, and leaving it
-    /// unbound would leave tiles unmapped that Metal maps. A texture a copy writes binds the
-    /// block and zeroes the rest.
-    SparseMapping,
     /// Command buffers and events, which the runtime completes and signals through timeline
     /// semaphores (core in Vulkan 1.2), on a device whose `maxTimelineSemaphoreValueDifference`
     /// (`max_value_difference`) is below the `2^31 - 1` Vulkan requires of every device: the

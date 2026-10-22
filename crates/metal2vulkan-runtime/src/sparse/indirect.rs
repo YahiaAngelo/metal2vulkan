@@ -14,7 +14,7 @@ use super::encoder::SparseUpdate;
 use super::mapping::UnitUpdate;
 use crate::buffer::Buffer;
 use crate::degradation::Degradation;
-use crate::error::{internal, CommandBufferError, Error};
+use crate::error::{internal, Error};
 use crate::texture::Texture;
 use crate::values::{Region, ResourceOptions};
 use crate::Device;
@@ -25,33 +25,18 @@ use metal2vulkan::bind::TileMapping;
 /// and the slice.
 const ARGUMENT_WORDS: u64 = 8;
 
-/// Why an indirect update's host read failed the command buffer.
-pub(crate) enum ReadFailure {
-    /// The command buffer's error for the arguments read.
-    Arguments(CommandBufferError),
-    /// The read itself failed.
-    Read(Error),
-}
-
-impl From<Error> for ReadFailure {
-    fn from(error: Error) -> ReadFailure {
-        ReadFailure::Read(error)
-    }
-}
-
 /// The updates an indirect update of `texture` states now: its arguments at `offset` of
 /// `buffer`, a count and that many regions, mapped or unmapped by `mode` as one update of them
 /// all, through a view naming its texture's own tiles. Arguments Metal's validation stops map as
 /// plain Metal maps them (`UnitGrid::clipped_region`), and the regions the count names past the
-/// buffer map nothing (the M3 Max). Regions that bind part of a device unit of a texture whose
-/// texels no copy writes fail the command buffer typed (`SparseMappingSplit`).
+/// buffer map nothing (the M3 Max).
 pub(crate) fn resolve(
     device: &Device,
     texture: &Texture,
     mode: TileMapping,
     buffer: &Buffer,
     offset: u64,
-) -> Result<Vec<SparseUpdate>, ReadFailure> {
+) -> Result<Vec<SparseUpdate>, Error> {
     let sparse = texture
         .sparse_image()
         .ok_or_else(|| internal("an indirect update of a texture that is not sparse"))?;
@@ -76,11 +61,6 @@ pub(crate) fn resolve(
                 .grid
                 .clipped_region(word(6), word(7) + first, &region),
         );
-    }
-    if !sparse.zeroed && !sparse.grid.check_exact(&units) {
-        return Err(ReadFailure::Arguments(
-            CommandBufferError::SparseMappingSplit,
-        ));
     }
     if units.is_empty() {
         return Ok(Vec::new());

@@ -5,17 +5,21 @@
 //!   `shaderResourceResidency`), a sparse texture is an ordinary image in memory of its own: its
 //!   units are Metal's own (a tile, a slice's tail), so every mapping update is exact, and its
 //!   memory is its image's whatever is mapped.
-//! - **Zeroing.** Every sparse texture a copy writes keeps the texels of each unmapped Metal unit
-//!   inside memory it holds at zero: an ordinary image's from when it is made, a sparse image's
-//!   in each device unit bound while some Metal unit it holds texels of is mapped. A batch zeroes
-//!   each device unit it binds and the texels of each Metal unit it unmaps inside a unit that stays
-//!   bound ([`Mappings`]), and each blit that writes the texture is followed by the zeroing of the
-//!   unmapped Metal units it wrote there (its scrub, `Deferred::SparseScrub`), so a read of an
-//!   unmapped texel reads what Metal's reads, zero, and a blit's write to one is dropped as Metal
-//!   drops it (a blit into unmapped tiles leaves them reading zero). A sparse
-//!   image's device unit that holds no mapped tile reads the device's value, and a write into one
-//!   is the device's. A function's writes to a sparse texture never land (the module drops them, as
-//!   Metal does), and a render pass into an ordinary image is refused.
+//! - **Zeroing.** Every sparse texture keeps the texels of each unmapped Metal unit inside memory
+//!   it holds at zero: an ordinary image's from when it is made, a sparse image's in each device
+//!   unit bound while some Metal unit it holds texels of is mapped. A batch zeroes each device unit
+//!   it binds and the texels of each Metal unit it unmaps inside a unit that stays bound
+//!   ([`Mappings`]), and each blit or render pass that writes the texture is followed by the
+//!   zeroing of the unmapped Metal units it wrote there (its scrub, `Deferred::SparseScrub`), so a
+//!   read of an unmapped texel reads what Metal's reads, zero, and a write to one is dropped as
+//!   Metal drops it (a blit into unmapped tiles leaves them reading zero). A single-sampled image
+//!   is zeroed by copies of zeros; a multisampled one, which no copy writes, by clears
+//!   (`vkCmdClearAttachments`) in a render pass of its level and layer ([`Zeroing`]), as Metal's
+//!   multisampled sparse textures read zero where unmapped (a Metal probe, the M3 Max at 2x and
+//!   4x: a tile mapped, unmapped and mapped again, or mapped new, reads zero, and a clear's stores
+//!   into unmapped tiles are dropped). A sparse image's device unit that holds no mapped tile
+//!   reads the device's value, and a write into one is the device's. A function's writes to a
+//!   sparse texture never land (the module drops them, as Metal does).
 //! - **Tile maps.** A function reads a sparse texture's residency from a tile map
 //!   (`bind::SparseTileMap`) on every device, at each slot whose type has one and whose observed
 //!   accesses each name their texels: a buffer with a bit per tile, which each batch that changes
@@ -30,7 +34,7 @@
 
 use super::bind::Moved;
 use super::mapping::{MetalUnit, SparseState, TexelBox, VkUnit};
-use super::texture::{SparseImage, SparseShape};
+use super::texture::{SparseImage, SparseShape, Zeroing};
 use crate::buffer::Buffer;
 use crate::copy_plan::ImageRegion;
 use crate::device::lock;
@@ -38,8 +42,9 @@ use crate::error::{internal, Error};
 use crate::exit_guard::{self, Call};
 use crate::memory::Placement;
 use crate::render_pass::Target;
+use crate::render_target::{self, FramebufferObject, RenderPassObject, ATTACHMENT_STAGES};
 use crate::resource::ResourceKey;
-use crate::texture::{buffer_image_copy, copy_units, Texture};
+use crate::texture::{buffer_image_copy, copy_units, image_aspects, Texture};
 use crate::tracker::{Access, Use};
 use crate::upload::Uploads;
 use crate::values::ResourceOptions;
@@ -49,7 +54,7 @@ use metal2vulkan::bind::{SparseTileMap, TileMapping};
 use metal2vulkan::device::VkFeature;
 use metal2vulkan::metal::TextureType;
 use metal2vulkan::vk::{ImageAspectFlags, ImageUsageFlags};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Range;
 
 /// How a sparse texture's texels are held.
@@ -148,22 +153,57 @@ impl SparseImage {
     }
 }
 
-/// Record into `command_buffer` the copies of zeros that zero `boxes` of `texture`, a sparse
-/// texture whose image a copy writes (nothing for another), in the `GENERAL` layout, each box in
-/// pieces of at most one Metal tile, whose bytes the zeros hold.
+/// The render passes and framebuffers clears recorded with ([`record_zeroing`] of a texture the
+/// runtime zeroes by clears), held until their command buffer completes.
+#[derive(Default)]
+pub(crate) struct ClearObjects(Vec<(RenderPassObject, FramebufferObject)>);
+
+impl ClearObjects {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// Record into `command_buffer` the zeroing of `boxes` of `texture`, a sparse texture (nothing
+/// for another), in the `GENERAL` layout, as it is zeroed ([`Zeroing`]): copies of zeros, each box
+/// in pieces of at most one Metal tile, whose bytes the zeros hold; or clears in render passes
+/// ([`record_clears`]), whose objects go into `held`.
 ///
 /// # Safety
 ///
-/// `command_buffer` is recording outside a render pass; the texture is live and the memory of
-/// each box bound; the caller orders the copies after what used the image before and before what
-/// uses it after.
+/// `command_buffer` is a command buffer of `device` recording outside a render pass; the texture
+/// is live and the memory of each box bound; the caller orders the zeroing after what used the
+/// image before and before what uses it after.
 pub(crate) unsafe fn record_zeroing(
-    device: &ash::Device,
+    device: &Device,
+    command_buffer: vk::CommandBuffer,
+    texture: &Texture,
+    boxes: impl IntoIterator<Item = TexelBox>,
+    held: &mut ClearObjects,
+) -> Result<(), Error> {
+    let Some(image) = texture.sparse_image() else {
+        return Ok(());
+    };
+    match image.zeroing {
+        // SAFETY: the caller's.
+        Zeroing::Copies => unsafe { record_copies(device, command_buffer, texture, boxes) },
+        // SAFETY: the caller's.
+        Zeroing::Clears => unsafe { record_clears(device, command_buffer, texture, boxes, held) },
+    }
+}
+
+/// [`record_zeroing`] by copies of zeros, of a sparse texture whose image a copy writes.
+///
+/// # Safety
+///
+/// As [`record_zeroing`]'s.
+unsafe fn record_copies(
+    device: &Device,
     command_buffer: vk::CommandBuffer,
     texture: &Texture,
     boxes: impl IntoIterator<Item = TexelBox>,
 ) -> Result<(), Error> {
-    let Some(image) = texture.sparse_image().filter(|image| image.zeroed) else {
+    let Some(image) = texture.sparse_image() else {
         return Ok(());
     };
     let raw = texture.raw_image()?;
@@ -201,7 +241,7 @@ pub(crate) unsafe fn record_zeroing(
     // SAFETY: the caller's; the zeros are a live buffer of the device holding every copy's
     // bytes at `start`, and each region lies in the texture's image.
     unsafe {
-        device.cmd_copy_buffer_to_image(
+        device.shared().vk().cmd_copy_buffer_to_image(
             command_buffer,
             source,
             raw,
@@ -209,7 +249,123 @@ pub(crate) unsafe fn record_zeroing(
             &copies,
         );
     }
+    exit_guard::called(Call::CmdCopyBufferToImage);
     Ok(())
+}
+
+/// [`record_zeroing`] by clears, of a multisampled sparse texture, which no copy writes: for each
+/// level and layer a box lies in, a render pass of that level and layer alone, every aspect of
+/// the image's loaded and stored (`render_target::reach_pass`: the device's kept pass, and a
+/// framebuffer made now, which go into `held`), over the rectangle that bounds its boxes, in
+/// which `vkCmdClearAttachments` writes zero into each box. Zero bits are zero in every format's
+/// clear value.
+///
+/// # Safety
+///
+/// As [`record_zeroing`]'s.
+unsafe fn record_clears(
+    device: &Device,
+    command_buffer: vk::CommandBuffer,
+    texture: &Texture,
+    boxes: impl IntoIterator<Item = TexelBox>,
+    held: &mut ClearObjects,
+) -> Result<(), Error> {
+    let mut slices: BTreeMap<(u32, u32), Vec<vk::Rect2D>> = BTreeMap::new();
+    for b in boxes {
+        let rect = vk::Rect2D {
+            offset: vk::Offset2D {
+                x: b.origin[0] as i32,
+                y: b.origin[1] as i32,
+            },
+            extent: vk::Extent2D {
+                width: b.size[0],
+                height: b.size[1],
+            },
+        };
+        slices.entry((b.level, b.layer)).or_default().push(rect);
+    }
+    if slices.is_empty() {
+        return Ok(());
+    }
+    let plan = texture.image_plan()?;
+    let aspect = image_aspects(plan.format);
+    let attachments = [vk::ClearAttachment {
+        aspect_mask: aspect.into(),
+        color_attachment: 0,
+        clear_value: vk::ClearValue::default(),
+    }];
+    let raw = device.shared().vk();
+    for ((level, layer), rects) in slices {
+        let extent = [plan.extent[0], plan.extent[1]].map(|side| (side >> level).max(1));
+        let target = Target {
+            texture: texture.clone(),
+            level,
+            layer,
+            layers: 1,
+            format: plan.format,
+            samples: plan.samples.as_raw(),
+            extent,
+        };
+        let depth_stencil = !aspect.contains(ImageAspectFlags::COLOR);
+        let (pass, framebuffer, _) =
+            render_target::reach_pass(device, &target, depth_stencil, extent)?;
+        let area = bounding(&rects);
+        let clears: Vec<vk::ClearRect> = rects
+            .iter()
+            .map(|&rect| vk::ClearRect {
+                rect,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .collect();
+        let begin = vk::RenderPassBeginInfo::default()
+            .render_pass(pass.raw)
+            .framebuffer(framebuffer.raw)
+            .render_area(area);
+        // SAFETY: the caller's; the pass and its framebuffer are live until the command buffer
+        // completes (held), the framebuffer's one attachment the image's level and layer, in
+        // `GENERAL`, the pass's layout; the area and every rectangle lie in the level, and each
+        // rectangle in the area, of the framebuffer's one layer; the aspects are the image's.
+        unsafe {
+            raw.cmd_begin_render_pass(command_buffer, &begin, vk::SubpassContents::INLINE);
+            raw.cmd_clear_attachments(command_buffer, &attachments, &clears);
+            raw.cmd_end_render_pass(command_buffer);
+        }
+        held.0.push((pass, framebuffer));
+    }
+    exit_guard::called(Call::CmdBeginRenderPass);
+    exit_guard::called(Call::CmdClearAttachments);
+    exit_guard::called(Call::CmdEndRenderPass);
+    Ok(())
+}
+
+/// The rectangle that bounds `rects` (at least one).
+fn bounding(rects: &[vk::Rect2D]) -> vk::Rect2D {
+    let start = |r: &vk::Rect2D| [r.offset.x, r.offset.y];
+    let end = |r: &vk::Rect2D| {
+        [
+            r.offset.x + r.extent.width as i32,
+            r.offset.y + r.extent.height as i32,
+        ]
+    };
+    let low = rects
+        .iter()
+        .map(start)
+        .fold([i32::MAX; 2], |a, b| [a[0].min(b[0]), a[1].min(b[1])]);
+    let high = rects
+        .iter()
+        .map(end)
+        .fold([i32::MIN; 2], |a, b| [a[0].max(b[0]), a[1].max(b[1])]);
+    vk::Rect2D {
+        offset: vk::Offset2D {
+            x: low[0],
+            y: low[1],
+        },
+        extent: vk::Extent2D {
+            width: (high[0] - low[0]) as u32,
+            height: (high[1] - low[1]) as u32,
+        },
+    }
 }
 
 /// A barrier from every command before to every command after: all memory writes made
@@ -272,11 +428,11 @@ impl Written {
     }
 }
 
-/// A blit's or a render pass's writes of a sparse texture a copy writes: Metal drops a blit's write
-/// to an unmapped tile and a pass's store (a Metal sparse probe on the M3 Max and
-/// an M4), so where the command wrote an unmapped tile inside memory the texture holds the runtime
-/// zeroes it again right after, recorded as the batch is submitted, with the mappings the batch
-/// applied (`Deferred::SparseScrub`). A write into a device unit that holds no memory is the
+/// A blit's or a render pass's writes of a sparse texture: Metal drops a blit's write to an unmapped
+/// tile and a pass's store (a Metal sparse probe on the M3 Max and an M4, single-sampled and
+/// multisampled), so where the command wrote an unmapped tile inside memory the texture holds the
+/// runtime zeroes it again right after, recorded as the batch is submitted, with the mappings the
+/// batch applied (`Deferred::SparseScrub`). A write into a device unit that holds no memory is the
 /// device's (dropped: Vulkan discards a write to an unbound block).
 pub(crate) struct Scrub {
     texture: Texture,
@@ -285,22 +441,19 @@ pub(crate) struct Scrub {
 
 impl Scrub {
     /// The scrub of `written` of `texture` (made only for one), or `None` for a texture that is
-    /// not a sparse texture the runtime zeroes.
+    /// not sparse.
     pub(crate) fn of(texture: &Texture, written: impl FnOnce() -> Vec<Written>) -> Option<Scrub> {
-        texture
-            .sparse_image()
-            .filter(|image| image.zeroed)
-            .map(|_| Scrub {
-                texture: texture.clone(),
-                written: written(),
-            })
+        texture.sparse_image().map(|_| Scrub {
+            texture: texture.clone(),
+            written: written(),
+        })
     }
 
     /// The scrubs of a render pass's writes of `targets` (its attachments, resolve targets and the
     /// textures copied into after it) over its render area `extent` from the origin: Metal drops a
     /// pass's stores into unmapped tiles, of a clear, a draw and a resolve alike (a Metal sparse
-    /// probe on the M3 Max and an M4), as a blit's, so each sparse texture the runtime zeroes is
-    /// scrubbed after the pass. Inside the pass, the draws see what the draws before them stored,
+    /// probe on the M3 Max and an M4), as a blit's, so each sparse texture is scrubbed after the
+    /// pass. Inside the pass, the draws see what the draws before them stored,
     /// as in Metal's tile memory.
     pub(crate) fn of_pass<'a>(
         targets: impl IntoIterator<Item = &'a Target>,
@@ -323,19 +476,22 @@ impl Scrub {
 
     /// Record into `command_buffer` the zeroing of the unmapped units the writes touched inside
     /// memory the texture holds, as mapped now, between barriers from everything before and to
-    /// everything after.
+    /// everything after: what its clears recorded with, for the command buffer to hold until it
+    /// completes.
     ///
     /// # Safety
     ///
-    /// `command_buffer` is recording outside a render pass; the texture is live in the
-    /// `GENERAL` layout, and its mappings are those the batch the scrub is in applied.
+    /// `command_buffer` is a command buffer of `device` recording outside a render pass; the
+    /// texture is live in the `GENERAL` layout, and its mappings are those the batch the scrub is
+    /// in applied.
     pub(crate) unsafe fn record(
         &self,
-        device: &ash::Device,
+        device: &Device,
         command_buffer: vk::CommandBuffer,
-    ) -> Result<(), Error> {
+    ) -> Result<ClearObjects, Error> {
+        let mut held = ClearObjects::default();
         let Some(image) = self.texture.sparse_image() else {
-            return Ok(());
+            return Ok(held);
         };
         let boxes = {
             let state = lock(&image.state);
@@ -349,15 +505,15 @@ impl Scrub {
                 .grid
                 .unmapped_boxes(unmapped, |unit| image.held(unit, &state))
         };
+        let raw = device.shared().vk();
         // SAFETY: the caller's; each box lies in memory the texture holds.
         unsafe {
-            record_full_barrier(device, command_buffer);
-            record_zeroing(device, command_buffer, &self.texture, boxes)?;
-            record_full_barrier(device, command_buffer);
+            record_full_barrier(raw, command_buffer);
+            record_zeroing(device, command_buffer, &self.texture, boxes, &mut held)?;
+            record_full_barrier(raw, command_buffer);
         }
         exit_guard::called(Call::CmdPipelineBarrier);
-        exit_guard::called(Call::CmdCopyBufferToImage);
-        Ok(())
+        Ok(held)
     }
 }
 
@@ -380,12 +536,11 @@ struct MoveCopy {
     destination: TexelBox,
 }
 
-/// A batch's work on its sparse textures and tile maps after its updates applied, on the textures
-/// the runtime zeroes: each device unit the batch bound to new memory zeroed whole; each move's
-/// texels copied from its source tile to its destination, one tile at a time in the batch's order,
-/// as Metal's move takes them (a texture the runtime does not zero moves whole device units, their
-/// memory with them, `bind.rs`); each Metal unit it unmapped inside memory the texture still holds
-/// zeroed; and each changed tile map rewritten.
+/// A batch's work on its sparse textures and tile maps after its updates applied: each device unit
+/// the batch bound to new memory zeroed whole; each move's texels copied from its source tile to
+/// its destination, one tile at a time in the batch's order, as Metal's move takes them; each Metal
+/// unit it unmapped inside memory the texture still holds zeroed; and each changed tile map
+/// rewritten.
 #[derive(Default)]
 pub(crate) struct Mappings {
     work: Vec<TextureWork>,
@@ -412,33 +567,27 @@ impl Mappings {
         }
         let images: Vec<Option<&SparseImage>> = textures
             .iter()
-            .map(|texture| texture.sparse_image().filter(|image| image.zeroed))
+            .map(|texture| texture.sparse_image())
             .collect();
         let mut work = Vec::new();
         for (index, (texture, units)) in textures.iter().zip(touched).enumerate() {
             let (fresh, unmapped, map) = match texture.sparse_image() {
                 Some(image) if !units.is_empty() => {
                     let state = lock(&image.state);
-                    let (fresh, unmapped) = if image.zeroed {
-                        let bound = &binds[index];
-                        // Held once the batch's binds apply: what the plan bound (`bind.rs`).
-                        let held = |unit: VkUnit| {
-                            !bound.contains(&unit)
-                                && (image.emulated()
-                                    || image.grid.wanted(unit, &state.mapped)
-                                    || kept.contains(&(index, unit)))
-                        };
-                        let unmapped = units
-                            .iter()
-                            .copied()
-                            .filter(|unit| !state.mapped.contains(unit));
-                        (
-                            image.grid.bound_boxes(bound),
-                            image.grid.unmapped_boxes(unmapped, held),
-                        )
-                    } else {
-                        (BTreeSet::new(), BTreeSet::new())
+                    let bound = &binds[index];
+                    // Held once the batch's binds apply: what the plan bound (`bind.rs`).
+                    let held = |unit: VkUnit| {
+                        !bound.contains(&unit)
+                            && (image.emulated()
+                                || image.grid.wanted(unit, &state.mapped)
+                                || kept.contains(&(index, unit)))
                     };
+                    let unmapped = units
+                        .iter()
+                        .copied()
+                        .filter(|unit| !state.mapped.contains(unit));
+                    let fresh = image.grid.bound_boxes(bound);
+                    let unmapped = image.grid.unmapped_boxes(unmapped, held);
                     (fresh, unmapped, image.tile_map_bytes(&state.mapped))
                 }
                 _ => (BTreeSet::new(), BTreeSet::new(), Vec::new()),
@@ -477,32 +626,55 @@ impl Mappings {
             })
     }
 
-    /// What the work uses, for the hazard tracker, in the transfer stage: each texture it zeroes
-    /// or copies into written whole, each it only copies from read whole, and each tile map it
-    /// rewrites written whole.
+    /// What the work uses, for the hazard tracker: each texture it zeroes or copies into written
+    /// whole, each it only copies from read whole, in the transfer stage, or in the attachment
+    /// stages where its clears zero it; and each tile map it rewrites written whole.
     pub(crate) fn uses(&self) -> Result<Vec<Use<ResourceKey>>, Error> {
         let mut reads = vec![false; self.work.len()];
-        let mut writes: Vec<bool> = self
-            .work
-            .iter()
-            .map(|work| !work.fresh.is_empty() || !work.unmapped.is_empty())
-            .collect();
+        let mut moved_into = vec![false; self.work.len()];
         for copy in &self.copies {
             reads[copy.from] = true;
-            writes[copy.to] = true;
+            moved_into[copy.to] = true;
         }
         let mut uses = Vec::new();
-        for ((work, read), write) in self.work.iter().zip(reads).zip(writes) {
-            if read || write {
-                let mut access = vk::AccessFlags2::empty();
-                if read {
-                    access |= vk::AccessFlags2::TRANSFER_READ;
+        for ((work, read), moved_into) in self.work.iter().zip(reads).zip(moved_into) {
+            let zeroes = !work.fresh.is_empty() || !work.unmapped.is_empty();
+            let mut stages = vk::PipelineStageFlags2::empty();
+            let mut access = vk::AccessFlags2::empty();
+            if read || moved_into {
+                stages |= vk::PipelineStageFlags2::TRANSFER;
+            }
+            if read {
+                access |= vk::AccessFlags2::TRANSFER_READ;
+            }
+            if moved_into {
+                access |= vk::AccessFlags2::TRANSFER_WRITE;
+            }
+            let image = work.texture.sparse_image();
+            let plan = work.texture.image_plan()?;
+            match image.map(|image| image.zeroing) {
+                Some(Zeroing::Clears) if zeroes => {
+                    stages |= ATTACHMENT_STAGES;
+                    access |= match image_aspects(plan.format).contains(ImageAspectFlags::COLOR) {
+                        true => {
+                            vk::AccessFlags2::COLOR_ATTACHMENT_READ
+                                | vk::AccessFlags2::COLOR_ATTACHMENT_WRITE
+                        }
+                        false => {
+                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ
+                                | vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE
+                        }
+                    };
                 }
-                if write {
+                _ if zeroes => {
+                    stages |= vk::PipelineStageFlags2::TRANSFER;
                     access |= vk::AccessFlags2::TRANSFER_WRITE;
                 }
-                let access = Access::new(vk::PipelineStageFlags2::TRANSFER, access);
-                let plan = work.texture.image_plan()?;
+                _ => {}
+            }
+            if !access.is_empty() {
+                let access = Access::new(stages, access);
+                let write = moved_into || zeroes;
                 uses.push(
                     work.texture
                         .image_use(0..plan.levels, 0..plan.layers, access, write)?,
@@ -521,7 +693,8 @@ impl Mappings {
     /// everything after, each step after the one before it: the new units zeroed, each move's
     /// copy in order, the unmapped units zeroed, and each tile map's bytes copied from `uploads`,
     /// the command buffer's arena (inside the scheduler's section, whose entry points hold
-    /// copies, not buffer updates).
+    /// copies, not buffer updates). What its clears recorded with, for the command buffer to hold
+    /// until it completes.
     ///
     /// # Safety
     ///
@@ -533,22 +706,16 @@ impl Mappings {
         device: &Device,
         uploads: &mut Uploads,
         command_buffer: vk::CommandBuffer,
-    ) -> Result<(), Error> {
+    ) -> Result<ClearObjects, Error> {
         let raw = device.shared().vk();
+        let mut held = ClearObjects::default();
         // SAFETY: the caller's.
         unsafe { record_full_barrier(raw, command_buffer) };
         exit_guard::called(Call::CmdPipelineBarrier);
         for work in &self.work {
+            let fresh = work.fresh.iter().copied();
             // SAFETY: the caller's; each box lies in a unit the batch bound.
-            unsafe {
-                record_zeroing(
-                    raw,
-                    command_buffer,
-                    &work.texture,
-                    work.fresh.iter().copied(),
-                )?
-            };
-            exit_guard::called(Call::CmdCopyBufferToImage);
+            unsafe { record_zeroing(device, command_buffer, &work.texture, fresh, &mut held)? };
         }
         for copy in &self.copies {
             // SAFETY: the caller's; each step's writes finish before the next reads them.
@@ -567,16 +734,9 @@ impl Mappings {
         // SAFETY: the caller's.
         unsafe { record_full_barrier(raw, command_buffer) };
         for work in &self.work {
+            let unmapped = work.unmapped.iter().copied();
             // SAFETY: the caller's; each box lies in memory the texture holds after the binds.
-            unsafe {
-                record_zeroing(
-                    raw,
-                    command_buffer,
-                    &work.texture,
-                    work.unmapped.iter().copied(),
-                )?
-            };
-            exit_guard::called(Call::CmdCopyBufferToImage);
+            unsafe { record_zeroing(device, command_buffer, &work.texture, unmapped, &mut held)? };
             let tile_map = work.texture.sparse_image().and_then(SparseImage::tile_map);
             if let (false, Some(tile_map)) = (work.map.is_empty(), tile_map) {
                 let bytes = &work.map;
@@ -595,12 +755,12 @@ impl Mappings {
         }
         // SAFETY: the caller's.
         unsafe { record_full_barrier(raw, command_buffer) };
-        Ok(())
+        Ok(held)
     }
 }
 
 /// Record into `command_buffer` the copy of box `source` of texture `from` to box `destination`
-/// of texture `to`, both sparse textures the runtime zeroes, of one format, in the `GENERAL`
+/// of texture `to`, both sparse textures, of one format and sample count, in the `GENERAL`
 /// layout, each of the format's aspects; nothing where `from`'s image is not a copy's source.
 ///
 /// # Safety
@@ -643,7 +803,7 @@ unsafe fn record_move_copy(
         })
         .collect();
     // SAFETY: the caller's; each region lies in its image, which a copy reads (checked) or
-    // writes (the runtime zeroes it by copies).
+    // writes (every sparse texture's image takes transfer writes, `Device::plan_sparse_texture`).
     unsafe {
         device.cmd_copy_image(
             command_buffer,

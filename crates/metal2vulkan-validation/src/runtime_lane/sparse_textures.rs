@@ -5,8 +5,9 @@
 //! on a device whose blocks are 64 KiB, the unmapped tiles of its block reading zero on every
 //! device after a blit's or a render pass's writes; an indirect update maps what its buffer holds
 //! when it runs, which the host reads (`host-read-mapping-arguments`, once); a move takes mappings,
-//! and their texels, to unmapped tiles, of the same heap or another, counting nothing; committed
-//! sparse kernel cases read through the runtime what Metal read. A device that binds no sparse
+//! and their texels, to unmapped tiles, of the same heap or another, counting nothing; a
+//! multisampled texture reads zero where unmapped, as Metal's; committed sparse kernel cases read
+//! through the runtime what Metal read. A device that binds no sparse
 //! memory emulates sparse textures over ordinary images where its functions read tile maps
 //! (MoltenVK), every test here running on them; elsewhere it refuses the heap typed, naming what it
 //! lacks.
@@ -44,12 +45,12 @@ pub(super) const SPARSE: [Degradation; 3] = [
     Degradation::EmulatedSparseTexture,
 ];
 
-/// What `device` makes a sparse texture of `pf` (single-sample, of 2D images) of, read through
-/// Vulkan apart from the runtime: a sparse image where it binds sparse memory (`sparseBinding` and
-/// `sparseResidencyImage2D`, and its queue family's sparse-binding bit) and lists the format's
-/// sparse image properties of the colour aspect, else an ordinary image whose unmapped tiles the
-/// runtime keeps at zero (MoltenVK); and whether a sparse image's residency is
-/// `residencyNonResidentStrict`.
+/// What `device` makes a sparse texture of `pf` (of 2D images) of, read through Vulkan apart from
+/// the runtime: a sparse image where it binds sparse memory (`sparseBinding` and
+/// `sparseResidencyImage2D`, `sparseResidency2Samples` or `4Samples` for a multisampled one, and
+/// its queue family's sparse-binding bit) and lists the format's sparse image properties of the
+/// colour aspect, else an ordinary image whose unmapped tiles the runtime keeps at zero (MoltenVK);
+/// and whether a sparse image's residency is `residencyNonResidentStrict`.
 #[derive(Clone, Copy)]
 pub(super) struct SparseFacts {
     /// A sparse image, not an ordinary one (`emulated-sparse-texture`).
@@ -59,13 +60,23 @@ pub(super) struct SparseFacts {
 }
 
 impl SparseFacts {
-    /// The facts of `device` for a sparse texture of `pf`.
+    /// The facts of `device` for a single-sampled sparse texture of `pf`.
     pub(super) fn of(device: &Device, pf: PixelFormat) -> SparseFacts {
+        SparseFacts::of_samples(device, pf, 1)
+    }
+
+    /// The facts of `device` for a sparse texture of `pf` of 1, 2 or 4 `samples`, a multisampled
+    /// one a render target (the runtime makes its image an attachment).
+    fn of_samples(device: &Device, pf: PixelFormat, samples: u32) -> SparseFacts {
         let format = metal2vulkan::metal::format::direct_format(pf).expect("a sparse format");
         let format = vk::Format::from_raw(format.as_raw());
-        let usage = vk::ImageUsageFlags::SAMPLED
+        let mut usage = vk::ImageUsageFlags::SAMPLED
             | vk::ImageUsageFlags::TRANSFER_SRC
             | vk::ImageUsageFlags::TRANSFER_DST;
+        if samples > 1 {
+            usage |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
+        }
+        let count = vk::SampleCountFlags::from_raw(samples);
         // SAFETY: instance-level queries of the live device's physical device.
         let (features, sparse, family, formats) = unsafe {
             let raw = device.raw();
@@ -81,14 +92,19 @@ impl SparseFacts {
                     physical,
                     format,
                     vk::ImageType::TYPE_2D,
-                    vk::SampleCountFlags::TYPE_1,
+                    count,
                     usage,
                     vk::ImageTiling::OPTIMAL,
                 ),
             )
         };
+        let residency = match samples {
+            1 => features.sparse_residency_image2_d,
+            2 => features.sparse_residency2_samples,
+            _ => features.sparse_residency4_samples,
+        };
         let binds = features.sparse_binding == vk::TRUE
-            && features.sparse_residency_image2_d == vk::TRUE
+            && residency == vk::TRUE
             && family.contains(vk::QueueFlags::SPARSE_BINDING);
         let listed = (formats.iter()).any(|f| f.aspect_mask.contains(vk::ImageAspectFlags::COLOR));
         let image = binds && listed;
@@ -1109,6 +1125,123 @@ fn a_render_pass_drops_its_stores_into_unmapped_tiles() {
     check("the rest mapped", true);
     println!("SPARSE {name}: a render pass's stores into unmapped tiles dropped");
     drop(texture);
+    drop(heap);
+    quiet(lane, &messages);
+}
+
+/// A multisampled sparse texture reads zero where its tiles are unmapped, as a Metal probe measured
+/// on the M3 Max at 2x and 4x (`RGBA8Unorm`, tiles of 64x32 and 32x32 texels): in a texture of
+/// 4x2 tiles, tiles (0, 0) and (2, 1) mapped read zero before any write; a red clear stores into
+/// those two alone; (0, 0) unmapped reads zero, and so it does mapped again, as (1, 0) does mapped
+/// new; a green clear, then (2, 1) unmapped, leaves the first two tiles green and the rest zero; the
+/// heap counts the two tiles mapped then. Each read is a pass that loads the texture and resolves
+/// it into a plain one, read per tile (`~` where a tile's texels differ): the probe's pass resolved
+/// alone; this one stores too, which a device need not keep otherwise, and whose stores into the
+/// unmapped tiles are dropped as a clear's are.
+#[test]
+fn a_multisampled_sparse_texture_reads_zero_where_unmapped() {
+    let (messages, _cache, lane) = super::resolves::lane();
+    let device = &lane.device;
+    let name = device.name().to_owned();
+    let Some(heap) = sparse_heap(device, 1 << 20) else {
+        return;
+    };
+    let rgba8 = PixelFormat::RGBA8Unorm;
+    let queue = &lane.queue;
+    for (samples, side) in [(2, [64, 32]), (4, [32, 32])] {
+        let tile = device.sparse_tile_size(TextureType::Type2DMultisample, rgba8, samples);
+        assert_eq!([tile.width, tile.height], side, "{samples}x tile on {name}");
+        let [width, height] = [side[0] * 4, side[1] * 2];
+        let mut d = TextureDescriptor::texture_2d(rgba8, width, height, false);
+        d.texture_type = TextureType::Type2DMultisample;
+        d.sample_count = samples;
+        d.usage = TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ;
+        d.resource_options = ResourceOptions::private();
+        // Refused only where a function may read the image's own residency and the device
+        // makes no sparse image of the texture: the device's lack, named. Where it binds no
+        // sparse memory the heap was refused; everywhere else the runtime makes it.
+        let texture = match heap.new_texture(&d) {
+            Ok(texture) => texture,
+            Err(Error::Unsupported(u)) if matches!(u.feature, Feature::SparseTextures { .. }) => {
+                println!("SPARSE {name}: a {samples}x texture refused {u:?}");
+                return;
+            }
+            Err(error) => panic!("a {samples}x sparse texture on {name}: {error:?}"),
+        };
+        assert_eq!(heap.used_size(), 0);
+        let facts = SparseFacts::of_samples(device, rgba8, samples as u32);
+        let mut r = TextureDescriptor::texture_2d(rgba8, width, height, false);
+        r.usage = TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ;
+        r.resource_options = ResourceOptions::private();
+        let resolved = device.new_texture(&r).unwrap();
+        let map = |mode, x, y| {
+            update(
+                queue,
+                &texture,
+                mode,
+                &[(0, Region::new_2d(x, y, 1, 1))],
+                |_| {},
+            )
+            .unwrap();
+        };
+        let clear = |red: f64, green: f64| {
+            let mut pass = color_pass(&texture, None, StoreAction::Store, (0, 0));
+            pass.color_attachments[0].clear_color = ClearColor::new(red, green, 0.0, 1.0);
+            lane.run(&pass, |_, _, _| {}).unwrap();
+        };
+        let show = |what: &str, want: &str| {
+            let store = StoreAction::StoreAndMultisampleResolve;
+            let mut pass = color_pass(&texture, Some(&resolved), store, (0, 0));
+            pass.color_attachments[0].load_action = LoadAction::Load;
+            lane.run(&pass, |_, _, _| {}).unwrap();
+            let texels = lane.read(&resolved, (0, 0), 4, BlitOption::None);
+            let texels = texels.as_chunks::<4>().0;
+            let rows: Vec<String> = (0..2)
+                .map(|ty| {
+                    (0..4)
+                        .map(|tx| {
+                            let at = |x: u64, y: u64| {
+                                texels[((ty * side[1] + y) * width + tx * side[0] + x) as usize]
+                            };
+                            let first = at(0, 0);
+                            let same =
+                                (0..side[1]).all(|y| (0..side[0]).all(|x| at(x, y) == first));
+                            let c = match first {
+                                [0, 0, 0, 0] => '.',
+                                [0xff, 0, 0, 0xff] => 'R',
+                                [0, 0xff, 0, 0xff] => 'G',
+                                _ => '?',
+                            };
+                            format!("{c}{}", if same { "" } else { "~" })
+                        })
+                        .collect()
+                })
+                .collect();
+            assert_eq!(rows.join(" "), want, "{samples}x, {what}, on {name}");
+        };
+        map(TileMapping::Map, 0, 0);
+        map(TileMapping::Map, 2, 1);
+        show("mapped (0, 0) and (2, 1), never written", ".... ....");
+        clear(1.0, 0.0);
+        show("after a red clear", "R... ..R.");
+        map(TileMapping::Unmap, 0, 0);
+        show("(0, 0) unmapped", ".... ..R.");
+        map(TileMapping::Map, 0, 0);
+        show("(0, 0) mapped again", ".... ..R.");
+        map(TileMapping::Map, 1, 0);
+        show("(1, 0) mapped too", ".... ..R.");
+        clear(0.0, 1.0);
+        map(TileMapping::Unmap, 2, 1);
+        show("a green clear, then (2, 1) unmapped", "GG.. ....");
+        assert_eq!(heap.used_size(), 2 * PAGE, "{samples}x on {name}");
+        map(TileMapping::Unmap, 0, 0);
+        map(TileMapping::Unmap, 1, 0);
+        let (strict, emulated) = (facts.strict, !facts.image);
+        println!(
+            "SPARSE {name}: a {samples}x texture reads zero where unmapped (strict {strict}, \
+             emulated {emulated})"
+        );
+    }
     drop(heap);
     quiet(lane, &messages);
 }

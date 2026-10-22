@@ -114,7 +114,6 @@ feature	PostDepthCoverage	rare	the coverage after early depth and stencil tests 
 feature	CentroidVarying	rare	centroid varyings in a multisampled pipeline
 feature	PrivateMemory	rare	very large per-thread arrays
 feature	SparseTextures	rare	sparse heaps on a device without sparse images
-feature	SparseMapping	rare	sparse mappings off the device's blocks
 feature	TimelineSemaphores	none	a device below the runtime's floor
 feature	Reflection	rare	reflection of argument kinds Metal's answer is unmeasured for
 feature	HeapTextureTiling	app	textures in Shared heaps on a device whose optimal images take no host memory

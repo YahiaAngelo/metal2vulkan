@@ -1105,10 +1105,12 @@ pub enum RuntimeGap {
     /// Sparse heaps and their textures.
     SparseHeaps,
     /// What the runtime's emulation of sparse textures does not build yet: a tile map of a cube or
-    /// multisampled sparse texture, which the tile-map format has no layout for; an emulated
-    /// texture no copy can write; and a sparse heap or texture on a device that binds no sparse
-    /// memory (`sparseBinding`, or the queue family's bit) where functions read the image's own
-    /// residency (it enables `shaderResourceResidency`), whose exact path is the tile-map arm.
+    /// multisampled sparse texture, which the tile-map format has no layout for; a sparse texture
+    /// whose unmapped texels the runtime cannot zero (a single-sampled one of a format the device
+    /// copies nothing into, a multisampled one of a format it does not clear and render); and a
+    /// sparse heap or texture on a device that binds no sparse memory (`sparseBinding`, or the
+    /// queue family's bit) where functions read the image's own residency (it enables
+    /// `shaderResourceResidency`), whose exact path is the tile-map arm.
     SparseTileMaps,
     /// A heap larger than the device's `maxBufferSize`, which the device can allocate: the
     /// runtime places a heap's buffers in one `VkBuffer` over the whole heap, which no `VkBuffer`
@@ -1599,16 +1601,6 @@ pub enum CommandBufferError {
     /// Metal draws it; the pool (a sixty-fourth of the device's largest device-local heap) is bound
     /// before the GPU reads the draw's count, so nothing is drawn short silently.
     IndexPoolOverflow,
-    /// A sparse mapping filled its heap inside one of the device's sparse units of several
-    /// tiles of a texture whose texels no copy writes (a multisampled texture): Metal maps the
-    /// tiles that fit; the runtime binds such a texture's whole units, so it applied none of the
-    /// batch's mappings and ran nothing of the command buffer from there.
-    SparseHeapSplit,
-    /// An indirect sparse mapping update's regions, as the host read them, would bind or unbind
-    /// part of one of the device's sparse units of a texture whose texels no copy writes
-    /// (`Feature::SparseMapping`, refused where a direct update is encoded): nothing of the batch
-    /// applied or ran.
-    SparseMappingSplit,
     /// A function the command buffer ran sampled, gathered, or queried a texture through a
     /// sampler state an argument buffer named whose min or mag filter is `Cubic`
     /// (`MTLSamplerMinMagFilterCubic`). Metal filters through it bicubically; the runtime does not
@@ -2006,8 +1998,6 @@ impl CommandBufferError {
             | CommandBufferError::DetachedBacking => 8,
             CommandBufferError::Internal(_)
             | CommandBufferError::MeshGridPastLimits
-            | CommandBufferError::SparseHeapSplit
-            | CommandBufferError::SparseMappingSplit
             | CommandBufferError::Refused
             | CommandBufferError::RenderTargetSize
             | CommandBufferError::CubicArgumentSampler
@@ -2054,8 +2044,6 @@ impl CommandBufferError {
             | CommandBufferError::DefaultRasterSampleCount => FailureOrigin::Metal,
             CommandBufferError::Internal(_)
             | CommandBufferError::IndexPoolOverflow
-            | CommandBufferError::SparseHeapSplit
-            | CommandBufferError::SparseMappingSplit
             | CommandBufferError::CubicArgumentSampler
             | CommandBufferError::MeshRecordsOverflow(_)
             | CommandBufferError::TessellationRecordsOverflow(_)
