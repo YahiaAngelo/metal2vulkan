@@ -419,6 +419,8 @@ impl EncoderCore {
         // The first encoder of a timed command buffer writes its start first (`gpu_time.rs`).
         command_buffer.open_start(&mut state, raw);
         state.encoder_open = true;
+        // Made under the protection options set now (`command_buffer/protection.rs`).
+        state.protected_made();
         drop(state);
         command_buffer
             .device()

@@ -164,6 +164,9 @@ pub struct BlitCommandEncoder {
     /// Its calls so far, where the device had a buffer over host pages as it opened
     /// (`replay.rs`): `None` where it logs nothing, or no longer.
     log: Option<CallLog<BlitCall>>,
+    /// The protection options it was made under where they end Metal's process at its first
+    /// command (`command_buffer/protection.rs`): each command is refused.
+    aborts: Option<u64>,
 }
 
 impl std::fmt::Debug for BlitCommandEncoder {
@@ -176,12 +179,14 @@ impl CommandBuffer {
     /// `blitCommandEncoder`. Refused while another encoder of this command buffer is open,
     /// after one was abandoned, and after commit.
     pub fn blit_command_encoder(&self) -> Result<BlitCommandEncoder, Error> {
+        let core = EncoderCore::open(self, "blit_command_encoder", EncoderKind::Blit, true)?;
         Ok(BlitCommandEncoder {
-            core: EncoderCore::open(self, "blit_command_encoder", EncoderKind::Blit, true)?,
+            core,
             pattern: None,
             shadows: Vec::new(),
             log: (self.device().shared().rebinds.any())
                 .then(|| self.device().shared().scheduler.spare_logs().blit()),
+            aborts: self.protected_blit(),
         })
     }
 }
@@ -195,6 +200,7 @@ impl BlitCommandEncoder {
             pattern: None,
             shadows: Vec::new(),
             log: None,
+            aborts: None,
         })
     }
 
@@ -210,12 +216,32 @@ impl BlitCommandEncoder {
     }
 
     /// Log the call `call` makes of the log, before it runs, where the encoder logs
-    /// (`replay.rs`).
-    pub(super) fn log(&mut self, call: impl FnOnce(&mut CallLog<BlitCall>) -> BlitCall) {
+    /// (`replay.rs`): each command's first step. Refused, for every command, where the encoder
+    /// was made under protection options that end Metal's process at its first command (`Invalid`,
+    /// `Problem::ProtectedEncoder`, `command_buffer/protection.rs`).
+    pub(super) fn log(
+        &mut self,
+        call: impl FnOnce(&mut CallLog<BlitCall>) -> BlitCall,
+    ) -> Result<(), Error> {
+        self.refuse_aborted()?;
         if let Some(log) = self.log.as_mut().filter(|log| !log.muted()) {
             let call = call(log);
             let extra = call.extra();
             log.push(call, extra);
+        }
+        Ok(())
+    }
+
+    /// Refuse a command where the encoder was made under protection options that end Metal's
+    /// process at its first command (`Invalid`, `Problem::ProtectedEncoder`,
+    /// `command_buffer/protection.rs`): a command whose first step comes before its log.
+    pub(super) fn refuse_aborted(&self) -> Result<(), Error> {
+        match self.aborts {
+            Some(options) => Err(invalid(
+                "blit_command_encoder",
+                Problem::ProtectedEncoder { options },
+            )),
+            None => Ok(()),
         }
     }
 
@@ -342,7 +368,7 @@ impl BlitCommandEncoder {
                 destination_offset,
                 size,
             )
-        });
+        })?;
         const CALL: &str = "copy_from_buffer_to_buffer";
         self.core.check_device(CALL, source_buffer.device())?;
         self.core.check_device(CALL, destination_buffer.device())?;
@@ -451,7 +477,7 @@ impl BlitCommandEncoder {
         range: Range<u64>,
         value: u8,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::FillBuffer(buffer.clone(), range.clone(), value));
+        self.log(|_| BlitCall::FillBuffer(buffer.clone(), range.clone(), value))?;
         const CALL: &str = "fill_buffer";
         self.core.check_device(CALL, buffer.device())?;
         let size = range.end.saturating_sub(range.start);
@@ -549,7 +575,7 @@ impl BlitCommandEncoder {
     ///
     /// Refused (`Invalid`): a resource of another device.
     pub fn synchronize_resource(&mut self, resource: ResourceRef<'_>) -> Result<(), Error> {
-        self.log(|_| BlitCall::SynchronizeResource(Resource::one(resource)));
+        self.log(|_| BlitCall::SynchronizeResource(Resource::one(resource)))?;
         const CALL: &str = "synchronize_resource";
         self.core.check_device(CALL, resource.device())?;
         if resource.storage_mode() != StorageMode::Managed {
@@ -590,6 +616,7 @@ impl BlitCommandEncoder {
             pattern,
             shadows: _,
             log,
+            aborts: _,
         } = self;
         if let Some(pattern) = pattern {
             core.retain(pattern);

@@ -485,7 +485,7 @@ impl BlitCommandEncoder {
                 Box::new((texture.clone(), level, slice, region)),
                 log.byte_span(pattern),
             )
-        });
+        })?;
         self.fill("fill_texture", texture, (level, slice), region, pattern)
     }
 
@@ -516,6 +516,8 @@ impl BlitCommandEncoder {
         pixel_format: Option<PixelFormat>,
     ) -> Result<(), Error> {
         const CALL: &str = "fill_texture_color";
+        // Refused before the command buffer's fill slot takes the texel, as its log is.
+        self.refuse_aborted()?;
         let packed_in = pixel_format.unwrap_or(texture.pixel_format());
         let channels = [color.red, color.green, color.blue, color.alpha];
         // The texel, which the command buffer's slot takes; else the slot's bytes.
@@ -528,7 +530,7 @@ impl BlitCommandEncoder {
                 Box::new((texture.clone(), level, slice, region)),
                 log.byte_span(&pattern),
             )
-        });
+        })?;
         self.fill(CALL, texture, (level, slice), region, &pattern)?;
         if texel.is_none() {
             let format = texture.pixel_format();
@@ -561,7 +563,7 @@ impl BlitCommandEncoder {
         range: Range<u64>,
         pattern: u32,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::FillBufferPattern4(buffer.clone(), range.clone(), pattern));
+        self.log(|_| BlitCall::FillBufferPattern4(buffer.clone(), range.clone(), pattern))?;
         const CALL: &str = "fill_buffer_pattern4";
         self.core().check_device(CALL, buffer.device())?;
         let size = range.end.saturating_sub(range.start);

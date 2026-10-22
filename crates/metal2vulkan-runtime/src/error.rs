@@ -492,6 +492,13 @@ pub enum Problem {
     /// ("A command encoder is already encoding to this command buffer", "commit command buffer with
     /// uncommitted encoder", "encodeSignalEvent:value: with uncommitted encoder"; an M4).
     EncoderOpen,
+    /// A compute or render encoder made, or a blit encoder's first command (`call` names the
+    /// blit encoder), under protection options 1, 3 or 7 (`CommandBuffer::set_protection_options`),
+    /// where Metal's process ends (SIGABRT, measured by a consumer on an M3 Max, macOS 26.7).
+    ProtectedEncoder {
+        /// The protection options set.
+        options: u64,
+    },
     /// An encoder of this command buffer was dropped without `end_encoding`: its commands are
     /// lost, so the command buffer can never be committed. Plain Metal asserts as the encoder
     /// goes ("Command encoder released without endEncoding").
@@ -1760,6 +1767,13 @@ pub enum CommandBufferError {
     /// detached buffer recorded nothing from that command on, so it fails alike where the buffer
     /// was given pages again before the submission, with [`CommandBufferError::EncodedUseRebound`].
     DetachedBacking,
+    /// An encoder of the command buffer was made under protection options other than 0
+    /// (`CommandBuffer::set_protection_options`; the options set, here), or options from 0x10 up
+    /// were set: as Metal's GPU fails it (measured by a consumer on an M3 Max, macOS 26.7), the
+    /// first such encoder ran nothing, nor did any after it (with none, every encoder ran), and
+    /// none of its event signals fired. Metal's code is 16 ("Protection Violation") below 0x10, 1
+    /// ("Invalid Input") from 0x10 up.
+    ProtectedEncoder(u64),
     /// A command-predication loop (`ComputeCommandEncoder::encode_start_while`,
     /// `encode_start_do_while`) would have run past the copies of its commands the runtime laid
     /// down (at most 64, or 16 inside another loop, fewer for a long body), and its commands hold
@@ -2011,6 +2025,10 @@ impl CommandBufferError {
                 PipelineCreationCause::Vulkan(_) | PipelineCreationCause::Internal => 1,
             },
             CommandBufferError::Execution(code) => code,
+            CommandBufferError::ProtectedEncoder(options) => match options >= 0x10 {
+                true => 1,
+                false => 16,
+            },
         }
     }
 
@@ -2032,6 +2050,7 @@ impl CommandBufferError {
             | CommandBufferError::RenderTargetSize
             | CommandBufferError::DetachedBacking
             | CommandBufferError::PredicationOpenAtUnitEnd { .. }
+            | CommandBufferError::ProtectedEncoder(_)
             | CommandBufferError::DefaultRasterSampleCount => FailureOrigin::Metal,
             CommandBufferError::Internal(_)
             | CommandBufferError::IndexPoolOverflow

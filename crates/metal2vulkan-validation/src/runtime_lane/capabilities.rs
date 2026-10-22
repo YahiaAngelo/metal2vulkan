@@ -10,8 +10,8 @@ use metal2vulkan::error::{Capability, Feature, Unsupported};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::vk::SampleCountFlags;
 use metal2vulkan_runtime::{
-    AppleOnly, CommandBufferStatus, CopyProblem, Device, DeviceProperties, Error, Invalid, Problem,
-    Query, ResourceOptions, RuntimeGap, Size, Texture, TextureDescriptor, TextureProblem,
+    CommandBufferStatus, CopyProblem, Device, DeviceProperties, Error, Invalid, Problem, Query,
+    ResourceOptions, RuntimeGap, Size, Texture, TextureDescriptor, TextureProblem,
     DEFAULT_PROTECTION_OPTIONS,
 };
 use std::time::Duration;
@@ -180,13 +180,12 @@ fn a_runtime_device_answers_its_queries_and_the_apple_only_calls() {
         let buffer = device.new_buffer(16, ResourceOptions::shared()).unwrap();
         let queue = device.new_command_queue().unwrap();
         let command_buffer = queue.command_buffer().unwrap();
+        // Options set and set back before any encoder is made under them: nothing of them stays
+        // (`protection_options.rs` has what they do).
+        command_buffer.set_protection_options(1).unwrap();
         command_buffer
             .set_protection_options(DEFAULT_PROTECTION_OPTIONS)
             .unwrap();
-        assert_eq!(
-            command_buffer.set_protection_options(1),
-            Err(Error::AppleOnly(AppleOnly::ProtectedContent))
-        );
         // Unbalanced records answer NO, as Metal's do; their range holds no dispatch, so the
         // DoWhile after them is killed from its start: its If's End answers NO, its own YES.
         let mut encoder = command_buffer.compute_command_encoder().unwrap();

@@ -1631,6 +1631,8 @@ impl CommandBuffer {
     ) -> Result<RenderCommandEncoder, Error> {
         // The last render encoder's end, where its call left it to the device's lowering thread.
         self.settle_end();
+        // Metal's process ends here under some protection options (`command_buffer/protection.rs`).
+        self.refuse_protected_encoder("render_command_encoder")?;
         self.open_render(descriptor, None)
             .map(RenderCommandEncoder::new)
     }

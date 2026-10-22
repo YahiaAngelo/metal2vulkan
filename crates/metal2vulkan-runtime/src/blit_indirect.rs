@@ -56,7 +56,7 @@ impl BlitCommandEncoder {
                 destination.clone(),
                 destination_index,
             )))
-        });
+        })?;
         const CALL: &str = "copy_indirect_command_buffer";
         self.core().check_device(CALL, source.device())?;
         self.core().check_device(CALL, destination.device())?;
@@ -108,7 +108,7 @@ impl BlitCommandEncoder {
         buffer: &IndirectCommandBuffer,
         range: Range<u64>,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::ResetCommandsInBuffer(buffer.clone(), range.clone()));
+        self.log(|_| BlitCall::ResetCommandsInBuffer(buffer.clone(), range.clone()))?;
         const CALL: &str = "reset_commands_in_buffer";
         self.core().check_device(CALL, buffer.device())?;
         let range = buffer.command_range(CALL, range)?;
@@ -278,7 +278,7 @@ impl BlitCommandEncoder {
         buffer: &IndirectCommandBuffer,
         range: Range<u64>,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::OptimizeIndirectCommandBuffer(buffer.clone(), range.clone()));
+        self.log(|_| BlitCall::OptimizeIndirectCommandBuffer(buffer.clone(), range.clone()))?;
         const CALL: &str = "optimize_indirect_command_buffer";
         self.core().check_device(CALL, buffer.device())?;
         buffer.command_range(CALL, range)?;

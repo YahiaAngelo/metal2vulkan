@@ -637,6 +637,8 @@ mod private_primitives;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod property_reads;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod protection_options;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod provoking;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod pvrtc_textures;

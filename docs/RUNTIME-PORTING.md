@@ -142,7 +142,7 @@ narrow refusal that the call's rustdoc describes.
 | `encode_wait` | `encodeWaitForEvent:value:` | `CommandBuffer::encode_wait_for_event` |
 | `error` | `error` | `CommandBuffer::error` |
 | `render_encoder` | `renderCommandEncoderWithDescriptor:` | `CommandBuffer::render_command_encoder` *(partial)* |
-| `set_protection_options` | `setProtectionOptions:` (SPI) | `CommandBuffer::set_protection_options`: 0 accepted; anything else refused `AppleOnly::ProtectedContent` *(partial)* |
+| `set_protection_options` | `setProtectionOptions:` (SPI) | `CommandBuffer::set_protection_options`: an encoder made under options other than 0 fails the command buffer from there (`CommandBufferError::ProtectedEncoder`), as Metal's GPU does; 1, 3 and 7 refused where they end Metal's process; changes Metal was not measured at refused `AppleOnly::ProtectedContent` *(partial)* |
 | `status` | `status` | `CommandBuffer::status` |
 | `wait_until_completed` | `waitUntilCompleted` | `CommandBuffer::wait_until_completed`, or `wait_until_completed_for` with a timeout |
 | `wait_until_scheduled` | `waitUntilScheduled` | `CommandBuffer::wait_until_scheduled` |

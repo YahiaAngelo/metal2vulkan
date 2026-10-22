@@ -226,6 +226,8 @@ impl CommandBuffer {
         call: &'static str,
         dispatch_type: DispatchType,
     ) -> Result<ComputeCommandEncoder, Error> {
+        // Metal's process ends here under some protection options (`command_buffer/protection.rs`).
+        self.refuse_protected_encoder(call)?;
         let core = EncoderCore::open(
             self,
             call,
