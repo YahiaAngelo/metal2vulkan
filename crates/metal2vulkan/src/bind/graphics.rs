@@ -1716,6 +1716,8 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
                 PushField::DepthClampRange if stage == Stage::Fragment => {}
                 // The encoder's blend color, which instantiation reads from the state.
                 PushField::BlendColor if stage == Stage::Fragment => {}
+                // The encoder's alpha test reference, which instantiation reads from the state.
+                PushField::AlphaTestReference if stage == Stage::Fragment => {}
                 PushField::HalfBlendColor if stage == Stage::Fragment => {}
                 // The draw's depth bias, which instantiation reads from the state.
                 PushField::DepthBias if stage == Stage::Fragment => {}
@@ -2647,6 +2649,19 @@ fn shadow_stencil_words(t: &ShadowTemplate, state: &BindState) -> Result<FieldBy
 
 /// The `PushField::ShaderTestsState` words of a draw under encoder state `state`: the depth compare
 /// function, write enable and clip mode, and viewport 0's depth range.
+/// The 8-bit unorm code Metal's private alpha test compares the reference `reference` as
+/// (`PushField::AlphaTestReference`, probes on an Apple M3 Max): NaN is 0, the value is clamped
+/// to `[0, 1]`, and the code is the exact product with 255 rounded to nearest, as the fragment
+/// function converts its alpha (`lower::arith::color_write::unorm8_code`). The product of an
+/// `f32` and 255 is exact as an `f64`, and its only tie, at 0.5, rounds to 128 either way.
+pub(crate) fn alpha_test_code(reference: f32) -> u32 {
+    let clamped = match reference.is_nan() {
+        true => 0.0,
+        false => f64::from(reference.clamp(0.0, 1.0)),
+    };
+    (clamped * 255.0).round_ties_even() as u32
+}
+
 fn shader_tests_words(state: &BindState) -> FieldBytes {
     let ds = &state.depth_stencil;
     let clamp = state.depth_clip_mode_clamp;
@@ -4313,6 +4328,10 @@ fn instantiate(
                     crate::lower::arith::extended_range::blend_color::constant_words(
                         state.blend_color,
                     ),
+                ),
+                // The alpha test reference's code, Metal's 1 where the encoder never set it.
+                PushField::AlphaTestReference => FieldBytes::of(
+                    &alpha_test_code(state.alpha_test_reference.unwrap_or(1.0)).to_le_bytes(),
                 ),
                 // The blend color as the encoder set it, which a 16-bit float blend rounds.
                 PushField::HalfBlendColor => state

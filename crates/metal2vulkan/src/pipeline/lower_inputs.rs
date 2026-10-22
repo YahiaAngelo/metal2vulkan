@@ -528,6 +528,15 @@ pub struct LoweringInputs {
     /// then has no Vulkan sample mask. Any other function compiles as without it.
     #[cfg_attr(feature = "serde", serde(default))]
     pub sample_mask: Option<u32>,
+    /// The render pipeline's private alpha test (`alphaTestEnabled`, `alphaTestFunction`), which
+    /// the fragment function runs itself after its body: each return kills the invocation unless
+    /// its color 0's alpha passes the comparison against the encoder's reference
+    /// (`PushField::AlphaTestReference`), both as Metal compares them, 8-bit unorm codes
+    /// (`StageIo::alpha_test`). `Device::compile_render_pipeline` sets it for a `Function`
+    /// fragment stage of a pipeline with the test on, for every function but `Always`, which
+    /// tests nothing. Any other function compiles as without it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub alpha_test: Option<crate::metal::CompareFunction>,
     /// The depth and stencil tests of the draws that run the fragment function write neither
     /// attachment and count no visibility result (`VariantKey::read_only_tests`): a function that
     /// stores a color through the interlocked storage form and declares no early tests only

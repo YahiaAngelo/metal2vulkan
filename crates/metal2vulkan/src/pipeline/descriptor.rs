@@ -366,10 +366,12 @@ pub struct PrivateRenderState {
     pub sample_coverage: f32,
     /// `sampleCoverageInvert` (default off): changes nothing Metal draws.
     pub sample_coverage_invert: bool,
-    /// `alphaTestEnabled` (default off; not built: on is refused).
+    /// `alphaTestEnabled` (default off): the fragment passes where `alpha_test_function` holds
+    /// between color 0's alpha and the render encoder's reference, each as an 8-bit unorm code
+    /// (`pipeline::private_state`'s docs); one that fails writes nothing.
     pub alpha_test_enabled: bool,
     /// `alphaTestFunction` (default 0, `MTLCompareFunctionNever`), the raw value: read only
-    /// with the alpha test on.
+    /// with the alpha test on, where a value past `MTLCompareFunctionAlways` is refused.
     pub alpha_test_function: u64,
     /// `logicOperationEnabled` (default off; not built: on is refused).
     pub logic_operation_enabled: bool,

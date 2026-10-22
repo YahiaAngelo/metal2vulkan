@@ -272,6 +272,14 @@ pub struct BindState {
     /// shape.
     #[cfg_attr(feature = "serde", serde(default))]
     pub blend_color: [f32; 4],
+    /// The render encoder's alpha test reference (`setAlphaTestReferenceValue:`, Apple SPI);
+    /// `None` where the encoder never set it, which Metal's test compares as 1 (each encoder
+    /// starts there: a reference set in an earlier encoder is not kept). A fragment function that
+    /// runs the pipeline's private alpha test takes its code as push data
+    /// (`PushField::AlphaTestReference`). Only a draw's bytes depend on it, so it is not part of
+    /// the shape.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub alpha_test_reference: Option<f32>,
     /// Viewport 0's depth range `[near, far]` as the encoder set it (`setViewport:`; Metal's
     /// default viewport has `[0, 1]`), which a fragment function that runs the draw's depth test
     /// itself clamps its depth to in depth clamp mode (`PushField::ShaderTestsState`). Read only

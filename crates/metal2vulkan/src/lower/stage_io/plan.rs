@@ -2024,6 +2024,25 @@ pub fn entry(cx: &mut SelectCx<'_>) -> Result<(), Error> {
         if matches!(o.role, OutputRole::PointSize) {
             point_size = true;
         }
+        // The private alpha test reads color 0's alpha as the function returns it, whatever the
+        // pipeline stores of it.
+        if let (Stage::Fragment, Some(function)) = (cx.stage, cx.inputs.alpha_test) {
+            if let OutputRole::RenderTarget {
+                attachment: AbiInt::Const(0),
+                index: 0,
+                ..
+            } = o.role
+            {
+                let f = io_form(cx, ty)?;
+                if !f.is_float() || f.lanes != 4 {
+                    return Err(alpha_test_refused());
+                }
+                cx.families.stage_io.alpha_test = Some(super::AlphaTest {
+                    field: o.field,
+                    function,
+                });
+            }
+        }
         // A `bfloat` color output is not Metal's (its compiler rejects the return type), whether
         // or not the pass or pipeline has the attachment.
         if cx.stage == Stage::Fragment && matches!(o.role, OutputRole::RenderTarget { .. }) {
@@ -3195,6 +3214,17 @@ pub fn finish(cx: &mut SelectCx<'_>) -> Result<(), Error> {
             return Err(limit(Feature::InterfaceComponents, lim, n, max));
         }
     }
+    // The render pipeline's private alpha test, which each return runs on color 0: Metal's
+    // compiler fails a function that writes no color 0 under the test.
+    if let (Stage::Fragment, Some(function)) = (cx.stage, cx.inputs.alpha_test) {
+        if cx.families.stage_io.alpha_test.is_none() {
+            return Err(alpha_test_refused());
+        }
+        if function != crate::metal::CompareFunction::Never {
+            cx.push.insert(PushField::AlphaTestReference);
+        }
+        cx.families.stage_io.interface.alpha_test = Some(function);
+    }
     // The render pipeline's private sample mask a fragment function applies itself: its
     // `SampleMask` output, the function's own where it writes one, which each return ANDs the
     // mask into or stores the mask as.
@@ -3265,6 +3295,9 @@ pub fn finish(cx: &mut SelectCx<'_>) -> Result<(), Error> {
         + u64::from(sp.point_size_default.is_some())
         // The private sample mask's AND and store.
         + 2 * u64::from(sp.private_mask.is_some())
+        // The alpha test: the alpha's extracts, its clamp and code, the reference, the
+        // comparison and the kill.
+        + 40 * u64::from(sp.alpha_test.is_some())
         + compensation_stores(sp.compensation)
         + sp.depth_clamp.map_or(0, |d| match (d.range, d.clamps || d.codes) {
             // The `[0, 1]` selects, the range's two clamps and the negative NaN's select.
@@ -3345,6 +3378,15 @@ fn half_color(e: &crate::air::Entry, ty: AirTypeId) -> bool {
         other => other,
     };
     matches!(scalar, Some(Type::Half))
+}
+
+/// The refusal of a private alpha test the translation has not built (`PrivateRenderField`'s
+/// `AlphaTest`): a fragment function under the test that writes no color 0, or one that is not
+/// four `float` or `half` lanes.
+fn alpha_test_refused() -> Error {
+    Error::Unsupported(Unsupported::not_implemented(Feature::PrivateRenderState(
+        crate::error::PrivateRenderField::AlphaTest,
+    )))
 }
 
 /// Whether `ty` is a `float` color output: a scalar or vector of AIR's `float`.

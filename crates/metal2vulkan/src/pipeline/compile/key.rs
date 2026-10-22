@@ -380,6 +380,11 @@ pub fn function_key(
         h.bytes(b"sample-mask").bytes(&mask.to_le_bytes());
     }
     // Appended only when set.
+    if let Some(function) = inputs.alpha_test {
+        h.bytes(b"alpha-test")
+            .bytes(&function.as_raw().to_le_bytes());
+    }
+    // Appended only when set.
     if inputs.read_only_tests {
         h.bytes(b"read-only-tests");
     }

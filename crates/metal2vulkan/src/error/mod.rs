@@ -1444,7 +1444,10 @@ pub enum PrivateRenderField {
     SampleMask,
     /// `sampleCoverage` other than 1.
     SampleCoverage,
-    /// `alphaTestEnabled`.
+    /// `alphaTestEnabled` with a test the translation has not built: an `alphaTestFunction` past
+    /// `MTLCompareFunctionAlways`, a pipeline without a fragment function, a fragment function
+    /// whose color 0 is not four `float` or `half` lanes (Metal's compiler fails a function that
+    /// writes no color 0 under the test), or one that loops over its covered samples.
     AlphaTest,
     /// `logicOperationEnabled`.
     LogicOperation,
@@ -1653,6 +1656,11 @@ pub enum RuntimeInput {
     /// or it applies another mask. It was compiled for another pipeline, and is compiled for this
     /// one again.
     SampleMask,
+    /// A fragment function in a render pipeline with the private alpha test on runs the test
+    /// itself (`LoweringInputs::alpha_test`), as Metal tests its color 0's alpha after it runs;
+    /// or it runs another comparison. It was compiled for another pipeline, and is compiled for
+    /// this one again.
+    AlphaTest,
     /// A fragment function reads flat an interpolated varying that its pipeline's vertex function
     /// does not write the same at every vertex of a primitive: compiled for another vertex
     /// function, which wrote it so (`LoweringInputs::uniform_varyings`), it would read the

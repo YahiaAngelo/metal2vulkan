@@ -3014,6 +3014,12 @@ impl RenderLowering {
         Ok(())
     }
 
+    /// Set the alpha test reference (`setAlphaTestReferenceValue:`, `apple_only.rs`), which a
+    /// pipeline with the private alpha test compares against (`BindState::alpha_test_reference`).
+    pub(crate) fn set_alpha_test_reference(&mut self, value: f32) {
+        self.state.set_alpha_test_reference(value);
+    }
+
     /// Set the amplification count `count` with the view mappings set before kept
     /// (`setVertexAmplificationMode:value:`, `apple_only.rs`); `None`, the amplification kept,
     /// where the count passes them ([`Amplification::with_count`]).
@@ -5614,6 +5620,9 @@ impl RenderLowering {
         state.viewport_count = self.state.viewport_count(true);
         // An extended-range blend computed in the shader reads the blend color as push data.
         state.blend_color = self.state.blend_color();
+        // A fragment function that runs the pipeline's private alpha test reads the reference as
+        // push data.
+        state.alpha_test_reference = self.state.alpha_test_reference();
         // A fragment function that runs the draw's depth test itself clamps its depth as the
         // encoder's depth clip mode says, read as push data (its range: `draw_resident`).
         state.depth_clip_mode_clamp = self.state.depth_clip_mode_clamp();

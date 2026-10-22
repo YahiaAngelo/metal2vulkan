@@ -390,14 +390,14 @@ narrow refusal that the call's rustdoc describes.
 | `ExecuteCommandsIndirect` | `executeCommandsInBuffer:indirectBuffer:indirectBufferOffset:` | `RenderCommandEncoder::execute_commands_in_buffer_indirect`: the pass is recorded at a host step (announced once); `_checked` adds an `IndirectCommandCheck` the step calls on each command first, and the `IndirectCommandCheckNeeds` it looks for *(partial)* |
 | `ExecuteCommandsInBuffer` | `executeCommandsInBuffer:withRange:` | `RenderCommandEncoder::execute_commands_in_buffer`: the records as they stand at commit, on the GPU alone where the commit can tell every command draws one primitive type under the inherited state (one merged draw for points, lines or triangles), or at a host step where the GPU writes them otherwise; `_checked` adds an `IndirectCommandCheck` that `commit` (for the CPU's records) or that step calls on each command first, and the `IndirectCommandCheckNeeds` it looks for, which may rule it out *(partial)* |
 | `MemoryBarrierWithScope` | `memoryBarrierWithScope:afterStages:beforeStages:` | `RenderCommandEncoder::memory_barrier_with_scope` |
-| `SetAlphaTestReferenceValue` | `setAlphaTestReferenceValue:` (SPI) | `RenderCommandEncoder::set_alpha_test_reference_value`: a no-op (no runtime pipeline has an alpha test) |
+| `SetAlphaTestReferenceValue` | `setAlphaTestReferenceValue:` (SPI) | `RenderCommandEncoder::set_alpha_test_reference_value`: the reference a pipeline with the private alpha test compares against |
 | `SetBlendColorRed` | `setBlendColorRed:green:blue:alpha:` | `RenderCommandEncoder::set_blend_color` |
 | `SetColorResolveTexture` | `setColorResolveTexture:slice:depthPlane:level:yInvert:atIndex:` (SPI) | `RenderCommandEncoder::set_color_resolve_target`: the last target set holds for every draw of the pass *(partial)* |
 | `SetColorStoreAction` | `setColorStoreAction:atIndex:` | `RenderCommandEncoder::set_color_store_action` |
 | `SetColorStoreActionOptions` | `setColorStoreActionOptions:atIndex:` | `RenderCommandEncoder::set_color_store_action_options`: custom sample positions refused where Metal refuses them |
 | `SetCullMode` | `setCullMode:` | `RenderCommandEncoder::set_cull_mode` |
 | `SetDepthBias` | `setDepthBias:slopeScale:clamp:` | `RenderCommandEncoder::set_depth_bias` *(partial)* |
-| `SetDepthCleared` | `setDepthCleared` (SPI) | `RenderCommandEncoder::set_depth_cleared`: refused `AppleOnly::DepthCleared` *(partial)* |
+| `SetDepthCleared` | `setDepthCleared` (SPI) | `RenderCommandEncoder::set_depth_cleared`: changes nothing, as on Metal |
 | `SetDepthResolveTexture` | `setDepthResolveTexture:slice:depthPlane:level:yInvert:` (SPI) | `RenderCommandEncoder::set_depth_resolve_target`, as the color one *(partial)* |
 | `SetDepthStencilState` | `setDepthStencilState:` | `RenderCommandEncoder::set_depth_stencil_state` (`None` for nil, Metal's default state) |
 | `SetDepthStoreAction` | `setDepthStoreAction:` | `RenderCommandEncoder::set_depth_store_action` |
@@ -415,7 +415,7 @@ narrow refusal that the call's rustdoc describes.
 | `SetRenderPipelineState` | `setRenderPipelineState:` | `RenderCommandEncoder::set_render_pipeline_state` |
 | `SetScissorRect` | `setScissorRect:` | `RenderCommandEncoder::set_scissor_rect` |
 | `SetScissorRects` | `setScissorRects:count:` | `RenderCommandEncoder::set_scissor_rects` |
-| `SetStencilCleared` | `setStencilCleared` (SPI) | `RenderCommandEncoder::set_stencil_cleared`: refused `AppleOnly::StencilCleared` *(partial)* |
+| `SetStencilCleared` | `setStencilCleared` (SPI) | `RenderCommandEncoder::set_stencil_cleared`: changes nothing, as on Metal |
 | `SetStencilFrontReferenceValue` | `setStencilFrontReferenceValue:backReferenceValue:` | `RenderCommandEncoder::set_stencil_reference_values` |
 | `SetStencilResolveTexture` | `setStencilResolveTexture:slice:depthPlane:level:yInvert:` (SPI) | `RenderCommandEncoder::set_stencil_resolve_target`, as the color one *(partial)* |
 | `SetStencilStoreAction` | `setStencilStoreAction:` | `RenderCommandEncoder::set_stencil_store_action` |
@@ -430,7 +430,7 @@ narrow refusal that the call's rustdoc describes.
 | `SetTileTextures` | `setTileTextures:withRange:` | `RenderCommandEncoder::set_tile_textures` |
 | `SetTriangleFillMode` | `setTriangleFillMode:` | `RenderCommandEncoder::set_triangle_fill_mode` |
 | `SetVertexAmplificationCount` | `setVertexAmplificationCount:viewMappings:` | `RenderCommandEncoder::set_vertex_amplification_count`: fewer view mappings than the count refused `Invalid` |
-| `SetVertexAmplificationMode` | `setVertexAmplificationMode:value:` (SPI) | `RenderCommandEncoder::set_vertex_amplification_mode`: refused `AppleOnly::VertexAmplificationMode` *(partial)* |
+| `SetVertexAmplificationMode` | `setVertexAmplificationMode:value:` (SPI) | `RenderCommandEncoder::set_vertex_amplification_mode`: sets the amplification count, the view mappings kept; a count of 0, past 8 or past the mappings refused `AppleOnly::VertexAmplificationMode` *(partial)* |
 | `SetVertexBuffer` | `setVertexBuffer:offset:atIndex:` | `RenderCommandEncoder::set_vertex_buffer` |
 | `SetVertexBufferOffset` | `setVertexBufferOffset:atIndex:` | `RenderCommandEncoder::set_vertex_buffer_offset` |
 | `SetVertexBufferOffsetAttributeStride` | `setVertexBufferOffset:attributeStride:atIndex:` | `RenderCommandEncoder::set_vertex_buffer_offset_with_stride` |

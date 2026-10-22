@@ -193,6 +193,8 @@ pub(super) struct EncoderState {
     /// What Metal's depth bias, slope scale and clamp do to a triangle's depth.
     depth_bias: DepthBiasEffect,
     blend_color: [f32; 4],
+    /// `setAlphaTestReferenceValue:` (SPI); `None` until set, which Metal's test compares as 1.
+    alpha_test_reference: Option<f32>,
     fill_mode: TriangleFillMode,
     clip_mode: DepthClipMode,
     /// Apple's `setProvokingVertexMode:` at 1: a primitive's flat inputs read its last vertex
@@ -230,6 +232,7 @@ impl EncoderState {
                 clamp: 0.0,
             },
             blend_color: [0.0; 4],
+            alpha_test_reference: None,
             fill_mode: TriangleFillMode::Fill,
             clip_mode: DepthClipMode::Clip,
             provoking_last: false,
@@ -365,6 +368,12 @@ impl EncoderState {
 
     pub(super) fn set_blend_color(&mut self, color: [f32; 4]) {
         self.blend_color = color;
+    }
+
+    /// `setAlphaTestReferenceValue:` (SPI), which a pipeline with the private alpha test compares
+    /// its fragments' alpha against (`BindState::alpha_test_reference`).
+    pub(super) fn set_alpha_test_reference(&mut self, value: f32) {
+        self.alpha_test_reference = Some(value);
     }
 
     /// `setTriangleFillMode:`: `Lines` needs `fillModeNonSolid`.
@@ -991,6 +1000,11 @@ impl EncoderState {
 
     pub(super) fn blend_color(&self) -> [f32; 4] {
         self.blend_color
+    }
+
+    /// The alpha test reference; `None` where the encoder never set it.
+    pub(super) fn alpha_test_reference(&self) -> Option<f32> {
+        self.alpha_test_reference
     }
 
     /// Whether the depth clip mode is `Clamp`: whether a fragment function that runs the draw's

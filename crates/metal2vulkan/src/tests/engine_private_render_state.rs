@@ -11,6 +11,8 @@
 //!   is refused where the fragment function could tell Metal's mask, applied after it runs, from
 //!   Vulkan's (the owned fixtures `engine/sample_rate`, reading `[[sample_mask]]`, and
 //!   `engine/multisample`, writing memory).
+//! - The alpha test is run by the fragment function, against the encoder's reference as a push
+//!   field; `Always` keeps the pipeline.
 //! - Each property not built refuses a value other than Metal's default `NotImplemented`, naming
 //!   it. A compute pipeline's `needs_custom_border_color_samplers`, which changes nothing, keeps
 //!   its key.
@@ -316,7 +318,13 @@ fn each_property_not_built_refuses_a_value_other_than_metals_default() {
     let cases: [(fn(&mut PrivateRenderState), PrivateRenderField); 6] = [
         (|p| p.sample_coverage = 0.5, F::SampleCoverage),
         (|p| p.sample_coverage = f32::NAN, F::SampleCoverage),
-        (|p| p.alpha_test_enabled = true, F::AlphaTest),
+        (
+            |p| {
+                p.alpha_test_enabled = true;
+                p.alpha_test_function = 8;
+            },
+            F::AlphaTest,
+        ),
         (|p| p.logic_operation_enabled = true, F::LogicOperation),
         (|p| p.point_smooth_enabled = true, F::PointSmooth),
         (
@@ -333,6 +341,90 @@ fn each_property_not_built_refuses_a_value_other_than_metals_default() {
                 Err(e) => assert_eq!(e, refused(field), "{stem} {field:?}"),
                 Ok(_) => panic!("{stem} {field:?}: compiled"),
             }
+        }
+    }
+}
+
+/// The private alpha test: the fragment function runs it at its returns, reading the encoder's
+/// reference as a push field for every function but `Never`, which kills every fragment; `Always`
+/// keeps the pipeline as without the test. The keys a consumer looks the pipeline up by name the
+/// tested compile, and a function compiled without the test is compiled for the pipeline again. A
+/// pipeline without a fragment function, and a function past `Always`, are refused.
+#[test]
+fn the_alpha_test_runs_in_the_fragment_function() {
+    use crate::metal::CompareFunction;
+    use crate::pipeline::sym::{PushField, Stage};
+    let Some(lib) = fixture("rt6_render_state") else {
+        return;
+    };
+    let reads_reference = |p: &RenderPipeline| {
+        p.interface.push.iter().any(|pl| {
+            pl.stage == Stage::Fragment
+                && pl
+                    .fields
+                    .iter()
+                    .any(|f| f.field == PushField::AlphaTestReference)
+        })
+    };
+    for stem in STEMS {
+        let dev = device(stem);
+        let plain = render(&lib, 1);
+        let base = compile(&dev, &plain, stem);
+        let untested = dev
+            .render_pipeline_key(&plain, &Budget::standard())
+            .unwrap_or_else(|e| panic!("{stem}: {e}"))
+            .fragment_inputs
+            .expect("fragment inputs");
+        assert_eq!(untested.alpha_test, None, "{stem}");
+        for raw in 0..=7u64 {
+            let what = format!("{stem} function {raw}");
+            let mut d = render(&lib, 1);
+            d.private.alpha_test_enabled = true;
+            d.private.alpha_test_function = raw;
+            let p = compile(&dev, &d, &what);
+            let function = CompareFunction::try_from(raw as u32).expect("function");
+            if function == CompareFunction::Always {
+                assert_eq!(p.key, base.key, "{what}");
+                assert!(same_modules(&p, &base), "{what}");
+                continue;
+            }
+            assert_ne!(p.key, base.key, "{what}");
+            assert!(!same_modules(&p, &base), "{what}");
+            assert_eq!(
+                reads_reference(&p),
+                function != CompareFunction::Never,
+                "{what}"
+            );
+            for m in &p.stages {
+                check_words_valid(&m.spirv, &p.requirements, dev.profile())
+                    .unwrap_or_else(|e| panic!("{what} {:?}: L3: {e}", m.stage));
+            }
+            let keys = dev
+                .render_pipeline_key(&d, &Budget::standard())
+                .unwrap_or_else(|e| panic!("{what}: {e}"));
+            assert_eq!(keys.pipeline, p.key, "{what}");
+            let inputs = keys.fragment_inputs.expect("fragment inputs");
+            assert_eq!(inputs.alpha_test, Some(function), "{what}");
+            let Some(StageSource::Function(f)) = &d.fragment else {
+                unreachable!("a function fragment stage")
+            };
+            let mut compiled = d.clone();
+            compiled.fragment = Some(StageSource::Compiled(
+                dev.compile_function(f, &untested, &Budget::standard())
+                    .unwrap_or_else(|e| panic!("{what}: {e}")),
+            ));
+            match dev.compile_render_pipeline(&compiled, &Budget::standard()) {
+                Err(e) => assert_eq!(e, Error::NeedsInput(RuntimeInput::AlphaTest), "{what}"),
+                Ok(_) => panic!("{what}: compiled"),
+            }
+        }
+        let mut bare = render(&lib, 1);
+        bare.fragment = None;
+        bare.private.alpha_test_enabled = true;
+        bare.private.alpha_test_function = 1;
+        match dev.compile_render_pipeline(&bare, &Budget::standard()) {
+            Err(e) => assert_eq!(e, refused(PrivateRenderField::AlphaTest), "{stem}"),
+            Ok(_) => panic!("{stem}: compiled without a fragment function"),
         }
     }
 }

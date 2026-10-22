@@ -23,7 +23,17 @@
 //!   (`borderColorSPI` 3 with its four values) samples transparent black, the values ignored,
 //!   with the flag or without: the raw border color 3 the runtime already
 //!   samples so (`sampler_border_color`).
-//! - `sampleCoverage`, `alphaTestEnabled`, `logicOperationEnabled`, `pointSmoothEnabled` and
+//! - `alphaTestEnabled` tests each fragment after its function runs (probes on an Apple M3 Max,
+//!   macOS 27.0.1): color 0's alpha and the encoder's reference (`setAlphaTestReferenceValue:`, 1
+//!   until set in each encoder) are each clamped to `[0, 1]`, a NaN taken as 0, and converted to an
+//!   8-bit unorm code as an 8-bit unorm attachment stores a float, whatever color 0's format; the
+//!   fragment passes where `alphaTestFunction` holds between the alpha's code and the
+//!   reference's, and one that fails writes nothing and counts no visibility. The fragment
+//!   function runs the test itself ([`alpha_test`], `LoweringInputs::alpha_test`); `Always`
+//!   changes nothing. Metal's compiler fails a function that writes no color 0 under the test,
+//!   and a function past `Always`, a pipeline without a fragment function and a color 0 other
+//!   than four `float` or `half` lanes are refused, their answers unmeasured.
+//! - `sampleCoverage`, `logicOperationEnabled`, `pointSmoothEnabled` and
 //!   `fragmentDepthCompareClampMask` change what Metal draws; until the translation builds one,
 //!   a value other than Metal's default refuses the pipeline `NotImplemented`
 //!   ([`Feature::PrivateRenderState`]) naming it.
@@ -37,6 +47,7 @@
 
 use crate::error::{Error, Feature, PrivateRenderField, RuntimeInput, Unsupported};
 use crate::library::FunctionArtifact;
+use crate::metal::CompareFunction;
 use crate::pipeline::descriptor::{PrivateRenderState, RenderPipelineDescriptor};
 use crate::pipeline::stage_io::StageBuiltin;
 use crate::pipeline::GraphicsState;
@@ -52,9 +63,9 @@ fn refused(field: PrivateRenderField) -> Error {
 /// refusal naming the first that is not.
 pub(crate) fn check_render(s: &PrivateRenderState) -> Result<(), Error> {
     use PrivateRenderField as F;
+    alpha_test(s)?;
     let unbuilt = [
         (s.sample_coverage != 1.0, F::SampleCoverage),
-        (s.alpha_test_enabled, F::AlphaTest),
         (s.logic_operation_enabled, F::LogicOperation),
         (s.point_smooth_enabled, F::PointSmooth),
         (
@@ -65,6 +76,41 @@ pub(crate) fn check_render(s: &PrivateRenderState) -> Result<(), Error> {
     match unbuilt.into_iter().find(|(set, _)| *set) {
         Some((_, field)) => Err(refused(field)),
         None => Ok(()),
+    }
+}
+
+/// The alpha test of the private state `s` its fragment function runs
+/// (`LoweringInputs::alpha_test`): the comparison where the test is on, `None` where it is off or
+/// `Always`, which keeps every fragment; a function past `Always` is refused
+/// (`PrivateRenderField::AlphaTest`), its answer unmeasured.
+pub(crate) fn alpha_test(s: &PrivateRenderState) -> Result<Option<CompareFunction>, Error> {
+    if !s.alpha_test_enabled {
+        return Ok(None);
+    }
+    let function = u32::try_from(s.alpha_test_function)
+        .ok()
+        .and_then(|raw| CompareFunction::try_from(raw).ok())
+        .ok_or_else(|| refused(PrivateRenderField::AlphaTest))?;
+    Ok((function != CompareFunction::Always).then_some(function))
+}
+
+/// `Ok` where the fragment function `fragment` of the pipeline `d` runs the pipeline's alpha
+/// test ([`alpha_test`]) as compiled: a pipeline with the test on and no fragment function is
+/// refused (`PrivateRenderField::AlphaTest`, Metal's answer unmeasured), and a function compiled
+/// without the test, or for another comparison, is compiled for the pipeline again
+/// (`NeedsInput(AlphaTest)`).
+pub(crate) fn alpha_tested(
+    d: &RenderPipelineDescriptor,
+    fragment: Option<&FunctionArtifact>,
+) -> Result<(), Error> {
+    let wanted = alpha_test(&d.private)?;
+    match fragment {
+        None if wanted.is_some() => Err(refused(PrivateRenderField::AlphaTest)),
+        None => Ok(()),
+        Some(f) if f.interface.io.alpha_test != wanted => {
+            Err(Error::NeedsInput(RuntimeInput::AlphaTest))
+        }
+        Some(_) => Ok(()),
     }
 }
 
@@ -145,8 +191,12 @@ pub(crate) fn sample_mask(
 /// defaults and wherever only properties that change nothing differ, so every other pipeline
 /// keeps its key.
 pub(crate) fn render_key_fields(d: &RenderPipelineDescriptor) -> String {
-    match applied_sample_mask(d) {
+    let mask = match applied_sample_mask(d) {
         Some(mask) => format!(" sample_mask {mask:#x}"),
         None => String::new(),
+    };
+    match alpha_test(&d.private) {
+        Ok(Some(function)) => format!("{mask} alpha_test {}", function.as_raw()),
+        _ => mask,
     }
 }

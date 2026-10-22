@@ -1134,6 +1134,12 @@ pub enum PushField {
     /// Metal's; all three are 0 for a draw its bias does not touch (points, lines, a bias the
     /// draw's viewports take).
     DepthBias,
+    /// The render encoder's alpha test reference (`setAlphaTestReferenceValue:`) for a fragment
+    /// function compiled under `LoweringInputs::alpha_test`: one `u32`, the reference's 8-bit
+    /// unorm code as Metal's alpha test compares it (`bind::alpha_test_code` of
+    /// `BindState::alpha_test_reference`), which the function compares its color 0's alpha's code
+    /// with.
+    AlphaTestReference,
     /// The value a draw or dispatch binds for specialization key `key`, carried as data rather
     /// than specialized: one `u32` holding exactly the value the binder computes for the key's
     /// specialization constant from the bound textures and samplers (a boolean key as 1 or 0; a

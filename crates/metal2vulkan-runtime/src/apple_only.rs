@@ -10,9 +10,10 @@
 //!   or 1, `render/provoking.rs`;
 //! - the call acts on state no runtime object has: Vulkan shows no texture compression, so a
 //!   reinterpretation flush has nothing to flush, and after an invalidation Metal leaves the
-//!   contents undefined, so keeping them is one of the outcomes Metal allows; and no pipeline the
-//!   runtime builds has a fixed-function alpha test, so its reference value has no effect, as on
-//!   Metal with the test off.
+//!   contents undefined, so keeping them is one of the outcomes Metal allows;
+//! - the call sets encoder state a runtime pipeline reads as Metal's does: the alpha test
+//!   reference, which a pipeline with the private alpha test compares against (`BindState`'s
+//!   `alpha_test_reference`).
 //!
 //! - `setPointSize:`, which Metal measured makes a no-op: the point is the vertex function's
 //!   `[[point_size]]`; and `setDepthCleared` and `setStencilCleared`, which change nothing Metal
@@ -284,7 +285,9 @@ impl RenderLowering {
     /// The lowering of [`RenderCommandEncoder::set_alpha_test_reference_value`].
     pub(crate) fn set_alpha_test_reference_value(&mut self, value: f32) -> Result<(), Error> {
         self.log(|_| RenderCall::AlphaTestReferenceValue(value));
-        answer(AppleOnlyCall::SetAlphaTestReferenceValue(value))
+        answer(AppleOnlyCall::SetAlphaTestReferenceValue(value))?;
+        self.set_alpha_test_reference(value);
+        Ok(())
     }
 
     /// The lowering of [`RenderCommandEncoder::set_line_width`].
@@ -338,8 +341,10 @@ impl RenderLowering {
 }
 
 impl RenderCommandEncoder {
-    /// `setAlphaTestReferenceValue:` (SPI): a no-op. No pipeline the runtime builds has a
-    /// fixed-function alpha test, so the reference has no effect, as on Metal with the test off.
+    /// `setAlphaTestReferenceValue:` (SPI): the reference a pipeline with the private alpha test
+    /// (`PrivateRenderState::alpha_test_enabled`) compares its fragments' color 0 alpha against,
+    /// both as Metal's 8-bit unorm codes; each encoder starts at Metal's 1. Accepted for every
+    /// value, as on Metal.
     pub fn set_alpha_test_reference_value(&mut self, value: f32) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| lowering.set_alpha_test_reference_value(value)),

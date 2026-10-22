@@ -287,6 +287,11 @@ pub struct StageIo {
     /// function.
     #[cfg_attr(feature = "serde", serde(default))]
     pub sample_mask: Option<u32>,
+    /// The render pipeline's private alpha test the fragment function runs itself
+    /// (`LoweringInputs::alpha_test`): its returns kill an invocation whose color 0's alpha fails
+    /// the comparison against `PushField::AlphaTestReference`. `None` for every other function.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub alpha_test: Option<crate::metal::CompareFunction>,
     /// The channels taking a `half` output at `float` precision the function compiled under
     /// (`LoweringInputs::half_output_lanes`), by color index: those of the attachments it writes
     /// a `half` output to. Link refuses a stage one of whose entries is not the pipeline's
