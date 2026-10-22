@@ -50,6 +50,7 @@ pub(super) use group::{Group, GroupEnd, GROUP_BATCHES};
 use rebound_use::{ReboundUse, Unlogged};
 pub(super) use submit::{BatchLists, Submitting};
 
+use super::compute::EncoderState;
 use super::contexts::{self, Run};
 use super::deferred::{Deferred, Prepared, StepInputs};
 use super::degradation::Degradation;
@@ -73,7 +74,7 @@ use super::heap_sets::HeapUse;
 use super::live_buffers::LiveTable;
 use super::pipeline::budget::Urgency;
 use super::pipeline::kept::StepNumbers;
-use super::predication::Predication;
+use super::predication::{Event, Predication};
 use super::program_objects;
 use super::queue::Slot;
 use super::rebind::{Holds, SubmittedHolds, Taken};
@@ -1127,11 +1128,15 @@ impl State {
 
     /// A compute encoder of `dispatch_type` opened: it joins the unit of command predication of
     /// the compute encoder that ended just before it, of its dispatch type with no event wait or
-    /// signal between, or starts the next (`predication.rs`).
-    pub(super) fn enter_predication(&mut self, dispatch_type: DispatchType) {
+    /// signal between and no fence update in it, taking the bodies of the loops it left open, or
+    /// starts the next (`predication.rs`).
+    pub(super) fn enter_predication(
+        &mut self,
+        dispatch_type: DispatchType,
+    ) -> Vec<Vec<(EncoderState, Event)>> {
         let place = self.open_encoder_place();
         self.predication
-            .enter(place, self.batches.events(), dispatch_type);
+            .enter(place, self.batches.events(), dispatch_type)
     }
 
     /// Keep `error`, a render encoder's call's refused as it was lowered
@@ -2107,8 +2112,8 @@ impl CommandBuffer {
     ///
     /// Under `RenderLoweringPolicy::Worker`, where the device's lowering thread has not lowered
     /// the last render encoder's end, or a commit of the device waits for one, it makes the
-    /// checks above that refuse at the call (committed already, an encoder open, one abandoned,
-    /// a predication block left open) and returns, its status `Committed`: its own work runs
+    /// checks above that refuse at the call (committed already, an encoder open, one abandoned)
+    /// and returns, its status `Committed`: its own work runs
     /// once the end is lowered, after the commits that wait, on the thread that lowers it
     /// (docs/API.md section 1). A refusal only that work finds (an executed indirect command's,
     /// out of memory) fails the command buffer with nothing of it run
@@ -2184,7 +2189,6 @@ impl CommandBuffer {
         if let Some(problem) = refusal {
             return Err(invalid(call, problem));
         }
-        state.predication.commit_refusal()?;
         state.queued_commit = true;
         self.0.status.store(
             status_word(CommandBufferStatus::Committed),
@@ -2278,8 +2282,7 @@ impl CommandBuffer {
             if let Some(problem) = failure.as_ref().and_then(|failure| failure.problem(ended)) {
                 return Err(invalid(call, problem));
             }
-            // Its last unit of command predication ends: a live block left open where a unit
-            // ended refuses, and each step's gates are listed for it.
+            // Its last unit of command predication ends, and each step's gates are listed for it.
             if run != CommitRun::Refused {
                 let held = &mut *state;
                 held.predication.commit(&mut held.uploads, device)?;
@@ -2582,7 +2585,8 @@ impl CommandBuffer {
     /// `error.localizedDescription`, where the driver relayed Metal's failure of the command
     /// buffer's work ([`CommandBufferError::Execution`], and the `PageFault` and `DeviceLost` it
     /// maps codes 3 and 11 to): Metal's description, as MoltenVK's message gave it after the
-    /// code (`device/relay.rs`), empty where the message had none. `None` for every other
+    /// code (`device/relay.rs`), empty where the message had none; and Metal's for
+    /// [`CommandBufferError::PredicationOpenAtUnitEnd`], as measured. `None` for every other
     /// failure, and before one.
     pub fn error_description(&self) -> Option<String> {
         self.state().relayed_description.clone()
@@ -3887,9 +3891,21 @@ impl CommandBufferShared {
                         state.status = CommandBufferStatus::Error;
                         state.error = Some(CommandBufferError::IndexPoolOverflow);
                     }
+                    // A unit of command predication ended with a live block open where its
+                    // commands skipped (`predication.rs`): Metal's GPU recovery failed the command
+                    // buffer.
+                    if let (Some(record), None) =
+                        (state.predication.open_at_unit_end(), state.error)
+                    {
+                        state.status = CommandBufferStatus::Error;
+                        state.error = Some(CommandBufferError::PredicationOpenAtUnitEnd { record });
+                        state.relayed_description = Some(
+                            CommandBufferError::PREDICATION_OPEN_AT_UNIT_END_DESCRIPTION.to_owned(),
+                        );
+                    }
                     // A predicated loop would have run past its copies (`predication.rs`): the
                     // command buffer failed.
-                    if state.predication.overflowed() && state.error.is_none() {
+                    if state.predication.halted() && state.error.is_none() {
                         state.status = CommandBufferStatus::Error;
                         state.error = Some(CommandBufferError::PredicatedLoopPastCopies);
                     }

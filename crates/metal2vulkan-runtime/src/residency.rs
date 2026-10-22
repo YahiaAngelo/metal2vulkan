@@ -309,6 +309,20 @@ impl Residency {
         }
     }
 
+    /// Make resident what `from`, an earlier compute encoder's residency, made resident: each
+    /// resource with its usage, and each heap with the textures it holds now. Those this one
+    /// first uses here (the caller then holds them until the command buffer completes).
+    pub(super) fn carry(&mut self, from: &Residency) -> Vec<Used> {
+        let mut first = Vec::new();
+        for (used, usage, _) in &from.used {
+            first.extend(self.join(used.clone(), *usage, RenderStages::empty()));
+        }
+        for heap in &from.heaps {
+            first.extend(self.use_heap(&heap.heap, RenderStages::empty()));
+        }
+        first
+    }
+
     /// The residency a compute command reaches, stated as a compute encoder's (no render
     /// stages), so its plan is a kernel's of the same shape as the encoder's own dispatch's
     /// (`tile_resources` alike).

@@ -156,6 +156,16 @@ fn a_level_takes_its_release_s_mipmaps_and_nil_alignments() {
     }
 }
 
+/// macOS 26.7 ends the process at a compute encoder run's first indirect dispatch in an encoder
+/// of another dispatch type (the consumer's measurement); 27.0.1 runs it (ours). The 18 shapes
+/// run on a device at each level in the validation crate's runtime lane
+/// (`a_runs_first_indirect_dispatch_of_another_type_ends_the_process_at_26_7`).
+#[test]
+fn only_26_7_ends_at_a_runs_first_indirect_dispatch_of_another_type() {
+    assert!(MetalLevel::MacOS26_7.ends_at_a_runs_first_indirect_of_another_type());
+    assert!(!MetalLevel::MacOS27_0_1.ends_at_a_runs_first_indirect_of_another_type());
+}
+
 /// A macOS host's release reads as major, minor and patch, the patch 0 where absent.
 #[test]
 fn a_host_release_parses() {

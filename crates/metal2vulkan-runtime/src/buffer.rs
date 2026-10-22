@@ -3309,6 +3309,15 @@ impl Buffer {
         }
     }
 
+    /// The bytes of the heap the buffer is placed in, and where its byte 0 lies among them:
+    /// `None` for a buffer outside a heap.
+    pub(super) fn heap_bytes(&self) -> Option<(&Buffer, u64)> {
+        match &self.0.bytes {
+            Bytes::Own(_) => None,
+            Bytes::Heap(bytes) => Some((&bytes.bytes, bytes.offset)),
+        }
+    }
+
     /// `heapOffset`: where the buffer lies in a placement heap. Metal answers 0 for a buffer of an
     /// automatic heap, whatever its place (measured), and for one outside a heap.
     pub fn heap_offset(&self) -> u64 {

@@ -134,8 +134,7 @@ compile does. `DevicePolicy::default()` is `DevicePolicy::UNTRUSTED`:
   command, `commit_failed`, `refusal`, `used_resources`, `ended_encoders`, `failed_pipeline`)
   lowers on the program's thread what the thread has not, and a rebind or detach of host pages
   and `Device::work_counts` lower every encoder's first. `commit` makes its checks at the call
-  (committed already, an encoder open, one abandoned, a predication block left open) and
-  returns, its status `Committed`, its own work left to run once the end is lowered, on the
+  (committed already, an encoder open, one abandoned) and returns, its status `Committed`, its own work left to run once the end is lowered, on the
   thread that lowers it; while such a commit waits, every later commit of the device waits
   behind it, so the device's scheduler still takes commits in their order across its queues. A
   wait for the command buffer lowers on the waiting thread what that thread has not. A refusal
@@ -1635,6 +1634,14 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   run, on an Apple M3 Max and an Apple M4 alike, so no stable answer exists. Cost: each execution
   runs its own range, as Metal documents, where Metal's GPU may run one execution with the other's
   length, so commands run more or fewer times than the ranges name, differently from run to run.
+- `metal2vulkan-degrade-predication-word-past-buffer` (precision). `PredicationWordPastBuffer`: A
+  command predication record (`encode_start_if`, a loop's start, a live DoWhile's end) whose
+  condition word lies past its buffer's end, past the 256 bytes Metal rounds a lone buffer up to,
+  or past the end of the heap the buffer lies in: Metal reads whatever its own address space holds
+  there, a neighbouring buffer's bytes or zero, which depends on where Metal placed memory
+  unrelated to the buffer. Cost: the record reads its word as zero, where Metal reads what lies at
+  that address in its own address space: zero where nothing is there, another buffer's bytes where
+  Metal placed one.
 - `metal2vulkan-degrade-private-resource-option` (precision). `PrivateResourceOption`: A resource
   made with `MTLResourceOptions` bit 24, a private option Metal takes
   (`ResourceOptions::PRIVATE_BIT`), is made as without it, and reports its options without it, as
@@ -1880,9 +1887,10 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-metal-level-below-host` (precision). `MetalLevelBelowHost`: A device made,
   with no level named in its options, on a macOS host whose release has no measured `MetalLevel`: it
   answers as the newest measured release below the host's. Cost: where Metal's answers differ by
-  release (which pixel formats a texture descriptor takes and Metal describes), the device gives the
-  older release's: it can stop or refuse a texture the host's Metal makes, and never makes one the
-  older release stops.
+  release (which pixel formats a texture descriptor takes and Metal describes, whether a run of
+  compute encoders' first indirect dispatch of another dispatch type ends the process), the device
+  gives the older release's: it can stop or refuse a texture or a dispatch the host's Metal makes,
+  and never makes one the older release stops.
 - `metal2vulkan-degrade-unreached-tiles-rewritten` (precision). `UnreachedTilesRewritten`: A render
   pass that loads a color attachment of an extended-range or padded 10-bit format (`BGR10_XR`,
   `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and their sRGB twins), or under
@@ -2209,8 +2217,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-metal-level-not-macos` (precision). `MetalLevelNotMacOS`: A device made off
   macOS with no Metal level named: it answers as the newest measured release (`MetalLevel::NEWEST`),
   no release of the host's. Cost: where Metal's answers differ by release (which pixel formats a
-  texture descriptor takes and Metal describes, how a heap texture's blocks lie), the device gives
-  the newest measured release's, whatever release the program expects.
+  texture descriptor takes and Metal describes, how a heap texture's blocks lie, whether a run of
+  compute encoders' first indirect dispatch of another dispatch type ends the process), the device
+  gives the newest measured release's, whatever release the program expects.
 - `metal2vulkan-degrade-private-properties-unknown` (precision). `PrivatePropertiesUnknown`: Apple's
   private device properties the device has no answer for: no document describes them and nothing the
   device reports maps to them. Cost: the device gives no answer for them (`PrivateAnswer::value` is
@@ -2860,10 +2869,17 @@ each item named states the rule in full.
   may hold rules out every kind the check names (`IndirectCommandCheckNeeds::ALL` names both), the
   check has nothing to see, is never called, and the execution may run on the GPU alone.
 - **Command predication** (`encode_start_if`, `encode_start_else`, `encode_end_if` and the
-  while and do-while loops) runs Metal's blocks and loops. A loop is laid down as 64 copies (16
-  inside another loop); one that runs past them fails its command buffer
-  (`PredicatedLoopPastCopies`), where Metal runs on. Streams Metal answers by no measured rule are
-  refused (`RuntimeGap::Predication*`).
+  while and do-while loops) runs Metal's blocks and loops on every device, with or without
+  buffer device addresses, its unbalanced records answering `NO` and dropping their ranges, and
+  its live blocks left open where a unit ends failing the command buffer as Metal's GPU recovery
+  does (`PredicationOpenAtUnitEnd`). Loops nest to any depth. A loop is laid down as 64 copies
+  (16 inside another loop, fewer where they would lay down more than 16384 steps and gated
+  dispatches, and at least one); one that runs past them runs nothing more of its unit and fails
+  its command buffer (`PredicatedLoopPastCopies`), where Metal runs on. A condition word past its buffer reads as
+  Metal reads it (the heap's bytes, or zero), and as zero where Metal reads memory unrelated to the
+  buffer (`predication-word-past-buffer`). Refused where Metal runs on (`RuntimeGap`): an
+  unbalanced record that is its unit's first after dispatches of the unit
+  (`PredicationDropsUngatedWork`).
 - **A GPU-written indirect command naming a placed ID runs that ID's live holder**, the state made
   last; once it is released, nothing.
 - **An indirect render command keeps a draw's values to 32 bits**, as Metal's records keep most of

@@ -601,6 +601,7 @@ surface! {
         enum PredicationCompare N;
         enum PredicationOp N;
         struct PredicationStep N;
+        enum PredicationStepForm N;
         struct PredicationStepModule N;
         struct FunctionTableSnapshot O;
         struct FunctionTableWords O;

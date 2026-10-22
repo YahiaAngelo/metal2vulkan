@@ -1387,11 +1387,6 @@ pub enum Feature {
     /// function under the indexed form, an indirect or amplified draw, and an indexed draw whose
     /// indices run past its buffer or whose index offset is not a multiple of the index size.
     TileReach,
-    /// Metal's private command predication (`encodeStartIf:offset:comparison:referenceValue:`
-    /// and the rest), whose step module ([`predication_step_module`](crate::bind::predication_step_module))
-    /// reaches the counter, the condition words and the gated commands by device address: on a
-    /// device without device addresses ([`Needs::AnyOf`]).
-    CommandPredication,
     /// A program-scope buffer binding of MSL 3.2 (macOS 15 and later), `constant T* constant p
     /// [[buffer(n)]];` in Apple's `!air.global_bindings` list, valid AIR this version does not
     /// implement yet.

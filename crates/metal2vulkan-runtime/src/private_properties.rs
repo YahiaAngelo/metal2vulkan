@@ -156,8 +156,8 @@ pub enum PrivateCount {
     /// `maxComputeThreadgroupMemoryAlignmentBytes`: the device's (Metal's alignment where the
     /// `ThreadgroupMemoryAlignment` row is exact: lengths are taken in its multiples).
     MaxComputeThreadgroupMemoryAlignmentBytes,
-    /// `maxPredicatedNestingDepth`: the device's: Metal's `2^32 - 1` where command predication
-    /// runs (a device with device addresses; ifs nest without limit, loops three deep), else 0.
+    /// `maxPredicatedNestingDepth`: the device's, Metal's `2^32 - 1`, as command predication
+    /// runs on every device (ifs nest without limit, loops three deep).
     MaxPredicatedNestingDepth,
     /// `maxRasterizationRateLayerCount`: the device's (the layers a rasterization rate map
     /// takes, `supportsRasterizationRateMapWithLayerCount:`).
@@ -285,8 +285,8 @@ pub enum PrivateFlag {
     /// `supportsBufferWithIOSurface`: the device's, no (the runtime makes no buffer over an
     /// IOSurface).
     SupportsBufferWithIosurface,
-    /// `supportsCommandBufferJump`: the device's: yes where command predication runs (a device
-    /// with device addresses), else no.
+    /// `supportsCommandBufferJump`: the device's, yes, as command predication runs on every
+    /// device.
     SupportsCommandBufferJump,
     /// `supportsComputeCompressedTextureWrite`: Metal's (whether a kernel's writes keep a
     /// texture's lossless compression, which Vulkan leaves to the driver, is not documented).
@@ -488,13 +488,12 @@ impl PrivateProperties {
     }
 
     /// The answers on a device of `properties`, at its Metal level, whose compile layer answers
-    /// `metal`, and whose rows of [`MEASURED_FAMILY`] are `rows`; command predication runs on it
-    /// where `predicates`, and the runtime gives a pixel format the capabilities `formats` answers.
+    /// `metal`, and whose rows of [`MEASURED_FAMILY`] are `rows`, and the runtime gives a pixel
+    /// format the capabilities `formats` answers.
     pub(crate) fn of(
         properties: &DeviceProperties,
         metal: &MetalDeviceProperties,
         rows: &[RowAudit],
-        predicates: bool,
         formats: &dyn Fn(PixelFormat) -> FormatCapabilities,
     ) -> PrivateProperties {
         let level = properties.metal_level;
@@ -502,7 +501,6 @@ impl PrivateProperties {
             properties,
             metal,
             rows,
-            predicates,
             formats,
         };
         PrivateProperties {
@@ -536,8 +534,6 @@ impl Device {
             self.properties(),
             compile.metal_properties(),
             &self.family_rows(MEASURED_FAMILY),
-            // Its step module reaches memory by device address.
-            compile.profile().addressed_needs().is_empty(),
             &|pf| self.pixel_format_capabilities(pf),
         );
         // The properties the device has no answer for, announced once.
@@ -565,8 +561,6 @@ struct Answers<'a> {
     metal: &'a MetalDeviceProperties,
     /// The device's rows of [`MEASURED_FAMILY`].
     rows: &'a [RowAudit],
-    /// Command predication runs on the device.
-    predicates: bool,
     /// The texture capabilities the runtime gives a pixel format on the device
     /// ([`Device::pixel_format_capabilities`]).
     formats: &'a dyn Fn(PixelFormat) -> FormatCapabilities,
@@ -638,10 +632,7 @@ impl Answers<'_> {
                 let metal = self.properties.metal_level.private_count(property);
                 self.limit(L::ThreadgroupMemoryAlignment, metal)
             }
-            C::MaxPredicatedNestingDepth => match self.predicates {
-                true => self.properties.metal_level.private_count(property),
-                false => 0,
-            },
+            C::MaxPredicatedNestingDepth => self.properties.metal_level.private_count(property),
             C::MaxRasterizationRateLayerCount => RATE_MAP_LAYERS,
             C::MaxTextureWidth2D | C::MaxTextureHeight2D => self.limit(L::TextureSize2D, side_2d),
             C::MaxTextureLayers => self.limit(L::TextureArrayLayers, MAX_ARRAY_LENGTH),
@@ -685,7 +676,7 @@ impl Answers<'_> {
             F::SupportsBufferWithAddressRanges
             | F::SupportsBufferWithIosurface
             | F::SupportsHeapWithAddressRanges => false,
-            F::SupportsCommandBufferJump => self.predicates,
+            F::SupportsCommandBufferJump => true,
             F::SupportsDynamicAttributeStride => self.exact(R::DynamicAttributeStride),
             F::SupportsImageBlocks => self.exact(R::Imageblocks),
             F::SupportsNonSquareTileShaders => self.exact(R::NonsquareTileDispatch),

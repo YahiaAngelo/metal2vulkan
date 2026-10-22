@@ -72,7 +72,7 @@ use super::pipeline::{
     flat_dispatch, BufferForms, ComputePipelineState, Planned, RawPipeline, RegionKey,
     RegionPipeline, Variant, VariantObjects,
 };
-use super::predication::{Captures, Event};
+use super::predication::{self, Captures, Event};
 use super::pvrtc::degrade_unreadable;
 use super::replay::{CallLog, ComputeCall, Replay, Resource, SamplersWithLodClamps};
 use super::residency::Residency;
@@ -227,8 +227,9 @@ impl CommandBuffer {
         dispatch_type: DispatchType,
     ) -> Result<ComputeCommandEncoder, Error> {
         let core = EncoderCore::open(self, call, dispatch_type == DispatchType::Serial)?;
-        // It joins its command buffer's unit of command predication, or starts the next.
-        self.state().enter_predication(dispatch_type);
+        // It joins its command buffer's unit of command predication, carrying on the loops open
+        // across its start, or starts the next.
+        let carried = self.state().enter_predication(dispatch_type);
         Ok(ComputeCommandEncoder {
             core,
             dispatch_type,
@@ -240,7 +241,7 @@ impl CommandBuffer {
             indirect_stage_in: None,
             residency: self.inherited_residency(false),
             writers: Writers::default(),
-            captures: Captures::default(),
+            captures: Captures::carried(carried),
             log: (self.device().shared().rebinds.any())
                 .then(|| self.device().shared().scheduler.spare_logs().compute()),
             dispatches: 0,
@@ -741,6 +742,7 @@ impl ComputeCommandEncoder {
                 threads_per_group,
             },
         )?;
+        self.worked();
         self.capture(|| Event::Threadgroups(groups, threads));
         Ok(())
     }
@@ -761,6 +763,7 @@ impl ComputeCommandEncoder {
                 threads_per_group,
             },
         )?;
+        self.worked();
         self.capture(|| Event::Threads(threads, per_group));
         Ok(())
     }
@@ -774,8 +777,11 @@ impl ComputeCommandEncoder {
     ///
     /// An offset that is not a multiple of 4 reads at the multiple below, as plain Metal reads
     /// it. Refused, recording nothing, as `dispatch_threadgroups` refuses `threads`, and as Metal's
-    /// API validation refuses arguments past the buffer's length from there (`Invalid`); and for a
-    /// buffer of another device.
+    /// API validation refuses arguments past the buffer's length from there (`Invalid`); for a
+    /// buffer of another device; and, on a device at the Metal level `MacOS26_7`, as the first
+    /// indirect dispatch of a run of compute encoders in an encoder of another dispatch type than
+    /// the run's first (`Invalid`, `Problem::IndirectDispatchOfAnotherType`: that Metal ends the
+    /// process there).
     pub fn dispatch_threadgroups_indirect(
         &mut self,
         indirect_buffer: &Buffer,
@@ -795,6 +801,7 @@ impl ComputeCommandEncoder {
         };
         let arguments = Arguments::Threadgroups { threads_per_group };
         self.dispatch_indirect(CALL, indirect_buffer, indirect_buffer_offset, arguments)?;
+        self.worked();
         self.capture(|| {
             Event::ThreadgroupsIndirect(indirect_buffer.clone(), indirect_buffer_offset, threads)
         });
@@ -814,8 +821,9 @@ impl ComputeCommandEncoder {
     ///
     /// An offset that is not a multiple of 4 reads at the multiple below, as plain Metal reads
     /// it. Refused, recording nothing, with no pipeline state set, and as Metal's API validation
-    /// refuses arguments past the buffer's length from there (`Invalid`); and for a buffer of
-    /// another device.
+    /// refuses arguments past the buffer's length from there (`Invalid`); for a buffer of another
+    /// device; and as [`dispatch_threadgroups_indirect`](Self::dispatch_threadgroups_indirect)
+    /// refuses a run's first indirect dispatch of another type.
     pub fn dispatch_threads_indirect(
         &mut self,
         indirect_buffer: &Buffer,
@@ -825,6 +833,7 @@ impl ComputeCommandEncoder {
         const CALL: &str = "dispatch_threads_indirect";
         let arguments = Arguments::Threads;
         self.dispatch_indirect(CALL, indirect_buffer, indirect_buffer_offset, arguments)?;
+        self.worked();
         self.capture(|| Event::ThreadsIndirect(indirect_buffer.clone(), indirect_buffer_offset));
         Ok(())
     }
@@ -858,6 +867,16 @@ impl ComputeCommandEncoder {
         offset: u64,
         arguments: Arguments,
     ) -> Result<(), Error> {
+        // Where the device's Metal level ends the process at a run's first indirect dispatch in
+        // an encoder of another type than the run's first encoder's, so does the runtime
+        // (`metal_level.rs`).
+        let ends = (self.core.device().properties().metal_level)
+            .ends_at_a_runs_first_indirect_of_another_type();
+        let goes = (self.core.command_buffer().state().predication)
+            .indirect_dispatch(self.dispatch_type, ends);
+        if !goes {
+            return Err(invalid(call, Problem::IndirectDispatchOfAnotherType));
+        }
         let Some(pipeline) = self.pipeline.clone() else {
             return Err(invalid(call, Problem::NoPipelineState));
         };
@@ -1101,6 +1120,7 @@ impl ComputeCommandEncoder {
         }
         let fixed = u64::from(range.start)..u64::from(range.end);
         self.defer_execution(icb, ExecutionRange::Fixed(range), pipeline, check)?;
+        self.worked();
         self.capture(|| Event::Execute(icb.clone(), fixed));
         Ok(())
     }
@@ -1180,6 +1200,7 @@ impl ComputeCommandEncoder {
             indirect_execute::RANGE_BYTES,
         )?;
         self.defer_execution(icb, ExecutionRange::Indirect(copy), pipeline, check)?;
+        self.worked();
         self.capture(|| Event::ExecuteIndirect(icb.clone(), range_buffer.clone(), offset));
         Ok(())
     }
@@ -1221,22 +1242,26 @@ impl ComputeCommandEncoder {
         // Inside a block of command predication: the host step's check of the counter, and the
         // gate the GPU-alone path's preprocess of a fixed range runs from (`gpu_execute.rs`), one
         // invocation per command where the counter is 0.
-        let (gate, preprocess_gate) = {
+        let (gate, further, preprocess_gate) = {
             let device = self.core.device().clone();
             let mut state = self.core.command_buffer().state();
             let held = &mut *state;
             let gate = held.predication.host_gate();
-            let preprocess_gate = match (&gate, &range, &check) {
+            let (further, preprocess_gate) = match (&gate, &range, &check) {
                 (Some(_), ExecutionRange::Fixed(range), None) if !range.is_empty() => {
                     let count = [range.len() as u32, 1, 1];
-                    held.predication
-                        .gates(&mut held.uploads, &device, &[count])?
-                        .pop()
+                    let (further, mut gates) =
+                        held.predication
+                            .gates(&mut held.uploads, &device, &[count])?;
+                    (further, gates.pop())
                 }
-                _ => None,
+                _ => (None, None),
             };
-            (gate, preprocess_gate)
+            (gate, further, preprocess_gate)
         };
+        if let Some(step) = further {
+            predication::record_further(&mut self.core, &step)?;
+        }
         self.core.defer(Deferred::Execute(Arc::new(Execute {
             icb: icb.clone(),
             range,
@@ -1317,9 +1342,25 @@ impl ComputeCommandEncoder {
         &mut self.captures
     }
 
+    /// What the encoder made resident so far, which a predicated loop carried to its unit's next
+    /// encoder replays its commands with (`predication.rs`).
+    pub(super) fn residency_now(&self) -> Residency {
+        self.residency.clone()
+    }
+
+    /// Make resident here what `residency`, an earlier encoder's of the unit, made resident: a
+    /// predicated loop's copy replays that encoder's commands here (`predication.rs`).
+    pub(super) fn carry_residency(&mut self, residency: &Residency) {
+        for used in self.residency.carry(residency) {
+            self.core.retain(used);
+        }
+    }
+
     /// `endEncoding`. What it binds is held until the command buffer completes, as Metal holds
     /// what an encoder was handed.
     pub fn end_encoding(mut self) -> Result<(), Error> {
+        // Its unit of command predication takes what it encoded (`predication.rs`).
+        self.end_predication()?;
         self.table.let_go_all(&mut self.core);
         // Its log, which its command buffer keeps where a rebind may need it (`replay.rs`).
         let replay = self.log.map(|log| Replay::Compute {
@@ -1972,11 +2013,15 @@ fn record(
                     .map(|region| region.group_count)
                     .collect(),
             };
-            let mut state = core.command_buffer().state();
-            let state = &mut *state;
-            state
-                .predication
-                .gates(&mut state.uploads, &device, &counts)?
+            let (further, gates) = {
+                let mut state = core.command_buffer().state();
+                let state = &mut *state;
+                (state.predication).gates(&mut state.uploads, &device, &counts)?
+            };
+            if let Some(step) = further {
+                predication::record_further(core, &step)?;
+            }
+            gates
         }
         false => Vec::new(),
     };

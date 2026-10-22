@@ -162,8 +162,9 @@ pub(super) enum OwnedModule {
     /// (`render/extended_shadow.rs`). Two storage images: the codes, then the shadow.
     ExtendedShadowLoad(ExtendedRange),
     /// `bind::predication_step_module`: one command-predication record's step, its skip counter
-    /// moved and its dispatches gated (`predication.rs`). No descriptor: it reaches memory by
-    /// device address.
+    /// moved and its dispatches gated (`predication.rs`). On a device with device addresses no
+    /// descriptor: it reaches memory by device address; elsewhere five storage buffers, its
+    /// record's region, its unit's counter, Metal's word, its loop's flag and the overflow word.
     PredicationStep,
     /// The GPU decode of one decoded twin's blocks (`TwinDecode::module`:
     /// `bind::block_decode_module`, `bind::astc_decode_module`): a BC1 to BC5 texture's or an
@@ -423,10 +424,14 @@ impl OwnedModule {
                 Ok((module.spirv.to_vec(), 0, 0))
             }
             OwnedModule::PredicationStep => {
+                use metal2vulkan::bind::{PredicationStepForm, PredicationStepModule};
                 let module = metal2vulkan::bind::predication_step_module(device.compile_device())
                     .map_err(Error::Compile)?;
-                let push_bytes = metal2vulkan::bind::PredicationStepModule::PUSH_BYTES;
-                Ok((module.spirv.to_vec(), 0, push_bytes))
+                let (buffers, push_bytes) = match module.form {
+                    PredicationStepForm::Bound => (PredicationStepModule::BINDINGS, 0),
+                    _ => (0, PredicationStepModule::PUSH_BYTES),
+                };
+                Ok((module.spirv.to_vec(), buffers, push_bytes))
             }
             OwnedModule::TwinDecode(decode) => {
                 let module = decode

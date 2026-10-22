@@ -525,6 +525,15 @@ pub enum Problem {
     Semaphore(SemaphoreProblem),
     /// No pipeline state is set (plain Metal faults at a compute dispatch without one).
     NoPipelineState,
+    /// A run of compute encoders' first indirect dispatch (`dispatch_threadgroups_indirect`,
+    /// `dispatch_threads_indirect`) in an encoder whose dispatch type is not the run's first
+    /// encoder's, on a device whose Metal level ends the process there (a segmentation fault):
+    /// [`MetalLevel::MacOS26_7`](crate::MetalLevel::MacOS26_7), as the consumer measured on an M3
+    /// Max. A run is a command buffer's compute encoders one after another with no other encoder
+    /// and no event signal or wait between; its first encoder's type counts though it dispatches
+    /// nothing, and once one indirect dispatch of the run went through, every later one does.
+    /// macOS 27.0.1 runs it.
+    IndirectDispatchOfAnotherType,
     /// An argument-table index past Metal's table (plain Metal writes past its own table: a
     /// compute texture at index 128 faulted the dispatch on an M4).
     IndexOutOfRange {
@@ -1490,28 +1499,11 @@ pub enum RuntimeGap {
     HostHeapUncompressedMultisample,
     /// An unbalanced command-predication record (`ComputeCommandEncoder::encode_end_if` and the
     /// other ends, or `encode_start_else`, with no block open; `encode_start_if` on a nil buffer
-    /// with none). Metal answers NO and drops its unit's work from the unit's start up to a point
-    /// the records after it decide, by no rule the measurements fit (and one such stream ends
-    /// the process).
-    PredicationUnbalanced,
-    /// A command buffer one of whose units of predication ended with an If still open that no
-    /// misused record killed, refused at `CommandBuffer::commit`. Metal runs it where the If's
-    /// condition held, and fails the command buffer in a GPU recovery where it failed, the
-    /// unit's work from before the If not run either: GPU data decides.
-    PredicationOpenAtUnitEnd,
-    /// A predication condition word (`encode_start_if`'s offset, rounded down to a multiple of
-    /// 4) past its buffer's end. Metal reads whatever memory lies there: zero past a lone buffer,
-    /// the next buffer's bytes inside a heap.
-    PredicationWordPastBuffer,
-    /// A predicated loop started (`ComputeCommandEncoder::encode_start_while`,
-    /// `encode_start_do_while`) with three loops already open in its unit. Metal nests them
-    /// without limit; the runtime lays a loop down as copies of its commands (64, or 16 inside
-    /// another loop), so each level multiplies the copies of the commands inside it.
-    PredicatedLoopDepth,
-    /// A command buffer one of whose live predicated loops started in one compute encoder and
-    /// ended in a later one of its unit, refused at `CommandBuffer::commit`. Metal runs it; the
-    /// runtime lays a loop down as copies of the commands its own encoder encoded inside it.
-    PredicatedLoopAcrossEncoders,
+    /// with none) that is its unit's first record, after dispatches of the unit (of this encoder,
+    /// or of an earlier one of its unit). Metal answers NO and drops those dispatches, which have
+    /// run nothing; the runtime recorded them ungated, before any record, so it cannot drop them.
+    /// Every other unbalanced record runs as Metal's does.
+    PredicationDropsUngatedWork,
     /// A blit copy between a buffer and a multisampled texture (`copyFromBuffer:...toTexture:`
     /// into, or `copyFromTexture:...toBuffer:` out of, a texture of more than one sample).
     /// Vulkan copies no multisampled image to or from a buffer (its `vkCmdCopyBufferToImage` and
@@ -1773,9 +1765,30 @@ pub enum CommandBufferError {
     DetachedBacking,
     /// A command-predication loop (`ComputeCommandEncoder::encode_start_while`,
     /// `encode_start_do_while`) would have run past the copies of its commands the runtime laid
-    /// down (64, or 16 inside another loop). Metal runs a loop on without bound; the runtime ran
-    /// those copies and then the rest of the command buffer, so its results are not Metal's.
+    /// down (at most 64, or 16 inside another loop, fewer for a long body). Metal runs a loop on
+    /// without bound; the runtime ran those copies, then nothing more of the loop's unit, and then
+    /// the rest of the command buffer, so its results are not Metal's. Set before the command
+    /// buffer's completed handlers run.
     PredicatedLoopPastCopies,
+    /// A unit of command predication (`ComputeCommandEncoder::encode_start_if` and the others)
+    /// ended with a block open that no misused record killed, where the unit's commands skipped
+    /// as the GPU reached its end (a failed If or While, a held If's Else, a block inside one that
+    /// skipped): Metal's GPU recovery fails the command buffer, `MTLCommandBufferErrorInternal`
+    /// ("Discarded (victim of GPU error/recovery)
+    /// (00000005:kIOGPUCommandBufferCallbackErrorInnocentVictim)", which
+    /// [`CommandBuffer::error_description`](crate::CommandBuffer::error_description) gives), on
+    /// an M3 Max under macOS 27.0.1, `PageFault` in some runs. The runtime reads
+    /// the unit's skip counter where it ends, on the GPU, and fails the command buffer as it
+    /// completes, before its completed handlers run, and only so; a block whose commands ran there
+    /// is harmless, as on Metal. The rest of the command buffer runs: how much of it Metal's
+    /// recovery runs varies run to run.
+    PredicationOpenAtUnitEnd {
+        /// The index of the call that opened the outermost block left open in the first unit
+        /// that failed so, among the command buffer's command-predication calls that returned
+        /// `Ok` (`encode_start_if` and the other six), counting from 0. Metal's error names no
+        /// record.
+        record: u32,
+    },
     /// The command buffer encoded a render pass without attachments whose
     /// `defaultRasterSampleCount`'s low 8 bits are 16 to 127, which Metal's encoder takes: Metal
     /// fails the command buffer with `MTLCommandBufferErrorInternal` ("Internal Error
@@ -1996,6 +2009,7 @@ impl CommandBufferError {
             | CommandBufferError::HostStepObject(_)
             | CommandBufferError::EncodedUseRebound
             | CommandBufferError::PredicatedLoopPastCopies
+            | CommandBufferError::PredicationOpenAtUnitEnd { .. }
             | CommandBufferError::DefaultRasterSampleCount
             | CommandBufferError::CallRefused(_) => 1,
             CommandBufferError::PageFault => 3,
@@ -2026,6 +2040,7 @@ impl CommandBufferError {
             | CommandBufferError::Execution(_)
             | CommandBufferError::RenderTargetSize
             | CommandBufferError::DetachedBacking
+            | CommandBufferError::PredicationOpenAtUnitEnd { .. }
             | CommandBufferError::DefaultRasterSampleCount => FailureOrigin::Metal,
             CommandBufferError::Internal(_)
             | CommandBufferError::IndexPoolOverflow
@@ -2044,6 +2059,12 @@ impl CommandBufferError {
             | CommandBufferError::CallRefused(_) => FailureOrigin::Runtime,
         }
     }
+
+    /// Metal's `localizedDescription` of [`CommandBufferError::PredicationOpenAtUnitEnd`] (an M3
+    /// Max under macOS 27.0.1).
+    pub(crate) const PREDICATION_OPEN_AT_UNIT_END_DESCRIPTION: &'static str =
+        "Discarded (victim of GPU error/recovery) \
+         (00000005:kIOGPUCommandBufferCallbackErrorInnocentVictim)";
 
     /// The error of Metal's `MTLCommandBufferError` code `code` (not 0), as the driver relayed it
     /// (`device/relay.rs`): `PageFault` for 3, `DeviceLost` for 11, else `Execution`.

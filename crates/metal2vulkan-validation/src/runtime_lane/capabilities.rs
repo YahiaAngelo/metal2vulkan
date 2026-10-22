@@ -187,23 +187,21 @@ fn a_runtime_device_answers_its_queries_and_the_apple_only_calls() {
             command_buffer.set_protection_options(1),
             Err(Error::AppleOnly(AppleOnly::ProtectedContent))
         );
-        let unbalanced = Error::NotImplemented(RuntimeGap::PredicationUnbalanced);
+        // Unbalanced records answer NO, as Metal's do; their range holds no dispatch, so the
+        // DoWhile after them is killed from its start: its If's End answers NO, its own YES.
         let mut encoder = command_buffer.compute_command_encoder().unwrap();
-        assert_eq!(encoder.encode_start_else().err(), Some(unbalanced.clone()));
-        assert_eq!(encoder.encode_end_if().err(), Some(unbalanced.clone()));
-        assert_eq!(encoder.encode_end_while().err(), Some(unbalanced.clone()));
+        encoder.encode_start_else().unwrap();
+        assert_eq!(encoder.encode_end_if(), Ok(false));
+        assert_eq!(encoder.encode_end_while(), Ok(false));
         assert_eq!(
-            encoder.encode_end_do_while(Some(&buffer), 8, 3, 1).err(),
-            Some(unbalanced.clone())
+            encoder.encode_end_do_while(Some(&buffer), 8, 3, 1),
+            Ok(false)
         );
-        assert_eq!(
-            encoder.encode_start_while(None, 0, 3, 1).err(),
-            Some(unbalanced)
-        );
+        encoder.encode_start_while(None, 0, 3, 1).unwrap();
         encoder.encode_start_do_while().unwrap();
         encoder.encode_start_if(Some(&buffer), 0, 3, 1).unwrap();
         encoder.encode_start_else().unwrap();
-        assert_eq!(encoder.encode_end_if(), Ok(true));
+        assert_eq!(encoder.encode_end_if(), Ok(false));
         assert_eq!(
             encoder.encode_end_do_while(Some(&buffer), 0, 3, 1),
             Ok(true)

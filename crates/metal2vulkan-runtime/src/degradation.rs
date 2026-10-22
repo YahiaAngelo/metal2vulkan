@@ -973,6 +973,16 @@ degradations! {
             "each execution runs its own range, as Metal documents, where Metal's GPU may run \
              one execution with the other's length, so commands run more or fewer times than \
              the ranges name, differently from run to run";
+        /// A command predication record (`encode_start_if`, a loop's start, a live DoWhile's
+        /// end) whose condition word lies past its buffer's end, past the 256 bytes Metal rounds
+        /// a lone buffer up to, or past the end of the heap the buffer lies in
+        /// (`predication.rs`): Metal reads whatever its own address space holds there, a
+        /// neighbouring buffer's bytes or zero, which depends on where Metal placed memory
+        /// unrelated to the buffer.
+        PredicationWordPastBuffer = "predication-word-past-buffer", Precision,
+            "the record reads its word as zero, where Metal reads what lies at that address in its \
+             own address space: zero where nothing is there, another buffer's bytes where Metal \
+             placed one";
         /// A resource made with `MTLResourceOptions` bit 24, a private option Metal takes
         /// ([`ResourceOptions::PRIVATE_BIT`](crate::ResourceOptions::PRIVATE_BIT)), is
         /// made as without it, and reports its options without it, as Metal's does.
@@ -1342,9 +1352,10 @@ degradations! {
         /// payload names the host's release and the level.
         MetalLevelBelowHost = "metal-level-below-host", Precision,
             "where Metal's answers differ by release (which pixel formats a texture descriptor \
-             takes and Metal describes), the device gives the older release's: it can stop or \
-             refuse a texture the host's Metal makes, and never makes one the older release \
-             stops";
+             takes and Metal describes, whether a run of compute encoders' first indirect \
+             dispatch of another dispatch type ends the process), the device gives the older \
+             release's: it can stop or refuse a texture or a dispatch the host's Metal makes, and \
+             never makes one the older release stops";
         /// A render pass that loads a color attachment of an extended-range or padded 10-bit
         /// format (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and
         /// their sRGB twins), or under [`metal2vulkan::device::TileStorePolicy::Exact`] of a
@@ -1841,8 +1852,9 @@ degradations! {
         /// (`metal_level.rs`). Announced once, as the device is made; the payload names the level.
         MetalLevelNotMacOS = "metal-level-not-macos", Precision,
             "where Metal's answers differ by release (which pixel formats a texture descriptor \
-             takes and Metal describes, how a heap texture's blocks lie), the device gives the \
-             newest measured release's, whatever release the program expects";
+             takes and Metal describes, how a heap texture's blocks lie, whether a run of compute \
+             encoders' first indirect dispatch of another dispatch type ends the process), the \
+             device gives the newest measured release's, whatever release the program expects";
         /// Apple's private device properties the device has no answer for
         /// (`private_properties.rs`): no document describes them and nothing the device reports
         /// maps to them. Announced once, when `Device::private_properties` is first read; the

@@ -228,6 +228,17 @@ impl Upload {
         self.len
     }
 
+    /// `len` bytes of the region from byte `at`, as a region of their own: a gate in a bound
+    /// predication step's record (`predication.rs`). A part past the region is cut to it.
+    pub(super) fn part(&self, at: u64, len: u64) -> Upload {
+        let at = at.min(self.len);
+        Upload {
+            buffer: self.buffer.clone(),
+            offset: self.offset + at,
+            len: len.min(self.len - at),
+        }
+    }
+
     /// Write `bytes` at the region's start again, before any batch that reads the region is
     /// submitted: as the command buffer commits (a function-table snapshot). A write longer than
     /// the region is cut to it.

@@ -1881,6 +1881,174 @@ fn step_run(
     metal_word: Option<u32>,
     gates: &[[u32; 3]],
 ) -> (u32, Vec<[u32; 3]>) {
+    let (counter, outs, _) = step_out(step, counter, metal_word, gates);
+    (counter, outs)
+}
+
+/// [`step_run`], and Metal's word as the step left it (a [`PredicationOp::UnitEnd`] writes its
+/// check word there where the step names it), the unit's halt word 0.
+fn step_out(
+    step: PredicationStep,
+    counter: u32,
+    metal_word: Option<u32>,
+    gates: &[[u32; 3]],
+) -> (u32, Vec<[u32; 3]>, Option<u32>) {
+    let ((counter, _), outs, metal_word) = halted_out(step, (counter, 0), metal_word, gates);
+    (counter, outs, metal_word)
+}
+
+/// [`step_out`] from the counter and the halt word `(counter, halt)`, and the halt word the step
+/// leaves; a loop's step's flag (at [`STEP_FLAG`]) 0. Run in each form of the module, which give
+/// the same.
+fn halted_out(
+    step: PredicationStep,
+    counter: (u32, u32),
+    metal_word: Option<u32>,
+    gates: &[[u32; 3]],
+) -> ((u32, u32), Vec<[u32; 3]>, Option<u32>) {
+    let addressed = addressed_out(step, counter, metal_word, gates);
+    let bound = bound_out(step, counter, metal_word, gates);
+    assert_eq!(
+        addressed, bound,
+        "{step:?}: the addressed and the bound form"
+    );
+    addressed
+}
+
+/// Whether a step of `op` reads Metal's word.
+fn op_tests(op: PredicationOp) -> bool {
+    use PredicationOp::{DoEnd, If, While, WhileFirst, WhilePast};
+    matches!(op, If | While | WhileFirst | DoEnd | WhilePast)
+}
+
+/// Whether a step of `op` is of a loop (it names a flag).
+fn op_loops(op: PredicationOp) -> bool {
+    use PredicationOp::{Do, DoEnd, DoFirst, DoPast, While, WhileFirst, WhilePast};
+    matches!(
+        op,
+        While | WhileFirst | Do | DoFirst | DoEnd | WhilePast | DoPast
+    )
+}
+
+/// The counter's binding or buffer: the counter, then the halt word.
+fn counter_bytes((counter, halt): (u32, u32)) -> Vec<u8> {
+    [counter, halt]
+        .iter()
+        .flat_map(|w| w.to_le_bytes())
+        .collect()
+}
+
+/// Metal's word's byte in the bound harness's word binding, as an aligned-down binding leaves it.
+const BOUND_WORD_AT: usize = 8;
+
+/// [`step_out`] in the bound form: the record of `step` with every place at byte 0 of its binding
+/// (Metal's word at [`BOUND_WORD_AT`]), its gates after it; a place the step names in its own
+/// record a copy of the record (the interpreter keeps bindings apart), the check word of a
+/// `UnitEnd` the check binding's, and a loop's flag a zero word.
+fn bound_out(
+    step: PredicationStep,
+    counter: (u32, u32),
+    metal_word: Option<u32>,
+    gates: &[[u32; 3]],
+) -> ((u32, u32), Vec<[u32; 3]>, Option<u32>) {
+    let at = BOUND_WORD_AT as u64;
+    let bound = PredicationStep {
+        counter: 0,
+        word: if op_tests(step.op) { at } else { 0 },
+        flag: 0,
+        check: if step.op == PredicationOp::UnitEnd {
+            at
+        } else {
+            0
+        },
+        ..step
+    };
+    let record = bound.record(0).to_vec();
+    let gate_bytes = PredicationStep::GATE_BYTES as usize;
+    let mut region = vec![0xEE; PredicationStep::bound_bytes(gates.len() as u64) as usize];
+    region[..record.len()].copy_from_slice(&record);
+    let count = PredicationStep::BOUND_COUNT_OFFSET as usize;
+    region[count..count + 4].copy_from_slice(&(gates.len() as u32).to_le_bytes());
+    let first = PredicationStep::BOUND_GATES_OFFSET as usize;
+    for (i, counts) in gates.iter().enumerate() {
+        region[first + i * gate_bytes..first + (i + 1) * gate_bytes]
+            .copy_from_slice(&PredicationStep::gate(*counts));
+    }
+    let mut words = vec![0xEE; BOUND_WORD_AT + 8];
+    if let Some(metal_word) = metal_word {
+        words[BOUND_WORD_AT..BOUND_WORD_AT + 4].copy_from_slice(&metal_word.to_le_bytes());
+    }
+    let own = || record.clone();
+    let word_bytes = if op_tests(step.op) {
+        words.clone()
+    } else {
+        own()
+    };
+    let flag_bytes = if op_loops(step.op) { vec![0; 4] } else { own() };
+    let check_bytes = if step.op == PredicationOp::UnitEnd {
+        words.clone()
+    } else {
+        own()
+    };
+    let slots = super::predication::BOUND_SLOTS;
+    let bytes = [
+        region.clone(),
+        counter_bytes(counter),
+        word_bytes,
+        flag_bytes,
+        check_bytes,
+    ];
+    let buffers = slots
+        .into_iter()
+        .zip(bytes)
+        .map(|(slot, bytes)| Buffer {
+            slot: Some(slot),
+            address: None,
+            bytes,
+        })
+        .collect();
+    let res = Resources {
+        buffers,
+        push: Vec::new(),
+        spec: Default::default(),
+    };
+    let cfg = Config {
+        workgroups: [1, 1, 1],
+        ..Config::default()
+    };
+    let m = predication::bound_typed_module().expect("module");
+    let out = run(&m, &cfg, res).expect("run").buffers;
+    let fields = ..record.len();
+    assert_eq!(out[0][fields], region[fields], "the record is only read");
+    let outs = (0..gates.len())
+        .map(|i| {
+            let base = first + i * gate_bytes + PredicationStep::GATE_OUT_OFFSET as usize;
+            std::array::from_fn(|axis| word(&out[0], base + 4 * axis))
+        })
+        .collect();
+    for (i, counts) in gates.iter().enumerate() {
+        let source = &out[0][first + i * gate_bytes..first + i * gate_bytes + 12];
+        assert_eq!(
+            source,
+            &PredicationStep::gate(*counts)[..12],
+            "a gate's command is only read"
+        );
+    }
+    let metal_word = metal_word.map(|value| match step.op {
+        PredicationOp::UnitEnd => word(&out[4], BOUND_WORD_AT),
+        op if op_tests(op) => word(&out[2], BOUND_WORD_AT),
+        _ => value,
+    });
+    ((word(&out[1], 0), word(&out[1], 4)), outs, metal_word)
+}
+
+/// [`step_out`] in the addressed form.
+fn addressed_out(
+    step: PredicationStep,
+    counter: (u32, u32),
+    metal_word: Option<u32>,
+    gates: &[[u32; 3]],
+) -> ((u32, u32), Vec<[u32; 3]>, Option<u32>) {
     let mut record = step.record(STEP_RECORD).to_vec();
     let gate_bytes = PredicationStep::GATE_BYTES as usize;
     let addresses: Vec<u64> = (0..gates.len())
@@ -1904,7 +2072,7 @@ fn step_run(
         Buffer {
             slot: None,
             address: Some(STEP_COUNTER),
-            bytes: counter.to_le_bytes().to_vec(),
+            bytes: counter_bytes(counter),
         },
         Buffer {
             slot: None,
@@ -1915,6 +2083,11 @@ fn step_run(
             slot: None,
             address: Some(STEP_TABLE),
             bytes: PredicationStep::table(STEP_RECORD, &addresses),
+        },
+        Buffer {
+            slot: None,
+            address: Some(STEP_FLAG),
+            bytes: vec![0; 4],
         },
     ];
     if let Some(metal_word) = metal_word {
@@ -1950,45 +2123,31 @@ fn step_run(
             "a gate's command is only read"
         );
     }
-    (word(&out[1], 0), outs)
+    let metal_word = metal_word.map(|_| word(&out[5], 0));
+    ((word(&out[1], 0), word(&out[1], 4)), outs, metal_word)
 }
 
-/// The predication step module is valid on every committed profile with device addresses and
-/// refused by name on the others.
+/// The predication step module is valid on every committed profile in the profile's form: the
+/// addressed one (no descriptor, the record's address pushed) where the device has device
+/// addresses, the bound one (five storage buffers, no push constants) elsewhere; and the bound
+/// form is valid on every profile.
 #[test]
-fn the_predication_step_module_is_valid_where_device_addresses_are() {
+fn the_predication_step_module_is_valid_in_each_devices_form() {
     let mut seen = (0, 0);
     for (stem, dev) in devices() {
         let p = dev.profile();
+        assert_valid(predication::bound_typed_module().expect("module"), p);
+        let m = predication_step_module(&dev).unwrap_or_else(|e| panic!("{stem}: {e}"));
+        assert!(p.check(&m.requirements).is_ok(), "{stem}");
         if addressed(&dev) {
             seen.0 += 1;
             assert_valid(predication::typed_module().expect("module"), p);
-            let m = predication_step_module(&dev).unwrap_or_else(|e| panic!("{stem}: {e}"));
-            assert!(p.check(&m.requirements).is_ok(), "{stem}");
-            assert!(m.layout.sets.is_empty(), "{stem}");
-            assert_eq!(
-                m.layout
-                    .push_constants
-                    .iter()
-                    .map(|r| (r.stages, r.offset, r.size))
-                    .collect::<Vec<_>>(),
-                vec![(
-                    crate::vk::ShaderStageFlags::COMPUTE,
-                    0,
-                    PredicationStepModule::PUSH_BYTES
-                )],
-                "{stem}"
-            );
+            assert_eq!(m.form, PredicationStepForm::Addressed, "{stem}");
         } else {
             seen.1 += 1;
-            let e =
-                Unsupported::needs_any_of(Feature::CommandPredication, vec![p.addressed_needs()]);
-            assert_eq!(
-                predication_step_module(&dev),
-                Err(Error::Unsupported(e)),
-                "{stem}"
-            );
+            assert_eq!(m.form, PredicationStepForm::Bound, "{stem}");
         }
+        assert_eq!(PredicationStepForm::of(&dev), m.form, "{stem}");
     }
     assert!(seen.0 > 0 && seen.1 > 0, "{seen:?}");
 }
@@ -2039,6 +2198,48 @@ fn a_predication_step_moves_its_counter_as_metals_blocks_nest() {
             "EndDead at {c}"
         );
     }
+}
+
+/// The steps of a range an unbalanced record dropped: a Drop sets the counter to 1, a Hold leaves
+/// it, and a Resume sets it to 0, from 0, 1, 2 and 5, reading only their own record; a Drop's gates
+/// run nothing and a Resume's run. A UnitEnd leaves the counter and writes 1 into its check word
+/// where the counter is above 0, else 0.
+#[test]
+fn a_predication_step_drops_holds_resumes_and_checks_a_units_end() {
+    let step = |op| PredicationStep::new(STEP_COUNTER, op);
+    for c in [0, 1, 2, 5] {
+        assert_eq!(
+            step_run(step(PredicationOp::Drop), c, None, &[]).0,
+            1,
+            "Drop at {c}"
+        );
+        assert_eq!(
+            step_run(step(PredicationOp::Hold), c, None, &[]).0,
+            c,
+            "Hold at {c}"
+        );
+        assert_eq!(
+            step_run(step(PredicationOp::Resume), c, None, &[]).0,
+            0,
+            "Resume at {c}"
+        );
+        let check = step(PredicationOp::UnitEnd).checking(STEP_WORD);
+        let (after, _, word) = step_out(check, c, Some(0xEE), &[]);
+        assert_eq!(
+            (after, word),
+            (c, Some(u32::from(c != 0))),
+            "UnitEnd at {c}"
+        );
+    }
+    let gates = [[3, 2, 1], [1, 1, 1]];
+    assert_eq!(
+        step_run(step(PredicationOp::Drop), 0, None, &gates).1,
+        vec![[0; 3]; 2]
+    );
+    assert_eq!(
+        step_run(step(PredicationOp::Resume), 1, None, &gates).1,
+        gates.to_vec()
+    );
 }
 
 /// Metal's six comparison codes compare the word with the reference unsigned, the word on the left,
@@ -2101,6 +2302,14 @@ fn a_predication_table_ends_at_the_records_sink_gate() {
         assert_eq!(table.len(), past + 8, "{gates:x?}");
         assert_eq!(table[past..], sink.to_le_bytes(), "{gates:x?}");
     }
+    // The bound form's region holds one gate past its count.
+    for gates in 0..3 {
+        let past = PredicationStep::BOUND_GATES_OFFSET + gates * PredicationStep::GATE_BYTES;
+        assert_eq!(
+            PredicationStep::bound_bytes(gates),
+            past + PredicationStep::GATE_BYTES
+        );
+    }
     let record = PredicationStep::new(STEP_COUNTER, PredicationOp::End).record(STEP_RECORD);
     let field = PredicationStep::TABLE_OFFSET as usize;
     let empty = STEP_RECORD + PredicationStep::EMPTY_TABLE_OFFSET;
@@ -2112,23 +2321,21 @@ fn a_predication_table_ends_at_the_records_sink_gate() {
     );
 }
 
-/// Where the loop steps' harness puts a loop's flag and the overflow word.
+/// Where the loop steps' harness puts a loop's flag, and its loop's id.
 const STEP_FLAG: u64 = 0x0000_0055_0000_0000;
-const STEP_OVERFLOW: u64 = 0x0000_0056_0000_0000;
+const LOOP_ID: u32 = 9;
+/// Another loop's id.
+const OTHER_ID: u32 = 3;
 
-/// Run the loop step `op` (its counter, word, flag and overflow word at the harness's addresses)
-/// once from the counter `counter`, the flag `flag` and the overflow word `overflow`, Metal's word
-/// 7 tested `<` 7 where `holds` is false and `<` 8 where true. The counter, flag and overflow
+/// Run the loop step `op` of the loop [`LOOP_ID`] (its counter, word and flag at the harness's
+/// addresses) once from the counter `counter`, the flag `flag` and the halt word `halt`, Metal's
+/// word 7 tested `<` 7 where `holds` is false and `<` 8 where true. The counter, flag and halt
 /// word it leaves.
-fn loop_run(
-    op: PredicationOp,
-    holds: bool,
-    (counter, flag, overflow): (u32, u32, u32),
-) -> [u32; 3] {
+fn loop_run(op: PredicationOp, holds: bool, (counter, flag, halt): (u32, u32, u32)) -> [u32; 3] {
     let reference = if holds { 8 } else { 7 };
     let step = PredicationStep::new(STEP_COUNTER, op)
         .testing(STEP_WORD, PredicationCompare::Less, reference)
-        .in_loop(STEP_FLAG, STEP_OVERFLOW);
+        .in_loop(STEP_FLAG, LOOP_ID);
     let record = step.record(STEP_RECORD).to_vec();
     let buffer = |address, bytes: Vec<u8>| Buffer {
         slot: None,
@@ -2138,10 +2345,9 @@ fn loop_run(
     let res = Resources {
         buffers: vec![
             buffer(STEP_RECORD, record.clone()),
-            buffer(STEP_COUNTER, counter.to_le_bytes().to_vec()),
+            buffer(STEP_COUNTER, counter_bytes((counter, halt))),
             buffer(STEP_WORD, 7u32.to_le_bytes().to_vec()),
             buffer(STEP_FLAG, flag.to_le_bytes().to_vec()),
-            buffer(STEP_OVERFLOW, overflow.to_le_bytes().to_vec()),
         ],
         push: PredicationStepModule::push_constants(STEP_RECORD).to_vec(),
         spec: Default::default(),
@@ -2154,17 +2360,72 @@ fn loop_run(
     let out = run(&m, &cfg, res).expect("run").buffers;
     assert_eq!(out[0], record, "the record is only read");
     assert_eq!(word(&out[2], 0), 7, "the word is only read");
-    [word(&out[1], 0), word(&out[3], 0), word(&out[4], 0)]
+    let addressed = [word(&out[1], 0), word(&out[3], 0), word(&out[1], 4)];
+    let bound = bound_loop_run(step, (counter, flag, halt));
+    assert_eq!(addressed, bound, "{op:?}: the addressed and the bound form");
+    addressed
 }
 
-/// A loop's copies move the counter, its flag and the overflow word as the module docs state: a
+/// [`loop_run`]'s step `step` in the bound form: every place at byte 0 of its binding, Metal's
+/// word 7 at [`BOUND_WORD_AT`] of its, the check word the record's own.
+fn bound_loop_run(step: PredicationStep, (counter, flag, halt): (u32, u32, u32)) -> [u32; 3] {
+    let bound = PredicationStep {
+        counter: 0,
+        word: BOUND_WORD_AT as u64,
+        flag: 0,
+        ..step
+    };
+    let record = bound.record(0).to_vec();
+    let mut region = vec![0; PredicationStep::bound_bytes(0) as usize];
+    region[..record.len()].copy_from_slice(&record);
+    let mut words = vec![0xEE; BOUND_WORD_AT + 8];
+    words[BOUND_WORD_AT..BOUND_WORD_AT + 4].copy_from_slice(&7u32.to_le_bytes());
+    let bytes = [
+        region,
+        counter_bytes((counter, halt)),
+        words,
+        flag.to_le_bytes().to_vec(),
+        record.clone(),
+    ];
+    let buffers = (super::predication::BOUND_SLOTS.into_iter())
+        .zip(bytes)
+        .map(|(slot, bytes)| Buffer {
+            slot: Some(slot),
+            address: None,
+            bytes,
+        })
+        .collect();
+    let res = Resources {
+        buffers,
+        push: Vec::new(),
+        spec: Default::default(),
+    };
+    let cfg = Config {
+        workgroups: [1, 1, 1],
+        ..Config::default()
+    };
+    let m = predication::bound_typed_module().expect("module");
+    let out = run(&m, &cfg, res).expect("run").buffers;
+    assert_eq!(out[0][..record.len()], record, "the record is only read");
+    assert_eq!(word(&out[2], BOUND_WORD_AT), 7, "the word is only read");
+    assert_eq!(
+        out[4], record,
+        "the record's own check word is written back"
+    );
+    [word(&out[1], 0), word(&out[3], 0), word(&out[1], 4)]
+}
+
+/// A loop's copies move the counter, its flag and the halt word as the module docs state: a
 /// While runs a copy while its test holds and sets the flag where it fails, a Do runs one until the
-/// flag is set, a DoEnd sets the flag where its copy ran and the test fails, a Past step sets the
-/// overflow word where the loop would run another copy, and a skipped region skips every copy and
-/// touches neither word.
+/// flag is set, a DoEnd sets the flag where its copy ran and the test fails, a first copy's start
+/// takes the flag as clear, a Past step halts the unit at the loop's id where the loop would run
+/// another copy, a halted unit's steps leave every word but at the halted loop's first copy's
+/// start, which clears the halt and runs, and a skipped region skips every copy.
 #[test]
-fn a_loop_step_moves_its_counter_flag_and_overflow_word() {
-    use PredicationOp::{Do, DoEnd, DoPast, While, WhilePast};
+fn a_loop_step_moves_its_counter_flag_and_halt_word() {
+    use PredicationOp::{Do, DoEnd, DoFirst, DoPast, While, WhileFirst, WhilePast};
+    const ID: u32 = LOOP_ID;
+    const NO: u32 = OTHER_ID;
     for ((op, holds, before), after) in [
         // While: runs, exits (setting the flag), stays out, and nests in a skip.
         ((While, true, (0, 0, 0)), [0, 0, 0]),
@@ -2172,24 +2433,42 @@ fn a_loop_step_moves_its_counter_flag_and_overflow_word() {
         ((While, true, (0, 1, 0)), [1, 1, 0]),
         ((While, true, (1, 0, 0)), [2, 0, 0]),
         ((While, false, (3, 0, 0)), [4, 0, 0]),
-        // Do: runs until the flag is set.
+        // WhileFirst: a While on a clear flag.
+        ((WhileFirst, true, (0, 1, 0)), [0, 0, 0]),
+        ((WhileFirst, false, (0, 1, 0)), [1, 1, 0]),
+        ((WhileFirst, true, (2, 1, 0)), [3, 0, 0]),
+        // Do: runs until the flag is set; DoFirst runs on a clear flag.
         ((Do, false, (0, 0, 0)), [0, 0, 0]),
         ((Do, true, (0, 1, 0)), [1, 1, 0]),
         ((Do, true, (2, 0, 0)), [3, 0, 0]),
+        ((DoFirst, false, (0, 1, 0)), [0, 0, 0]),
+        ((DoFirst, true, (1, 1, 0)), [2, 0, 0]),
         // DoEnd: a copy that ran tests; a skipped one does not.
         ((DoEnd, true, (0, 0, 0)), [0, 0, 0]),
         ((DoEnd, false, (0, 0, 0)), [0, 1, 0]),
         ((DoEnd, false, (1, 0, 0)), [0, 0, 0]),
         ((DoEnd, false, (3, 1, 0)), [2, 1, 0]),
-        // Past: a loop still running sets the overflow word, once and for good.
-        ((WhilePast, true, (0, 0, 0)), [0, 0, 1]),
+        // Past: a loop still running halts the unit at its id.
+        ((WhilePast, true, (0, 0, 0)), [0, 0, ID]),
         ((WhilePast, false, (0, 0, 0)), [0, 0, 0]),
         ((WhilePast, true, (0, 1, 0)), [0, 1, 0]),
         ((WhilePast, true, (1, 0, 0)), [1, 0, 0]),
-        ((WhilePast, false, (0, 0, 1)), [0, 0, 1]),
-        ((DoPast, false, (0, 0, 0)), [0, 0, 1]),
+        ((DoPast, false, (0, 0, 0)), [0, 0, ID]),
         ((DoPast, false, (0, 1, 0)), [0, 1, 0]),
         ((DoPast, false, (2, 0, 0)), [2, 0, 0]),
+        // Halted: every step leaves every word, a Past step's too.
+        ((While, false, (0, 0, NO)), [0, 0, NO]),
+        ((While, true, (1, 0, ID)), [1, 0, ID]),
+        ((Do, true, (0, 1, NO)), [0, 1, NO]),
+        ((DoEnd, false, (0, 0, NO)), [0, 0, NO]),
+        ((WhilePast, true, (0, 0, NO)), [0, 0, NO]),
+        ((DoPast, false, (0, 0, NO)), [0, 0, NO]),
+        ((WhileFirst, true, (0, 1, NO)), [0, 1, NO]),
+        ((DoFirst, true, (0, 1, NO)), [0, 1, NO]),
+        // The halted loop's first copy's start: the halt clears and the loop runs afresh.
+        ((WhileFirst, true, (0, 1, ID)), [0, 0, 0]),
+        ((WhileFirst, false, (0, 0, ID)), [1, 1, 0]),
+        ((DoFirst, true, (0, 1, ID)), [0, 0, 0]),
     ] {
         assert_eq!(
             loop_run(op, holds, before),
@@ -2197,4 +2476,35 @@ fn a_loop_step_moves_its_counter_flag_and_overflow_word() {
             "{op:?} holding {holds} from {before:?}"
         );
     }
+}
+
+/// While the halt word is not 0, a step of every op leaves the counter, the halt word and a unit
+/// end's check word, and its gates run nothing; the halted loop's first copy's start runs its gates.
+#[test]
+fn a_halted_unit_holds_every_step_and_runs_nothing() {
+    use PredicationOp::{Dead, Drop, Else, End, EndDead, Hold, Resume, UnitEnd};
+    let gates = [[3, 2, 1], [1, 1, 1]];
+    let holds = PredicationStep::condition(STEP_COUNTER, STEP_WORD, PredicationCompare::Equal, 7);
+    let fails = PredicationStep::condition(STEP_COUNTER, STEP_WORD, PredicationCompare::Equal, 8);
+    let mut steps = vec![holds, fails];
+    for op in [Else, End, Dead, EndDead, Drop, Hold, Resume] {
+        steps.push(PredicationStep::new(STEP_COUNTER, op));
+    }
+    steps.push(PredicationStep::new(STEP_COUNTER, UnitEnd).checking(STEP_WORD));
+    for step in steps {
+        for c in [0, 1, 2] {
+            let word = if step.op == UnitEnd { 0xEE } else { 7 };
+            let (after, outs, left) = halted_out(step, (c, OTHER_ID), Some(word), &gates);
+            assert_eq!(after, (c, OTHER_ID), "{:?} at {c}", step.op);
+            assert_eq!(outs, vec![[0; 3]; 2], "{:?} at {c}", step.op);
+            assert_eq!(left, Some(word), "{:?} at {c}", step.op);
+        }
+    }
+    let first = PredicationStep::new(STEP_COUNTER, PredicationOp::WhileFirst)
+        .testing(STEP_WORD, PredicationCompare::Equal, 7)
+        .in_loop(STEP_FLAG, LOOP_ID);
+    let resumed = halted_out(first, (0, LOOP_ID), Some(7), &gates);
+    assert_eq!((resumed.0, resumed.1), ((0, 0), gates.to_vec()));
+    let other = halted_out(first, (0, OTHER_ID), Some(7), &gates);
+    assert_eq!((other.0, other.1), ((0, OTHER_ID), vec![[0; 3]; 2]));
 }
