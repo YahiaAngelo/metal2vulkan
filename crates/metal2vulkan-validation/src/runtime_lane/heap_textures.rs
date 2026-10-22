@@ -1742,7 +1742,8 @@ fn heap_depth_textures_keep_their_texels_in_metal_s_tiles() {
         // Each shape's format, extent, `allowGPUOptimizedContents` and Metal's size (every
         // alignment 128), measured, and its aspects: each one's element bytes, blit option and
         // first byte from the texture's.
-        let shapes: [(PixelFormat, [u64; 2], bool, u64, &[(u64, BlitOption, u64)]); 11] = [
+        type Aspects = &'static [(u64, BlitOption, u64)];
+        let shapes: [(PixelFormat, [u64; 2], bool, u64, Aspects); 11] = [
             (
                 PixelFormat::Depth16Unorm,
                 [37, 5],
