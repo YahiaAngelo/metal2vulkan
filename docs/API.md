@@ -3097,8 +3097,11 @@ each item named states the rule in full.
   running nothing and firing none of its event signals, for good (two seconds on too), while one
   committed before it runs; the device's other queues, new ones too, run on. The runtime counts the
   faults and hangs it makes Metal's answer for (primitive type 9, an execution of indirect
-  commands under a state it cannot inherit), not the ones the driver relays, and decides at the
-  commit: a command buffer committed before the revocation runs whatever its event waits.
+  commands under a state it cannot inherit) and those a program commits as failed in their place
+  (`commit_failed` with Metal's code 3 or 2, `CommandBufferError::Injected`), not the ones the
+  driver relays, and decides at the commit: a command buffer committed before the revocation runs
+  whatever its event waits, a predicated loop's runs again included (on the M3 Max a loop
+  committed before the revocation ran all its passes after it, with no error).
 
 **Heaps and memory**
 

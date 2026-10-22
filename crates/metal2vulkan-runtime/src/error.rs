@@ -1649,7 +1649,9 @@ pub enum CommandBufferError {
     /// `commit`'s would be.
     Refused,
     /// The program committed the command buffer as failed, with this `MTLCommandBufferError`
-    /// code ([`CommandBuffer::commit_failed`](crate::CommandBuffer::commit_failed)).
+    /// code ([`CommandBuffer::commit_failed`](crate::CommandBuffer::commit_failed)). Of Metal's
+    /// codes of a page fault (3) and a hang (2), it counts against its queue as the error it
+    /// stands for does ([`AccessRevoked`](Self::AccessRevoked)); of any other code, not.
     Injected(u64),
     /// The command buffer encoded a render pass without attachments whose
     /// `renderTargetWidth` or `renderTargetHeight` is past 16384, which Metal's encoder takes:
@@ -1718,7 +1720,8 @@ pub enum CommandBufferError {
     /// count against its queue.
     GpuRecoveryVictim,
     /// Metal ignored the command buffer, committed on a queue whose second command buffer with a
-    /// GPU error it caused ([`PageFault`](Self::PageFault), [`GpuHang`](Self::GpuHang); not a
+    /// GPU error it caused ([`PageFault`](Self::PageFault), [`GpuHang`](Self::GpuHang), or
+    /// [`Injected`](Self::Injected) of Metal's code of either; not a
     /// [`GpuRecoveryVictim`](Self::GpuRecoveryVictim)) had completed:
     /// `MTLCommandBufferErrorAccessRevoked` (4, "Ignored (for causing prior/excessive GPU errors)
     /// (00000004:kIOGPUCommandBufferCallbackErrorSubmissionsIgnored)" on the M3 Max, macOS

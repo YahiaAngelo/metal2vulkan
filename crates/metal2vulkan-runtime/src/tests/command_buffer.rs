@@ -344,3 +344,29 @@ fn metal_submissions_follow_the_consumer_s_measurements() {
     assert_eq!(kinds, [Render, Blit]);
     assert!(metal_submissions([]).is_empty());
 }
+
+/// A command buffer counts toward its queue's revocation where it completed with a GPU error it
+/// caused: a page fault or a hang, the runtime's or one a program injected in their place by
+/// Metal's code (3 or 2); not a victim of the GPU's recovery, injected (1) or not, another code,
+/// nor a failure the driver relays.
+#[test]
+fn caused_errors_count_toward_revocation_by_their_metal_code() {
+    use crate::command_buffer::revocation::caused;
+    use CommandBufferError as E;
+    let counted = [E::PageFault, E::GpuHang, E::Injected(3), E::Injected(2)];
+    let uncounted = [
+        E::GpuRecoveryVictim,
+        E::Injected(1),
+        E::Injected(4),
+        E::Injected(8),
+        E::Injected(11),
+        E::Execution(3),
+        E::AccessRevoked,
+    ];
+    for error in counted {
+        assert!(caused(error), "{error:?}");
+    }
+    for error in uncounted {
+        assert!(!caused(error), "{error:?}");
+    }
+}
