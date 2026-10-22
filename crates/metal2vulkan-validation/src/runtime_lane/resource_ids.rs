@@ -2302,7 +2302,9 @@ fn plain_ids_after_a_reservation_are_metal_s() {
     // One reserved texture ID inside the pool's second half: 11 to 15 first (`o1_0_10`); a
     // second call is ignored, even before any texture was made (`w_16_5`). A call of no ID, of
     // 0 alone, or holding an ID of 2^32 or more (dropped whole) is not the reservation
-    // (`empty_first`, `y_zero_then_10`, `y_high_and_10`, `y_high_then_10`).
+    // (`empty_first`, `y_high_and_10`, `y_high_then_10`), but the call of 0 alone leaves the pool
+    // made, so its first range's IDs are handed out twice: 1 after 9, where the M4's
+    // `y_zero_then_10` handed out 16 (an M3 Max, macOS 27.0.1, this very sequence).
     on_device(|device, _| {
         let reserve = |ids: &[u64]| {
             let ids: Vec<ResourceId> = ids.iter().copied().map(ResourceId).collect();
@@ -2314,7 +2316,7 @@ fn plain_ids_after_a_reservation_are_metal_s() {
         reserve(&[10]).unwrap();
         reserve(&[12]).unwrap();
         let made = textures(device, 17);
-        assert_eq!(ids(&made), runs(&[(11, 15), (1, 9), (16, 18)]));
+        assert_eq!(ids(&made), runs(&[(11, 15), (1, 9), (1, 3)]));
     });
     // IDs past Metal's placement limit (`hi_0_16380`, `multi_0`): 16383 is handed out.
     on_device(|device, _| {
@@ -2469,6 +2471,35 @@ fn plain_ids_after_a_reservation_are_metal_s() {
                 .collect();
             let got: Vec<u64> = buffers.iter().map(|b| b.gpu_resource_id().0).collect();
             assert_eq!(got, ids, "{reserved}");
+        });
+    }
+    // After a call of 0 alone, a reservation keeps the pool's first range beside its own, whose
+    // IDs Metal hands out twice (an M3 Max, macOS 27.0.1): 0 then 10 gives 1 to 9, 11 to 31,
+    // then 1 to 15; 0 then 20, 21 to 31, 1 to 19, then 1 to 10.
+    for (reserved, runs) in [
+        (10, &[(1, 9), (11, 31), (1, 15)]),
+        (20, &[(21, 31), (1, 19), (1, 10)]),
+    ] {
+        on_device(|device, _| {
+            for ids in [0, reserved] {
+                device
+                    .reserve_resource_ids(ResourceIdKind::IndirectCommandBuffer, &[ResourceId(ids)])
+                    .unwrap();
+            }
+            let want: Vec<u64> = runs
+                .iter()
+                .flat_map(|&(first, last)| first..=last)
+                .collect();
+            let buffers: Vec<IndirectCommandBuffer> = want
+                .iter()
+                .map(|_| {
+                    device
+                        .new_indirect_command_buffer(&icb, 1, ResourceOptions::shared())
+                        .unwrap()
+                })
+                .collect();
+            let got: Vec<u64> = buffers.iter().map(|b| b.gpu_resource_id().0).collect();
+            assert_eq!(got, want, "0, then {reserved}");
         });
     }
 }

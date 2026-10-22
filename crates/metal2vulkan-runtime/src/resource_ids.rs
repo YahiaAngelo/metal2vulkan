@@ -94,8 +94,14 @@
 //!   not. Only a space's first call with an ID counts: one once the space handed out an ID,
 //!   placed or plain, or took a reservation is ignored, with a diagnostic line, as Metal's is
 //!   (its pool logs "reserve() must be called before any allocation takes place" for both). A
-//!   call of no ID, or of 0 alone, changes nothing, and 0 beside other IDs reserves nothing:
-//!   Metal's pool, given 0, later hands IDs out twice (1 to 4 again after 9), a defect not copied.
+//!   call of no ID changes nothing, and 0 beside other IDs is no ID (0 and 5 reserve 5). A call
+//!   of 0 alone reserves nothing, but leaves the pool made, as a texture pool is by the device's
+//!   first queue ([`Pool::make`]): a later reservation keeps the pool's first range beside the
+//!   ranges it leaves, and Metal hands out that range's IDs twice, as the runtime does (an M3
+//!   Max, macOS 27.0.1, indirect command buffers: 0 then 10 gives 1 to 9, 11 to 31, then 1 to
+//!   15; 0 then 20, 21 to 31, 1 to 19, then 1 to 10; 0 then 40, 41 to 63, 1 to 31, then 1 to 16;
+//!   0 then 31, 1 to 30, then 1 to 50; 0 then 32, 1 to 31, then 33 on, the first range equal to
+//!   the one left; textures, 0 then 10, 11 to 15, 1 to 9, then 1 to 31).
 //!   A call holding an ID of 2^32 or more is dropped whole, silently, and a later call is the
 //!   reservation (2^32 to 2^63, alone or beside 10, for textures, sampler states and indirect
 //!   command buffers).
@@ -598,14 +604,19 @@ impl Pool {
     }
 
     /// Reserve `ids` ([`Pool::keep`]): false, reserving nothing, once the pool started. 0, the
-    /// null handle, is no ID, and a call of no other ID leaves the pool as it was, as Metal's
-    /// does (Metal's pool, given 0, later hands IDs out twice: not copied). A made pool
-    /// ([`Pool::make`]) keeps its first range, from 1 to its first size, beside the ranges the
-    /// reservation leaves, as Metal's does.
+    /// null handle, is no ID: a call of no ID leaves the pool as it was, and one of 0 alone leaves
+    /// it made ([`Pool::make`]) before it started, and is ignored after (Metal logs it then, as
+    /// any late call), as Metal's does. A made pool keeps its first range, from 1 to its first
+    /// size, beside the ranges the reservation leaves, as Metal's does.
     pub(super) fn reserve(&mut self, ids: impl IntoIterator<Item = u64>) -> bool {
-        let ids: Vec<u64> = ids.into_iter().filter(|&id| id != 0).collect();
+        let all: Vec<u64> = ids.into_iter().collect();
+        let ids: Vec<u64> = all.iter().copied().filter(|&id| id != 0).collect();
         if ids.is_empty() {
-            return true;
+            if all.is_empty() {
+                return true;
+            }
+            self.make();
+            return !self.started;
         }
         if self.started {
             return false;
@@ -940,7 +951,10 @@ impl Device {
     /// its message sink, else on stderr). A call of no ID changes nothing.
     ///
     /// A call holding an ID of 2^32 or more is dropped whole, silently, and leaves the kind's
-    /// reservation to a later call, as Metal's is; 0, the null handle, reserves nothing.
+    /// reservation to a later call, as Metal's is; 0, the null handle, reserves nothing. A call
+    /// of 0 alone, before any ID of `kind`, leaves `kind`'s pool to keep its first range beside a
+    /// later reservation's ranges, so plain allocation hands that range's IDs out twice, as
+    /// Metal's does (the module docs).
     ///
     /// Refused, reserving nothing: a texture or sampler state ID of 2^28 or more, which ends
     /// Metal's process (`Invalid`, `Problem::ResourceId`); an indirect command buffer ID of 2^31

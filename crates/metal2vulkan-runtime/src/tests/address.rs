@@ -639,6 +639,36 @@ fn records_ids_after_a_reservation_are_metal_s() {
     }
 }
 
+/// Indirect command buffers' plain IDs after a call of 0 alone, then a reservation, are Metal's:
+/// the pool's first range kept beside the reservation's, its IDs handed out twice (an M3 Max,
+/// macOS 27.0.1, and the consumer's runs of 0 then 100 and 0 then 2^31 - 1 there).
+#[test]
+fn records_ids_after_a_lone_zero_are_handed_out_twice_as_metal_s() {
+    let cases: [(u64, &[(u64, u64)]); 7] = [
+        (10, &[(1, 9), (11, 31), (1, 15)]),
+        (20, &[(21, 31), (1, 19), (1, 10)]),
+        (40, &[(41, 63), (1, 31), (1, 16)]),
+        (31, &[(1, 30), (1, 50)]),
+        (32, &[(1, 31), (33, 81)]),
+        (100, &[(101, 127), (1, 31), (1, 82)]),
+        ((1 << 31) - 1, &[(1, 31), (1, 40)]),
+    ];
+    for (reserved, runs) in cases {
+        let mut space = AddressSpace::new();
+        assert!(space.reserve_records(&[0]));
+        assert!(space.reserve_records(&[reserved]));
+        let mut held = Vec::new();
+        for id in runs.iter().flat_map(|&(first, last)| first..=last) {
+            let next = space.take_records_id(None).unwrap();
+            assert_eq!(next.id, id, "0, then {reserved}");
+            held.push(next);
+        }
+        for id in held {
+            space.give_records_id(id);
+        }
+    }
+}
+
 /// A placed indirect command buffer's ID is not the pool's (on an M4, plain and
 /// under API validation): plain allocation neither skips it (1, 2, then 3 placed, then 3 and 4
 /// plain) nor gets it back once the placed buffer is gone (1 to 4 plain, 2 placed and gone: 5, 6
