@@ -31,14 +31,17 @@ use super::{buffer_with, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::VkFeature;
-use metal2vulkan::metal::{IndexType, PixelFormat, PrimitiveType, TextureUsage};
+use metal2vulkan::metal::{
+    IndexType, IndirectCommandType, PixelFormat, PrimitiveType, TextureUsage,
+};
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
 use metal2vulkan::vk;
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBufferStatus, CommandQueue, Degradation, Device, DrawPrimitiveType,
-    Error, ExecutedPipeline, Library, LoadAction, PipelineOptions, Region, RenderCommandEncoder,
-    RenderPassDescriptor, RenderPipelineState, ResourceOptions, StoreAction, TextureDescriptor,
+    Error, ExecutedPipeline, IndirectCommandBufferDescriptor, Library, LoadAction, PipelineOptions,
+    Region, RenderCommandEncoder, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
+    StoreAction, TextureDescriptor,
 };
 use std::cell::Cell;
 
@@ -384,6 +387,12 @@ impl Lane {
 
     /// The pipeline of `fragment` and the vertex function that writes what it reads.
     fn pipeline(&self, fragment: Fragment) -> RenderPipelineState {
+        self.pipeline_of(fragment, false)
+    }
+
+    /// [`pipeline`](Self::pipeline)'s, that indirect command buffers may hold where
+    /// `executable`.
+    fn pipeline_of(&self, fragment: Fragment, executable: bool) -> RenderPipelineState {
         let function = |name| {
             StageSource::Function(
                 self.library
@@ -398,6 +407,7 @@ impl Lane {
         };
         let mut descriptor = RenderPipelineDescriptor::new(function(vertex));
         descriptor.fragment = Some(function(fragment.name));
+        descriptor.support_indirect_command_buffers = executable;
         for (i, format) in FORMATS.iter().enumerate() {
             descriptor.color_attachments[i] = Some(ColorAttachmentDescriptor::new(*format));
         }
@@ -414,23 +424,6 @@ impl Lane {
         case: &Case,
         mode: u64,
     ) -> Result<Texels, Error> {
-        let targets: Vec<_> = FORMATS
-            .iter()
-            .map(|format| {
-                let mut descriptor = TextureDescriptor::texture_2d(*format, SIDE, SIDE, false);
-                descriptor.usage = TextureUsage::RENDER_TARGET;
-                descriptor.resource_options = ResourceOptions::shared();
-                self.device.new_texture(&descriptor).unwrap()
-            })
-            .collect();
-        let mut pass = RenderPassDescriptor::new();
-        for (i, target) in targets.iter().enumerate() {
-            let color = &mut pass.color_attachments[i];
-            color.texture = Some(target.clone());
-            color.load_action = LoadAction::Clear;
-            color.clear_color = ClearColor::new(0.0, 0.0, 0.0, 0.0);
-            color.store_action = StoreAction::Store;
-        }
         let index_type = case.form.index_type().unwrap_or(IndexType::UInt32);
         let size = match index_type {
             IndexType::UInt16 => 2,
@@ -447,9 +440,7 @@ impl Lane {
         };
         let arguments: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
         let indirect = buffer_with(&self.device, &arguments).unwrap();
-        let command_buffer = self.queue.command_buffer()?;
-        let mut encoder = command_buffer.render_command_encoder(&pass)?;
-        let drawn = (|encoder: &mut RenderCommandEncoder| {
+        self.render(case, |encoder| {
             encoder.set_render_pipeline_state(pipeline)?;
             encoder.set_vertex_buffer(Some(&self.positions), 0, 0)?;
             encoder.set_provoking_vertex_mode(mode)?;
@@ -480,7 +471,36 @@ impl Lane {
                     0,
                 ),
             }
-        })(&mut encoder);
+        })
+    }
+
+    /// What `encode` draws (`case` names it in failures) over cleared targets: every
+    /// attachment's texels.
+    fn render(
+        &self,
+        case: &Case,
+        encode: impl FnOnce(&mut RenderCommandEncoder) -> Result<(), Error>,
+    ) -> Result<Texels, Error> {
+        let targets: Vec<_> = FORMATS
+            .iter()
+            .map(|format| {
+                let mut descriptor = TextureDescriptor::texture_2d(*format, SIDE, SIDE, false);
+                descriptor.usage = TextureUsage::RENDER_TARGET;
+                descriptor.resource_options = ResourceOptions::shared();
+                self.device.new_texture(&descriptor).unwrap()
+            })
+            .collect();
+        let mut pass = RenderPassDescriptor::new();
+        for (i, target) in targets.iter().enumerate() {
+            let color = &mut pass.color_attachments[i];
+            color.texture = Some(target.clone());
+            color.load_action = LoadAction::Clear;
+            color.clear_color = ClearColor::new(0.0, 0.0, 0.0, 0.0);
+            color.store_action = StoreAction::Store;
+        }
+        let command_buffer = self.queue.command_buffer()?;
+        let mut encoder = command_buffer.render_command_encoder(&pass)?;
+        let drawn = encode(&mut encoder);
         let ended = encoder.end_encoding();
         command_buffer.commit()?;
         command_buffer.wait_until_completed_for(WAIT).unwrap();
@@ -589,20 +609,25 @@ fn pixel_of(
         .zip(weights)
         .map(|(&v, w)| v as f32 * w)
         .sum();
-    let weights_ok = !check_weights || (sum - smooth).abs() <= 0.02 + smooth.abs() * 1e-5;
+    // The interpolation's error scales with the values interpolated, not with their sum: a
+    // fragment near a vertex of a small ID beside one of a large one (65537) interpolates the
+    // large one's share to a few units of 1e-5 of it (lavapipe: 0.04 of 65537 * 0.01).
+    let scale: f32 = primitive.iter().map(|&v| v as f32).sum();
+    let weights_ok = !check_weights || (sum - smooth).abs() <= 0.02 + scale * 1e-5;
     flat_ok && weights_ok
 }
 
 /// The covered pixels of `texels` that fail Metal's mode-1 checks for `case` under `fragment`:
-/// its flat vertex where `flat`, its weights' order where `weights`.
+/// its flat vertex where `flat`, its weights' order where `weights`. With the counts, the first
+/// failing pixel: its texels and its primitive's vertices.
 fn failing(
     case: &Case,
     fragment: Fragment,
     texels: &Texels,
     checks: (bool, bool),
-) -> (usize, usize) {
+) -> (usize, usize, Option<String>) {
     let primitives = case.primitives(true);
-    let (mut covered, mut failed) = (0, 0);
+    let (mut covered, mut failed, mut first) = (0, 0, None);
     let pixels = texels[0].iter().zip(&texels[1]).zip(&texels[2]);
     for ((weights, smooth), &ids) in pixels {
         if ids[3] != 1 {
@@ -618,9 +643,13 @@ fn failing(
                 .is_some_and(|p| pixel_of(got, p, checks)),
             false => primitives.iter().any(|p| pixel_of(got, p, checks)),
         };
+        if !ok && first.is_none() {
+            let primitive = primitives.get(ids[1] as usize);
+            first = Some(format!("{got:?} of {primitive:?}"));
+        }
         failed += usize::from(!ok);
     }
-    (covered, failed)
+    (covered, failed, first)
 }
 
 /// What one run of every case found.
@@ -680,11 +709,11 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
                 let listed_line = !native && fragment.flat && lines(primitive);
                 let rotated_weights = !native && fragment.flat;
                 let checks = (fragment.flat, fragment.weights && !rotated_weights);
-                let (covered, failed) = failing(&case, fragment, &last, checks);
+                let (covered, failed, example) = failing(&case, fragment, &last, checks);
                 assert_eq!(
                     failed, 0,
                     "{case:?} {fragment:?} on {name} (native {native}): {failed} of {covered} \
-                     pixels are not Metal's at mode 1"
+                     pixels are not Metal's at mode 1, the first {example:?}"
                 );
                 found.covered += covered;
                 // The same pixels, under the same primitive IDs.
@@ -859,6 +888,76 @@ fn the_third_way_is_drawn_as_mode_1_announced() {
             }
         }
         assert!(third(&messages) > 0, "{name}: not announced");
+    }
+    let reported = messages.take();
+    assert!(
+        reported.is_empty(),
+        "the validation layer reported: {reported:#?}"
+    );
+}
+
+/// An execution of indirect render commands takes the first vertex at mode 1, as Metal's does: its
+/// command draws, bit for bit, what the encoder's own draw does at mode 0, and not at mode 1; on
+/// the cfg's device.
+#[test]
+fn executions_take_the_first_vertex() {
+    let cache = ScratchCache::new().unwrap();
+    let messages = Messages::default();
+    {
+        let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), |_| {}).unwrap();
+        let name = device.name().to_owned();
+        let lane = Lane::new(device);
+        let mut executed_draws = 0;
+        // `pv_flat` and `pv_both`: the flat vertex ID, and with it the weights.
+        for fragment in &FRAGMENTS[..2] {
+            let pipeline = lane.pipeline_of(*fragment, true);
+            for primitive in [
+                PrimitiveType::Line,
+                PrimitiveType::LineStrip,
+                PrimitiveType::Triangle,
+                PrimitiveType::TriangleStrip,
+            ] {
+                let case = Case::direct(DrawPrimitiveType::Public(primitive), Form::Direct, 12, 2);
+                let at = |mode| lane.draw(&pipeline, &case, mode).unwrap();
+                let (first, last) = (at(0), at(1));
+                let mut descriptor = IndirectCommandBufferDescriptor::new();
+                descriptor.command_types = IndirectCommandType::DRAW;
+                descriptor.inherit_buffers = true;
+                let icb = lane
+                    .device
+                    .new_indirect_command_buffer(&descriptor, 1, ResourceOptions::shared())
+                    .unwrap();
+                let command = icb.indirect_render_command_at(0).unwrap();
+                command.set_render_pipeline_state(&pipeline).unwrap();
+                command
+                    .draw_primitives(
+                        primitive,
+                        u64::from(case.start),
+                        u64::from(case.count),
+                        1,
+                        0,
+                    )
+                    .unwrap();
+                let executed = lane
+                    .render(&case, |encoder| {
+                        encoder.set_render_pipeline_state(&pipeline)?;
+                        encoder.set_vertex_buffer(Some(&lane.positions), 0, 0)?;
+                        encoder.set_provoking_vertex_mode(1)?;
+                        encoder.execute_commands_in_buffer(&icb, 0..1)
+                    })
+                    .unwrap_or_else(|e| panic!("{case:?} {fragment:?} on {name}: {e}"));
+                assert!(
+                    executed == first,
+                    "{case:?} {fragment:?} on {name}: the execution is not mode 0's draw"
+                );
+                assert!(
+                    executed != last,
+                    "{case:?} {fragment:?} on {name}: the modes draw alike"
+                );
+                executed_draws += 1;
+            }
+        }
+        eprintln!("{name}: {executed_draws} executions at mode 1 drew mode 0's draws");
     }
     let reported = messages.take();
     assert!(
