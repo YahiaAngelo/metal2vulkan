@@ -1096,8 +1096,10 @@ enum Standing {
 /// or unbound before any draw used it, and one bound after the last draw, too.
 pub struct RenderCommandEncoder {
     /// Its lowering, which runs its calls, where it lowers each inside the call
-    /// (`RenderLoweringPolicy::AtCall`): no slot, no lock (`render/deferral.rs`).
-    own: Option<RenderLowering>,
+    /// (`RenderLoweringPolicy::AtCall`): no slot, no lock (`render/deferral.rs`). Boxed where
+    /// it is made ([`RenderLowering::assemble`]), so neither the encoder's return nor a caller's
+    /// move of it copies the lowering's state, thousands of bytes.
+    own: Option<Box<RenderLowering>>,
     /// Else its slot of the device's, which holds its lowering, its checks at the call and its
     /// calls not yet lowered.
     logged: Option<Logged>,
@@ -1106,6 +1108,10 @@ pub struct RenderCommandEncoder {
     /// Not `Sync`, as every encoder.
     unshared: PhantomData<std::cell::Cell<()>>,
 }
+
+// A program's encoder is a handle, moved by every return and by each of the program's own moves
+// of it, so it holds its lowering in a box: the lowering's state is thousands of bytes.
+const _: () = assert!(std::mem::size_of::<RenderCommandEncoder>() <= 128);
 
 impl std::fmt::Debug for RenderCommandEncoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1337,6 +1343,9 @@ pub(crate) struct RenderLowering {
     shape_memo: ShapeMemo,
     /// What its draws retained of their own, each once ([`LastRetained`]).
     last_retained: LastRetained,
+    /// The residency's generation as a command last noted the heaps of what it made resident
+    /// (`command_encoded`): no command notes them again before it changes.
+    heaps_noted: Option<u64>,
     /// Whether the pass's first instance records inline (`render/inline_first.rs`).
     inline: inline_first::Inline,
     /// What the draws recorded inline into the pass's command buffer bound there, in its every
@@ -1429,9 +1438,9 @@ impl LastRetained {
 
     /// Retain into `core` the samplers a draw's bind named, each unless an earlier draw of the
     /// encoder retained it: by another reference to it, the last first, so they go in their
-    /// order (`retained.rs`).
-    fn retain_samplers(&mut self, core: &mut EncoderCore, samplers: Vec<Arc<OwnedSampler>>) {
-        for sampler in samplers.into_iter().rev() {
+    /// order (`retained.rs`). `samplers` is left empty, its storage kept.
+    fn retain_samplers(&mut self, core: &mut EncoderCore, samplers: &mut Vec<Arc<OwnedSampler>>) {
+        for sampler in samplers.drain(..).rev() {
             if !self.samplers.holds(&sampler, Arc::ptr_eq) {
                 core.retain_shared(sampler.clone());
                 self.samplers.keep(sampler);
@@ -1517,7 +1526,7 @@ impl CommandBuffer {
         &self,
         given: &RenderPassDescriptor,
         again: Option<Residency>,
-    ) -> Result<RenderLowering, Error> {
+    ) -> Result<Box<RenderLowering>, Error> {
         const CALL: &str = "render_command_encoder";
         let device = self.device();
         rate_mapped_pass::check_descriptor(CALL, device, given)?;
@@ -1686,8 +1695,8 @@ impl Opening {
 
 impl RenderLowering {
     /// An encoder over `core` of the pass `opening` describes, its first instance's draws
-    /// recording into `draws` (null where it records inline).
-    fn assemble(core: EncoderCore, draws: vk::CommandBuffer, opening: Opening) -> Self {
+    /// recording into `draws` (null where it records inline), made in its box.
+    fn assemble(core: EncoderCore, draws: vk::CommandBuffer, opening: Opening) -> Box<Self> {
         let Opening {
             layout,
             render_target_array_length,
@@ -1707,7 +1716,7 @@ impl RenderLowering {
         let live = core.device().shared().live_binds.take();
         // The views and sampler descriptions its binds made or found (`binding::BindMemo`).
         let bind_memo = core.device().shared().bind_memos.take();
-        RenderLowering {
+        Box::new(RenderLowering {
             core,
             earlier: Vec::new(),
             current: Instance {
@@ -1812,13 +1821,14 @@ impl RenderLowering {
             bind_memo,
             shape_memo: ShapeMemo::default(),
             last_retained: LastRetained::default(),
+            heaps_noted: None,
             inline: match inline {
                 Some(splits) => inline_first::Inline::Open { splits },
                 None => inline_first::Inline::Never,
             },
             held_bound: Bound::default(),
             grouped,
-        }
+        })
     }
 }
 
@@ -3629,7 +3639,7 @@ impl RenderLowering {
     }
 
     /// The lowering of [`RenderCommandEncoder::end_encoding`].
-    pub(crate) fn end_encoding(self) -> Result<(), Error> {
+    pub(crate) fn end_encoding(self: Box<Self>) -> Result<(), Error> {
         self.core.device().shared().counts.render_encoder_ended();
         // And the pass's later color groups, where it draws in groups (`render/color_groups.rs`).
         let (mut core, residency, log) = self.end_pass()?.with_later_groups()?;
@@ -3649,7 +3659,7 @@ impl RenderLowering {
     /// An encoder made by `CommandBuffer::open_render` to encode an ended one again
     /// (`render/replay.rs`), ended as [`end_encoding`](Self::end_encoding) ends one, into its
     /// place: what it recorded, and what it made resident.
-    pub(super) fn finish_replay(self) -> Result<(Replayed, Option<Residency>), Error> {
+    pub(super) fn finish_replay(self: Box<Self>) -> Result<(Replayed, Option<Residency>), Error> {
         let (core, residency, _) = self.end_pass()?.with_later_groups()?;
         Ok((core.finish_replay()?, Some(residency)))
     }
@@ -3660,7 +3670,7 @@ impl RenderLowering {
         command_buffer: &CommandBuffer,
         descriptor: &RenderPassDescriptor,
         residency: Residency,
-    ) -> Result<RenderLowering, Error> {
+    ) -> Result<Box<RenderLowering>, Error> {
         command_buffer.open_render(descriptor, Some(residency))
     }
 
@@ -3679,7 +3689,7 @@ impl RenderLowering {
     /// encode it again from it (not where its end captured its draws' tile reach, whose tally
     /// lies in the command buffer), and what its later color groups draw
     /// (`render/color_groups.rs`).
-    fn end_pass(mut self) -> Result<color_groups::Ended, Error> {
+    fn end_pass(mut self: Box<Self>) -> Result<color_groups::Ended, Error> {
         const CALL: &str = "end_encoding";
         // What its tables bind is held until the command buffer completes, as Metal holds what an
         // encoder was handed (`ArgumentTable::let_go_all`).
@@ -3741,7 +3751,7 @@ impl RenderLowering {
             live,
             bind_memo,
             ..
-        } = self;
+        } = *self;
         // The views and sampler descriptions its binds made or found, which the device's next
         // render encoder takes (`binding::BindMemo`).
         core.device().shared().bind_memos.give(bind_memo);
@@ -5434,6 +5444,12 @@ impl RenderLowering {
         // (`live_bind::ReadFrom`); a table that keeps its stamp is checked in debug builds alone.
         let moved = crate::buffer::host_cells_moved();
         let same = live.read_from.reads(interface, maps, moved);
+        // The state's used resources are what the encoder made resident still where the
+        // residency kept its generation since they were made of it (`Residency::generation`), no
+        // no-copy buffer moved since (their addresses), and each indirect command buffer made
+        // resident holds its ID's slot as they state (`Residency::holds_slots_as`).
+        let generation = self.residency.generation();
+        let resident = live.read_from.resident(generation, moved);
         let counts = &self.core.device().shared().counts;
         for (at, (stage, table)) in tables.into_iter().enumerate() {
             let kept = state.stages.entry(stage).or_default();
@@ -5465,7 +5481,15 @@ impl RenderLowering {
             &mut object.threadgroup_lengths,
             &self.object_threadgroup_lengths,
         );
-        reshape.field(&mut state.used_resources, self.residency.used_resources());
+        let kept = resident && self.residency.holds_slots_as(&state.used_resources);
+        debug_assert!(
+            !kept || state.used_resources == self.residency.used_resources(),
+            "a draw's kept used resources that are not its residency's"
+        );
+        if !kept {
+            reshape.field(&mut state.used_resources, self.residency.used_resources());
+        }
+        live.read_from.made_resident(generation);
         // Listed again only where the device's sampler states changed since: not where the
         // listing kept is of every live state at the count of their slots' changes that still
         // holds; else they are taken and compared state by state.
@@ -8024,19 +8048,20 @@ impl RenderLowering {
         // Set 0's writes and the heap set's, in the last draw's storage (`LiveBind::writes`),
         // emptied as the draw returns: their keepers hold nothing past it.
         let mut writes = Emptied::new(&mut live.writes);
+        // The samplers they name, in the last draw's storage (`LiveBind::samplers`), emptied as
+        // the draw returns likewise: its encoder retains them as it records.
+        let mut samplers = Emptied::new(&mut live.samplers);
         let objects = Arc::clone(variant.objects());
         // Set 1 the device's (written below, once nothing refuses).
         let bound = {
             let mut state = self.core.command_buffer().state();
             let memo = Some(&mut self.bind_memo);
-            binding::bind(
+            binding::bind_into(
                 call,
                 &device,
                 &mut state,
-                &plan,
-                &command,
-                &tables,
-                (memo, &mut writes),
+                (&plan, &command, &tables),
+                (memo, &mut writes, &mut samplers),
             )?
         };
         // The draw's push bytes, filled in place, over the last draw's (`LiveBind::pushes`).
@@ -8961,7 +8986,7 @@ impl RenderLowering {
             self.core.retain_shared(buffer.held());
         }
         self.last_retained
-            .retain_samplers(&mut self.core, bound.samplers);
+            .retain_samplers(&mut self.core, &mut samplers);
         if let Some(unlisted) = unlisted {
             heap_sets::degrade_unlisted(&device, unlisted, "a render pipeline state's draws");
             // A host step's draw, which no commit lists again, fails its command buffer.

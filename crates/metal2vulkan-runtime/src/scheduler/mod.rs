@@ -10,7 +10,10 @@
 //!   thread stops looking at the inbox again at a pass that leaves it a check or a host step, and
 //!   before each one it runs passes again for as long as the inbox holds commits, and looks at it
 //!   before it sleeps ([`left`]): a commit waits for the pass under way, the submission handlers
-//!   that pass leaves, and the pass that takes it in, never for a check or a step.
+//!   that pass leaves, and the pass that takes it in, never for a check or a step. After a round
+//!   whose passes took commits in, and before its submission handlers, the thread wakes the
+//!   device's recorder where it waits with their replays queued (`recorder`), which the commits
+//!   queued without a wake: a commit wakes this thread alone.
 //!
 //! - **The order** ([`Order`]). Each logical queue's batches wait in commit order; the head
 //!   committed first among those ready goes next. A batch is ready once every event it waits for
@@ -128,6 +131,7 @@ use super::error::{CommandBufferError, Error, MemoryKind};
 use super::event::EventShared;
 use super::event_timeline::WaitFor;
 use super::exit_guard;
+use super::recorder::RecorderShared;
 use super::replay::SpareLogs;
 use super::resource::ResourceKey;
 use super::tracker::{self, Footprint, Tracker};
@@ -308,6 +312,9 @@ struct SchedulerShared {
     /// The device's cleared encoder logs (`replay.rs`): an encoder takes one, and its log comes
     /// back as the encoder ends, or in its command buffer's release.
     spare_logs: SpareLogs,
+    /// The device's recorder, where it records off the encoding thread (`recorder`): woken after
+    /// a round that took commits in (the module docs).
+    recorder: OnceLock<Arc<RecorderShared>>,
 }
 
 impl SchedulerShared {
@@ -514,6 +521,7 @@ impl Scheduler {
             passes: AtomicU64::new(0),
             nudge: OnceLock::new(),
             spare_logs: SpareLogs::default(),
+            recorder: OnceLock::new(),
         });
         let thread = {
             let shared = Arc::clone(&shared);
@@ -538,6 +546,11 @@ impl Scheduler {
             functions,
             semaphore,
         });
+    }
+
+    /// Wake `recorder`, the device's, after each round that took commits in (the module docs).
+    pub(crate) fn wake_recorder(&self, recorder: Arc<RecorderShared>) {
+        let _ = self.shared.recorder.set(recorder);
     }
 
     /// Hold the batches of `buffer`, committed now on logical queue `queue`: what each batch
@@ -876,6 +889,14 @@ fn round(shared: &SchedulerShared, left: &mut Left<Work>, passed: &mut Passed) -
         !passed.exiting && left.is_empty() && !passed.more
     });
     passed.more = false;
+    // The commits' replays, which they queued without waking the recorder: after the passes'
+    // submissions, which replayed their own (`recorder`).
+    if passed.took && !passed.exiting {
+        if let Some(recorder) = shared.recorder.get() {
+            recorder.kick();
+        }
+    }
+    passed.took = false;
     if passed.exiting {
         passed.settled.clear();
         passed.handlers.clear();
@@ -897,6 +918,8 @@ struct Passed {
     handlers: Handlers,
     more: bool,
     exiting: bool,
+    /// A pass took commits in.
+    took: bool,
 }
 
 /// A pass of the thread's: take `commits` into the order, in commit order, then submit what is
@@ -909,6 +932,7 @@ fn pass(
     (passed, left): (&mut Passed, &mut Left<Work>),
     awaits: &Awaits,
 ) {
+    passed.took |= !commits.is_empty();
     for Committed {
         buffer,
         queue,

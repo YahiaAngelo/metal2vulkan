@@ -88,6 +88,8 @@ impl Gpu for Runtime {
     type IndirectCommands = rt::IndirectCommandBuffer;
     type SharedEvent = rt::SharedEvent;
     type Listener = rt::SharedEventListener;
+    type Pass = rt::RenderPassDescriptor;
+    type BlitEncoder = rt::BlitCommandEncoder;
 
     fn label(&self) -> String {
         format!("runtime on {}", self.device.name())
@@ -460,6 +462,25 @@ impl Gpu for Runtime {
             .expect("render_command_encoder")
     }
 
+    fn pass(&self, target: &rt::Texture) -> rt::RenderPassDescriptor {
+        let mut pass = rt::RenderPassDescriptor::new();
+        let color = &mut pass.color_attachments[0];
+        color.texture = Some(target.clone());
+        color.load_action = rt::LoadAction::Clear;
+        color.store_action = rt::StoreAction::Store;
+        pass
+    }
+
+    fn pass_encoder(
+        &self,
+        command_buffer: &rt::CommandBuffer,
+        pass: &rt::RenderPassDescriptor,
+    ) -> rt::RenderCommandEncoder {
+        command_buffer
+            .render_command_encoder(pass)
+            .expect("render_command_encoder")
+    }
+
     fn depth_render_encoder(
         &self,
         command_buffer: &rt::CommandBuffer,
@@ -531,6 +552,20 @@ impl Gpu for Runtime {
         encoder
             .set_vertex_buffer(Some(buffer), offset as u64, index as u32)
             .expect("set_vertex_buffer");
+    }
+
+    fn set_vertex_buffers(
+        &self,
+        encoder: &mut rt::RenderCommandEncoder,
+        buffers: &[&rt::Buffer],
+        offsets: &[usize],
+        first: usize,
+    ) {
+        let buffers: [Option<&rt::Buffer>; 2] = [Some(buffers[0]), Some(buffers[1])];
+        let offsets = [offsets[0] as u64, offsets[1] as u64];
+        encoder
+            .set_vertex_buffers(&buffers, &offsets, first as u32)
+            .expect("set_vertex_buffers");
     }
 
     fn set_fragment_buffer(
@@ -685,6 +720,22 @@ impl Gpu for Runtime {
             .expect("use_resource");
     }
 
+    fn use_buffers_read(&self, encoder: &mut rt::ComputeCommandEncoder, buffers: &[&rt::Buffer]) {
+        let resources: Vec<rt::ResourceRef> = buffers.iter().map(|b| b.as_resource()).collect();
+        encoder
+            .use_resources(&resources, ResourceUsage::READ)
+            .expect("use_resources");
+    }
+
+    fn use_buffers_drawn(&self, encoder: &mut rt::RenderCommandEncoder, buffers: &[&rt::Buffer]) {
+        let resources: Vec<rt::ResourceRef> = buffers.iter().map(|b| b.as_resource()).collect();
+        let stages =
+            metal2vulkan::metal::RenderStages::VERTEX | metal2vulkan::metal::RenderStages::FRAGMENT;
+        encoder
+            .use_resources(&resources, ResourceUsage::READ, stages)
+            .expect("use_resources");
+    }
+
     fn use_buffer(&self, encoder: &mut rt::ComputeCommandEncoder, buffer: &rt::Buffer) {
         encoder
             .use_resource(
@@ -728,6 +779,28 @@ impl Gpu for Runtime {
         blit.reset_commands_in_buffer(commands, 0..count as u64)
             .expect("reset_commands_in_buffer");
         blit.end_encoding().expect("end_encoding");
+    }
+
+    fn blit_encoder(&self, command_buffer: &rt::CommandBuffer) -> rt::BlitCommandEncoder {
+        command_buffer
+            .blit_command_encoder()
+            .expect("blit_command_encoder")
+    }
+
+    fn copy_buffer(
+        &self,
+        encoder: &mut rt::BlitCommandEncoder,
+        (from, from_offset): (&rt::Buffer, usize),
+        (to, to_offset): (&rt::Buffer, usize),
+        size: usize,
+    ) {
+        encoder
+            .copy_from_buffer_to_buffer(from, from_offset as u64, to, to_offset as u64, size as u64)
+            .expect("copy_from_buffer_to_buffer");
+    }
+
+    fn end_blit(&self, encoder: rt::BlitCommandEncoder) {
+        encoder.end_encoding().expect("end_encoding");
     }
 
     fn fill(&self, command_buffer: &rt::CommandBuffer, buffer: &rt::Buffer, length: usize) {

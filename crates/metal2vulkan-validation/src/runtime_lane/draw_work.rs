@@ -66,6 +66,10 @@
 //! - **Uploads.** Draws that set their bytes write them, and their tables, into no device-local
 //!   memory on a device with host-coherent, host-cached system memory
 //!   (`WorkCounts::upload_chunks_in_device_memory`).
+//! - **Resident set.** A draw takes its encoder's last draw's used resources while what the
+//!   encoder made resident is unchanged (`Residency::generation`), and states those resident as it
+//!   was encoded: after a resource made resident, a usage or render stage widened, or another made
+//!   resident through `useResources`, the new set.
 //!
 //! The pipeline is the owned fixture `tob_renders`'s `tob_rect` (a rectangle of the corners at
 //! vertex buffer 0) and `tob_sample` (texture 0 through sampler 0, where its pixel lies).
@@ -73,21 +77,22 @@
 use super::degrade_notices::{on_device, on_device_with};
 use super::{buffer_with, pipelines_settled, WAIT};
 use crate::air_library::AirLibrary;
-use metal2vulkan::bind::{BindState, SamplerDescriptor};
+use metal2vulkan::bind::{BindState, SamplerDescriptor, UsedClass};
 use metal2vulkan::device::VkExtension;
 use metal2vulkan::library::{FunctionConstantValue, FunctionConstantValues};
 use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{
     BlendFactor, CompareFunction, DataType, DepthClipMode, PixelFormat, PrimitiveType,
-    SamplerMinMagFilter, SamplerMipFilter, TextureUsage,
+    RenderStages, ResourceUsage, SamplerMinMagFilter, SamplerMipFilter, TextureUsage,
 };
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBuffer, CommandBufferStatus, Device, LoadAction, PipelineOptions,
     Region, RenderCommandEncoder, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
-    SamplerState, ScissorRect, StoreAction, Texture, TextureDescriptor, WorkCounts,
+    ResourceRef, SamplerState, ScissorRect, StoreAction, Texture, TextureDescriptor, WorkCounts,
 };
+use std::collections::BTreeMap;
 
 /// The target's side, in pixels: one column a draw.
 const SIDE: u64 = 8;
@@ -2016,5 +2021,106 @@ fn draws_rebinding_a_slot_to_a_texture_that_looks_alike_list_each_object() {
         assert!(used.heaps.is_empty(), "{:?}", used.heaps);
         let pixels = scene.pixels(&command_buffer);
         assert!(pixels.iter().all(|&p| p == RED), "{pixels:?}");
+    });
+}
+
+/// What one draw of [`draws_state_the_resources_resident_as_they_were_encoded`] changed before it,
+/// and the usages and render stages resident as it was encoded, by token.
+struct Resident {
+    change: &'static str,
+    resident: &'static [(ResourceUsage, RenderStages)],
+}
+
+/// A draw states the resources its encoder made resident as they were when it was encoded, though
+/// the encoder's draws take its last draw's used resources without making them again while the
+/// residency is unchanged (`Residency::generation`): a draw after a resource made resident, its
+/// usage widened, its render stages widened, or another made resident through `useResources`
+/// states the new set; one after the same resource made resident again as it was states the set
+/// it had. Each draw is its own column, the texture's.
+#[test]
+fn draws_state_the_resources_resident_as_they_were_encoded() {
+    const READ: ResourceUsage = ResourceUsage::READ;
+    const BOTH: ResourceUsage = ResourceUsage::READ.union(ResourceUsage::WRITE);
+    const VERTEX: RenderStages = RenderStages::VERTEX;
+    const FRAGMENT: RenderStages = RenderStages::FRAGMENT;
+    const DRAWN: RenderStages = RenderStages::VERTEX.union(RenderStages::FRAGMENT);
+    let steps = [
+        Resident {
+            change: "the first",
+            resident: &[],
+        },
+        Resident {
+            change: "a buffer made resident",
+            resident: &[(READ, VERTEX)],
+        },
+        Resident {
+            change: "nothing, it resident",
+            resident: &[(READ, VERTEX)],
+        },
+        Resident {
+            change: "it made resident again as it was",
+            resident: &[(READ, VERTEX)],
+        },
+        Resident {
+            change: "its usage widened",
+            resident: &[(BOTH, VERTEX)],
+        },
+        Resident {
+            change: "its stages widened",
+            resident: &[(BOTH, DRAWN)],
+        },
+        Resident {
+            change: "another made resident",
+            resident: &[(BOTH, DRAWN), (READ, FRAGMENT)],
+        },
+        Resident {
+            change: "nothing, both resident",
+            resident: &[(BOTH, DRAWN), (READ, FRAGMENT)],
+        },
+    ];
+    assert_eq!(steps.len() as u64, SIDE, "a column a draw");
+    on_device(|device, _| {
+        let scene = Scene::new(device);
+        let red = solid(device, PixelFormat::RGBA8Unorm, RED);
+        let first = buffer_with(device, &[0; 64]).unwrap();
+        let second = buffer_with(device, &[0; 64]).unwrap();
+        let (command_buffer, mut encoder) = scene.encoder(device);
+        encoder.set_fragment_texture(Some(&red), 0).unwrap();
+        for (c, step) in (0..).zip(&steps) {
+            let first = ResourceRef::Buffer(&first);
+            match step.change {
+                "a buffer made resident" | "it made resident again as it was" => {
+                    encoder.use_resource(first, READ, VERTEX).unwrap();
+                }
+                "its usage widened" => {
+                    encoder
+                        .use_resource(first, ResourceUsage::WRITE, VERTEX)
+                        .unwrap();
+                }
+                "its stages widened" => encoder.use_resource(first, READ, FRAGMENT).unwrap(),
+                "another made resident" => encoder
+                    .use_resources(&[ResourceRef::Buffer(&second)], READ, FRAGMENT)
+                    .unwrap(),
+                _ => {}
+            }
+            encoder.set_vertex_bytes(&column(c), 0).unwrap();
+            draw(&mut encoder);
+        }
+        encoder.end_encoding().unwrap();
+        let pixels = scene.pixels(&command_buffer);
+        assert!(pixels.iter().all(|&p| p == RED), "{pixels:?}");
+        let executions = command_buffer.executions();
+        assert_eq!(executions.len(), steps.len());
+        for (step, execution) in steps.iter().zip(&executions) {
+            let want: BTreeMap<u32, (UsedClass, ResourceUsage, RenderStages)> = (0u32..)
+                .zip(step.resident)
+                .map(|(token, &(usage, stages))| (token, (UsedClass::Buffer, usage, stages)))
+                .collect();
+            let used: BTreeMap<u32, (UsedClass, ResourceUsage, RenderStages)> =
+                (execution.shape().used.iter())
+                    .map(|(&token, used)| (token, (used.class, used.usage, used.stages)))
+                    .collect();
+            assert_eq!(used, want, "{}", step.change);
+        }
     });
 }

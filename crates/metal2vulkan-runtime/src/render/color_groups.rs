@@ -469,7 +469,7 @@ impl RenderLowering {
         later: &Later,
         group: u32,
         log: &RenderLog,
-    ) -> Result<RenderLowering, Error> {
+    ) -> Result<Box<RenderLowering>, Error> {
         const CALL: &str = "end_encoding";
         let grouping = ColorGroup::of(later.group.present.clone(), later.group.width, group)
             .ok_or_else(|| internal("a later color group of a pass in one"))?;

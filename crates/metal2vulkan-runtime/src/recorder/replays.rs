@@ -162,11 +162,24 @@ impl RecorderShared {
         let _ = self.elsewhere.set(elsewhere);
     }
 
-    /// Hand `replays` to the recorder thread, waking it where it waits.
-    fn enqueue(&self, replays: Arc<Replays>) {
+    /// Hand `replays` to the recorder thread, waking it where it waits and `wake` says so; else
+    /// the scheduler's thread wakes it ([`kick`](Self::kick)).
+    fn enqueue(&self, replays: Arc<Replays>, wake: bool) {
         let mut queue = lock(&self.queue);
         queue.replays.push_back(replays);
-        if queue.parked {
+        if wake && queue.parked {
+            self.wake.notify_one();
+        }
+    }
+
+    /// Wake the recorder thread where it waits while its queue holds replays: the scheduler's
+    /// thread, after a pass that took commits in, whose replays their commits queued without a
+    /// wake ([`Replays::commit`]). A submission replays what the recorder has yet to itself
+    /// ([`resolve`]), so no submission waits for this; the recorder replays what waits for a
+    /// later submission, and takes off its queue what a submission replayed.
+    pub(crate) fn kick(&self) {
+        let queue = lock(&self.queue);
+        if queue.parked && !queue.replays.is_empty() {
             self.wake.notify_one();
         }
     }
@@ -312,7 +325,7 @@ impl Replays {
         if state.open && !state.queued {
             state.queued = true;
             drop(state);
-            self.recorder.enqueue(Arc::clone(self));
+            self.recorder.enqueue(Arc::clone(self), true);
         }
     }
 
@@ -328,11 +341,12 @@ impl Replays {
     ) -> Vec<HostPages> {
         let mut state = lock(&self.state);
         Self::fill(&mut state, fill);
-        self.settle(device, &mut state)
+        self.settle(device, &mut state, true)
     }
 
     /// Its command buffer commits, its commands' holds on host pages `fill` adds to what it holds
-    /// ([`hold`](Self::hold)): what ended is replayed, on the recorder thread, and what ends from
+    /// ([`hold`](Self::hold)): what ended is replayed, on the recorder thread, which the
+    /// scheduler's wakes once it took the commit in ([`RecorderShared::kick`]), and what ends from
     /// now on; where nothing ended waits, what it holds goes now. `fill` runs under its lock,
     /// which it must not take again.
     ///
@@ -349,7 +363,7 @@ impl Replays {
         let mut state = lock(&self.state);
         Self::fill(&mut state, fill);
         state.open = true;
-        self.settle(device, &mut state)
+        self.settle(device, &mut state, false)
     }
 
     /// What `state` holds once its command buffer committed (nothing before), under its lock:
@@ -358,7 +372,12 @@ impl Replays {
     /// both (`HostPages::let_go_by_buffer`). Where one came before, everything ended replays now,
     /// on this thread, with `device`; where nothing ended waits, what it holds goes now. The
     /// pages it held last are the answer.
-    fn settle(self: &Arc<Self>, device: &Vk, state: &mut ReplayState) -> Vec<HostPages> {
+    fn settle(
+        self: &Arc<Self>,
+        device: &Vk,
+        state: &mut ReplayState,
+        wake: bool,
+    ) -> Vec<HostPages> {
         let mut last = Vec::new();
         if !state.open {
             return last;
@@ -366,7 +385,7 @@ impl Replays {
         if !state.ended.is_empty() {
             if !state.queued {
                 state.queued = true;
-                self.recorder.enqueue(Arc::clone(self));
+                self.recorder.enqueue(Arc::clone(self), wake);
             }
             if state.held.iter().any(|pages| pages.buffer_let_go()) {
                 let replayed = self.replay_ended(device, state);

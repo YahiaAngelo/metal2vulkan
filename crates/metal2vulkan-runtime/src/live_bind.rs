@@ -68,6 +68,7 @@ use super::argument_table::Stamp;
 use super::binding::{CommandUses, PushWrite, SetWrite, Write};
 use super::device::lock;
 use super::noted_apart::NotedApart;
+use super::sampler::OwnedSampler;
 use super::work_counts::Counters;
 
 /// The most bind states a device keeps for its render encoders to start from: one per encoder
@@ -192,6 +193,9 @@ pub(super) struct LiveBind {
     pub(super) offsets: Vec<u32>,
     /// The last draw's vertex buffers, `(binding, buffer, offset, stride)`, kept likewise.
     pub(super) vertex_buffers: Vec<(u32, vk::Buffer, u64, u64)>,
+    /// The storage of the samplers the last draw's writes named (`binding::bind_into`), kept
+    /// likewise and empty between draws: its encoder retains them as the draw records.
+    pub(super) samplers: Vec<Arc<OwnedSampler>>,
 }
 
 /// A bind state a [`LiveBind`] set aside, with its shape, its listing's count and what its stage
@@ -207,16 +211,17 @@ struct SetAside {
 }
 
 /// What a kept state's stage tables were read from at the draw that read them last
-/// (`RenderCommandEncoder::refresh_bind_state`; the module docs): the encoder's table of each
-/// stage by its stamp (`argument_table::Stamp`), the interface they were read through, the
-/// samplers' address-mode maps, and the count of no-copy buffers' moves
-/// (`buffer::host_cells_moved`). A stage's table that keeps its stamp, read through the same
-/// interface with the same maps while no no-copy buffer moved, brings in what it brought in then
-/// where its drawing state's slots that tell the view base alignment apart are still those it
-/// read under (`AtBindViews::holds`, checked at each draw): a slot's binding is a function of the
-/// object bound there (its length, its base and addresses, which only a move changes; a texture's
-/// facts, made with it; a sampler's descriptor), of the table's other entries, of the function's
-/// reading of the slot (the interface), of the maps, and of those slots.
+/// (`RenderCommandEncoder::refresh_bind_state`; the module docs): the encoder's table of each stage
+/// by its stamp (`argument_table::Stamp`), the interface they were read through, the samplers'
+/// address-mode maps, and the count of no-copy buffers' moves (`buffer::host_cells_moved`); and the
+/// generation of the residency the state's used resources were made of (`Residency::generation`). A
+/// stage's table that keeps its stamp, read through the same interface with the same maps while no
+/// no-copy buffer moved, brings in what it brought in then where its drawing state's slots that
+/// tell the view base alignment apart are still those it read under (`AtBindViews::holds`, checked
+/// at each draw): a slot's binding is a function of the object bound there (its length, its base
+/// and addresses, which only a move changes; a texture's facts, made with it; a sampler's
+/// descriptor), of the table's other entries, of the function's reading of the slot (the
+/// interface), of the maps, and of those slots.
 #[derive(Default)]
 pub(super) struct ReadFrom {
     /// Each stage's table's stamp, by the stage's place in the draw's reading order.
@@ -228,6 +233,9 @@ pub(super) struct ReadFrom {
     maps: SamplerMaps,
     /// The count of no-copy buffers' moves as they were read.
     moved: u64,
+    /// The generation of the residency the state's used resources were made of, at `moved`
+    /// moves; `None` before any were.
+    resident: Option<u64>,
 }
 
 impl ReadFrom {
@@ -248,6 +256,20 @@ impl ReadFrom {
         let at = std::ptr::from_ref(interface).addr();
         (self.interface.as_ref())
             .is_some_and(|(read, state)| *read == at && state.strong_count() > 0)
+    }
+
+    /// Whether the state's used resources were made of a residency of `generation` with no no-copy
+    /// buffer moved since (`moved` moves): they are its used resources still, but for an indirect
+    /// command buffer's hold on its ID's slot, which a buffer made later takes without changing
+    /// the residency (`Residency::holds_slots_as`, the caller's to check).
+    pub(super) fn resident(&self, generation: u64, moved: u64) -> bool {
+        self.moved == moved && self.resident == Some(generation)
+    }
+
+    /// The state's used resources are those of a residency of `generation`, at the moves the
+    /// tables were last [`read`](Self::read) at.
+    pub(super) fn made_resident(&mut self, generation: u64) {
+        self.resident = Some(generation);
     }
 
     /// Whether the table at `at` in the reading order, stamped `stamp`, is the one read.

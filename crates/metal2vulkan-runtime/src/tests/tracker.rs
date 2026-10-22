@@ -1874,3 +1874,22 @@ fn a_draw_s_fragments_after_one_that_wrote_before_its_fragments_wait_for_the_wri
         None
     );
 }
+
+/// A resource the encoder's commands use at range after range (a buffer whose draws move along
+/// it) makes room for every range it keeps before they merge, and the merge's own, at its second:
+/// its list allocates once, through the merges, and the uses it hands on are those it kept.
+#[test]
+fn a_resource_used_at_moving_ranges_allocates_its_list_once() {
+    let mut uses = EncoderUses::new(false);
+    for at in 0..3 * ENTRIES_PER_KEY as u64 {
+        let used = [reads(1, bytes(256 * at..256 * at + 16), shader_read())];
+        uses.record_reaching(COMPUTE, &used, None, Reach::Named);
+        if at > 0 {
+            assert_eq!(uses.range_room(1), Some(ENTRIES_PER_KEY + 1), "range {at}");
+        }
+    }
+    let summaries = uses.finish_parts();
+    let kept = summaries[0].uses();
+    assert!(!kept.is_empty() && kept.len() <= ENTRIES_PER_KEY);
+    assert!(kept.iter().all(|used| used.key == 1));
+}

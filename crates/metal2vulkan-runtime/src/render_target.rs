@@ -1299,18 +1299,15 @@ pub(super) fn handed_dont_care(
         last: true,
     };
     let dont_care = DontCare::of(device);
-    let colors = layout
-        .colors
-        .iter()
-        .enumerate()
-        .map(|(index, color)| {
-            let index = index as u32;
+    let colors = (layout.colors.iter().enumerate())
+        .filter(|(index, color)| {
+            let index = *index as u32;
             color.as_ref().is_some_and(|color| {
                 !shape.storage.contains(&index)
                     && color_ops(color, only, dont_care).store == vk::AttachmentStoreOp::DONT_CARE
             })
         })
-        .collect();
+        .fold(0, |colors, (index, _)| colors | 1 << index);
     let (depth, stencil) = layout.depth_stencil.as_ref().map_or((false, false), |ds| {
         let ops = depth_stencil_ops(layout, ds, only, dont_care);
         let handed = |aspect: Option<&AspectTarget>, store| {
@@ -1330,8 +1327,9 @@ pub(super) fn handed_dont_care(
 
 /// The attachments [`handed_dont_care`] finds.
 pub(super) struct HandedDontCare {
-    /// By color index, as long as the layout's colors.
-    pub(super) colors: Vec<bool>,
+    /// A bit per color index (each below `MAX_COLOR_ATTACHMENTS`), so a pass's end allocates
+    /// nothing for them.
+    pub(super) colors: u32,
     pub(super) depth: bool,
     pub(super) stencil: bool,
 }

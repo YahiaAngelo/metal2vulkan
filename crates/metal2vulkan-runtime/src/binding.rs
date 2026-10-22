@@ -579,11 +579,37 @@ pub(super) fn bind(
     plan: &BindingPlan,
     command: &Command<'_>,
     tables: &Tables<'_>,
-    (mut memo, writes): (Option<&mut BindMemo>, &mut Vec<Write>),
+    (memo, writes): (Option<&mut BindMemo>, &mut Vec<Write>),
+) -> Result<Bound, Error> {
+    let mut samplers = Vec::new();
+    let mut bound = bind_into(
+        call,
+        device,
+        state,
+        (plan, command, tables),
+        (memo, writes, &mut samplers),
+    )?;
+    bound.samplers = samplers;
+    Ok(bound)
+}
+
+/// [`bind`]'s, the samplers the writes name in `samplers`, emptied first (its [`Bound`]'s
+/// `samplers` left empty), so a caller that keeps the vector fills each command's into the last
+/// one's storage (a draw's, `LiveBind::samplers`).
+pub(super) fn bind_into(
+    call: &'static str,
+    device: &Device,
+    state: &mut State,
+    (plan, command, tables): (&BindingPlan, &Command<'_>, &Tables<'_>),
+    (mut memo, writes, samplers): (
+        Option<&mut BindMemo>,
+        &mut Vec<Write>,
+        &mut Vec<Arc<OwnedSampler>>,
+    ),
 ) -> Result<Bound, Error> {
     writes.clear();
     writes.reserve(plan.descriptors.len());
-    let mut samplers = Vec::new();
+    samplers.clear();
     // The sampler tables, whose regions the command buffer writes again as it commits.
     let sampler_keys = plan.sampler_tables();
     let mut sampler_tables = Vec::with_capacity(sampler_keys.len());
@@ -635,7 +661,7 @@ pub(super) fn bind(
                     tables,
                     write,
                     ty,
-                    (&mut samplers, memo.as_deref_mut()),
+                    (samplers, memo.as_deref_mut()),
                 )?),
             },
         };
@@ -735,7 +761,7 @@ pub(super) fn bind(
     }
     Ok(Bound {
         holes,
-        samplers,
+        samplers: Vec::new(),
         sampler_tables,
     })
 }
@@ -1207,6 +1233,12 @@ impl LastSetZero {
 /// The most sets 0 one generation of a [`SetCache`] keeps.
 const SETS_KEPT: usize = 128;
 
+/// The sets 0 a [`Generation`] makes room for at its first set; it grows past them to
+/// [`SETS_KEPT`]. A command buffer's commands write a few sets as a rule (one per pipeline state
+/// and bound resources), so the room for all of them at once (about 27 KB) would be made and let
+/// go of at every command buffer.
+const SETS_ROOM: usize = 8;
+
 /// The sets 0 a command buffer's recorded commands allocated and wrote, by what they hold
 /// (`EncoderCore::set_zero`): a later command of the command buffer, in any of its encoders, that
 /// writes the same descriptors into a set of the same layout binds the set again, and allocates
@@ -1228,8 +1260,8 @@ const SETS_KEPT: usize = 128;
 /// generation moves to the newer one; a newer generation that fills becomes the older one, the
 /// older one's sets forgotten (they stay in their pools, unbound by later commands). So a command
 /// buffer whose commands write fewer distinct sets than a generation holds allocates each once.
-/// A generation keeps its storage as it empties, and makes it at its first set: a few
-/// allocations a command buffer, none a command.
+/// A generation keeps its storage as it empties, and makes room for [`SETS_ROOM`] sets at its
+/// first: a few allocations a command buffer, none a command but where the room grows.
 #[derive(Default)]
 pub(crate) struct SetCache {
     generations: [Generation; 2],
@@ -1274,9 +1306,9 @@ impl Generation {
         writes: impl Iterator<Item = SetWrite>,
     ) {
         if self.sets.capacity() == 0 {
-            self.by_key.reserve(SETS_KEPT);
-            self.sets.reserve(SETS_KEPT);
-            self.writes.reserve(4 * SETS_KEPT);
+            self.by_key.reserve(SETS_ROOM);
+            self.sets.reserve(SETS_ROOM);
+            self.writes.reserve(4 * SETS_ROOM);
         }
         let start = self.writes.len();
         self.writes.extend(writes);

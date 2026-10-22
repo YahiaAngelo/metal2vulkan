@@ -23,11 +23,14 @@
 //! - **Replayed once committed** (`replays.rs`). A command buffer's ended logs replay, in the order
 //!   they ended (a secondary before the primary that executes it, Vulkan's executable state), into
 //!   command buffers of a pool of its own (a spare, `spares.rs`), never shared with the scheduler's
-//!   barrier command buffers: on the recorder thread, which its commit wakes, or on the thread
-//!   that submits it where the recorder has not yet reached it, which then replays it itself
-//!   ([`resolve`]), so a submission never waits for a wake. A log of a command buffer never
-//!   committed is never replayed, nor one never ended: a render pass instance's secondary that
-//!   nothing will execute is left unended (`CommandBuffer::give_up_raw`).
+//!   barrier command buffers: on the recorder thread, or on the thread that submits it where the
+//!   recorder has not yet reached it, which then replays it itself ([`resolve`]), so a submission
+//!   never waits for a wake. The scheduler's thread wakes the recorder's once a pass took the
+//!   commit in, after the pass's submissions ([`RecorderShared::kick`]): a commit wakes one
+//!   thread, the scheduler's, so the program's thread makes one system call for it. A log of a
+//!   command buffer never committed is never replayed, nor one never ended: a render pass
+//!   instance's secondary that nothing will execute is left unended
+//!   (`CommandBuffer::give_up_raw`).
 //! - **What the logs name lives through the replay.** Every object a command names stays live
 //!   until its command buffer completes, but for the host pages a command buffer holds only weakly
 //!   from its commit to its first submission (`rebind.rs`): its commit hands their holds to its

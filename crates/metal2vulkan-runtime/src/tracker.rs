@@ -91,6 +91,9 @@ use std::ops::Range;
 /// The most entries the state keeps for one resource before it merges them.
 pub(super) const ENTRIES_PER_KEY: usize = 8;
 
+/// The resources an encoder's part makes room for at its first tracked use.
+const TRACKED_ROOM: usize = 8;
+
 /// One side of a dependency: pipeline stages, and the access types in them.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub(super) struct Access {
@@ -621,9 +624,11 @@ struct Needs {
     waits: Vec<Wait>,
 }
 
-/// A short list kept one per `VkQueue` (an entry's writers and reads, a writer's waits), its first
-/// value inline: on a device of one `VkQueue` it never allocates, and copying it allocates nothing
-/// (the module docs). It keeps the order values were pushed in, as a `Vec` would.
+/// A short list, its first value inline: of one value it allocates nothing, nor does a copy of it
+/// (the module docs). Kept one per `VkQueue` (an entry's writers and reads, a writer's waits), so
+/// on a device of one `VkQueue` those never allocate; and one per range (a resource's uses in an
+/// encoder's part) and per part (an encoder's parts, one but where it splits). It keeps the order
+/// values were pushed in, as a `Vec` would.
 #[derive(Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 struct Few<T> {
@@ -642,6 +647,19 @@ impl<T> Default for Few<T> {
 }
 
 impl<T> Few<T> {
+    /// A list of `value` alone.
+    fn of(value: T) -> Few<T> {
+        Few {
+            first: Some(value),
+            rest: Vec::new(),
+        }
+    }
+
+    /// The last value, to change.
+    fn last_mut(&mut self) -> Option<&mut T> {
+        self.rest.last_mut().or(self.first.as_mut())
+    }
+
     fn is_empty(&self) -> bool {
         self.first.is_none()
     }
@@ -652,6 +670,15 @@ impl<T> Few<T> {
             None => self.first = Some(value),
             Some(_) => self.rest.push(value),
         }
+    }
+
+    /// [`push`](Self::push) `value`, the room for `room` values past the first made at once
+    /// where it holds one value alone, so a list that grows to `room` allocates once.
+    fn push_with_room(&mut self, value: T, room: usize) {
+        if self.first.is_some() && self.rest.capacity() == 0 {
+            self.rest.reserve_exact(room);
+        }
+        self.push(value);
     }
 
     fn iter(&self) -> std::iter::Chain<std::option::Iter<'_, T>, std::slice::Iter<'_, T>> {
@@ -1060,8 +1087,9 @@ pub(super) struct EncoderUses<K> {
     ordered: bool,
     /// The accesses of the current part's commands so far, for that order.
     inside: KeyMap<Class<K>, Vec<Entry>>,
-    /// The parts, in order: the last is the current one. Never empty.
-    parts: Vec<Part<K>>,
+    /// The parts, in order: the last is the current one. Never empty; the first held in place, so
+    /// an encoder of one part allocates none for them.
+    parts: Few<Part<K>>,
     /// The fences waited for: before the encoder's first part.
     waits: Vec<FenceUse<K>>,
     /// The fences updated: after its last part.
@@ -1136,7 +1164,7 @@ impl<K: Copy + Ord + Hash> EncoderUses<K> {
         EncoderUses {
             ordered,
             inside: KeyMap::default(),
-            parts: vec![Part::new()],
+            parts: Few::of(Part::new()),
             waits: Vec::new(),
             updates: Vec::new(),
             held: Vec::new(),
@@ -1207,6 +1235,11 @@ impl<K: Copy + Ord + Hash> EncoderUses<K> {
             );
         }
         let part = self.current();
+        // Room for a few resources at once, made at the part's first: grown from nothing, the map
+        // would allocate again at its fourth and eighth.
+        if part.tracked.capacity() == 0 {
+            part.tracked.reserve(TRACKED_ROOM);
+        }
         for used in uses
             .iter()
             .filter(|used| used.tracked && !used.is_nothing())
@@ -1217,7 +1250,9 @@ impl<K: Copy + Ord + Hash> EncoderUses<K> {
                     known.read = known.read.union(used.read);
                     known.write = known.write.union(used.write);
                 }
-                None => ranges.push(used.clone()),
+                // A resource used at a second range (a buffer whose draws move along it) takes
+                // room for every range it keeps before they merge, and the merge's own, at once.
+                None => ranges.push_with_room(used.clone(), ENTRIES_PER_KEY + 1),
             }
             if ranges.len() > ENTRIES_PER_KEY {
                 ranges.change_all(coalesce_uses);
@@ -1327,8 +1362,7 @@ impl<K: Copy + Ord + Hash> EncoderUses<K> {
 
     /// The part commands are recorded into now.
     fn current(&mut self) -> &mut Part<K> {
-        let last = self.parts.len() - 1;
-        &mut self.parts[last]
+        self.parts.last_mut().expect("an encoder has a part")
     }
 
     /// End the current part: the commands after this run in a part of their own, after
@@ -1368,7 +1402,11 @@ impl<K: Copy + Ord + Hash> EncoderUses<K> {
         let mut summaries: Vec<Summary<K>> = parts
             .into_iter()
             .map(|part| {
-                let mut uses: Vec<Use<K>> = part.tracked.into_values().flatten().collect();
+                // Sized once: a flattened map's iterator tells no length, which would grow the
+                // vector use by use.
+                let count = part.tracked.values().map(Few::len).sum();
+                let mut uses: Vec<Use<K>> = Vec::with_capacity(count);
+                uses.extend(part.tracked.into_values().flatten());
                 uses.sort_by_key(|used| used.key);
                 Summary {
                     uses,
@@ -1786,6 +1824,15 @@ impl<K: Copy + Ord> Summary<K> {
         for used in other.updates {
             add_fence(&mut self.updates, used);
         }
+    }
+}
+
+impl<K: Copy + Ord + Hash> EncoderUses<K> {
+    /// The room its current part's list of `key`'s uses has past the first, where it tracks it.
+    #[cfg(test)]
+    pub(super) fn range_room(&self, key: K) -> Option<usize> {
+        let part = self.parts.iter().last()?;
+        part.tracked.get(&key).map(|few| few.rest.capacity())
     }
 }
 

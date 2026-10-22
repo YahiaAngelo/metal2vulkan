@@ -1739,6 +1739,8 @@ impl Device {
         // The pages its replays held last go on its handler threads (`recorder`).
         if let Some(recorder) = device.shared().recorder() {
             recorder.set_elsewhere(device.elsewhere());
+            // Woken by the scheduler's thread for what a commit queued (`recorder`).
+            (device.shared().scheduler).wake_recorder(Arc::clone(recorder));
         }
         device.say_unmeasured_driver();
         device.degrade_argument_buffers_unread();

@@ -200,7 +200,7 @@ const _: () = {
 /// A slot's lowering, and whether it refused a call.
 struct Lowerer {
     /// Its encoder's lowering: `None` once the encoder ended, and in a slot not taken.
-    lowering: Option<RenderLowering>,
+    lowering: Option<Box<RenderLowering>>,
     /// A call was refused as it was lowered: no later call is lowered.
     refused: bool,
 }
@@ -496,7 +496,7 @@ pub(crate) struct DeferredEncoders {
 impl DeferredEncoders {
     /// A slot for `lowering`'s encoder, which logs its calls, with its checks at the call: one
     /// kept, its checks' room reused, else a new one.
-    fn take(&self, lowering: RenderLowering) -> Arc<LoweringSlot> {
+    fn take(&self, lowering: Box<RenderLowering>) -> Arc<LoweringSlot> {
         let mut slots = lock(&self.slots);
         let kept = slots.iter().find(|slot| !lock(&slot.state).taken).cloned();
         let slot = match kept {
@@ -649,7 +649,7 @@ impl EndInFlight {
 impl RenderCommandEncoder {
     /// The program's encoder over `lowering`, which lowers its calls as the device's policy says
     /// (the module docs).
-    pub(super) fn new(lowering: RenderLowering) -> RenderCommandEncoder {
+    pub(super) fn new(lowering: Box<RenderLowering>) -> RenderCommandEncoder {
         let device = lowering.core.device();
         let logs = device.compile_device().policy().render_lowering == RenderLoweringPolicy::Worker
             && lowering.grouped.is_none();
