@@ -370,10 +370,10 @@ impl RenderCommandEncoder {
     /// primitive whose vertex order a pipeline state reads from a list led by its last vertex,
     /// which a GPU pass writes (the CPU for a direct draw without indices); what that list
     /// draws otherwise than Metal is announced (`provoking-vertex-lines`,
-    /// `provoking-vertex-unmatched`). Metal draws a mode from 2 to `2^63 - 1` a third way (a
-    /// triangle from its last vertex, but an odd strip triangle `(i + 2, i + 1, i)` from `i`,
-    /// and every line's flat inputs and `[[primitive_id]]` as 0), which the runtime draws as
-    /// mode 1, announced at the call (`provoking-vertex-unmatched`). No mode is refused.
+    /// `provoking-vertex-unmatched`). Metal draws a mode from 2 to `2^63 - 1` a third way, which
+    /// differs between pipeline states (every line's flat inputs and `[[primitive_id]]` 0), and
+    /// the runtime as mode 1, announced at the call (`provoking-vertex-unmatched`). No mode is
+    /// refused.
     pub fn set_provoking_vertex_mode(&mut self, mode: u64) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| lowering.set_provoking_vertex_mode(mode)),

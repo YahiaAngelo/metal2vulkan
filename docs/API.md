@@ -2244,8 +2244,8 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   whose IDs read each primitive's last vertex; and a slice or viewport a vertex function selects,
   which a device without `shaderOutputLayer` or `shaderOutputViewportIndex` selects in a geometry
   stage, from each primitive's first vertex. And on every device, a mode from 2 to `2^63 - 1`,
-  which Metal draws a third way (an odd triangle strip triangle `(i + 2, i + 1, i)` from `i`, every
-  line's flat inputs and `[[primitive_id]]` 0) and the runtime as mode 1: announced at the call.
+  which Metal draws a third way that differs between pipeline states (every line's flat inputs and
+  `[[primitive_id]]` 0) and the runtime as mode 1: announced at the call.
   Cost: flat inputs or a computed primitive ID read another vertex than Metal's, or barycentric
   weights come in another order than Metal's.
 - `metal2vulkan-degrade-visibility-count-per-color` (precision). `VisibilityCountPerColor`: A

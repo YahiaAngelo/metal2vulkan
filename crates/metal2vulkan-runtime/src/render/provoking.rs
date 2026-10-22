@@ -1,13 +1,16 @@
 //! The provoking vertex: Apple's `setProvokingVertexMode:`.
 //!
-//! Measured on the M3 Max with macOS 27.0.1 (each primitive's flat inputs, `[[primitive_id]]` and
-//! barycentric weights, solved for its vertices):
+//! Measured on the M3 Max with macOS 27.0.1 (each primitive's flat inputs, `[[primitive_id]]`,
+//! barycentric weights, slice and viewport, solved for its vertices):
 //!
-//! - Mode 0, and every value whose top bit is set, takes a primitive's flat inputs from its first
-//!   vertex; mode 1 from its last. The values from 2 to `2^63 - 1` draw a third way (a triangle
-//!   from its last vertex, an odd strip triangle `(i + 2, i + 1, i)` from `i`, every line's flat
-//!   inputs and `[[primitive_id]]` 0), which the runtime draws as mode 1, announcing it at the
-//!   call (`Degradation::ProvokingVertexUnmatched`). No value is a validation error.
+//! - Mode 0, and every value whose top bit is set, takes a primitive's flat inputs, and the slice
+//!   and viewport its vertex function selects, from its first vertex; mode 1 from its last. The
+//!   values from 2 to `2^63 - 1` draw a third way, which differs between pipeline states (for one,
+//!   a triangle list from its last vertex and an odd strip triangle `(i + 2, i + 1, i)` from `i`;
+//!   for one whose vertex function selects a slice, a triangle from its middle vertex) and draws
+//!   every line's flat inputs and `[[primitive_id]]` 0: the runtime draws them as mode 1,
+//!   announcing it at the call (`Degradation::ProvokingVertexUnmatched`). No value is a
+//!   validation error.
 //! - At mode 1 the vertex is a line list's `2j + 1`, a line strip's `j + 1`, a triangle list's
 //!   `3j + 2`, a triangle strip's `j + 2`, and Metal's private types' list primitives' last
 //!   (`DrawPrimitiveType`). The barycentric order is mode 0's but for a triangle strip's odd
@@ -184,9 +187,9 @@ impl RenderLowering {
                 .degrade(Degradation::ProvokingVertexUnmatched, || {
                     (
                         "setProvokingVertexMode: of a mode from 2 to 2^63 - 1".to_owned(),
-                        "Metal draws an odd triangle strip triangle (i + 2, i + 1, i) from vertex \
-                         i, and every line's flat inputs and [[primitive_id]] as 0; the runtime \
-                         draws the mode as mode 1"
+                        "Metal draws such a mode a third way, which differs between pipeline \
+                         states, and every line's flat inputs and [[primitive_id]] as 0; the \
+                         runtime draws it as mode 1"
                             .to_owned(),
                     )
                 });

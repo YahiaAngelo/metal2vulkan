@@ -85,7 +85,7 @@ fn every_apple_only_call_answers_typed() {
         (
             "setProvokingVertexMode:",
             C::SetProvokingVertexMode(i64::MAX as u64),
-            Err(AppleOnly::ProvokingVertexMode),
+            Ok(()),
         ),
         (
             "setViewportTransformEnabled:",
