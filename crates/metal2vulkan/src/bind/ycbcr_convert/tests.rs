@@ -18,7 +18,9 @@ fn the_ycbcr_conversion_kernels_are_valid_on_every_committed_profile() {
             YCbCrOutput::Codes,
             YCbCrOutput::Srgb,
         ] {
-            assert_valid(typed_module(output).expect("module"), &p);
+            for floats in [false, true] {
+                assert_valid(typed_module(output, floats).expect("module"), &p);
+            }
         }
     }
 }
@@ -289,7 +291,7 @@ impl Surface {
     /// one), or its code, both invocation orders alike; alpha checked to be 1.
     fn converted(&self) -> Vec<[u16; 3]> {
         let output = self.planes.codes.output;
-        let m = typed_module(output).expect("module");
+        let m = typed_module(output, false).expect("module");
         let [w, h] = self.planes.size;
         let groups = [w, h].map(|n| n.div_ceil(YCbCrConvertModule::LOCAL_SIZE));
         let mut runs = Vec::new();
@@ -345,6 +347,86 @@ impl Surface {
         }
         assert_eq!(runs[0], runs[1], "order independent");
         runs.swap_remove(0)
+    }
+}
+
+impl Surface {
+    /// The floats module's texels ([`super::ycbcr_convert_floats_module`]), as `f32`s.
+    fn floats(&self) -> Vec<[f32; 4]> {
+        let m = typed_module(self.planes.codes.output, true).expect("module");
+        let [w, h] = self.planes.size;
+        let groups = [w, h].map(|n| n.div_ceil(YCbCrConvertModule::LOCAL_SIZE));
+        let part = |slot, bytes: Vec<u8>| Buffer {
+            slot: Some(slot),
+            address: None,
+            bytes,
+        };
+        let shape = YCbCrConvertModule::shape(&self.planes);
+        let res = Resources {
+            buffers: vec![part(SHAPE, shape.to_vec()), part(BYTES, self.bytes.clone())],
+            push: Vec::new(),
+            spec: Default::default(),
+        };
+        let cfg = Config {
+            workgroups: [groups[0], groups[1], 1],
+            ..Config::default()
+        };
+        let image = Image::new(IMAGE, [w, h, 1], 1, 1, 1);
+        let (_, images) = run_with_images(&m, &cfg, res, vec![image]).expect("run");
+        images[0]
+            .texels
+            .iter()
+            .map(|t| std::array::from_fn(|c| f32::from_bits(t[c])))
+            .collect()
+    }
+}
+
+/// The floats module writes each texel the conversion reads as floats: a converted texel's
+/// `v / 2048` and an sRGB one's `v / 8192`, bit for bit, and a code read as codes as its code over
+/// the largest, within a thousandth of a code; alpha 1.
+#[test]
+fn the_floats_module_writes_the_texels_as_floats() {
+    let mut random = Random(0x5eed_f10a);
+    for codes in layouts().into_iter().chain(subsampled_layouts()) {
+        let mask = (1u16 << codes.bits) - 1;
+        let size = [17, 9];
+        let [w, h] = size;
+        for conversion in CONVERSIONS {
+            let luma: Vec<u16> = (0..w * h)
+                .map(|_| u16::from_le_bytes([random.next(), random.next()]) & mask)
+                .collect();
+            let [cw, ch] = YCbCrPlanes::new(size, [0; 2], [0; 2], conversion, codes).chroma_size();
+            let chroma: Vec<u16> = (0..2 * cw * ch)
+                .map(|_| u16::from_le_bytes([random.next(), random.next()]) & mask)
+                .collect();
+            let rows = [48, row_bytes(codes, 2 * cw).next_multiple_of(16)];
+            let surface = Surface::new(
+                size,
+                512,
+                rows,
+                (conversion, codes),
+                &|x, y| luma[(y * w + x) as usize],
+                &|x, y| {
+                    let i = (2 * (y * cw + x)) as usize;
+                    [chroma[i], chroma[i + 1]]
+                },
+            );
+            let model = surface.modelled();
+            for (i, (got, want)) in surface.floats().iter().zip(&model).enumerate() {
+                assert_eq!(got[3], 1.0, "{codes:?} texel {i}: alpha 1");
+                for c in 0..3 {
+                    let want = f32::from(want[c]);
+                    match codes.output {
+                        YCbCrOutput::Converted => assert_eq!(got[c], want / 2048.0),
+                        YCbCrOutput::Srgb => assert_eq!(got[c], want / 8192.0),
+                        YCbCrOutput::Codes => {
+                            let code = got[c] * f32::from(mask);
+                            assert!((code - want).abs() < 1e-3, "{codes:?} {i}: {code} {want}");
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

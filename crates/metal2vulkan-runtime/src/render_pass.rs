@@ -1360,14 +1360,10 @@ pub(super) fn layout(
             colors.push(None);
             continue;
         };
-        // A two-plane YCbCr attachment's store is matched for a pass that clears it or leaves
-        // it to the pass (`DontCare`), stores it, and resolves nothing: a load (its texels then
-        // the planes' converted reads), another store and a resolve are not measured.
+        // A two-plane YCbCr attachment loads, stores and blends as Metal's tile of halves
+        // (`texture/ycbcr_image.rs`); a resolve into or out of one is not measured.
         if ycbcr_renders(texture.pixel_format())
-            && (color.load_action == LoadAction::Load
-                || color.store_action != StoreAction::Store
-                || color.resolve_texture.is_some()
-                || color.store_action_options != StoreActionOptions::NONE)
+            && (color.resolve_texture.is_some() || color.store_action.resolves())
         {
             return Err(Error::Unsupported(
                 Unsupported::not_implemented(Feature::Format).naming_format(texture.pixel_format()),

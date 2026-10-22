@@ -157,11 +157,14 @@ pub enum FormatEmulation {
     RotatedView,
     /// A render pass's color attachment of a two-plane YCbCr format whose store Metal's planes
     /// are matched for ([`ycbcr_renders`]): `R32G32B32A32_SFLOAT` of the values the pass leaves
-    /// in each texel (the fragment function's output, or the clear color through `float`),
-    /// which the consumer encodes into the surface's planes as the pass stores
-    /// (`bind::ycbcr_store`, the encode kernel's store of every texel). Exact for an attachment
-    /// a fragment function writes unblended through a mask of red, green and blue; admitted for
-    /// that usage only (no blend: the pipeline refuses one).
+    /// in each texel (the fragment function's output, the clear color through `float`, or the
+    /// texel the pass loads), which the consumer encodes into the surface's planes as the pass
+    /// stores (`bind::ycbcr_store`, the encode kernel's store of every texel). Exact for an
+    /// attachment a fragment function writes unblended, under any write mask (a masked channel
+    /// keeps the texel's value, as Metal's tile keeps it). Admitted for a color attachment and
+    /// its blend (where the device blends `R32G32B32A32_SFLOAT`), which the device computes in
+    /// floats where Metal's tile blends halves: within a code of Metal's, which the consumer
+    /// announces.
     YCbCrRendered,
     /// A pipeline's color attachment of a packed 10-bit two-plane YCbCr format whose pass is
     /// refused ([`ycbcr_pass_refused`]): `R32G32B32A32_SFLOAT`, which no pass renders into.
@@ -241,9 +244,10 @@ impl FormatEmulation {
             FormatEmulation::YCbCr => {
                 matches!(usage, U::SampledImage | U::SampledImageFilterLinear)
             }
-            FormatEmulation::YCbCrRendered | FormatEmulation::YCbCrPassRefused => {
-                usage == U::ColorAttachment
+            FormatEmulation::YCbCrRendered => {
+                matches!(usage, U::ColorAttachment | U::ColorAttachmentBlend)
             }
+            FormatEmulation::YCbCrPassRefused => usage == U::ColorAttachment,
             FormatEmulation::XChannel => matches!(
                 usage,
                 U::SampledImage
@@ -2010,9 +2014,10 @@ pub fn ycbcr_writes_stored(pf: PixelFormat) -> bool {
 /// probe on an Apple M3 Max under macOS 26.7: the M4's bytes in every case; the same M4: every byte
 /// of the 10-bit formats' draws and clears over `x420`, `xf20`, `x422`, `xf22`, `x444` and `xf44`).
 /// Such an attachment renders into `R32G32B32A32_SFLOAT` ([`FormatEmulation::YCbCrRendered`]),
-/// unblended, through a mask of red, green and blue (the pipeline refuses a blend or a partial
-/// mask, `NotImplemented(Format)`). Not the `_sRGB`, code or packed formats, whose stores no rule
-/// matches yet (a packed one's pass is refused, [`ycbcr_pass_refused`]).
+/// through any write mask and, where the device blends that format, any blend (within a code of
+/// Metal's, the runtime announces it; refused elsewhere, `Unsupported(Format)` naming the need).
+/// Not the `_sRGB`, code or packed formats, whose stores no rule matches yet (a packed one's pass
+/// is refused, [`ycbcr_pass_refused`]).
 pub fn ycbcr_renders(pf: PixelFormat) -> bool {
     // Every such layout is held ([`ycbcr`]), whose representation asks this.
     ycbcr_format(pf)

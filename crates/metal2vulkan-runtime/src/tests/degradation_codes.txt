@@ -237,7 +237,9 @@ metal2vulkan-degrade-vertex-simdgroup-grouping
 metal2vulkan-degrade-view-base-texel-offset
 metal2vulkan-degrade-visibility-count-per-color
 metal2vulkan-degrade-wrapped-image-layout-transitions
+metal2vulkan-degrade-ycbcr-blend-rounding
 metal2vulkan-degrade-ycbcr-filter-not-exact
 metal2vulkan-degrade-ycbcr-linear-filter
+metal2vulkan-degrade-ycbcr-load-tiles
 metal2vulkan-degrade-zero-layer-map-after-release
 metal2vulkan-degrade-zeroed-index-fetch

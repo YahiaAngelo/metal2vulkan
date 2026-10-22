@@ -111,24 +111,33 @@
 //!   (`bind::ycbcr_write_module`), which stores the codes of the marked texels, and copies the
 //!   planes' rows of codes back. The texture's converted texels then convert again at their next
 //!   use, as after any write of the planes. Exact, so announced nowhere.
-//! - **Passes** (on an Apple M4 under macOS 27.0.1, and XRR2's probe on the consumer's Apple M3 Max
-//!   under macOS 26.7, byte for byte alike). Metal stores a pass's color attachment of
-//!   `YCBCR8_420_2P`, `YCBCR8_422_2P` and `YCBCR8_444_2P` (500, 502, 503) over plane 0 into both
-//!   planes at its store: every texel's luma code, drawn or not, and each chroma pair's codes of
-//!   the block of texels it covers, the codes `metal2vulkan::bind::ycbcr_store` states
-//!   (`metal::format::ycbcr_renders`). The pass renders into the texture's render shadow
-//!   (`texture/ycbcr_image.rs`), an `R32G32B32A32_SFLOAT` image of the texture's size, cleared at
-//!   its copy in; its copy back is the write-back above storing every texel ([`YCbCrWriteBack`] of
-//!   a store), and the texture's converted texels convert again at their next use. Exact for a pass
-//!   that clears the attachment or leaves it to the pass (`DontCare`) and stores it, a draw writing
-//!   red, green and blue unblended; a load, another store action, a resolve, a blend and a partial
-//!   write mask are refused (`NotImplemented(Format)`, naming the format, at the pass or the
-//!   pipeline), as are a texture over plane 1 and one whose size the chroma blocks do not tile,
-//!   none measured; the other formats' passes stay refused (the 10-bit ones' draws match no rule
-//!   yet). A packed 10-bit format's pipeline is made, as Metal makes it, and its pass refused at
-//!   its start, naming the format (`metal::format::ycbcr_pass_refused`): Metal fails the pass's
-//!   command buffer, its error and the luma bytes it leaves varying from run to run, so no exact
-//!   form exists.
+//! - **Passes** (on an Apple M4 under macOS 27.0.1, and on an Apple M3 Max under macOS 26.7 and
+//!   27.0.1, byte for byte alike). Metal's tile holds a color attachment of `YCBCR8_420_2P`,
+//!   `YCBCR8_422_2P`, `YCBCR8_444_2P` or their 10-bit formats (500 to 507) over plane 0 as halves
+//!   of red, green and blue, and its store converts the tile back into both planes: every texel's
+//!   luma code, drawn or not, and each chroma pair's codes of the block of texels it covers, the
+//!   codes `metal2vulkan::bind::ycbcr_store` states (`metal::format::ycbcr_renders`). The pass
+//!   renders into the texture's render shadow (`texture/ycbcr_image.rs`), an
+//!   `R32G32B32A32_SFLOAT` image of the texture's size; its copy back is the write-back above
+//!   storing every texel ([`YCbCrWriteBack`] of a store), and the texture's converted texels
+//!   convert again at their next use. A pass that clears the attachment, or leaves it to the pass
+//!   (`DontCare`), clears the shadow at its copy in and stores every texel, exact. A pass that
+//!   loads it loads each texel as the texture reads it ([`YCbCrLoad`], the conversion kernel
+//!   writing floats), and Metal stores only the 32x32 tiles its draws reach, every texel of each
+//!   re-encoded, leaving the others' bytes (a load with no draw stores nothing): the copy back
+//!   stores the tiles of the pass's drawn area (`render/shadows.rs`'s `DrawnArea`, the scissored
+//!   bounds of its draws), so a tile inside that area that no primitive reaches is re-encoded
+//!   where Metal keeps its bytes, announced (`ycbcr-load-tiles`). A `DontCare` store, and a store
+//!   left `Unknown`, store nothing, as Metal's do. A write mask keeps the masked channels' cleared
+//!   or loaded values, exact. A blend blends the shadow's floats where Metal blends its halves (an
+//!   8-bit format's in half arithmetic, a 10-bit one's in `float` rounded toward zero), within a
+//!   code of Metal's, announced at the draw (`ycbcr-blend-rounding`); on a device that does not
+//!   blend `R32G32B32A32_SFLOAT` such a pipeline is refused, naming the need. A resolve is refused
+//!   (`NotImplemented(Format)`, naming the format, at the pass), as are a texture over plane 1 and
+//!   one whose size the chroma blocks do not tile, and the other formats' passes. A packed 10-bit
+//!   format's pipeline is made, as Metal makes it, and its pass refused at its start, naming the
+//!   format (`metal::format::ycbcr_pass_refused`): Metal fails the pass's command buffer, its error
+//!   and the luma bytes it leaves varying from run to run, so no exact form exists.
 //! - **Linear filtering** is Metal's, exact: the function emulates Metal's filter of the texels on
 //!   their grid of 1/2048 or 1/8192 (`metal2vulkan::metal::texel_format::PackedTexels::YCbCr2048`,
 //!   `YCbCr8192`), under MoltenVK through the slot's YCbCr variant, and announces, naming the slot,
@@ -539,7 +548,7 @@ impl YCbCrConversion {
         let (raw, start) = staging.at(0);
         let (identity, range) = staging.tracked(0..BYTES_AT + held);
         let shape = YCbCrConvertModule::shape(planes);
-        let kernel = device.owned_kernel(OwnedModule::YCbCrConvert(planes.codes.output))?;
+        let kernel = device.owned_kernel(OwnedModule::YCbCrConvert(planes.codes.output, false))?;
         let set = OwnedSet {
             images: Vec::new(),
             storage_images: vec![view],
@@ -755,9 +764,12 @@ impl YCbCrConversion {
 /// module docs): the copy back of its write shadow (`ShadowSource::YCbCrWrite`). The planes'
 /// bytes go into a staging buffer of the texture's, the encode kernel (`bind::ycbcr_write_module`,
 /// `owned_kernel.rs`) stores the codes of every texel the shadow marks written, and the planes'
-/// rows of codes go back; the bytes between the rows stay as they were.
+/// rows of codes go back; the bytes between the rows stay as they were. A render shadow's
+/// write-back stores every texel, of the tiles a pass changed alone where it knows them
+/// ([`YCbCrWriteBack::record`]), and loads the shadow too ([`YCbCrLoad`]).
 pub(super) struct YCbCrWriteBack {
-    /// The shape at its start, the planes' bytes from `BYTES_AT`; held for the texture's life.
+    /// The shape at its start, the planes' bytes from `BYTES_AT`, and a load's shape after them;
+    /// held for the texture's life.
     staging: Buffer,
     /// The staging buffer's identity and its bytes.
     staging_use: (ResourceKey, Range<u64>),
@@ -766,12 +778,35 @@ pub(super) struct YCbCrWriteBack {
     shape: [u8; YCbCrWriteModule::SHAPE_WORDS as usize * 4],
     /// The planes' bytes from the surface's buffer into the staging buffer.
     into: vk::BufferCopy,
-    /// Each row of codes of both planes from the staging buffer back into the surface's buffer.
-    back: Vec<vk::BufferCopy>,
+    /// Where the planes' bytes start in the staging buffer's `VkBuffer`, and in the surface's
+    /// buffer's.
+    bytes_at: [u64; 2],
+    /// The planes, whose rows of codes go back.
+    planes: YCbCrPlanes,
+    kernel: OwnedKernel,
+    sets: OwnedSets,
+    groups: [u32; 2],
+    /// The load of a render shadow, `None` for a write shadow.
+    load: Option<YCbCrLoad>,
+}
+
+/// The load of a render shadow (the module docs' **Passes**): the copy in of a pass that loads
+/// the attachment, which converts the planes' bytes into the shadow as floats through the
+/// conversion kernel (`bind::ycbcr_convert_floats_module`), each texel what the texture reads.
+/// It shares the write-back's staging buffer, its shape past the planes' bytes.
+struct YCbCrLoad {
+    /// Where the shape lies in the staging buffer's `VkBuffer`.
+    shape_at: u64,
+    shape: [u8; YCbCrConvertModule::SHAPE_WORDS as usize * 4],
     kernel: OwnedKernel,
     sets: OwnedSets,
     groups: [u32; 2],
 }
+
+/// The side of the tiles Metal loads and stores a render pass's attachment by
+/// (`bind::tile_reach`): a pass that loads a two-plane YCbCr attachment stores every texel of
+/// each tile it reaches, its codes re-encoded from what the tile loaded.
+const TILE: u32 = 32;
 
 impl YCbCrWriteBack {
     /// The write-back into `planes` (a layout `bind::ycbcr_write` encodes, over plane 0), whose
@@ -785,13 +820,21 @@ impl YCbCrWriteBack {
         (planes, bytes_in): (&YCbCrPlanes, Range<u64>),
         at: u64,
         (view, all): (vk::ImageView, bool),
+        load_view: Option<vk::ImageView>,
     ) -> Result<YCbCrWriteBack, Error> {
         let span = bytes_in.end - bytes_in.start;
         // The kernel reads and writes whole words: a row's last may reach past the span's end.
         let held = span.next_multiple_of(4);
-        let staging = device.own_buffer(BYTES_AT + held, ResourceOptions::private())?;
+        // A load's shape past the planes' bytes, at a multiple of every
+        // `minStorageBufferOffsetAlignment`.
+        let load_shape_at = BYTES_AT + held.next_multiple_of(BYTES_AT);
+        let length = match load_view {
+            Some(_) => load_shape_at + 4 * u64::from(YCbCrConvertModule::SHAPE_WORDS),
+            None => BYTES_AT + held,
+        };
+        let staging = device.own_buffer(length, ResourceOptions::private())?;
         let (raw, start) = staging.at(0);
-        let (identity, range) = staging.tracked(0..BYTES_AT + held);
+        let (identity, range) = staging.tracked(0..length);
         let shape = YCbCrWriteModule::shape(planes, all);
         let kernel = device.owned_kernel(OwnedModule::YCbCrWrite)?;
         let set = OwnedSet {
@@ -812,23 +855,16 @@ impl YCbCrWriteBack {
                 "a YCbCr texture past the device's workgroup counts",
             ));
         }
-        // Each plane's rows of codes: the luma plane's a code a texel, the chroma plane's a pair.
-        let unit = u64::from(planes.codes.bytes);
-        let [width, height] = planes.size.map(u64::from);
-        let [chroma_width, chroma_height] = planes.chroma_size().map(u64::from);
-        let rows = |[offset, row]: [u32; 2], rows: u64, bytes: u64| {
-            (0..rows).map(move |y| {
-                let first = u64::from(offset) + y * u64::from(row);
-                vk::BufferCopy {
-                    src_offset: start + BYTES_AT + first,
-                    dst_offset: at + first,
-                    size: bytes,
-                }
-            })
+        let load = match load_view {
+            Some(view) => Some(YCbCrLoad::new(
+                device,
+                planes,
+                (raw, start, load_shape_at),
+                held,
+                view,
+            )?),
+            None => None,
         };
-        let back = rows(planes.luma, height, unit * width)
-            .chain(rows(planes.chroma, chroma_height, 2 * unit * chroma_width))
-            .collect();
         Ok(YCbCrWriteBack {
             staging_use: (identity.key, range),
             shape_at: start,
@@ -838,12 +874,63 @@ impl YCbCrWriteBack {
                 dst_offset: start + BYTES_AT,
                 size: span,
             },
-            back,
+            bytes_at: [start + BYTES_AT, at],
+            planes: *planes,
             staging,
             kernel,
             sets,
             groups,
+            load,
         })
+    }
+
+    /// Whether it loads a render shadow ([`YCbCrLoad`]): its copy in converts the planes.
+    pub(super) fn loads(&self) -> bool {
+        self.load.is_some()
+    }
+
+    /// The rows of codes of both planes it copies back from the staging buffer: of every texel,
+    /// or, `area` (`[x0, y0, x1, y1)` of the texture's texels), of the tiles of [`TILE`] texels
+    /// a side from the texture's origin that it meets, clipped to the texture; each chroma pair
+    /// of the luma texels it covers.
+    fn back(&self, area: Option<[u32; 4]>) -> Vec<vk::BufferCopy> {
+        let planes = &self.planes;
+        let [width, height] = planes.size;
+        let [x0, y0, x1, y1] = match area {
+            Some([x0, y0, x1, y1]) => [
+                x0 - x0 % TILE,
+                y0 - y0 % TILE,
+                x1.next_multiple_of(TILE).min(width),
+                y1.next_multiple_of(TILE).min(height),
+            ],
+            None => [0, 0, width, height],
+        };
+        if x0 >= x1 || y0 >= y1 {
+            return Vec::new();
+        }
+        let unit = u64::from(planes.codes.bytes);
+        let [from, to] = self.bytes_at;
+        let rows = |[offset, row]: [u32; 2], rows: Range<u32>, columns: Range<u32>, pair: u64| {
+            rows.map(move |y| {
+                let first = u64::from(offset) + u64::from(y) * u64::from(row);
+                let first = first + pair * unit * u64::from(columns.start);
+                vk::BufferCopy {
+                    src_offset: from + first,
+                    dst_offset: to + first,
+                    size: pair * unit * u64::from(columns.end - columns.start),
+                }
+            })
+        };
+        let [across, down] = planes.codes.subsampling.halved();
+        let halve = |v: u32, halved: bool| if halved { v.div_ceil(2) } else { v };
+        let luma = rows(planes.luma, y0..y1, x0..x1, 1);
+        let chroma = rows(
+            planes.chroma,
+            halve(y0, down)..halve(y1, down),
+            halve(x0, across)..halve(x1, across),
+            2,
+        );
+        luma.chain(chroma).collect()
     }
 
     /// The write-back's uses: `truth`, the read and the write of the planes' bytes, then the
@@ -894,8 +981,13 @@ impl YCbCrWriteBack {
         device: &Vk,
         command_buffer: vk::CommandBuffer,
         source: vk::Buffer,
+        area: Option<[u32; 4]>,
     ) {
         let staging = self.staging.at(0).0;
+        let back = self.back(area);
+        if back.is_empty() {
+            return;
+        }
         // SAFETY: the caller's contract; the shape, the copy in and the rows lie in the staging
         // buffer and in `source` (checked when the texture was made), and the set binds them.
         unsafe {
@@ -917,7 +1009,103 @@ impl YCbCrWriteBack {
             );
             device.cmd_dispatch(command_buffer, self.groups[0], self.groups[1], 1);
             Barrier::everything().record(device, command_buffer);
-            device.cmd_copy_buffer(command_buffer, staging, source, &self.back);
+            device.cmd_copy_buffer(command_buffer, staging, source, &back);
         }
+    }
+
+    /// The load's uses ([`YCbCrLoad`]): `truth`, the read of the planes' bytes, then the staging
+    /// buffer's writes and reads, and the write of every texel of the shadow of `copies`.
+    pub(super) fn load_uses(
+        &self,
+        truth: Use<ResourceKey>,
+        copies: &ShadowCopies,
+    ) -> Vec<Use<ResourceKey>> {
+        let mut uses = self.uses(truth, copies);
+        if let Some(shadow) = uses.last_mut() {
+            *shadow = Use::writes(
+                copies.shadow_key,
+                copies.tracked,
+                copies.shadow_range.clone(),
+                Access::new(
+                    vk::PipelineStageFlags2::COMPUTE_SHADER,
+                    vk::AccessFlags2::SHADER_STORAGE_WRITE,
+                ),
+            );
+        }
+        uses
+    }
+
+    /// Record the load of the render shadow ([`YCbCrLoad`]) from the planes in `source` (the
+    /// surface's buffer's `VkBuffer` now) into `command_buffer`: nothing for a write shadow.
+    ///
+    /// # Safety
+    ///
+    /// As [`record`](Self::record)'s.
+    pub(super) unsafe fn record_load(
+        &self,
+        device: &Vk,
+        command_buffer: vk::CommandBuffer,
+        source: vk::Buffer,
+    ) {
+        let Some(load) = &self.load else {
+            return;
+        };
+        let staging = self.staging.at(0).0;
+        // SAFETY: the caller's contract; the shape and the copy in lie in the staging buffer and
+        // in `source` (checked when the texture was made), and the load's set binds them.
+        unsafe {
+            device.cmd_update_buffer(command_buffer, staging, load.shape_at, &load.shape);
+            device.cmd_copy_buffer(command_buffer, source, staging, &[self.into]);
+            Barrier::everything().record(device, command_buffer);
+            device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                load.kernel.pipeline,
+            );
+            device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                load.kernel.layout,
+                0,
+                &load.sets.sets,
+                &[],
+            );
+            device.cmd_dispatch(command_buffer, load.groups[0], load.groups[1], 1);
+        }
+    }
+}
+
+impl YCbCrLoad {
+    /// The load of `planes` into `view`, a float storage view of the render shadow, through the
+    /// staging buffer `staging` (its `VkBuffer`, its first byte there, and the load's shape's
+    /// offset in it), whose planes' bytes are `held` bytes from `BYTES_AT`.
+    fn new(
+        device: &Device,
+        planes: &YCbCrPlanes,
+        (raw, start, shape_at): (vk::Buffer, u64, u64),
+        held: u64,
+        view: vk::ImageView,
+    ) -> Result<YCbCrLoad, Error> {
+        let shape = YCbCrConvertModule::shape(planes);
+        let kernel = device.owned_kernel(OwnedModule::YCbCrConvert(planes.codes.output, true))?;
+        let set = OwnedSet {
+            images: Vec::new(),
+            storage_images: vec![view],
+            buffers: vec![
+                (raw, start + shape_at, shape.len() as u64),
+                (raw, start + BYTES_AT, held),
+            ],
+        };
+        let sets = OwnedSets::write_each(device, &[kernel], &[set])?;
+        let groups = planes
+            .size
+            .map(|n| n.div_ceil(YCbCrConvertModule::LOCAL_SIZE));
+        Ok(YCbCrLoad {
+            shape_at: start + shape_at,
+            shape,
+            kernel,
+            sets,
+            groups,
+        })
     }
 }
