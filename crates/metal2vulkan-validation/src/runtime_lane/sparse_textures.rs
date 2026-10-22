@@ -45,12 +45,12 @@ pub(super) const SPARSE: [Degradation; 3] = [
     Degradation::EmulatedSparseTexture,
 ];
 
-/// What `device` makes a sparse texture of `pf` (single-sample, of 2D images) of, read through
-/// Vulkan apart from the runtime: a sparse image where it binds sparse memory (`sparseBinding` and
-/// `sparseResidencyImage2D`, and its queue family's sparse-binding bit) and lists the format's
-/// sparse image properties of the colour aspect, else an ordinary image whose unmapped tiles the
-/// runtime keeps at zero (MoltenVK); and whether a sparse image's residency is
-/// `residencyNonResidentStrict`.
+/// What `device` makes a sparse texture of `pf` (of 2D images) of, read through Vulkan apart from
+/// the runtime: a sparse image where it binds sparse memory (`sparseBinding` and
+/// `sparseResidencyImage2D`, `sparseResidency2Samples` or `4Samples` for a multisampled one, and
+/// its queue family's sparse-binding bit) and lists the format's sparse image properties of the
+/// colour aspect, else an ordinary image whose unmapped tiles the runtime keeps at zero (MoltenVK);
+/// and whether a sparse image's residency is `residencyNonResidentStrict`.
 #[derive(Clone, Copy)]
 pub(super) struct SparseFacts {
     /// A sparse image, not an ordinary one (`emulated-sparse-texture`).
@@ -60,13 +60,23 @@ pub(super) struct SparseFacts {
 }
 
 impl SparseFacts {
-    /// The facts of `device` for a sparse texture of `pf`.
+    /// The facts of `device` for a single-sampled sparse texture of `pf`.
     pub(super) fn of(device: &Device, pf: PixelFormat) -> SparseFacts {
+        SparseFacts::of_samples(device, pf, 1)
+    }
+
+    /// The facts of `device` for a sparse texture of `pf` of 1, 2 or 4 `samples`, a multisampled
+    /// one a render target (the runtime makes its image an attachment).
+    fn of_samples(device: &Device, pf: PixelFormat, samples: u32) -> SparseFacts {
         let format = metal2vulkan::metal::format::direct_format(pf).expect("a sparse format");
         let format = vk::Format::from_raw(format.as_raw());
-        let usage = vk::ImageUsageFlags::SAMPLED
+        let mut usage = vk::ImageUsageFlags::SAMPLED
             | vk::ImageUsageFlags::TRANSFER_SRC
             | vk::ImageUsageFlags::TRANSFER_DST;
+        if samples > 1 {
+            usage |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
+        }
+        let count = vk::SampleCountFlags::from_raw(samples);
         // SAFETY: instance-level queries of the live device's physical device.
         let (features, sparse, family, formats) = unsafe {
             let raw = device.raw();
@@ -82,14 +92,19 @@ impl SparseFacts {
                     physical,
                     format,
                     vk::ImageType::TYPE_2D,
-                    vk::SampleCountFlags::TYPE_1,
+                    count,
                     usage,
                     vk::ImageTiling::OPTIMAL,
                 ),
             )
         };
+        let residency = match samples {
+            1 => features.sparse_residency_image2_d,
+            2 => features.sparse_residency2_samples,
+            _ => features.sparse_residency4_samples,
+        };
         let binds = features.sparse_binding == vk::TRUE
-            && features.sparse_residency_image2_d == vk::TRUE
+            && residency == vk::TRUE
             && family.contains(vk::QueueFlags::SPARSE_BINDING);
         let listed = (formats.iter()).any(|f| f.aspect_mask.contains(vk::ImageAspectFlags::COLOR));
         let image = binds && listed;
@@ -1154,6 +1169,7 @@ fn a_multisampled_sparse_texture_reads_zero_where_unmapped() {
             Err(error) => panic!("a {samples}x sparse texture on {name}: {error:?}"),
         };
         assert_eq!(heap.used_size(), 0);
+        let facts = SparseFacts::of_samples(device, rgba8, samples as u32);
         let mut r = TextureDescriptor::texture_2d(rgba8, width, height, false);
         r.usage = TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ;
         r.resource_options = ResourceOptions::private();
@@ -1220,7 +1236,11 @@ fn a_multisampled_sparse_texture_reads_zero_where_unmapped() {
         assert_eq!(heap.used_size(), 2 * PAGE, "{samples}x on {name}");
         map(TileMapping::Unmap, 0, 0);
         map(TileMapping::Unmap, 1, 0);
-        println!("SPARSE {name}: a {samples}x texture reads zero where unmapped");
+        let (strict, emulated) = (facts.strict, !facts.image);
+        println!(
+            "SPARSE {name}: a {samples}x texture reads zero where unmapped (strict {strict}, \
+             emulated {emulated})"
+        );
     }
     drop(heap);
     quiet(lane, &messages);
