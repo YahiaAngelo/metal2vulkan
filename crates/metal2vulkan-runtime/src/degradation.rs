@@ -1524,16 +1524,6 @@ degradations! {
              reused as Metal reuses it, but it is not the number Metal answers there, which \
              follows how the process was started, what it made and Metal's own encoders' \
              allocations";
-        /// A program set a buffer at a slot past 31, or a threadgroup memory length at an index
-        /// past 30, of a command of an indirect command buffer whose descriptor counts more:
-        /// Metal's validation stops such a descriptor, and plain Metal keeps the value for its
-        /// private getters alone, as no function binds past index 30. The runtime's records hold
-        /// 32 buffers of each stage and 31 lengths a command, so the value is not kept: the
-        /// read-back answers a fresh command's value there.
-        IndirectValuePastRecord = "indirect-value-past-record", Precision,
-            "the command's read-back (Metal's private getters) answers a fresh command's value \
-             for a buffer slot past 31 or a threadgroup length past 30, where Metal answers the \
-             value set; no command runs otherwise";
         /// A draw or dispatch that binds, at a texture slot, a texture whose format's numeric
         /// class (float, signed or unsigned integer) is not the class the function declares there
         /// and that its plan has no exact answer for (`PlanDiagnostic::CrossClassNeutral`): a

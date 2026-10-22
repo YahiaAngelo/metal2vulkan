@@ -380,8 +380,9 @@ fn creation_refuses_what_metal_refuses() {
             assert_eq!(icb(device, &descriptor, 2).size(), 2);
         }
         // A buffer set past what a record holds is kept beside the records and read back with
-        // the record's slots, every slot the descriptor counts; a length past the record is still
-        // dropped, so the read-back lists the lengths a record holds.
+        // the record's slots, every slot the descriptor counts; a length past the record is kept
+        // where Metal keeps it, for its getter (past the last command's lengths here), and the
+        // read-back lists the lengths a record holds.
         let [buffers, lengths, ..] = counts(64);
         let wide = icb(device, &buffers, 1);
         let set = wide.indirect_compute_command_at(0).unwrap();
@@ -397,6 +398,7 @@ fn creation_refuses_what_metal_refuses() {
         let set = long.indirect_compute_command_at(0).unwrap();
         set.set_threadgroup_memory_length(16, 63).unwrap();
         set.set_threadgroup_memory_length(16, 30).unwrap();
+        assert_eq!(set.threadgroup_memory_length(63).unwrap(), Some(16));
         let lengths = command(&long, 0).threadgroup_memory_lengths;
         assert_eq!(lengths.len(), 31);
         assert_eq!(lengths[30], 16);
@@ -895,7 +897,8 @@ fn dynamic_strides_read_back_as_set() {
 
 /// What Metal's validation stops at a setter, or ends the process for, is refused typed, and an
 /// imageblock side the record cannot hold is a gap. A dispatch of the kind a buffer's command types
-/// lack, which Metal's validation stops but plain Metal runs, is set.
+/// lack, which Metal's validation stops but plain Metal runs, is set, and so is a threadgroup
+/// length at or past the descriptor's count, which plain Metal keeps.
 #[test]
 fn setters_refuse_what_metal_refuses() {
     on_device(|device| {
@@ -953,13 +956,10 @@ fn setters_refuse_what_metal_refuses() {
                 Problem::IndexOutOfRange { index: 4, limit: 4 }
             )
         );
-        assert_eq!(
-            first.set_threadgroup_memory_length(16, 2).unwrap_err(),
-            invalid(
-                "set_threadgroup_memory_length",
-                Problem::IndexOutOfRange { index: 2, limit: 2 }
-            )
-        );
+        // A threadgroup length at or past the count is kept, as plain Metal keeps it
+        // (`threadgroup_lengths_are_kept_where_metal_keeps_them`).
+        first.set_threadgroup_memory_length(16, 2).unwrap();
+        assert_eq!(first.threadgroup_memory_length(2).unwrap(), Some(16));
         assert_eq!(
             first.set_imageblock_size(65536, 8).unwrap_err(),
             Error::NotImplemented(RuntimeGap::IndirectImageblockSize {
@@ -1118,10 +1118,6 @@ pub(super) const UNMEASURED_IDENTIFIERS: [Degradation; 2] = [
     Degradation::PlainStateUniqueIdentifier,
 ];
 
-/// The kind a threadgroup length set past what a record holds takes
-/// ([`commands_read_back_their_type_and_slots_past_the_record`]).
-pub(super) const PAST_RECORD: [Degradation; 1] = [Degradation::IndirectValuePastRecord];
-
 /// `getCommandType` answers the type of the dispatch or draw a record holds, none fresh and after
 /// a reset (on an M4: `0x20`, `0x40`, 1 and 2, then 0). A buffer slot past the 32 a record holds,
 /// below the descriptor's count, reads back as set, as Metal's getters answer every slot below the
@@ -1129,23 +1125,11 @@ pub(super) const PAST_RECORD: [Degradation; 1] = [Degradation::IndirectValuePast
 /// descriptor of 64, carried by a GPU copy within the buffer, cleared by a GPU reset (one fill of
 /// the records and one of the slots past them, no copy) and by the command's reset, and announcing
 /// nothing. A copy into a buffer of another count carries the slots
-/// both hold and clears the destination's past the source's. A threadgroup length at index 40,
-/// which Metal keeps in storage not measured past about index 38, announces
-/// `indirect-value-past-record` once a device and reads back as fresh.
+/// both hold and clears the destination's past the source's.
 #[test]
 fn commands_read_back_their_type_and_slots_past_the_record() {
     notices::on_device(|device, messages| {
         messages.take_notices();
-        let past = |messages: &Messages| -> Vec<Degradation> {
-            let notices = messages.take_notices();
-            counts(&notices);
-            notices
-                .into_iter()
-                .filter_map(|message| message.degradation)
-                .map(|notice| notice.degradation)
-                .filter(|kind| PAST_RECORD.contains(kind))
-                .collect()
-        };
         let queue = device.new_command_queue().unwrap();
         let blit = |work: &dyn Fn(&mut metal2vulkan_runtime::BlitCommandEncoder)| {
             let command_buffer = queue.command_buffer().unwrap();
@@ -1174,16 +1158,16 @@ fn commands_read_back_their_type_and_slots_past_the_record() {
             command(&made, 0).command_type,
             IndirectCommandType::CONCURRENT_DISPATCH_THREADS
         );
-        assert_eq!(past(messages), []);
         let buffer = device.new_buffer(256, ResourceOptions::shared()).unwrap();
         let address = buffer.gpu_address().0;
+        messages.take_notices();
         set.set_kernel_buffer(Some(&buffer), 0x10, 40).unwrap();
         set.set_kernel_buffer(None, 0x30, 63).unwrap();
-        assert_eq!(past(messages), [], "a buffer past the record is kept");
-        set.set_threadgroup_memory_length(0x200, 40).unwrap();
-        assert_eq!(past(messages), PAST_RECORD);
-        set.set_threadgroup_memory_length(0x300, 41).unwrap();
-        assert_eq!(past(messages), [], "once a device");
+        assert_eq!(
+            counts(&messages.take_notices()),
+            Default::default(),
+            "a buffer past the record is kept"
+        );
         let slots = |read: &EncodedComputeCommand| {
             [39, 40, 63, 64].map(|at| read.kernel_buffer_address(at))
         };
@@ -1259,7 +1243,174 @@ fn commands_read_back_their_type_and_slots_past_the_record() {
             render_command(&render, 0).command_type,
             IndirectCommandType::empty()
         );
-        assert_eq!(past(messages), []);
+    });
+}
+
+/// A probe's case of [`threadgroup_lengths_are_kept_where_metal_keeps_them`]: the descriptor's
+/// count, the range read ([`kept_lengths`]), the command that sets `1000 + index` at `index`,
+/// `index`, and the indices each command's getter answers it at.
+type LengthCase = (u32, u64, u64, u32, [&'static [u64]; 3]);
+
+/// Each command's threadgroup lengths at 0 to `range` (exclusive) that are not 0, as the M3 Max
+/// probes printed them: `(index, length)` a command, of commands 0 to 2.
+fn kept_lengths(icb: &IndirectCommandBuffer, range: u64) -> [Vec<(u64, u32)>; 3] {
+    [0, 1, 2].map(|index| {
+        let command = icb.indirect_compute_command_at(index).unwrap();
+        (0..range)
+            .filter_map(|at| match command.threadgroup_memory_length(at).unwrap() {
+                Some(0) => None,
+                Some(length) => Some((at, length)),
+                None => panic!("command {index}: no length at {at}"),
+            })
+            .collect()
+    })
+}
+
+/// Threadgroup lengths are kept where Metal keeps them (an M3 Max, macOS 27.0.1, buffers of 3
+/// commands): 38 a command, of one array, whatever the descriptor's count (8, 31, 32, 40, 64,
+/// 100), so a length set at 38 or more of a command is a later command's and a command's getter
+/// past 37 answers a later command's; one at 31 to 37 is kept for the getter alone, one at or
+/// past the count is kept as well, and one past the last command's 38 reads back as set (at
+/// 1000 of the last command), changing no command's record; the getter takes the index's low 32
+/// bits. A command's reset, on the CPU or by a blit, clears its 38 and leaves the next command's;
+/// a blit's copy of a command carries its 38. None announces anything.
+#[test]
+fn threadgroup_lengths_are_kept_where_metal_keeps_them() {
+    notices::on_device(|device, messages| {
+        let made = |count: u32| {
+            let mut descriptor = compute_descriptor();
+            descriptor.max_kernel_threadgroup_memory_bind_count = count;
+            icb(device, &descriptor, 3)
+        };
+        messages.take_notices();
+        let cases: [LengthCase; 14] = [
+            (8, 88, 1, 5, [&[43], &[5], &[]]),
+            (8, 88, 2, 5, [&[81], &[43], &[5]]),
+            (8, 88, 1, 10, [&[48], &[10], &[]]),
+            (31, 111, 1, 30, [&[68], &[30], &[]]),
+            (32, 112, 1, 31, [&[69], &[31], &[]]),
+            (32, 112, 0, 31, [&[31], &[], &[]]),
+            (32, 112, 2, 31, [&[107], &[69], &[31]]),
+            (64, 144, 1, 30, [&[68], &[30], &[]]),
+            (64, 144, 1, 70, [&[108], &[70], &[32]]),
+            (64, 144, 2, 63, [&[139], &[101], &[63]]),
+            (64, 72, 1, 38, [&[], &[38], &[0]]),
+            (64, 72, 1, 50, [&[], &[50], &[12]]),
+            (40, 48, 1, 39, [&[], &[39], &[1]]),
+            (100, 108, 1, 90, [&[], &[90], &[52]]),
+        ];
+        for (count, range, command, index, at) in cases {
+            let icb = made(count);
+            let set = icb.indirect_compute_command_at(command).unwrap();
+            set.set_threadgroup_memory_length(1000 + index, index)
+                .unwrap();
+            let expected: [Vec<(u64, u32)>; 3] =
+                at.map(|at| at.iter().map(|&at| (at, 1000 + index)).collect());
+            assert_eq!(
+                kept_lengths(&icb, range),
+                expected,
+                "{count} lengths, command {command} set at {index}"
+            );
+        }
+
+        // Far reads, and past the last command's lengths.
+        let icb = made(64);
+        let first = icb.indirect_compute_command_at(0).unwrap();
+        icb.indirect_compute_command_at(1)
+            .unwrap()
+            .set_threadgroup_memory_length(1030, 30)
+            .unwrap();
+        assert_eq!(first.threadgroup_memory_length(200).unwrap(), Some(0));
+        let icb = made(8);
+        let first = icb.indirect_compute_command_at(0).unwrap();
+        first.set_threadgroup_memory_length(1001, 1).unwrap();
+        first.set_threadgroup_memory_length(1005, 5).unwrap();
+        let far = [(1 << 32) + 1, (1 << 32) + 5, (1 << 33) + 5];
+        assert_eq!(
+            far.map(|at| first.threadgroup_memory_length(at).unwrap()),
+            [Some(1001), Some(1005), Some(1005)],
+            "the index's low 32 bits"
+        );
+        let icb = made(8);
+        let last = icb.indirect_compute_command_at(2).unwrap();
+        for at in [40, 100, 300, 1000] {
+            last.set_threadgroup_memory_length(7777, at).unwrap();
+            assert_eq!(
+                last.threadgroup_memory_length(u64::from(at)).unwrap(),
+                Some(7777)
+            );
+        }
+        for index in 0..3 {
+            let lengths = command(&icb, index).threadgroup_memory_lengths;
+            assert!(
+                lengths.iter().all(|&length| length == 0),
+                "{index}: {lengths:?}"
+            );
+        }
+
+        // Resets and copies, of 64 lengths, read as the probes read them (0 to 71).
+        let queue = device.new_command_queue().unwrap();
+        let blit = |work: &dyn Fn(&mut metal2vulkan_runtime::BlitCommandEncoder)| {
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut blit = command_buffer.blit_command_encoder().unwrap();
+            work(&mut blit);
+            blit.end_encoding().unwrap();
+            command_buffer.commit().unwrap();
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            assert_eq!(command_buffer.error(), None);
+        };
+        let set_three = |icb: &IndirectCommandBuffer| {
+            let second = icb.indirect_compute_command_at(1).unwrap();
+            for (length, at) in [(1035, 35), (1038, 38), (1003, 3)] {
+                second.set_threadgroup_memory_length(length, at).unwrap();
+            }
+            assert_eq!(
+                kept_lengths(icb, 72),
+                [
+                    vec![(41, 1003)],
+                    vec![(3, 1003), (35, 1035), (38, 1038)],
+                    vec![(0, 1038)]
+                ]
+            );
+        };
+        let after_reset = [vec![], vec![(38, 1038)], vec![(0, 1038)]];
+        let icb = made(64);
+        set_three(&icb);
+        icb.indirect_compute_command_at(1).unwrap().reset().unwrap();
+        assert_eq!(kept_lengths(&icb, 72), after_reset, "the command's reset");
+        let icb = made(64);
+        set_three(&icb);
+        blit(&|blit| blit.reset_commands_in_buffer(&icb, 1..2).unwrap());
+        assert_eq!(kept_lengths(&icb, 72), after_reset, "a blit's reset");
+        let icb = made(64);
+        set_three(&icb);
+        blit(&|blit| {
+            blit.copy_indirect_command_buffer(&icb, 1..2, &icb, 0)
+                .unwrap()
+        });
+        assert_eq!(
+            kept_lengths(&icb, 72),
+            [
+                vec![(3, 1003), (35, 1035), (41, 1003)],
+                vec![(3, 1003), (35, 1035), (38, 1038)],
+                vec![(0, 1038)]
+            ],
+            "a blit's copy"
+        );
+        let icb = made(64);
+        let last = icb.indirect_compute_command_at(2).unwrap();
+        last.set_threadgroup_memory_length(1038, 38).unwrap();
+        last.set_threadgroup_memory_length(1045, 45).unwrap();
+        assert_eq!(
+            kept_lengths(&icb, 72),
+            [vec![], vec![], vec![(38, 1038), (45, 1045)]],
+            "past the last command's"
+        );
+        assert_eq!(
+            counts(&messages.take_notices()),
+            Default::default(),
+            "nothing announced"
+        );
     });
 }
 

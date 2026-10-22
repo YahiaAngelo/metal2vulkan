@@ -97,6 +97,7 @@ use metal2vulkan::metal::{
     Winding,
 };
 use metal2vulkan::pipeline::CommandWrites;
+use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -555,9 +556,9 @@ impl Device {
             Place::Records(held.id),
         )?;
         // The slots past the record's, of their own buffer, as long as Metal's storage grows.
-        let overflow = match Overflow::past(descriptor) {
-            Some(past) => {
-                let bytes = u64::from(size) * Overflow::command_bytes(&past);
+        let overflow = match OverflowLayout::of(descriptor) {
+            Some(layout) => {
+                let bytes = layout.bytes(size);
                 if bytes > max_buffer_length {
                     return Err(past_length());
                 }
@@ -569,7 +570,12 @@ impl Device {
                     false,
                     AddressPlacement::Outside,
                 )?;
-                Some(Overflow { storage, past })
+                Some(Overflow {
+                    storage,
+                    past: layout.past,
+                    lengths: layout.lengths,
+                    commands: size,
+                })
             }
             None => None,
         };
@@ -590,6 +596,7 @@ impl Device {
             cpu_writes: AtomicU64::new(0),
             barriers: AtomicBool::new(false),
             overflow,
+            tail: Mutex::default(),
             written: Arc::default(),
         }));
         icb.initialize()?;
@@ -929,25 +936,59 @@ struct IcbShared {
     /// The CPU set a render command's barrier: an execution's render pass instance may split at
     /// it (`render/executions.rs`), for good.
     barriers: AtomicBool,
-    /// The buffer slots past the record's, where the descriptor counts more ([`Overflow`]).
+    /// The buffer slots past the record's, where the descriptor counts more, and a compute
+    /// buffer's threadgroup lengths 31 to 37 ([`Overflow`]).
     overflow: Option<Overflow>,
+    /// The threadgroup lengths set past the last command's 38 ([`LENGTH_STRIDE`]), by their
+    /// place past them, none 0. Metal keeps them in its storage's slack for its getter alone (an
+    /// M3 Max, 3 commands: the last command's lengths at 100, 300 and 1000 read back as set,
+    /// changing no other command's state); no command's copy or reset reaches them. Past about
+    /// 4000 places its setter ends the process (`SIGSEGV`, `SIGBUS`); the runtime keeps them all.
+    tail: Mutex<BTreeMap<u64, u32>>,
     /// What its records may hold, from every route that writes them (`written_commands.rs`).
     written: Arc<WrittenCommands>,
 }
 
 /// The buffer slots of each command past the 32 of a stage its record holds, below the
-/// descriptor's count of the stage, in a host-visible buffer of their own outside the Metal
-/// address space: 16 bytes a slot, the address word and the stride word as a record's slot holds
-/// them (both 0 where none is set), each command's after the one before, its stages in
-/// [`OVERFLOW_STAGES`]' order. Metal keeps such a slot for its getters alone (no function binds
-/// past index 30), its storage growing with the count; its getters answer every slot below the
-/// count, its GPU copy carries them, and its resets clear them.
+/// descriptor's count of the stage, and a compute command's threadgroup lengths 31 to 37, past
+/// the 31 its record holds, in a host-visible buffer of their own outside the Metal address
+/// space. A command's block holds its buffer slots, 16 bytes a slot, the address word and the
+/// stride word as a record's slot holds them (both 0 where none is set), its stages in
+/// [`OVERFLOW_STAGES`]' order, then, in a buffer of compute commands, its lengths 31 to 37
+/// ([`LENGTHS_BYTES`]); each command's block follows the one before. Metal keeps such a slot or
+/// length for its getters alone (no function binds past index 30), its storage growing with the
+/// buffer count; its getters answer every slot below the count and every length, its GPU copy
+/// carries them, and its resets clear them.
 pub(super) struct Overflow {
     /// Made zeroed.
     storage: Buffer,
     /// The slots past the record's of each of [`OVERFLOW_STAGES`].
     past: [u32; 5],
+    /// Whether each command's block holds its threadgroup lengths 31 to 37: the buffer holds
+    /// compute commands.
+    lengths: bool,
+    /// The commands whose blocks it holds: the buffer's size.
+    commands: u32,
 }
+
+/// What [`Overflow`] holds of each command, of a descriptor: the slots past the record's of
+/// each stage, and whether it holds the threadgroup lengths 31 to 37.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OverflowLayout {
+    past: [u32; 5],
+    lengths: bool,
+}
+
+/// How many threadgroup lengths Metal keeps a compute command, at `command * 38 + index` of one
+/// array of the buffer's, whatever the descriptor's count (an M3 Max, macOS 27.0.1, counts of 8,
+/// 31, 32, 40, 64 and 100: command 1's length set at 38 is command 2's at 0, at 50 command 2's
+/// at 12, and command 0's getter at 68 answers command 1's at 30). Neither the setter nor the
+/// getter checks the index against 38 or against the count; both take its low 32 bits.
+const LENGTH_STRIDE: u32 = 38;
+
+/// The bytes of a command's threadgroup lengths 31 to 37 in its [`Overflow`] block: 4 a length,
+/// padded to 8 bytes.
+const LENGTHS_BYTES: u64 = 32;
 
 /// The stages whose slots [`Overflow`] holds, in its order.
 const OVERFLOW_STAGES: [BufferStage; 5] = [
@@ -961,10 +1002,10 @@ const OVERFLOW_STAGES: [BufferStage; 5] = [
 /// The bytes of one buffer slot: the address word and the stride word.
 const SLOT_BYTES: u64 = 16;
 
-impl Overflow {
-    /// The slots past the record's of each stage `descriptor` counts, `None` where it counts no
-    /// more than a record holds of any.
-    fn past(descriptor: &IndirectCommandBufferDescriptor) -> Option<[u32; 5]> {
+impl OverflowLayout {
+    /// What `descriptor`'s commands hold past their records, `None` where it counts no more than
+    /// a record holds of any stage and holds no compute command.
+    fn of(descriptor: &IndirectCommandBufferDescriptor) -> Option<OverflowLayout> {
         let counts = [
             descriptor.max_kernel_buffer_bind_count,
             descriptor.max_vertex_buffer_bind_count,
@@ -973,18 +1014,50 @@ impl Overflow {
             descriptor.max_mesh_buffer_bind_count,
         ];
         let past = counts.map(|count| count.saturating_sub(RECORD_BUFFERS));
-        past.iter().any(|&slots| slots > 0).then_some(past)
+        // Any compute command may hold a length past its record: Metal's setter keeps one at
+        // any index, whatever the count.
+        let lengths = descriptor.command_types.intersects(COMPUTE_TYPES);
+        (lengths || past.iter().any(|&slots| slots > 0)).then_some(OverflowLayout { past, lengths })
     }
 
-    /// The bytes of one command's slots, of `past`.
-    fn command_bytes(past: &[u32; 5]) -> u64 {
-        past.iter().map(|&slots| u64::from(slots)).sum::<u64>() * SLOT_BYTES
+    /// The bytes of one command's buffer slots.
+    fn slot_bytes(&self) -> u64 {
+        self.past.iter().map(|&slots| u64::from(slots)).sum::<u64>() * SLOT_BYTES
     }
 
-    /// The bytes of commands `range`'s slots.
+    /// The bytes of one command's block: its buffer slots, then its lengths 31 to 37.
+    fn command_bytes(&self) -> u64 {
+        self.slot_bytes() + if self.lengths { LENGTHS_BYTES } else { 0 }
+    }
+
+    /// The bytes an overflow of `commands` commands holds.
+    fn bytes(&self, commands: u32) -> u64 {
+        u64::from(commands) * self.command_bytes()
+    }
+}
+
+impl Overflow {
+    /// Its layout.
+    fn layout(&self) -> OverflowLayout {
+        OverflowLayout {
+            past: self.past,
+            lengths: self.lengths,
+        }
+    }
+
+    /// The bytes of commands `range`'s blocks.
     pub(super) fn bytes(&self, range: Range<u32>) -> Range<u64> {
-        let each = Self::command_bytes(&self.past);
+        let each = self.layout().command_bytes();
         u64::from(range.start) * each..u64::from(range.end) * each
+    }
+
+    /// The offset of threadgroup length `slot` (31 to 37) of command `index`, `None` where the
+    /// blocks hold no lengths or `slot` lies past them.
+    fn length_at(&self, index: u32, slot: u32) -> Option<u64> {
+        let past = slot.checked_sub(THREADGROUP_BUFFER_ARGUMENT_COUNT)?;
+        (self.lengths && index < self.commands && slot < LENGTH_STRIDE).then(|| {
+            self.bytes(index..index).start + self.layout().slot_bytes() + u64::from(past) * 4
+        })
     }
 
     /// The offset of slot `slot` (at or past the record's) of `stage` of command `index`, `None`
@@ -1017,6 +1090,12 @@ impl Overflow {
             source += u64::from(held) * SLOT_BYTES;
             destination += u64::from(taken) * SLOT_BYTES;
         }
+        // The threadgroup lengths 31 to 37, as Metal's copy carries a command's 38.
+        match (self.lengths, into.lengths) {
+            (true, true) => runs.copies.push((source, destination, LENGTHS_BYTES)),
+            (false, true) => runs.clears.push((destination, LENGTHS_BYTES)),
+            _ => {}
+        }
         runs
     }
 
@@ -1025,10 +1104,19 @@ impl Overflow {
         &self.storage
     }
 
-    /// Whether `other` lays its slots out as this one does.
+    /// Whether `other` lays its commands' blocks out as this one does.
     pub(super) fn same_layout(&self, other: &Overflow) -> bool {
-        self.past == other.past
+        self.past == other.past && self.lengths == other.lengths
     }
+}
+
+/// Where a threadgroup length is kept (`IndirectCommandBuffer::length_place`): command and
+/// index of a record, an offset of the [`Overflow`], or a place past the last command's lengths
+/// (`IcbShared::tail`).
+enum LengthPlace {
+    Record(u32, u32),
+    Overflow(u64),
+    Tail(u64),
 }
 
 /// What a GPU copy of commands does to the destination's [`Overflow`]: the runs it copies from
@@ -1436,22 +1524,77 @@ impl IndirectCommandBuffer {
         self.edit(index, field, None)
     }
 
-    /// Announce `Degradation::IndirectValuePastRecord` for `call`'s threadgroup length at `slot`
-    /// of command `index`, past what a record holds.
-    fn degrade_past_record(&self, call: &'static str, index: u32, slot: u32) {
-        self.device()
-            .degrade(Degradation::IndirectValuePastRecord, || {
-                (
-                    format!(
-                        "{call} at index {slot} of command {index} of an indirect command buffer"
-                    ),
-                    "Metal keeps the length for its private getters alone (no function binds past \
-                     index 30), in storage that runs into the next command's past about index \
-                     38, which was not measured exactly; the runtime's records hold 31 \
-                     threadgroup lengths a command: its getter answers a fresh command's value"
-                        .to_owned(),
-                )
-            });
+    /// Where Metal keeps threadgroup length `slot` of command `index` of a compute buffer: at
+    /// `index * 38 + slot` of one array of the buffer's ([`LENGTH_STRIDE`]), the length of
+    /// command `(index * 38 + slot) / 38` at the remainder: in its record below 31, in its
+    /// [`Overflow`] block at 31 to 37, and past the last command's in [`IcbShared::tail`].
+    fn length_place(&self, index: u32, slot: u32) -> Result<LengthPlace, Error> {
+        let stride = u64::from(LENGTH_STRIDE);
+        let flat = u64::from(index) * stride + u64::from(slot);
+        let (command, slot) = (flat / stride, (flat % stride) as u32);
+        let size = u64::from(self.0.size);
+        if command >= size {
+            return Ok(LengthPlace::Tail(flat - size * stride));
+        }
+        let command = command as u32;
+        if slot < THREADGROUP_BUFFER_ARGUMENT_COUNT {
+            return Ok(LengthPlace::Record(command, slot));
+        }
+        self.0
+            .overflow
+            .as_ref()
+            .and_then(|overflow| overflow.length_at(command, slot))
+            .map(LengthPlace::Overflow)
+            .ok_or_else(|| internal("an indirect command's threadgroup length has no place"))
+    }
+
+    /// Set threadgroup length `slot` of command `index`, where Metal keeps it
+    /// ([`length_place`](Self::length_place)). A length past a record is no execution's: it
+    /// counts as no write of the records ([`cpu_writes`](Self::cpu_writes)).
+    fn set_length(&self, index: u32, slot: u32, length: u32) -> Result<(), Error> {
+        match self.length_place(index, slot)? {
+            LengthPlace::Record(command, slot) => {
+                let field = RecordField::ThreadgroupMemoryLength {
+                    index: slot as usize,
+                    length,
+                };
+                self.edit(command, field, None)
+            }
+            LengthPlace::Overflow(at) => {
+                let _pipelines = lock(&self.0.pipelines);
+                self.write_overflow_at(at, &length.to_le_bytes())
+            }
+            LengthPlace::Tail(at) => {
+                let mut tail = lock(&self.0.tail);
+                match length {
+                    0 => tail.remove(&at),
+                    _ => tail.insert(at, length),
+                };
+                Ok(())
+            }
+        }
+    }
+
+    /// Threadgroup length `slot` of command `index` as it is now, where Metal keeps it
+    /// ([`length_place`](Self::length_place)): 0 where none was set.
+    fn length(&self, index: u32, slot: u32) -> Result<u32, Error> {
+        match self.length_place(index, slot)? {
+            LengthPlace::Record(command, slot) => self
+                .read_record(command, |view| {
+                    view.threadgroup_memory_length(slot as usize)
+                })
+                .map(Option::unwrap_or_default),
+            LengthPlace::Overflow(at) => {
+                let mut bytes = [0u8; 4];
+                match self.read_overflow_at(at, &mut bytes) {
+                    true => Ok(u32::from_le_bytes(bytes)),
+                    false => Err(internal(
+                        "an indirect command buffer's overflow is not mapped",
+                    )),
+                }
+            }
+            LengthPlace::Tail(at) => Ok(lock(&self.0.tail).get(&at).copied().unwrap_or(0)),
+        }
     }
 
     /// Write `binding` (none: unset) at `slot` of `stage` of command `index`, past the record's
@@ -1463,9 +1606,12 @@ impl IndirectCommandBuffer {
         slot: u32,
         binding: Option<BufferBinding>,
     ) -> Result<(), Error> {
-        let missing = || internal("an indirect command's slot past its record has no place");
-        let overflow = self.0.overflow.as_ref().ok_or_else(missing)?;
-        let at = overflow.at(index, stage, slot).ok_or_else(missing)?;
+        let at = self
+            .0
+            .overflow
+            .as_ref()
+            .and_then(|overflow| overflow.at(index, stage, slot))
+            .ok_or_else(|| internal("an indirect command's slot past its record has no place"))?;
         let (address, stride) = binding.map_or((0, 0), |binding| {
             (
                 binding.address,
@@ -1475,13 +1621,23 @@ impl IndirectCommandBuffer {
         let mut bytes = [0u8; SLOT_BYTES as usize];
         bytes[..8].copy_from_slice(&address.to_le_bytes());
         bytes[8..].copy_from_slice(&stride.to_le_bytes());
-        let contents = overflow
-            .storage
-            .contents()
+        self.write_overflow_at(at, &bytes)?;
+        self.wrote();
+        Ok(())
+    }
+
+    /// Write `bytes` at `at` of the overflow, which holds them (`Overflow::at`,
+    /// `Overflow::length_at`). The caller holds `pipelines`.
+    fn write_overflow_at(&self, at: u64, bytes: &[u8]) -> Result<(), Error> {
+        let contents = self
+            .0
+            .overflow
+            .as_ref()
+            .and_then(|overflow| overflow.storage.contents())
             .ok_or_else(|| internal("an indirect command buffer's overflow is not mapped"))?;
-        // SAFETY: the overflow is host-visible and mapped for its life, and the slot lies inside
-        // it (`Overflow::at`); writes are one at a time (`pipelines`). A GPU write meanwhile is
-        // the program's race, as on Metal.
+        // SAFETY: the overflow is host-visible and mapped for its life, and `at` and `bytes` lie
+        // inside it (the caller's); writes are one at a time (`pipelines`). A GPU write meanwhile
+        // is the program's race, as on Metal.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 bytes.as_ptr(),
@@ -1489,8 +1645,29 @@ impl IndirectCommandBuffer {
                 bytes.len(),
             );
         }
-        self.wrote();
         Ok(())
+    }
+
+    /// Read `bytes` from `at` of the overflow, which holds them (as
+    /// [`write_overflow_at`](Self::write_overflow_at)'s); false where it is not mapped.
+    fn read_overflow_at(&self, at: u64, bytes: &mut [u8]) -> bool {
+        let Some(contents) = self
+            .0
+            .overflow
+            .as_ref()
+            .and_then(|overflow| overflow.storage.contents())
+        else {
+            return false;
+        };
+        // SAFETY: as `write_overflow_at`'s; a write meanwhile is the program's race.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                contents.as_ptr().add(at as usize),
+                bytes.as_mut_ptr(),
+                bytes.len(),
+            );
+        }
+        true
     }
 
     /// The slots of `stage` of command `index` past the record's, below `count`, as set: none
@@ -1513,17 +1690,10 @@ impl IndirectCommandBuffer {
     /// Slot `slot` of `stage` of command `index`, past the record's, as set: none where no setter
     /// set it, a reset cleared it, or the descriptor counts none there.
     fn overflow_slot(&self, index: u32, stage: BufferStage, slot: u32) -> Option<BufferBinding> {
-        let overflow = self.0.overflow.as_ref()?;
-        let contents = overflow.storage.contents()?;
-        let at = overflow.at(index, stage, slot)?;
+        let at = self.0.overflow.as_ref()?.at(index, stage, slot)?;
         let mut bytes = [0u8; SLOT_BYTES as usize];
-        // SAFETY: as `write_overflow`'s; a write meanwhile is the program's race.
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                contents.as_ptr().add(at as usize),
-                bytes.as_mut_ptr(),
-                bytes.len(),
-            );
+        if !self.read_overflow_at(at, &mut bytes) {
+            return None;
         }
         let word = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap_or_default());
         let (address, stride) = (word(0), word(8));
@@ -2911,28 +3081,15 @@ impl IndirectComputeCommand {
     }
 
     /// `setThreadgroupMemoryLength:atIndex:`: as set, a multiple of 16 or not and past the
-    /// device's maximum alike, as Metal keeps it. Refused (`Invalid`): an index at or past the
-    /// descriptor's `max_kernel_threadgroup_memory_bind_count`.
+    /// device's maximum alike, where Metal keeps it, at any index, the descriptor's
+    /// `max_kernel_threadgroup_memory_bind_count` or not: 38 lengths a command, of one array, so
+    /// an index of 38 or more sets a later command's length (`index - 38` of the next command's,
+    /// and so on), and one past the last command's is kept beside the buffer for the getter. No
+    /// function binds one past index 30: Metal keeps lengths 31 to 37 for its private getter
+    /// alone, as the runtime does. Differs: far past the last command's lengths (about 4000
+    /// places on an M3 Max), Metal's setter ends the process; the runtime keeps the length.
     pub fn set_threadgroup_memory_length(&self, length: u32, index: u32) -> Result<(), Error> {
-        let limit = self.descriptor().max_kernel_threadgroup_memory_bind_count;
-        if index >= limit {
-            return Err(invalid(
-                "set_threadgroup_memory_length",
-                Problem::IndexOutOfRange { index, limit },
-            ));
-        }
-        // No function binds threadgroup memory past index 30: plain Metal keeps the length for
-        // its private getters alone, which the runtime does not (announced).
-        if index >= THREADGROUP_BUFFER_ARGUMENT_COUNT {
-            self.icb
-                .degrade_past_record("set_threadgroup_memory_length", self.index, index);
-            return Ok(());
-        }
-        let field = RecordField::ThreadgroupMemoryLength {
-            index: index as usize,
-            length,
-        };
-        self.edit(field, None)
+        self.icb.set_length(self.index, index, length)
     }
 
     /// `setStageInRegion:`: each origin and size value's low 32 bits, as Metal keeps them.
@@ -3016,23 +3173,17 @@ impl IndirectComputeCommand {
             .read_buffer(self.index, BufferStage::Kernel, count, index)
     }
 
-    /// `getThreadgroupMemoryLengthAtIndex:`, Apple's private getter: the command's
-    /// [`threadgroup_memory_lengths`](EncodedComputeCommand::threadgroup_memory_lengths)`[index]`,
-    /// read alone; none past what the record holds of the descriptor's
-    /// `max_kernel_threadgroup_memory_bind_count` (31 lengths).
+    /// `getThreadgroupMemoryLengthAtIndex:`, Apple's private getter: the length at `index`'s low
+    /// 32 bits, as Metal's takes them, where Metal keeps it, as
+    /// [`set_threadgroup_memory_length`](Self::set_threadgroup_memory_length) sets it (below 31,
+    /// the command's
+    /// [`threadgroup_memory_lengths`](EncodedComputeCommand::threadgroup_memory_lengths)`[index]`;
+    /// at 38 or more, a later command's), read alone: 0 where none was set, at any index, the
+    /// descriptor's `max_kernel_threadgroup_memory_bind_count` or not; always some. Differs: far
+    /// past the last command's lengths (an M3 Max: 100000 places past command 0's of 3), Metal's
+    /// getter ends the process; the runtime's answers.
     pub fn threadgroup_memory_length(&self, index: u64) -> Result<Option<u32>, Error> {
-        let held = held(
-            self.descriptor().max_kernel_threadgroup_memory_bind_count,
-            THREADGROUP_BUFFER_ARGUMENT_COUNT,
-        );
-        let Some(index) = usize::try_from(index)
-            .ok()
-            .filter(|&index| index < held as usize)
-        else {
-            return Ok(None);
-        };
-        self.icb
-            .read_record(self.index, |view| view.threadgroup_memory_length(index))
+        self.icb.length(self.index, index as u32).map(Some)
     }
 
     /// `getStageInRegion`, Apple's private getter: the command's
