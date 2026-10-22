@@ -23,6 +23,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// The degradation notices the runtime's device announced.
 pub static NOTICES: AtomicU64 = AtomicU64::new(0);
 
+/// The other messages the runtime's device's sink heard.
+pub static MESSAGES: AtomicU64 = AtomicU64::new(0);
+
 pub struct Runtime {
     device: rt::Device,
     queue: rt::CommandQueue,
@@ -30,15 +33,23 @@ pub struct Runtime {
 
 impl Runtime {
     /// Open the device with its shader cache in `cache`, announcing the kinds of `announce_each`
-    /// at every occurrence, its notices counted ([`NOTICES`]) as a consumer's sink hears them.
-    pub fn open(cache: &Path, announce_each: &[rt::Degradation]) -> Runtime {
+    /// at every occurrence, its notices counted ([`NOTICES`]) as a consumer's sink hears them,
+    /// and its other messages ([`MESSAGES`]), the sink hearing those of `least` severity and above.
+    pub fn open(
+        cache: &Path,
+        announce_each: &[rt::Degradation],
+        least: rt::MessageSeverity,
+    ) -> Runtime {
         let mut options = rt::DeviceOptions::default();
         options.announce_each = announce_each.iter().copied().collect();
-        options.messages = Some(rt::MessageSink::new(|message| {
-            if message.degradation.is_some() {
-                NOTICES.fetch_add(1, Ordering::Relaxed);
-            }
-        }));
+        let sink = rt::MessageSink::new(|message| {
+            let count = match message.degradation {
+                Some(_) => &NOTICES,
+                None => &MESSAGES,
+            };
+            count.fetch_add(1, Ordering::Relaxed);
+        });
+        options.messages = Some(sink.with_least_severity(least));
         options.gpu_times_from_host = true;
         options.policy.completion = CompletionPolicy::Exact;
         options.policy.heap_compression = HeapCompressionPolicy::Uncompressed;
