@@ -402,9 +402,9 @@ impl<'a> Wanted<'a> {
     }
 }
 
-/// The refusal of a resolve from or into a texture of `pf` that the runtime does not model: an
-/// extended-range format's, whose resolve in Metal matches no average of its samples' values
-/// measured. The format's Resolve capability answers it too (`families::formats`).
+/// The refusal of a resolve from or into a texture of `pf` that the runtime does not build: an
+/// extended-range format's (`RuntimeGap::ExtendedRangeResolve` states Metal's rule). The format's
+/// Resolve capability answers it too (`families::formats`).
 pub(crate) fn unmodelled_resolve(pf: PixelFormat) -> Option<Unsupported> {
     ExtendedRange::of(pf).map(|_| Unsupported::not_implemented(Feature::Format))
 }
@@ -596,11 +596,14 @@ pub(super) fn color(
     ) {
         return Err(problem(call, RenderPassProblem::ResolveFormat(which)));
     }
-    // An extended-range attachment's resolve, not modelled. A resolve texture of such a format is
+    // An extended-range attachment's resolve, not built. A resolve texture of such a format is
     // the attachment's own or its twin, so of such an attachment, or of another format, which a
     // resolve leaves untouched or `destination` refuses.
-    if let Some(unsupported) = unmodelled_resolve(source.texture.pixel_format()) {
-        return Err(Error::Unsupported(unsupported));
+    let pixel_format = source.texture.pixel_format();
+    if unmodelled_resolve(pixel_format).is_some() {
+        return Err(Error::NotImplemented(RuntimeGap::ExtendedRangeResolve {
+            pixel_format,
+        }));
     }
     // An attachment rendered through the view of its word (`metal::format::WordAttachment`) holds
     // each sample's stored codes, while Metal resolves its tile's values: not modelled.
