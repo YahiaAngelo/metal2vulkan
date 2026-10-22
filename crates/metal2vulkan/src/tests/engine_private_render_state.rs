@@ -52,12 +52,16 @@ fn fixture(stem: &str) -> Option<Library> {
 }
 
 fn device(stem: &str) -> Device {
+    device_with(stem, DevicePolicy::default())
+}
+
+fn device_with(stem: &str, policy: DevicePolicy) -> Device {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../metal2vulkan-validation/profiles")
         .join(format!("{stem}.json"));
     let text = std::fs::read_to_string(path).expect("profile");
     let description = DeviceDescription::from_khronos_json(&text, None).expect("description");
-    Device::new(description, DevicePolicy::default()).expect("device")
+    Device::new(description, policy).expect("device")
 }
 
 /// The fullscreen triangle drawn white into one `RGBA8Unorm` attachment at `samples`.
@@ -465,6 +469,17 @@ fn the_logic_operation_draws_as_metal_s_or_is_refused() {
                 Ok(_) => panic!("{stem} {pf:?} xor compiled"),
             }
         }
+        // Each Vulkan operation keys a pipeline of its own, apart from copy's, whose attachments
+        // are the same unblended ones.
+        if has {
+            let key = |raw: u64| {
+                compile(&dev, &with(PixelFormat::RGBA8Unorm, true, Some(raw)), "key").key
+            };
+            let keys = [key(0), key(10), key(15), key(2)];
+            for (i, a) in keys.iter().enumerate() {
+                assert!(keys[i + 1..].iter().all(|b| a != b), "{stem} keys {keys:?}");
+            }
+        }
         // Off, the pipeline is the one without the property.
         let off = compile(&dev, &with(PixelFormat::RGBA8Unorm, true, None), "off");
         let mut d = with(PixelFormat::RGBA8Unorm, true, None);
@@ -602,8 +617,13 @@ fn the_depth_compare_clamp_mask_clamps_its_samplers_references() {
             ],
         ),
     ];
-    for stem in STEMS {
-        let dev = device(stem);
+    // Under exact sampling lavapipe's shader makes the constexpr comparison and the slot's gather
+    // itself (`compared::select`), which clamp alike.
+    let devices = STEMS.map(|stem| (stem, device(stem))).into_iter().chain([(
+        "lavapipe exact sampling",
+        device_with("lavapipe", crate::pipeline::testing::EXACT_SAMPLING),
+    )]);
+    for (stem, dev) in devices {
         for (fragment, samplers, masks) in cases {
             let base = compile(&dev, &pipeline(fragment, 0), stem);
             for (mask, clamped) in masks {

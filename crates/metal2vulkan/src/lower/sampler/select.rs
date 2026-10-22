@@ -2632,7 +2632,13 @@ fn select_one(
     if tangled {
         cx.tangled.insert(value);
     }
-    let clamp_reference = clamps_reference(cx, &op, sampler)?;
+    // A comparison the shader makes alone has left the op (`compared::select`).
+    let compares = compared.is_some()
+        || matches!(
+            op,
+            SampleOp::Sample { dref: Some(_), .. } | SampleOp::Gather { dref: Some(_), .. }
+        );
+    let clamp_reference = clamps_reference(cx, compares, sampler)?;
     let sampling = Sampling {
         source,
         op,
@@ -2673,9 +2679,10 @@ fn select_one(
     Ok(sampling)
 }
 
-/// Whether a fragment function's depth comparison `op` through `sampler` clamps its reference, as
-/// the pipeline's private `fragmentDepthCompareClampMask` says (`LoweringInputs::
-/// depth_compare_clamp_mask`; probes on an Apple M3 Max, macOS 27.0.1): bit `s` clamps a
+/// Whether a fragment function's depth comparison (where `compares`, the device's or the
+/// shader's) through `sampler` clamps its reference, as the pipeline's private
+/// `fragmentDepthCompareClampMask` says (`LoweringInputs::depth_compare_clamp_mask`; probes on an
+/// Apple M3 Max, macOS 27.0.1): bit `s` clamps a
 /// comparison through `[[sampler(s)]]`, whichever texture slot it compares, and bit 31 one
 /// through any constexpr sampler; the reference is clamped to `[0, 1]`, a NaN taken as 0, for
 /// `sample_compare` and `gather_compare` alike. Each comparison's sampler is recorded
@@ -2683,14 +2690,10 @@ fn select_one(
 /// refused under a mask other than 0.
 fn clamps_reference(
     cx: &mut SelectCx<'_>,
-    op: &SampleOp,
+    compares: bool,
     sampler: SamplerArg,
 ) -> Result<bool, Error> {
     use crate::pipeline::stage_io::DepthCompares;
-    let compares = matches!(
-        op,
-        SampleOp::Sample { dref: Some(_), .. } | SampleOp::Gather { dref: Some(_), .. }
-    );
     if cx.stage != Stage::Fragment || !compares {
         return Ok(false);
     }
