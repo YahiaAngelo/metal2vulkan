@@ -55,6 +55,7 @@ use crate::color_reformat::Routing;
 use crate::degradation::{BoundFormats, CompiledPipeline, Degradation, Occurrence};
 use crate::device::{device_error, lock};
 use crate::error::{internal, invalid, ArchivedPipeline, Error, Problem, RuntimeGap};
+use crate::released_programs::KeptProgram;
 use crate::render_pass::MAX_COLOR_ATTACHMENTS;
 use crate::render_target::RenderPassObject;
 use crate::residency::{every_render_stage, handle_stages};
@@ -151,6 +152,24 @@ impl std::ops::Deref for StateShared {
     type Target = Program;
     fn deref(&self) -> &Program {
         &self.program
+    }
+}
+
+/// The program's release of a state made with `supportIndirectCommandBuffers`: each buffer whose
+/// records the GPU may write keeps what it runs (`released_programs.rs`).
+impl Drop for StateShared {
+    fn drop(&mut self) {
+        let Some(id) = self.id.as_ref().filter(|id| id.id().0 != 0) else {
+            return;
+        };
+        let program = &self.program;
+        program
+            .device
+            .shared()
+            .keepers
+            .released(id.id().0, id.serial(), || {
+                KeptProgram::Render(RenderProgram(Arc::clone(program)))
+            });
     }
 }
 

@@ -19,6 +19,8 @@
 //!   rebound, recorded once, its resident table pointed at the set as it lies at the first
 //!   submission;
 //! - a range its own commands alone;
+//! - a record a blit copied naming a state the program released since, which runs that state's
+//!   program, after another state took its ID too;
 //! - with as many live states as the GPU-alone path takes in its encoder's order on the GPU alone,
 //!   and with one more in the host step, which runs it faster;
 //! - inside a block of command predication, nothing where the block skips and every command where
@@ -434,6 +436,74 @@ fn each_command_runs_its_own_state_and_group_count() {
         );
         announced(device, messages, &[]);
     });
+}
+
+/// A record the GPU wrote naming a state the program released since runs that state's program on
+/// the GPU alone, as Metal's runs it (`released_programs.rs`): a blit copies a command of
+/// [`FLAT_MARK`]'s state from a buffer of its own into the unwritten command 2 (the GPU writes
+/// it), and the program releases the state and the source buffer; the execution runs it beside
+/// the others, one indirect dispatch per command and state (the kept program's among them), with
+/// nothing announced. So it does where a state made after (`flat_sum`'s) took the released
+/// state's ID: the ID names the kept program, as the copy wrote it before the new state took it.
+#[test]
+fn a_copied_record_runs_its_released_state_s_program_on_the_gpu_alone() {
+    for taken in [false, true] {
+        on_device(|device, messages| {
+            let queue = device.new_command_queue().unwrap();
+            let setup = Setup::new(device);
+            let threads = 8;
+            let id = {
+                let mark = mark_state(device);
+                let mut descriptor = IndirectCommandBufferDescriptor::new();
+                descriptor.command_types = IndirectCommandType::CONCURRENT_DISPATCH
+                    .union(IndirectCommandType::CONCURRENT_DISPATCH_THREADS);
+                descriptor.max_kernel_buffer_bind_count = 2;
+                let source = device
+                    .new_indirect_command_buffer(&descriptor, 1, ResourceOptions::shared())
+                    .unwrap();
+                let at = source.indirect_compute_command_at(0).unwrap();
+                at.set_compute_pipeline_state(&mark).unwrap();
+                let offset = (2 * WINDOW * 4) as u64;
+                at.set_kernel_buffer(Some(&setup.params), offset, 0)
+                    .unwrap();
+                at.set_kernel_buffer(Some(&setup.out), offset, 1).unwrap();
+                at.concurrent_dispatch_threads(Size::new(threads, 1, 1), Size::new(threads, 1, 1))
+                    .unwrap();
+                let command_buffer = queue.command_buffer().unwrap();
+                let mut blit = command_buffer.blit_command_encoder().unwrap();
+                blit.copy_indirect_command_buffer(&source, 0..1, &setup.icb, 2)
+                    .unwrap();
+                blit.end_encoding().unwrap();
+                complete(&command_buffer);
+                mark.gpu_resource_id()
+            };
+            let taker = taken.then(|| flat_template(device));
+            if let Some(taker) = &taker {
+                assert_eq!(taker.gpu_resource_id(), id, "flat_sum's state takes the ID");
+            }
+            let before = dispatches_indirect(device);
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            setup.resident(&mut encoder);
+            encoder
+                .execute_commands_in_buffer(&setup.icb, 0..COMMANDS)
+                .unwrap();
+            encoder.end_encoding().unwrap();
+            complete(&command_buffer);
+            let mut expected = expected(0..COMMANDS as usize);
+            for p in 0..threads as usize {
+                expected[2 * WINDOW + p] += base(2) * 1000 + p as u32;
+            }
+            assert_eq!(setup.output(), expected, "taken {taken}");
+            assert!(ran_flat(&command_buffer), "taken {taken}: on the GPU alone");
+            assert_eq!(
+                dispatches_indirect(device) - before,
+                COMMANDS * 3,
+                "taken {taken}: one indirect dispatch per command and state"
+            );
+            announced(device, messages, &[]);
+        });
+    }
 }
 
 /// A concurrent encoder's execution recorded with no barrier between its commands is recorded

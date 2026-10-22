@@ -19,6 +19,9 @@
 //!   it read once; `commit` checks the CPU's records it records the same way, where a state the
 //!   records may name may encode, and never where none may;
 //! - the blit encoder's copy, reset and optimize act on the commands as they run;
+//! - a record the kernel wrote runs the state its ID named as it wrote it, after the program
+//!   released it and after another state took its ID; where the state was released before the
+//!   buffer could be written, nothing, announced;
 //! - a kernel reaches the buffer made last with the ID it encodes through, placed or not, and
 //!   none once that one is gone, the buffer at an ID a reservation leaves next, and an ID's
 //!   records where an earlier ID's run past their start;
@@ -37,7 +40,9 @@
 use super::degrade_notices::{
     assert_made_once, counts, forced, on_device_with, shared_in_system_memory,
 };
+use super::generated_executions::flat_template;
 use super::host_memory::{gpu_fill, no_copy, Mapping, GUEST_PAGE};
+use super::indirect_executions::RELEASED_STATES;
 use super::resource_ids::DELAYED_DEALLOCATORS as DELAYED;
 use super::{buffer_with, read_buffer, WAIT};
 use crate::air_library::AirLibrary;
@@ -235,6 +240,15 @@ impl Setup {
                     .unwrap();
             }
             command.set_barrier().unwrap();
+        }
+    }
+
+    /// The setup with its template released, the writer's state in its place: the argument
+    /// buffer still names the template's ID, which a state made after may take.
+    fn releasing_template(self) -> Setup {
+        Setup {
+            template: self.writer.clone(),
+            ..self
         }
     }
 
@@ -611,6 +625,59 @@ fn a_kernel_writes_the_buffer_that_holds_the_id_now() {
         assert_eq!(
             format!("{:?}", other.commands(0..COMMANDS).unwrap()),
             format!("{:?}", fresh.commands(0..COMMANDS).unwrap())
+        );
+    });
+}
+
+/// A record a kernel wrote runs the state its ID named as the kernel wrote it, released since or
+/// not, as Metal's runs it (measured on an M3 Max, `released_programs.rs`): where the program
+/// releases the template after the kernel wrote the commands, they run the template's program,
+/// and so they do after a state made after (the flat template of `generated_executions`) took its
+/// ID, unannounced. Where the program released the template before any command buffer that may
+/// write the buffer was encoded, the buffer keeps no program of it: Metal runs it, the commands
+/// run nothing, announced (`Degradation::ReleasedCommandState`).
+#[test]
+fn commands_a_kernel_wrote_run_the_state_their_id_named_then() {
+    for taken in [false, true] {
+        on_device(|device| {
+            let queue = device.new_command_queue().unwrap();
+            let setup = Setup::new(device, 2);
+            let id = setup.template.gpu_resource_id();
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            setup.write(&mut encoder);
+            encoder.end_encoding().unwrap();
+            complete(&command_buffer);
+            let setup = setup.releasing_template();
+            let taker = taken.then(|| flat_template(device));
+            if let Some(taker) = &taker {
+                assert_eq!(
+                    taker.gpu_resource_id(),
+                    id,
+                    "the flat template takes the ID"
+                );
+            }
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            setup.execute(&mut encoder);
+            encoder.end_encoding().unwrap();
+            complete(&command_buffer);
+            assert_eq!(setup.output(), expected(), "taken {taken}");
+        });
+    }
+    on_device_forcing(&RELEASED_STATES, |device| {
+        let queue = device.new_command_queue().unwrap();
+        let setup = Setup::new(device, 2).releasing_template();
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        setup.write(&mut encoder);
+        setup.execute(&mut encoder);
+        encoder.end_encoding().unwrap();
+        complete(&command_buffer);
+        assert_eq!(
+            setup.output(),
+            expected_in(0..0),
+            "the commands ran nothing"
         );
     });
 }

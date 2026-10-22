@@ -16,7 +16,11 @@
 //!   (`fetch_reach.rs`); no command of the range has a state the CPU set that the program released
 //!   since, whose program the command runs while its record names the ID
 //!   (`IndirectCommandBuffer::name_state`), and the variants of the states alive run the ID's
-//!   holder instead; and one of the two recordings below takes the variants. Each flat variant runs
+//!   holder instead; where the ID's holder as the GPU last could write the records is a state the
+//!   program released since, whose program the buffer keeps (`released_programs.rs`), the ID names
+//!   that program's variant, as Metal's record the GPU wrote runs it, unless the CPU set the state
+//!   that took the ID since on a command of the range (`IndirectCommandBuffer::gpu_states`); and
+//!   one of the two recordings below takes the variants. Each flat variant runs
 //!   every grid and threadgroup size of its state, so the records' contents cannot leave a command
 //!   uncovered. Otherwise the execution takes the host step (`indirect_execute.rs`, part 3a), which
 //!   the device announces once (`Degradation::HostReplayedIndirectCommands`). Nothing is decided at
@@ -345,7 +349,19 @@ fn total(
     state.used_resources = residency.used_resources();
     state.resident_ranges = live;
     let shape = state.shape();
-    let states = execute.states(device);
+    // Each state with the ID its records name it by: the encoder's where the buffer inherits it;
+    // else the states alive, but where the records name the kept program of a state the program
+    // released since the GPU last could write them (`IndirectCommandBuffer::gpu_states`).
+    let states = match &execute.pipeline {
+        Some(pipeline) => vec![(pipeline.gpu_resource_id().0, pipeline.clone())],
+        None => match execute
+            .icb
+            .gpu_states(range.clone(), execute.states(device))
+        {
+            Some(states) => states,
+            None => return Ok(None),
+        },
+    };
     // Where only the indirect dispatches could run it, none past their bounds, before a variant is
     // compiled for it.
     if device.shared().generated_commands.is_none()
@@ -354,8 +370,8 @@ fn total(
         return Ok(None);
     }
     let mut prepared = Vec::with_capacity(states.len());
-    for pipeline in &states {
-        match prepare(pipeline, &state, &shape)? {
+    for (id, pipeline) in &states {
+        match prepare(pipeline, *id, &state, &shape)? {
             Some(p) => prepared.push(p),
             None => return Ok(None),
         }
@@ -447,11 +463,13 @@ fn preprocess(
     Ok(Some((pre, Form::Dispatches(templates))))
 }
 
-/// The flat replay variant of `pipeline` for `state` (of `shape`), instantiated for its
-/// threadgroup size; `None` where it has none (`ComputePipelineState::replay_variant`), its
-/// plan cannot run that size, or its kernel fetches `[[stage_in]]` attributes.
+/// The flat replay variant of `pipeline`, which the records name by ID `id`, for `state` (of
+/// `shape`), instantiated for its threadgroup size; `None` where it has none
+/// (`ComputePipelineState::replay_variant`), its plan cannot run that size, or its kernel fetches
+/// `[[stage_in]]` attributes.
 fn prepare(
     pipeline: &ComputePipelineState,
+    id: u64,
     state: &BindState,
     shape: &metal2vulkan::bind::BindShape,
 ) -> Result<Option<Prepared>, Error> {
@@ -476,7 +494,7 @@ fn prepare(
     let Some(commands) = refusal(plan.instantiate_replay(state, threads))? else {
         return Ok(None);
     };
-    let token = NonZeroU64::new(pipeline.gpu_resource_id().0)
+    let token = NonZeroU64::new(id)
         .ok_or_else(|| internal("an indirect command buffer's state without an ID"))?;
     Ok(Some(Prepared {
         variant,

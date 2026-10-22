@@ -1842,10 +1842,14 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   (VUID-vkCreateDescriptorSetLayout-support-09582).
 - `metal2vulkan-degrade-released-command-state` (precision). `ReleasedCommandState`: An indirect
   command naming the ID of a pipeline state the program released is executed where the runtime
-  cannot run what Metal runs. Cost: a command naming another ID than the state set on it runs
-  nothing, where Metal runs the released state's program; one naming that state's ID runs its
-  program, as Metal runs a command the CPU encoded, where for a record the GPU wrote Metal runs the
-  ID's holder since (nothing, for a state of the other kind).
+  cannot run what Metal runs. A record the GPU wrote runs the state that held the ID as the GPU
+  last could write the buffer's records, released since or not, as Metal's does: a buffer the GPU
+  may write keeps the programs of the states released after a command buffer that may write it
+  was first encoded. Cost: a command whose record the GPU wrote naming a state released before its
+  buffer could be written runs nothing, where Metal runs that state's program; one naming the ID
+  of the state set on it runs its program, as Metal runs a command the CPU encoded, where for a
+  record the GPU wrote while another state held the ID Metal runs that state (nothing, for a
+  state of the other kind).
 - `metal2vulkan-degrade-ycbcr-filter-not-exact` (precision). `YCbCrFilterNotExact`: A pipeline
   stage's filtered sample of a texture slot bound to a two-plane YCbCr texture does not take Metal's
   exact filter of the format: the stage records `PrecisionNote::HalfSampleFilter` or

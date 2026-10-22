@@ -76,8 +76,9 @@ use super::pipeline::{
     ComputePipelineState, ComputeProgram, RenderPipelineState, RenderProgram, RenderStateKind,
     WeakComputePipelineState, WeakRenderPipelineState,
 };
+use super::released_programs::{KeptProgram, KeptPrograms};
 use super::render::{index_size, DrawProblem};
-use super::resource_ids::{records_placement, IdPlacement, ResourceId, StateKind};
+use super::resource_ids::{records_placement, HolderThen, IdPlacement, ResourceId, StateKind};
 use super::unique_identifier::{degrade_identifier, state_value_degradation, UniqueIdentifier};
 use super::values::{Origin, Region, Size};
 use super::written_commands::{Named, WrittenCommands};
@@ -599,6 +600,8 @@ impl Device {
             tail: Mutex::default(),
             gpu_writes: Arc::default(),
             written: Arc::default(),
+            kept: Arc::default(),
+            keeping: AtomicBool::new(false),
         }));
         icb.initialize()?;
         self.take_device_sampler();
@@ -678,6 +681,21 @@ impl CommandState {
             CommandState::Compute(..) => None,
         }
     }
+
+    /// Its ID's hold and program, where the program released the state (`released_programs.rs`).
+    fn kept(&self) -> Option<(IdStamp, KeptProgram)> {
+        if !self.released() {
+            return None;
+        }
+        Some(match self {
+            CommandState::Compute(_, program, stamp, _) => {
+                (*stamp, KeptProgram::Compute(program.clone()))
+            }
+            CommandState::Render(_, program, stamp, _) => {
+                (*stamp, KeptProgram::Render(program.clone()))
+            }
+        })
+    }
 }
 
 /// One kind of pipeline state a command's record names: compute (`S` a
@@ -689,6 +707,8 @@ struct Of<S> {
     own: fn(&CommandState) -> Option<(Option<S>, IdStamp)>,
     /// Its program, as a state (`CommandState::compute_program`).
     program: fn(&CommandState) -> Option<S>,
+    /// A kept program of the kind, as a state (`KeptProgram::compute`).
+    kept: fn(&KeptProgram) -> Option<S>,
     /// A state's ID.
     id: fn(&S) -> u64,
     /// A state's `uniqueIdentifier`.
@@ -700,6 +720,7 @@ const COMPUTE: Of<ComputePipelineState> = Of {
     kind: StateKind::Compute,
     own: CommandState::compute,
     program: CommandState::compute_program,
+    kept: KeptProgram::compute,
     id: compute_id,
     identifier: ComputePipelineState::identifier_value,
 };
@@ -709,6 +730,7 @@ const RENDER: Of<RenderPipelineState> = Of {
     kind: StateKind::Render,
     own: CommandState::render,
     program: CommandState::render_program,
+    kept: KeptProgram::render,
     id: render_id,
     identifier: RenderPipelineState::identifier_value,
 };
@@ -740,14 +762,15 @@ pub(super) enum Reader {
 /// program released.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Unmatched {
-    /// The record names another ID than the state the CPU set (the GPU wrote it), which no state
-    /// holds since a state of the command's kind the program released held it: Metal runs that
-    /// state's program, which the runtime does not hold, so the command runs nothing.
+    /// The record names another ID than the state the CPU set (the GPU wrote it), whose holder
+    /// as the GPU last could write it was a state of the command's kind the program released
+    /// since, whose program the buffer does not keep (`released_programs.rs`): Metal runs that
+    /// state's program, so the command runs nothing.
     Unrun,
     /// The record names the ID of the state the CPU set, which the program released, and the
-    /// GPU may have written it: the runtime runs that state's program, as Metal runs a command
-    /// the CPU encoded, while another state held the ID since, which Metal runs for a record the
-    /// GPU wrote (nothing, for a state of the other kind or one released too).
+    /// GPU may have written it while another state held the ID: the runtime runs that state's
+    /// program, as Metal runs a command the CPU encoded, where Metal runs the other state for a
+    /// record the GPU wrote (nothing, for a state of the other kind).
     Unsure,
 }
 
@@ -951,6 +974,11 @@ struct IcbShared {
     gpu_writes: Arc<Mutex<GpuWrites>>,
     /// What its records may hold, from every route that writes them (`written_commands.rs`).
     written: Arc<WrittenCommands>,
+    /// The programs of the released pipeline states its records the GPU wrote may name, kept
+    /// from the first command buffer that may write them (`released_programs.rs`).
+    kept: Arc<Mutex<KeptPrograms>>,
+    /// The device's keepers list `kept` (`Keepers::add`).
+    keeping: AtomicBool,
 }
 
 /// The buffer slots of each command past the 32 of a stage its record holds, below the
@@ -2045,11 +2073,11 @@ impl IndirectCommandBuffer {
     /// `named`, the CPU having set `set` on it and the getter reading `state` of kind `of` for
     /// it (`name_state`): 0 where it names none; the identifier of the state the CPU set where
     /// the record names its ID, after the state's release too, as Metal answers it (measured on
-    /// an M3 Max by the consumer), unless the GPU may have written the record since and another
-    /// state took the ID meanwhile; for a record the GPU wrote, the identifier of the state that
-    /// held the ID as the GPU last could write it ([`written_identifier`](Self::written_identifier)),
-    /// else the live state of the ID's. `None` where the runtime cannot tell which state the
-    /// record names.
+    /// an M3 Max by the consumer), unless the GPU may have written the record while another state
+    /// held the ID ([`may_name_another`](Self::may_name_another)); for a record the GPU wrote, the
+    /// identifier of the state that held the ID as the GPU last could write it
+    /// ([`written_identifier`](Self::written_identifier)), else the live state of the ID's. `None`
+    /// where the runtime cannot tell which state the record names.
     fn pipeline_identifier<S>(
         &self,
         named: Option<NonZeroU64>,
@@ -2062,9 +2090,9 @@ impl IndirectCommandBuffer {
         };
         match set.and_then(of.own).filter(|(_, stamp)| stamp.id == named) {
             Some((Some(_), stamp)) => Some(stamp.identifier),
-            Some((None, stamp)) => (!self.gpu_written()
-                || self.released_holder(named) == Some((of.kind, stamp.serial)))
-            .then_some(stamp.identifier),
+            Some((None, stamp)) => {
+                (!self.may_name_another(named, of.kind, stamp.serial)).then_some(stamp.identifier)
+            }
             None => self
                 .written_identifier(named, of.kind)
                 .or_else(|| state.map(of.identifier)),
@@ -2143,8 +2171,13 @@ impl IndirectCommandBuffer {
     }
 
     /// A hold on the buffer for a command buffer whose work may write its records on the GPU,
-    /// which the encoder retains until it completes ([`GpuWrite`]).
+    /// which the encoder retains until it completes ([`GpuWrite`]). The first one has the buffer
+    /// keep, from now on, the programs of the states the program releases
+    /// (`released_programs.rs`).
     pub(super) fn gpu_write(&self) -> GpuWrite {
+        if !self.0.keeping.swap(true, Ordering::AcqRel) {
+            self.device().shared().keepers.add(&self.0.kept);
+        }
         lock(&self.0.gpu_writes).pending += 1;
         GpuWrite {
             device: self.device().clone(),
@@ -2152,27 +2185,135 @@ impl IndirectCommandBuffer {
         }
     }
 
-    /// The `uniqueIdentifier` of the state of `kind` that held pipeline state ID `named` as the
-    /// GPU last could write the buffer's records: at the completion of the last command buffer
-    /// that could ([`GpuWrite`]), or now while one has not completed; released since or not, as
-    /// Metal's GPU write resolves the ID as it runs, and its record names that state after
-    /// (measured on an M3 Max by the consumer). None where the GPU could not write the records,
-    /// or the ID's holder then is one of another kind or past the ones the device keeps.
-    fn written_identifier(&self, named: u64, kind: StateKind) -> Option<u64> {
+    /// For a blit's copy of `source`'s commands `range` into this buffer, which the copy's
+    /// [`gpu_write`](Self::gpu_write) has keep programs already: keep what `source` keeps, and the
+    /// programs of the released states the CPU set on the commands copied, whose records name
+    /// them as Metal's copied records do (`released_programs.rs`).
+    pub(super) fn keep_copied(&self, source: &IndirectCommandBuffer, range: Range<u32>) {
+        let mut copied = lock(&source.0.kept).clone();
+        let sets: Vec<CommandState> = {
+            let pipelines = lock(&source.0.pipelines);
+            range
+                .filter_map(|index| pipelines.get(index as usize).cloned().flatten())
+                .collect()
+        };
+        // Upgraded with no lock of either buffer held: a state dropped here releases its ID.
+        for (stamp, program) in sets.iter().filter_map(CommandState::kept) {
+            copied.keep(stamp.id, stamp.serial, program);
+        }
+        lock(&self.0.kept).keep_all(copied);
+    }
+
+    /// The stamp of the device's IDs (`ResourceIds::stamp`) as the GPU last could write the
+    /// buffer's records: at the completion of the last command buffer that could
+    /// ([`GpuWrite`]), or now (`u64::MAX`) while one has not completed; none where the GPU could
+    /// not write them.
+    fn window(&self) -> Option<u64> {
         if !self.gpu_written() {
             return None;
         }
-        let stamp = {
-            let writes = lock(&self.0.gpu_writes);
-            match writes.pending {
-                0 => writes.end,
-                _ => u64::MAX,
-            }
+        let writes = lock(&self.0.gpu_writes);
+        Some(match writes.pending {
+            0 => writes.end,
+            _ => u64::MAX,
+        })
+    }
+
+    /// The state that held pipeline state ID `named` as the GPU last could write the buffer's
+    /// records ([`window`](Self::window)), released since or not: the state a GPU write of the ID
+    /// resolved it to, as Metal's write resolves the ID as it runs and its record runs that state
+    /// and answers its identifier after (`released_programs.rs`). None where the GPU could not
+    /// write the records, or the ID's holder then is past the ones the device keeps.
+    fn window_holder(&self, named: u64) -> Option<HolderThen> {
+        let window = self.window()?;
+        lock(&self.device().shared().resource_ids).pipeline_holder_by(named, window)
+    }
+
+    /// The `uniqueIdentifier` of the state of `kind` that held pipeline state ID `named` as the
+    /// GPU last could write the buffer's records ([`window_holder`](Self::window_holder)), as
+    /// Metal's record the GPU wrote answers (measured on an M3 Max by the consumer). None where
+    /// that is none, or one of another kind.
+    fn written_identifier(&self, named: u64, kind: StateKind) -> Option<u64> {
+        self.window_holder(named)
+            .filter(|then| then.kind == kind)
+            .map(|then| then.identifier)
+    }
+
+    /// Whether the GPU may have written ID `named` into the record of a command the CPU set the
+    /// state of kind `kind` whose hold of the ID had `serial` on, so that Metal's record names
+    /// another state than the CPU's: the GPU could write the buffer's records after the state
+    /// took the ID, and the ID's holder as it last could ([`window_holder`](Self::window_holder))
+    /// is another state.
+    fn may_name_another(&self, named: u64, kind: StateKind, serial: u64) -> bool {
+        let Some(window) = self.window() else {
+            return false;
         };
-        lock(&self.device().shared().resource_ids)
-            .pipeline_holder_by(named, stamp)
-            .filter(|&(of, _)| of == kind)
-            .map(|(_, identifier)| identifier)
+        serial < window
+            && lock(&self.device().shared().resource_ids)
+                .pipeline_holder_by(named, window)
+                .map(|then| (then.kind, then.serial))
+                != Some((kind, serial))
+    }
+
+    /// The program of the released state of kind `of` whose hold of ID `named` had `serial`, as a
+    /// state, where the buffer keeps it (`released_programs.rs`).
+    fn kept<S>(&self, named: u64, serial: u64, of: &Of<S>) -> Option<S> {
+        let program = lock(&self.0.kept).program(named, serial).cloned()?;
+        (of.kept)(&program)
+    }
+
+    /// For an execution of commands `range` on the GPU alone, which runs a record by its ID among
+    /// the compute states `live` lists, each with its ID: those states, but that where the GPU
+    /// last could write the records the ID's holder was a state the program released since, whose
+    /// program the buffer keeps, the ID names that program instead, as a record the GPU wrote then
+    /// runs it (`window_holder`), and no record the GPU writes later can name another, as no state
+    /// took the ID before the window. `None` where the CPU set on a command of `range` the live
+    /// state that took such an ID since: the ID names two states, which the host step tells apart
+    /// (`name_state`).
+    pub(super) fn gpu_states(
+        &self,
+        range: Range<u32>,
+        live: Vec<ComputePipelineState>,
+    ) -> Option<Vec<(u64, ComputePipelineState)>> {
+        let mut states: Vec<(u64, ComputePipelineState)> = live
+            .into_iter()
+            .map(|state| (compute_id(&state), state))
+            .collect();
+        let ids: Vec<u64> = lock(&self.0.kept).ids().collect();
+        let mut kept = Vec::new();
+        for id in ids {
+            let Some(then) = self.window_holder(id) else {
+                continue;
+            };
+            if then.holds || then.kind != StateKind::Compute {
+                continue;
+            }
+            if let Some(program) = self.kept(id, then.serial, &COMPUTE) {
+                kept.push((id, program));
+            }
+        }
+        if kept.is_empty() {
+            return Some(states);
+        }
+        let sets: Vec<CommandState> = {
+            let pipelines = lock(&self.0.pipelines);
+            range
+                .filter_map(|index| pipelines.get(index as usize).cloned().flatten())
+                .collect()
+        };
+        // Upgraded with no lock of the buffer held: a state dropped here releases its ID.
+        let set_live = sets
+            .iter()
+            .filter_map(CommandState::compute)
+            .filter(|(alive, _)| alive.is_some())
+            .map(|(_, stamp)| stamp.id)
+            .collect::<std::collections::BTreeSet<u64>>();
+        if kept.iter().any(|(id, _)| set_live.contains(id)) {
+            return None;
+        }
+        states.retain(|(id, _)| kept.iter().all(|(taken, _)| taken != id));
+        states.extend(kept);
+        Some(states)
     }
 
     /// Watch `execution`, which `commit` recorded from the CPU's records: its host step is
@@ -2532,13 +2673,11 @@ impl IndirectCommandBuffer {
     /// - Where `set` had the ID: the state while it lives; once the program released it, its
     ///   program (as a state of no ID), whoever holds the ID since, as Metal's command the CPU
     ///   encoded runs it. A host step cannot tell a record the GPU wrote naming that ID from
-    ///   the CPU's: where the GPU may have written it and the state was not the ID's last
-    ///   holder, Metal's run of a GPU write would differ (`Unmatched::Unsure`). The getter
-    ///   reads it as the state holding the ID instead (`holder`), none where none lives.
-    /// - Else (the GPU wrote the ID): the state of the kind holding it (`holder`), else none:
-    ///   a state of the other kind holding it runs nothing, as on Metal; where none holds it
-    ///   since the program released a state of the kind that did, Metal runs that state's
-    ///   program, which the runtime does not hold (`Unmatched::Unrun`).
+    ///   the CPU's: where the GPU may have written it while another state held the ID
+    ///   ([`may_name_another`](Self::may_name_another)), Metal's run of a GPU write would differ
+    ///   (`Unmatched::Unsure`). The getter reads it as the state holding the ID instead
+    ///   (`holder`), none where none lives.
+    /// - Else (the GPU wrote the ID): [`name_written`](Self::name_written).
     ///
     /// The commands an execution runs otherwise than Metal's may are added to `unmatched`.
     fn name_state<S>(
@@ -2552,16 +2691,7 @@ impl IndirectCommandBuffer {
     ) -> Option<S> {
         let own = set.and_then(of.own).filter(|(_, stamp)| stamp.id == named);
         let Some((alive, stamp)) = own else {
-            let state = holder();
-            if state.is_none()
-                && reader != Reader::Getter
-                && self
-                    .released_holder(named)
-                    .is_some_and(|(kind, _)| kind == of.kind)
-            {
-                unmatched.push((index, named, Unmatched::Unrun));
-            }
-            return state;
+            return self.name_written((index, named), reader, of, holder, unmatched);
         };
         if alive.is_some() {
             return alive;
@@ -2570,14 +2700,54 @@ impl IndirectCommandBuffer {
             Reader::Getter => holder(),
             Reader::Commit => set.and_then(of.program),
             Reader::Step => {
-                if self.gpu_written()
-                    && self.released_holder(named) != Some((of.kind, stamp.serial))
-                {
+                if self.may_name_another(named, of.kind, stamp.serial) {
                     unmatched.push((index, named, Unmatched::Unsure));
                 }
                 set.and_then(of.program)
             }
         }
+    }
+
+    /// The state of kind `of` command `index`'s record the GPU wrote runs for `reader`, where it
+    /// names pipeline state ID `named`, as Metal's runs it: the state that held the ID as the GPU
+    /// last could write the records ([`window_holder`](Self::window_holder)), which Metal's write
+    /// resolved the ID to (`released_programs.rs`):
+    ///
+    /// - one of the other kind: none, as on Metal;
+    /// - one that holds the ID still: the state of the kind holding it (`holder`);
+    /// - one the program released since: its program, as a state of no ID, where the buffer keeps
+    ///   it; else none (`Unmatched::Unrun`). The getter reads it as none.
+    /// - none the device keeps (the records were the CPU's alone, or the ID's holders since are
+    ///   more than it keeps): the state of the kind holding the ID (`holder`), else none, the
+    ///   program having released a state of the kind that held it last (`Unmatched::Unrun`).
+    fn name_written<S>(
+        &self,
+        (index, named): (u32, u64),
+        reader: Reader,
+        of: &Of<S>,
+        holder: impl FnOnce() -> Option<S>,
+        unmatched: &mut Vec<(u32, u64, Unmatched)>,
+    ) -> Option<S> {
+        let state = match self.window_holder(named) {
+            Some(then) if then.kind != of.kind => return None,
+            Some(then) if then.holds => return holder(),
+            Some(_) if reader == Reader::Getter => return None,
+            Some(then) => self.kept(named, then.serial, of),
+            None => match holder() {
+                Some(state) => return Some(state),
+                None if self
+                    .released_holder(named)
+                    .is_some_and(|(kind, _)| kind == of.kind) =>
+                {
+                    None
+                }
+                None => return None,
+            },
+        };
+        if state.is_none() && reader != Reader::Getter {
+            unmatched.push((index, named, Unmatched::Unrun));
+        }
+        state
     }
 
     /// The kind and hold serial of the state that last held pipeline state ID `named`, where

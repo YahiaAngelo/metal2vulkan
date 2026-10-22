@@ -62,8 +62,8 @@ const CHAIN: &str = "saturating-halving-and-wide-product-integers-at-their-edges
 /// A kernel whose `[[stage_in]]` layout's stride is `MTLBufferLayoutStrideDynamic`.
 const DYNAMIC: &str = "stage-in-of-a-dynamic-stride-layout-of-an-executed-command-template";
 
-/// The kind [`a_host_step_runs_a_released_state_s_program_and_announces_what_it_cannot_tell`]
-/// takes where a host step cannot run what Metal runs.
+/// The kind [`a_record_the_gpu_wrote_runs_the_state_its_id_named_as_it_was_written`] takes where
+/// a host step cannot run what Metal runs.
 pub(super) const RELEASED_STATES: [Degradation; 1] = [Degradation::ReleasedCommandState];
 
 /// Run `test` on a validated device of the lane, then fail on any validation message.
@@ -953,32 +953,33 @@ fn a_command_naming_a_released_state_runs_its_program() {
     }
 }
 
-/// A host step, which runs records the GPU may write, cannot tell the GPU's write of an ID from
-/// the CPU's, nor run a released state's program it does not hold. Command 0 is encoded with a
-/// state, and copied to command 1 by a blit (the GPU writes it, so the buffer's executions take
-/// the host step), which then gets buffers of its own; the program releases the state.
+/// A record the GPU wrote runs the state that held its ID as the GPU wrote it, released since or
+/// not, as Metal's runs it (measured on an M3 Max: `released_programs.rs`); a host step, which runs
+/// records the GPU may write, cannot tell the GPU's write of an ID from the CPU's. Command 0 is
+/// encoded with a state, and copied to command 1 by a blit (the GPU writes it, so the buffer's
+/// executions take the host step or the GPU alone), which then gets buffers of its own; the
+/// program releases the state.
 ///
-/// - No state takes the ID: command 0 runs the released state's program, as Metal's runs it
-///   whoever wrote the ID, unannounced. Command 1 names the ID with no state set on it on the
-///   CPU: Metal runs the released state's program, which only command 0 holds, so it runs
-///   nothing, announced once for two executions (`Degradation::ReleasedCommandState`), and at
-///   each on a device whose options ask for the kind at each occurrence.
-/// - A compute state of another interface ([`CHAIN`]'s kernel) takes the ID: command 0 runs the
-///   released state's program, as Metal runs the command the CPU encoded, announced, as Metal
-///   runs the new state for a record the GPU wrote; command 1 runs the new state, as Metal's
-///   record the GPU wrote does, unannounced.
-///
-/// On a device with generated commands, an execution of command 0 takes the host step too: the GPU
-/// alone would run the ID's holder.
+/// - No state takes the ID: both commands run the released state's program, unannounced.
+/// - A compute state of another interface ([`CHAIN`]'s kernel) takes the ID: both still run the
+///   released state's program, as Metal runs the command the CPU encoded and the record its copy
+///   wrote before the new state took the ID, unannounced.
+/// - The new state takes the ID and an encoder then makes the buffer resident for writing, so
+///   the GPU may write command 0's record while the new state holds the ID: command 0 runs the
+///   released state's program, as Metal runs the command the CPU encoded, announced once for two
+///   executions (`Degradation::ReleasedCommandState`), as Metal runs the new state for a record
+///   the GPU wrote then; and at each on a device whose options ask for the kind at each
+///   occurrence.
 #[test]
-fn a_host_step_runs_a_released_state_s_program_and_announces_what_it_cannot_tell() {
-    let run = |device: &Device, messages: &Messages, taken: bool, times: usize| {
+fn a_record_the_gpu_wrote_runs_the_state_its_id_named_as_it_was_written() {
+    // `rewritable`: an encoder makes the buffer resident for writing after the new state took the
+    // ID, and command 0 alone runs.
+    let run = |device: &Device, messages: &Messages, taken: bool, rewritable: bool| {
         let case = public_case(RAGGED).unwrap();
         let resources = CaseResources::new(device, &case).unwrap();
         let sets: Vec<_> = (0..2)
             .map(|_| bound_buffers(device, &case.compute, &resources).unwrap())
             .collect();
-        let initial = output(&case.compute, &sets[1]);
         let icb = icb(device, 2, false);
         let queue = device.new_command_queue().unwrap();
         let id = {
@@ -1001,22 +1002,37 @@ fn a_host_step_runs_a_released_state_s_program_and_announces_what_it_cannot_tell
                 "the state made after takes the ID"
             );
         }
-        // The case's kernel adds to its output, as its Metal output is one run's: `check` reads
-        // the output after the first execution.
-        let execute = |range: std::ops::Range<u64>, check: &dyn Fn()| {
-            for run in 0..times {
+        if rewritable {
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            encoder
+                .use_resource(icb.as_resource(), ResourceUsage::WRITE)
+                .unwrap();
+            encoder.end_encoding().unwrap();
+            complete(&command_buffer);
+        }
+        // The case's kernel adds to its output, as its Metal output is one run's: each command's
+        // output is read after its first execution.
+        let execute = |command: usize| {
+            for run in 0..2 {
                 let command_buffer = queue.command_buffer().unwrap();
                 let mut encoder = command_buffer.compute_command_encoder().unwrap();
                 for buffers in &sets {
                     make_resident(&mut encoder, buffers, &resources);
                 }
+                let at = command as u64;
                 encoder
-                    .execute_commands_in_buffer(&icb, range.clone())
+                    .execute_commands_in_buffer(&icb, at..at + 1)
                     .unwrap();
                 encoder.end_encoding().unwrap();
                 complete(&command_buffer);
                 if run == 0 {
-                    check();
+                    assert_eq!(
+                        output(&case.compute, &sets[command]),
+                        case.metal_output,
+                        "taken {taken}, rewritable {rewritable}: command {command} ran the \
+                         released state's program"
+                    );
                 }
             }
             counts(&messages.take_notices())
@@ -1024,32 +1040,24 @@ fn a_host_step_runs_a_released_state_s_program_and_announces_what_it_cannot_tell
                 .copied()
                 .unwrap_or(0)
         };
-        let first = execute(0..1, &|| {
-            assert_eq!(output(&case.compute, &sets[0]), case.metal_output);
-        });
-        let second = execute(1..2, &|| {
-            if !taken {
-                assert_eq!(
-                    output(&case.compute, &sets[1]),
-                    initial,
-                    "command 1 ran nothing"
-                );
-            }
-        });
-        [first, second]
+        let commands = if rewritable { 0..1 } else { 0..2 };
+        commands.map(execute).collect::<Vec<usize>>()
     };
     on_device(|device, messages| {
-        assert_eq!(run(device, messages, false, 2), [0, 1]);
+        assert_eq!(run(device, messages, false, false), [0, 0]);
     });
     on_device(|device, messages| {
-        assert_eq!(run(device, messages, true, 2), [1, 0]);
+        assert_eq!(run(device, messages, true, false), [0, 0]);
+    });
+    on_device(|device, messages| {
+        assert_eq!(run(device, messages, true, true), [1]);
     });
     // Asked for at each occurrence: each execution announces it.
     let each = |options: &mut DeviceOptions| {
         options.announce_each = RELEASED_STATES.into_iter().collect();
     };
     on_device_with(each, |device, messages| {
-        assert_eq!(run(device, messages, false, 2), [0, 2]);
+        assert_eq!(run(device, messages, true, true), [2]);
     });
 }
 

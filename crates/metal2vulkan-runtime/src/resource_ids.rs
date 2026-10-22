@@ -142,8 +142,9 @@
 //!   answers it as its own. Once the holder is gone the slot reads the neutral resource, even
 //!   while an earlier resource with the ID lives (Metal's kernel read the gone holder's texels
 //!   there, probe 2). A pipeline state ID keeps the kind of its gone holder until a state takes
-//!   it again (`ResourceIds::released_pipeline`): a record the GPU wrote naming it runs the
-//!   released state's program on Metal, which the runtime no longer has.
+//!   it again (`ResourceIds::released_pipeline`), and the device its last holders, released or
+//!   not (`ResourceIds::pipeline_holder_by`): a record the GPU wrote naming the ID runs the state
+//!   that held it as the GPU wrote it on Metal, released since or not (`released_programs.rs`).
 //! - **When an ID is resolved.** A command reaches texture ID `X` whatever its encoder named,
 //!   as Metal's did (the M4 probe: a texture no encoder named, or one a later encoder
 //!   made resident, was read through its ID in an argument buffer): the device writes each
@@ -375,16 +376,27 @@ impl ResourceIds {
         self.next()
     }
 
-    /// The kind and `uniqueIdentifier` of the state that held pipeline state ID `id` at `stamp`
-    /// ([`ResourceIds::stamp`]): the last to take it before then, released since or not; none
-    /// where none of the ID's last [`PIPELINE_HOLDERS`] holders took it before then.
-    pub(super) fn pipeline_holder_by(&self, id: u64, stamp: u64) -> Option<(StateKind, u64)> {
-        self.pipeline_holders
+    /// The state that held pipeline state ID `id` at `stamp` ([`ResourceIds::stamp`]): the last
+    /// to take it before then, released since or not; none where none of the ID's last
+    /// [`PIPELINE_HOLDERS`] holders took it before then.
+    pub(super) fn pipeline_holder_by(&self, id: u64, stamp: u64) -> Option<HolderThen> {
+        let holder = self
+            .pipeline_holders
             .get(&id)?
             .iter()
             .rev()
-            .find(|holder| holder.serial < stamp)
-            .map(|holder| (holder.kind, holder.identifier))
+            .find(|holder| holder.serial < stamp)?;
+        let holds = self
+            .pipelines
+            .slots
+            .get(&id)
+            .is_some_and(|slot| slot.serial == holder.serial);
+        Some(HolderThen {
+            kind: holder.kind,
+            serial: holder.serial,
+            identifier: holder.identifier,
+            holds,
+        })
     }
 
     /// The count of held sampler IDs and the sampler pool's size (the module docs), which the
@@ -817,8 +829,9 @@ impl Elements {
 }
 
 /// How many of each pipeline state ID's holders the device keeps
-/// ([`ResourceIds::pipeline_holder_by`]).
-const PIPELINE_HOLDERS: usize = 4;
+/// ([`ResourceIds::pipeline_holder_by`]), and a buffer the programs of
+/// (`released_programs.rs`).
+pub(super) const PIPELINE_HOLDERS: usize = 4;
 
 /// A pipeline state that took an ID: its kind, its hold serial and its `uniqueIdentifier`.
 #[derive(Clone, Copy, Debug)]
@@ -826,6 +839,18 @@ struct PipelineHolder {
     kind: StateKind,
     serial: u64,
     identifier: u64,
+}
+
+/// The state that held a pipeline state ID at a stamp ([`ResourceIds::pipeline_holder_by`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct HolderThen {
+    pub(super) kind: StateKind,
+    /// Its hold serial (`IdHold::serial`).
+    pub(super) serial: u64,
+    /// Its `uniqueIdentifier`.
+    pub(super) identifier: u64,
+    /// It holds the ID still: the program has not released it.
+    pub(super) holds: bool,
 }
 
 /// One ID's slot, while its holder lives: the holder and its hold serial.

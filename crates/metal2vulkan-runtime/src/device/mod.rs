@@ -66,6 +66,7 @@ use super::memory_log::MemoryLog;
 use super::mipmap_scratch::MipmapScratch;
 use super::owned_kernel::OwnedKernels;
 use super::recycle::{self, BufferMaking, Recycler};
+use super::released_programs::Keepers;
 use super::render_state::{depth_bias_command, DepthBiasCommand, DepthRanges};
 use super::render_target::KeptRenderPasses;
 use super::resource_ids::{ResourceIds, SamplerIdReads};
@@ -223,6 +224,9 @@ pub(super) struct DeviceShared {
     pub(super) recycled_buffers: Mutex<Recycler<vk::Buffer, BufferMaking>>,
     /// The resource IDs of textures and sampler states (`resource_ids.rs`).
     pub(super) resource_ids: Arc<Mutex<ResourceIds>>,
+    /// The buffers whose records the GPU may write, which keep the programs of the pipeline
+    /// states the program releases (`released_programs.rs`).
+    pub(super) keepers: Keepers,
     /// The `uniqueIdentifier`s the device allocates from 2^36 (`unique_identifier.rs`).
     pub(super) identifiers: Arc<UniqueIdentifiers>,
     /// How many holders hold a sampler ID now and the sampler pool's size (`resource_ids.rs`),
@@ -1631,6 +1635,7 @@ impl Device {
             addresses: Mutex::new(AddressSpace::new()),
             recycled_buffers: Mutex::new(Recycler::new(recycle::BUFFERS)),
             resource_ids,
+            keepers: Keepers::default(),
             identifiers: Arc::default(),
             sampler_ids,
             samplers: Mutex::default(),

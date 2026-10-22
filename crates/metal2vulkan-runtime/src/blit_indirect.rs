@@ -77,6 +77,7 @@ impl BlitCommandEncoder {
         }
         destination.written_by_gpu();
         self.core().retain(destination.gpu_write());
+        destination.keep_copied(source, from.clone());
         destination.written().copied_from(source.written());
         // The slots past the records', carried as Metal's copy carries every slot below the count.
         self.copy_overflow(source, from.clone(), destination, to.start)?;
