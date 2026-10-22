@@ -1751,9 +1751,9 @@ pub enum CommandBufferError {
     /// resolves such a use as it submits the command buffer, to the pages the buffer lies in
     /// then; the runtime resolved it as the command was encoded. The rebind encodes the command
     /// buffer's compute, blit and render encoders that named it again, from their calls, so they
-    /// reach the new pages as Metal's do; this fails only an encoder that cannot be encoded again:
-    /// a resource state encoder, which logs no calls; one of a command buffer that used command
-    /// predication; a render pass recorded later (an indirect command buffer's execution, a draw
+    /// reach the new pages as Metal's do (a resource state encoder takes no pages: an indirect
+    /// mapping update reads its buffer as it runs); this fails only an encoder that cannot be
+    /// encoded again: one of a command buffer that used command predication; a render pass recorded later (an indirect command buffer's execution, a draw
     /// whose pipeline was being made) or whose end captured its draws' tile reach; and one a call
     /// of which was refused (at its encoding, and so again). Each of Metal's submissions holding
     /// such an encoder ran nothing (the command buffer's split), every other ran, the event signals
