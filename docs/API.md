@@ -1968,15 +1968,15 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   on Metal.
 - `metal2vulkan-degrade-heap-texture-untiled-layout` (precision). `HeapTextureUntiledLayout`: A
   texture made in a heap over host pages that Metal lays out tiled where the runtime does not: a
-  layout not measured (an `X32_Stencil8` texture's), an image that holds other bytes than Metal's
-  elements, or moves past the device's limits. Also a texture made in any other heap (over the
-  device's memory) whose bytes there are not Metal's layout: its image bound there in the driver's
-  layout, on a driver whose colour images are not measured to lie as Metal's heap textures
-  (`DriverFact::ColorImagesLieAsMetalHeapTextures`) or of a depth or stencil texture there; its
-  image a shadow of the bytes in rows; a multisample texture; or a layout not measured. Cost: the
-  texture's reads, writes and copies are Metal's, but its texels lie in the heap's bytes in the
-  runtime's layout, where Metal tiles them: a buffer or texture over them meets the texels at other
-  bytes than on Metal.
+  layout not measured (a format whose layout in Metal's heaps is not probed), an image that holds
+  other bytes than Metal's elements, or moves past the device's limits. Also a texture made in any
+  other heap (over the device's memory) whose bytes there are not Metal's layout: its image bound
+  there in the driver's layout, on a driver whose colour images are not measured to lie as Metal's
+  heap textures (`DriverFact::ColorImagesLieAsMetalHeapTextures`) or of a depth or stencil texture
+  there; its image a shadow of the bytes in rows; a multisample texture; or a layout not measured.
+  Cost: the texture's reads, writes and copies are Metal's, but its texels lie in the heap's bytes
+  in the runtime's layout, where Metal tiles them: a buffer or texture over them meets the texels at
+  other bytes than on Metal.
 - `metal2vulkan-degrade-shader-side-depth-test` (performance). `ShaderSideDepthTest`: A render
   pass's draws test the depth in the fragment shader: a fragment function that stores a color
   through the pixel interlock before Vulkan's tests, in a draw whose depth test may drop the

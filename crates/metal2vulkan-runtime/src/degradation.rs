@@ -1467,18 +1467,18 @@ degradations! {
              heap's bytes in the runtime's layout, where Metal tiles them: a buffer or texture \
              over them meets the blocks at other bytes than on Metal";
         /// A texture made in a heap over host pages that Metal lays out tiled where the runtime
-        /// does not (`texture/heap_tiled.rs`): a layout not measured (an `X32_Stencil8`
-        /// texture's), an image that holds other bytes than Metal's elements, or moves past the
-        /// device's limits. Also a texture made in any other heap (over the device's memory)
-        /// whose bytes there are not Metal's layout (`texture/heap.rs`): its image bound there in
-        /// the driver's layout, on a driver whose colour images are not measured to lie as
+        /// does not (`texture/heap_tiled.rs`): a layout not measured (a format whose layout in
+        /// Metal's heaps is not probed), an image that holds other bytes than Metal's elements, or
+        /// moves past the device's limits. Also a texture made in any other heap (over the device's
+        /// memory) whose bytes there are not Metal's layout (`texture/heap.rs`): its image bound
+        /// there in the driver's layout, on a driver whose colour images are not measured to lie as
         /// Metal's heap textures
         /// ([`metal2vulkan::device::DriverFact::ColorImagesLieAsMetalHeapTextures`]) or of a depth
         /// or stencil texture there; its image a shadow of the bytes in rows; a multisample
         /// texture; or a layout not measured. The notice's reason names which (the first
-        /// texture's). Announced once per device, in the call that made
-        /// the first such texture, with its ID ([`DegradeNotice::object_id`]), or for each
-        /// texture where `DeviceOptions::announce_each` asks; each texture counted
+        /// texture's). Announced once per device, in the call that made the first such texture,
+        /// with its ID ([`DegradeNotice::object_id`]), or for each texture where
+        /// `DeviceOptions::announce_each` asks; each texture counted
         /// ([`Device::degraded_objects`](crate::Device::degraded_objects)).
         HeapTextureUntiledLayout = "heap-texture-untiled-layout", Precision,
             "the texture's reads, writes and copies are Metal's, but its texels lie in the \

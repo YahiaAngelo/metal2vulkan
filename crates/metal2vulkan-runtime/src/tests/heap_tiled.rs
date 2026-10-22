@@ -863,6 +863,26 @@ fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
     let depth = texture(T::Type2D, PixelFormat::Depth32Float, [64, 64, 1], (1, 1, 1));
     let tiled_depth = metal_heap_layout(&depth, read, false, Format::D32_SFLOAT, M4);
     assert!(matches!(tiled_depth.layout, HeapLayout::Tiled(_)));
+    // A stencil view: a `Stencil8` texture's tiles and answers (the M3 Max under 27.0.1), the
+    // tiles its image's stencil aspect's; kept compressed, a shadow's uncompressed tiles alike.
+    let view = texture(T::Type2D, PixelFormat::X32Stencil8, [100, 70, 1], (1, 1, 1));
+    let x32 = metal_heap_layout(&view, read, false, format, M4);
+    assert_eq!(x32.answer.map(|a| (a.size, a.align)), Some((0x4000, 128)));
+    let HeapLayout::Tiled(tiles) = &x32.layout else {
+        panic!("a stencil view is untiled");
+    };
+    let parts: Vec<_> = (tiles.parts.iter())
+        .map(|part| (part.aspect, part.at, part.layout.unit, part.layout.size))
+        .collect();
+    assert_eq!(parts, [(stencil, 0, 1, 0x4000)]);
+    let kept = metal_heap_layout(&view, read, true, format, M4);
+    assert_eq!(kept.answer.map(|a| (a.size, a.align)), Some((0x4200, 128)));
+    let shadow = shadow_tiles(&view, format, M4, &kept.layout);
+    let Some(HeapLayout::Uncompressed(tiles)) = shadow else {
+        panic!("a compressed stencil view has no shadow's tiles");
+    };
+    assert_eq!(tiles.parts.len(), 1);
+    assert_eq!((tiles.parts[0].aspect, tiles.size), (stencil, 0x4000));
 }
 
 /// A multisample texture's answers and layout kind (on an Apple M4 under macOS 27.0.1; the M3 Max
@@ -871,7 +891,7 @@ fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
 /// all their samples in Metal's tiles, a multisample array's slices an array's; compressed, that
 /// plus metadata over the sample grid for each slice. A `Depth32Float_Stencil8` texture answers
 /// neither (its device's); a compressed one is held in memory of its own
-/// (`Untiled::LOSSLESS_MULTISAMPLE`), any other refused over host pages.
+/// (`Untiled::LOSSLESS_MULTISAMPLE`), and over host pages any other too, announced untiled.
 #[test]
 fn multisample_answers_are_metal_s() {
     use crate::degradation::Degradation as D;

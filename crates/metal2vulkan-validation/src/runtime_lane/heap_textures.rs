@@ -1732,7 +1732,9 @@ fn heap_depth_textures_keep_their_bytes_with_their_twins() {
 /// tiles place it, and bytes a blit writes there through the buffer read back through a blit as
 /// those texels. With the property on, a 64x64 `Depth32Float` texture (which Metal keeps
 /// losslessly compressed, 16512 bytes) holds its uncompressed tiles there, announced
-/// `heap-texture-lossless-layout` once. Elsewhere `HEAPTEX tiles` lines print whether they lie so.
+/// `heap-texture-lossless-layout` once. Elsewhere `HEAPTEX tiles` lines print whether they lie so;
+/// but an `X32_Stencil8` texture's stencil lies as a `Stencil8` texture's on every device (the
+/// probe alike: 8x8 to 300x200, both ways), its image never fitting the `Stencil8` answer.
 #[test]
 fn heap_depth_textures_keep_their_texels_in_metal_s_tiles() {
     use super::heap_layouts::tiled_offset;
@@ -1751,7 +1753,7 @@ fn heap_depth_textures_keep_their_texels_in_metal_s_tiles() {
         // alignment 128), measured, and its aspects: each one's element bytes, blit option and
         // first byte from the texture's.
         type Aspects = &'static [(u64, BlitOption, u64)];
-        let shapes: [(PixelFormat, [u64; 2], bool, u64, Aspects); 11] = [
+        let shapes: [(PixelFormat, [u64; 2], bool, u64, Aspects); 14] = [
             (
                 PixelFormat::Depth16Unorm,
                 [37, 5],
@@ -1829,12 +1831,38 @@ fn heap_depth_textures_keep_their_texels_in_metal_s_tiles() {
                 0x14000,
                 &[(4, DEPTH, 0), (1, StencilFromDepthStencil, 0x10000)],
             ),
+            (
+                PixelFormat::X32Stencil8,
+                [37, 5],
+                false,
+                0x200,
+                &[(1, WHOLE, 0)],
+            ),
+            (
+                PixelFormat::X32Stencil8,
+                [100, 70],
+                false,
+                0x4000,
+                &[(1, WHOLE, 0)],
+            ),
+            (
+                PixelFormat::X32Stencil8,
+                [300, 200],
+                false,
+                0x18000,
+                &[(1, WHOLE, 0)],
+            ),
         ];
         for (format, [w, h], allow, metal, aspects) in shapes {
             let what = format!("{format:?} {w}x{h} allow {allow}");
             let mut descriptor = TextureDescriptor::texture_2d(format, w, h, false);
             descriptor.resource_options = options;
-            descriptor.usage = TextureUsage::SHADER_READ | TextureUsage::RENDER_TARGET;
+            // A stencil view's texture is read, its stencil blitted.
+            let view = format == PixelFormat::X32Stencil8;
+            descriptor.usage = match view {
+                true => TextureUsage::SHADER_READ,
+                false => TextureUsage::SHADER_READ | TextureUsage::RENDER_TARGET,
+            };
             descriptor.allow_gpu_optimized_contents = allow;
             let answer = device.heap_texture_size_and_align(&descriptor).unwrap();
             let heap = heap(device, HeapType::Placement, 1 << 20, options);
@@ -1931,6 +1959,10 @@ fn heap_depth_textures_keep_their_texels_in_metal_s_tiles() {
             );
             if tiled {
                 assert_eq!((answer.size, answer.align), (metal, 128), "{what}");
+            }
+            // A stencil view's image never fits a `Stencil8` texture's answer: on every device a
+            // shadow of Metal's tiles holds it.
+            if tiled || view {
                 assert_eq!((off, read_off), (0, 0), "{what}: texels off Metal's tiles");
             }
         }

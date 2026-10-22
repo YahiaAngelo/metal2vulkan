@@ -622,12 +622,13 @@ fn a_command_writing_a_tiled_texture_two_ways_keeps_both_writes() {
     });
 }
 
-/// A texture Metal keeps losslessly compressed (a colour one and a `Depth32Float_Stencil8` one),
-/// one of a block-compressed format whose placement its device's Metal level does not measure
-/// (PVRTC at macOS 26.7's, `DeviceOptions::metal_level`) and one of a format whose layout is not
-/// measured (`X32_Stencil8`), each in a heap over host pages, are counted in their kind's field and
+/// A texture Metal keeps losslessly compressed (a colour one, a `Depth32Float_Stencil8` one and an
+/// `X32_Stencil8` one), one of a block-compressed format whose placement its device's Metal level
+/// does not measure (PVRTC at macOS 26.7's, `DeviceOptions::metal_level`) and one whose samples
+/// Metal lays out in the heap's bytes (an uncompressed multisample one, which lies apart from
+/// them), each in a heap over host pages, are counted in their kind's field and
 /// `Device::degraded_objects`, and the first of each kind is announced in the call that made it,
-/// with its ID; each is usable after. Three compressed textures, one notice, a count of three.
+/// with its ID; each is usable after. Four compressed textures, one notice, a count of four.
 #[test]
 fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced_once() {
     let at_26_7 = |options: &mut DeviceOptions| options.metal_level = Some(MetalLevel::MacOS26_7);
@@ -651,6 +652,12 @@ fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced
         let mut stencil = TextureDescriptor::texture_2d(PixelFormat::X32Stencil8, 32, 32, false);
         stencil.resource_options = shared();
         stencil.usage = read;
+        let mut samples = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 32, 32, false);
+        samples.resource_options = shared();
+        samples.texture_type = TextureType::Type2DMultisample;
+        samples.sample_count = 4;
+        samples.usage = TextureUsage::RENDER_TARGET;
+        samples.allow_gpu_optimized_contents = false;
         // Metal's answer for the compressed shape (`heap_textures`): its
         // metadata included.
         let answer = device.heap_texture_size_and_align(&compressed).unwrap();
@@ -660,7 +667,8 @@ fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced
             (compressed, Degradation::HeapTextureLosslessLayout, 1),
             (blocks, Degradation::HeapTextureBlockCompressedLayout, 2),
             (aspects, Degradation::HeapTextureLosslessLayout, 1),
-            (stencil, Degradation::HeapTextureUntiledLayout, 3),
+            (stencil, Degradation::HeapTextureLosslessLayout, 1),
+            (samples, Degradation::HeapTextureUntiledLayout, 3),
         ];
         let mut offset = 0u64;
         let mut kept = Vec::new();
@@ -704,10 +712,10 @@ fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced
                 Some(objects + 1),
                 "{what}: counted"
             );
-            // Usable: its texels round-trip.
-            let (row, rows) = match descriptor.pixel_format {
-                PixelFormat::PVRTCRGBA4BPP => (16 * 8, 16),
-                PixelFormat::RGBA8Unorm => (64 * 4, 64),
+            // Usable: its texels round-trip (a single-sample texture's, which the CPU copies).
+            let (row, rows) = match (descriptor.pixel_format, descriptor.sample_count) {
+                (PixelFormat::PVRTCRGBA4BPP, _) => (16 * 8, 16),
+                (PixelFormat::RGBA8Unorm, 1) => (64 * 4, 64),
                 _ => (0, 0),
             };
             if row > 0 {

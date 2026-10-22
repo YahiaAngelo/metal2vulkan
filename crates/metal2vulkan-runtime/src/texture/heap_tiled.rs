@@ -118,10 +118,14 @@
 //!   the heap's bytes, and the bytes written there read back by blits). With it on Metal keeps the
 //!   depth plane compressed, and a shadow holds its uncompressed tiles, the stencil plane past the
 //!   compressed answer (`heap-texture-lossless-layout`).
-//! - **Not measured**: an `X32_Stencil8` texture's layout (its answer is `Stencil8`'s, `heap.rs`)
-//!   and a PVRTC format's under macOS 26.7; the runtime holds them untiled
-//!   (`heap-texture-untiled-layout`, `heap-texture-block-compressed-layout`), a PVRTC texture
-//!   there at its device's answer.
+//! - **A stencil view.** An `X32_Stencil8` texture lies as a `Stencil8` texture of its shape lies,
+//!   compressed or not, and answers as one (an Apple M3 Max under macOS 27.0.1: 1720 answers, 1 to
+//!   1024 texels a side, 1 to 3 levels, 1 and 3 slices, allowGPUOptimizedContents off and on; every
+//!   texel of one-level 8 x 8 to 300 x 200 textures written by blits and found where a `Stencil8`
+//!   texture's lie, and the bytes written there read back by blits). Its image's tiles are its
+//!   stencil aspect's; the image's depth holds none of its texels.
+//! - **Not measured**: a PVRTC format's layout under macOS 26.7; the runtime holds it untiled
+//!   (`heap-texture-block-compressed-layout`) at its device's answer.
 //!
 //! **Held** as the texture's image in memory of its own, a shadow of the heap's bytes
 //! (`shadow.rs`, `ShadowTarget::Tiled`): into the image, the texture's bytes copied into a
@@ -1078,6 +1082,13 @@ fn image_element(pf: PixelFormat, format: Format) -> Option<(u64, [u64; 2])> {
             .find(|(aspect, _, _)| *aspect == ImageAspectFlags::STENCIL)
             .filter(|_| units.len() == 1)
             .map(|&(_, bytes, block)| (bytes, block)),
+        // A stencil view's image holds a depth aspect it does not name (`heap_plane_layout`).
+        PixelFormat::X32Stencil8 => match units[..] {
+            [(ImageAspectFlags::DEPTH, _, _), (ImageAspectFlags::STENCIL, bytes, block)] => {
+                Some((bytes, block))
+            }
+            _ => None,
+        },
         PixelFormat::Depth16Unorm | PixelFormat::Depth32Float => match units[..] {
             [(ImageAspectFlags::DEPTH, bytes, block)] => {
                 (depth_bytes(format) == Some(bytes)).then_some((bytes, block))
@@ -1107,7 +1118,7 @@ fn metal_element(pf: PixelFormat) -> Option<u64> {
     match pf {
         PixelFormat::Depth16Unorm => Some(2),
         PixelFormat::Depth32Float => Some(4),
-        PixelFormat::Stencil8 => Some(1),
+        PixelFormat::Stencil8 | PixelFormat::X32Stencil8 => Some(1),
         pf if is_depth_stencil(pf) => None,
         pf => block_bytes(pf).map(u64::from),
     }
@@ -1246,9 +1257,14 @@ pub(crate) fn metal_heap_layout(
             Untiled::other("its image holds other bytes than Metal's elements"),
         );
     }
+    // A stencil view's tiles are its image's stencil aspect's.
+    let mut tiles = TiledTexture::one(tiled);
+    if pf == PixelFormat::X32Stencil8 {
+        tiles.parts[0].aspect = Some(ImageAspectFlags::STENCIL);
+    }
     MetalHeapLayout {
         answer: plain,
-        layout: HeapLayout::Tiled(TiledTexture::one(tiled)),
+        layout: HeapLayout::Tiled(tiles),
     }
 }
 

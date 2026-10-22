@@ -49,7 +49,8 @@
 //!   Where the device's image needs more bytes or a coarser alignment than that answer, and for
 //!   every 4:2:2 texture, the texture is a shadow of the heap's bytes in memory of its own
 //!   (`AliasRoute::MemoryShadow`): its planes fit the answer (an `X32_Stencil8` texture's stencil
-//!   alone, packed; a 4:2:2 texture's rows where Metal lays them, so a buffer over them reads
+//!   alone, in a `Stencil8` texture's tiles where they serve, as Metal lays it, `heap_tiled.rs`,
+//!   else packed; a 4:2:2 texture's rows where Metal lays them, so a buffer over them reads
 //!   Metal's bytes; `heap_plane_layout`), so two textures side by side at the answer keep their
 //!   texels on every device.
 //! - **Two-plane extended-range textures** (`RGB10A8_2P_XR10` and its sRGB twin; the consumer's
@@ -179,7 +180,7 @@
 use super::first_move::FirstMove;
 use super::heap_tiled::{
     metal_compresses_layout, metal_heap_layout, modelled_size, shadow_tiles, HeapLayout,
-    HeapTiledCopies, TiledTexture, Untiled, UNMEASURED_FORMAT,
+    HeapTiledCopies, TiledTexture, Untiled,
 };
 use super::heap_two_planes::{HeapPlaneCopies, TwoPlaneHeapLayout};
 use super::stand_in::StandIn;
@@ -1424,7 +1425,7 @@ impl Device {
         // texture's bytes there, in memory of its own. A 4:2:2 texture is always a shadow: its
         // bytes then lie where Metal's linear rows do (`heap_plane_layout`). A two-plane
         // texture's image lies apart from the heap's bytes (above).
-        let special = self.metal_heap_answer(call, descriptor, &layout)?;
+        let special = self.metal_heap_answer(call, descriptor, &layout, image.plan.format)?;
         // Metal's modelled answer where the texture takes the larger of it and its image's.
         let mut modelled = None;
         // Metal's answer, where the runtime knows it.
@@ -1587,13 +1588,16 @@ impl Device {
     ///
     /// With each answer, Metal's layout of the texture's bytes as the runtime holds it over host
     /// pages: a 4:2:2 or two-plane texture's, as its route lays it (`HeapLayout::Measured`); an
-    /// `X32_Stencil8` texture's, not measured; a `BlockWritesOnly` texture's, the descriptor's
-    /// without it.
+    /// `X32_Stencil8` texture's, a `Stencil8` texture's tiles of its image's (of `format`) stencil
+    /// aspect (`metal_heap_layout`; an M3 Max under macOS 27.0.1: every texel of one-level 8 x 8
+    /// to 300 x 200 textures, both ways, where a `Stencil8` texture's lie, and 1720 answers equal
+    /// a `Stencil8` texture's); a `BlockWritesOnly` texture's, the descriptor's without it.
     fn metal_heap_answer(
         &self,
         call: &'static str,
         descriptor: &TextureDescriptor,
         layout: &TextureLayout,
+        format: Format,
     ) -> Result<Option<(SizeAndAlign, HeapLayout)>, Error> {
         if let Some(answer) = planes_answer(layout) {
             return Ok(Some((answer, HeapLayout::Measured)));
@@ -1601,10 +1605,15 @@ impl Device {
         let Some(other) = sized_as(descriptor) else {
             return Ok(None);
         };
-        let layout = self.heap_layout(call, &other, Creator::SizeQuery)?;
-        let p = self.heap_plan(call, &other, layout)?;
+        let other_layout = self.heap_layout(call, &other, Creator::SizeQuery)?;
+        let p = self.heap_plan(call, &other, other_layout)?;
         let metal_layout = match descriptor.pixel_format {
-            PixelFormat::X32Stencil8 => HeapLayout::Untiled(Untiled::other(UNMEASURED_FORMAT)),
+            PixelFormat::X32Stencil8 => {
+                let usage = effective_usage(descriptor.usage);
+                let optimized = descriptor.allow_gpu_optimized_contents;
+                let level = self.properties().metal_level;
+                metal_heap_layout(layout, usage, optimized, format, level).layout
+            }
             _ => p.metal_layout,
         };
         Ok(Some((p.size_and_align, metal_layout)))
