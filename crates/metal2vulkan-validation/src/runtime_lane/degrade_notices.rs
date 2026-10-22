@@ -99,8 +99,8 @@
 //! command buffers whose named uses of a buffer rebound before their first submission fail in
 //! `rebind_reach` ([`REBOUND_USES`]), textures over bytes detached after they were resident,
 //! and writable ones whose writes their stand-ins' sinks keep, reached unnamed in
-//! `detach_textures` ([`DETACHED_REACHES`]), textures in heaps over host pages laid out otherwise
-//! than Metal's tiles in `heap_layouts` ([`HEAP_LAYOUTS`]), fetches under a written depth test
+//! `detach_textures` ([`DETACHED_REACHES`]), textures in heaps laid out otherwise than Metal's
+//! tiles in `heap_layouts` and `heap_textures` ([`HEAP_LAYOUTS`]), fetches under a written depth test
 //! run in the shader in `framebuffer_fetch::shader_depth` ([`SHADER_DEPTH`]),
 //! heap textures whose layout in Metal's heaps the runtime does not model in `heap_metal_sizes`
 //! ([`UNMODELLED_SIZES`]) and those whose images take more of a heap than Metal's answer there

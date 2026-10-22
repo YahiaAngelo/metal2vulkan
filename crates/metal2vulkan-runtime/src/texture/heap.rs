@@ -132,6 +132,18 @@
 //!   the heap's bytes in rows (`AliasRoute::Shadow`), or, where no shadow serves (a multisample
 //!   texture, a depth twin), aliases none of the heap's other resources, and the device announces
 //!   `heap-depth-stencil-apart` once when it makes one.
+//! - **Heaps over the device's memory**. A texture whose image is bound in such a heap's memory
+//!   lies there in the driver's layout. On a driver whose single-sample colour images lie as Metal
+//!   lays out a heap texture of the image's usage
+//!   ([`DriverFact::ColorImagesLieAsMetalHeapTextures`]: MoltenVK 1.4.2 on the M3 Max, measured)
+//!   such a texture Metal tiles is Metal's bytes there. Every other texture whose bytes there are
+//!   not Metal's layout is counted (`Device::degraded_objects`), each kind announced at its first
+//!   texture, with its ID: its image in the driver's layout on any other driver, or of a depth or
+//!   stencil texture, `heap-texture-untiled-layout`; its image a shadow of the bytes in rows,
+//!   alike; a multisample texture, alike; one Metal may keep losslessly compressed,
+//!   `heap-texture-lossless-layout` (the runtime's image need not be compressed as Metal's); one
+//!   whose layout is not measured, by its kind (`device_heap_layout`). A texture apart from the
+//!   heap's bytes, and a two-plane one, announce their own routes.
 //! - **Compressed images**. On a driver whose compressed images may keep their texels apart from
 //!   the memory they are bound to ([`DriverFact::CompressedImagesHideAliasedWrites`]: ANV on
 //!   Intel's GPUs, measured), a heap's colour texture whose optimal image takes the heap's memory
@@ -204,7 +216,7 @@ use crate::Device;
 use ash::vk;
 use metal2vulkan::device::{DriverFact, HeapCompressionPolicy};
 use metal2vulkan::error::{Feature, LinearNeed, Unsupported};
-use metal2vulkan::metal::format::ycbcr_format;
+use metal2vulkan::metal::format::{is_depth_stencil, ycbcr_format};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::vk::{
     Format, FormatFeatureFlags2, ImageAspectFlags, ImageUsageFlags, SampleCountFlags,
@@ -2263,6 +2275,48 @@ impl Device {
         }))
     }
 
+    /// How a texture of `layout` on `route`, laid out by Metal as `metal`, in a heap not over host
+    /// pages lies otherwise than Metal lays it in the heap's bytes, where it does: Metal's own
+    /// layout the runtime does not hold (Metal may keep it compressed, its samples, a layout not
+    /// measured: `metal`'s reason; `Untiled::LOSSLESS` for one whose uncompressed tiles a shadow
+    /// would hold), a multisample texture's samples (`Untiled::MULTISAMPLE`), its image a shadow
+    /// of the bytes in rows (`Untiled::ROWS`), or its image bound there in the driver's layout
+    /// (`Untiled::DRIVER`; not a single-sample colour image bound there on a driver whose such
+    /// images lie as Metal's heap textures, `DriverFact::ColorImagesLieAsMetalHeapTextures`, where
+    /// Metal tiles the texture). `None` for a route whose own notice says where it lies (apart, a
+    /// two-plane texture's planes) and a layout a measured route holds.
+    fn device_heap_layout(
+        &self,
+        layout: &TextureLayout,
+        route: AliasRoute,
+        metal: &HeapLayout,
+    ) -> Option<Untiled> {
+        if matches!(
+            route,
+            AliasRoute::Apart | AliasRoute::Unaliased | AliasRoute::Planes
+        ) {
+            return None;
+        }
+        match metal {
+            HeapLayout::Measured => return None,
+            HeapLayout::Untiled(untiled) => return Some(*untiled),
+            HeapLayout::Uncompressed(_) => return Some(Untiled::LOSSLESS),
+            HeapLayout::Tiled(_) => {}
+        }
+        if layout.samples > 1 {
+            return Some(Untiled::MULTISAMPLE);
+        }
+        let facts = &self.properties().driver_facts;
+        let as_metal = route == AliasRoute::Direct
+            && !is_depth_stencil(layout.pixel_format)
+            && facts.contains(&DriverFact::ColorImagesLieAsMetalHeapTextures);
+        match route {
+            _ if as_metal => None,
+            AliasRoute::Shadow | AliasRoute::MemoryShadow => Some(Untiled::ROWS),
+            _ => Some(Untiled::DRIVER),
+        }
+    }
+
     /// Whether a shadow of Metal's tiles `tiled` serves an image of `plan` whose texture takes
     /// `size` bytes of its heap: an image of one sample that takes copies, whose tiles fit those
     /// bytes, and whose moves fit the device (`HeapTiledCopies::fit`).
@@ -2744,8 +2798,13 @@ impl Device {
         // Over host pages, each texture laid out otherwise than Metal tiles it is announced, in
         // the program's call that made it, with its ID; and in any heap a multisample texture whose
         // image lies in memory of its own, and a shadow of the uncompressed tiles of a texture
-        // Metal keeps compressed.
-        if host || matches!(route, AliasRoute::Lossless | AliasRoute::Tiled) {
+        // Metal keeps compressed. In any other heap, a texture whose bytes there are not Metal's
+        // layout (`device_heap_layout`).
+        if !host && !matches!(route, AliasRoute::Lossless | AliasRoute::Tiled) {
+            if let Some(untiled) = self.device_heap_layout(&p.layout, route, &metal_layout) {
+                self.degrade_heap_layout(untiled, texture.object_id());
+            }
+        } else {
             match metal_layout {
                 HeapLayout::Tiled(_) if route == AliasRoute::Tiled => {
                     self.shared().counts.heap_texture_tiled();

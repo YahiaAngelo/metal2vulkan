@@ -25,6 +25,7 @@
 //!   layout), so the test asserts the change, not the bytes.
 
 use super::degrade_notices::counts;
+use super::heap_layouts::HEAP_LAYOUTS;
 use super::heap_metal_sizes::stacked_nil_alignment;
 use super::host_memory::{gpu_fill, gpu_read, on_device, run};
 use super::presenting::Adopted;
@@ -368,15 +369,22 @@ fn heap_textures_answer_and_place_as_metal_s_do() {
                 // the driver may compress one of `ALIASES`; a depth or stencil texture's image
                 // the driver lays apart from its memory a shadow of the heap's bytes
                 // (`shadowed-texture`, as the heap depth lane measures on MoltenVK) or, where no
-                // shadow serves it, `heap-depth-stencil-apart`.
+                // shadow serves it, `heap-depth-stencil-apart`; and one of [`HEAP_LAYOUTS`] for a
+                // texture whose bytes in the heap the driver is not measured to lay out as Metal's
+                // (a multisample texture, a depth or stencil one, any on a driver without
+                // `DriverFact::ColorImagesLieAsMetalHeapTextures`).
                 let facts = &device.properties().driver_facts;
                 let apart = is_depth_stencil(shape.pixel_format)
                     && facts.contains(&DriverFact::DepthStencilImagesLieApart);
+                let as_metal = shape.samples == 1
+                    && !is_depth_stencil(shape.pixel_format)
+                    && facts.contains(&DriverFact::ColorImagesLieAsMetalHeapTextures);
                 let routes = facts
                     .contains(&DriverFact::CompressedImagesHideAliasedWrites)
                     .then_some(&ALIASES[..])
                     .into_iter()
                     .chain(apart.then_some(&DEPTH_STENCIL_ROUTES[..]))
+                    .chain((!as_metal).then_some(&HEAP_LAYOUTS[..]))
                     .flatten();
                 let allowed: BTreeSet<Degradation> =
                     SIZE_NOTICES.iter().chain(routes).copied().collect();
@@ -1936,6 +1944,124 @@ fn heap_depth_textures_keep_their_texels_in_metal_s_tiles() {
         assert_eq!(count(Degradation::ShadowedTexture), 1);
         assert_eq!(count(OPTIMIZED[0]), 0);
         assert_eq!(count(APART[0]), 0);
+    }
+    let failing = messages.take();
+    assert!(
+        failing.is_empty(),
+        "the validation layer reported: {failing:#?}"
+    );
+}
+
+/// A heap's colour textures that Metal keeps uncompressed, in a `Private` placement heap over the
+/// device's memory, lie where Metal's tiles place each texel (`heap_layouts::tiled_offset`) on a
+/// driver whose colour images lie as Metal's heap textures
+/// (`DriverFact::ColorImagesLieAsMetalHeapTextures`: MoltenVK 1.4.2 on the M3 Max), and the device
+/// announces no heap layout there; elsewhere the first announces `heap-texture-untiled-layout`
+/// and each is counted. On every device a texture counted for no layout lies in Metal's tiles.
+/// Kept uncompressed by `ShaderRead | ShaderWrite` usage: `RGBA8Unorm` of 64 x 64 and 37 x 5,
+/// `R8Unorm` of 100 x 70 and `RG16Float` of 300 x 200; by `allowGPUOptimizedContents` off:
+/// `RGBA8Unorm` of 64 x 64 of `ShaderRead` usage and of `ShaderRead | RenderTarget`; by a side
+/// shorter than 16: `RGBA8Unorm` of 8 x 8 of `ShaderRead` usage. Each is written by a blit naming
+/// each texel and found through a buffer over the heap; `HEAPTEX device-tiles` lines print the
+/// texels off the tiles.
+#[test]
+fn device_heap_textures_lie_in_metal_s_tiles() {
+    use super::heap_layouts::tiled_offset;
+    let messages = Messages::default();
+    let cache = ScratchCache::new().unwrap();
+    let untiled = Degradation::HeapTextureUntiledLayout;
+    let (as_metal, counted) = {
+        let device = &validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
+        let as_metal = device
+            .properties()
+            .driver_facts
+            .contains(&DriverFact::ColorImagesLieAsMetalHeapTextures);
+        let before = device.degraded_objects(untiled).unwrap();
+        let queue = device.new_command_queue().unwrap();
+        let options = tracked(StorageMode::Private);
+        let (read, written) = (TextureUsage::SHADER_READ, TextureUsage::SHADER_WRITE);
+        let shapes = [
+            (PixelFormat::RGBA8Unorm, 4, [64, 64], read | written, true),
+            (PixelFormat::RGBA8Unorm, 4, [37, 5], read | written, true),
+            (PixelFormat::R8Unorm, 1, [100, 70], read | written, true),
+            (PixelFormat::RG16Float, 4, [300, 200], read | written, true),
+            (PixelFormat::RGBA8Unorm, 4, [64, 64], read, false),
+            (
+                PixelFormat::RGBA8Unorm,
+                4,
+                [64, 64],
+                read | TextureUsage::RENDER_TARGET,
+                false,
+            ),
+            (PixelFormat::RGBA8Unorm, 4, [8, 8], read, true),
+        ];
+        let mut kept = Vec::new();
+        for (format, unit, [w, h], usage, optimized) in shapes {
+            let what = format!("{format:?} {w}x{h} {usage:?} optimized {optimized}");
+            let mut descriptor = TextureDescriptor::texture_2d(format, w, h, false);
+            descriptor.resource_options = options;
+            descriptor.usage = usage;
+            descriptor.allow_gpu_optimized_contents = optimized;
+            let answer = device.heap_texture_size_and_align(&descriptor).unwrap();
+            let heap = heap(device, HeapType::Placement, 1 << 20, options);
+            let made_before = device.degraded_objects(untiled).unwrap();
+            let texture = heap.new_texture_at_offset(&descriptor, 0).unwrap();
+            let announced = device.degraded_objects(untiled).unwrap() > made_before;
+            let over = heap.new_buffer_at_offset(answer.size, options, 0).unwrap();
+            gpu_fill(&queue, &over, 0..answer.size, 0);
+            // Texel `i`'s element, naming it: `unit` bytes of `i + 1`.
+            let element = |i: u64| (i + 1).to_le_bytes()[..unit as usize].to_vec();
+            let count = w * h;
+            let named: Vec<u8> = (0..count).flat_map(element).collect();
+            let row = w * unit;
+            let source = staged(device, &named);
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut blit = command_buffer.blit_command_encoder().unwrap();
+            blit.copy_from_buffer_to_texture(
+                &source,
+                0,
+                row,
+                row * h,
+                Size::new(w, h, 1),
+                &texture,
+                0,
+                0,
+                Origin::new(0, 0, 0),
+                BlitOption::None,
+            )
+            .unwrap();
+            blit.end_encoding().unwrap();
+            run(&command_buffer);
+            let bytes = gpu_read(&queue, &over, 0..answer.size);
+            let off = (0..count)
+                .filter(|&i| {
+                    let at = tiled_offset(unit, [w, h], i % w, i / w) as usize;
+                    bytes.get(at..at + unit as usize) != Some(&element(i)[..])
+                })
+                .count();
+            eprintln!(
+                "HEAPTEX device-tiles {what}: size {}, {off} of {count} texels off Metal's tiles \
+                 (fact {as_metal}, announced {announced})",
+                answer.size
+            );
+            assert_eq!(announced, !as_metal, "{what}: counted untiled");
+            if !announced {
+                assert_eq!(off, 0, "{what}: texels off Metal's tiles");
+            }
+            kept.push((texture, over, heap));
+        }
+        let counted = device.degraded_objects(untiled).unwrap() - before;
+        drop(kept);
+        (as_metal, counted)
+    };
+    let notices = counts(&messages.take_notices());
+    let layouts: Vec<_> = (notices.iter())
+        .filter(|(kind, _)| HEAP_LAYOUTS.contains(kind))
+        .collect();
+    eprintln!("HEAPTEX device-tiles: {layouts:?}, {counted} counted");
+    match as_metal {
+        true => assert_eq!((layouts.len(), counted), (0, 0)),
+        false => assert_eq!((layouts, counted), (vec![(&untiled, &1)], 7)),
     }
     let failing = messages.take();
     assert!(

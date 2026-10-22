@@ -1439,7 +1439,8 @@ degradations! {
         /// layout of its texels, so the runtime lays them out as its own, its uncompressed tiles
         /// where it tiles them (`texture/heap_tiled.rs`). A multisample texture so (its sample
         /// grid's shorter side 16 or more) lies in memory of its own, the heap's bytes keeping
-        /// what they held.
+        /// what they held. Also such a texture whose image lies in a heap over the device's
+        /// memory: the image, of the runtime's usage, need not be compressed as Metal's.
         /// Announced once per device, in the call that made the first such texture, with its ID
         /// ([`DegradeNotice::object_id`]), or for each texture where `DeviceOptions::announce_each`
         /// asks; each texture counted
@@ -1467,9 +1468,15 @@ degradations! {
              over them meets the blocks at other bytes than on Metal";
         /// A texture made in a heap over host pages that Metal lays out tiled where the runtime
         /// does not (`texture/heap_tiled.rs`): a layout not measured (an `X32_Stencil8`
-        /// texture's), an image that holds other
-        /// bytes than Metal's elements, or moves past the device's limits. The notice's reason
-        /// names which (the first texture's). Announced once per device, in the call that made
+        /// texture's), an image that holds other bytes than Metal's elements, or moves past the
+        /// device's limits. Also a texture made in any other heap (over the device's memory)
+        /// whose bytes there are not Metal's layout (`texture/heap.rs`): its image bound there in
+        /// the driver's layout, on a driver whose colour images are not measured to lie as
+        /// Metal's heap textures
+        /// ([`metal2vulkan::device::DriverFact::ColorImagesLieAsMetalHeapTextures`]) or of a depth
+        /// or stencil texture there; its image a shadow of the bytes in rows; a multisample
+        /// texture; or a layout not measured. The notice's reason names which (the first
+        /// texture's). Announced once per device, in the call that made
         /// the first such texture, with its ID ([`DegradeNotice::object_id`]), or for each
         /// texture where `DeviceOptions::announce_each` asks; each texture counted
         /// ([`Device::degraded_objects`](crate::Device::degraded_objects)).
@@ -2931,10 +2938,11 @@ impl Device {
         self.deliver_placed(kind, notice.message(), misplaced);
     }
 
-    /// Count the texture of `texture`, made in a heap over host pages in this program call, as
-    /// laid out otherwise than Metal tiles it, for `untiled`'s reason (`heap-texture-*-layout`,
-    /// `texture/heap_tiled.rs`), and announce it, with its ID, where it is the first of its kind
-    /// (or at each texture, where the device's options ask).
+    /// Count the texture of `texture`, made in a heap in this program call, as laid out
+    /// otherwise than Metal lays it in the heap's bytes, for `untiled`'s reason
+    /// (`heap-texture-*-layout`, `texture/heap_tiled.rs`, `texture/heap.rs`), and announce it, with
+    /// its ID, where it is the first of its kind (or at each texture, where the device's options
+    /// ask).
     pub(super) fn degrade_heap_layout(&self, untiled: Untiled, texture: ObjectId) {
         let shared = self.shared();
         let kind = untiled.kind;
@@ -2954,8 +2962,8 @@ impl Device {
 
     /// How many objects this device met as `kind` so far, for a kind it meets once per object
     /// and announces once (naming the first object, [`DegradeNotice::object_id`]), so that a
-    /// census counts them without a notice each: the textures made in heaps over host pages laid
-    /// out otherwise than Metal tiles them ([`Degradation::HeapTextureLosslessLayout`],
+    /// census counts them without a notice each: the textures made in heaps laid out otherwise
+    /// than Metal lays them in the heap's bytes ([`Degradation::HeapTextureLosslessLayout`],
     /// [`Degradation::HeapTextureBlockCompressedLayout`] and
     /// [`Degradation::HeapTextureUntiledLayout`], each counted as it is made), and the textures
     /// over detached bytes a command buffer could reach unnamed

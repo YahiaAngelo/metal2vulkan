@@ -1649,6 +1649,14 @@ pub enum DriverFact {
     /// shader's writes to its reads and writes, which RADV on the Radeon 780M needs (a later draw
     /// read texels from before an earlier one's writes without it).
     InterlockOrdersDraws,
+    /// A single-sample colour image bound to memory lies in it as Metal lays out a heap texture
+    /// of the image's usage there: a buffer over the memory meets each texel at the byte Metal's
+    /// tiles place it. Vulkan leaves an optimal image's layout to the driver. On a driver without
+    /// it the runtime announces `heap-texture-untiled-layout` for a texture of a heap over the
+    /// device's memory whose image lies in the heap's bytes (`texture/heap.rs`); on one with it,
+    /// only where Metal's layout is not the image's (a texture Metal may keep losslessly
+    /// compressed, `heap-texture-lossless-layout`; a multisample one, a layout not measured).
+    ColorImagesLieAsMetalHeapTextures,
 }
 
 impl DriverFact {
@@ -2128,6 +2136,17 @@ const DYNAMIC_RESTART_WARNING: DriverDiagnostic = DriverDiagnostic {
 /// Measured not to have it: RADV, Mesa 26.2.4 on the Radeon 780M, which passes the first but
 /// leaves 19 of the second's 495 bands wrong. Every other driver is unmeasured, and takes the
 /// barrier.
+///
+/// `ColorImagesLieAsMetalHeapTextures`, measured by
+/// `runtime_lane::heap_textures::device_heap_textures_lie_in_metal_s_tiles` (textures Metal keeps
+/// uncompressed in a `Private` placement heap: `RGBA8Unorm`, `R8Unorm` and `RG16Float` ones of
+/// `ShaderRead | ShaderWrite` usage of 64 x 64, 37 x 5, 100 x 70 and 300 x 200 texels,
+/// `RGBA8Unorm` ones of 64 x 64 of `ShaderRead` and `ShaderRead | RenderTarget` usage with
+/// `allowGPUOptimizedContents` off, and one of 8 x 8 of `ShaderRead` usage; written by blits
+/// naming each texel, found through a buffer over the heap): MoltenVK 1.4.2 on the M3 Max under
+/// macOS 27.0.1, every texel at the byte Metal's tiles place it (the lane's restatement of the
+/// tiled layout measured on Metal's own heap textures there, `heap_layouts::tiled_offset`). It
+/// decides a notice, not an answer, so the M4 is not measured. Every other driver is unmeasured.
 ///
 /// MoltenVK 1.4.2 on the M3 Max under macOS 27.0.1 ([`moltenvk_142`]; 2026-10-21, the runtime
 /// lanes in release builds under `--cfg m2v_gpu`, each fact taken):
@@ -2752,6 +2771,7 @@ pub(crate) const MEASURED: &[Measured<DriverFact>] = &[
     moltenvk_142(DriverFact::Bc6hBlockDecodeIsMetals),
     moltenvk_142(DriverFact::Bc7BlockDecodeIsMetals),
     moltenvk_142(DriverFact::TileStoreIsMetals),
+    moltenvk_142(DriverFact::ColorImagesLieAsMetalHeapTextures),
 ];
 
 /// Intel's `vendorID`.

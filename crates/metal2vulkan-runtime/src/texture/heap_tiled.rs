@@ -906,6 +906,21 @@ impl Untiled {
                  stencil format), whose bytes in the heap are no layout of its samples: its \
                  image lies in memory of its own, and the heap's bytes keep what they held",
     };
+    /// A texture of a heap over the device's memory whose image lies in the heap's bytes in the
+    /// driver's layout (`heap-texture-untiled-layout`, `heap.rs`).
+    pub(crate) const DRIVER: Untiled = Untiled::other(
+        "its image lies in the heap's bytes in the device driver's layout, which no driver fact \
+         measures as Metal's tiles (DriverFact::ColorImagesLieAsMetalHeapTextures)",
+    );
+    /// A texture of a heap over the device's memory whose image is a shadow of the heap's bytes
+    /// in rows, where Metal tiles its elements (`heap-texture-untiled-layout`, `heap.rs`).
+    pub(crate) const ROWS: Untiled = Untiled::other(
+        "its image is a shadow of the heap's bytes in rows, where Metal tiles its elements",
+    );
+    /// A multisample texture whose image lies in the heap's bytes, where Metal lays its samples
+    /// out by a layout no image of the runtime's is measured to hold
+    /// (`heap-texture-untiled-layout`, `heap.rs`).
+    pub(crate) const MULTISAMPLE: Untiled = Untiled::other(MULTISAMPLE_SAMPLES);
     /// A block-compressed texture whose placement the device's Metal level does not measure
     /// (`heap-texture-block-compressed-layout`).
     const BLOCK_COMPRESSED: Untiled = Untiled {
@@ -1245,7 +1260,8 @@ pub(crate) fn metal_heap_layout(
 /// two planes: the depth plane (`Depth32Float`'s answer) rounded up to 16 KiB, then the stencil
 /// plane (`Stencil8`'s), at the depth plane's alignment. A sample count Apple's GPUs do not make
 /// is not measured. Metal's compression decides how a heap over host pages holds it
-/// ([`Untiled::LOSSLESS_MULTISAMPLE`], in memory of its own; any other is refused, `heap.rs`).
+/// ([`Untiled::LOSSLESS_MULTISAMPLE`]; any other, its samples apart from the heap's bytes): in
+/// memory of its own (`heap.rs`).
 fn multisample_heap_layout(
     layout: &TextureLayout,
     usage: TextureUsage,
@@ -1254,12 +1270,12 @@ fn multisample_heap_layout(
     let pf = layout.pixel_format;
     let [width, height, _] = layout.extent.map(u64::from);
     let samples = layout.samples;
-    let refused = |answer| MetalHeapLayout {
+    let apart = |answer| MetalHeapLayout {
         answer,
         layout: HeapLayout::Untiled(Untiled::other(MULTISAMPLE_SAMPLES)),
     };
     let Some(grid) = sample_grid(samples, [width, height]) else {
-        return refused(None);
+        return apart(None);
     };
     let colour = !is_depth_stencil(pf);
     let compressed = metal_compresses(colour, usage, allow_gpu_optimized_contents, grid);
@@ -1292,7 +1308,7 @@ fn multisample_heap_layout(
             layout: HeapLayout::Untiled(Untiled::LOSSLESS_MULTISAMPLE),
         };
     }
-    refused(answer)
+    apart(answer)
 }
 
 /// One direction of the kernel's moves: its shape, where it lies in the shape buffer, and the
