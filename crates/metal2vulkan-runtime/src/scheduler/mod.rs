@@ -301,6 +301,8 @@ struct SchedulerShared {
     spared: AtomicU64,
     /// The sleeps on the GPU, of `sleeps` (the module docs).
     gpu_waits: AtomicU64,
+    /// The passes the thread made.
+    passes: AtomicU64,
     /// The device's nudge, where the thread waits for the GPU itself (the module docs).
     nudge: OnceLock<Nudge>,
     /// The device's cleared encoder logs (`replay.rs`): an encoder takes one, and its log comes
@@ -509,6 +511,7 @@ impl Scheduler {
             wakings: Default::default(),
             spared: AtomicU64::new(0),
             gpu_waits: AtomicU64::new(0),
+            passes: AtomicU64::new(0),
             nudge: OnceLock::new(),
             spare_logs: SpareLogs::default(),
         });
@@ -687,6 +690,11 @@ impl Scheduler {
         )
     }
 
+    /// The passes the thread made so far (`WorkCounts::scheduler_passes`).
+    pub(crate) fn passes(&self) -> u64 {
+        self.shared.passes.load(Ordering::Relaxed)
+    }
+
     /// The device's cleared encoder logs (`replay.rs`).
     pub(crate) fn spare_logs(&self) -> &SpareLogs {
         &self.shared.spare_logs
@@ -863,6 +871,7 @@ fn run_work(kind: Kind, work: Work) -> bool {
 /// exiting.
 fn round(shared: &SchedulerShared, left: &mut Left<Work>, passed: &mut Passed) -> bool {
     (shared.inbox).pass(|state, commits| {
+        shared.passes.fetch_add(1, Ordering::Relaxed);
         pass(state, commits, (&mut *passed, &mut *left), &shared.awaits);
         !passed.exiting && left.is_empty() && !passed.more
     });

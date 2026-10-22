@@ -20,8 +20,8 @@
 //!   vertex buffer and offset, and another fragment texture), `pipeline` (as `bind`, and the
 //!   pipeline state switched between two) and `passes` (as `pipeline`, in render passes of three
 //!   draws, as a window server draws), and a compute encoder of as many single-threadgroup
-//!   dispatches, `static` and `churn` (the pipeline state and both buffers' offsets each
-//!   dispatch). Per draw and dispatch: the encoding thread's wall time from the command buffer's
+//!   dispatches, `static`, `offsets` (both buffers' offsets each dispatch) and `churn` (the
+//!   pipeline state and both buffers' offsets each dispatch). Per draw and dispatch: the encoding thread's wall time from the command buffer's
 //!   creation through `endEncoding`, and the whole process's CPU time until the wait returned.
 //!   Then `dispatch_resident_*`: as many dispatches of the tiny kernel after one
 //!   `useResources:count:usage:` of 0, 1, 256 or 4096 buffers, or of one buffer 4096 times
@@ -39,6 +39,19 @@
 //!   read as `half` and as `float`, threadgroup float, threadgroup half) on the kernel's grid
 //!   and loop. With both sides, each round also compares every kernel's output buffer after its
 //!   last run between the sides, and the last table counts the 32-bit words that differ.
+//! - `signals`: a command buffer of one tiny fill with a completed handler, committed alone and
+//!   waited for, as the consumer's isolated execution is: `plain`; `scheduled_handler`, with a
+//!   scheduled handler that sets a shared event's value (how a program without
+//!   `encodeSignalEventScheduled:value:` signals as it is scheduled); `scheduled_signal`, with that
+//!   private call (the runtime's `encode_signal_event_scheduled`); and the runtime's alone,
+//!   `checked`, with a submission check that answers none (`set_submission_check`). Per command
+//!   buffer: commit to the completed handler, commit to the wait's return, the process's CPU time,
+//!   and on the runtime's side its work counts (`rt_*`: handler-thread and scheduler wakes, and
+//!   the command buffers scheduled where their last batch was submitted, the scheduler's passes).
+//!   Then bursts of 64 such command buffers committed back to back, `plain` and `checked`, to
+//!   the last one's completion, per command buffer. Then a shared event listener made and dropped
+//!   unused, one made, and its first notification, asked for a value already reached, from the
+//!   ask to the block's start.
 //! - `latency_split` (with `latency`): the same command buffers' host-clock timeline, commit to
 //!   `kernelStartTime` to `kernelEndTime` to `GPUStartTime` to `GPUEndTime` to the wait's return.
 //!   The runtime's GPU times on MoltenVK are the host's (its docs): its GPU start is its kernel
@@ -146,8 +159,8 @@
 //! `--metallib PATH` (skip the compile; not with `pipeline`), `--cache DIR` (the runtime's shader
 //! cache, with `--side`), `--variants a,b,...` (the encode workload's variants alone:
 //! `draw_static`, `draw_bind`, `draw_pipeline`, `draw_passes`, `dispatch_static`,
-//! `dispatch_churn`, `dispatch_resident_0`, `_1`, `_256`, `_4096`, `_same_4096`; for a profile of
-//! one; and the memory workload's parts alone: `create`,
+//! `dispatch_offsets`, `dispatch_churn`, `dispatch_resident_0`, `_1`, `_256`, `_4096`,
+//! `_same_4096`; for a profile of one; and the memory workload's parts alone: `create`,
 //! `no_copy`, `held_1m`, `held_64m`, `texture`), `--announce-each a,b,...` (the runtime's device
 //! announces these degradation kinds, by code with or without its `metal2vulkan-degrade-` prefix,
 //! or `all` of them, at every occurrence, `DeviceOptions::announce_each`, as a consumer that hears
@@ -171,7 +184,7 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 use workloads::Sizes;
 
-const WORKLOADS: [&str; 15] = [
+const WORKLOADS: [&str; 16] = [
     "encode",
     "fixed",
     "latency",
@@ -187,6 +200,7 @@ const WORKLOADS: [&str; 15] = [
     "burst",
     "icb",
     "icb_draws",
+    "signals",
 ];
 
 struct Options {
@@ -446,6 +460,7 @@ fn run<G: Gpu>(g: &G, opened: Instant, metallib: &Path, options: &Options) {
             "burst" => workloads::burst(g, &scene),
             "icb" => workloads::icb(g, &library, sizes),
             "icb_draws" => workloads::icb_draws(g, &library, sizes),
+            "signals" => workloads::signals(g, &scene, sizes),
             _ => unreachable!(),
         }
     }

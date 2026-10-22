@@ -321,15 +321,17 @@ fn encode_dispatches<G: Gpu>(
     s: &Scene<G>,
     command_buffer: &G::CommandBuffer,
     dispatches: usize,
-    churn: bool,
+    churn: DispatchChurn,
 ) {
     let mut encoder = g.compute_encoder(command_buffer);
     g.set_compute_pipeline(&mut encoder, &s.tiny[0]);
     g.set_buffer(&mut encoder, &s.tiny_out, 0, 0);
     g.set_buffer(&mut encoder, &s.tiny_values, 0, 1);
     for dispatch in 0..dispatches {
-        if churn {
+        if churn == DispatchChurn::Churn {
             g.set_compute_pipeline(&mut encoder, &s.tiny[dispatch % 2]);
+        }
+        if churn != DispatchChurn::Static {
             let offset = (dispatch % RECTS) * RECT_STRIDE;
             g.set_buffer(&mut encoder, &s.tiny_out, offset, 0);
             g.set_buffer(&mut encoder, &s.tiny_values, offset, 1);
@@ -337,6 +339,27 @@ fn encode_dispatches<G: Gpu>(
         g.dispatch(&mut encoder, 1, 64);
     }
     g.end_compute(encoder);
+}
+
+/// What the encode workload's dispatches change between them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DispatchChurn {
+    /// Nothing.
+    Static,
+    /// Both buffers' offsets.
+    Offsets,
+    /// The pipeline state and both buffers' offsets.
+    Churn,
+}
+
+impl DispatchChurn {
+    fn name(self) -> &'static str {
+        match self {
+            DispatchChurn::Static => "static",
+            DispatchChurn::Offsets => "offsets",
+            DispatchChurn::Churn => "churn",
+        }
+    }
 }
 
 /// The CPU cost of encoding: per draw and per dispatch, on the encoding thread (wall) and in the
@@ -391,11 +414,12 @@ pub fn encode<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes, variants: &[String]) {
         );
         emit("encode", &format!("draw_{name}_cb_total"), "ms", &mut total);
     }
-    for churn in [false, true] {
-        if !runs(format!(
-            "dispatch_{}",
-            if churn { "churn" } else { "static" }
-        )) {
+    for churn in [
+        DispatchChurn::Static,
+        DispatchChurn::Offsets,
+        DispatchChurn::Churn,
+    ] {
+        if !runs(format!("dispatch_{}", churn.name())) {
             continue;
         }
         let (mut wall, mut cpu, mut total) = (vec![], vec![], vec![]);
@@ -417,7 +441,7 @@ pub fn encode<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes, variants: &[String]) {
                 }
             });
         }
-        let name = if churn { "churn" } else { "static" };
+        let name = churn.name();
         emit(
             "encode",
             &format!("dispatch_{name}_encode"),
@@ -470,7 +494,11 @@ fn encode_resident<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes, runs: &dyn Fn(Str
             false => resident[..count].iter().collect(),
         };
         let (mut using, mut wall, mut cpu, mut total) = (vec![], vec![], vec![], vec![]);
+        let mut counts = None;
         for run in 0..sizes.timed + 3 {
+            if run == 3 {
+                counts = Some(g.work_counts());
+            }
             g.pool(|| {
                 let cpu0 = process_cpu();
                 let t0 = Instant::now();
@@ -504,6 +532,20 @@ fn encode_resident<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes, runs: &dyn Fn(Str
         emit("encode", &metric("encode"), "us/dispatch", &mut wall);
         emit("encode", &metric("process_cpu"), "us/dispatch", &mut cpu);
         emit("encode", &metric("cb_total"), "ms", &mut total);
+        // The runtime's dispatches that took what the one before settled, a share of them.
+        let after = g.work_counts();
+        let dispatches = (sizes.timed * n) as f64;
+        for ((counted, before), (_, now)) in counts.unwrap_or_default().iter().zip(&after) {
+            if *counted == "dispatches_settled_as_before" {
+                let share = (now - before) / dispatches;
+                emit(
+                    "encode",
+                    &metric("rt_settled_as_before"),
+                    "share",
+                    &mut [share],
+                );
+            }
+        }
     }
 }
 
@@ -576,7 +618,7 @@ fn encode_tiny<G: Gpu>(g: &G, s: &Scene<G>, command_buffer: &G::CommandBuffer, t
     match tiny {
         Tiny::Empty => {}
         Tiny::Fill => g.fill(command_buffer, &s.fill, 256),
-        Tiny::Dispatch => encode_dispatches(g, s, command_buffer, 1, false),
+        Tiny::Dispatch => encode_dispatches(g, s, command_buffer, 1, DispatchChurn::Static),
         Tiny::Draw => encode_draws(g, s, command_buffer, 1, Churn::Static),
     }
 }
@@ -662,6 +704,181 @@ pub fn latency<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes) {
             &mut handler,
         );
     }
+}
+
+/// The `signals` workload (module docs of `main.rs`): a command buffer of one tiny fill with a
+/// completed handler, committed alone and waited for, as the consumer's isolated execution is,
+/// `plain`, and with what each other variant adds.
+pub fn signals<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes) {
+    for name in ["plain", "scheduled_handler", "scheduled_signal", "checked"] {
+        let event = g.shared_event();
+        let (mut handler, mut wait, mut cpu) = (vec![], vec![], vec![]);
+        let mut counts = None;
+        let mut has = true;
+        let runs = sizes.latency + 10;
+        for run in 0..runs {
+            if run == 10 {
+                counts = Some(g.work_counts());
+            }
+            let value = run as u64 + 1;
+            g.pool(|| {
+                let command_buffer = g.command_buffer();
+                encode_tiny(g, s, &command_buffer, Tiny::Fill);
+                match name {
+                    "scheduled_handler" => g.set_when_scheduled(&command_buffer, &event, value),
+                    "scheduled_signal" => g.signal_when_scheduled(&command_buffer, &event, value),
+                    "checked" => has = g.check_submissions(&command_buffer),
+                    _ => {}
+                }
+                let (send, receive) = mpsc::channel();
+                g.on_completed(
+                    &command_buffer,
+                    Box::new(move || {
+                        let _ = send.send(Instant::now());
+                    }),
+                );
+                let cpu0 = process_cpu();
+                let t0 = Instant::now();
+                g.commit(&command_buffer);
+                let at = receive.recv().expect("the completed handler ran");
+                g.wait(&command_buffer);
+                let t1 = Instant::now();
+                let cpu1 = process_cpu();
+                if run >= 10 {
+                    handler.push(us(at - t0));
+                    wait.push(us(t1 - t0));
+                    cpu.push(us(cpu1 - cpu0));
+                }
+            });
+            if !has {
+                break;
+            }
+            if name.starts_with("scheduled") {
+                assert_eq!(g.event_value(&event), value, "{name}: the value set");
+            }
+        }
+        if !has {
+            continue;
+        }
+        emit(
+            "signals",
+            &format!("{name}_commit_to_handler"),
+            "us",
+            &mut handler,
+        );
+        emit(
+            "signals",
+            &format!("{name}_commit_to_wait_return"),
+            "us",
+            &mut wait,
+        );
+        emit("signals", &format!("{name}_process_cpu"), "us", &mut cpu);
+        let after = g.work_counts();
+        for ((counted, before), (_, now)) in counts.unwrap_or_default().iter().zip(&after) {
+            let per = (now - before) / sizes.latency as f64;
+            emit(
+                "signals",
+                &format!("rt_{name}_{counted}"),
+                "per cb",
+                &mut [per],
+            );
+        }
+    }
+    // A burst of command buffers committed back to back, each checked or not, to the last one's
+    // completion: the scheduler's cost of a batch, per command buffer.
+    const BURST: usize = 64;
+    for name in ["plain", "checked"] {
+        let (mut wall, mut cpu) = (vec![], vec![]);
+        let mut counts = None;
+        let mut has = true;
+        for run in 0..sizes.latency + 3 {
+            if run == 3 {
+                counts = Some(g.work_counts());
+            }
+            g.pool(|| {
+                let buffers: Vec<_> = (0..BURST)
+                    .map(|_| {
+                        let command_buffer = g.command_buffer();
+                        encode_tiny(g, s, &command_buffer, Tiny::Fill);
+                        if name == "checked" {
+                            has = g.check_submissions(&command_buffer);
+                        }
+                        command_buffer
+                    })
+                    .collect();
+                let cpu0 = process_cpu();
+                let t0 = Instant::now();
+                for command_buffer in &buffers {
+                    g.commit(command_buffer);
+                }
+                g.wait(&buffers[BURST - 1]);
+                let t1 = Instant::now();
+                let cpu1 = process_cpu();
+                if run >= 3 {
+                    wall.push(us(t1 - t0) / BURST as f64);
+                    cpu.push(us(cpu1 - cpu0) / BURST as f64);
+                }
+            });
+            if !has {
+                break;
+            }
+        }
+        if !has {
+            continue;
+        }
+        emit("signals", &format!("burst_{name}_wall"), "us/cb", &mut wall);
+        emit(
+            "signals",
+            &format!("burst_{name}_process_cpu"),
+            "us/cb",
+            &mut cpu,
+        );
+        let after = g.work_counts();
+        for ((counted, before), (_, now)) in counts.unwrap_or_default().iter().zip(&after) {
+            let per = (now - before) / (sizes.latency * BURST) as f64;
+            emit(
+                "signals",
+                &format!("rt_burst_{name}_{counted}"),
+                "per cb",
+                &mut [per],
+            );
+        }
+    }
+    // A listener made and dropped unused, as the consumer makes one per task; then one made, and
+    // its first notification asked for a value already reached, to its block's start.
+    let (mut unused, mut made, mut first) = (vec![], vec![], vec![]);
+    let event = g.shared_event();
+    for run in 0..sizes.latency + 10 {
+        let t0 = Instant::now();
+        drop(g.listener());
+        let t1 = Instant::now();
+        let listener = g.listener();
+        let t2 = Instant::now();
+        let (send, receive) = mpsc::channel();
+        g.notify(
+            &event,
+            &listener,
+            0,
+            Box::new(move || {
+                let _ = send.send(Instant::now());
+            }),
+        );
+        let at = receive.recv().expect("the notification ran");
+        drop(listener);
+        if run >= 10 {
+            unused.push(us(t1 - t0));
+            made.push(us(t2 - t1));
+            first.push(us(at - t2));
+        }
+    }
+    emit(
+        "signals",
+        "listener_made_and_dropped_unused",
+        "us",
+        &mut unused,
+    );
+    emit("signals", "listener_made", "us", &mut made);
+    emit("signals", "listener_first_notification", "us", &mut first);
 }
 
 /// GPU time of the heavy shaders and the feature kernels, one command buffer in flight: from the
@@ -1160,7 +1377,7 @@ fn drag_once<G: Gpu>(
                 g.end_render(encoder);
             }
             if at < DRAG_DISPATCHES {
-                encode_dispatches(g, s, &command_buffer, 1, false);
+                encode_dispatches(g, s, &command_buffer, 1, DispatchChurn::Static);
             }
             g.commit(&command_buffer);
             last = Some(command_buffer);

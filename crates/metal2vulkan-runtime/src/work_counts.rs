@@ -2809,6 +2809,11 @@ pub struct WorkCounts {
     pub scheduler_wakes_host: u64,
     /// Sleeps that ended at the thread's longest wait with nothing having woken it.
     pub scheduler_sleep_slices: u64,
+    /// Passes the scheduler's thread made over its order (`scheduler/mod.rs`): one takes in what
+    /// was committed and submits what is ready; one more follows a submission check or a host
+    /// step the thread ran without its lock, a waker's nudge during a pass, and a pass that
+    /// stopped after a few submissions.
+    pub scheduler_passes: u64,
     /// Of `scheduler_sleeps`, those on the GPU: in one wait for the event values every head's
     /// checks wait for to land, or for the scheduler's nudge, which a commit, a host signal or a
     /// stop signals (`scheduler/mod.rs`; not on MoltenVK). A value landed wakes it as a
@@ -3956,6 +3961,7 @@ impl Device {
             scheduler_wakes_host: by_host,
             scheduler_sleep_slices: by_slice,
             scheduler_gpu_waits: gpu_waits,
+            scheduler_passes: self.shared().scheduler.passes(),
             wakes_completion_waiters: completion_wakes,
             wakes_handler_threads: handler_wakes,
             wakes_command_buffer_waiters: command_buffer_wakes,

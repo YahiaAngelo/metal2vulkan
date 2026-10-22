@@ -16,8 +16,8 @@ use objc2_metal::{
     MTLPixelFormat, MTLPrimitiveType, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
     MTLRenderPipelineDescriptor, MTLRenderPipelineState, MTLRenderStages, MTLResource,
     MTLResourceOptions, MTLResourceUsage, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
-    MTLSamplerState, MTLSize, MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor,
-    MTLTextureUsage, MTLWinding,
+    MTLSamplerState, MTLSharedEvent, MTLSharedEventListener, MTLSize, MTLStorageMode,
+    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLWinding,
 };
 use std::ffi::c_void;
 use std::path::Path;
@@ -81,6 +81,8 @@ impl Gpu for Native {
     type Heap = Object<dyn MTLHeap>;
     type DepthStencil = Object<dyn MTLDepthStencilState>;
     type IndirectCommands = Object<dyn MTLIndirectCommandBuffer>;
+    type SharedEvent = Object<dyn MTLSharedEvent>;
+    type Listener = Retained<MTLSharedEventListener>;
 
     fn label(&self) -> String {
         format!("native Metal on {}", self.device.name())
@@ -810,6 +812,65 @@ impl Gpu for Native {
             "the command buffer ended {status:?}: {:?}",
             command_buffer.error()
         );
+    }
+
+    fn shared_event(&self) -> Self::SharedEvent {
+        self.device.newSharedEvent().expect("newSharedEvent")
+    }
+
+    fn event_value(&self, event: &Self::SharedEvent) -> u64 {
+        event.signaledValue()
+    }
+
+    fn set_when_scheduled(
+        &self,
+        command_buffer: &Self::CommandBuffer,
+        event: &Self::SharedEvent,
+        value: u64,
+    ) {
+        let event = event.clone();
+        let block = RcBlock::new(move |_: NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+            event.setSignaledValue(value);
+        });
+        // SAFETY: the block is a valid scheduled handler, which Metal copies.
+        unsafe { command_buffer.addScheduledHandler(RcBlock::as_ptr(&block)) };
+    }
+
+    fn listener(&self) -> Self::Listener {
+        MTLSharedEventListener::new()
+    }
+
+    fn notify(
+        &self,
+        event: &Self::SharedEvent,
+        listener: &Self::Listener,
+        value: u64,
+        block: Box<dyn FnOnce() + Send>,
+    ) {
+        let block = Mutex::new(Some(block));
+        let block = RcBlock::new(
+            move |_: NonNull<ProtocolObject<dyn MTLSharedEvent>>, _: u64| {
+                if let Some(block) = block.lock().unwrap().take() {
+                    block();
+                }
+            },
+        );
+        // SAFETY: the block is a valid notification block, which Metal copies.
+        unsafe { event.notifyListener_atValue_block(listener, value, RcBlock::as_ptr(&block)) };
+    }
+
+    fn signal_when_scheduled(
+        &self,
+        command_buffer: &Self::CommandBuffer,
+        event: &Self::SharedEvent,
+        value: u64,
+    ) {
+        let event: &ProtocolObject<dyn MTLSharedEvent> = event;
+        // SAFETY: `encodeSignalEventScheduled:value:` takes a shared event and a 64-bit value
+        // (`v@:@Q`) and returns nothing.
+        let _: () = unsafe {
+            objc2::msg_send![&**command_buffer, encodeSignalEventScheduled: event, value: value]
+        };
     }
 
     fn on_completed(

@@ -28,6 +28,8 @@ pub trait Gpu {
     type Heap;
     type DepthStencil;
     type IndirectCommands;
+    type SharedEvent;
+    type Listener;
 
     /// The side and the device's name.
     fn label(&self) -> String;
@@ -301,6 +303,41 @@ pub trait Gpu {
     fn wait(&self, command_buffer: &Self::CommandBuffer);
     /// `addCompletedHandler:`.
     fn on_completed(&self, command_buffer: &Self::CommandBuffer, handler: Box<dyn FnOnce() + Send>);
+    /// `newSharedEvent`.
+    fn shared_event(&self) -> Self::SharedEvent;
+    /// `signaledValue`.
+    fn event_value(&self, event: &Self::SharedEvent) -> u64;
+    /// `addScheduledHandler:` of a handler that sets `event`'s value to `value`: how a program
+    /// without `encodeSignalEventScheduled:value:` signals as the command buffer is scheduled.
+    fn set_when_scheduled(
+        &self,
+        command_buffer: &Self::CommandBuffer,
+        event: &Self::SharedEvent,
+        value: u64,
+    );
+    /// `encodeSignalEventScheduled:value:` (Apple's private call; the runtime's
+    /// `encode_signal_event_scheduled`).
+    fn signal_when_scheduled(
+        &self,
+        command_buffer: &Self::CommandBuffer,
+        event: &Self::SharedEvent,
+        value: u64,
+    );
+    /// `[[MTLSharedEventListener alloc] init]`.
+    fn listener(&self) -> Self::Listener;
+    /// `notifyListener:atValue:block:` of `event`, calling `block` on the listener's thread.
+    fn notify(
+        &self,
+        event: &Self::SharedEvent,
+        listener: &Self::Listener,
+        value: u64,
+        block: Box<dyn FnOnce() + Send>,
+    );
+    /// A submission check that answers none (the runtime's `set_submission_check`, which Metal
+    /// has not): whether the side has it.
+    fn check_submissions(&self, _command_buffer: &Self::CommandBuffer) -> bool {
+        false
+    }
     /// `GPUEndTime - GPUStartTime`, in seconds, where the side measures it on the GPU.
     fn gpu_seconds(&self, command_buffer: &Self::CommandBuffer) -> Option<f64>;
     /// `kernelStartTime`, `kernelEndTime`, `GPUStartTime` and `GPUEndTime`, in seconds of the

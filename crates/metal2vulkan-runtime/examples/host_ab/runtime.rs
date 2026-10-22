@@ -86,6 +86,8 @@ impl Gpu for Runtime {
     type Heap = rt::Heap;
     type DepthStencil = rt::DepthStencilState;
     type IndirectCommands = rt::IndirectCommandBuffer;
+    type SharedEvent = rt::SharedEvent;
+    type Listener = rt::SharedEventListener;
 
     fn label(&self) -> String {
         format!("runtime on {}", self.device.name())
@@ -783,6 +785,58 @@ impl Gpu for Runtime {
         );
     }
 
+    fn shared_event(&self) -> rt::SharedEvent {
+        self.device.new_shared_event().expect("new_shared_event")
+    }
+
+    fn event_value(&self, event: &rt::SharedEvent) -> u64 {
+        event.signaled_value()
+    }
+
+    fn set_when_scheduled(
+        &self,
+        command_buffer: &rt::CommandBuffer,
+        event: &rt::SharedEvent,
+        value: u64,
+    ) {
+        let event = event.clone();
+        command_buffer
+            .add_scheduled_handler(Box::new(move |_| event.set_signaled_value(value)))
+            .expect("add_scheduled_handler");
+    }
+
+    fn signal_when_scheduled(
+        &self,
+        command_buffer: &rt::CommandBuffer,
+        event: &rt::SharedEvent,
+        value: u64,
+    ) {
+        command_buffer
+            .encode_signal_event_scheduled(event, value)
+            .expect("encode_signal_event_scheduled");
+    }
+
+    fn listener(&self) -> rt::SharedEventListener {
+        rt::SharedEventListener::new()
+    }
+
+    fn notify(
+        &self,
+        event: &rt::SharedEvent,
+        listener: &rt::SharedEventListener,
+        value: u64,
+        block: Box<dyn FnOnce() + Send>,
+    ) {
+        event.notify_listener(listener, value, Box::new(move |_, _| block()));
+    }
+
+    fn check_submissions(&self, command_buffer: &rt::CommandBuffer) -> bool {
+        command_buffer
+            .set_submission_check(std::sync::Arc::new(|_: &rt::Submission<'_>| None))
+            .expect("set_submission_check");
+        true
+    }
+
     fn on_completed(&self, command_buffer: &rt::CommandBuffer, handler: Box<dyn FnOnce() + Send>) {
         command_buffer
             .add_completed_handler(Box::new(move |_| handler()))
@@ -858,6 +912,16 @@ impl Gpu for Runtime {
             ("merged_draw_commands", c.merged_draw_commands),
             ("indirect_records_read", c.indirect_records_read),
             ("dispatches_indirect", replayed.cmd_dispatch_indirect),
+            ("wakes_handler_threads", c.wakes_handler_threads),
+            ("scheduled_where_submitted", c.scheduled_where_submitted),
+            ("scheduler_passes", c.scheduler_passes),
+            ("scheduler_sleeps", c.scheduler_sleeps),
+            ("scheduler_wakes_commit", c.scheduler_wakes_commit),
+            ("scheduler_wakes_host", c.scheduler_wakes_host),
+            (
+                "dispatches_settled_as_before",
+                c.dispatches_settled_as_before,
+            ),
         ]
         .into_iter()
         .map(|(name, count)| (name, count as f64))
