@@ -114,15 +114,26 @@
 //!   copies share a flag the first failing test sets, after which every copy skips; the first
 //!   copy's start takes the flag as clear (`PredicationOp::WhileFirst`, `PredicationOp::DoFirst`).
 //!   A step past the copies halts the unit where the loop would run another: it sets the unit's
-//!   halt word (beside its counter) to the loop's id, every later step of the unit then leaves
-//!   its words and runs nothing (a host step's command too), and the command buffer fails at its
-//!   completion, before its completed handlers run
-//!   (`CommandBufferError::PredicatedLoopPastCopies`), where Metal runs on. A loop inside
-//!   another's copy is laid down again in each, with an id of its own. A killed loop gets no
-//!   copies.
+//!   halt word (beside its counter) to the loop's id, and every later step of the unit then leaves
+//!   its words and runs nothing (a host step's command too). A loop inside another's copy is laid
+//!   down again in each, with an id of its own. A killed loop gets no copies.
+//! - **A loop's laying runs again** until the loop ends, as Metal runs a loop on without bound
+//!   (`command_buffer/rerun.rs`): the outermost loop's laying goes in command buffers of its own,
+//!   cut at its start (and at each later encoder of its unit it spans) and ended by its check, a
+//!   host step that reads the halt word once the laying completed and, while it is set, submits
+//!   the laying again; the halted loop's first copy's start clears it, so the loop goes on where
+//!   it stopped, and nothing encoded before the loop runs again. A dispatch inside a laying whose
+//!   pipelines are being made waits for them, so the laying stays one run. A laying that holds
+//!   work recorded apart (an indirect dispatch or an indirect command buffer's execution a host
+//!   step records, or a dispatch whose variant records in a command buffer of its own) cannot run
+//!   again alone: its loop past its copies fails the command buffer at its completion, before its
+//!   completed handlers run (`CommandBufferError::PredicatedLoopPastCopies`), where Metal runs
+//!   on.
 
 use super::buffer::Buffer;
+use super::command_buffer::rerun::LoopCheck;
 use super::compute::{ComputeCommandEncoder, EncoderState};
+use super::deferred::Deferred;
 use super::degradation::Degradation;
 use super::encoder::EncoderCore;
 use super::error::{internal, Error, RuntimeGap};
@@ -140,6 +151,7 @@ use metal2vulkan::bind::{
 };
 use metal2vulkan::metal::{BarrierScope, DispatchType};
 use std::ops::Range;
+use std::sync::Arc;
 
 /// A command buffer's command predication (the module docs): its current unit, the gated runs of
 /// its records, and the check words of the units that ended with a live block open.
@@ -167,9 +179,28 @@ pub(super) struct Predication {
     halts: Vec<Upload>,
     /// The loops laid down so far: the next one's id ([`PredicationStep::id`]) is one more.
     loops: u32,
+    /// The laying of the unit's outermost open loop, from its start (the module docs).
+    laying: Option<Laying>,
     /// The steps and gated dispatches recorded so far: what a loop's copies lay down is counted
     /// from it ([`copies_of`]).
     laid: u64,
+}
+
+/// The laying of a unit's outermost loop: the `VkCommandBuffer`s its encoders recorded it into,
+/// each begun to be submitted again, from the one begun at the loop's start; whether a segment
+/// left among them (work a host step or the commit records apart) keeps it from running again
+/// alone; and the command buffer's parts recorded before its first, after which its own lie.
+pub(super) struct Laying {
+    raws: Vec<vk::CommandBuffer>,
+    broken: bool,
+    from: usize,
+}
+
+impl Laying {
+    /// Its `VkCommandBuffer`s, in order, and the parts before its first.
+    pub(super) fn into_parts(self) -> (Vec<vk::CommandBuffer>, usize) {
+        (self.raws, self.from)
+    }
 }
 
 /// The copies of a loop no other loop holds, at most.
@@ -576,6 +607,8 @@ impl Predication {
     /// The current unit ends: one with a live block open keeps its check word for the completion,
     /// with the index of the record that opened its outermost open block.
     fn end_unit(&mut self) {
+        // A loop open where its unit ends is closed by no End: its laying is checked by none.
+        self.laying = None;
         if let Some(unit) = self.unit.take() {
             if let (true, Some(check), Some(outermost)) =
                 (unit.live_open(), unit.check, unit.stack.first())
@@ -875,6 +908,45 @@ impl Predication {
         }
         let (answer, record) = self.close(uploads, device, PredicationOp::End)?;
         Ok((answer, Some(record)))
+    }
+
+    /// The outermost loop's laying begins, in `raw`, after `from` parts of the command buffer.
+    pub(super) fn lay_from(&mut self, raw: vk::CommandBuffer, from: usize) {
+        self.laying = Some(Laying {
+            raws: vec![raw],
+            broken: false,
+            from,
+        });
+    }
+
+    /// Whether the outermost open loop's laying goes on.
+    pub(super) fn laying(&self) -> bool {
+        self.laying.is_some()
+    }
+
+    /// The laying goes on in `raw`, begun to be submitted again.
+    pub(super) fn laid_into(&mut self, raw: vk::CommandBuffer) {
+        if let Some(laying) = &mut self.laying {
+            laying.raws.push(raw);
+        }
+    }
+
+    /// The encoder left a segment inside the laying: it cannot run again alone.
+    pub(super) fn break_laying(&mut self) {
+        if let Some(laying) = &mut self.laying {
+            laying.broken = true;
+        }
+    }
+
+    /// The outermost loop closed: its laying, where it may run again alone and the loop was laid
+    /// down as copies, with the unit's counter, whose halt word its check reads.
+    fn end_laying(&mut self, copied: bool) -> Option<(Laying, Upload)> {
+        let laying = self.laying.take()?;
+        if laying.broken || !copied {
+            return None;
+        }
+        let counter = self.unit.as_ref()?.counter.clone()?;
+        Some((laying, counter))
     }
 
     /// How many loops the unit has open.
@@ -1513,6 +1585,16 @@ impl ComputeCommandEncoder {
         test: Option<&Test>,
         event: impl FnOnce() -> Event,
     ) -> Result<(), Error> {
+        // The outermost loop's laying goes in command buffers of its own, from here to its check
+        // (the module docs).
+        if self.predication(|predication, _, _| Ok(predication.loops_open() == 0))? {
+            let raw = self.core().cut_reusable()?;
+            let from = self.core().command_buffer().state().parts();
+            self.predication(|predication, _, _| {
+                predication.lay_from(raw, from);
+                Ok(())
+            })?;
+        }
         let (resume, record) = self.predication(|predication, uploads, device| {
             predication.start_loop(uploads, device, test)
         })?;
@@ -1547,6 +1629,7 @@ impl ComputeCommandEncoder {
                 self.captures().open.pop();
             }
             self.capture(event);
+            self.end_laying(false)?;
             return Ok(end.answer);
         };
         let record = end
@@ -1557,7 +1640,25 @@ impl ComputeCommandEncoder {
             .ok_or_else(|| internal("a live loop's End without its body"))?;
         self.capture(event);
         self.lay_copies(kernel, (&looping, test.as_ref()), &body)?;
+        self.end_laying(true)?;
         Ok(end.answer)
+    }
+
+    /// A loop closed, laid down as copies where `copied`: where it was the outermost one and its
+    /// laying may run again alone, the laying ends with its check (the module docs).
+    fn end_laying(&mut self, copied: bool) -> Result<(), Error> {
+        let ended = self.predication(|predication, _, _| {
+            Ok(match predication.loops_open() {
+                0 => predication.end_laying(copied),
+                _ => None,
+            })
+        })?;
+        let Some((laying, counter)) = ended else {
+            return Ok(());
+        };
+        let (raws, from) = laying.into_parts();
+        let check = LoopCheck::new(counter, raws, from);
+        self.core().end_laying(Deferred::Loop(Arc::new(check)))
     }
 
     /// Lay down the further copies of `looping` (with a DoWhile's `test`), each its start, its

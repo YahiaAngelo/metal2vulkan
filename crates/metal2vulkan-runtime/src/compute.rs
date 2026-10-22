@@ -236,6 +236,13 @@ impl CommandBuffer {
         // It joins its command buffer's unit of command predication, carrying on the loops open
         // across its start, or starts the next.
         let carried = self.state().enter_predication(dispatch_type);
+        let mut core = core;
+        // The laying of a loop open across its start goes on in a command buffer of its own, which
+        // the loop's check may submit again (`predication.rs`).
+        if !carried.is_empty() && self.state().predication.laying() {
+            let raw = core.cut_reusable()?;
+            self.state().predication.laid_into(raw);
+        }
         Ok(ComputeCommandEncoder {
             core,
             dispatch_type,
@@ -2071,7 +2078,12 @@ fn record(
         .and_then(|kept| kept.made.get())
         .or_else(|| planned.made_for(commands))
         .filter(|_| !apart_samplers(&device, &objects));
-    let (pipelines, pending) = match (own.filter(|_| !core.encodes_again()), kept_made) {
+    // Inside a predicated loop's laying, it waits for them too: the laying stays one run of
+    // command buffers its check may submit again (`command_buffer/rerun.rs`); but where its
+    // variant records in one of its own.
+    let laying = core.command_buffer().state().predication.laying();
+    let waits = core.encodes_again() || (laying && !apart_samplers(&device, &objects));
+    let (pipelines, pending) = match (own.filter(|_| !waits), kept_made) {
         (Some(_), Some(made)) => {
             if let Some(kept) = &kept {
                 drop(kept.made.set(made.clone()));

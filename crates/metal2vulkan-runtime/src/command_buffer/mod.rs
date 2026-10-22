@@ -41,6 +41,7 @@ pub(super) mod kept_barriers;
 pub(super) mod own;
 pub(super) mod rebound_use;
 mod reencode;
+pub(super) mod rerun;
 mod storage_form;
 mod submit;
 
@@ -1193,6 +1194,11 @@ impl State {
         self.ended.len()
     }
 
+    /// The encoders, or parts of them, ended so far.
+    pub(super) fn parts(&self) -> usize {
+        self.recorded.len()
+    }
+
     /// A compute encoder of `dispatch_type` opened: it joins the unit of command predication of
     /// the compute encoder that ended just before it, of its dispatch type with no event wait or
     /// signal between and no fence update in it, taking the bodies of the loops it left open, or
@@ -1676,7 +1682,7 @@ impl CommandBuffer {
     pub(super) fn new(queue: &CommandQueue, slot: Slot) -> CommandBuffer {
         CommandBuffer(Arc::new(CommandBufferShared {
             device: queue.device().clone(),
-            queue: queue.clone(),
+            queue: queue.kept(),
             state: Mutex::new(State {
                 status: CommandBufferStatus::NotEnqueued,
                 error: None,
@@ -2494,11 +2500,14 @@ impl CommandBuffer {
                 return Err(error);
             }
         };
-        // The first segment a host step records, which the device announces.
+        // The first segment a host step records, which the device announces (a loop's check
+        // records nothing).
         let announced = segments
             .iter()
             .zip(&prepared)
-            .find(|((_, host), prepared)| *host && !prepared.for_good)
+            .find(|((work, host), prepared)| {
+                *host && !prepared.for_good && !matches!(work, Deferred::Loop(_))
+            })
             .map(|((work, _), _)| work.clone());
         // A host step may record commands after the commit (a segment not recorded for good):
         // until the command buffer completes, the buffers they use keep their pages.
@@ -3115,17 +3124,24 @@ impl CommandBufferShared {
 
     /// What the host step of batch `index` waits for ([`needs_host_step`](Self::needs_host_step)):
     /// the work submitted before it, where the GPU may write what a segment or an indirect
-    /// sparse update of it reads; and the pipelines its segments record, while one is being made.
+    /// sparse update of it reads, its own `VkQueue`'s alone where those are loops' checks; and the
+    /// pipelines its segments record, while one is being made, and what a loop's check runs again.
     pub(crate) fn step_waits(&self, index: usize) -> StepWaits {
         let state = lock(&self.state);
         let recorded = &state.recorded[state.batch_range(index)];
         let segments = || recorded.iter().flat_map(|encoder| &encoder.segments);
+        let sparse = recorded
+            .iter()
+            .flat_map(|encoder| &encoder.sparse)
+            .any(SparseUpdate::needs_step);
+        // A loop's check reads only what its laying, on its own `VkQueue`, wrote (`rerun.rs`).
+        let checks_alone = !sparse
+            && segments()
+                .filter(|segment| segment.steps_after_the_gpu())
+                .all(|segment| matches!(segment.work, Deferred::Loop(_)));
         StepWaits {
-            gpu: segments().any(Segment::steps_after_the_gpu)
-                || recorded
-                    .iter()
-                    .flat_map(|encoder| &encoder.sparse)
-                    .any(SparseUpdate::needs_step),
+            gpu: segments().any(Segment::steps_after_the_gpu) || sparse,
+            queue_alone: checks_alone.then(|| self.queue.vk_queue()),
             pipelines: segments().any(Segment::steps_after_pipelines),
         }
     }
@@ -3157,18 +3173,25 @@ impl CommandBufferShared {
     /// batch that shares a resource with it waits for it. `None` while some of it is not known: a
     /// segment its host step records (or records again) for what the GPU may write, one its
     /// submission records (a scrub), or a resource state encoder's update, whose uses its
-    /// submission adds.
+    /// submission adds. A loop's check adds what its laying's parts use, which it may run again.
     pub(crate) fn footprint(&self, index: usize) -> Option<Footprint<ResourceKey>> {
         let state = lock(&self.state);
-        let recorded = &state.recorded[state.batch_range(index)];
+        let range = state.batch_range(index);
+        let recorded = &state.recorded[range.clone()];
         let mut summaries = Vec::new();
         let mut known = Vec::new();
-        for encoder in recorded {
+        for (at, encoder) in recorded.iter().enumerate() {
             if !encoder.sparse.is_empty() {
                 return None;
             }
             summaries.push(&encoder.summary);
             for segment in &encoder.segments {
+                // A loop's check may run its laying again: what the laying's parts use (`rerun.rs`).
+                if let Deferred::Loop(check) = &segment.work {
+                    let laying = state.recorded.get(check.from()..range.start + at);
+                    summaries.extend(laying.into_iter().flatten().map(|part| &part.summary));
+                    continue;
+                }
                 match &segment.recorded {
                     // One recorded again on the GPU alone uses what its recording does; one a
                     // route outgrew, what its host step finds.
@@ -3238,12 +3261,14 @@ impl CommandBufferShared {
         // announces: a recording on the GPU alone made again announces nothing
         // (`gpu_execute::Rerecord`), unless a route outgrew it (`Deferred::outgrown`), which the
         // step records from the records; nor does work recorded again for the CPU's writes since
-        // the commit alone (`Deferred::rewritten`), or for its pipelines alone.
+        // the commit alone (`Deferred::rewritten`), or for its pipelines alone; nor a loop's check,
+        // which records nothing.
         let announced = steps
             .iter()
             .find(|(_, work, inputs)| {
                 work.gpu_written()
                     && (!matches!(inputs, Some(StepInputs::Rerecord(_))) || work.outgrown())
+                    && !matches!(inputs, Some(StepInputs::Loop))
             })
             .map(|(_, work, _)| work.clone());
         let buffer = CommandBuffer(Arc::clone(self));
@@ -3279,8 +3304,14 @@ impl CommandBufferShared {
                 }
             }
             drop(state);
+            // A loop's check that runs its laying again holds the batch: the segments after it
+            // read what the laying leaves, and step once it ends (`rerun.rs`).
+            let holds = work.holds();
             // Dropped without the lock: what it holds may be a state's last handle.
             drop((work, inputs));
+            if holds {
+                break;
+            }
         }
         drop(buffer);
         if let Some(announced) = announced {

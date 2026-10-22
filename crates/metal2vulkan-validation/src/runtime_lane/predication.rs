@@ -16,8 +16,10 @@
 //!   an indirect range; inside a holding one each runs once; setters inside a skipped block take
 //!   effect;
 //! - loops run as Metal's ran, each pass with the encoder's state each command was encoded with,
-//!   nested, around Ifs and every dispatch form, across their unit's encoders, and a loop that
-//!   would run past the copies the runtime lays down fails its command buffer;
+//!   nested, around Ifs and every dispatch form, across their unit's encoders, and past the
+//!   copies the runtime lays down, whose laying its check runs again, repeating nothing encoded
+//!   before the loop (a render pass's clear, a blit); a loop without bound stops once the program
+//!   holds no handle of its queue;
 //! - a live block open where its unit ends fails the command buffer where its commands skip there,
 //!   as Metal's GPU recovery does, and is harmless where they run;
 //! - a word past its buffer reads as Metal reads it: zero within the 256 bytes Metal rounds a lone
@@ -33,14 +35,17 @@ use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::PredicationStepForm;
 use metal2vulkan::device::VkFeature;
-use metal2vulkan::metal::{BarrierScope, DispatchType, IndirectCommandType, ResourceUsage};
+use metal2vulkan::metal::{
+    BarrierScope, DispatchType, IndirectCommandType, PixelFormat, ResourceUsage, TextureUsage,
+};
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, StageSource};
 use metal2vulkan_devtools::llvm_assemble_text;
 use metal2vulkan_runtime::{
-    Buffer, CommandBuffer, CommandBufferError, CommandBufferStatus, ComputeCommandEncoder,
-    ComputePipelineState, Degradation, Device, Error, EventRef, HeapDescriptor, HeapType,
-    IndirectCommandBuffer, IndirectCommandBufferDescriptor, Invalid, MetalLevel, PipelineOptions,
-    Problem, ResourceOptions, RuntimeGap, Size,
+    BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferError, CommandBufferStatus,
+    ComputeCommandEncoder, ComputePipelineState, Degradation, Device, Error, EventRef,
+    HeapDescriptor, HeapType, IndirectCommandBuffer, IndirectCommandBufferDescriptor, Invalid,
+    LoadAction, MetalLevel, Origin, PipelineOptions, Problem, RenderPassDescriptor,
+    ResourceOptions, RuntimeGap, Size, StoreAction, TextureDescriptor,
 };
 
 /// The kernels: `prd_mark` adds 1 to word `t[0]` of `log`; `prd_put` writes `v[0]` into word 0
@@ -491,7 +496,21 @@ pub(crate) fn loop_cases() -> Vec<LoopCase> {
             "1",
         ));
     }
-    let fixed: [FixedLoopCase; 21] = [
+    let fixed: [FixedLoopCase; 25] = [
+        // Past the copies laid down, the laying run again: 128 passes, a DoWhile of 65, and inner
+        // loops of 17 and 40 passes in a While of 2, with marks after.
+        ("w128 T0 V T1", &[(0, 128), (1, 1)], "1"),
+        ("D T0 z65 T1", &[(0, 65), (1, 1)], "1"),
+        (
+            "w2 T0 Q1 w17@1 T1 T2 V V T3",
+            &[(0, 2), (1, 17), (2, 34), (3, 1)],
+            "11",
+        ),
+        (
+            "w2 T0 Q1 w40@1 T1 T2 V V T3",
+            &[(0, 2), (1, 40), (2, 80), (3, 1)],
+            "11",
+        ),
         ("% w7 T0 V", &[(0, 7)], "1"),
         (
             "w3 T0 Q1 w4@1 T1 Q2 D T2 T3 z5@2 V V",
@@ -1435,13 +1454,17 @@ fn loops_run_as_metal_ran() {
 }
 
 /// The loops Metal ran ([`loop_cases`]) run its passes, answer what its Ends answered and
-/// complete, but those that run past the copies the runtime lays down, which fail their command
-/// buffers (`CommandBufferError::PredicatedLoopPastCopies`), where Metal runs on, and one whose
-/// unbalanced End would drop the unit's ungated dispatches, refused
+/// complete, those that run past the copies the runtime lays down among them (their laying run
+/// again, counted), but one whose unbalanced End would drop the unit's ungated dispatches, refused
 /// (`RuntimeGap::PredicationDropsUngatedWork`).
 #[test]
 fn loop_streams_run_as_metal_ran() {
-    const PAST_COPIES: [&str; 7] = [
+    // Past the copies laid down: 2 x 2 x ... six deep, its laying cut at 64, 16, 16 and 1 copies.
+    const PAST_COPIES: [&str; 11] = [
+        "w128 T0 V T1",
+        "D T0 z65 T1",
+        "w2 T0 Q1 w17@1 T1 T2 V V T3",
+        "w2 T0 Q1 w40@1 T1 T2 V V T3",
         "w2@1 T1 Q2 w2@2 T2 Q3 w2@3 T3 Q4 w2@4 T4 Q5 w2@5 T5 Q6 w2@6 T6 T50 V V V V V V",
         "D T1 Q2 D T2 Q3 D T3 Q4 D T4 T50 z2@4 z2@3 z2@2 z2@1",
         "w65 T0 T1 V T2",
@@ -1455,6 +1478,7 @@ fn loop_streams_run_as_metal_ran() {
     on_device(|device| {
         let streams = Streams::new(device);
         let mut wrong = Vec::new();
+        let mut ran_again = device.work_counts().predicated_loop_runs_again;
         for (script, want, answers) in loop_cases() {
             let got = run_counted(&streams, &script);
             if script == DROPS_UNGATED {
@@ -1468,16 +1492,11 @@ fn loop_streams_run_as_metal_ran() {
                 wrong.push(format!("{script}: refused {error:?}"));
                 continue;
             }
-            if PAST_COPIES.contains(&script.as_str()) {
-                let failed = (
-                    CommandBufferStatus::Error,
-                    Some(CommandBufferError::PredicatedLoopPastCopies),
-                );
-                if (got.status, got.error) != failed {
-                    wrong.push(format!("{script}: {:?} {:?}", got.status, got.error));
-                }
-                continue;
+            let again = device.work_counts().predicated_loop_runs_again;
+            if PAST_COPIES.contains(&script.as_str()) && again == ran_again {
+                wrong.push(format!("{script}: its laying ran no time again"));
             }
+            ran_again = again;
             let mut counts = vec![0; LOG_WORDS];
             for &(tag, n) in &want {
                 counts[tag] = n;
@@ -1529,37 +1548,44 @@ fn every_dispatch_form_runs_in_each_pass() {
     });
 }
 
-/// A loop that would run past the copies the runtime lays down (64, or 16 inside another loop)
-/// runs them, halts its unit (the unit's later commands run nothing) and fails its command buffer
-/// (`CommandBufferError::PredicatedLoopPastCopies`), where Metal runs it on; one that ends within
-/// them completes.
+/// A loop that runs past the copies the runtime lays down (64, or 16 inside another loop) runs on
+/// as Metal's runs: its check runs its laying again until it ends, as many times as the passes past
+/// the copies need (counted), and its command buffer completes with every pass Metal ran (a While
+/// of 65, 128 and 1000, a DoWhile of 65, an inner While of 17 and 40 in a While of 2 that resets
+/// the inner count each pass).
 #[test]
-fn a_loop_past_its_copies_fails_its_command_buffer() {
+fn a_loop_past_its_copies_runs_on() {
     on_device(|device| {
-        let past = (
-            CommandBufferStatus::Error,
-            Some(CommandBufferError::PredicatedLoopPastCopies),
-        );
-        let got = looped(device, false, |encoder, marks| {
-            encoder
-                .encode_start_while(Some(&marks.log), 0, NOT_EQUAL, 65)
-                .unwrap();
-            marks.mark(encoder, 0);
-            assert_eq!(encoder.encode_end_while(), Ok(true));
-            marks.mark(encoder, 1);
-        });
-        assert_eq!((got.0, got.1), past, "a While of 65");
-        assert_eq!(got.2[..2], [64, 0], "a While of 65");
+        let ok = (CommandBufferStatus::Completed, None);
+        let again = || device.work_counts().predicated_loop_runs_again;
+        for (n, runs) in [(65u32, 1u64), (128, 1), (1000, 15)] {
+            let before = again();
+            let got = looped(device, false, |encoder, marks| {
+                encoder
+                    .encode_start_while(Some(&marks.log), 0, NOT_EQUAL, n)
+                    .unwrap();
+                marks.mark(encoder, 0);
+                assert_eq!(encoder.encode_end_while(), Ok(true));
+                marks.mark(encoder, 1);
+            });
+            assert_eq!((got.0, got.1), ok, "a While of {n}");
+            assert_eq!(got.2[..2], [n, 1], "a While of {n}");
+            assert_eq!(again() - before, runs, "a While of {n}: its runs again");
+        }
+        let before = again();
         let got = looped(device, false, |encoder, marks| {
             encoder.encode_start_do_while().unwrap();
             marks.mark(encoder, 0);
             let end = encoder.encode_end_do_while(Some(&marks.log), 0, LESS, 65);
             assert_eq!(end, Ok(true));
+            marks.mark(encoder, 1);
         });
-        assert_eq!((got.0, got.1), past, "a DoWhile of 65");
-        assert_eq!(got.2[0], 64, "a DoWhile of 65");
+        assert_eq!((got.0, got.1), ok, "a DoWhile of 65");
+        assert_eq!(got.2[..2], [65, 1], "a DoWhile of 65");
+        assert_eq!(again() - before, 1, "a DoWhile of 65: its runs again");
         let zero = kernel(device, "prd_put", false);
-        for (inner, status) in [(16, (CommandBufferStatus::Completed, None)), (17, past)] {
+        for (inner, runs) in [(16u32, 0u64), (17, 2), (40, 4)] {
+            let before = again();
             let got = looped(device, false, |encoder, marks| {
                 let log = Some(&marks.log);
                 encoder.encode_start_while(log, 0, NOT_EQUAL, 2).unwrap();
@@ -1572,16 +1598,152 @@ fn a_loop_past_its_copies_fails_its_command_buffer() {
                 marks.mark(encoder, 2);
                 assert_eq!(encoder.encode_end_while(), Ok(true));
                 assert_eq!(encoder.encode_end_while(), Ok(true));
+                marks.mark(encoder, 3);
             });
-            assert_eq!((got.0, got.1), status, "an inner While of {inner}");
-            // The inner loop past its copies halts the unit in the outer loop's first pass.
-            let passes = if inner > 16 { 1 } else { 2 };
+            assert_eq!((got.0, got.1), ok, "an inner While of {inner}");
+            let want = [2, inner, 2 * inner, 1];
+            assert_eq!(got.2[..4], want, "an inner While of {inner}");
             assert_eq!(
-                got.2[..3],
-                [passes, 16, passes * 16],
-                "an inner While of {inner}"
+                again() - before,
+                runs,
+                "an inner While of {inner}: its runs again"
             );
         }
+    });
+}
+
+/// What a loop's check runs again is the loop's laying alone: a render pass that clears a texture,
+/// a blit into it and a blit into the log, encoded before the loop in its command buffer, run
+/// once, as Metal runs them. The loop (`while (log[3] != 105) { mark 3; mark 4 }`, from the blit's
+/// 5) runs 100 passes, its laying once again; a run again of the blit would run more passes, and
+/// one of the clear would leave the texture red.
+#[test]
+fn a_loop_run_again_repeats_nothing_before_it() {
+    on_device(|device| {
+        let marks = Marks::new(device);
+        let queue = device.new_command_queue().unwrap();
+        let mut descriptor = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 1, 1, false);
+        descriptor.usage = TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ;
+        let texture = device.new_texture(&descriptor).unwrap();
+        let green = buffer_with(device, &[0, 255, 0, 255]).unwrap();
+        let five = buffer_with(device, &bytes(&[5])).unwrap();
+        let out = buffer_with(device, &[0; 4]).unwrap();
+        let before = device.work_counts().predicated_loop_runs_again;
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut pass = RenderPassDescriptor::new();
+        let color = &mut pass.color_attachments[0];
+        color.texture = Some(texture.clone());
+        color.load_action = LoadAction::Clear;
+        color.store_action = StoreAction::Store;
+        color.clear_color = ClearColor::new(1.0, 0.0, 0.0, 1.0);
+        command_buffer
+            .render_command_encoder(&pass)
+            .unwrap()
+            .end_encoding()
+            .unwrap();
+        let (origin, size) = (Origin::new(0, 0, 0), Size::new(1, 1, 1));
+        let mut blit = command_buffer.blit_command_encoder().unwrap();
+        blit.copy_from_buffer_to_texture(
+            &green,
+            0,
+            4,
+            4,
+            size,
+            &texture,
+            0,
+            0,
+            origin,
+            BlitOption::None,
+        )
+        .unwrap();
+        blit.copy_from_buffer_to_buffer(&five, 0, &marks.log, 12, 4)
+            .unwrap();
+        blit.end_encoding().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        encoder
+            .encode_start_while(Some(&marks.log), 12, NOT_EQUAL, 105)
+            .unwrap();
+        marks.mark(&mut encoder, 3);
+        marks.mark(&mut encoder, 4);
+        assert_eq!(encoder.encode_end_while(), Ok(true));
+        encoder.end_encoding().unwrap();
+        let mut blit = command_buffer.blit_command_encoder().unwrap();
+        blit.copy_from_texture_to_buffer(
+            &texture,
+            0,
+            0,
+            origin,
+            size,
+            &out,
+            0,
+            4,
+            4,
+            BlitOption::None,
+        )
+        .unwrap();
+        blit.end_encoding().unwrap();
+        complete(&command_buffer);
+        assert_eq!(marks.counts()[3..5], [105, 100]);
+        assert_eq!(read_buffer(&out, 0, 4).unwrap(), [0, 255, 0, 255]);
+        let again = device.work_counts().predicated_loop_runs_again - before;
+        assert_eq!(again, 1, "the laying ran once again");
+    });
+}
+
+/// A loop without bound (`while (log[1] != 1) mark 0`, log[1] staying 0) runs on, its laying run
+/// again and again, as Metal's runs (an M3 Max with macOS 27.0.1 ran one 180 s with no error),
+/// while the program holds a handle of its queue (one of two let go changes nothing); once it
+/// holds none, the check stops and the command buffer fails
+/// (`CommandBufferError::PredicatedLoopLetGo`), nothing after the loop run, its runs again
+/// stopped.
+#[test]
+fn a_loop_without_bound_stops_once_its_queue_is_let_go() {
+    on_device(|device| {
+        let marks = Marks::new(device);
+        let queue = device.new_command_queue().unwrap();
+        let held = queue.clone();
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        encoder
+            .encode_start_while(Some(&marks.log), 4, NOT_EQUAL, 1)
+            .unwrap();
+        marks.mark(&mut encoder, 0);
+        assert_eq!(encoder.encode_end_while(), Ok(true));
+        marks.mark(&mut encoder, 2);
+        encoder.end_encoding().unwrap();
+        let again = || device.work_counts().predicated_loop_runs_again;
+        let before = again();
+        command_buffer.commit().unwrap();
+        let ran = |more: u64| {
+            let start = std::time::Instant::now();
+            while again() < before + more {
+                assert!(
+                    start.elapsed() < WAIT,
+                    "its laying ran {} times again",
+                    again() - before
+                );
+                std::thread::yield_now();
+            }
+        };
+        ran(3);
+        drop(queue);
+        ran(6);
+        let running = !matches!(
+            command_buffer.status(),
+            CommandBufferStatus::Completed | CommandBufferStatus::Error
+        );
+        assert!(running, "{:?}", command_buffer.status());
+        drop(held);
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.status(), CommandBufferStatus::Error);
+        assert_eq!(
+            command_buffer.error(),
+            Some(CommandBufferError::PredicatedLoopLetGo)
+        );
+        let stopped = again();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert_eq!(again(), stopped, "its runs again stopped");
+        assert_eq!(marks.counts()[2], 0, "nothing after the loop ran");
     });
 }
 

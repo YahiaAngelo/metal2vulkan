@@ -2953,12 +2953,19 @@ each item named states the rule in full.
   while and do-while loops) runs Metal's blocks and loops on every device, with or without
   buffer device addresses, its unbalanced records answering `NO` and dropping their ranges, and
   its live blocks left open where a unit ends failing the command buffer as Metal's GPU recovery
-  does (`PredicationOpenAtUnitEnd`). Loops nest to any depth. A loop is laid down as 64 copies
-  (16 inside another loop, fewer where they would lay down more than 16384 steps and gated
-  dispatches, and at least one); one that runs past them runs nothing more of its unit and fails
-  its command buffer (`PredicatedLoopPastCopies`), where Metal runs on. A condition word past its buffer reads as
-  Metal reads it (the heap's bytes, or zero), and as zero where Metal reads memory unrelated to the
-  buffer (`predication-word-past-buffer`). Refused where Metal runs on (`RuntimeGap`): an
+  does (`PredicationOpenAtUnitEnd`). Loops nest to any depth and run as many passes as Metal's.
+  A loop is laid down as 64 copies (16 inside another loop, fewer where they would lay down more
+  than 16384 steps and gated dispatches, and at least one); where it runs past them, a check
+  submits its copies again, from where it stopped, until it ends, each time a round trip to the
+  host, holding the batches after it on its queue (and those on other queues that use what the
+  loop uses), and nothing encoded before the loop runs again. A loop without bound runs on, as
+  Metal's does, until the program holds no handle of its queue: then its command buffer fails
+  (`PredicatedLoopLetGo`). A loop whose commands hold work the runtime records apart (an
+  indirect dispatch or an indirect command buffer's execution a host step records) cannot be
+  submitted again alone: past its copies it runs nothing more of its unit and fails its command
+  buffer (`PredicatedLoopPastCopies`), where Metal runs on. A condition word past its buffer reads
+  as Metal reads it (the heap's bytes, or zero), and as zero where Metal reads memory unrelated to
+  the buffer (`predication-word-past-buffer`). Refused where Metal runs on (`RuntimeGap`): an
   unbalanced record that is its unit's first after dispatches of the unit
   (`PredicationDropsUngatedWork`).
 - **A GPU-written indirect command naming a placed ID runs that ID's live holder**, the state made

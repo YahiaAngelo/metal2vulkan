@@ -17,10 +17,12 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSRange, NSString};
 use objc2_metal::{
-    MTLBarrierScope, MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder,
-    MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineState, MTLDevice, MTLDispatchType,
-    MTLFence, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLLibrary, MTLResourceOptions,
-    MTLResourceUsage, MTLSize, MTLStorageMode,
+    MTLBarrierScope, MTLBlitCommandEncoder, MTLBuffer, MTLClearColor, MTLCommandBuffer,
+    MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineState,
+    MTLDevice, MTLDispatchType, MTLFence, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLLibrary,
+    MTLLoadAction, MTLOrigin, MTLPixelFormat, MTLRenderPassDescriptor, MTLResourceOptions,
+    MTLResourceUsage, MTLSize, MTLStorageMode, MTLStoreAction, MTLTextureDescriptor,
+    MTLTextureUsage,
 };
 
 type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
@@ -498,4 +500,95 @@ fn metal_runs_a_block_left_open_where_its_commands_run() {
         assert_eq!(got.settled, Ok(()), "{script}");
         assert_eq!(got.once().as_deref(), Some(ran), "{script}");
     }
+}
+
+/// A loop past the copies the runtime lays down, after a render pass that clears a texture and
+/// blits in its command buffer, on Metal (the runtime lane's
+/// `a_loop_run_again_repeats_nothing_before_it`, the same commands): the pass clears the texture
+/// red, a blit copies green into it, another 5 into log word 3, and `while (log[3] != 105)
+/// { mark 3; mark 4 }` runs 100 passes; the texture reads green.
+#[test]
+fn metal_runs_a_loop_after_a_cleared_pass_and_blits_once() {
+    let probe = Probe::new();
+    write(&probe.log, &[0; LOG_WORDS]);
+    let device = probe.queue.device();
+    let descriptor = MTLTextureDescriptor::new();
+    descriptor.setPixelFormat(MTLPixelFormat::RGBA8Unorm);
+    // SAFETY: a 1 x 1 texture.
+    unsafe {
+        descriptor.setWidth(1);
+        descriptor.setHeight(1);
+    }
+    descriptor.setStorageMode(MTLStorageMode::Shared);
+    descriptor.setUsage(MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead);
+    let texture = device
+        .newTextureWithDescriptor(&descriptor)
+        .expect("a texture");
+    let green = shared(&device, &[u32::from_le_bytes([0, 255, 0, 255])]);
+    let five = shared(&device, &[5]);
+    let out = shared(&device, &[0]);
+    let command_buffer: CommandBuffer = probe.queue.commandBuffer().expect("a command buffer");
+    let pass = MTLRenderPassDescriptor::renderPassDescriptor();
+    // SAFETY: attachment 0 of the pass's array.
+    let color = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
+    color.setTexture(Some(&texture));
+    color.setLoadAction(MTLLoadAction::Clear);
+    color.setStoreAction(MTLStoreAction::Store);
+    color.setClearColor(MTLClearColor {
+        red: 1.0,
+        green: 0.0,
+        blue: 0.0,
+        alpha: 1.0,
+    });
+    command_buffer
+        .renderCommandEncoderWithDescriptor(&pass)
+        .expect("a render encoder")
+        .endEncoding();
+    let origin = MTLOrigin { x: 0, y: 0, z: 0 };
+    let blit = command_buffer.blitCommandEncoder().expect("a blit encoder");
+    // SAFETY: a texel of the texture and words of Shared buffers that outlive the command buffer,
+    // which the test waits for.
+    unsafe {
+        blit.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+            &green, 0, 4, 4, one(), &texture, 0, 0, origin,
+        );
+        blit.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size(
+            &five, 0, &probe.log, 12, 4,
+        );
+    }
+    blit.endEncoding();
+    let encoder = command_buffer
+        .computeCommandEncoder()
+        .expect("a compute encoder");
+    let e = &*encoder;
+    let log = &*probe.log;
+    // SAFETY: the private selectors take these arguments (`v@:@QQI` and `B@:`), on a live compute
+    // encoder; the log outlives the command buffer.
+    unsafe {
+        let _: () = msg_send![e, encodeStartWhile: log, offset: 12usize, comparison: 1usize, referenceValue: 105u32];
+        for tag in [3, 4] {
+            probe.bind(&encoder, tag);
+            encoder.dispatchThreads_threadsPerThreadgroup(one(), one());
+        }
+        let end: bool = msg_send![e, encodeEndWhile];
+        assert!(end);
+    }
+    encoder.endEncoding();
+    let blit = command_buffer.blitCommandEncoder().expect("a blit encoder");
+    // SAFETY: as above.
+    unsafe {
+        blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+            &texture, 0, 0, origin, one(), &out, 0, 4, 4,
+        );
+    }
+    blit.endEncoding();
+    commit_and_wait(&command_buffer, "Metal loop after a cleared pass and blits")
+        .expect("the command buffer completes");
+    let contents = probe.log.contents().cast::<u32>();
+    // SAFETY: the Shared log's words, read once the command buffer's work ended.
+    let counts = unsafe { std::slice::from_raw_parts(contents.as_ptr(), LOG_WORDS) };
+    assert_eq!(counts[3..5], [105, 100]);
+    // SAFETY: the Shared buffer's word, read once the command buffer's work ended.
+    let texel = unsafe { out.contents().cast::<u32>().read() };
+    assert_eq!(texel.to_le_bytes(), [0, 255, 0, 255]);
 }

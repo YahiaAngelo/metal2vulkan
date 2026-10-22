@@ -128,12 +128,14 @@ impl Segment {
     /// the CPU wrote since (`Deferred::rewritten`); or `commit`'s recording on the
     /// GPU alone must be made again ([`rerecords`](Self::rerecords)); or `commit` recorded it on
     /// the GPU for good, and a route encoded since may write more than it decided on, or gives an
-    /// execution's check something to see (`Deferred::outgrown`).
+    /// execution's check something to see (`Deferred::outgrown`); or its step left work its batch
+    /// waits for (`Deferred::holds`).
     pub(super) fn needs_step(&self) -> bool {
         (!self.stepped
             && (self.host || self.pipelines || self.work.gpu_written() || self.work.rewritten()))
             || self.rerecords()
             || self.work.outgrown()
+            || self.work.holds()
     }
 
     /// Whether `commit` recorded it on the GPU alone with no barrier between its commands and its
@@ -149,9 +151,10 @@ impl Segment {
         (!self.stepped && (self.host || self.work.gpu_written())) || self.work.outgrown()
     }
 
-    /// Whether its host step waits for a pipeline still being made.
+    /// Whether its host step waits for a pipeline still being made, or its batch for what its
+    /// step left (`Deferred::holds`), which wakes the scheduler as it ends.
     pub(super) fn steps_after_pipelines(&self) -> bool {
-        !self.stepped && self.work.making()
+        (!self.stepped && self.work.making()) || self.work.holds()
     }
 
     /// Whether it is a dispatch whose pipelines were being made (`pending_dispatch.rs`): an
@@ -1556,22 +1559,80 @@ impl EncoderCore {
         let next = {
             let command_buffer = &self.open.command_buffer;
             let mut state = command_buffer.state();
+            // Work left apart inside a predicated loop's laying keeps it from running again alone
+            // (`predication.rs`).
+            state.predication.break_laying();
             command_buffer.allocate_raw(&mut state)?
         };
-        let begin = vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        self.begin(next, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
+        Ok(Continuation(next))
+    }
+
+    /// End the `VkCommandBuffer` the encoder records into and go on in a new one, begun to be
+    /// submitted again, for a predicated loop's laying (`predication.rs`), which its check may
+    /// run again: the textures it shadows copied back first, so the laying copies in again what
+    /// it reads, and a barrier from everything before at its start. Its handle. Refused where the
+    /// current one does not end, or none can be made, which abandons the command buffer.
+    pub(super) fn cut_reusable(&mut self) -> Result<vk::CommandBuffer, Error> {
+        let copies = self.shadows.leave();
+        self.shadow_copies(&copies);
+        self.barrier(Barrier::everything());
+        let next = {
+            let command_buffer = &self.open.command_buffer;
+            let mut state = command_buffer.state();
+            command_buffer.allocate_raw(&mut state)
+        };
+        let ended = next.and_then(|next| {
+            // SAFETY: as in `barrier`.
+            unsafe { self.open.command_buffer.end_raw(self.raw) }.map_err(vulkan)?;
+            Ok(next)
+        });
+        let next = match ended {
+            Ok(next) => next,
+            Err(error) => {
+                self.open.command_buffer.state().abandoned = true;
+                return Err(error);
+            }
+        };
+        self.ended.push(self.raw);
+        self.raw = next;
+        if let Err(error) = self.begin(next, vk::CommandBufferUsageFlags::empty()) {
+            self.open.command_buffer.state().abandoned = true;
+            return Err(error);
+        }
+        self.barrier(Barrier::everything());
+        Ok(next)
+    }
+
+    /// End a predicated loop's laying (`predication.rs`) with its check, `work`: the textures it
+    /// shadows copied back, a barrier from everything before to every later command and to the
+    /// host, which reads the unit's halt word; the encoder goes on after the check.
+    pub(super) fn end_laying(&mut self, work: Deferred) -> Result<(), Error> {
+        let copies = self.shadows.leave();
+        self.shadow_copies(&copies);
+        self.barrier(Barrier::to_all());
+        self.defer(work)
+    }
+
+    /// Begin `raw`, a `VkCommandBuffer` the command buffer's pool just handed out, with `flags`.
+    fn begin(
+        &self,
+        raw: vk::CommandBuffer,
+        flags: vk::CommandBufferUsageFlags,
+    ) -> Result<(), Error> {
+        let begin = vk::CommandBufferBeginInfo::default().flags(flags);
         // SAFETY: the command buffer was just allocated from the pool; only this encoder
         // records it.
         unsafe {
             self.device()
                 .shared()
                 .vk()
-                .begin_command_buffer(next, &begin)
+                .begin_command_buffer(raw, &begin)
         }
         .map_err(vulkan)?;
         let counts = &self.device().shared().counts;
         counts.encoder_command_buffer_begun(Begun::Continuation);
-        Ok(Continuation(next))
+        Ok(())
     }
 
     /// [`defer`](Self::defer) `work`, the encoder going on in `next`: refused only where the

@@ -50,7 +50,10 @@
 //!   values): only then are the records the work before it wrote known. The thread then records
 //!   the batch's segments (`CommandBufferShared::host_step`) without its lock, each step a
 //!   section of the exit guard, and submits the batch in its order. Meanwhile it submits other
-//!   ready batches; the completion turns wake it as batches complete while a gate is pending.
+//!   ready batches; the completion turns wake it as batches complete while a gate is pending. A
+//!   batch whose step is a predicated loop's check alone waits for its own `VkQueue`'s work
+//!   alone; while the check's thread runs the loop's laying again, the batch waits as for a
+//!   making, which the thread's end wakes the thread for (`command_buffer/rerun.rs`).
 //! - **Submission checks** (`command_buffer/checks.rs`). A batch of a command buffer with a check
 //!   is held, once otherwise ready and its host step recorded, until the checks of Metal's
 //!   submissions in it ran (`CommandBufferShared::run_checks`), which the thread runs as it runs
@@ -467,6 +470,9 @@ struct Held {
 pub(crate) struct StepWaits {
     /// The work submitted before it to complete (its gate): the GPU may write what it reads.
     pub(crate) gpu: bool,
+    /// The `VkQueue` whose work alone it waits for, where the GPU writes what it reads there alone
+    /// (a predicated loop's check, `command_buffer/rerun.rs`): every other queue goes on.
+    pub(crate) queue_alone: Option<usize>,
     /// A pipeline it records, still being made.
     pub(crate) pipelines: bool,
 }
@@ -1450,16 +1456,22 @@ fn gate_heads(state: &mut State, behind: &[u64], left: &mut Left<Work>, awaits: 
             continue;
         }
         let gate = held.gate.get_or_insert_with(|| values.clone());
-        awaits.gate(gate);
+        match waits.queue_alone {
+            Some(queue) => awaits.gate_on(queue, gate[queue], gate.len()),
+            None => awaits.gate(gate),
+        }
         fence(Ordering::SeqCst);
         let device = held.buffer.device();
         let shared = device.shared();
         let reached = device.is_lost()
-            || shared
-                .queues
-                .iter()
-                .zip(gate.iter())
-                .all(|(queue, &value)| queue.completed_value() >= value);
+            || match waits.queue_alone {
+                Some(queue) => shared.queues[queue].completed_value() >= gate[queue],
+                None => shared
+                    .queues
+                    .iter()
+                    .zip(gate.iter())
+                    .all(|(queue, &value)| queue.completed_value() >= value),
+            };
         if reached {
             left.push(Kind::Step, (held.buffer.hold(), held.index));
         } else {
