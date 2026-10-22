@@ -32,7 +32,8 @@
 //! argument-buffer state is unread ([`ARGUMENT_BUFFERS`]), a device answering at a Metal level
 //! below its host's macOS release here ([`METAL_LEVELS`]), mipmaps within Metal's
 //! spread ([`MIPMAPS`]), a heap's depth or stencil texture laid apart from the heap ([`APART`]),
-//! a depth or stencil texture without GPU-optimized contents that stays optimized ([`OPTIMIZED`]),
+//! a multisample depth or stencil texture without GPU-optimized contents that stays optimized
+//! ([`OPTIMIZED`]),
 //! a heap's colour texture on a driver whose compressed images hide aliased writes ([`ALIASES`]),
 //! one Metal compresses that keeps the driver's compression there ([`COMPRESSED`]),
 //! sparse textures on a device without strict residency ([`SPARSE`]), overlapping copies between textures over

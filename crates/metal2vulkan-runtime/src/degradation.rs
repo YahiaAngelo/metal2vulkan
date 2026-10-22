@@ -995,13 +995,14 @@ degradations! {
         /// A depth or stencil texture with `allowGPUOptimizedContents` off sized or made in a heap
         /// (never a device's own texture, whose layout nothing shows), on a device whose driver
         /// keeps depth and stencil images GPU-optimized whatever their create info
-        /// ([`metal2vulkan::device::DriverFact::DepthStencilImagesStayGpuOptimized`]): Metal lays
-        /// the texture out without its compression metadata, and the runtime's image keeps it.
+        /// ([`metal2vulkan::device::DriverFact::DepthStencilImagesStayGpuOptimized`]), that no
+        /// shadow of Metal's tiles in the heap's bytes serves (a multisample texture, a depth twin,
+        /// a format whose layout is not measured; `texture/heap.rs`): Metal lays the texture out
+        /// without its compression metadata, and the runtime's image keeps it.
         OptimizedDepthStencilTexture = "optimized-depth-stencil-texture", Precision,
             "the texture keeps its GPU-optimized layout: heap_texture_size_and_align answers \
-             Metal's size for the texture with the property on, larger than Metal's with it off \
-             (16512 bytes for a 64x64 Depth32Float texture, where Metal answers 16384), so a \
-             heap sized by Metal's answers holds fewer such textures";
+             Metal's size for the texture with the property on, larger than Metal's with it off, \
+             so a heap sized by Metal's answers holds fewer such textures";
         /// A texture of an IOSurface plane of more than one row under 16 bytes a row
         /// (`Buffer::new_texture_with_iosurface_plane`, `linear_plan.rs`): Metal's GPU writes its
         /// rows 16 bytes apart and reads every row past the first as memory-dependent bytes

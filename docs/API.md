@@ -1655,12 +1655,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-optimized-depth-stencil-texture` (precision).
   `OptimizedDepthStencilTexture`: A depth or stencil texture with `allowGPUOptimizedContents` off
   sized or made in a heap (never a device's own texture, whose layout nothing shows), on a device
-  whose driver keeps depth and stencil images GPU-optimized whatever their create info: Metal lays
-  the texture out without its compression metadata, and the runtime's image keeps it. Cost: the
-  texture keeps its GPU-optimized layout: heap_texture_size_and_align answers Metal's size for the
-  texture with the property on, larger than Metal's with it off (16512 bytes for a 64x64
-  Depth32Float texture, where Metal answers 16384), so a heap sized by Metal's answers holds fewer
-  such textures.
+  whose driver keeps depth and stencil images GPU-optimized whatever their create info, that no
+  shadow of Metal's tiles in the heap's bytes serves (a multisample texture, a depth twin, a format
+  whose layout is not measured): Metal lays the texture out without its compression metadata, and
+  the runtime's image keeps it. Cost: the texture keeps its GPU-optimized layout:
+  heap_texture_size_and_align answers Metal's size for the texture with the property on, larger
+  than Metal's with it off, so a heap sized by Metal's answers holds fewer such textures.
 - `metal2vulkan-degrade-narrow-surface-rows` (precision). `NarrowSurfaceRows`: A texture of an
   IOSurface plane of more than one row under 16 bytes a row: Metal's GPU writes its rows 16 bytes
   apart and reads every row past the first as memory-dependent bytes (zeros in a fresh process;

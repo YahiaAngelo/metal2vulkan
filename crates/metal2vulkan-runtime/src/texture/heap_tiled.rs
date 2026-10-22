@@ -823,7 +823,7 @@ pub(crate) struct Untiled {
 
 impl Untiled {
     /// A texture Metal may keep losslessly compressed (`heap-texture-lossless-layout`).
-    const LOSSLESS: Untiled = Untiled {
+    pub(crate) const LOSSLESS: Untiled = Untiled {
         kind: Degradation::HeapTextureLosslessLayout,
         reason: "Metal may keep it losslessly compressed (allowGPUOptimizedContents, 256 texels \
                  or more, and none of ShaderWrite, PixelFormatView and ShaderAtomic usage, or a \
@@ -879,6 +879,50 @@ pub(crate) enum HeapLayout {
     /// Laid out as a measured route of its own lays it (a 4:2:2 texture's rows, a two-plane
     /// texture's planes; `heap.rs`).
     Measured,
+    /// A texture Metal keeps losslessly compressed, whose bytes are no layout of its texels
+    /// ([`Untiled::LOSSLESS`]), held by a shadow of its elements in the tiles Metal lays it in
+    /// uncompressed (`heap.rs`): announced once per texture as `heap-texture-lossless-layout`.
+    Uncompressed(TiledLayout),
+}
+
+impl HeapLayout {
+    /// The tiles a shadow of the texture's bytes lays its elements in: Metal's
+    /// ([`HeapLayout::Tiled`]), or its uncompressed ones ([`HeapLayout::Uncompressed`]).
+    pub(crate) fn tiles(&self) -> Option<&TiledLayout> {
+        match self {
+            HeapLayout::Tiled(tiled) | HeapLayout::Uncompressed(tiled) => Some(tiled),
+            HeapLayout::Untiled(_) | HeapLayout::Measured => None,
+        }
+    }
+}
+
+/// The layout a shadow of the heap's bytes holds a single-sample texture of `layout` (its image of
+/// `format`, at the Metal level `level`) in, where Metal lays it out as `metal`: Metal's tiles
+/// where it tiles the texture ([`HeapLayout::Tiled`]); where it keeps the texture losslessly
+/// compressed ([`Untiled::LOSSLESS`]), the tiles it lays the texture in uncompressed
+/// ([`HeapLayout::Uncompressed`]); `None` for any other (a layout not measured, or an image that
+/// holds other bytes than Metal's elements).
+pub(crate) fn shadow_tiles(
+    layout: &TextureLayout,
+    format: Format,
+    level: MetalLevel,
+    metal: &HeapLayout,
+) -> Option<HeapLayout> {
+    if layout.samples > 1 {
+        return None;
+    }
+    match metal {
+        HeapLayout::Tiled(_) => Some(metal.clone()),
+        HeapLayout::Untiled(untiled) if *untiled == Untiled::LOSSLESS => {
+            // With `allowGPUOptimizedContents` off Metal keeps every texture uncompressed.
+            let plain = metal_heap_layout(layout, TextureUsage::SHADER_READ, false, format, level);
+            match plain.layout {
+                HeapLayout::Tiled(tiled) => Some(HeapLayout::Uncompressed(tiled)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Metal's answer for a heap texture where the runtime knows it, and the runtime's layout of it.
