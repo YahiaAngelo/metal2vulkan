@@ -53,7 +53,8 @@
 //!   once its waits are met, its submission handlers first and its kernel times then
 //!   ([`QueueHangs::schedule_early`], [`Scheduling::Behind`]), until it lets the wait go. One
 //!   whose waits are not met by then, and every one after it, read `Scheduled` with their last
-//!   batch, after the hang's, as does every one where the hang's own came with its last batch.
+//!   batch, after the hang's, as does every one where the hang's own came with its last batch, and
+//!   one with a switch of storage forms riding on its commit.
 //!
 //! [`Batches::hold`]: super::batches::Batches::hold
 
@@ -312,8 +313,8 @@ fn sleep_until(until: Instant) {
 /// The hanging command buffer `buffer` holds, where something still holds it, came to its time to
 /// read `Scheduled` ([`Scheduling::Hang`]): it does once the batch before its wait was taken, its
 /// submission handlers first on this thread. Where that batch is not taken within
-/// [`SIGNAL_BOUND`] (an event wait before the hang not met), its last batch makes it instead.
-/// Whether it was made here.
+/// [`SIGNAL_BOUND`] (an event wait before the hang not met), its last batch makes it instead, and
+/// none where the command buffer failed meanwhile. Whether it was made here.
 fn hang_scheduled(buffer: Weak<CommandBufferShared>) -> bool {
     let Some(buffer) = buffer.upgrade() else {
         return false;
@@ -330,7 +331,7 @@ fn hang_scheduled(buffer: Weak<CommandBufferShared>) -> bool {
                     break Some(handlers);
                 }
                 Some(Scheduling::Hang { taken: false, .. })
-                    if !left.is_zero() && !exit_guard::closed() => {}
+                    if !left.is_zero() && !exit_guard::closed() && state.failure.is_none() => {}
                 Some(Scheduling::Hang { taken: false, .. }) => {
                     state.hang_scheduling = None;
                     break None;
@@ -427,12 +428,16 @@ pub(super) fn schedules(
 
 /// The command buffer `buffer`, of state `state`, committed on its queue while a hang of it is in
 /// flight with the event waits `waits`, joins the hang's command buffers to make `Scheduled`
-/// early ([`QueueHangs::schedule_early`]).
+/// early ([`QueueHangs::schedule_early`]); not one with a switch of storage forms riding on its
+/// commit, which settles by its last batch's submission.
 pub(super) fn join(
     buffer: &Arc<CommandBufferShared>,
     state: &mut State,
     waits: Vec<(Arc<EventShared>, u64)>,
 ) {
+    if state.storage_form.is_some() {
+        return;
+    }
     state.hang_scheduling = Some(Scheduling::Behind { made: false });
     let hangs = buffer.queue.hangs();
     let mut early = lock(&hangs.early);
