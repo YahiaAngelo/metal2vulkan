@@ -72,7 +72,7 @@
 //!   reaches its record by the address it is pushed, and every other place by the address the
 //!   record names; on any other device (`bind::PredicationStepForm::Bound`) it binds its record's
 //!   region, its unit's counter, Metal's word (its buffer at the word's offset aligned down to
-//!   `minStorageBufferOffsetAlignment`), its loop's flag and the overflow or check word as five
+//!   `minStorageBufferOffsetAlignment`), its loop's flag and a `UnitEnd`'s check word as five
 //!   storage buffers of a set of its own, and the record names each by its byte offset there.
 //! - **Gated dispatches.** A dispatch encoded inside a block, or after the unit's first block
 //!   opened with none open (so a later unbalanced record can drop it), runs by
@@ -111,11 +111,15 @@
 //!   the first copy's, inner loops' copies included), and at least one, so neither a long body
 //!   nor nesting multiplies a loop's commands past what a driver takes in one command buffer;
 //!   each behind a copy start step and closed by a copy end step, and then a step past them. The
-//!   copies share a flag the first failing test sets, after which every copy skips; a step past
-//!   the copies sets the command buffer's overflow word where the loop would run another, which
-//!   fails the command buffer at its completion, before its completed handlers run
+//!   copies share a flag the first failing test sets, after which every copy skips; the first
+//!   copy's start takes the flag as clear (`PredicationOp::WhileFirst`, `PredicationOp::DoFirst`).
+//!   A step past the copies halts the unit where the loop would run another: it sets the unit's
+//!   halt word (beside its counter) to the loop's id, every later step of the unit then leaves
+//!   its words and runs nothing (a host step's command too), and the command buffer fails at its
+//!   completion, before its completed handlers run
 //!   (`CommandBufferError::PredicatedLoopPastCopies`), where Metal runs on. A loop inside
-//!   another's copy is laid down again in each. A killed loop gets no copies.
+//!   another's copy is laid down again in each, with an id of its own. A killed loop gets no
+//!   copies.
 
 use super::buffer::Buffer;
 use super::compute::{ComputeCommandEncoder, EncoderState};
@@ -157,10 +161,12 @@ pub(super) struct Predication {
     /// encoder of another type than its first encoder's ends the process at some levels
     /// (`MetalLevel::ends_at_a_runs_first_indirect_of_another_type`).
     indirect_run: Option<IndirectRun>,
-    /// The word a loop's last copy sets where the loop would run another (made with the
-    /// command buffer's first loop): the command buffer fails at its completion
-    /// (`CommandBufferError::PredicatedLoopPastCopies`).
-    overflow: Option<Upload>,
+    /// The skip counters of the units that laid a loop, whose halt words (4 bytes past each) a
+    /// loop's step past its copies sets where the loop would run another: the command buffer
+    /// fails at its completion where one is set (`CommandBufferError::PredicatedLoopPastCopies`).
+    halts: Vec<Upload>,
+    /// The loops laid down so far: the next one's id ([`PredicationStep::id`]) is one more.
+    loops: u32,
     /// The steps and gated dispatches recorded so far: what a loop's copies lay down is counted
     /// from it ([`copies_of`]).
     laid: u64,
@@ -331,14 +337,14 @@ pub(super) struct Step {
     bound: Option<Places>,
 }
 
-/// What a bound step binds besides its record and Metal's word: its unit's counter, and its
-/// loop's flag and the overflow word, or a `UnitEnd`'s check word, where it has them (its record
-/// where not).
+/// What a bound step binds besides its record and Metal's word: its unit's counter (with its halt
+/// word), and its loop's flag or a `UnitEnd`'s check word, where it has one (its record where
+/// not).
 #[derive(Clone)]
 struct Places {
     counter: Upload,
     flag: Option<Upload>,
-    overflow: Option<Upload>,
+    check: Option<Upload>,
 }
 
 /// The gates a bound step's record holds before a dispatch needs a further step's
@@ -402,6 +408,8 @@ struct Unit {
     /// The word its encoders' `UnitEnd` steps write, made at the first that ended with a live
     /// block open.
     check: Option<Upload>,
+    /// It laid a loop: its counter is among [`Predication::halts`].
+    halting: bool,
     /// The bodies of the loops its last encoder ended with open, which its next encoder carries
     /// on (`Captures`).
     carried: Vec<Vec<(EncoderState, Event)>>,
@@ -442,11 +450,13 @@ enum Kind {
 }
 
 /// A loop as its copies are laid down: a While's condition, or a DoWhile's (`None`: its End names
-/// it), and the flag its copies share, which its first failing test sets.
+/// it), the flag its copies share, which its first failing test sets, and its id, at which its
+/// step past its copies halts its unit.
 #[derive(Clone)]
 pub(super) struct Looping {
     test: Option<Test>,
     flag: Upload,
+    id: u32,
     /// The command buffer's steps and gated dispatches laid down before it ([`Predication::laid`]).
     laid_at: u64,
 }
@@ -482,6 +492,7 @@ impl Unit {
             range: Droppable::default(),
             closing: false,
             check: None,
+            halting: false,
             carried: Vec::new(),
         }
     }
@@ -619,8 +630,8 @@ impl Predication {
             .ok_or_else(|| internal("a predication record outside a unit"))
     }
 
-    /// A step of `step` on the unit's counter (made now where it has none), whose loop's flag
-    /// and overflow word, or check word, are `places` where it has them: what to record, which
+    /// A step of `step` on the unit's counter (made now where it has none), whose loop's flag or
+    /// check word is `places` where it has one: what to record, which
     /// gates the dispatches encoded after it until the next step. `step` takes the counter's
     /// place ([`place`]).
     fn step(
@@ -638,7 +649,7 @@ impl Predication {
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
-        ((flag, overflow), gates): ((Option<&Upload>, Option<&Upload>), u64),
+        ((flag, check), gates): ((Option<&Upload>, Option<&Upload>), u64),
         step: impl FnOnce(u64) -> PredicationStep,
     ) -> Result<Step, Error> {
         let counter = match self.unit()?.counter.clone() {
@@ -669,7 +680,7 @@ impl Predication {
         let places = bound.then(|| Places {
             counter,
             flag: flag.cloned(),
-            overflow: overflow.cloned(),
+            check: check.cloned(),
         });
         Ok(Step {
             record,
@@ -677,22 +688,10 @@ impl Predication {
         })
     }
 
-    /// The overflow word, made with the first loop.
-    fn overflow(&mut self, uploads: &mut Uploads, device: &Device) -> Result<Upload, Error> {
-        let overflow = match &self.overflow {
-            Some(overflow) => overflow.clone(),
-            None => uploads.upload(device, &[], 16)?,
-        };
-        self.overflow = Some(overflow.clone());
-        Ok(overflow)
-    }
-
-    /// Whether a loop's last copy found the loop would run another: read once the command
-    /// buffer completed.
-    pub(super) fn overflowed(&self) -> bool {
-        self.overflow
-            .as_ref()
-            .is_some_and(|overflow| u32::from_le_bytes(overflow.read::<4>()) != 0)
+    /// Whether a loop's step past its copies halted its unit, where the loop would run another
+    /// copy: read once the command buffer completed.
+    pub(super) fn halted(&self) -> bool {
+        (self.halts.iter()).any(|counter| counter.read::<8>()[4..] != [0; 4])
     }
 
     /// Where a unit ended with a live block open where its commands skipped, as Metal's GPU
@@ -895,26 +894,39 @@ impl Predication {
         test: Option<&Test>,
     ) -> Result<(Option<Step>, Step), Error> {
         let (resume, dead) = self.resume(uploads, device)?;
+        self.loops = (self.loops.checked_add(1))
+            .ok_or_else(|| internal("a command buffer's loops past 2^32"))?;
         let looping = Looping {
             test: test.cloned(),
             flag: uploads.upload(device, &[], 16)?,
+            id: self.loops,
             laid_at: self.laid,
         };
-        let record = self.copy_step(uploads, device, &looping)?;
+        let record = self.copy_step(uploads, device, &looping, true)?;
+        let unit = self.unit()?;
+        if !unit.halting {
+            unit.halting = true;
+            let counter = (unit.counter.clone())
+                .ok_or_else(|| internal("a loop's step without its unit's counter"))?;
+            self.halts.push(counter);
+        }
         self.open(&record, Kind::Loop(looping), dead)?;
         Ok((resume, record))
     }
 
-    /// The start of a copy of `looping`: its step's record.
+    /// The start of a copy of `looping`, its first where `first`: its step's record.
     fn copy_step(
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
         looping: &Looping,
+        first: bool,
     ) -> Result<Step, Error> {
-        let op = match looping.test {
-            Some(_) => PredicationOp::While,
-            None => PredicationOp::Do,
+        let op = match (&looping.test, first) {
+            (Some(_), true) => PredicationOp::WhileFirst,
+            (Some(_), false) => PredicationOp::While,
+            (None, true) => PredicationOp::DoFirst,
+            (None, false) => PredicationOp::Do,
         };
         self.loop_step(uploads, device, looping, (op, looping.test.as_ref()))
     }
@@ -926,7 +938,7 @@ impl Predication {
         device: &Device,
         looping: &Looping,
     ) -> Result<Step, Error> {
-        let record = self.copy_step(uploads, device, looping)?;
+        let record = self.copy_step(uploads, device, looping, false)?;
         let index = self.records;
         self.unit()?.stack.push(Block {
             start: record.record.clone(),
@@ -944,11 +956,10 @@ impl Predication {
         looping: &Looping,
         (op, test): (PredicationOp, Option<&Test>),
     ) -> Result<Step, Error> {
-        let overflow = self.overflow(uploads, device)?;
-        let (flag, overflow_at) = (place(device, &looping.flag)?, place(device, &overflow)?);
-        let places = (Some(&looping.flag), Some(&overflow));
+        let flag = place(device, &looping.flag)?;
+        let places = (Some(&looping.flag), None);
         self.step(uploads, device, places, |counter| {
-            let step = PredicationStep::new(counter, op).in_loop(flag, overflow_at);
+            let step = PredicationStep::new(counter, op).in_loop(flag, looping.id);
             match test {
                 Some(test) => test.of(step),
                 None => step,
@@ -974,8 +985,8 @@ impl Predication {
         Ok(record)
     }
 
-    /// After the last copy of `looping`, a DoWhile's testing `test`: the step's record that sets
-    /// the overflow word where the loop would run another.
+    /// After the last copy of `looping`, a DoWhile's testing `test`: the step's record that halts
+    /// the unit where the loop would run another.
     fn past(
         &mut self,
         uploads: &mut Uploads,
@@ -1160,15 +1171,16 @@ fn addressed(upload: &Upload) -> Result<u64, Error> {
         .ok_or_else(|| internal("a predication region without a device address"))
 }
 
-/// The check a host step makes of a command inside a block: its unit's skip counter.
+/// The check a host step makes of a command inside a block: its unit's skip counter and halt
+/// word.
 #[derive(Clone)]
 pub(super) struct HostGate(Upload);
 
 impl HostGate {
-    /// Whether the command runs nothing: the counter the steps before it left is not 0. Read at
-    /// the command's host step, once the work before it completed.
+    /// Whether the command runs nothing: the counter the steps before it left is not 0, or a loop
+    /// halted the unit. Read at the command's host step, once the work before it completed.
     pub(super) fn skips(&self) -> bool {
-        u32::from_le_bytes(self.0.read::<4>()) != 0
+        self.0.read::<8>() != [0; 8]
     }
 }
 
@@ -1199,7 +1211,7 @@ fn record_step(
                     region(&places.counter),
                     test.and_then(|test| test.binding).unwrap_or(record),
                     or_record(&places.flag),
-                    or_record(&places.overflow),
+                    or_record(&places.check),
                 ],
             };
             (None, Some(OwnedBinds::new(core.device(), &kernel, &[set])?))

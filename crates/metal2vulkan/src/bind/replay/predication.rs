@@ -17,6 +17,15 @@
 //!   [`PredicationOp::Hold`] (the counter stays), and a [`PredicationOp::Resume`] (the counter
 //!   becomes 0) goes before the record that ends the range. [`PredicationOp::UnitEnd`] leaves the
 //!   counter and writes whether it is above 0 into its check word.
+//! - **The halt word** (the `u32` 4 bytes past the counter, 0 at the unit's start): a loop's step
+//!   past its last copy ([`PredicationOp::WhilePast`], [`PredicationOp::DoPast`]) sets it to the
+//!   loop's id where the loop would run another pass. While it is not 0, every step leaves the
+//!   counter, its loop's flag and its check word as they are and closes its gates, but the start
+//!   of the first copy of the loop of that id ([`PredicationOp::WhileFirst`],
+//!   [`PredicationOp::DoFirst`]), which sets it back to 0 and runs: so the consumer can run the
+//!   recorded steps again from the halted loop's first copy on, and the loop goes on where it
+//!   stopped, as many passes again as it has copies. A first copy's start takes its loop's flag
+//!   as clear, so a loop laid down again runs afresh.
 //! - **The condition** (an If's): `word OP reference`, unsigned, the word on the left
 //!   ([`PredicationCompare`], Metal's codes 0 to 5; any other code compares `==`, as Metal's do).
 //!   The word is the `u32` at the record's word address, which the consumer points at Metal's
@@ -54,12 +63,12 @@
 //! - **Bound** (every other device): no push constants, and set 0 of
 //!   [`PredicationStepModule::BINDINGS`] storage buffers, which the consumer binds per step: the
 //!   record's region ([`PredicationStepModule::RECORD_BINDING`], the record at its byte 0), the
-//!   counter's, Metal's word's (bound at an offset the device aligns), the loop's flag's and the
-//!   overflow or check word's. The record is [`PredicationStep::record`] of `at` = 0, whose
-//!   address fields hold, in their low halves, each place's byte offset in its binding: a step
-//!   that names its own record for a place (the word of a step that tests none, the flag and
-//!   overflow word of a step not of a loop) has that binding bound to its record's region. Its
-//!   gates lie in the record's region, the first at [`PredicationStep::BOUND_GATES_OFFSET`], their
+//!   counter's (with its unit's halt word), Metal's word's (bound at an offset the device aligns),
+//!   the loop's flag's and the check word's. The record is [`PredicationStep::record`] of `at` =
+//!   0, whose address fields hold, in their low halves, each place's byte offset in its binding:
+//!   a step that names its own record for a place (the word of a step that tests none, the flag
+//!   of a step not of a loop, the check word of a step not a unit's end) has that binding bound
+//!   to its record's region. Its gates lie in the record's region, the first at [`PredicationStep::BOUND_GATES_OFFSET`], their
 //!   count (a `u32`) at [`PredicationStep::BOUND_COUNT_OFFSET`] (0 until the consumer writes it),
 //!   and the region holds one gate more ([`PredicationStep::bound_bytes`]), which the gate loop's
 //!   pass past the count reads. No table.
@@ -106,17 +115,23 @@ pub enum PredicationOp {
     /// skipped region one deeper; else 1 where the loop has exited (its flag set), 0 where the
     /// condition holds, and 1 where not, which sets the flag.
     While,
+    /// The start of the first copy of `encodeStartWhile:...`'s loop: a [`While`](Self::While)
+    /// whose flag is taken as clear; where the halt word is the loop's id, it clears it first.
+    WhileFirst,
     /// A copy's start of `encodeStartDoWhile`'s loop: inside a skipped region one deeper; else 1
     /// where the loop has exited, and 0 where not.
     Do,
+    /// The start of the first copy of `encodeStartDoWhile`'s loop: a [`Do`](Self::Do) whose flag
+    /// is taken as clear; where the halt word is the loop's id, it clears it first.
+    DoFirst,
     /// A copy's end of a DoWhile loop (`encodeEndDoWhile:...`): where the copy ran (the counter
     /// 0) and the condition fails, the flag is set; then one less, as [`End`](Self::End).
     DoEnd,
     /// After a While loop's last copy: where the loop would run another (the counter 0, the
-    /// flag clear, the condition holding), the overflow word is set; the counter stays.
+    /// flag clear, the condition holding), the halt word becomes the loop's id; the counter stays.
     WhilePast,
     /// After a DoWhile loop's last copy: where the loop would run another (the counter 0, the
-    /// flag clear), the overflow word is set; the counter stays.
+    /// flag clear), the halt word becomes the loop's id; the counter stays.
     DoPast,
     /// The first step of a range an unbalanced record dropped: the counter becomes 1, so nothing
     /// up to the range's end runs.
@@ -126,8 +141,8 @@ pub enum PredicationOp {
     /// The end of a dropped range, before the record after it: the counter becomes 0.
     Resume,
     /// The end of a compute encoder whose unit has a block open: the counter stays, and the check
-    /// word (the record's overflow word, [`PredicationStep::checking`]) becomes 1 where the
-    /// counter is above 0 (the unit's commands skip there), else 0.
+    /// word ([`PredicationStep::checking`]) becomes 1 where the counter is above 0 (the unit's
+    /// commands skip there), else 0.
     UnitEnd,
 }
 
@@ -145,7 +160,9 @@ impl PredicationOp {
             PredicationOp::Dead => OP_DEAD,
             PredicationOp::EndDead => OP_END_DEAD,
             PredicationOp::While => OP_WHILE,
+            PredicationOp::WhileFirst => OP_WHILE_FIRST,
             PredicationOp::Do => OP_DO,
+            PredicationOp::DoFirst => OP_DO_FIRST,
             PredicationOp::DoEnd => OP_DO_END,
             PredicationOp::WhilePast => OP_WHILE_PAST,
             PredicationOp::DoPast => OP_DO_PAST,
@@ -162,22 +179,23 @@ impl PredicationOp {
             self,
             PredicationOp::If
                 | PredicationOp::While
+                | PredicationOp::WhileFirst
                 | PredicationOp::DoEnd
                 | PredicationOp::WhilePast
         )
     }
 
-    /// Whether the step reads and writes its loop's flag and the overflow word (a
-    /// [`UnitEnd`](Self::UnitEnd)'s check word).
+    /// Whether the step is of a loop: it reads and writes its loop's flag, and names its loop's id.
     fn loops(self) -> bool {
         matches!(
             self,
             PredicationOp::While
+                | PredicationOp::WhileFirst
                 | PredicationOp::Do
+                | PredicationOp::DoFirst
                 | PredicationOp::DoEnd
                 | PredicationOp::WhilePast
                 | PredicationOp::DoPast
-                | PredicationOp::UnitEnd
         )
     }
 }
@@ -196,6 +214,8 @@ const OP_DROP: u32 = 10;
 const OP_HOLD: u32 = 11;
 const OP_RESUME: u32 = 12;
 const OP_UNIT_END: u32 = 13;
+const OP_WHILE_FIRST: u32 = 14;
+const OP_DO_FIRST: u32 = 15;
 
 /// An If's comparison of Metal's word with its reference, unsigned, the word on the left: Metal's
 /// `comparison` argument, which is not an `MTLCompareFunction` (measured on an M4).
@@ -258,7 +278,8 @@ impl PredicationCompare {
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PredicationStep {
-    /// The device address of the unit's skip counter (a `u32`, 4-aligned).
+    /// The device address of the unit's skip counter (a `u32`, 8-aligned), and 4 bytes past it of
+    /// its halt word (the module docs).
     pub counter: u64,
     /// What the step does.
     pub op: PredicationOp,
@@ -274,10 +295,13 @@ pub struct PredicationStep {
     /// A loop's step: the device address of the loop's flag (a `u32`, 0 until the loop exits;
     /// one per laying down of the loop). 0 for the others, whose record names a word of its own.
     pub flag: u64,
-    /// A loop's step: the device address of the overflow word (a `u32`) a
-    /// [`WhilePast`](PredicationOp::WhilePast) or [`DoPast`](PredicationOp::DoPast) sets. 0 for
-    /// the others, whose record names a word of its own.
-    pub overflow: u64,
+    /// A loop's step: the loop's id (not 0; one per laying down of the loop within its unit),
+    /// which its past step writes into the halt word and its first copy's start answers to. 0 for
+    /// the others.
+    pub id: u32,
+    /// A [`UnitEnd`](PredicationOp::UnitEnd)'s check word (a `u32`), at this device address. 0
+    /// for the others, whose record names a word of its own.
+    pub check: u64,
 }
 
 // The record's fields.
@@ -285,11 +309,12 @@ const R_COUNTER: u64 = 0;
 const R_WORD: u64 = 8;
 const R_COMPARE: u64 = 28;
 const R_REFERENCE: u64 = 32;
-/// A word of the record's own that a step not of a loop names as its flag and overflow word,
+/// A word of the record's own that a step names as its flag and check word where it has none,
 /// which it writes back unchanged.
 const R_SCRATCH: u64 = 36;
 const R_FLAG: u64 = 40;
-const R_OVERFLOW: u64 = 48;
+const R_CHECK: u64 = 48;
+const R_ID: u64 = 72;
 
 impl PredicationStep {
     /// Bytes of a record.
@@ -330,7 +355,8 @@ impl PredicationStep {
             compare: PredicationCompare::Equal,
             reference: 0,
             flag: 0,
-            overflow: 0,
+            id: 0,
+            check: 0,
         }
     }
 
@@ -349,7 +375,8 @@ impl PredicationStep {
             compare,
             reference,
             flag: 0,
-            overflow: 0,
+            id: 0,
+            check: 0,
         }
     }
 
@@ -365,28 +392,23 @@ impl PredicationStep {
         }
     }
 
-    /// This loop step on the loop's flag and the overflow word at device addresses `flag` and
-    /// `overflow`.
-    pub fn in_loop(self, flag: u64, overflow: u64) -> Self {
-        PredicationStep {
-            flag,
-            overflow,
-            ..self
-        }
+    /// This loop step on the loop's flag at device address `flag`, of the loop of id `id`.
+    pub fn in_loop(self, flag: u64, id: u32) -> Self {
+        PredicationStep { flag, id, ..self }
     }
 
     /// This [`UnitEnd`](PredicationOp::UnitEnd) step writing its check word (a `u32`) at device
     /// address `word`. Its flag is the record's own word.
     pub fn checking(self, word: u64) -> Self {
         PredicationStep {
-            overflow: word,
+            check: word,
             ..self
         }
     }
 
     /// The record's bytes where it lies at device address `at`, its table its own empty one; a
-    /// step that tests no word names the record itself as its word, and one not of a loop a word
-    /// of its own as its flag and overflow word, so no step reads or writes address 0.
+    /// step that tests no word names the record itself as its word, and one with no flag or check
+    /// word a word of its own for each, so no step reads or writes address 0.
     pub fn record(&self, at: u64) -> [u8; 112] {
         let mut bytes = [0u8; 112];
         let mut put = |offset: u64, word: &[u8]| {
@@ -396,13 +418,14 @@ impl PredicationStep {
         put(R_COUNTER, &self.counter.to_le_bytes());
         let word = if self.op.tests() { self.word } else { at };
         put(R_WORD, &word.to_le_bytes());
-        let (flag, overflow) = match self.op {
-            PredicationOp::UnitEnd => (at + R_SCRATCH, self.overflow),
-            op if op.loops() => (self.flag, self.overflow),
+        let (flag, check) = match self.op {
+            PredicationOp::UnitEnd => (at + R_SCRATCH, self.check),
+            op if op.loops() => (self.flag, at + R_SCRATCH),
             _ => (at + R_SCRATCH, at + R_SCRATCH),
         };
         put(R_FLAG, &flag.to_le_bytes());
-        put(R_OVERFLOW, &overflow.to_le_bytes());
+        put(R_CHECK, &check.to_le_bytes());
+        put(R_ID, &self.id.to_le_bytes());
         put(
             PredicationStep::TABLE_OFFSET,
             &(at + PredicationStep::EMPTY_TABLE_OFFSET).to_le_bytes(),
@@ -496,9 +519,9 @@ impl PredicationStepModule {
     /// The bound form's binding of the loop's flag (the record's, where the step is not of a
     /// loop).
     pub const FLAG_BINDING: u32 = 3;
-    /// The bound form's binding of the overflow word, or a [`UnitEnd`](PredicationOp::UnitEnd)'s
-    /// check word (the record's, where the step is not of a loop).
-    pub const OVERFLOW_BINDING: u32 = 4;
+    /// The bound form's binding of a [`UnitEnd`](PredicationOp::UnitEnd)'s check word (the
+    /// record's, for any other step).
+    pub const CHECK_BINDING: u32 = 4;
 
     /// The push bytes for the record at device address `record` (the addressed form).
     pub fn push_constants(record: u64) -> [u8; 8] {
@@ -542,7 +565,7 @@ pub(super) const BOUND_SLOTS: [ResourceSlot; 5] = [
     bound_slot(PredicationStepModule::COUNTER_BINDING),
     bound_slot(PredicationStepModule::WORD_BINDING),
     bound_slot(PredicationStepModule::FLAG_BINDING),
-    bound_slot(PredicationStepModule::OVERFLOW_BINDING),
+    bound_slot(PredicationStepModule::CHECK_BINDING),
 ];
 
 /// The bound form's symbol of binding `index`.
@@ -802,8 +825,8 @@ pub(super) fn bound_typed_module() -> BResult<TypedModule> {
     b.finalize()
 }
 
-/// The step of the record at `record`, in either form: its counter moved, its loop's flag and
-/// the overflow word written, and its gates.
+/// The step of the record at `record`, in either form: its counter moved, its loop's flag, its
+/// check word and its unit's halt word written, and its gates.
 fn step_body<M: Memory>(fb: &mut FunctionBuilder<'_>, memory: M, record: M::Place) -> BResult<()> {
     let field = |fb: &mut FunctionBuilder<'_>, offset: u64| -> BResult<Value> {
         let a = memory.at(fb, record, offset)?;
@@ -857,18 +880,16 @@ fn step_body<M: Memory>(fb: &mut FunctionBuilder<'_>, memory: M, record: M::Plac
     let down_two = fb.binary(BinOp::ISub, c, two)?;
     let after_end_dead = fb.select(deep, down_two, zero)?;
 
-    // A loop's flag (set once the loop exits) and the overflow word (set where a loop would run
-    // past its last copy); a step not of a loop names a word of its record for both, and writes
-    // back what it read.
+    // A loop's flag (set once the loop exits) and a UnitEnd's check word; a step with neither
+    // names a word of its record for each, and writes back what it read.
     let flag_at = memory.named(fb, record, R_FLAG, PredicationStepModule::FLAG_BINDING)?;
-    let overflow_at = memory.named(
-        fb,
-        record,
-        R_OVERFLOW,
-        PredicationStepModule::OVERFLOW_BINDING,
-    )?;
+    let check_at = memory.named(fb, record, R_CHECK, PredicationStepModule::CHECK_BINDING)?;
     let flag = memory.load(fb, flag_at)?;
-    let overflow = memory.load(fb, overflow_at)?;
+    let check = memory.load(fb, check_at)?;
+    // The halt word, 4 bytes past the counter, and the loop's id.
+    let halt_at = memory.at(fb, counter_at, 4)?;
+    let halt = memory.load(fb, halt_at)?;
+    let id = field(fb, R_ID)?;
     let exited = fb.binary(BinOp::INotEqual, flag, zero)?;
     let fails = fb.unary(UnOp::LogicalNot, holds)?;
     let running = fb.unary(UnOp::LogicalNot, skipping)?;
@@ -877,51 +898,84 @@ fn step_body<M: Memory>(fb: &mut FunctionBuilder<'_>, memory: M, record: M::Plac
     let after_while = fb.select(skipping, up, tested)?;
     let exits = fb.binary(BinOp::LogicalAnd, running, fails)?;
     let flag_while = fb.select(exits, one, flag)?;
-    // Do: 1 once the loop exited, else 0.
+    // WhileFirst: a While on a clear flag.
+    let after_while_first = fb.select(skipping, up, fresh)?;
+    let flag_while_first = fb.select(exits, one, zero)?;
+    // Do: 1 once the loop exited, else 0; DoFirst: 0, its flag cleared.
     let entered = fb.select(exited, one, zero)?;
     let after_do = fb.select(skipping, up, entered)?;
+    let after_do_first = fb.select(skipping, up, zero)?;
     // DoEnd: a copy that ran sets the flag where the test fails; then as an End.
     let flag_do_end = fb.select(exits, one, flag)?;
-    // WhilePast and DoPast: a loop still running sets the overflow word; the counter stays.
+    // WhilePast and DoPast: a loop still running halts the unit at its id; the counter stays.
     let staying = fb.unary(UnOp::LogicalNot, exited)?;
     let live = fb.binary(BinOp::LogicalAnd, running, staying)?;
     let past_while = fb.binary(BinOp::LogicalAnd, live, holds)?;
-    let overflow_while = fb.select(past_while, one, overflow)?;
-    let overflow_do = fb.select(live, one, overflow)?;
+    let halt_while = fb.select(past_while, id, halt)?;
+    let halt_do = fb.select(live, id, halt)?;
     // UnitEnd: the check word says whether the unit's commands skip where it ends.
-    let check = fb.select(skipping, one, zero)?;
+    let unit_check = fb.select(skipping, one, zero)?;
 
     let mut next = c;
     let mut flag_next = flag;
-    let mut overflow_next = overflow;
-    for (code, value, flag_value, overflow_value) in [
-        (OP_IF, after_if, flag, overflow),
-        (OP_ELSE, after_else, flag, overflow),
-        (OP_END, after_end, flag, overflow),
-        (OP_DEAD, after_dead, flag, overflow),
-        (OP_END_DEAD, after_end_dead, flag, overflow),
-        (OP_WHILE, after_while, flag_while, overflow),
-        (OP_DO, after_do, flag, overflow),
-        (OP_DO_END, after_end, flag_do_end, overflow),
-        (OP_WHILE_PAST, c, flag, overflow_while),
-        (OP_DO_PAST, c, flag, overflow_do),
-        (OP_DROP, one, flag, overflow),
-        (OP_HOLD, c, flag, overflow),
-        (OP_RESUME, zero, flag, overflow),
-        (OP_UNIT_END, c, flag, check),
+    let mut check_next = check;
+    let mut halt_next = halt;
+    for (code, value, flag_value, check_value, halt_value) in [
+        (OP_IF, after_if, flag, check, halt),
+        (OP_ELSE, after_else, flag, check, halt),
+        (OP_END, after_end, flag, check, halt),
+        (OP_DEAD, after_dead, flag, check, halt),
+        (OP_END_DEAD, after_end_dead, flag, check, halt),
+        (OP_WHILE, after_while, flag_while, check, halt),
+        (
+            OP_WHILE_FIRST,
+            after_while_first,
+            flag_while_first,
+            check,
+            zero,
+        ),
+        (OP_DO, after_do, flag, check, halt),
+        (OP_DO_FIRST, after_do_first, zero, check, zero),
+        (OP_DO_END, after_end, flag_do_end, check, halt),
+        (OP_WHILE_PAST, c, flag, check, halt_while),
+        (OP_DO_PAST, c, flag, check, halt_do),
+        (OP_DROP, one, flag, check, halt),
+        (OP_HOLD, c, flag, check, halt),
+        (OP_RESUME, zero, flag, check, halt),
+        (OP_UNIT_END, c, flag, unit_check, halt),
     ] {
         let k = k32(fb, code)?;
         let is = fb.binary(BinOp::IEqual, op, k)?;
         next = fb.select(is, value, next)?;
         flag_next = fb.select(is, flag_value, flag_next)?;
-        overflow_next = fb.select(is, overflow_value, overflow_next)?;
+        check_next = fb.select(is, check_value, check_next)?;
+        halt_next = fb.select(is, halt_value, halt_next)?;
     }
+    // A halted unit: every step leaves what it read, but its loop's first copy's start.
+    let halted = fb.binary(BinOp::INotEqual, halt, zero)?;
+    let while_first = k32(fb, OP_WHILE_FIRST)?;
+    let do_first = k32(fb, OP_DO_FIRST)?;
+    let is_while_first = fb.binary(BinOp::IEqual, op, while_first)?;
+    let is_do_first = fb.binary(BinOp::IEqual, op, do_first)?;
+    let first = fb.binary(BinOp::LogicalOr, is_while_first, is_do_first)?;
+    let ours = fb.binary(BinOp::IEqual, halt, id)?;
+    let resumes = fb.binary(BinOp::LogicalAnd, first, ours)?;
+    let resumed = fb.unary(UnOp::LogicalNot, resumes)?;
+    let holds_all = fb.binary(BinOp::LogicalAnd, halted, resumed)?;
+    let next = fb.select(holds_all, c, next)?;
+    let flag_next = fb.select(holds_all, flag, flag_next)?;
+    let check_next = fb.select(holds_all, check, check_next)?;
+    let halt_next = fb.select(holds_all, halt, halt_next)?;
     memory.store(fb, counter_at, next)?;
     memory.store(fb, flag_at, flag_next)?;
-    memory.store(fb, overflow_at, overflow_next)?;
+    memory.store(fb, check_at, check_next)?;
+    memory.store(fb, halt_at, halt_next)?;
 
-    // The gates: each runs its command where the counter is 0, else nothing.
-    let runs = fb.binary(BinOp::IEqual, next, zero)?;
+    // The gates: each runs its command where the counter is 0 and the unit is not halted, else
+    // nothing.
+    let counted = fb.binary(BinOp::IEqual, next, zero)?;
+    let going = fb.binary(BinOp::IEqual, halt_next, zero)?;
+    let runs = fb.binary(BinOp::LogicalAnd, counted, going)?;
     memory.gates(fb, record, move |fb, gate| {
         let zero = k32(fb, 0)?;
         for axis in 0..3 {

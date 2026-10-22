@@ -3905,7 +3905,7 @@ impl CommandBufferShared {
                     }
                     // A predicated loop would have run past its copies (`predication.rs`): the
                     // command buffer failed.
-                    if state.predication.overflowed() && state.error.is_none() {
+                    if state.predication.halted() && state.error.is_none() {
                         state.status = CommandBufferStatus::Error;
                         state.error = Some(CommandBufferError::PredicatedLoopPastCopies);
                     }

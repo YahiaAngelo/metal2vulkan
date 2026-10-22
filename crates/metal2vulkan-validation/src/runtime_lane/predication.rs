@@ -1527,8 +1527,9 @@ fn every_dispatch_form_runs_in_each_pass() {
 }
 
 /// A loop that would run past the copies the runtime lays down (64, or 16 inside another loop)
-/// runs them and fails its command buffer (`CommandBufferError::PredicatedLoopPastCopies`), where
-/// Metal runs it on; one that ends within them completes.
+/// runs them, halts its unit (the unit's later commands run nothing) and fails its command buffer
+/// (`CommandBufferError::PredicatedLoopPastCopies`), where Metal runs it on; one that ends within
+/// them completes.
 #[test]
 fn a_loop_past_its_copies_fails_its_command_buffer() {
     on_device(|device| {
@@ -1545,7 +1546,7 @@ fn a_loop_past_its_copies_fails_its_command_buffer() {
             marks.mark(encoder, 1);
         });
         assert_eq!((got.0, got.1), past, "a While of 65");
-        assert_eq!(got.2[..2], [64, 1], "a While of 65");
+        assert_eq!(got.2[..2], [64, 0], "a While of 65");
         let got = looped(device, false, |encoder, marks| {
             encoder.encode_start_do_while().unwrap();
             marks.mark(encoder, 0);
@@ -1570,7 +1571,13 @@ fn a_loop_past_its_copies_fails_its_command_buffer() {
                 assert_eq!(encoder.encode_end_while(), Ok(true));
             });
             assert_eq!((got.0, got.1), status, "an inner While of {inner}");
-            assert_eq!(got.2[2], 2 * inner.min(16), "an inner While of {inner}");
+            // The inner loop past its copies halts the unit in the outer loop's first pass.
+            let passes = if inner > 16 { 1 } else { 2 };
+            assert_eq!(
+                got.2[..3],
+                [passes, 16, passes * 16],
+                "an inner While of {inner}"
+            );
         }
     });
 }

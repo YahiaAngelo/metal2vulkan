@@ -1765,9 +1765,10 @@ pub enum CommandBufferError {
     DetachedBacking,
     /// A command-predication loop (`ComputeCommandEncoder::encode_start_while`,
     /// `encode_start_do_while`) would have run past the copies of its commands the runtime laid
-    /// down (64, or 16 inside another loop). Metal runs a loop on without bound; the runtime ran
-    /// those copies and then the rest of the command buffer, so its results are not Metal's. Set
-    /// before the command buffer's completed handlers run.
+    /// down (at most 64, or 16 inside another loop, fewer for a long body). Metal runs a loop on
+    /// without bound; the runtime ran those copies, then nothing more of the loop's unit, and then
+    /// the rest of the command buffer, so its results are not Metal's. Set before the command
+    /// buffer's completed handlers run.
     PredicatedLoopPastCopies,
     /// A unit of command predication (`ComputeCommandEncoder::encode_start_if` and the others)
     /// ended with a block open that no misused record killed, where the unit's commands skipped

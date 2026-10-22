@@ -2874,8 +2874,8 @@ each item named states the rule in full.
   its live blocks left open where a unit ends failing the command buffer as Metal's GPU recovery
   does (`PredicationOpenAtUnitEnd`). Loops nest to any depth. A loop is laid down as 64 copies
   (16 inside another loop, fewer where they would lay down more than 16384 steps and gated
-  dispatches, and at least one); one that runs past them fails its command buffer
-  (`PredicatedLoopPastCopies`), where Metal runs on. A condition word past its buffer reads as
+  dispatches, and at least one); one that runs past them runs nothing more of its unit and fails
+  its command buffer (`PredicatedLoopPastCopies`), where Metal runs on. A condition word past its buffer reads as
   Metal reads it (the heap's bytes, or zero), and as zero where Metal reads memory unrelated to the
   buffer (`predication-word-past-buffer`). Refused where Metal runs on (`RuntimeGap`): an
   unbalanced record that is its unit's first after dispatches of the unit
