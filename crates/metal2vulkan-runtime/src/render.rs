@@ -3014,6 +3014,15 @@ impl RenderLowering {
         Ok(())
     }
 
+    /// Set the amplification count `count` with the view mappings set before kept
+    /// (`setVertexAmplificationMode:value:`, `apple_only.rs`); `None`, the amplification kept,
+    /// where the count passes them ([`Amplification::with_count`]).
+    pub(crate) fn amplify_with_kept_mappings(&mut self, count: u64) -> Option<()> {
+        let amplified = self.amplification.with_count(count)?;
+        *self.amplification = amplified;
+        Some(())
+    }
+
     /// The lowering of [`RenderCommandEncoder::draw_primitives`].
     pub(crate) fn draw_primitives(
         &mut self,

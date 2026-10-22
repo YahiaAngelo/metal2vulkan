@@ -1757,15 +1757,15 @@ fn passes_and_draws_are_refused_as_metal_refuses_them() {
         encoder.set_viewport_transform_enabled(false),
         apple(AppleOnly::ViewportTransformDisabled)
     );
+    // A count of 0 (no set bits in mode 1) draws a number of copies that changes from run to
+    // run on Metal: refused, the amplification set before kept.
     assert_eq!(
         encoder.set_vertex_amplification_mode(1, 0),
         apple(AppleOnly::VertexAmplificationMode)
     );
-    assert_eq!(encoder.set_depth_cleared(), apple(AppleOnly::DepthCleared));
-    assert_eq!(
-        encoder.set_stencil_cleared(),
-        apple(AppleOnly::StencilCleared)
-    );
+    // Depth and stencil "cleared" change nothing Metal draws.
+    assert_eq!(encoder.set_depth_cleared(), Ok(()));
+    assert_eq!(encoder.set_stencil_cleared(), Ok(()));
     // Nothing above drew; a draw of no vertices records nothing.
     encoder
         .draw_primitives(PrimitiveType::Triangle, 0, 0, 1, 0)

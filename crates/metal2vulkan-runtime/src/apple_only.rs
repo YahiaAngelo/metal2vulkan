@@ -15,7 +15,13 @@
 //!   Metal with the test off.
 //!
 //! - `setPointSize:`, which Metal measured makes a no-op: the point is the vertex function's
-//!   `[[point_size]]`.
+//!   `[[point_size]]`; and `setDepthCleared` and `setStencilCleared`, which change nothing Metal
+//!   draws (the consumer's suite case on the M3 Max, pixel for pixel).
+//! - `setVertexAmplificationMode:value:`, which sets the amplification count
+//!   `setVertexAmplificationCount:viewMappings:` sets and keeps the view mappings that call set,
+//!   whichever of the two comes last deciding (the consumer's measurements on the M3 Max, modes 0
+//!   to 8, 15, 16, 255 and the largest values): the count is the value's set bits in mode 1 and the
+//!   value in every other mode, exact from 1 to 8 (`amplification_mode_count`).
 //!
 //! A provoking vertex mode past 1, which Metal draws a third way that differs between pipeline
 //! states, is accepted and drawn as mode 1, announced at the call (`provoking-vertex-unmatched`).
@@ -24,8 +30,10 @@
 //! - nonzero protection options, whose effect on Metal is not measured (Vulkan's protected
 //!   memory is the nearest form);
 //! - a line width other than 1 (Apple's wide-line rule is unmeasured, where Vulkan has
-//!   `wideLines`), and vertex amplification mode, and depth or stencil "cleared", whose meaning
-//!   or raw values are unmeasured;
+//!   `wideLines`);
+//! - a vertex amplification mode whose count is 0, which draws a number of copies that changes
+//!   from run to run on Metal, or above 8 (9 draws one copy and 16 and 32 eight, the rest
+//!   unmeasured), and one whose count passes the view mappings kept (unmeasured);
 //! - turning the viewport transform off, which Vulkan has no switch for and whose meaning on
 //!   Metal is not measured;
 //! - a texture over an IOSurface made with `kIOSurfaceClientDirection`, a key in no header of the
@@ -44,6 +52,7 @@
 
 use super::blit::BlitCommandEncoder;
 use super::blit_texture::check_slice_level;
+use super::capabilities::MAX_VERTEX_AMPLIFICATION;
 use super::command_buffer::CommandBuffer;
 use super::compute::ComputeCommandEncoder;
 use super::error::Error;
@@ -64,12 +73,10 @@ pub enum AppleOnly {
     LineWidth,
     /// The viewport transform turned off (`setViewportTransformEnabled:NO`).
     ViewportTransformDisabled,
-    /// `setVertexAmplificationMode:value:`.
+    /// `setVertexAmplificationMode:value:` of a count (the value's set bits in mode 1, else the
+    /// value) of 0, whose copies change from run to run on Metal, or above 8, or above the view
+    /// mappings kept.
     VertexAmplificationMode,
-    /// `setDepthCleared`.
-    DepthCleared,
-    /// `setStencilCleared`.
-    StencilCleared,
     /// A texture over an IOSurface made with `kIOSurfaceClientDirection`
     /// (`newTextureWithDescriptor:iosurface:plane:` of such a surface): IOSurface SPI, a key
     /// IOSurface.framework exports and no header of the public macOS SDK declares, so the
@@ -99,8 +106,6 @@ impl AppleOnly {
             | Self::LineWidth
             | Self::ViewportTransformDisabled
             | Self::VertexAmplificationMode
-            | Self::DepthCleared
-            | Self::StencilCleared
             | Self::SurfaceClientDirection => AppleOnlyGap::Unmeasured,
         }
     }
@@ -179,7 +184,9 @@ impl AppleOnlyCall {
             | AppleOnlyCall::CompressedTextureReinterpretationFlush
             | AppleOnlyCall::SetAlphaTestReferenceValue(_)
             | AppleOnlyCall::SetPointSize(_)
-            | AppleOnlyCall::SetProvokingVertexMode(_) => Ok(()),
+            | AppleOnlyCall::SetProvokingVertexMode(_)
+            | AppleOnlyCall::SetDepthCleared
+            | AppleOnlyCall::SetStencilCleared => Ok(()),
             AppleOnlyCall::SetProtectionOptions(options) => default_or(
                 options == DEFAULT_PROTECTION_OPTIONS,
                 AppleOnly::ProtectedContent,
@@ -188,12 +195,21 @@ impl AppleOnlyCall {
             AppleOnlyCall::SetViewportTransformEnabled(enabled) => {
                 default_or(enabled, AppleOnly::ViewportTransformDisabled)
             }
-            AppleOnlyCall::SetVertexAmplificationMode { .. } => {
-                Err(AppleOnly::VertexAmplificationMode)
-            }
-            AppleOnlyCall::SetDepthCleared => Err(AppleOnly::DepthCleared),
-            AppleOnlyCall::SetStencilCleared => Err(AppleOnly::StencilCleared),
+            AppleOnlyCall::SetVertexAmplificationMode { mode, value } => default_or(
+                (1..=MAX_VERTEX_AMPLIFICATION).contains(&amplification_mode_count(mode, value)),
+                AppleOnly::VertexAmplificationMode,
+            ),
         }
+    }
+}
+
+/// The amplification count `setVertexAmplificationMode:value:` sets (the consumer's measurements
+/// on the M3 Max): the number of `value`'s set bits in mode 1, and `value` in every other mode.
+/// Metal draws that many copies, amplification IDs from 0 up, for a count from 1 to 8.
+pub(crate) fn amplification_mode_count(mode: u64, value: u64) -> u64 {
+    match mode {
+        1 => u64::from(value.count_ones()),
+        _ => value,
     }
 }
 
@@ -303,7 +319,9 @@ impl RenderLowering {
         value: u64,
     ) -> Result<(), Error> {
         self.log(|_| RenderCall::VertexAmplificationMode(mode, value));
-        answer(AppleOnlyCall::SetVertexAmplificationMode { mode, value })
+        answer(AppleOnlyCall::SetVertexAmplificationMode { mode, value })?;
+        self.amplify_with_kept_mappings(amplification_mode_count(mode, value))
+            .ok_or(Error::AppleOnly(AppleOnly::VertexAmplificationMode))
     }
 
     /// The lowering of [`RenderCommandEncoder::set_depth_cleared`].
@@ -380,8 +398,14 @@ impl RenderCommandEncoder {
         }
     }
 
-    /// `setVertexAmplificationMode:value:` (SPI): refused
-    /// ([`AppleOnly::VertexAmplificationMode`]), its meaning unmeasured.
+    /// `setVertexAmplificationMode:value:` (SPI): sets the amplification count
+    /// [`set_vertex_amplification_count`](Self::set_vertex_amplification_count) sets, the number
+    /// of `value`'s set bits in mode 1 and `value` in every other mode, and keeps the view mappings
+    /// that call set (none at the encoder's start), as Metal does (the consumer's measurements on
+    /// the M3 Max). Refused
+    /// ([`AppleOnly::VertexAmplificationMode`]) for a count of 0, whose copies Metal draws change
+    /// from run to run, above 8 (unmeasured but for three values), or above the view mappings kept
+    /// (unmeasured); a refused call keeps the amplification set before.
     pub fn set_vertex_amplification_mode(&mut self, mode: u64, value: u64) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| lowering.set_vertex_amplification_mode(mode, value)),
@@ -389,7 +413,8 @@ impl RenderCommandEncoder {
         }
     }
 
-    /// `setDepthCleared` (SPI): refused ([`AppleOnly::DepthCleared`]), its meaning unmeasured.
+    /// `setDepthCleared` (SPI): a no-op. It changes nothing Metal draws (the consumer's suite case
+    /// on the M3 Max, pixel for pixel).
     pub fn set_depth_cleared(&mut self) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| lowering.set_depth_cleared()),
@@ -397,8 +422,7 @@ impl RenderCommandEncoder {
         }
     }
 
-    /// `setStencilCleared` (SPI): refused ([`AppleOnly::StencilCleared`]), its meaning
-    /// unmeasured.
+    /// `setStencilCleared` (SPI): a no-op, as [`set_depth_cleared`](Self::set_depth_cleared) is.
     pub fn set_stencil_cleared(&mut self) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| lowering.set_stencil_cleared()),

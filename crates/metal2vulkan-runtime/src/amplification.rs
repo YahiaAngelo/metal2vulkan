@@ -15,7 +15,8 @@
 //! into the first slice, the last one's texels kept). One above a maximum of 1 is refused: plain
 //! Metal stored garbage (probe 13 `amp2_pipeline1`, probe 2 `amp_2_on_1`, `amp_3_on_1`). Metal
 //! reads `count` mappings from its pointer; a slice of fewer is refused at the setter, and one of
-//! more gives its first `count`.
+//! more gives its first `count`. `setVertexAmplificationMode:value:` sets the count and keeps the
+//! mappings ([`Amplification::with_count`], `apple_only.rs`).
 
 use super::capabilities::MAX_VERTEX_AMPLIFICATION;
 use super::render::DrawProblem;
@@ -83,6 +84,17 @@ impl Amplification {
             }
         };
         Ok(Amplification { count, mappings })
+    }
+
+    /// The amplification of `count` with these view mappings kept
+    /// (`setVertexAmplificationMode:value:`, `apple_only.rs`): `None` where there are mappings
+    /// and the count passes them, which Metal's measurements do not reach.
+    pub(super) fn with_count(&self, count: u64) -> Option<Amplification> {
+        let mappings = match self.mappings.is_empty() {
+            true => Vec::new(),
+            false => self.mappings.get(..usize::try_from(count).ok()?)?.to_vec(),
+        };
+        Some(Amplification { count, mappings })
     }
 
     /// Whether a draw draws nothing: a count of 0 (the module docs).
