@@ -437,6 +437,74 @@ pub fn encode<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes, variants: &[String]) {
             &mut total,
         );
     }
+    encode_resident(g, s, sizes, &runs);
+}
+
+/// The resident buffers of the encode workload's `dispatch_resident` variants, of 256 bytes each.
+const RESIDENT: usize = 4096;
+
+/// The encode workload's `dispatch_resident_*` variants: a compute encoder whose pipeline state
+/// and buffers are set, one `useResources:count:usage:` (reading) of none, 1, 256 or 4096
+/// buffers, or of one buffer 4096 times (`same_4096`), then `draws` single-threadgroup dispatches
+/// of the tiny kernel. Per variant: the `useResources` call, the encoding thread's wall time per
+/// dispatch, the process's CPU time per dispatch, and the command buffer's whole time.
+fn encode_resident<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes, runs: &dyn Fn(String) -> bool) {
+    let variants = [
+        ("0", 0, false),
+        ("1", 1, false),
+        ("256", 256, false),
+        ("4096", 4096, false),
+        ("same_4096", 4096, true),
+    ];
+    let wanted: Vec<_> = (variants.iter())
+        .filter(|(name, ..)| runs(format!("dispatch_resident_{name}")))
+        .collect();
+    if wanted.is_empty() {
+        return;
+    }
+    let n = sizes.draws;
+    let resident: Vec<G::Buffer> = (0..RESIDENT).map(|_| g.buffer(256)).collect();
+    for &&(name, count, same) in &wanted {
+        let list: Vec<&G::Buffer> = match same {
+            true => vec![&resident[0]; count],
+            false => resident[..count].iter().collect(),
+        };
+        let (mut using, mut wall, mut cpu, mut total) = (vec![], vec![], vec![], vec![]);
+        for run in 0..sizes.timed + 3 {
+            g.pool(|| {
+                let cpu0 = process_cpu();
+                let t0 = Instant::now();
+                let command_buffer = g.command_buffer();
+                let mut encoder = g.compute_encoder(&command_buffer);
+                g.set_compute_pipeline(&mut encoder, &s.tiny[0]);
+                g.set_buffer(&mut encoder, &s.tiny_out, 0, 0);
+                g.set_buffer(&mut encoder, &s.tiny_values, 0, 1);
+                let t1 = Instant::now();
+                g.use_buffers(&mut encoder, &list);
+                let t2 = Instant::now();
+                for _ in 0..n {
+                    g.dispatch(&mut encoder, 1, 64);
+                }
+                let t3 = Instant::now();
+                g.end_compute(encoder);
+                g.commit(&command_buffer);
+                g.wait(&command_buffer);
+                let t4 = Instant::now();
+                let cpu1 = process_cpu();
+                if run >= 3 {
+                    using.push(us(t2 - t1));
+                    wall.push(us(t3 - t2) / n as f64);
+                    cpu.push(us(cpu1 - cpu0) / n as f64);
+                    total.push(ms(t4 - t0));
+                }
+            });
+        }
+        let metric = |what: &str| format!("dispatch_resident_{name}_{what}");
+        emit("encode", &metric("use_call"), "us", &mut using);
+        emit("encode", &metric("encode"), "us/dispatch", &mut wall);
+        emit("encode", &metric("process_cpu"), "us/dispatch", &mut cpu);
+        emit("encode", &metric("cb_total"), "ms", &mut total);
+    }
 }
 
 /// The fixed costs: a command buffer's creation, an encoder of one command (opened, bound, one

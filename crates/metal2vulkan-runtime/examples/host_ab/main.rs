@@ -23,6 +23,10 @@
 //!   dispatches, `static` and `churn` (the pipeline state and both buffers' offsets each
 //!   dispatch). Per draw and dispatch: the encoding thread's wall time from the command buffer's
 //!   creation through `endEncoding`, and the whole process's CPU time until the wait returned.
+//!   Then `dispatch_resident_*`: as many dispatches of the tiny kernel after one
+//!   `useResources:count:usage:` of 0, 1, 256 or 4096 buffers, or of one buffer 4096 times
+//!   (`same_4096`); per variant the `useResources` call, and per dispatch the encoding thread's
+//!   wall time after it and the process's CPU time.
 //! - `fixed`: a command buffer's creation, an encoder of one command each (render, compute,
 //!   blit), and the commit call of a command buffer of 30 such encoders.
 //! - `latency`: commit to `waitUntilCompleted`'s return, and commit to the completed handler, of
@@ -142,7 +146,8 @@
 //! `--metallib PATH` (skip the compile; not with `pipeline`), `--cache DIR` (the runtime's shader
 //! cache, with `--side`), `--variants a,b,...` (the encode workload's variants alone:
 //! `draw_static`, `draw_bind`, `draw_pipeline`, `draw_passes`, `dispatch_static`,
-//! `dispatch_churn`; for a profile of one; and the memory workload's parts alone: `create`,
+//! `dispatch_churn`, `dispatch_resident_0`, `_1`, `_256`, `_4096`, `_same_4096`; for a profile of
+//! one; and the memory workload's parts alone: `create`,
 //! `no_copy`, `held_1m`, `held_64m`, `texture`), `--announce-each a,b,...` (the runtime's device
 //! announces these degradation kinds, by code with or without its `metal2vulkan-degrade-` prefix,
 //! or `all` of them, at every occurrence, `DeviceOptions::announce_each`, as a consumer that hears

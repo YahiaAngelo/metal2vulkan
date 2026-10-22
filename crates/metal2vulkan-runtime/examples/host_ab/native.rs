@@ -14,9 +14,10 @@ use objc2_metal::{
     MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
     MTLIndirectCommandType, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPipelineOption,
     MTLPixelFormat, MTLPrimitiveType, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLRenderPipelineDescriptor, MTLRenderPipelineState, MTLRenderStages, MTLResourceOptions,
-    MTLResourceUsage, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLSize,
-    MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLWinding,
+    MTLRenderPipelineDescriptor, MTLRenderPipelineState, MTLRenderStages, MTLResource,
+    MTLResourceOptions, MTLResourceUsage, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
+    MTLSamplerState, MTLSize, MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor,
+    MTLTextureUsage, MTLWinding,
 };
 use std::ffi::c_void;
 use std::path::Path;
@@ -701,6 +702,18 @@ impl Gpu for Native {
             ProtocolObject::from_ref(&**buffer),
             MTLResourceUsage::Read | MTLResourceUsage::Write,
         );
+    }
+
+    fn use_buffers(&self, encoder: &mut Self::ComputeEncoder, buffers: &[&Self::Buffer]) {
+        let resources: Vec<NonNull<ProtocolObject<dyn MTLResource>>> = buffers
+            .iter()
+            .map(|buffer| NonNull::from(ProtocolObject::from_ref(&***buffer)))
+            .collect();
+        let Some(first) = NonNull::new(resources.as_ptr().cast_mut()) else {
+            return;
+        };
+        // SAFETY: `first` points at `resources.len()` live resources, held by `buffers`.
+        unsafe { encoder.useResources_count_usage(first, resources.len(), MTLResourceUsage::Read) };
     }
 
     fn execute_commands(
