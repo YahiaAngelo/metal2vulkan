@@ -56,7 +56,7 @@ impl Device {
         // SAFETY: the window's pages are this call's mapping, which stays mapped until the
         // placement is freed below.
         let imported =
-            unsafe { self.import_pointer(importer, pointer, unit, &window, MemoryClass::Shared) };
+            unsafe { self.import_pointer(importer, pointer, unit, &window, MemoryClass::Shared, false) };
         let answer = match imported {
             Ok((buffer, placement)) => {
                 self.discard_import(buffer, placement);

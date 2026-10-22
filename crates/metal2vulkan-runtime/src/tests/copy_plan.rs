@@ -599,7 +599,7 @@ fn a_host_layout_is_packed_exactly_where_packing_moves_nothing() {
                     bytes_per_row,
                     bytes_per_image,
                 };
-                let len = layout.host_len().max(layout.packed_len()) as usize;
+                let len = layout.host_len().unwrap().max(layout.packed_len()) as usize;
                 let host: Vec<u8> = (1..=len as u8).collect();
                 let mut packed = vec![0; layout.packed_len() as usize];
                 layout.pack(&host, &mut packed);

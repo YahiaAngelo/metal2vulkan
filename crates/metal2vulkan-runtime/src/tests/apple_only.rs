@@ -9,7 +9,7 @@ use crate::{AppleOnly, AppleOnlyCall, DEFAULT_PROTECTION_OPTIONS};
 #[test]
 fn every_apple_only_call_answers_typed() {
     use AppleOnlyCall as C;
-    let table: [(&str, AppleOnlyCall, Result<(), AppleOnly>); 26] = [
+    let table: [(&str, AppleOnlyCall, Result<(), AppleOnly>); 30] = [
         // Compressed-texture controls: no compression is visible on Vulkan.
         (
             "invalidateCompressedTexture:",
