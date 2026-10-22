@@ -196,9 +196,9 @@ impl TexelFormat {
     /// The [`PACKED`](Self::PACKED) field's mask, in place.
     pub const PACKED_MASK: u32 = 0xF << TexelFormat::PACKED;
 
-    /// The [`PACKED`](Self::PACKED) field's top bit, set in exactly the fields of the YCbCr grid
-    /// `8192` ([`PackedTexels::YCbCr8192`] and [`PackedTexels::YCbCrExtended8192`]), whose one
-    /// texel's `half` rounds with ties away from zero: what the `half` routine of a device that
+    /// The [`PACKED`](Self::PACKED) field's top bit, set in exactly the fields of the grid `8192`
+    /// ([`PackedTexels::YCbCr8192`], [`PackedTexels::YCbCrExtended8192`] and
+    /// [`PackedTexels::Rgb10A2Srgb`]), whose one texel's `half` rounds with ties away from zero: what the `half` routine of a device that
     /// samples through Metal's own texture unit reads of the field (`lower::texture::half`), so
     /// that every other field's class specializes as a slot bound to nothing does.
     pub const YCBCR_8192: u32 = 8 << TexelFormat::PACKED;
@@ -430,11 +430,19 @@ pub enum PackedTexels {
     /// [`YCbCr8192`](Self::YCbCr8192)'s, the steps and the sums signed
     /// ([`filter_extended`](Self::filter_extended)).
     YCbCrExtended8192 = 9,
+    /// `RGB10A2Unorm_sRGB`'s channels as the function decodes its held word
+    /// (`ExtendedRange::Rgb10A2Srgb`): red, green and blue steps `k / 8192` of `[0, 1]`, which
+    /// Metal's linear filter sums as [`YCbCr8192`](Self::YCbCr8192)'s, and alpha's 2-bit code
+    /// `a` read `a / 3`, which it sums on the grid `16 · 255` (the code `1360 a`), each 2D term
+    /// truncated by `2^4`; a `half` result's color steps rounded with ties away from zero (an
+    /// Apple M3 Max under macOS 27.0.1: every channel of 4,096 2D samples of a 16 x 16 texture,
+    /// `float` and `half` results). Its filter of more than one level is not measured.
+    Rgb10A2Srgb = 10,
 }
 
 impl PackedTexels {
     /// Every value, in field order.
-    pub const ALL: [PackedTexels; 9] = [
+    pub const ALL: [PackedTexels; 10] = [
         PackedTexels::Rgb565,
         PackedTexels::Rgb5A1,
         PackedTexels::Rgba4,
@@ -444,6 +452,7 @@ impl PackedTexels {
         PackedTexels::YCbCr2048,
         PackedTexels::YCbCr8192,
         PackedTexels::YCbCrExtended8192,
+        PackedTexels::Rgb10A2Srgb,
     ];
 
     /// The packed channels of `pf`, where Metal's reads of them are measured, a two-plane YCbCr
@@ -492,8 +501,8 @@ impl PackedTexels {
     }
 
     /// Each channel's code scale `2^b - 1`, red to alpha (an absent alpha's 1, which its value
-    /// 1 recovers), or `None` where the device's value is Metal's exactly: the small floats and
-    /// the YCbCr fields.
+    /// 1 recovers), or `None` where the device's value is Metal's exactly: the small floats, the
+    /// YCbCr fields and `RGB10A2Unorm_sRGB`'s, whose function decodes Metal's values itself.
     pub fn scales(self) -> Option<[u32; 4]> {
         Some(match self {
             PackedTexels::Rgb565 => [31, 63, 31, 1],
@@ -504,7 +513,8 @@ impl PackedTexels {
             PackedTexels::SmallFloat
             | PackedTexels::YCbCr2048
             | PackedTexels::YCbCr8192
-            | PackedTexels::YCbCrExtended8192 => return None,
+            | PackedTexels::YCbCrExtended8192
+            | PackedTexels::Rgb10A2Srgb => return None,
         })
     }
 
@@ -530,6 +540,7 @@ impl PackedTexels {
             PackedTexels::Rgba4 => [G8; 4],
             PackedTexels::YCbCr2048 => [2048; 4],
             PackedTexels::YCbCr8192 | PackedTexels::YCbCrExtended8192 => [8192; 4],
+            PackedTexels::Rgb10A2Srgb => [8192, 8192, 8192, G8],
             PackedTexels::SmallFloat | PackedTexels::Argb8 => return None,
         })
     }
@@ -538,12 +549,22 @@ impl PackedTexels {
     /// [`filter_grids`](Self::filter_grids) names the grids: the term of a code `c` on its grid
     /// under the weight `w` (in units of `2^-16`) is `⌊c · w / 2^s⌋`, and the sum's grid step
     /// `⌊(T + 2^(15 - s)) / 2^(16 - s)⌋` (module docs). 4 for a packed normalized format's 12-bit
-    /// grids, as for an 8-bit format's, and 7 for the YCbCr fields', measured on their 2D samples.
-    pub fn filter_truncation(self) -> Option<u32> {
-        self.filter_grids().map(|_| match self.ycbcr() {
-            true => 7,
-            false => 4,
+    /// grids, as for an 8-bit format's, and 7 for the YCbCr fields', measured on their 2D samples;
+    /// `RGB10A2Unorm_sRGB`'s 7 for its color channels and 4 for alpha. Red to alpha.
+    pub fn filter_truncation(self) -> Option<[u32; 4]> {
+        self.filter_grids().map(|_| match self {
+            PackedTexels::Rgb10A2Srgb => [7, 7, 7, 4],
+            _ if self.ycbcr() => [7; 4],
+            _ => [4; 4],
         })
+    }
+
+    /// Whether a `half` result of the field's one texel or linear filter rounds with ties away
+    /// from zero: the two-plane YCbCr fields' ([`ycbcr`](Self::ycbcr)) and
+    /// `RGB10A2Unorm_sRGB`'s, whose color steps lie on the grid `8192` (its alpha's values are
+    /// never a tie).
+    pub fn ties_away(self) -> bool {
+        self.ycbcr() || self == PackedTexels::Rgb10A2Srgb
     }
 
     /// Whether the field is a two-plane YCbCr format's: its view holds Metal's reads exactly, and a
@@ -1391,7 +1412,13 @@ mod tests {
                 p.filter_grids().is_some(),
                 "{p:?}"
             );
-            assert!(seen.contains(&(p as u32)), "{p:?} has no format");
+            // `RGB10A2Unorm_sRGB`'s field is its extended-range form's class's
+            // (`lower::sampler::extended`), which no format's own class takes.
+            let extended = p == PackedTexels::Rgb10A2Srgb;
+            assert!(
+                seen.contains(&(p as u32)) || extended,
+                "{p:?} has no format"
+            );
         }
         // A swizzle drops the field, and a packed normalized format's family with it.
         for (pf, alone) in [
@@ -1585,8 +1612,8 @@ mod tests {
     /// texture unit reads (`lower::texture::half`).
     const READ_ON_METAL_SAMPLER: u32 = T::LINEAR | T::SNORM | T::WIDE16 | TexelFormat::YCBCR_8192;
 
-    /// [`TexelFormat::YCBCR_8192`] is set in exactly the fields of the YCbCr grid `8192`, the
-    /// packed fields whose one texel's `half` rounds with ties away from zero.
+    /// [`TexelFormat::YCBCR_8192`] is set in exactly the fields of the grid `8192`, the packed
+    /// fields whose one texel's `half` rounds with ties away from zero.
     #[test]
     fn the_ycbcr_8192_bit_names_exactly_the_grid_8192_fields() {
         for p in PackedTexels::ALL {
@@ -1594,7 +1621,17 @@ mod tests {
             assert_eq!(field & TexelFormat::PACKED_MASK, field, "{p:?}");
             assert_eq!(
                 field & TexelFormat::YCBCR_8192 != 0,
-                matches!(p, PackedTexels::YCbCr8192 | PackedTexels::YCbCrExtended8192),
+                matches!(
+                    p,
+                    PackedTexels::YCbCr8192
+                        | PackedTexels::YCbCrExtended8192
+                        | PackedTexels::Rgb10A2Srgb
+                ),
+                "{p:?}"
+            );
+            assert_eq!(
+                field & TexelFormat::YCBCR_8192 != 0,
+                p.ties_away() && p != PackedTexels::YCbCr2048,
                 "{p:?}"
             );
         }

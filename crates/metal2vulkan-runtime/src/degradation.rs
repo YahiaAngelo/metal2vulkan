@@ -1175,7 +1175,8 @@ degradations! {
              Metal keeps";
         /// A draw in a render pass that loads a color attachment of an extended-range or padded
         /// 10-bit format (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`,
-        /// `RG10Unorm_X12` and their sRGB twins) and does not discard it at the store, where the
+        /// `RG10Unorm_X12` and their sRGB twins, and `RGB10A2Unorm_sRGB`) and does not discard it
+        /// at the store, where the
         /// pass's load pass (`render/unused_bits_load.rs`) does not take it (`render.rs`): a
         /// multisampled attachment, a texture held as a shadow of another image or of a heap's
         /// bytes, a sparse one, or one whose image the device does not copy both ways (a padded
@@ -1372,7 +1373,8 @@ degradations! {
              never makes one the older release stops";
         /// A render pass that loads a color attachment of an extended-range or padded 10-bit
         /// format (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and
-        /// their sRGB twins), or under [`metal2vulkan::device::TileStorePolicy::Exact`] of a
+        /// their sRGB twins, and `RGB10A2Unorm_sRGB`), or under
+        /// [`metal2vulkan::device::TileStorePolicy::Exact`] of a
         /// signed normalized format or `RGB9E5Float`, stores it and draws, whose load pass
         /// (`render/unused_bits_load.rs`) rewrites every 32 x 32 tile of its render area: Metal's
         /// pass rewrites only the tiles a draw's primitives reach (on

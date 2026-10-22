@@ -677,6 +677,8 @@ mod resource_ids;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod restart;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod rgb10a2_srgb;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod rgbx_textures;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod rotated_targets;

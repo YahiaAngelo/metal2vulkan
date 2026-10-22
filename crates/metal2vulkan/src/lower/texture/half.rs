@@ -288,7 +288,8 @@ struct PackedField {
     coded: SValue,
     /// Whether the field is `PackedTexels::SmallFloat`.
     small: SValue,
-    /// Whether the field is a two-plane YCbCr format's (`PackedTexels::ycbcr`).
+    /// Whether the field's one texel rounds with ties away from zero, a two-plane YCbCr format's
+    /// or `RGB10A2Unorm_sRGB`'s (`PackedTexels::ties_away`).
     ycbcr: SValue,
     /// Whether the lanes are a gather's, each its channel's (`channel` below 4).
     gathered: SValue,
@@ -314,12 +315,12 @@ impl PackedField {
         let mut ycbcr = coded;
         let mut fields = Vec::with_capacity(PackedTexels::ALL.len());
         for p in PackedTexels::ALL {
-            if !p.ycbcr() && p.scales().is_none() {
+            if !p.ties_away() && p.scales().is_none() {
                 continue;
             }
             let k = u1(fb, p as u32)?;
             let is = fb.binary(BinOp::IEqual, field, k)?;
-            if p.ycbcr() {
+            if p.ties_away() {
                 ycbcr = fb.binary(BinOp::LogicalOr, ycbcr, is)?;
             }
             let Some(s) = p.scales() else {

@@ -282,8 +282,8 @@ fn the_core_count_and_fp16_are_the_devices() {
 /// The answers read from the device: the texture alignments are the 16 bytes the runtime takes a
 /// linear texture and an IOSurface plane at; ordered atomics follow the Vulkan memory model at
 /// device scope; the XR10 formats follow their family row; a half-float texture is filtered
-/// bicubically everywhere; and `RGB10A2Unorm_sRGB`, which the runtime holds no texture of, is
-/// filtered nowhere.
+/// bicubically everywhere; and `RGB10A2Unorm_sRGB`, held as its raw word and filtered by the
+/// function (`ExtendedRange::Rgb10A2Srgb`), is filtered everywhere.
 #[test]
 fn the_alignments_atomics_and_formats_are_the_devices() {
     use crate::families::{FamilyRow, FeatureRow, RowState};
@@ -323,6 +323,6 @@ fn the_alignments_atomics_and_formats_are_the_devices() {
             Some(true),
             "{stem}"
         );
-        assert_eq!(flag(F::IsRgb10a2GammaSupported), Some(false), "{stem}");
+        assert_eq!(flag(F::IsRgb10a2GammaSupported), Some(true), "{stem}");
     }
 }

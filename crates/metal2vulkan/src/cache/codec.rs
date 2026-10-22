@@ -1122,7 +1122,7 @@ codec_enum! {
     }
     ExtendedRange {
         Bgr10 { srgb }, Bgra10 { srgb }, Planes { srgb }, R10X6, Rg10X12, R10X6Srgb, Rg10X12Srgb,
-        R16Bfloat, Rg16Bfloat, Rgba16Bfloat,
+        R16Bfloat, Rg16Bfloat, Rgba16Bfloat, Rgb10A2Srgb,
     }
     WordAttachment { Packed16 { fields }, Srgb8 { fields }, Rgb9e5 }
     FactorLane { Zero, One, Output(f0) }

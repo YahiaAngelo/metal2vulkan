@@ -334,6 +334,17 @@ pub enum ExtendedRange {
     /// are `RG10Unorm_X12`'s, `c / 1023`; a write stores, for the code `m` `RG10Unorm_X12` writes,
     /// Metal's code of `m` (a measured table of 1024 codes up to 137).
     Rg10X12Srgb,
+    /// `RGB10A2Unorm_sRGB` (586): `RGB10A2Unorm`'s little-endian word, red in bits 0-9, green
+    /// 10-19, blue 20-29 and alpha 30-31, held as `R32_UINT`. Measured on an Apple M3 Max under
+    /// macOS 27.0.1, which makes it in every storage mode and usage: each color channel's code
+    /// converts as `R10Unorm_X6_sRGB`'s (its tables, every code read and 16,385 values written;
+    /// a `half` read with ties away from zero), and alpha's 2-bit code `a` reads `a / 3`
+    /// correctly rounded and a write stores the exact product of the value, clamped to `[0, 1]`
+    /// (a NaN 0), with 3, rounded to nearest. A render pass's store rounds a `float` output to
+    /// `half` toward zero first, a clear goes through `half` (nearest even), and a pass that loads
+    /// it and draws elsewhere writes each color code back as `R10Unorm_X6_sRGB`'s
+    /// ([`load_code`](Self::load_code)), alpha kept.
+    Rgb10A2Srgb,
     /// `R16Bfloat` (26): a bfloat code (the top 16 bits of an IEEE `float`) in a little-endian
     /// 16-bit word, held as `R16_UINT` ([`FormatEmulation::Bfloat`]). Measured on an Apple M4
     /// under macOS 27.0.1, every code of each bfloat format: a read (`read` and `read_write`, a
@@ -369,6 +380,7 @@ impl ExtendedRange {
             PixelFormat::RG10UnormX12 => Some(ExtendedRange::Rg10X12),
             PixelFormat::R10UnormX6SRGB => Some(ExtendedRange::R10X6Srgb),
             PixelFormat::RG10UnormX12SRGB => Some(ExtendedRange::Rg10X12Srgb),
+            PixelFormat::RGB10A2UnormSRGB => Some(ExtendedRange::Rgb10A2Srgb),
             PixelFormat::R16Bfloat => Some(ExtendedRange::R16Bfloat),
             PixelFormat::RG16Bfloat => Some(ExtendedRange::Rg16Bfloat),
             PixelFormat::RGBA16Bfloat => Some(ExtendedRange::Rgba16Bfloat),
@@ -379,7 +391,7 @@ impl ExtendedRange {
     /// The unsigned integer format of the texels' bytes, which holds them.
     pub fn raw_format(self) -> vk::Format {
         match self {
-            ExtendedRange::Bgr10 { .. } => vk::Format::R32_UINT,
+            ExtendedRange::Bgr10 { .. } | ExtendedRange::Rgb10A2Srgb => vk::Format::R32_UINT,
             ExtendedRange::Bgra10 { .. } => vk::Format::R16G16B16A16_UINT,
             ExtendedRange::Planes { .. } => vk::Format::R32G32_UINT,
             ExtendedRange::R10X6 | ExtendedRange::R10X6Srgb => vk::Format::R16_UINT,
@@ -402,6 +414,7 @@ impl ExtendedRange {
             | ExtendedRange::Rg10X12
             | ExtendedRange::R10X6Srgb
             | ExtendedRange::Rg10X12Srgb
+            | ExtendedRange::Rgb10A2Srgb
             | ExtendedRange::R16Bfloat
             | ExtendedRange::Rg16Bfloat
             | ExtendedRange::Rgba16Bfloat => false,
@@ -418,14 +431,19 @@ impl ExtendedRange {
     }
 
     /// Whether the codes convert through the padded `_sRGB` formats' tables
-    /// (`R10Unorm_X6_sRGB`, `RG10Unorm_X12_sRGB`; `lower::arith::extended_range::declare_padded`).
+    /// (`R10Unorm_X6_sRGB`, `RG10Unorm_X12_sRGB`, and `RGB10A2Unorm_sRGB`'s color channels
+    /// through `R10Unorm_X6_sRGB`'s; `lower::arith::extended_range::declare_padded`).
     pub fn padded_srgb(self) -> bool {
-        matches!(self, ExtendedRange::R10X6Srgb | ExtendedRange::Rg10X12Srgb)
+        matches!(
+            self,
+            ExtendedRange::R10X6Srgb | ExtendedRange::Rg10X12Srgb | ExtendedRange::Rgb10A2Srgb
+        )
     }
 
-    /// Whether the codes are the padded 10-bit unsigned normalized ones (`R10Unorm_X6`,
-    /// `RG10Unorm_X12` and their `_sRGB` twins), each in a 16-bit word's top 10 bits, rather
-    /// than Apple's extended-range `(c - 384) / 510`.
+    /// Whether the codes are 10-bit unsigned normalized ones rather than Apple's extended-range
+    /// `(c - 384) / 510`: the padded formats' (`R10Unorm_X6`, `RG10Unorm_X12` and their `_sRGB`
+    /// twins), each in a 16-bit word's top 10 bits, and `RGB10A2Unorm_sRGB`'s packed fields
+    /// ([`Rgb10A2Srgb`](Self::Rgb10A2Srgb), its alpha a 2-bit code).
     pub fn padded(self) -> bool {
         matches!(
             self,
@@ -433,6 +451,7 @@ impl ExtendedRange {
                 | ExtendedRange::Rg10X12
                 | ExtendedRange::R10X6Srgb
                 | ExtendedRange::Rg10X12Srgb
+                | ExtendedRange::Rgb10A2Srgb
         )
     }
 
@@ -484,7 +503,9 @@ impl ExtendedRange {
         let rgb = M::RED.union(M::GREEN).union(M::BLUE);
         match self {
             ExtendedRange::Bgr10 { .. } => rgb,
-            ExtendedRange::Bgra10 { .. } | ExtendedRange::Planes { .. } => rgb.union(M::ALPHA),
+            ExtendedRange::Bgra10 { .. }
+            | ExtendedRange::Planes { .. }
+            | ExtendedRange::Rgb10A2Srgb => rgb.union(M::ALPHA),
             ExtendedRange::R10X6 | ExtendedRange::R10X6Srgb => M::RED,
             ExtendedRange::Rg10X12 | ExtendedRange::Rg10X12Srgb => M::RED.union(M::GREEN),
             ExtendedRange::R16Bfloat => M::RED,
@@ -497,7 +518,10 @@ impl ExtendedRange {
     /// word, the two-plane formats' color word and alpha byte, `BGRA10_XR`'s four fields.
     pub fn raw_components(self) -> u32 {
         match self {
-            ExtendedRange::Bgr10 { .. } | ExtendedRange::R10X6 | ExtendedRange::R10X6Srgb => 1,
+            ExtendedRange::Bgr10 { .. }
+            | ExtendedRange::R10X6
+            | ExtendedRange::R10X6Srgb
+            | ExtendedRange::Rgb10A2Srgb => 1,
             ExtendedRange::Planes { .. } | ExtendedRange::Rg10X12 | ExtendedRange::Rg10X12Srgb => 2,
             ExtendedRange::Bgra10 { .. } => 4,
             ExtendedRange::R16Bfloat => 1,
@@ -632,12 +656,14 @@ impl ExtendedRange {
         let v = if v.is_nan() { 0.0 } else { v };
         // A padded format's code: the exact product of the value clamped to [0, 1] with 1023,
         // rounded to nearest even (its one tie, 0.5, stores 512); an `_sRGB`
-        // twin's through Metal's tables.
+        // twin's through Metal's tables. `RGB10A2Unorm_sRGB`'s alpha: the product with 3, never a
+        // tie.
         if self.padded() {
             let v = f64::from(v.clamp(0.0, 1.0));
             let linear = (v * 1023.0).round_ties_even() as usize;
             return match self {
-                ExtendedRange::R10X6Srgb => {
+                ExtendedRange::Rgb10A2Srgb if alpha => (v * 3.0).round_ties_even() as u32,
+                ExtendedRange::R10X6Srgb | ExtendedRange::Rgb10A2Srgb => {
                     // `v` times 2^13 is exact.
                     let i = (v * 8192.0).round_ties_even() as u16;
                     let first = &padded_srgb::R10X6_SRGB_ENCODE_FIRST;
@@ -689,6 +715,12 @@ impl ExtendedRange {
             }
             // Each code in its word's top 10 bits, the low 6 bits zero.
             ExtendedRange::R10X6 | ExtendedRange::R10X6Srgb => [rgba[0] << 6, 0, 0, 0],
+            ExtendedRange::Rgb10A2Srgb => [
+                rgba[3] << 30 | rgba[2] << 20 | rgba[1] << 10 | rgba[0],
+                0,
+                0,
+                0,
+            ],
             ExtendedRange::Rg10X12 | ExtendedRange::Rg10X12Srgb => {
                 [rgba[0] << 6, rgba[1] << 6, 0, 0]
             }
@@ -703,7 +735,9 @@ impl ExtendedRange {
     /// draws, where no draw writes it: Metal's pass reads the word and writes it back, its
     /// decoded value encoded again (an Apple M4 and an Apple M3 Max, byte-identical). `c` itself
     /// for `R10Unorm_X6` and `RG10Unorm_X12`; `R10Unorm_X6_sRGB`'s write of its read, which moves
-    /// the 23 codes no write stores; `RG10Unorm_X12_sRGB`'s write code of `c`. A bfloat form's code
+    /// the 23 codes no write stores, and so does each color channel's code of `RGB10A2Unorm_sRGB`
+    /// (an Apple M3 Max under macOS 27.0.1, every code; its alpha's code stays);
+    /// `RG10Unorm_X12_sRGB`'s write code of `c`. A bfloat form's code
     /// `c` (each channel's 16-bit word) holds the code a `Clear` of its value stores under
     /// [`ClearRoute::ThroughHalf`] ([`clear_texel`](Self::clear_texel)): the `float` of its bits
     /// rounded to `half` to nearest even (past the largest `half`, the infinity), then the bfloat
@@ -720,7 +754,7 @@ impl ExtendedRange {
         let at = usize::try_from(c).ok().filter(|&c| c < 1024)?;
         match self {
             ExtendedRange::R10X6 | ExtendedRange::Rg10X12 => Some(c),
-            ExtendedRange::R10X6Srgb => {
+            ExtendedRange::R10X6Srgb | ExtendedRange::Rgb10A2Srgb => {
                 let step = padded_srgb::R10X6_SRGB_DECODE_STEPS[at];
                 let first = &padded_srgb::R10X6_SRGB_ENCODE_FIRST;
                 Some(first.partition_point(|&f| f <= step).saturating_sub(1) as u32)
@@ -1103,7 +1137,6 @@ macro_rules! formats_named_not_held {
             | PixelFormat::YCBCRA84441P
             | PixelFormat::YCBCR84221PREV
             | PixelFormat::YCBCR104441PPQ
-            | PixelFormat::RGB10A2UnormSRGB
             | PixelFormat::RGB10A2UnormPQ
             | PixelFormat::R10UnormPACKED
             | PixelFormat::RG10UnormPACKED
@@ -1429,6 +1462,9 @@ fn make_repr(pf: PixelFormat) -> Repr {
         P::RG10UnormX12 | P::RG10UnormX12SRGB => {
             color(vec![combined(F::R16G16_UINT, E::ExtendedRange)])
         }
+        // `RGB10A2Unorm`'s word, its color codes sRGB-encoded by Metal's own tables, which no
+        // Vulkan format has: held raw ([`ExtendedRange::Rgb10A2Srgb`]).
+        P::RGB10A2UnormSRGB => color(vec![combined(F::R32_UINT, E::ExtendedRange)]),
         // The bfloat formats: each code held raw in the integer format of its words.
         P::R16Bfloat => color(vec![combined(F::R16_UINT, E::Bfloat)]),
         P::RG16Bfloat => color(vec![combined(F::R16G16_UINT, E::Bfloat)]),
@@ -2164,6 +2200,7 @@ pub(crate) fn color_output_components(pf: PixelFormat) -> Option<u8> {
         | P::BGRA10XRSRGB
         | P::RGB10A82PXR10
         | P::RGB10A82PXR10SRGB
+        | P::RGB10A2UnormSRGB
         | P::RGBA16Bfloat
         | P::RGBA32Uint
         | P::RGBA32Sint
@@ -2396,6 +2433,7 @@ pub(crate) fn out_of_bounds_alpha_one(pf: PixelFormat) -> Option<bool> {
         | P::ARGB8Unorm
         | P::RGB10A82PXR10
         | P::RGB10A82PXR10SRGB
+        | P::RGB10A2UnormSRGB
         | P::RGBA32Uint
         | P::RGBA32Sint
         | P::RGBA32Float

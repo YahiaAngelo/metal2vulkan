@@ -34,11 +34,12 @@ pub fn declare(mb: &mut ModuleBuilder) -> BResult<GlobalId> {
 /// Declare the module's table of the padded `_sRGB` form `form`, a `Private` `u32[1024]`
 /// indexed by code (`metal::format::padded_srgb`): `R10Unorm_X6_sRGB`'s holds each code's
 /// decode step in its low half and its first encode index in its high half, as [`declare`]'s
-/// does an offset's, so [`search`] encodes through it; `RG10Unorm_X12_sRGB`'s holds the code a
+/// does an offset's, so [`search`] encodes through it (`RGB10A2Unorm_sRGB`'s color channels
+/// take the same); `RG10Unorm_X12_sRGB`'s holds the code a
 /// write of each linear code stores. `None` for every other form, which has no such table.
 pub fn declare_padded(mb: &mut ModuleBuilder, form: ExtendedRange) -> BResult<Option<GlobalId>> {
     let words: Vec<u64> = match form {
-        ExtendedRange::R10X6Srgb => R10X6_SRGB_DECODE_STEPS
+        ExtendedRange::R10X6Srgb | ExtendedRange::Rgb10A2Srgb => R10X6_SRGB_DECODE_STEPS
             .iter()
             .zip(&R10X6_SRGB_ENCODE_FIRST)
             .map(|(&step, &first)| u64::from(step) | (u64::from(first) << 16))

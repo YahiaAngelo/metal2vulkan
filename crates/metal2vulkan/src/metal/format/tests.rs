@@ -87,7 +87,8 @@ fn refused_formats_are_exactly_the_documented_set() {
     // - their `_sRGB` twins, held raw.
     // - the eleven RGBX formats, held in their RGBA twins.
     // - the three bfloat formats, held raw.
-    assert_eq!(count("not_implemented"), 45 + 3 + 6 + 62, "{refused:?}");
+    // - `RGB10A2Unorm_sRGB`, held raw.
+    assert_eq!(count("not_implemented"), 45 + 3 + 6 + 61, "{refused:?}");
     assert!(refused["not_implemented"].iter().all(|&pf| {
         (ycbcr_format(pf).is_some() && !ycbcr(pf))
             || matches!(pf, P::RGBA16FloatXR | P::AnyDepth | P::AnyStencil)
@@ -1107,20 +1108,21 @@ fn formats_metal_names_are_named_and_refused_typed() {
     // All but `R10Unorm_X6`, `RG10Unorm_X12` and their `_sRGB` twins, held raw
     // (`padded_only_over_memory`).
     // And the eleven RGBX formats, held in their RGBA twins (`x_channel`).
-    // And the three bfloat formats, held raw (`ExtendedRange::bfloat`).
+    // And the three bfloat formats and `RGB10A2Unorm_sRGB`, held raw (`ExtendedRange`).
     let bfloat = |pf| ExtendedRange::of(pf).is_some_and(ExtendedRange::bfloat);
+    let rgb10a2_srgb = |pf| ExtendedRange::of(pf) == Some(ExtendedRange::Rgb10A2Srgb);
     assert_eq!(
         PixelFormat::ALL
             .iter()
             .filter(|&&pf| matches!(pf, formats_named_not_held!()))
             .count(),
-        named.len() - 4 - 11 - 3
+        named.len() - 4 - 11 - 3 - 1
     );
     for (raw, name) in named {
         let pf = PixelFormat::try_from(raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
         assert_eq!(pf.name(), name);
         assert_eq!(PixelFormat::from_name(name), Some(pf));
-        if padded_only_over_memory(pf) || x_channel(pf) || bfloat(pf) {
+        if padded_only_over_memory(pf) || x_channel(pf) || bfloat(pf) || rgb10a2_srgb(pf) {
             continue;
         }
         assert!(matches!(pf, formats_named_not_held!()), "{name}");

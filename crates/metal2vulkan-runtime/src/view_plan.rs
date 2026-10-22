@@ -401,11 +401,13 @@ fn check_format(
         ));
     }
     // A padded 10-bit texture's view in another format, or another texture's in one, is not
-    // measured: the runtime's gap.
-    if [source, view]
-        .into_iter()
-        .any(metal2vulkan::metal::format::padded_only_over_memory)
-    {
+    // measured: the runtime's gap. Nor is an `RGB10A2Unorm_sRGB` texture's view as
+    // `RGB10A2Unorm`, or the other order, which plain Metal makes (an Apple M3 Max under macOS
+    // 27.0.1), its reads unmeasured.
+    if [source, view].into_iter().any(|pf| {
+        metal2vulkan::metal::format::padded_only_over_memory(pf)
+            || ExtendedRange::of(pf) == Some(ExtendedRange::Rgb10A2Srgb)
+    }) {
         return Err(ViewRefusal::Unsupported(
             Unsupported::not_implemented(Feature::Format).naming_format(view),
         ));

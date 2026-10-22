@@ -1789,10 +1789,10 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   and those an earlier blit left in a row's padding or past a plane, which Metal keeps.
 - `metal2vulkan-degrade-extended-range-bits-kept` (precision). `ExtendedRangeBitsKept`: A draw in a
   render pass that loads a color attachment of an extended-range or padded 10-bit format
-  (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and their sRGB twins)
-  and does not discard it at the store, where the pass's load pass does not take it: a multisampled
-  attachment, a texture held as a shadow of another image or of a heap's bytes, a sparse one, or one
-  whose image the device does not copy both ways (a padded format has none of these). Cost: the
+  (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and their sRGB twins,
+  and `RGB10A2Unorm_sRGB`) and does not discard it at the store, where the pass's load pass does
+  not take it: a multisampled attachment, a texture held as a shadow of another image or of a
+  heap's bytes, a sparse one, or one whose image the device does not copy both ways (a padded format has none of these). Cost: the
   texels the pass's draws do not write keep their bytes; Metal's pass keeps their codes but rewrites
   the bits they leave unused in each tile a draw reaches (BGR10_XR's bits 30 and 31 to ones,
   BGRA10_XR's low six bits of each field to zeros, the two-plane color word's top two bits to zeros)
@@ -1906,7 +1906,8 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   and never makes one the older release stops.
 - `metal2vulkan-degrade-unreached-tiles-rewritten` (precision). `UnreachedTilesRewritten`: A render
   pass that loads a color attachment of an extended-range or padded 10-bit format (`BGR10_XR`,
-  `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and their sRGB twins), or under
+  `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and their sRGB twins, and
+  `RGB10A2Unorm_sRGB`), or under
   `TileStorePolicy::Exact` of a signed normalized format or `RGB9E5Float`, stores it and draws,
   whose load pass rewrites every 32 x 32 tile of its render area: Metal's pass rewrites
   only the tiles a draw's primitives reach, and every tile only where a color attachment of the pass

@@ -70,6 +70,7 @@ pub(super) fn raw_of(form: ExtendedRange, [r, g, b, a]: [u32; 4]) -> [u32; 4] {
         ExtendedRange::R16Bfloat => [r, 0, 0, 1],
         ExtendedRange::Rg16Bfloat => [r, g, 0, 1],
         ExtendedRange::Rgba16Bfloat => [r, g, b, a],
+        ExtendedRange::Rgb10A2Srgb => [a << 30 | b << 20 | g << 10 | r, 0, 0, 1],
     }
 }
 

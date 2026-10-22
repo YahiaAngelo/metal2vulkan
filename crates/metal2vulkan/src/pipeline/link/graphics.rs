@@ -1089,7 +1089,8 @@ fn extended_write_mask(
     if kept.is_empty() {
         return Ok(C::empty());
     }
-    if form.padded() {
+    // `RGB10A2Unorm_sRGB`'s channels share one word: a mask of some of them is refused as above.
+    if form.padded() && form.raw_components() == channels.as_raw().count_ones() {
         return Ok(kept);
     }
     if kept != channels {
