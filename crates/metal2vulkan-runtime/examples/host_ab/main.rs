@@ -416,6 +416,14 @@ fn child(side: &str, options: &Options) {
                 c.batches_with_two_or_three_pending,
                 c.batches_with_four_or_more_pending,
             );
+            eprintln!(
+                "runtime replays: command_buffers_replayed {} command_buffers_replayed_inline {} \
+                 scheduler_sleeps {} scheduler_wakes_commit {}",
+                c.command_buffers_replayed,
+                c.command_buffers_replayed_inline,
+                c.scheduler_sleeps,
+                c.scheduler_wakes_commit,
+            );
             eprintln!("runtime commands replayed: {:?}", c.commands_replayed);
             eprintln!(
                 "runtime notices: {} (bound notices made {}), other messages heard {}",

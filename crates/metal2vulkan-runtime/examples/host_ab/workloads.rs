@@ -2836,10 +2836,13 @@ pub fn calls<G: Gpu>(
         .filter(|shape| variants.is_empty() || variants.iter().any(|v| v == shape.name));
     for shape in shapes {
         let mut means: [Vec<f64>; CALL_STEPS.len()] = Default::default();
-        let mut frames = vec![];
+        let (mut frames, mut walls) = (vec![], vec![]);
         for frame in 0..WARM + sizes.timed {
+            let start = Instant::now();
             let t = objects.frame(g, s, shape, false);
+            let wall = start.elapsed();
             if frame >= WARM {
+                walls.push(wall.as_secs_f64() * 1e6);
                 let mut sum = 0.0;
                 for (step, &(total, count)) in t.0.iter().enumerate() {
                     if count > 0 {
@@ -2857,6 +2860,9 @@ pub fn calls<G: Gpu>(
             }
         }
         emit("calls", &format!("{name}_frame_calls"), "us", &mut frames);
+        // The frame from its first call until its last command buffer's handler ran and its wait
+        // returned: what the calls cost, and how soon their work went to the GPU and completed.
+        emit("calls", &format!("{name}_frame_wall"), "us", &mut walls);
         let t = crate::allocs::counting(|| objects.frame(g, s, shape, true));
         for (step, &(total, count)) in CALL_STEPS.iter().zip(&t.0) {
             if count > 0 {
