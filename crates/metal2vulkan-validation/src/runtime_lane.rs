@@ -613,7 +613,7 @@ mod pool_churn;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod pool_slots;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
-mod predication;
+pub(crate) mod predication;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod presenting;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
