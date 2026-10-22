@@ -417,7 +417,8 @@ fn a_host_heap_s_plain_texture_lies_in_metal_s_tiles() {
 /// A texture made again in a heap over host pages, of a descriptor a texture of the device was
 /// made of before, makes no image to ask its plan's memory requirements where the device enables
 /// `maintenance4`, which fixes them by the image's creation parameters
-/// (`WorkCounts::requirement_images_made`), and neither does the size query of that descriptor;
+/// (`WorkCounts::requirement_images_made`), nor asks the device's limits for those images
+/// (`WorkCounts::requirement_limits_asked`), and neither does the size query of that descriptor;
 /// the first texture of another extent asks. Elsewhere each making asks as the first did. Each
 /// texture made again lies in Metal's tiles all the same: a blit reads the bytes it was made
 /// over, its answered size the first's.
@@ -426,10 +427,19 @@ fn a_texture_made_again_asks_the_device_nothing_its_first_making_asked() {
     on_device(|device, _| {
         let queue = device.new_command_queue().unwrap();
         let kept = device.enabled().features.contains(&VkFeature::Maintenance4);
+        // The images made and the device's limits asked for them.
         let asked = |make: &mut dyn FnMut()| {
-            let before = device.work_counts().requirement_images_made;
+            let count = || {
+                let counts = device.work_counts();
+                (
+                    counts.requirement_images_made,
+                    counts.requirement_limits_asked,
+                )
+            };
+            let before = count();
             make();
-            device.work_counts().requirement_images_made - before
+            let after = count();
+            (after.0 - before.0, after.1 - before.1)
         };
         let zero = vec![0u8; HEAP];
         for plain in &plains()[2..4] {
@@ -462,9 +472,10 @@ fn a_texture_made_again_asks_the_device_nothing_its_first_making_asked() {
             drop(heap);
             drop(mapping);
             // Each extent's first making asks, the second's too.
-            assert!(counts[0] > 0, "{what}: the first making asks: {counts:?}");
+            assert!(counts[0].0 > 0, "{what}: the first making asks: {counts:?}");
+            assert!(counts[0].1 >= counts[0].0, "{what}: {counts:?}");
             match kept {
-                true => assert_eq!(counts[1..], [0; 5], "{what}: {counts:?}"),
+                true => assert_eq!(counts[1..], [(0, 0); 5], "{what}: {counts:?}"),
                 false => assert!(
                     counts.iter().step_by(2).all(|&n| n == counts[0]),
                     "{what}: {counts:?}"

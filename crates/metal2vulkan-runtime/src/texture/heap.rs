@@ -1720,13 +1720,19 @@ impl Device {
     /// `Unsupported` where the device makes no such image: for a linear one,
     /// `HeapTextureTiling`, naming what the device's linear images lack. The answer for an image
     /// of the same plan and tiling asked before where Vulkan fixes it (`texture/requirements.rs`),
-    /// else that of an image made for the query (`WorkCounts::requirement_images_made`).
+    /// with no other query: it was kept only once the device's limits took the image. Else the
+    /// device's limits for the image are asked (`vkGetPhysicalDeviceImageFormatProperties2`), then
+    /// an image is made for the query (`WorkCounts::requirement_images_made`).
     fn planned_requirements(
         &self,
         plan: &ImagePlan,
         texture_type: TextureType,
         tiling: vk::ImageTiling,
     ) -> Result<vk::MemoryRequirements, Error> {
+        let answers = &self.shared().textures.requirements;
+        if let Some(requirements) = lock(answers).answer(plan, tiling) {
+            return Ok(requirements);
+        }
         let view_formats = plan.ash_view_formats();
         let mut list = vk::ImageFormatListCreateInfo::default();
         let info = plan
@@ -1734,14 +1740,11 @@ impl Device {
             .tiling(tiling)
             .initial_layout(initial_layout(tiling));
         let limits = self.image_limits(&info, &view_formats)?;
+        self.shared().counts.requirement_limits_asked();
         if tiling == vk::ImageTiling::LINEAR {
             check_linear_limits(plan, &limits).map_err(tiling_refusal)?;
         } else {
             check_image_limits(plan, texture_type, &limits).map_err(Error::Unsupported)?;
-        }
-        let answers = &self.shared().textures.requirements;
-        if let Some(requirements) = lock(answers).answer(plan, tiling) {
-            return Ok(requirements);
         }
         let raw_device = self.shared().vk();
         // SAFETY: the device is live and `info` (with its format list) valid and within the

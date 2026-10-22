@@ -90,6 +90,7 @@ pub(crate) struct Counters {
     heap_slot_writes_deferred: AtomicU64,
     heap_textures_tiled: AtomicU64,
     requirement_images_made: AtomicU64,
+    requirement_limits_asked: AtomicU64,
     arena_pools_made: AtomicU64,
     heap_texture_lossless_layouts: AtomicU64,
     heap_texture_block_compressed_layouts: AtomicU64,
@@ -2166,6 +2167,13 @@ impl Counters {
         self.requirement_images_made.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// The device's limits were asked for an image a heap texture's plan asks the memory
+    /// requirements of (`texture/requirements.rs`).
+    pub(crate) fn requirement_limits_asked(&self) {
+        self.requirement_limits_asked
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     /// A descriptor arena made a pool, no spare having room (`descriptor_arena.rs`).
     pub(crate) fn arena_pool_made(&self) {
         self.arena_pools_made.fetch_add(1, Ordering::Relaxed);
@@ -2585,6 +2593,10 @@ pub struct WorkCounts {
     /// once: none for a plan and tiling asked before on a device that enables `maintenance4`,
     /// which fixes the answer (`texture/requirements.rs`).
     pub requirement_images_made: u64,
+    /// The device's limits (`vkGetPhysicalDeviceImageFormatProperties2`) heap textures' plans
+    /// asked for the images whose memory requirements they ask: none for a plan and tiling whose
+    /// requirements were kept (`texture/requirements.rs`), which the limits took already.
+    pub requirement_limits_asked: u64,
     /// The descriptor pools the runtime's descriptor arenas made, where no spare of the device's
     /// had room (`descriptor_arena.rs`): those of commands' set 0 and of the runtime's own
     /// kernels' sets (`owned_kernel.rs`).
@@ -3903,6 +3915,7 @@ impl Device {
             host_range_lookups: self.shared().aliases.range_lookups(),
             heap_textures_tiled: counters.heap_textures_tiled.load(Ordering::Relaxed),
             requirement_images_made: counters.requirement_images_made.load(Ordering::Relaxed),
+            requirement_limits_asked: counters.requirement_limits_asked.load(Ordering::Relaxed),
             arena_pools_made: counters.arena_pools_made.load(Ordering::Relaxed),
             heap_texture_lossless_layouts: counters
                 .heap_texture_lossless_layouts
