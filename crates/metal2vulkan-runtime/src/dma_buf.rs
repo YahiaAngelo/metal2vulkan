@@ -194,17 +194,16 @@ pub(super) struct DmaBufPages {
 impl Drop for DmaBufPages {
     fn drop(&mut self) {
         // The Vulkan teardown is a section of the exit guard.
-        let after_free: Vec<Box<dyn Send>> = (self.after_free.get_mut())
-            .unwrap_or_else(PoisonError::into_inner)
-            .drain(..)
-            .collect();
         let Some(busy) = exit_guard::enter() else {
             // The process is exiting: the imports stay to its end, and the source and what waits
             // for their free with them.
             if let Some(source) = self.source.take() {
                 std::mem::forget(source);
             }
-            std::mem::forget(after_free);
+            let after_free = self.after_free.get_mut();
+            for after in after_free.unwrap_or_else(PoisonError::into_inner).drain(..) {
+                std::mem::forget(after);
+            }
             return;
         };
         let shared = self.device.shared();
@@ -235,8 +234,8 @@ impl Drop for DmaBufPages {
         if let Some(source) = self.source.take() {
             exit_guard::program_release(move || drop(source));
         }
-        // Freed: what waited for it goes, the keep-alive that kept the pages mapped among it.
-        drop(after_free);
+        // Freed: what waited for it (`after_free`, the keep-alive that kept the pages mapped
+        // among it) goes as the fields drop, after this.
     }
 }
 
