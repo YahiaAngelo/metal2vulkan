@@ -348,10 +348,12 @@ impl Running {
 }
 
 impl InProcess for Running {
-    fn drain(&self, deadline: Instant) -> bool {
+    fn drain(&self, deadline: Option<Instant>) -> bool {
         self.asked.lock().unwrap().get_or_insert_with(Instant::now);
         let done = self.done.lock().unwrap().take();
-        let left = deadline.saturating_duration_since(Instant::now());
+        let left = deadline.map_or(Duration::MAX, |deadline| {
+            deadline.saturating_duration_since(Instant::now())
+        });
         done.is_some_and(|done| done.recv_timeout(left).is_ok())
     }
 }
@@ -360,6 +362,25 @@ impl InProcess for Running {
 fn add(devices: &InProcessDevices, device: &Arc<Running>) {
     let weak: Weak<dyn InProcess> = Arc::<Running>::downgrade(device);
     devices.add(weak);
+}
+
+/// A bound past what the host's clock holds is no deadline: the hook waits until the work
+/// completes.
+#[test]
+fn a_bound_past_the_clock_waits_until_the_work_completes() {
+    let guard = guard();
+    let devices = none_in_process();
+    let (finish, done) = mpsc::channel();
+    let running = Running::new(done);
+    add(&devices, &running);
+    let finishing = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(50));
+        finish.send(()).unwrap();
+    });
+    let pid = std::process::id();
+    let hooked = hook(guard, &devices, pid, pid, 0, Duration::MAX, Duration::MAX);
+    assert_eq!(hooked, Some(true));
+    finishing.join().unwrap();
 }
 
 /// The interleaving of an exit while a CPU device runs submitted work (the in-flight dispatch
@@ -485,7 +506,7 @@ fn the_hook_s_wait_for_a_cpu_device_s_work_shares_its_bound() {
 struct Counted(AtomicUsize);
 
 impl InProcess for Counted {
-    fn drain(&self, _deadline: Instant) -> bool {
+    fn drain(&self, _deadline: Option<Instant>) -> bool {
         self.0.fetch_add(1, Ordering::SeqCst);
         true
     }
@@ -751,7 +772,7 @@ fn no_wait_for_a_cpu_device_s_work_follows_a_destructor_between_the_hook_s_runs(
     /// A device whose wait ends the child with 43 once the destructor ran.
     struct Checked;
     impl InProcess for Checked {
-        fn drain(&self, _deadline: Instant) -> bool {
+        fn drain(&self, _deadline: Option<Instant>) -> bool {
             if DESTROYED.load(Ordering::SeqCst) {
                 // SAFETY: ends the child at once, from its exit handlers.
                 unsafe { libc::_exit(43) };
@@ -888,7 +909,8 @@ fn a_busy_exit_ends_at_once_with_its_status() {
     /// A CPU device whose submitted work never completes.
     struct Stuck;
     impl InProcess for Stuck {
-        fn drain(&self, deadline: Instant) -> bool {
+        fn drain(&self, deadline: Option<Instant>) -> bool {
+            let deadline = deadline.expect("the hook's bound is a deadline");
             std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
             false
         }

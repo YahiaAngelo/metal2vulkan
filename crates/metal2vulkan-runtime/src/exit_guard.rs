@@ -204,9 +204,10 @@ static IN_PROCESS: InProcessDevices = InProcessDevices::new();
 /// A device whose queues run in this process (a CPU device): the work submitted to them runs on
 /// the process's own threads, which the exit's destructors must not run under.
 pub(crate) trait InProcess: Send + Sync {
-    /// Wait until the work submitted to its queues completed, at most until `deadline`: whether
+    /// Wait until the work submitted to its queues completed, at most until `deadline` (`None`:
+    /// no deadline): whether
     /// it did. Called by the hook once the sections ended, so nothing is submitted meanwhile.
-    fn drain(&self, deadline: Instant) -> bool;
+    fn drain(&self, deadline: Option<Instant>) -> bool;
 }
 
 /// The devices whose queues run in this process, each with the process it was made in (a forked
@@ -244,7 +245,7 @@ impl InProcessDevices {
 
 /// Wait for the submitted work of each of `devices`, at most until `deadline`: whether every one
 /// completed.
-fn drain(devices: &[Arc<dyn InProcess>], deadline: Instant) -> bool {
+fn drain(devices: &[Arc<dyn InProcess>], deadline: Option<Instant>) -> bool {
     // Every device is waited for, whatever an earlier one answered.
     let mut drained = true;
     for device in devices {
@@ -1469,13 +1470,14 @@ pub(crate) fn hook(
     making: Duration,
 ) -> Option<bool> {
     (registered == pid).then(|| {
-        let deadline = Instant::now() + bound;
+        // A bound past what the host's clock holds is no deadline.
+        let deadline = Instant::now().checked_add(bound);
         let ended = guard.close(own, bound, making);
         // A making's section held the close past the bound: the work gets the bound from there.
         let now = Instant::now();
-        let deadline = match now > deadline {
-            true => now + bound,
-            false => deadline,
+        let deadline = match deadline {
+            Some(deadline) if now > deadline => now.checked_add(bound),
+            deadline => deadline,
         };
         // A later run (an earlier registration) follows the destructors registered after its
         // registration: it finds no device, so makes no Vulkan call.

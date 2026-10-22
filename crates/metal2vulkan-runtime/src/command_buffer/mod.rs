@@ -2723,13 +2723,13 @@ impl CommandBuffer {
             .map_err(|_| DeadlockCause::Exiting.into())
     }
 
-    /// [`CommandBuffer::wait_until_completed`] for at most `timeout`, which bounds the whole call.
-    /// Where that is refused, it ends at once with `TimedOut`, as it does once the process is
-    /// exiting.
+    /// [`CommandBuffer::wait_until_completed`] for at most `timeout`, which bounds the whole call;
+    /// a timeout past what the host's clock holds waits until the completion comes. Where that is
+    /// refused, it ends at once with `TimedOut`, as it does once the process is exiting.
     pub fn wait_until_completed_for(&self, timeout: Duration) -> Result<(), TimedOut> {
-        let deadline = Instant::now() + timeout;
+        let deadline = Instant::now().checked_add(timeout);
         let _blocked = match self.completed_wait() {
-            Answer::Return => return self.trailed(Some(deadline)).map_err(|_| TimedOut),
+            Answer::Return => return self.trailed(deadline).map_err(|_| TimedOut),
             Answer::Refuse(_) => return Err(TimedOut),
             Answer::Wait => None,
             Answer::Block(from) => {
@@ -2738,8 +2738,12 @@ impl CommandBuffer {
         };
         self.settle_commit();
         self.0.waits_for_completion();
-        self.0.gate.wait_until(deadline)?;
-        self.trailed(Some(deadline)).map_err(|_| TimedOut)
+        match deadline {
+            Some(deadline) => self.0.gate.wait_until(deadline)?,
+            // Only an exiting process ends a wait with no deadline: that wait's `TimedOut`.
+            None => self.0.gate.wait().map_err(|_| TimedOut)?,
+        }
+        self.trailed(deadline).map_err(|_| TimedOut)
     }
 
     /// Once its gate opened, wait until the trails opened before it completed closed

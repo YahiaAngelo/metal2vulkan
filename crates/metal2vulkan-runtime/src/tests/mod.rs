@@ -39,6 +39,8 @@ mod completion_here;
 mod completion_seen;
 mod compute;
 mod contexts;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod copy_bounds;
 mod copy_plan;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod deferred_calls;

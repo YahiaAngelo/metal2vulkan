@@ -1728,7 +1728,7 @@ impl Device {
 
 impl exit_guard::InProcess for DeviceShared {
     /// Wait on each `VkQueue`'s timeline for the value of the last batch submitted there.
-    fn drain(&self, deadline: Instant) -> bool {
+    fn drain(&self, deadline: Option<Instant>) -> bool {
         let (timelines, values): (Vec<vk::Semaphore>, Vec<u64>) = self
             .queues
             .iter()
@@ -1741,13 +1741,14 @@ impl exit_guard::InProcess for DeviceShared {
         let info = vk::SemaphoreWaitInfo::default()
             .semaphores(&timelines)
             .values(&values);
-        let timeout = deadline.saturating_duration_since(Instant::now());
+        // No deadline is the longest timeout, `UINT64_MAX` nanoseconds.
+        let timeout = deadline.map_or(u64::MAX, |deadline| {
+            let left = deadline.saturating_duration_since(Instant::now());
+            u64::try_from(left.as_nanos()).unwrap_or(u64::MAX)
+        });
         // SAFETY: the timelines are the device's, live while this handle holds it; a wait for
         // values already signalled or submitted to be (each batch signals its queue's).
-        let waited = unsafe {
-            self.vk()
-                .wait_semaphores(&info, u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX))
-        };
+        let waited = unsafe { self.vk().wait_semaphores(&info, timeout) };
         waited.is_ok()
     }
 }

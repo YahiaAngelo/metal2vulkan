@@ -265,11 +265,12 @@ impl EventShared {
         self.device.shared().scheduler.wake();
     }
 
-    /// Wait until the value reaches `value`, at most `timeout`. Once the process is exiting, it
-    /// answers at once from the value last seen: neither a completion turn nor the counter
-    /// raises it any more (`exit_guard`).
+    /// Wait until the value reaches `value`, at most `timeout`; a timeout past what the host's
+    /// clock holds (Metal's `UINT64_MAX` milliseconds) has no deadline. Once the process is
+    /// exiting, it answers at once from the value last seen: neither a completion turn nor the
+    /// counter raises it any more (`exit_guard`).
     fn wait_until(self: &Arc<Self>, value: u64, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
+        let deadline = Instant::now().checked_add(timeout);
         loop {
             if self.value() >= value {
                 return true;
@@ -278,7 +279,9 @@ impl EventShared {
             if state.timeline.value() >= value {
                 return true;
             }
-            let left = deadline.saturating_duration_since(Instant::now());
+            let left = deadline.map_or(POLL, |deadline| {
+                deadline.saturating_duration_since(Instant::now())
+            });
             if left.is_zero() || exit_guard::closed() {
                 return false;
             }
@@ -441,7 +444,8 @@ impl SharedEvent {
     }
 
     /// `waitUntilSignaledValue:timeoutMS:`: whether the value reached `value` within `timeout`.
-    /// Once the process is exiting, it answers at once from the value last seen (a wait already
+    /// A timeout past what the host's clock holds, as Metal's `UINT64_MAX` milliseconds, waits
+    /// until the value comes. Once the process is exiting, it answers at once from the value last seen (a wait already
     /// blocked, within 50 ms): the runtime reads no counter then.
     pub fn wait_until_signaled_value(&self, value: u64, timeout: Duration) -> bool {
         self.0.wait_until(value, timeout)

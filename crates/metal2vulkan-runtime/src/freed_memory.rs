@@ -575,12 +575,15 @@ pub(crate) mod held {
             self.release();
         }
 
-        /// Wait until `count` wait at the hold, failing past `within`.
+        /// Wait until `count` wait at the hold, failing past `within` (none past what the host's
+        /// clock holds).
         pub(crate) fn until_waiting(&self, count: usize, within: Duration) {
-            let deadline = Instant::now() + within;
+            let deadline = Instant::now().checked_add(within);
             let mut state = lock(&self.state);
             while state.1 < count {
-                let left = deadline.saturating_duration_since(Instant::now());
+                let left = deadline.map_or(Duration::MAX, |deadline| {
+                    deadline.saturating_duration_since(Instant::now())
+                });
                 assert!(!left.is_zero(), "{count} never waited at the hold");
                 state = (self.changed.wait_timeout(state, left))
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
