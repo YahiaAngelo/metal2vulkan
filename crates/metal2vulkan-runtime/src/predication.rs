@@ -1831,10 +1831,8 @@ impl ComputeCommandEncoder {
     /// The runtime lays the loop down as copies of its commands (64, or 16 inside another loop,
     /// fewer where the copies would lay down more than 16384 steps and gated dispatches, and at
     /// least one); where the loop runs past them, the runtime submits its copies again from where
-    /// it stopped, each time after a round trip to the host, until it ends, as Metal runs it on.
-    /// A loop without bound runs until the program holds no handle of its queue, which fails the
-    /// command buffer (`CommandBufferError::PredicatedLoopLetGo`); Metal runs it until the process
-    /// ends.
+    /// it stopped, each time after a round trip to the host, until it ends, as Metal runs it on: a
+    /// loop without bound runs until the process ends, or its device is lost.
     ///
     /// Refused, recording nothing: as [`encode_start_if`](Self::encode_start_if) refuses.
     pub fn encode_start_while(

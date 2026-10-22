@@ -1653,7 +1653,7 @@ impl CommandBuffer {
     pub(super) fn new(queue: &CommandQueue, slot: Slot) -> CommandBuffer {
         CommandBuffer(Arc::new(CommandBufferShared {
             device: queue.device().clone(),
-            queue: queue.kept(),
+            queue: queue.clone(),
             state: Mutex::new(State {
                 status: CommandBufferStatus::NotEnqueued,
                 error: None,

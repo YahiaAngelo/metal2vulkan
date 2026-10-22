@@ -36,13 +36,13 @@
 //!   committed later on another queue that conflicts with the laying's uses waits behind it
 //!   (`CommandBufferShared::footprint`), as behind any host step. The batch's other segments step
 //!   once the check ends: they read what the laying leaves.
-//! - **Let go.** The thread stops at the process's exit, a lost device or a failed submission,
+//! - **Ends.** As Metal's GPU runs a loop without bound on after the program let go of every
+//!   handle of its queue and its device, so does the thread, which holds the command buffer, and
+//!   through it the queue and the device. It stops only at a lost device, a failed submission,
 //!   wait or recording (each failing the command buffer as its submission or host step would),
-//!   and once the program holds no handle of the command buffer's queue (`CommandQueue::let_go`):
-//!   Metal would run the loop until the process ends, but nothing of the program can then commit
-//!   to the queue or wait for it, and the device would stay held. The command buffer then fails
-//!   (`CommandBufferError::PredicatedLoopLetGo`), its later batches unsubmitted, and lets go of
-//!   its device. Each run again is counted (`WorkCounts::predicated_loop_runs_again`).
+//!   or the process's exit, which it never holds up: it waits in slices of [`WAIT_SLICE`], each
+//!   inside a section of the exit guard, and does nothing more once the guard closes. Each run
+//!   again is counted (`WorkCounts::predicated_loop_runs_again`).
 
 use super::gate::Hold;
 use super::{
@@ -221,9 +221,6 @@ impl LoopCheck {
         buffer: &Hold<CommandBufferShared>,
         pool: &Arc<Mutex<CommandPool>>,
     ) -> Round {
-        if buffer.device.is_lost() {
-            return Round::Failed(CommandBufferError::DeviceLost);
-        }
         let mut recordings = Vec::new();
         let ran = self.run_pieces(buffer, pool, &mut recordings);
         // Its recordings' command buffers go back to the pool for the next run: they ended there,
@@ -434,10 +431,10 @@ fn nothing() -> RecordedSegment {
 }
 
 /// The loop's decision before each run again: `None` where it runs again; else how it ends
-/// without running. It stops once the program holds no handle of its queue (the module docs).
+/// without running. It stops once its device is lost (the module docs).
 fn before_round(buffer: &CommandBufferShared) -> Option<Round> {
-    if buffer.queue.let_go() {
-        return Some(Round::Failed(CommandBufferError::PredicatedLoopLetGo));
+    if buffer.device.is_lost() {
+        return Some(Round::Failed(CommandBufferError::DeviceLost));
     }
     None
 }

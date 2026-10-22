@@ -1761,16 +1761,14 @@ fn a_loop_run_again_repeats_nothing_before_it() {
 
 /// A loop without bound (`while (log[1] != 1) mark 0`, log[1] staying 0) runs on, its laying run
 /// again and again, as Metal's runs (an M3 Max with macOS 27.0.1 ran one 180 s with no error),
-/// while the program holds a handle of its queue (one of two let go changes nothing); once it
-/// holds none, the check stops and the command buffer fails
-/// (`CommandBufferError::PredicatedLoopLetGo`), nothing after the loop run, its runs again
-/// stopped.
+/// after the program let go of its queue, and of its command buffer too: Metal's GPU runs it on
+/// until the process ends, the command buffer never completing. The process's exit, after the
+/// test, ends it.
 #[test]
-fn a_loop_without_bound_stops_once_its_queue_is_let_go() {
+fn a_loop_without_bound_runs_on_after_its_queue_is_let_go() {
     on_device(|device| {
         let marks = Marks::new(device);
         let queue = device.new_command_queue().unwrap();
-        let held = queue.clone();
         let command_buffer = queue.command_buffer().unwrap();
         let mut encoder = command_buffer.compute_command_encoder().unwrap();
         encoder
@@ -1802,16 +1800,8 @@ fn a_loop_without_bound_stops_once_its_queue_is_let_go() {
             CommandBufferStatus::Completed | CommandBufferStatus::Error
         );
         assert!(running, "{:?}", command_buffer.status());
-        drop(held);
-        command_buffer.wait_until_completed_for(WAIT).unwrap();
-        assert_eq!(command_buffer.status(), CommandBufferStatus::Error);
-        assert_eq!(
-            command_buffer.error(),
-            Some(CommandBufferError::PredicatedLoopLetGo)
-        );
-        let stopped = again();
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        assert_eq!(again(), stopped, "its runs again stopped");
+        drop(command_buffer);
+        ran(9);
         assert_eq!(marks.counts()[2], 0, "nothing after the loop ran");
     });
 }

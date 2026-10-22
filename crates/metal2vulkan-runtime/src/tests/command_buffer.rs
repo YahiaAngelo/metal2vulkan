@@ -257,7 +257,6 @@ fn a_command_buffer_error_names_whose_failure_it_is() {
         (E::DetachedBacking, Metal, 8),
         (E::Internal(VkResultCode(-13)), Runtime, 1),
         (E::IndexPoolOverflow, Runtime, 8),
-        (E::PredicatedLoopLetGo, Runtime, 1),
         (E::PredicationOpenAtUnitEnd { record: 3 }, Metal, 1),
         (E::SparseHeapSplit, Runtime, 1),
         (E::SparseMappingSplit, Runtime, 1),

@@ -1783,13 +1783,6 @@ pub enum CommandBufferError {
     /// none of its event signals fired. Metal's code is 16 ("Protection Violation") below 0x10, 1
     /// ("Invalid Input") from 0x10 up.
     ProtectedEncoder(u64),
-    /// A command-predication loop of the command buffer would still run on (Metal runs a loop
-    /// without bound, as the runtime runs its laying again) when the program held no handle of
-    /// the command buffer's queue any more: the runtime stopped running it, nothing of the
-    /// command buffer after the loop ran, and the command buffer let go of its device. Metal runs
-    /// such a loop until the process ends. Set before the command buffer's completed handlers
-    /// run.
-    PredicatedLoopLetGo,
     /// A unit of command predication (`ComputeCommandEncoder::encode_start_if` and the others)
     /// ended with a block open that no misused record killed, where the unit's commands skipped
     /// as the GPU reached its end (a failed If or While, a held If's Else, a block inside one that
@@ -2009,7 +2002,6 @@ impl CommandBufferError {
             | CommandBufferError::RenderTargetSize
             | CommandBufferError::CubicArgumentSampler
             | CommandBufferError::EncodedUseRebound
-            | CommandBufferError::PredicatedLoopLetGo
             | CommandBufferError::PredicationOpenAtUnitEnd { .. }
             | CommandBufferError::DefaultRasterSampleCount
             | CommandBufferError::CallRefused(_) => 1,
@@ -2061,7 +2053,6 @@ impl CommandBufferError {
             | CommandBufferError::Refused
             | CommandBufferError::PipelineCreation(_)
             | CommandBufferError::EncodedUseRebound
-            | CommandBufferError::PredicatedLoopLetGo
             | CommandBufferError::CallRefused(_) => FailureOrigin::Runtime,
         }
     }

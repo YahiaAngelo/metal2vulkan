@@ -3005,8 +3005,8 @@ each item named states the rule in full.
   submits its copies again, from where it stopped, until it ends, each time a round trip to the
   host, holding the batches after it on its queue (and those on other queues that use what the
   loop uses), and nothing encoded before the loop runs again. A loop without bound runs on, as
-  Metal's does, until the program holds no handle of its queue: then its command buffer fails
-  (`PredicatedLoopLetGo`). Work inside a loop the runtime records apart (an indirect dispatch or
+  Metal's does, after the program let go of its queue and device too, until the process ends or
+  the device is lost. Work inside a loop the runtime records apart (an indirect dispatch or
   an indirect command buffer's execution a host step records) is recorded again in each such
   run, after another round trip to the host where its first recording waited for the work
   before it. A condition word past its buffer reads
