@@ -136,7 +136,7 @@
 //!   (`ElementHold`), which the sampler table maps its ID to, so a state at any ID is listed; only
 //!   where more states live than an array holds is one left out,
 //!   [`Degradation::UnlistedArgumentSampler`](super::Degradation::UnlistedArgumentSampler), and a
-//!   command buffer whose commands list the argument samplers then fails.
+//!   function reading it through an argument buffer then reads the neutral sampler.
 //! - **Slots.** Each ID has one slot, held by the resource last made with it, placed or plain:
 //!   that is what a function reading the ID reaches, and every resource with the ID still
 //!   answers it as its own. Once the holder is gone the slot reads the neutral resource, even

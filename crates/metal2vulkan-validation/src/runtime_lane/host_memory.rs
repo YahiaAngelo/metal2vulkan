@@ -1985,7 +1985,8 @@ fn memory_metal_makes_no_buffer_over_is_refused_when_it_is_made() {
 /// did not make: what Metal stops (`Invalid`: Private and Memoryless storage), and what plain
 /// Metal answers nil for (`Nil`: length 0, and its descriptor form, and a length past
 /// `max_buffer_length`). (The private option bit the consumer's detached buffers
-/// send, 0x1000000, is taken: `degrade_notices`' `the_private_option_bit_is_ignored_once`.)
+/// send, 0x1000000, is taken: `degrade_notices`'
+/// `the_private_option_bit_is_announced_where_the_gpu_s_writes_reach_the_memory`.)
 #[test]
 fn refused_no_copy_buffers_never_run_their_deallocator() {
     on_device(|device| {

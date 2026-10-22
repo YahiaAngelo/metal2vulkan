@@ -534,7 +534,7 @@ impl Device {
         layouts: VkImageLayouts,
     ) -> Result<Texture, Error> {
         const CALL: &str = "new_texture_with_vk_image";
-        let descriptor = &self.take_texture_options(CALL, descriptor);
+        let descriptor = &self.texture_options(CALL, descriptor)?;
         self.check_texture_placement(
             CALL,
             descriptor.placement,

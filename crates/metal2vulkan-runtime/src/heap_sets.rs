@@ -65,8 +65,8 @@
 //!   placement's or a rebind's writes go only to versions not committed).
 //! - **Samplers.** A sampler state is at its element of the sampler arrays (`resource_ids.rs`),
 //!   which its command's sampler table maps its ID to: the device's live states as the command was
-//!   encoded. Until it completes, a command buffer whose commands list them is counted in the
-//!   device's `sampler_tables` (`sampler.rs` announces a state made meanwhile).
+//!   encoded, listed again as its command buffer commits and as the command's batch is submitted
+//!   (`sampler_listing.rs`).
 //! - **Release.** A heap set goes with the last variant of its layout and the last command buffer
 //!   that bound it; the table with the device.
 
@@ -602,9 +602,9 @@ impl DeviceHeaps {
     }
 }
 
-/// Whether `device`'s heap arrays can be written while a command buffer binding them is pending
-/// (the module docs).
-fn unused_while_pending(device: &Device) -> bool {
+/// Whether the device's heap sets take writes while command buffers that bind them are pending:
+/// one version of each set, `UPDATE_UNUSED_WHILE_PENDING` (the module docs).
+pub(super) fn unused_while_pending(device: &Device) -> bool {
     metal2vulkan::pipeline::heap_unused_while_pending(device.compile_device().profile())
 }
 
@@ -1263,16 +1263,11 @@ pub(super) fn retire(device: &Device, kept: Keeper) {
     drop(freed);
 }
 
-/// A command buffer's heap: the versions its commands bound and its sampler listing (the module
-/// docs), until it completes.
+/// A command buffer's heap: the versions its commands bound (the module docs), until it
+/// completes.
 #[derive(Default)]
 pub(super) struct HeapUse {
     versions: Vec<Arc<SetVersion>>,
-    listed: Option<Listed>,
-    /// Some command lists the argument samplers.
-    lists_samplers: bool,
-    /// The command buffer committed.
-    committed: bool,
     /// Its first submission takes a ticket: its commands, or its host steps', may read the heap.
     wants_ticket: bool,
     /// Its ticket was taken.
@@ -1289,18 +1284,11 @@ impl HeapUse {
     /// argument samplers again (`sampler_listing.rs`), where its commands or its host steps may
     /// read the heap: its ticket for what a rebind or a detach replaces, which it holds until it
     /// completes; its first submission takes its ticket for gone textures ([`submit`]). Nothing
-    /// writes its own versions from now on but a gone texture's neutrals (the module docs). A
-    /// command buffer that lists the argument samplers is counted in the device's
-    /// `sampler_tables` until it completes: a state made meanwhile is not among them
-    /// (`sampler.rs`).
+    /// writes its own versions from now on but a gone texture's neutrals (the module docs).
     ///
     /// [`submit`]: HeapUse::submit
     pub(super) fn commit(&mut self, device: &Device) -> Ticket {
-        self.committed = true;
         self.wants_ticket = true;
-        if self.lists_samplers && self.listed.is_none() {
-            self.listed = Some(Listed::new(&device.shared().sampler_tables));
-        }
         let mut heaps = lock(&device.shared().heaps);
         for version in &self.versions {
             version.committed.store(true, Ordering::Release);
@@ -1339,13 +1327,10 @@ impl HeapUse {
         })
     }
 
-    /// The command buffer completed: its listing goes, and the versions its commands bound come
-    /// out, for the caller to let go of once its completed handlers ran (each version's last
-    /// hold releases its descriptor pool).
+    /// The command buffer completed: the versions its commands bound come out, for the caller to
+    /// let go of once its completed handlers ran (each version's last hold releases its
+    /// descriptor pool).
     pub(super) fn clear(&mut self) -> Vec<Arc<SetVersion>> {
-        self.listed = None;
-        self.lists_samplers = false;
-        self.committed = false;
         self.wants_ticket = false;
         self.ticketed = false;
         std::mem::take(&mut self.versions)
@@ -1466,15 +1451,6 @@ pub(super) fn bind(
         return Err(internal("a heap write to another set"));
     }
     let set = objects.heap_set()?;
-    // A command buffer whose commands list the argument samplers lists them again as it commits
-    // (`sampler_listing.rs`), and is counted from then on; a command a host step records after
-    // the commit lists the states as they stand then, counted at once.
-    if writes.iter().any(|w| w.ty == vk::DescriptorType::SAMPLER) {
-        heap.lists_samplers = true;
-        if heap.committed && heap.listed.is_none() {
-            heap.listed = Some(Listed::new(&device.shared().sampler_tables));
-        }
-    }
     let mut notes = Notes::default();
     let version = {
         let mut heaps = lock(&device.shared().heaps);
@@ -1623,35 +1599,23 @@ pub(super) fn fit_samplers(
 
 /// Announce that `commands` (the commands of a function, named) leave the sampler state at
 /// resource ID `id` out of their argument samplers, their variant's set-1 sampler arrays holding
-/// `capacity` elements ([`fit_samplers`]): their command buffer fails as it completes, where the
-/// state still lives as it commits (`sampler_listing.rs`), or where a host step recorded them after
-/// the commit.
-pub(super) fn degrade_unlisted(device: &Device, (id, capacity): (u64, u64), commands: &str) {
+/// `capacity` elements ([`fit_samplers`]): a function of theirs reading it reads the neutral
+/// sampler, where the state still lives as their command buffer commits (`sampler_listing.rs`),
+/// or where a host step recorded them after the commit.
+pub(super) fn degrade_unlisted(device: &Device, unlisted: (u64, u64), commands: &str) {
     device.degrade(Degradation::UnlistedArgumentSampler, || {
-        (
-            format!("sampler state at resource ID {id}"),
-            format!(
-                "{commands}' set-1 sampler arrays hold {capacity} elements, fewer than the live \
-                 sampler states, so they leave the state out of their argument samplers and \
-                 their command buffer fails (CommandBufferError::UnlistedArgumentSampler)"
-            ),
-        )
+        unlisted_notice(unlisted, commands)
     });
 }
 
-/// A command buffer whose commands list the argument samplers, counted in its device's
-/// `sampler_tables` until it goes.
-struct Listed(Arc<AtomicUsize>);
-
-impl Listed {
-    fn new(count: &Arc<AtomicUsize>) -> Listed {
-        count.fetch_add(1, Ordering::AcqRel);
-        Listed(Arc::clone(count))
-    }
-}
-
-impl Drop for Listed {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
+/// The object and the reason of [`degrade_unlisted`]'s notice.
+pub(super) fn unlisted_notice((id, capacity): (u64, u64), commands: &str) -> (String, String) {
+    (
+        format!("sampler state at resource ID {id}"),
+        format!(
+            "{commands}' set-1 sampler arrays hold {capacity} elements, fewer than the live \
+             sampler states, so they leave the state out of their argument samplers, and a \
+             function of theirs reading it reads the neutral sampler"
+        ),
+    )
 }

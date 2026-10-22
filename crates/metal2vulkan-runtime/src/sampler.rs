@@ -483,19 +483,9 @@ impl Device {
                     format!(
                         "more sampler states live than a set-1 sampler array of the device \
                          holds ({limit:?} is {available}), so none holds its element {element}, \
-                         and a command buffer whose commands list the argument samplers while it \
-                         lives fails (CommandBufferError::UnlistedArgumentSampler)"
+                         and a function reading it through an argument buffer while it lives \
+                         reads the neutral sampler"
                     ),
-                )
-            });
-        }
-        if shared.sampler_tables.load(Ordering::Acquire) > 0 {
-            self.degrade(Degradation::ResourceIdTakeover, || {
-                (
-                    format!("sampler state made at resource ID {id}"),
-                    "a committed command buffer that has not completed lists the argument \
-                     samplers as it committed, which this state is not among"
-                        .to_owned(),
                 )
             });
         }

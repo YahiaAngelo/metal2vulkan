@@ -793,28 +793,25 @@ degradations! {
         ImplementationDefinedReconvergence = "implementation-defined-reconvergence", Precision,
             "simdgroup operations after divergent control flow can see other lanes active than \
              Metal's";
-        /// A function can read a resource ID whose holder the runtime cannot give it as Metal's
-        /// command buffer reads it (`resource_ids.rs`, `sampler.rs`): a sampler state was made
-        /// while a committed command buffer not yet completed lists the argument samplers as it
-        /// committed. A texture's ID reaches its holder as the command buffer runs
-        /// (`heap_sets.rs`); a state live as a command buffer commits that its command's plan
-        /// cannot list fails it (`UnlistedArgumentSampler`).
-        ResourceIdTakeover = "resource-id-takeover", Precision,
-            "a function reading the ID can see an earlier holder of it, or the neutral \
-             resource, where Metal's sees the resource holding it as the command buffer runs";
         /// A sampler state whose element no set-1 sampler array can hold, as more states live
         /// than it holds (each takes the lowest element no live state holds, `resource_ids.rs`):
         /// the device's, as the state is made, or a pipeline's, as a command lists the argument
-        /// samplers or its command buffer lists them again as it commits (`sampler.rs`,
-        /// `compute.rs`, `sampler_listing.rs`). Or, as a command buffer commits, more states live
-        /// than a command's plan's sampler tables hold, or one of a shape its checks refuse
-        /// (`sampler_listing.rs`). A command buffer whose command lists the argument samplers then
-        /// fails (`CommandBufferError::UnlistedArgumentSampler`), whether or not its functions
-        /// reach the state; each is counted (`WorkCounts::unlisted_argument_sampler_failures`).
+        /// samplers or its command buffer lists them again as it commits or as the command's batch
+        /// is submitted (`sampler.rs`, `compute.rs`, `sampler_listing.rs`). Or, as a command
+        /// buffer commits or the batch is submitted, more states live than a command's plan's
+        /// sampler tables hold, or one of a shape its checks refuse (`sampler_listing.rs`): at the
+        /// submission, announced on the device's scheduler thread, outside any program call. The
+        /// command runs with the states it lists: those that fit its sampler arrays, where its
+        /// tables hold them, else those it listed before. Each command buffer that left a state
+        /// out is counted once, whether or not its functions reach the state
+        /// (`WorkCounts::unlisted_argument_sampler_buffers`). Where it happens: a command misses a
+        /// state where more states live than its sampler arrays hold (at most the device's
+        /// update-after-bind sampler limit), or than its plan's tables hold, twice the capacity
+        /// class of the states live as it was encoded, so where the live states more than doubled
+        /// between its encoding and its batch's submission.
         UnlistedArgumentSampler = "unlisted-argument-sampler", Precision,
-            "a command buffer whose commands list the argument samplers while the state lives \
-             fails (UnlistedArgumentSampler), where Metal's function reads the state through \
-             its ID";
+            "a function reading the state through its ID in an argument buffer reads the \
+             neutral sampler, where Metal's reads the state";
         /// A `Depth32Float` texture the program only reads or samples, on a device whose driver
         /// is not measured to keep every `float` in a depth image (`device/driver_facts.rs`: a
         /// denormal, and without `VK_EXT_depth_range_unrestricted` a value outside `[0, 1]`), is
@@ -985,13 +982,23 @@ degradations! {
             "the record reads its word as zero, where Metal reads what lies at that address in its \
              own address space: zero where nothing is there, another buffer's bytes where Metal \
              placed one";
-        /// A resource made with `MTLResourceOptions` bit 24, a private option Metal takes
-        /// ([`ResourceOptions::PRIVATE_BIT`](crate::ResourceOptions::PRIVATE_BIT)), is
-        /// made as without it, and reports its options without it, as Metal's does.
+        /// A heap of the runtime's memory or an indirect command buffer made with
+        /// `MTLResourceOptions` bit 24
+        /// ([`ResourceOptions::PRIVATE_BIT`](crate::ResourceOptions::PRIVATE_BIT)), or off macOS a
+        /// no-copy buffer or heap over the caller's bytes, which Metal makes and keeps the GPU's
+        /// writes from the memory of (the M3 Max under macOS 27.0.1: a kernel's stores and a
+        /// blit's fill reach neither the CPU nor a later command buffer, which read the memory's
+        /// bytes; a later command of the same command buffer may read them, as the GPU's caches
+        /// hold them; a blit into a texture over or in that memory faults the command buffer), is
+        /// made as without it, and reports its options without it, as Metal's does. On macOS a
+        /// no-copy buffer or heap with the bit drops the GPU's writes as Metal's does, its pages
+        /// imported through a read-only view of them (`read_only_view.rs`), announcing nothing.
+        /// A buffer of the runtime's memory or a texture descriptor with the bit is refused, as
+        /// Metal ends the process there; a buffer placed in a heap without the bit is made as
+        /// without it, as Metal's is, announcing nothing.
         PrivateResourceOption = "private-resource-option", Precision,
-            "the private option has no effect here: on Metal a no-copy buffer made with it kept \
-             the GPU's writes from the CPU (Metal probe nc_bit24 on an M4), where the runtime's \
-             reach it";
+            "the GPU's writes reach the resource's memory, the CPU and later command buffers, \
+             where Metal's never reach them";
         /// A depth or stencil texture with `allowGPUOptimizedContents` off sized or made in a heap
         /// (never a device's own texture, whose layout nothing shows), on a device whose driver
         /// keeps depth and stencil images GPU-optimized whatever their create info
@@ -2317,6 +2324,16 @@ impl Degradation {
             "none: a texture over a no-copy buffer's host pages is a shadow, which takes no first \
              move over them",
         ),
+        (
+            // A sampler state made while a committed command buffer that listed the argument
+            // samplers had not completed announced it. Each batch's submission lists the states
+            // live then, so a state made before the wait that orders its ID's write is the one
+            // its function reads, as Metal's.
+            "metal2vulkan-degrade-resource-id-takeover",
+            "none: a command reads the sampler states live as its batch is submitted, so a state \
+             made before the event wait that orders its ID's write is the one its function reads, \
+             as on Metal",
+        ),
     ];
 
     /// The kind of `code`, if any.
@@ -2761,6 +2778,20 @@ pub(crate) fn announcement_breach(each: bool) -> Option<NoticePlace> {
     }
 }
 
+/// `Invalid` (`Problem::UndefinedValue`) where `options` set [`ResourceOptions::PRIVATE_BIT`].
+fn refuse_private_bit(call: &'static str, options: ResourceOptions) -> Result<(), Error> {
+    match options.without_private_bit().1 {
+        true => Err(crate::error::invalid(
+            call,
+            crate::error::Problem::UndefinedValue {
+                ty: "MTLResourceOptions",
+                raw: options.raw(),
+            },
+        )),
+        false => Ok(()),
+    }
+}
+
 /// Whether a misplaced announcement ends the process: in builds with debug assertions, which
 /// every lane and gate runs.
 pub(crate) const MISPLACED_ENDS: bool = cfg!(debug_assertions);
@@ -3091,9 +3122,27 @@ impl Device {
         }
     }
 
-    /// `options` as the runtime makes `call`'s resource of them: without
-    /// [`ResourceOptions::PRIVATE_BIT`], which has no effect here, announced once
-    /// ([`Degradation::PrivateResourceOption`]).
+    /// `options` of `call`'s no-copy buffer or heap over the caller's bytes without
+    /// [`ResourceOptions::PRIVATE_BIT`], and whether its memory drops the GPU's writes, as Metal's
+    /// does where the options set the bit: on macOS, where the runtime imports the pages through
+    /// a read-only view of them (`read_only_view.rs`). Elsewhere the GPU's writes reach the
+    /// pages, announced once ([`Degradation::PrivateResourceOption`]).
+    pub(super) fn no_copy_options(
+        &self,
+        call: &'static str,
+        options: ResourceOptions,
+    ) -> (ResourceOptions, bool) {
+        if !crate::read_only_view::VIEWS_DROP_WRITES {
+            return (self.take_options(call, options), false);
+        }
+        options.without_private_bit()
+    }
+
+    /// `options` as the runtime makes `call`'s resource of them where Metal makes it with
+    /// [`ResourceOptions::PRIVATE_BIT`] and keeps the GPU's writes from its memory (a heap of
+    /// the runtime's memory; a no-copy buffer or heap off macOS, [`Device::no_copy_options`]; an
+    /// indirect command buffer, whose GPU-written records under it are not measured): without the
+    /// bit, announced once ([`Degradation::PrivateResourceOption`]).
     pub(super) fn take_options(
         &self,
         call: &'static str,
@@ -3113,16 +3162,33 @@ impl Device {
         taken
     }
 
-    /// `descriptor` with its options as [`take_options`](Self::take_options) takes them.
-    pub(super) fn take_texture_options(
+    /// `options` of `call`'s resource whose memory the runtime gives it (a buffer of a length or
+    /// of bytes, a Vulkan buffer of the caller's): refused where they set
+    /// [`ResourceOptions::PRIVATE_BIT`] (`Invalid`, `Problem::UndefinedValue`), as Metal ends the
+    /// process there (the M3 Max under macOS 27.0.1: `newBufferWithLength:options:` and
+    /// `newBufferWithBytes:length:options:`, `Shared` or `Private`, assert in the buffer's
+    /// suballocator, "Different MTLResourceOptions used for the same heap index").
+    pub(super) fn own_memory_options(
+        &self,
+        call: &'static str,
+        options: ResourceOptions,
+    ) -> Result<ResourceOptions, Error> {
+        refuse_private_bit(call, options)?;
+        Ok(options)
+    }
+
+    /// `descriptor`, refused where its options set [`ResourceOptions::PRIVATE_BIT`] (`Invalid`,
+    /// `Problem::UndefinedValue`), as Metal's texture descriptor validation ends the process there
+    /// for every texture (the M3 Max under macOS 27.0.1: "MTLResourceOptions (0x1000000) contains
+    /// unknown bits", a device's texture, `Shared` or `Private`, a heap's, a buffer's and a
+    /// shareable one alike).
+    pub(super) fn texture_options(
         &self,
         call: &'static str,
         descriptor: &TextureDescriptor,
-    ) -> TextureDescriptor {
-        TextureDescriptor {
-            resource_options: self.take_options(call, descriptor.resource_options),
-            ..*descriptor
-        }
+    ) -> Result<TextureDescriptor, Error> {
+        refuse_private_bit(call, descriptor.resource_options)?;
+        Ok(*descriptor)
     }
 
     /// Announce what `stages` (a variant's) record, `at` its making or a bind

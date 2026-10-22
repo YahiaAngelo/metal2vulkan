@@ -474,7 +474,7 @@ impl Buffer {
         let surface_facts = ycbcr_surface;
         let ycbcr_surface = ycbcr_surface.filter(|_| ycbcr(asked_format) && surface);
         let device = self.device();
-        let asked = device.take_texture_options(call, descriptor);
+        let asked = device.texture_options(call, descriptor)?;
         device.check_texture_placement(call, asked.placement, asked.usage, asked.texture_type)?;
         let options = asked.resource_options;
         let storage = options.storage_mode()?;

@@ -6,7 +6,7 @@
 //! M4 probe, residency part C), a heap's and a sparse heap's alike, and the neutral
 //! texture once that holder went. The kernel samples a 2-by-2 `RGBA32Uint` texture through a
 //! sampler held beside it, so its output is the texels it reached (a float twin of the case reads
-//! `RGBA16Float` linearly). Each degradation site of the kinds ([`RESOURCE_IDS`] and the device
+//! `RGBA16Float` linearly). Each degradation site of the kinds (the device
 //! heap's: [`UNVIEWABLE`], [`UNNAMED_SHADOWS`], [`PAST_CAPACITY`], [`PAST_LAYOUT_SUPPORT`],
 //! [`OWN_COPIES`]) is taken on a device of its own and announced once.
 
@@ -38,22 +38,12 @@ use metal2vulkan::metal::{
     SamplerMinMagFilter, TextureType, TextureUsage,
 };
 use metal2vulkan_runtime::{
-    BlitOption, Buffer, BufferContents, BufferDescriptor, CommandBuffer, CommandBufferError,
-    CommandBufferStatus, CommandQueue, ComputePipelineState, Deallocator, DebugMessage,
-    Degradation, Device, DeviceOptions, Error, EventRef, ExecutedPipeline, Fence, Heap,
-    HeapDescriptor, HeapType, HostMemory, IdPlacement, IndirectCommandBuffer,
-    IndirectCommandBufferDescriptor, Invalid, IoSurfacePlane, KeepAlive, MessageSeverity,
-    MessageSink, Origin, Problem, Region, RenderPassDescriptor, ResourceId, ResourceIdKind,
-    ResourceOptions, SamplerState, SamplerStateOptions, SharedEvent, Size, Texture,
-    TextureDescriptor, TextureSwizzleChannels,
+    BlitOption, Buffer, BufferContents, BufferDescriptor, CommandBuffer, CommandBufferError, CommandBufferStatus, CommandQueue, ComputePipelineState, Deallocator, DebugMessage, Degradation, Device, DeviceOptions, Error, EventRef, ExecutedPipeline, Fence, Heap, HeapDescriptor, HeapType, HostMemory, IdPlacement, IndirectCommandBuffer, IndirectCommandBufferDescriptor, Invalid, IoSurfacePlane, KeepAlive, MemoryKind, MessageSeverity, MessageSink, Origin, Problem, Region, RenderPassDescriptor, ResourceId, ResourceIdKind, ResourceOptions, SamplerState, SamplerStateOptions, SharedEvent, Size, Texture, TextureDescriptor, TextureSwizzleChannels,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
-/// The kind this module's takeover tests take: one site per test, each on a device of its own.
-pub(super) const RESOURCE_IDS: [Degradation; 1] = [Degradation::ResourceIdTakeover];
 
 /// The kind [`a_sampler_state_at_any_id_is_listed`] takes where more sampler states live than
 /// the device's or the pipeline's sampler arrays hold (and expects absent elsewhere).
@@ -1745,30 +1735,84 @@ fn a_device_without_pending_writes_binds_a_copy_per_command_buffer() {
     );
 }
 
-/// A sampler state made to support argument buffers while a committed command buffer that lists
-/// the argument samplers waits is announced: its sampler table lists the states of its
-/// encoding.
+/// A sampler state that takes the ID a dispatch's argument buffer names, made after its command
+/// buffer committed and before the event it waits for is signalled, is reached through that ID, as
+/// Metal's function reaches it (the M3 Max under macOS 27.0.1: a state made after the commit,
+/// its ID written into the argument buffer before the signal, is the one sampled): the batch's
+/// submission lists the states live then. Nothing is announced. (On a device without
+/// `descriptorBindingUpdateUnusedWhilePending`, which no venue is, the commit's listing stands:
+/// `sampler_listing.rs`.)
 #[test]
-fn a_sampler_state_made_while_samplers_are_listed_degrades() {
+fn a_sampler_state_made_after_the_commit_before_its_wait_is_reached_by_its_id() {
+    on_device(|device, messages| {
+        let mut sampling = Sampling::new(device);
+        let key = *sampling
+            .case
+            .compute
+            .argument_buffer_samplers
+            .keys()
+            .next()
+            .unwrap();
+        let resource = &sampling.case.compute.argument_buffer_samplers[&key];
+        let mut descriptor = argument_sampler_descriptor(resource);
+        descriptor.normalized_coordinates = false;
+        assert_ne!(corner(), sampling.case.metal_output);
+        let texture = sampling.texture().clone();
+        let event = device.new_shared_event().unwrap();
+        let wait = EventRef::from(&event);
+        let (command_buffer, buffers) =
+            sampling.encode(device, &texture, Some(&texture), Some(wait));
+        command_buffer.commit().unwrap();
+        let own = sampling.base.argument_samplers.remove(&key).unwrap();
+        let id = own.gpu_resource_id();
+        drop(own);
+        let mut options = SamplerStateOptions::default();
+        options.support_argument_buffers = true;
+        options.placement = IdPlacement::At(id);
+        let state = device
+            .new_sampler_state_with_options(&descriptor, options)
+            .unwrap();
+        assert_eq!(state.gpu_resource_id(), id);
+        event.set_signaled_value(1);
+        assert_eq!(
+            sampling.output(&command_buffer, &buffers),
+            corner(),
+            "through ID {} after the commit",
+            id.0
+        );
+        sampling.announced(device, messages, &[]);
+        drop(state);
+    });
+}
+
+/// Sampler states made after a dispatch's command buffer committed and before the event it waits
+/// for is signalled, 64 more than the case's (past twice the capacity class of the states live as
+/// the dispatch was encoded), are more than the command's plan's tables hold as its batch is
+/// submitted: the command keeps the states its commit listed, the case's among them, so the
+/// command buffer completes with the case's output, announced once (`UNLISTED`, on the scheduler's
+/// thread) and counted once (`WorkCounts::unlisted_argument_sampler_buffers`).
+#[test]
+fn sampler_states_made_after_the_commit_past_the_class_keep_the_commit_s_listing() {
     on_device(|device, messages| {
         let sampling = Sampling::new(device);
         let texture = sampling.texture();
+        let unlisted = || device.work_counts().unlisted_argument_sampler_buffers;
+        let before = unlisted();
         let event = device.new_shared_event().unwrap();
         let wait = EventRef::from(&event);
         let (command_buffer, buffers) = sampling.encode(device, texture, Some(texture), Some(wait));
         command_buffer.commit().unwrap();
-        let mut options = SamplerStateOptions::default();
-        options.support_argument_buffers = true;
-        let mut descriptor = SamplerDescriptor::new();
-        descriptor.min_filter = SamplerMinMagFilter::Linear;
-        let state = device
-            .new_sampler_state_with_options(&descriptor, options)
-            .unwrap();
+        let past = distinct_sampler_states(device, 64);
         event.set_signaled_value(1);
-        let output = sampling.output(&command_buffer, &buffers);
-        assert_eq!(output, sampling.case.metal_output);
-        drop(state);
-        sampling.announced(device, messages, &RESOURCE_IDS);
+        assert_eq!(
+            sampling.output(&command_buffer, &buffers),
+            sampling.case.metal_output,
+            "64 more states"
+        );
+        assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+        assert_eq!(unlisted(), before + 1);
+        sampling.announced(device, messages, &UNLISTED);
+        drop(past);
     });
 }
 
@@ -1876,13 +1920,13 @@ pub(super) fn distinct_sampler_states(device: &Device, count: u64) -> Vec<Sample
 /// listed as it commits up to twice the capacity class of the states live as it was encoded. With
 /// the case's states alone live at encoding (at most 11: class 0, 16 entries), 20 more are past the
 /// class and within twice it: the kernel reads the case's state through its ID, nothing is
-/// announced, and nothing is counted. 64 more are past twice the class: the command buffer fails
-/// `CommandBufferError::UnlistedArgumentSampler` (Metal code 1), announced once (`UNLISTED`) and
-/// counted once (`WorkCounts::unlisted_argument_sampler_failures`), though the kernel reads only
-/// the case's state: the refusal is over-approximate. Once they go, the next command buffer
-/// completes with the case's output.
+/// announced, and nothing is counted. 64 more are past twice the class: the command keeps the
+/// states it listed as it was encoded, the case's among them, so the command buffer completes with
+/// the case's output, announced once (`UNLISTED`) and counted once
+/// (`WorkCounts::unlisted_argument_sampler_buffers`). Once they go, the next command buffer
+/// completes with the case's output, announcing nothing.
 #[test]
-fn late_sampler_states_list_within_twice_the_class_and_fail_past_it() {
+fn late_sampler_states_list_within_twice_the_class_and_run_listed_past_it() {
     on_device(|device, messages| {
         let sampling = Sampling::new(device);
         let live = sampling.base.argument_samplers.len() + sampling.base.samplers.len();
@@ -1891,8 +1935,8 @@ fn late_sampler_states_list_within_twice_the_class_and_fail_past_it() {
             "{live} states of the case: with 20 more, past class 0's 16 entries and within its 32"
         );
         let texture = sampling.texture();
-        let failures = || device.work_counts().unlisted_argument_sampler_failures;
-        let before = failures();
+        let unlisted = || device.work_counts().unlisted_argument_sampler_buffers;
+        let before = unlisted();
         let (command_buffer, buffers) = sampling.encode(device, texture, Some(texture), None);
         let within = distinct_sampler_states(device, 20);
         command_buffer.commit().unwrap();
@@ -1901,18 +1945,19 @@ fn late_sampler_states_list_within_twice_the_class_and_fail_past_it() {
             sampling.case.metal_output,
             "20 more states"
         );
-        assert_eq!(failures(), before);
+        assert_eq!(unlisted(), before);
         sampling.announced(device, messages, &[]);
         drop(within);
-        let (command_buffer, _buffers) = sampling.encode(device, texture, Some(texture), None);
+        let (command_buffer, buffers) = sampling.encode(device, texture, Some(texture), None);
         let past = distinct_sampler_states(device, 64);
         command_buffer.commit().unwrap();
-        command_buffer.wait_until_completed_for(WAIT).unwrap();
-        assert_eq!(command_buffer.status(), CommandBufferStatus::Error);
-        let error = command_buffer.error().expect("the command buffer's error");
-        assert_eq!(error, CommandBufferError::UnlistedArgumentSampler);
-        assert_eq!(error.metal_code(), 1);
-        assert_eq!(failures(), before + 1);
+        assert_eq!(
+            sampling.output(&command_buffer, &buffers),
+            sampling.case.metal_output,
+            "64 more states"
+        );
+        assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+        assert_eq!(unlisted(), before + 1);
         sampling.announced(device, messages, &UNLISTED);
         drop(past);
         assert_eq!(
@@ -1920,7 +1965,7 @@ fn late_sampler_states_list_within_twice_the_class_and_fail_past_it() {
             sampling.case.metal_output,
             "once they went"
         );
-        assert_eq!(failures(), before + 1);
+        assert_eq!(unlisted(), before + 1);
         sampling.announced(device, messages, &[]);
     });
 }
@@ -1969,8 +2014,8 @@ const CROWD: u64 = 2048;
 /// sampler the state would miss to reads the case's own answer; nothing is announced. A state is
 /// left out only where more states live than the arrays hold: the line `SAMPLER-CAPACITY` reports
 /// the device's and the case's pipeline's, and where either holds at most [`CROWD`] elements the
-/// lane makes states past it, announced once (`UNLISTED`), and the command buffer fails
-/// `CommandBufferError::UnlistedArgumentSampler`.
+/// lane makes states past it, announced once (`UNLISTED`), and the command buffer completes with
+/// the state at the high ID listed, made before them.
 #[test]
 fn a_sampler_state_at_any_id_is_listed() {
     on_device(|device, messages| {
@@ -2048,15 +2093,14 @@ fn a_sampler_state_at_any_id_is_listed() {
                     device.new_sampler_state(&distinct).unwrap()
                 })
                 .collect();
-            let (command_buffer, _buffers) =
-                sampling.encode(device, &texture, Some(&texture), None);
+            let (command_buffer, buffers) = sampling.encode(device, &texture, Some(&texture), None);
             command_buffer.commit().unwrap();
-            command_buffer.wait_until_completed_for(WAIT).unwrap();
             assert_eq!(
-                command_buffer.error(),
-                Some(CommandBufferError::UnlistedArgumentSampler),
+                sampling.output(&command_buffer, &buffers),
+                corner,
                 "with {capacity} more states"
             );
+            assert_eq!(command_buffer.error(), None);
             sampling.announced(device, messages, &UNLISTED);
             drop(crowd);
         }

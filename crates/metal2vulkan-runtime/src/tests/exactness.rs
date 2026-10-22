@@ -79,16 +79,16 @@ fn the_kinds_metal_answers_otherwise_are_named() {
             _ => None,
         })
         .collect();
-    assert_eq!(fails.len(), 2, "{fails:?}");
-    for pair in [
-        (
-            D::UnlistedArgumentSampler,
-            CommandBufferError::UnlistedArgumentSampler,
-        ),
-        (D::EncodedUseRebound, CommandBufferError::EncodedUseRebound),
-    ] {
-        assert!(fails.contains(&pair), "{pair:?}");
-    }
+    assert_eq!(
+        fails,
+        [(D::EncodedUseRebound, CommandBufferError::EncodedUseRebound)]
+    );
+    // A command that leaves a live sampler state out runs, a function reading it reading the
+    // neutral sampler.
+    assert_eq!(
+        D::UnlistedArgumentSampler.exactness(),
+        Exactness::NearEquivalent
+    );
     for (kind, error) in fails {
         assert_eq!(error.origin(), FailureOrigin::Runtime, "{kind:?}");
     }

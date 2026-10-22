@@ -123,13 +123,21 @@ impl ResourceOptions {
     const HAZARD_SHIFT: u32 = 8;
     const DEFINED: u64 = 0xf | (0xf << 4) | (0x3 << 8);
 
-    /// Bit 24 (0x100_0000), a private option plain Metal takes (a consumer's read-only detached
-    /// buffers pass it; Metal's validation stops it as undefined). Metal makes the resource and
-    /// reports its options without the bit (Metal probe `nc_bit24` on an M4).
-    /// [`from_raw`](Self::from_raw) takes it. A device makes a resource of options with it as
-    /// without it, reports its options without it, and announces
-    /// `metal2vulkan-degrade-private-resource-option` once: on Metal a no-copy buffer made with it
-    /// kept the GPU's writes from the CPU, where the runtime's reach it.
+    /// Bit 24 (0x100_0000), a private option (a consumer's read-only detached buffers and heaps
+    /// pass it). [`from_raw`](Self::from_raw) takes it. What Metal does with it (the M3 Max under
+    /// macOS 27.0.1), and the runtime:
+    /// - a no-copy buffer and a heap are made with it, and report their options without it: Metal
+    ///   keeps the GPU's writes from their memory (a kernel's stores and a blit's fill reach
+    ///   neither the CPU nor a later command buffer; a blit into a texture over or in the memory
+    ///   faults the command buffer). The runtime makes them as without it, and announces
+    ///   `metal2vulkan-degrade-private-resource-option` once; so does an indirect command buffer
+    ///   made with it, which Metal makes and whose GPU-written records under it are not measured;
+    /// - a buffer placed in a heap without it is made as without it, as Metal's is, announcing
+    ///   nothing;
+    /// - a buffer of a length or of bytes, and a texture descriptor, end Metal's process (the
+    ///   buffer's suballocator and the texture descriptor's validation assert): refused `Invalid`
+    ///   (`Problem::UndefinedValue`), as is a Vulkan buffer of the caller's
+    ///   (`Device::new_buffer_with_vk_buffer`).
     pub const PRIVATE_BIT: u64 = 1 << 24;
 
     /// The options of these three modes.

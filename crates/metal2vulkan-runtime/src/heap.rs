@@ -526,7 +526,9 @@ impl Device {
     /// image over a dma-buf of its own pages), else an image of its own whose texels the encoders copy from
     /// the heap's bytes and back, laid out by level and layer from the texture's offset, which the
     /// device announces once (`shadowed-texture`; `texture/heap.rs`). Its purgeable state answers
-    /// as a no-copy buffer's: non-volatile, and emptying it keeps the caller's bytes.
+    /// as a no-copy buffer's: non-volatile, and emptying it keeps the caller's bytes. With Metal's
+    /// private option bit 24 the GPU's writes to the memory are dropped as a no-copy buffer's are
+    /// ([`Device::new_buffer_with_bytes_no_copy`]).
     ///
     /// Refused: a size of 0 (`Nil`, as [`Device::new_heap`] answers it); storage other than
     /// `Shared`, a sparse heap, an undefined option (`Invalid`); memory whose first byte is not a multiple of the import's unit
@@ -587,7 +589,7 @@ impl Device {
         token: Option<RangeToken>,
     ) -> Result<Heap, Error> {
         const CALL: &str = "new_heap_with_bytes_no_copy";
-        let options = self.take_options(CALL, descriptor.resource_options);
+        let (options, drops_writes) = self.no_copy_options(CALL, descriptor.resource_options);
         let modes = Modes::of(options)?;
         if modes.storage != StorageMode::Shared || descriptor.heap_type == HeapType::Sparse {
             return Err(invalid(CALL, Problem::StorageMode));
@@ -606,6 +608,7 @@ impl Device {
                 release,
                 descriptor.placement.into(),
                 true,
+                drops_writes,
             )
         }?;
         if let Some(token) = token {
@@ -940,7 +943,9 @@ impl Heap {
     /// (`OutOfMemory(Heap)`).
     pub fn new_buffer(&self, length: u64, options: ResourceOptions) -> Result<Buffer, Error> {
         const CALL: &str = "new_buffer";
-        let options = self.device().take_options(CALL, options);
+        // Metal makes a placed buffer with the private bit as without it (the heap's own options
+        // decide where its writes go).
+        let options = options.without_private_bit().0;
         let options = self.placed_options(CALL, options)?;
         let bytes = self.check_type(CALL, HeapType::Automatic)?;
         if length == 0 {
@@ -976,7 +981,8 @@ impl Heap {
         offset: u64,
     ) -> Result<Buffer, Error> {
         const CALL: &str = "new_buffer_at_offset";
-        let options = self.device().take_options(CALL, options);
+        // As `new_buffer`: the private bit is the heap's to take.
+        let options = options.without_private_bit().0;
         let options = self.placed_options(CALL, options)?;
         let bytes = self.check_type(CALL, HeapType::Placement)?;
         self.check_length(CALL, length)?;

@@ -179,6 +179,7 @@ use super::hang;
 use super::kept_barriers::{KeptBarriers, SlotStamps};
 use super::{lock, recording_error, submission_error, CommandBufferShared, State};
 use crate::deferred::Deferred;
+use crate::degradation::Degradation;
 use crate::encoder::RecordedSegment;
 use crate::error::CommandBufferError;
 use crate::error::{internal, Error};
@@ -393,6 +394,12 @@ impl CommandBufferShared {
         // check's code.
         let rebound = state.failing_at(device, index);
         let range = state.batch_range(index);
+        // Its commands' argument samplers, the states live now where some were made or went since
+        // they were listed (`sampler_listing.rs`); one its plan cannot list is announced below,
+        // with the lock let go of.
+        let unlisted = state
+            .list_samplers_at_submission(device, range.clone())
+            .map_err(|error| recording_error(device, error))?;
         // A batch that begins with resource state encoders binds their updates first, after its
         // waits, which its work then waits for through the bind.
         let updates: Vec<SparseUpdate> = state.recorded[range.clone()]
@@ -1040,6 +1047,9 @@ impl CommandBufferShared {
         drop(state);
         if rebound {
             device.degrade_encoded_use_rebound(rebound_use);
+        }
+        if let Some(unlisted) = unlisted {
+            device.degrade_once(Degradation::UnlistedArgumentSampler, || unlisted);
         }
         device.reach_stale_detached(reaches);
         let submission = Submission {

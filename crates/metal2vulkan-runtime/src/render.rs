@@ -9231,7 +9231,7 @@ impl RenderLowering {
             .retain_samplers(&mut self.core, &mut samplers);
         if let Some(unlisted) = unlisted {
             heap_sets::degrade_unlisted(&device, unlisted, "a render pipeline state's draws");
-            // A host step's draw, which no commit lists again, fails its command buffer.
+            // A host step's draw, which no commit lists again, runs with the states it listed.
             let mut held = self.core.command_buffer().state();
             held.unlisted_argument_sampler(&device);
         }

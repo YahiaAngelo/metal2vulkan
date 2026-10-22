@@ -2608,7 +2608,8 @@ fn a_listed_cubic_sampler_is_planned_beside_a_stage_that_tests_it() {
 /// The states a command buffer lists again as it commits fit the plan of a command encoded with one
 /// state (class 0, 16 entries) up to twice the class's entries, 31 states and the null entry, each
 /// written at its element as the plan writes them; 32 do not (`relisted_sampler_tables` is `None`,
-/// which the runtime fails `UnlistedArgumentSampler`). A state of a new shape is held where the
+/// where the runtime keeps the states listed before, announcing `unlisted-argument-sampler`). A
+/// state of a new shape is held where the
 /// plan's checks pass: a linear one, and a cubic one beside the kernel's test; a cubic one beside a
 /// stage compiled without the test is not, nor one whose LOD clamps no sampler can take.
 #[test]

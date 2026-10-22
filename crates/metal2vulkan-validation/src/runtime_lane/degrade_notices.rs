@@ -24,7 +24,7 @@
 //! ([`UNPACKED_FILL`]), texture buffers' fills reading bytes past their pattern's copies in
 //! `texture_buffer_fills` ([`TEXTURE_BUFFER_FILL`]), draws of points no state sizes in
 //! `topology_classes` ([`UNSIZED_POINTS`]),
-//! resource IDs ([`RESOURCE_IDS`], [`UNLISTED`]),
+//! resource IDs ([`UNLISTED`]),
 //! indirect command buffers' commands naming a released state ([`RELEASED_STATES`]) and their host
 //! steps ([`HOST_STEPS`]), indirect dispatches' host reads ([`INDIRECT_DISPATCHES`]), indexed draws
 //! past their index buffer ([`INDEX_FETCHES`]), depth twins ([`TWINS`]) and uploads into depth
@@ -186,6 +186,7 @@ use super::kept_buffer_bytes::KEPT_BYTES;
 use super::linear_attachments::{CHOSEN_COPIES, LINEAR_COPIES};
 use super::mesh_draws::EMULATED_MESH;
 use super::mipmaps_exact::{M3_MIPMAPS, TIE_MIPMAPS};
+use super::no_copy_heaps::HEAP;
 use super::pass_start_reads::{FRAGMENTS_BEFORE_GEOMETRY, IN_PLACE_VERTEX_READS};
 use super::patches::EMULATED_TESSELLATION;
 use super::pvrtc_textures::UNREADABLE;
@@ -193,7 +194,7 @@ use super::rate_mapped_passes::ZERO_LAYER_AFTER_RELEASE;
 use super::rebind_reach::REBOUND_USES;
 use super::resolves::{color_pass, lane, quiet, MIXED_RESOLVES, ONE};
 use super::resource_ids::{
-    DELAYED_DEALLOCATORS, OWN_COPIES, PAST_CAPACITY, PAST_LAYOUT_SUPPORT, RESOURCE_IDS, UNLISTED,
+    DELAYED_DEALLOCATORS, OWN_COPIES, PAST_CAPACITY, PAST_LAYOUT_SUPPORT, UNLISTED,
     UNNAMED_SHADOWS, UNVIEWABLE,
 };
 use super::rotated_textures::ROTATED_LOADS;
@@ -245,10 +246,10 @@ use metal2vulkan::vk::ResolveModeFlags as Mode;
 use metal2vulkan::Budget;
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
-    BlitOption, CpuCacheMode, DebugMessage, Degradation, DegradationCategory, Device,
+    BlitOption, Buffer, CpuCacheMode, DebugMessage, Degradation, DegradationCategory, Device,
     DeviceOptions, DriverSetting, Error, HazardTrackingMode, HeapDescriptor, HeapType, HostMemory,
     LayerSetting, LayerSettingValue, LoadAction, MessageSeverity, MetalLevel,
-    MultisampleStencilResolveFilter, Origin, PipelineOptions, RenderPassDescriptor,
+    MultisampleStencilResolveFilter, Origin, PipelineOptions, Problem, RenderPassDescriptor,
     ResourceOptions, RuntimeGap, Size, StorageMode, StoreAction, TextureDescriptor,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -471,7 +472,6 @@ fn every_kind_has_a_site_a_lane_test_takes() {
         &UNPACKED_FILL,
         &TEXTURE_BUFFER_FILL,
         &FROM_HOST,
-        &RESOURCE_IDS,
         &UNLISTED,
         &RELEASED_STATES,
         &HOST_STEPS,
@@ -913,45 +913,158 @@ fn an_anisotropic_state_without_mips_is_announced_through_metals_sampler() {
 /// takes its site, as a build without debug assertions does.
 const MISPLACED: [Degradation; 1] = [Degradation::MisplacedNotice];
 
-/// The kind Metal's private option bit takes ([`the_private_option_bit_is_ignored_once`]).
+/// The kind Metal's private option bit takes where the GPU's writes reach the memory here
+/// ([`the_private_option_bit_is_announced_on_a_heap_of_the_runtime_s_memory`],
+/// [`the_private_option_bit_drops_the_gpu_s_writes_to_no_copy_memory`]).
 const PRIVATE_OPTION: [Degradation; 1] = [Degradation::PrivateResourceOption];
 
-/// Metal's private option bit 24 (0x1000000), which plain Metal takes and reports its options
-/// without (Metal probe `nc_bit24` on an M4), makes each resource as without it: buffers, a no-copy
-/// buffer whose GPU writes reach the CPU here, a texture, a heap and a heap's buffer, each
-/// reporting its options without the bit; it is announced once.
+/// `options` with Metal's private option bit 24 (0x1000000).
+fn with_private_bit(options: ResourceOptions) -> ResourceOptions {
+    ResourceOptions::from_raw(options.raw() | ResourceOptions::PRIVATE_BIT)
+        .expect("the runtime takes the private bit")
+}
+
+/// Whether `made` is refused `Invalid` for the undefined option bits `raw`.
+fn refused_bits<T>(made: Result<T, Error>, raw: u64) -> bool {
+    matches!(
+        made,
+        Err(Error::Invalid(invalid)) if invalid.problem
+            == Problem::UndefinedValue { ty: "MTLResourceOptions", raw }
+    )
+}
+
+/// Where Metal ends the process at Metal's private option bit 24 (the M3 Max under macOS 27.0.1:
+/// a buffer of a length or of bytes, `Shared` or `Private`, asserts in its suballocator, and a
+/// texture descriptor in its validation), the runtime refuses the call `Invalid`; a buffer with it
+/// placed in a heap without it is made as without it and reports its options without it, as
+/// Metal's is. Nothing is announced.
 #[test]
-fn the_private_option_bit_is_ignored_once() {
+fn the_private_option_bit_is_refused_where_metal_ends_and_ignored_in_a_plain_heap() {
+    on_device(|device, messages| {
+        let shared = with_private_bit(ResourceOptions::shared());
+        let private = with_private_bit(ResourceOptions::private());
+        assert!(refused_bits(device.new_buffer(256, shared), shared.raw()));
+        assert!(refused_bits(device.new_buffer(256, private), private.raw()));
+        assert!(refused_bits(
+            device.new_buffer_with_bytes(&[7; 16], shared),
+            shared.raw()
+        ));
+        let mut d = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 4, 4, false);
+        d.resource_options = shared;
+        assert!(refused_bits(device.new_texture(&d), shared.raw()));
+        d.resource_options = private;
+        assert!(refused_bits(device.new_texture(&d), private.raw()));
+        let plain = ResourceOptions::private();
+        let heap = device
+            .new_heap(&HeapDescriptor::new(HeapType::Automatic, 1 << 16, plain))
+            .unwrap();
+        assert!(refused_bits(heap.new_texture(&d), private.raw()));
+        let placed = heap.new_buffer(256, private).unwrap();
+        assert_eq!(
+            placed.resource_options(),
+            heap.new_buffer(256, plain).unwrap().resource_options()
+        );
+        assert_eq!(
+            placed.resource_options().raw() & ResourceOptions::PRIVATE_BIT,
+            0
+        );
+        assert_made_once(messages, &[], &BTreeSet::new());
+    });
+}
+
+/// A heap of the runtime's memory made with Metal's private option bit 24, which Metal makes and
+/// keeps the GPU's writes from the memory of, is made as without it here, the GPU's writes
+/// reaching the memory, the heap and a buffer placed in it reporting their options without the
+/// bit; it is announced once.
+#[test]
+fn the_private_option_bit_is_announced_on_a_heap_of_the_runtime_s_memory() {
+    on_device(|device, messages| {
+        let private = with_private_bit(ResourceOptions::private());
+        let heap = device
+            .new_heap(&HeapDescriptor::new(HeapType::Automatic, 1 << 16, private))
+            .unwrap();
+        assert_eq!(
+            heap.resource_options().raw() & ResourceOptions::PRIVATE_BIT,
+            0
+        );
+        let placed = heap.new_buffer(256, private).unwrap();
+        assert_eq!(
+            placed.resource_options().raw() & ResourceOptions::PRIVATE_BIT,
+            0
+        );
+        assert_made_once(messages, &PRIVATE_OPTION, &BTreeSet::new());
+    });
+}
+
+/// Whether the GPU's writes to no-copy memory made with Metal's private option bit 24 are
+/// dropped here, as Metal drops them: on macOS, where the runtime imports its pages through a
+/// read-only view of them (the runtime's `read_only_view.rs`).
+const DROPS_WRITES: bool = cfg!(target_os = "macos");
+
+/// Of `buffer`, a no-copy buffer over host pages whose bytes are its `contents`: the CPU writes
+/// 0x11 to its first 16 bytes, a command buffer fills them with 0x5a, and later command buffers
+/// copy them out, before and after the CPU writes 0x33 there. Whether they dropped the fill: the
+/// pages and the first copy kept the CPU's 0x11, and the second read its 0x33. Where they took
+/// it, the pages and the first copy hold 0x5a, and the second the CPU's 0x33.
+fn drops_the_fill(device: &Device, buffer: &Buffer) -> bool {
+    let contents = buffer.contents().unwrap();
+    let write = |byte: u8| {
+        // SAFETY: the buffer's first 16 bytes are host memory of this process, and no command
+        // uses them now.
+        unsafe { std::ptr::write_bytes(contents.as_ptr(), byte, 16) };
+    };
+    // SAFETY: as above.
+    let pages = || unsafe { std::slice::from_raw_parts(contents.as_ptr(), 16) }.to_vec();
+    let queue = device.new_command_queue().unwrap();
+    let run = |encode: &dyn Fn(&mut metal2vulkan_runtime::BlitCommandEncoder)| {
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut blit = command_buffer.blit_command_encoder().unwrap();
+        encode(&mut blit);
+        blit.end_encoding().unwrap();
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.error(), None);
+    };
+    let out = device.new_buffer(16, ResourceOptions::shared()).unwrap();
+    let copied = || {
+        run(&|blit| {
+            blit.copy_from_buffer_to_buffer(buffer, 0, &out, 0, 16)
+                .unwrap()
+        });
+        // SAFETY: `out` holds 16 bytes, and no command uses them now.
+        unsafe { std::slice::from_raw_parts(out.contents().unwrap().as_ptr(), 16) }.to_vec()
+    };
+    write(0x11);
+    run(&|blit| blit.fill_buffer(buffer, 0..16, 0x5a).unwrap());
+    let (kept, first) = (pages(), copied());
+    write(0x33);
+    let second = copied();
+    assert_eq!(second, [0x33; 16], "a later copy reads the CPU's bytes");
+    assert_eq!(kept, first, "a later copy reads the pages");
+    if kept == [0x11; 16] {
+        return true;
+    }
+    assert_eq!(kept, [0x5a; 16]);
+    false
+}
+
+/// A no-copy buffer, a buffer placed in a no-copy heap and that buffer rebound to other pages,
+/// made with Metal's private option bit 24, which Metal makes and keeps the GPU's writes from the
+/// memory of (the M3 Max under macOS 27.0.1: a blit's fill reaches neither the CPU nor a later
+/// command buffer, which reads the CPU's bytes): on macOS each drops a fill so, and nothing is
+/// announced; elsewhere the fill reaches the pages, announced once. Each reports its options
+/// without the bit, as Metal's does.
+#[test]
+fn the_private_option_bit_drops_the_gpu_s_writes_to_no_copy_memory() {
     on_device(|device, messages| {
         let bit = ResourceOptions::PRIVATE_BIT;
-        let with_bit = |options: ResourceOptions| {
-            ResourceOptions::from_raw(options.raw() | bit).expect("Metal takes the private bit")
-        };
-        let shared = with_bit(ResourceOptions::shared());
+        let shared = with_private_bit(ResourceOptions::shared());
         let plain = device
             .new_buffer(256, ResourceOptions::shared())
             .unwrap()
             .resource_options();
-        assert_eq!(plain.raw() & bit, 0);
-        let buffer = device.new_buffer(256, shared).unwrap();
-        assert_eq!(buffer.resource_options(), plain);
-        let copied = device.new_buffer_with_bytes(&[7; 16], shared).unwrap();
-        assert_eq!(copied.resource_options(), plain);
-        let mut d = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 4, 4, false);
-        d.resource_options = shared;
-        let texture = device.new_texture(&d).unwrap();
-        assert_eq!(texture.resource_options().raw() & bit, 0);
-        let private = with_bit(ResourceOptions::private());
-        let heap = device
-            .new_heap(&HeapDescriptor::new(HeapType::Automatic, 1 << 16, private))
-            .unwrap();
-        assert_eq!(heap.resource_options().raw() & bit, 0);
-        let placed = heap.new_buffer(256, private).unwrap();
-        assert_eq!(placed.resource_options().raw() & bit, 0);
-
-        // A no-copy buffer, the form RT4 measured: the GPU's writes reach the CPU, as without
-        // the bit.
         let memory = Mapping::anonymous(GUEST_PAGE);
+        let other = Mapping::anonymous(GUEST_PAGE);
         // SAFETY: the mapping outlives the buffer, which is dropped first.
         let no_copy = unsafe {
             device.new_buffer_with_bytes_no_copy(
@@ -961,26 +1074,43 @@ fn the_private_option_bit_is_ignored_once() {
                 None,
             )
         };
-        match no_copy {
-            Err(error) if not_importable(&error) => {}
-            no_copy => {
-                let no_copy = no_copy.unwrap();
-                assert_eq!(no_copy.resource_options(), plain);
-                let queue = device.new_command_queue().unwrap();
-                let command_buffer = queue.command_buffer().unwrap();
-                let mut blit = command_buffer.blit_command_encoder().unwrap();
-                blit.fill_buffer(&no_copy, 0..16, 0x5a).unwrap();
-                blit.end_encoding().unwrap();
-                command_buffer.commit().unwrap();
-                command_buffer.wait_until_completed_for(WAIT).unwrap();
-                assert_eq!(command_buffer.error(), None);
-                // SAFETY: the mapping holds `GUEST_PAGE` bytes, and no command uses them now.
-                let bytes = unsafe { std::slice::from_raw_parts(memory.pointer().as_ptr(), 16) };
-                assert_eq!(bytes, [0x5a; 16]);
+        let no_copy = match no_copy {
+            Err(error) if not_importable(&error) => {
+                eprintln!("PRIVATEBIT: the device imports no host memory: {error:?}");
+                return;
             }
+            no_copy => no_copy.unwrap(),
+        };
+        assert_eq!(no_copy.resource_options(), plain);
+        assert_eq!(drops_the_fill(device, &no_copy), DROPS_WRITES);
+        // Rebound to other pages, it drops the GPU's writes to them too.
+        // SAFETY: the other mapping outlives the buffer, and no other thread encodes or commits.
+        unsafe { no_copy.rebind_bytes_no_copy(HostMemory::new(other.pointer()), None, None) }
+            .unwrap();
+        assert_eq!(no_copy.contents(), Some(other.pointer()));
+        assert_eq!(drops_the_fill(device, &no_copy), DROPS_WRITES);
+        let heap_memory = Mapping::anonymous(HEAP);
+        let descriptor = HeapDescriptor::new(HeapType::Automatic, HEAP as u64, shared);
+        // SAFETY: the mapping outlives the heap, which is dropped first.
+        let heap = unsafe {
+            device.new_heap_with_bytes_no_copy(
+                HostMemory::new(heap_memory.pointer()),
+                &descriptor,
+                None,
+                None,
+            )
         }
-        // Beside it, what the `Shared` resources force on the device.
-        assert_made_once(messages, &PRIVATE_OPTION, &shared_kinds(device));
+        .unwrap();
+        assert_eq!(heap.resource_options().raw() & bit, 0);
+        let placed = heap.new_buffer(256, ResourceOptions::shared()).unwrap();
+        assert_eq!(drops_the_fill(device, &placed), DROPS_WRITES);
+        drop((placed, heap, no_copy));
+        // Beside them, what the `Shared` resources force on the device.
+        let kinds: &[Degradation] = match DROPS_WRITES {
+            true => &[],
+            false => &PRIVATE_OPTION,
+        };
+        assert_made_once(messages, kinds, &shared_kinds(device));
     });
 }
 
