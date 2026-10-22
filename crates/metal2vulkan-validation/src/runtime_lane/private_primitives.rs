@@ -28,17 +28,19 @@
 //! `[[primitive_id]]` are refused (`NotImplemented(PrivatePrimitives)`): the list's triangles
 //! count two IDs where Metal counts one.
 
-use super::{buffer_with, validated_device, Messages, ScratchCache, WAIT};
+use super::{buffer_with, validated_device, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
+use metal2vulkan::device::VkFeature;
 use metal2vulkan::metal::{IndexType, PixelFormat, PrimitiveType, TextureUsage};
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
+use metal2vulkan::vk;
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBuffer, CommandBufferError, CommandBufferStatus, CommandQueue,
-    Device, DrawPrimitiveType, Error, Library, LoadAction, PipelineOptions, Region,
-    RenderCommandEncoder, RenderPassDescriptor, RenderPipelineState, ResourceOptions, RuntimeGap,
-    StoreAction, TextureDescriptor,
+    Device, DrawPrimitiveType, Error, ExecutedPipeline, Library, LoadAction, PipelineOptions,
+    Region, RenderCommandEncoder, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
+    RuntimeGap, StoreAction, TextureDescriptor,
 };
 
 /// The target's side, in pixels.
@@ -457,6 +459,16 @@ impl Lane {
 
     /// `case` drawn as its private type, in its form.
     fn private(&self, pipeline: &RenderPipelineState, case: &Case) -> Result<Texels, Error> {
+        Ok(self.private_executed(pipeline, case)?.0)
+    }
+
+    /// [`private`](Self::private)'s texels, and how many geometry stages the pipeline its draw
+    /// executed carries (`None` for a draw that records nothing).
+    fn private_executed(
+        &self,
+        pipeline: &RenderPipelineState,
+        case: &Case,
+    ) -> Result<(Texels, Option<usize>), Error> {
         let index_type = case.form.index_type().unwrap_or(IndexType::UInt32);
         let index_bytes = bytes_of(index_type, &case.indices);
         // A buffer of 4 bytes at least, for a draw without indices that names none.
@@ -546,7 +558,20 @@ impl Lane {
             None => {}
         }
         assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
-        Ok(texels)
+        let stages = command_buffer
+            .executions()
+            .iter()
+            .find_map(|e| match e.pipeline() {
+                ExecutedPipeline::Render(executed) => Some(
+                    executed
+                        .stages
+                        .iter()
+                        .filter(|s| s.stage == vk::ShaderStage::GEOMETRY)
+                        .count(),
+                ),
+                _ => None,
+            });
+        Ok((texels, stages))
     }
 }
 
@@ -633,14 +658,44 @@ fn indexed_cases() -> Vec<Case> {
     cases
 }
 
+/// How the lane's device reads the barycentric weights.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Weights {
+    /// As the device is made (`BaryCoordKHR` where it has `fragmentShaderBarycentric`).
+    Device,
+    /// With `fragmentShaderBarycentric` withheld: varyings a generated geometry stage writes, one
+    /// per topology class, so a private draw must run its list's class's.
+    Withheld,
+}
+
 /// Each case of `cases` draws, at every texel of every attachment, what Metal's list drawn as the
-/// public list draws, under the fragment function [`full`] names, and most cover a pixel.
-fn draws_metal_s_lists(cases: &[Case]) {
+/// public list draws, under the fragment function [`full`] names, and most cover a pixel. With
+/// the weights `Withheld`, every draw's pipeline carries geometry stages; a device without
+/// `geometryShader` then refuses the functions (`runtime_lane::barycentric_weights` checks how),
+/// and the check is skipped, printed.
+fn draws_metal_s_lists(cases: &[Case], weights: Weights) {
     let cache = ScratchCache::new().unwrap();
     let messages = Messages::default();
     {
-        let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
+        let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), |options| {
+            if weights == Weights::Withheld {
+                options
+                    .withheld_features
+                    .insert(VkFeature::FragmentShaderBarycentric);
+            }
+        })
+        .unwrap();
         let name = device.name().to_owned();
+        let geometry = device
+            .compile_device()
+            .profile()
+            .enabled()
+            .features
+            .contains(&VkFeature::GeometryShader);
+        if weights == Weights::Withheld && !geometry {
+            eprintln!("{name}: no geometryShader, so no weights without BaryCoordKHR: skipped");
+            return;
+        }
         let lane = Lane::new(device);
         let pipelines: Vec<_> = PRIVATE
             .iter()
@@ -654,9 +709,15 @@ fn draws_metal_s_lists(cases: &[Case]) {
                 .unwrap()
                 .1;
             let expected = lane.reference(pipeline, case);
-            let texels = lane
-                .private(pipeline, case)
+            let (texels, stages) = lane
+                .private_executed(pipeline, case)
                 .unwrap_or_else(|e| panic!("{case:?} on {name}: {e}"));
+            if weights == Weights::Withheld {
+                assert!(
+                    stages.is_none_or(|stages| stages > 0),
+                    "{case:?} on {name}: no geometry stage with the weights withheld"
+                );
+            }
             drawn += usize::from(covers(&expected));
             covered += expected[3].iter().filter(|t| t[3] == 1).count();
             for (a, (got, want)) in texels.iter().zip(&expected).enumerate() {
@@ -673,8 +734,8 @@ fn draws_metal_s_lists(cases: &[Case]) {
             cases.len()
         );
         eprintln!(
-            "{name}: {} private draws equal Metal's lists at every texel; {drawn} cover pixels, \
-             {covered} covered pixels in all",
+            "{name} ({weights:?} weights): {} private draws equal Metal's lists at every texel; \
+             {drawn} cover pixels, {covered} covered pixels in all",
             cases.len()
         );
     }
@@ -688,13 +749,22 @@ fn draws_metal_s_lists(cases: &[Case]) {
 /// Every direct draw without indices draws Metal's list, from the CPU's.
 #[test]
 fn direct_private_draws_are_metal_s_lists() {
-    draws_metal_s_lists(&direct_cases());
+    draws_metal_s_lists(&direct_cases(), Weights::Device);
 }
 
 /// Every indexed or indirect draw draws Metal's list, from the index rewrite pass's.
 #[test]
 fn indexed_and_indirect_private_draws_are_metal_s_lists() {
-    draws_metal_s_lists(&indexed_cases());
+    draws_metal_s_lists(&indexed_cases(), Weights::Device);
+}
+
+/// Through a geometry stage (the weights withheld), every direct and indexed draw draws Metal's
+/// list too: the private draw runs its list's class's stage.
+#[test]
+fn through_a_geometry_stage_private_draws_are_metal_s_lists() {
+    let mut cases = direct_cases();
+    cases.extend(indexed_cases());
+    draws_metal_s_lists(&cases, Weights::Withheld);
 }
 
 /// Under fragment functions that read fewer of the inputs (the primitive ID without the weights,
