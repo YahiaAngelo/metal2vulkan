@@ -102,7 +102,7 @@ impl KeptPrograms {
     }
 
     /// How many programs it keeps.
-    #[cfg(test)]
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
     pub(super) fn count(&self) -> usize {
         self.0.values().map(VecDeque::len).sum()
     }
