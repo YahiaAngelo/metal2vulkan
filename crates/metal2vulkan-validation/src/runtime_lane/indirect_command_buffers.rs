@@ -586,7 +586,9 @@ fn a_command_keeps_a_buffer_offset_s_low_32_bits() {
 /// lives, and none where it names none, as Metal's getter answers a released state's identifier
 /// and 0 for none (measured by the consumer on an M3 Max): a command copied into another buffer,
 /// which holds no state, names the state after the state and its source buffer are released,
-/// while `pipeline` reads none; the copy's fresh command names none.
+/// while `pipeline` reads none, and its identifier is the state's that held the ID as the copy
+/// wrote it, after a render state took the ID too, as Metal's record holds the state its GPU
+/// write resolved; the copy's fresh command names none.
 #[test]
 fn a_command_names_its_state_s_id_after_the_state_is_released() {
     on_device(|device| {
@@ -619,7 +621,7 @@ fn a_command_names_its_state_s_id_after_the_state_is_released() {
         assert_eq!(
             command(&copied, 0).pipeline_unique_identifier,
             Some(identifier),
-            "a record the GPU wrote: the live state of its ID"
+            "a record the GPU wrote: the state of its ID as it wrote it"
         );
         drop(state);
         assert_eq!(
@@ -630,9 +632,18 @@ fn a_command_names_its_state_s_id_after_the_state_is_released() {
         drop((set, source));
         let read = command(&copied, 0);
         assert_eq!(
-            read.pipeline_unique_identifier, None,
-            "a record the GPU wrote, naming an ID no state holds"
+            read.pipeline_unique_identifier,
+            Some(identifier),
+            "a record the GPU wrote, naming an ID no state holds: the released state's"
         );
+        let taker = render_template_state(device, true);
+        assert_eq!(taker.gpu_resource_id(), id, "a render state takes the ID");
+        assert_eq!(
+            command(&copied, 0).pipeline_unique_identifier,
+            Some(identifier),
+            "the state the record held when the GPU wrote it, after another took its ID"
+        );
+        drop(taker);
         assert!(
             read.pipeline.is_none(),
             "a released compute state reads as none"

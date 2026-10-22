@@ -161,7 +161,7 @@ use super::texture::TextureShared;
 use metal2vulkan::device::VkLimit;
 use metal2vulkan::error::{Capability, Feature, Unsupported};
 use metal2vulkan::metal::{TextureType, TextureUsage};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
@@ -302,6 +302,9 @@ pub(super) struct ResourceIds {
     /// The pipeline state IDs whose holder the program released, which no state took since,
     /// each with its last holder's kind and hold serial (`IdHold::serial`).
     released_pipelines: BTreeMap<u64, (StateKind, u64)>,
+    /// The last [`PIPELINE_HOLDERS`] holders of each pipeline state ID, oldest first, released
+    /// or not ([`ResourceIds::pipeline_holder_by`]).
+    pipeline_holders: BTreeMap<u64, VecDeque<PipelineHolder>>,
     /// The keys pipeline states numbered that a holder may hold, each with its ID
     /// (`numbered.rs`).
     numbered: BTreeMap<numbered::SamplerKey, (u64, Weak<Numbered>)>,
@@ -341,6 +344,7 @@ impl Default for ResourceIds {
             counter: 0,
             device_sampler: None,
             released_pipelines: BTreeMap::new(),
+            pipeline_holders: BTreeMap::new(),
             numbered: BTreeMap::new(),
             libraries: BTreeMap::new(),
             functions: BTreeMap::new(),
@@ -363,6 +367,24 @@ impl ResourceIds {
     fn next(&mut self) -> u64 {
         self.counter += 1;
         self.counter
+    }
+
+    /// A value of the counter past every hold serial handed out so far: a holder whose serial
+    /// is below it took its ID before now ([`ResourceIds::pipeline_holder_by`]).
+    pub(super) fn stamp(&mut self) -> u64 {
+        self.next()
+    }
+
+    /// The kind and `uniqueIdentifier` of the state that held pipeline state ID `id` at `stamp`
+    /// ([`ResourceIds::stamp`]): the last to take it before then, released since or not; none
+    /// where none of the ID's last [`PIPELINE_HOLDERS`] holders took it before then.
+    pub(super) fn pipeline_holder_by(&self, id: u64, stamp: u64) -> Option<(StateKind, u64)> {
+        self.pipeline_holders
+            .get(&id)?
+            .iter()
+            .rev()
+            .find(|holder| holder.serial < stamp)
+            .map(|holder| (holder.kind, holder.identifier))
     }
 
     /// The count of held sampler IDs and the sampler pool's size (the module docs), which the
@@ -794,6 +816,18 @@ impl Elements {
     }
 }
 
+/// How many of each pipeline state ID's holders the device keeps
+/// ([`ResourceIds::pipeline_holder_by`]).
+const PIPELINE_HOLDERS: usize = 4;
+
+/// A pipeline state that took an ID: its kind, its hold serial and its `uniqueIdentifier`.
+#[derive(Clone, Copy, Debug)]
+struct PipelineHolder {
+    kind: StateKind,
+    serial: u64,
+    identifier: u64,
+}
+
 /// One ID's slot, while its holder lives: the holder and its hold serial.
 #[derive(Debug)]
 struct Slot {
@@ -879,6 +913,23 @@ impl IdHold {
         if self.space == IdSpace::Sampler {
             all.sampler_slot_changed();
         }
+    }
+
+    /// Make `holder`, a pipeline state of `kind` whose `uniqueIdentifier` is `identifier`, its
+    /// slot's holder ([`hold`](Self::hold)), and the ID's last holder
+    /// ([`ResourceIds::pipeline_holder_by`]).
+    pub(super) fn hold_state(&self, holder: Holder, kind: StateKind, identifier: u64) {
+        self.hold(holder);
+        let mut all = lock(&self.ids);
+        let holders = all.pipeline_holders.entry(self.id).or_default();
+        if holders.len() == PIPELINE_HOLDERS {
+            holders.pop_front();
+        }
+        holders.push_back(PipelineHolder {
+            kind,
+            serial: self.serial,
+            identifier,
+        });
     }
 
     /// The ID.

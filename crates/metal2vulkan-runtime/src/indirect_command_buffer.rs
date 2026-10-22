@@ -597,6 +597,7 @@ impl Device {
             barriers: AtomicBool::new(false),
             overflow,
             tail: Mutex::default(),
+            gpu_writes: Arc::default(),
             written: Arc::default(),
         }));
         icb.initialize()?;
@@ -945,6 +946,9 @@ struct IcbShared {
     /// changing no other command's state); no command's copy or reset reaches them. Past about
     /// 4000 places its setter ends the process (`SIGSEGV`, `SIGBUS`); the runtime keeps them all.
     tail: Mutex<BTreeMap<u64, u32>>,
+    /// The command buffers that may write its records on the GPU ([`GpuWrite`]): how many have
+    /// not yet completed, and the stamp of the last one's completion.
+    gpu_writes: Arc<Mutex<GpuWrites>>,
     /// What its records may hold, from every route that writes them (`written_commands.rs`).
     written: Arc<WrittenCommands>,
 }
@@ -1107,6 +1111,34 @@ impl Overflow {
     /// Whether `other` lays its commands' blocks out as this one does.
     pub(super) fn same_layout(&self, other: &Overflow) -> bool {
         self.past == other.past && self.lengths == other.lengths
+    }
+}
+
+/// The command buffers that may write a buffer's records on the GPU (`IcbShared::gpu_writes`).
+#[derive(Debug, Default)]
+struct GpuWrites {
+    /// Those not yet completed.
+    pending: u32,
+    /// The device's ID stamp (`ResourceIds::stamp`) as the last one completed.
+    end: u64,
+}
+
+/// A command buffer's note of a buffer whose records its work may write on the GPU (made
+/// resident for writing, or the destination of a blit's copy or reset of commands), from the
+/// encoding call until the command buffer completes (an encoder's retained object): its drop
+/// stamps the buffer's [`GpuWrites`]. It holds the buffer's writes alone, not the buffer, whose
+/// ID a blit's command does not hold, as Metal's does not.
+pub(super) struct GpuWrite {
+    device: Device,
+    writes: Arc<Mutex<GpuWrites>>,
+}
+
+impl Drop for GpuWrite {
+    fn drop(&mut self) {
+        let stamp = lock(&self.device.shared().resource_ids).stamp();
+        let mut writes = lock(&self.writes);
+        writes.pending = writes.pending.saturating_sub(1);
+        writes.end = writes.end.max(stamp);
     }
 }
 
@@ -2014,8 +2046,10 @@ impl IndirectCommandBuffer {
     /// it (`name_state`): 0 where it names none; the identifier of the state the CPU set where
     /// the record names its ID, after the state's release too, as Metal answers it (measured on
     /// an M3 Max by the consumer), unless the GPU may have written the record since and another
-    /// state took the ID meanwhile; the identifier of the live state of the ID for a record the
-    /// GPU wrote. `None` where the runtime cannot tell which state the record names.
+    /// state took the ID meanwhile; for a record the GPU wrote, the identifier of the state that
+    /// held the ID as the GPU last could write it ([`written_identifier`](Self::written_identifier)),
+    /// else the live state of the ID's. `None` where the runtime cannot tell which state the
+    /// record names.
     fn pipeline_identifier<S>(
         &self,
         named: Option<NonZeroU64>,
@@ -2031,7 +2065,9 @@ impl IndirectCommandBuffer {
             Some((None, stamp)) => (!self.gpu_written()
                 || self.released_holder(named) == Some((of.kind, stamp.serial)))
             .then_some(stamp.identifier),
-            None => state.map(of.identifier),
+            None => self
+                .written_identifier(named, of.kind)
+                .or_else(|| state.map(of.identifier)),
         }
     }
 
@@ -2104,6 +2140,39 @@ impl IndirectCommandBuffer {
                 execution.settle(self.device());
             }
         }
+    }
+
+    /// A hold on the buffer for a command buffer whose work may write its records on the GPU,
+    /// which the encoder retains until it completes ([`GpuWrite`]).
+    pub(super) fn gpu_write(&self) -> GpuWrite {
+        lock(&self.0.gpu_writes).pending += 1;
+        GpuWrite {
+            device: self.device().clone(),
+            writes: Arc::clone(&self.0.gpu_writes),
+        }
+    }
+
+    /// The `uniqueIdentifier` of the state of `kind` that held pipeline state ID `named` as the
+    /// GPU last could write the buffer's records: at the completion of the last command buffer
+    /// that could ([`GpuWrite`]), or now while one has not completed; released since or not, as
+    /// Metal's GPU write resolves the ID as it runs, and its record names that state after
+    /// (measured on an M3 Max by the consumer). None where the GPU could not write the records,
+    /// or the ID's holder then is one of another kind or past the ones the device keeps.
+    fn written_identifier(&self, named: u64, kind: StateKind) -> Option<u64> {
+        if !self.gpu_written() {
+            return None;
+        }
+        let stamp = {
+            let writes = lock(&self.0.gpu_writes);
+            match writes.pending {
+                0 => writes.end,
+                _ => u64::MAX,
+            }
+        };
+        lock(&self.device().shared().resource_ids)
+            .pipeline_holder_by(named, stamp)
+            .filter(|&(of, _)| of == kind)
+            .map(|(_, identifier)| identifier)
     }
 
     /// Watch `execution`, which `commit` recorded from the CPU's records: its host step is
@@ -3362,9 +3431,15 @@ pub struct EncodedComputeCommand {
     /// [`unique_identifier`](ComputePipelineState::unique_identifier) of the state its record
     /// names, the one the CPU set after its release too, as Metal answers it (measured on an M3
     /// Max by the consumer); 0 where it names none (`pipeline_id`). For a record the GPU wrote,
-    /// the live state of its ID's. `None` where the runtime cannot tell which state the record
-    /// names: a state the program released, whose ID another took while the GPU could write the
-    /// record, or an ID no live state holds.
+    /// the state that held its ID as the GPU last could write the record (the completion of the
+    /// last command buffer that made the buffer resident for writing, or copied or reset commands
+    /// into it; now, while one has not completed), released since or not and after another state
+    /// took the ID, as Metal's GPU write resolves the ID as it runs and its record names that
+    /// state after (measured on an M3 Max by the consumer). Differs: a record written by an
+    /// earlier command buffer, its ID's holder changed before the last one completed, answers
+    /// the later holder's. `None` where the runtime cannot tell which state the record names:
+    /// the ID's holder then was a state of the other kind, or is past the last four holders of
+    /// the ID the device keeps, and no live state of this kind holds it.
     pub pipeline_unique_identifier: Option<u64>,
     /// Each kernel buffer below the descriptor's `max_kernel_buffer_bind_count`, past the 32 a
     /// record holds too, as set, a nil buffer included (its address the offset's low 32 bits): none

@@ -1647,7 +1647,11 @@ impl GraphicsState {
             // command's record can name (`indirect_states`).
             let id = descriptor.support_indirect_command_buffers().then(|| {
                 let id = IdHold::take(&device.shared().resource_ids, IdSpace::Pipeline, placement);
-                id.hold(Holder::RenderPipeline(Weak::clone(state)));
+                id.hold_state(
+                    Holder::RenderPipeline(Weak::clone(state)),
+                    StateKind::Render,
+                    identifier.value(),
+                );
                 id
             });
             let program = Program {

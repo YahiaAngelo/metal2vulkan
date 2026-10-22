@@ -1011,6 +1011,7 @@ impl ComputeCommandEncoder {
             if let ResourceRef::IndirectCommandBuffer(icb) = resource {
                 if usage.contains(ResourceUsage::WRITE) {
                     self.writers.made_writable(icb.written());
+                    self.core.retain(icb.gpu_write());
                 }
             }
         }

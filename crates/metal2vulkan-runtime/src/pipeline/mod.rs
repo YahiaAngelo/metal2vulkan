@@ -690,7 +690,11 @@ impl ComputePipelineState {
             // command's record can name (`indirect_states`).
             let id = indirect.then(|| {
                 let id = IdHold::take(&device.shared().resource_ids, IdSpace::Pipeline, placement);
-                id.hold(Holder::Pipeline(Weak::clone(state)));
+                id.hold_state(
+                    Holder::Pipeline(Weak::clone(state)),
+                    StateKind::Compute,
+                    identifier.value(),
+                );
                 id
             });
             let program = Program {
