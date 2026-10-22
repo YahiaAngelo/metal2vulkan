@@ -4058,8 +4058,9 @@ impl IndirectRenderCommand {
     /// hold it (`CommandType`; plain Metal ends its process), and, as Metal's validation stops
     /// each, buffers of another device. Refused as the encoder's draw refuses them, which Metal's
     /// validation of a command was not measured to: patch indices past the patch index buffer
-    /// (`PatchIndexBufferRange`; plain Metal read 0 past it, the buffer's page padding, which stays
-    /// undefined). An odd factor offset is read from the byte below, and an odd instance stride
+    /// from its offset's low 32 bits, which the command keeps (`PatchIndexBufferRange`; plain
+    /// Metal read 0 past it, the buffer's page padding, which stays undefined). An odd factor
+    /// offset is read from the byte below, and an odd instance stride
     /// rounded down to a multiple of 4, as plain Metal reads a command's and the encoder's alike,
     /// with and without its validation.
     pub fn draw_patches(
@@ -4191,7 +4192,7 @@ impl IndirectRenderCommand {
     /// Refuse a patch draw's values for `call` as [`draw_patches`](Self::draw_patches) states:
     /// its buffers (the patch index buffer and its offset, a control-point index buffer, the
     /// factor buffer) of another device, and patch indices past the patch index buffer from its
-    /// offset rounded down to a multiple of 4.
+    /// offset's low 32 bits, which the record keeps, rounded down to a multiple of 4.
     fn check_patches(
         &self,
         call: &'static str,
@@ -4212,7 +4213,9 @@ impl IndirectRenderCommand {
         }
         let draw = |problem| Err(invalid(call, Problem::Draw(problem)));
         if let Some(buffer) = patch_index_buffer {
-            let offset = patch_index_buffer_offset - patch_index_buffer_offset % 4;
+            // The record keeps the offset's low 32 bits, as Metal's (its getter answers them).
+            let kept = u64::from(patch_index_buffer_offset as u32);
+            let offset = kept - kept % 4;
             let indices = u64::from(patch_start as u32) + u64::from(patch_count as u32);
             let end = offset.checked_add(4 * indices);
             if end.is_none_or(|end| end > buffer.length()) {
@@ -4699,4 +4702,47 @@ pub enum IndirectDraw {
         /// `threadsPerMeshThreadgroup`.
         threads_per_mesh_threadgroup: Size,
     },
+}
+
+/// The address Metal's private patch draw getters (`drawPatchesArguments`,
+/// `drawIndexedPatchesArguments`) answer for a nil patch index or control-point index buffer,
+/// whatever its offset (the M3 Max under macOS 27.0.1: offsets 0, 0x10, 0xfffffff0,
+/// 0x100000010 and 0x1eeee1111; and the consumer's M3 Max under macOS 26.7, on a fresh command
+/// and on one that held a buffer).
+pub const NIL_PATCH_BUFFER_ADDRESS: u64 = 0x1_eeee_1111;
+
+/// Apple's private getters of a patch draw's buffers, as Metal answers them.
+impl IndirectDraw {
+    /// `patchIndexBufferGPUVirtualAddress` of `drawPatchesArguments` and
+    /// `drawIndexedPatchesArguments` (SPI): a patch draw's patch index buffer's address plus the
+    /// offset's low 32 bits, or [`NIL_PATCH_BUFFER_ADDRESS`] for none; `None` for a draw of
+    /// another kind, which the runtime does not read as a patch draw.
+    pub fn patch_index_buffer_address(&self) -> Option<u64> {
+        match *self {
+            IndirectDraw::Patches {
+                patch_index_buffer, ..
+            }
+            | IndirectDraw::IndexedPatches {
+                patch_index_buffer, ..
+            } => Some(patch_index_buffer.map_or(NIL_PATCH_BUFFER_ADDRESS, |address| address.0)),
+            _ => None,
+        }
+    }
+
+    /// `controlPointIndexBufferGPUVirtualAddress` of `drawIndexedPatchesArguments` (SPI): an
+    /// indexed patch draw's control-point index buffer's address plus the offset's low 32 bits,
+    /// and [`NIL_PATCH_BUFFER_ADDRESS`] for a patch draw, which an indexed one of no control-point
+    /// index buffer is, as Metal answers it; `None` for a draw of another kind.
+    pub fn control_point_index_buffer_address(&self) -> Option<u64> {
+        match *self {
+            IndirectDraw::Patches { .. } => Some(NIL_PATCH_BUFFER_ADDRESS),
+            IndirectDraw::IndexedPatches {
+                control_point_index_buffer,
+                ..
+            } => Some(
+                control_point_index_buffer.map_or(NIL_PATCH_BUFFER_ADDRESS, |address| address.0),
+            ),
+            _ => None,
+        }
+    }
 }

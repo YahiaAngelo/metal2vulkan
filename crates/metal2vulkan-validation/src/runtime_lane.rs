@@ -519,6 +519,8 @@ mod indirect_executions;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod indirect_host_steps;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod indirect_patch_addresses;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod inline_bytes;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod inline_reasons;

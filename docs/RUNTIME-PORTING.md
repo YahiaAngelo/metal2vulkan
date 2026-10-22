@@ -312,7 +312,7 @@ narrow refusal that the call's rustdoc describes.
 | Item | Metal | Runtime |
 |---|---|---|
 | `encode` |  | one `IndirectRenderCommand` method per `IcbRenderCmd` (above) |
-| `command_type`, `fragment_buffer_address`, `vertex_attribute_stride`, `vertex_buffer_address`, `has_barrier`, `draw_args`, `draw_indexed_args`, `draw_patches_args`, `draw_indexed_patches_args`, `tessellation_factor_args` | the getters (SPI) | `IndirectRenderCommand::command_type`, `vertex_buffer`, `fragment_buffer`, `has_barrier`, `draw`: each reads its field of the record alone; or `IndirectCommandBuffer::commands`, each render command decoded as an `EncodedRenderCommand` |
+| `command_type`, `fragment_buffer_address`, `vertex_attribute_stride`, `vertex_buffer_address`, `has_barrier`, `draw_args`, `draw_indexed_args`, `draw_patches_args`, `draw_indexed_patches_args`, `tessellation_factor_args` | the getters (SPI) | `IndirectRenderCommand::command_type`, `vertex_buffer`, `fragment_buffer`, `has_barrier`, `draw`: each reads its field of the record alone; or `IndirectCommandBuffer::commands`, each render command decoded as an `EncodedRenderCommand`; a patch draw's buffer addresses as Metal answers them, `NIL_PATCH_BUFFER_ADDRESS` for nil, from `IndirectDraw::patch_index_buffer_address` and `control_point_index_buffer_address` |
 | `pipeline_state_unique_identifier` | `getPipelineStateUniqueIdentifier` (SPI) | `IndirectRenderCommand::pipeline_unique_identifier` (with `pipeline_state` and `pipeline_id`), or that of the command read back (`IndirectCommandBuffer::commands`) *(partial)* |
 
 ### `IcbComputeCmd`: `MTLIndirectComputeCommand` commands

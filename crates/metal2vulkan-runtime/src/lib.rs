@@ -289,7 +289,7 @@ pub use indirect_command_buffer::{
     EncodedComputeCommand, EncodedRenderCommand, IndirectBufferBinding, IndirectCommand,
     IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectCommandBufferProblem,
     IndirectCommandCheck, IndirectCommandCheckNeeds, IndirectComputeCommand, IndirectDispatch,
-    IndirectDraw, IndirectRenderCommand,
+    IndirectDraw, IndirectRenderCommand, NIL_PATCH_BUFFER_ADDRESS,
 };
 pub use interop::SemaphoreProblem;
 pub use library::{Function, FunctionDescriptor, Library};
