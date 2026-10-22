@@ -2944,8 +2944,8 @@ impl CommandBuffer {
     ///   completed, as Metal's does. It is refused (`WaitWouldDeadlock`) only where it would
     ///   deadlock: when that queue's handlers wait, through the queues they wait for, for this
     ///   one ([`DeadlockCause::Cycle`]), or when it would leave the device's handler threads
-    ///   with none that is not blocked so ([`DeadlockCause::HandlerThreadCap`]: the runtime's
-    ///   cap, above the 256 measured on Metal).
+    ///   with none that is not blocked so ([`DeadlockCause::HandlerThreadCap`]: the 512th, where
+    ///   Metal's handler threads run out and it hangs).
     pub fn wait_until_completed(&self) -> Result<(), Error> {
         let _blocked = match self.completed_wait() {
             Answer::Return => {

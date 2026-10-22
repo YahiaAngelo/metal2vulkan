@@ -16,15 +16,19 @@
 //! - **Metal's order** (measured on an M4, macOS 27.0.1): while one of a
 //!   queue's handlers blocks, the queue's later transitions wait, even of a command buffer whose
 //!   work already ran; another queue's transitions and handlers go on, on another thread. Metal
-//!   ran 256 queues' handlers blocked at once, on 256 threads, and reached no limit.
+//!   ran 256 queues' handlers blocked at once, on 256 threads, and reached no limit. On the M3
+//!   Max under macOS 27.0.1 it ran 511 queues' handlers blocked at once in a wait for another
+//!   queue's command buffer, and those waits returned once it completed; with 512 blocked so (the
+//!   process's 512 dispatch threads), no handler ran after and the command buffer they waited for
+//!   never completed: a hang.
 //! - **Threads.** One thread starts with the device and stays. Another starts when a context is
 //!   ready and no thread is free, up to [`THREADS`]; one that found nothing to run for [`IDLE`]
-//!   ends. The cap is the runtime's own, above the 256 measured on Metal. Each has a stack of
-//!   [`STACK`] bytes.
+//!   ends. The cap is Metal's 512. Each has a stack of [`STACK`] bytes.
 //! - **Waits that would deadlock** ([`block`]). A handler's wait for another queue's command
 //!   buffer blocks its thread. It is refused when it would close a cycle of such waits (across
-//!   every device) or leave the device's pool with no thread that is not blocked so; then at least
-//!   one thread can always run the contexts the blocked waits wait for.
+//!   every device) or leave the device's pool with no thread that is not blocked so, the 512th,
+//!   where Metal's hangs; then at least one thread can always run the contexts the blocked waits
+//!   wait for.
 //! - **Stopping.** The device's drop stops the threads, which end once no item is left: a
 //!   transition holds its command buffer, which holds the device, so none is left by then; a
 //!   release may hold nothing of the device, and runs before its thread ends. A drop on one of the
@@ -51,8 +55,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-/// The most threads a device's pool runs at once: above the 256 handlers Metal was measured to
-/// run blocked at once.
+/// The most threads a device's pool runs at once: Metal's 512 dispatch threads, of which 511
+/// handlers blocked at once in waits for other queues and their waits returned, where 512 hung
+/// (the module docs).
 pub(crate) const THREADS: usize = 512;
 
 /// Each thread's stack, in bytes.

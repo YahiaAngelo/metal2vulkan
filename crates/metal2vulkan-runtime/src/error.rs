@@ -105,7 +105,7 @@ pub enum Error {
     /// `commandBuffer` on a queue whose command buffers are all held): the runtime refuses it at
     /// once rather than hang. The cause says which of Metal's answers the refusal stands for: where
     /// Metal never returns ([`DeadlockCause::OwnQueue`]), where it would hang too
-    /// ([`DeadlockCause::Cycle`]), where the cap is the runtime's own
+    /// ([`DeadlockCause::Cycle`]), where Metal's handler threads run out and it hangs
     /// ([`DeadlockCause::HandlerThreadCap`]), once the process is exiting
     /// ([`DeadlockCause::Exiting`]), and from a submission handler, which Metal has not
     /// ([`DeadlockCause::SubmissionHandler`]).
@@ -274,8 +274,10 @@ pub enum DeadlockCause {
     Cycle,
     /// From a handler thread, a wait for another queue that would leave the device's handler
     /// threads with none that is not blocked in such a wait (or a marked wait off those threads,
-    /// which none can count). The cap is the runtime's: Metal ran 256 such waits at once, the
-    /// most measured, and the runtime runs them too.
+    /// which none can count): the 512th. Metal ran 511 such waits at once, which returned once
+    /// the command buffers they waited for completed; with 512 its process's dispatch threads ran
+    /// out, and no handler ran nor command buffer completed after: it hangs (the M3 Max under
+    /// macOS 27.0.1). Metal's threads are the process's, the runtime's each device's.
     HandlerThreadCap,
     /// From any thread, once the process is exiting ([`process_exiting`](crate::process_exiting)):
     /// the runtime's threads that schedule and finish command buffers have ended, and it makes no
