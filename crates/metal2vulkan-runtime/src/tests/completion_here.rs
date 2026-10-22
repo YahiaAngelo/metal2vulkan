@@ -177,13 +177,13 @@ fn scheduled_where_submitted(device: &Device, queue: &CommandQueue, besides: Bes
                 .add_scheduled_handler(Box::new(|_: &CommandBuffer| {}))
                 .unwrap(),
             Besides::ScheduledSignal => command_buffer
-                .encode_signal_event_scheduled(&event, round as u64 + 1)
+                .encode_signal_event_scheduled(&event, round + 1)
                 .unwrap(),
         }
         command_buffer.commit().unwrap();
         command_buffer.wait_until_scheduled().unwrap();
         if besides == Besides::ScheduledSignal {
-            assert_eq!(event.signaled_value(), round as u64 + 1);
+            assert_eq!(event.signaled_value(), round + 1);
         }
         command_buffer.wait_until_completed().unwrap();
     }
