@@ -672,6 +672,75 @@ impl Gpu for Native {
         );
     }
 
+    fn draw_triangles(&self, encoder: &mut Self::RenderEncoder, start: usize, count: usize) {
+        // SAFETY: the bound state reads only its bound buffers.
+        unsafe {
+            encoder.drawPrimitives_vertexStart_vertexCount(MTLPrimitiveType::Triangle, start, count)
+        };
+    }
+
+    fn draw_indexed_at(
+        &self,
+        encoder: &mut Self::RenderEncoder,
+        count: usize,
+        indices: &Self::Buffer,
+        offset: usize,
+    ) {
+        // SAFETY: the indices lie in the buffer, and the bound state reads only its bound buffers.
+        unsafe {
+            encoder.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset(
+                MTLPrimitiveType::Triangle,
+                count,
+                MTLIndexType::UInt16,
+                indices,
+                offset,
+            )
+        };
+    }
+
+    fn draw_triangles_indirect(
+        &self,
+        encoder: &mut Self::RenderEncoder,
+        arguments: &Self::Buffer,
+        offset: usize,
+    ) {
+        // SAFETY: the arguments lie in the buffer and name vertices the bound buffers hold.
+        unsafe {
+            encoder.drawPrimitives_indirectBuffer_indirectBufferOffset(
+                MTLPrimitiveType::Triangle,
+                arguments,
+                offset,
+            )
+        };
+    }
+
+    fn draw_indexed_indirect(
+        &self,
+        encoder: &mut Self::RenderEncoder,
+        indices: &Self::Buffer,
+        arguments: &Self::Buffer,
+        offset: usize,
+    ) {
+        // SAFETY: the arguments lie in the buffer and name indices it holds.
+        unsafe {
+            encoder.drawIndexedPrimitives_indexType_indexBuffer_indexBufferOffset_indirectBuffer_indirectBufferOffset(
+                MTLPrimitiveType::Triangle,
+                MTLIndexType::UInt16,
+                indices,
+                0,
+                arguments,
+                offset,
+            )
+        };
+    }
+
+    fn set_provoking_vertex_mode(&self, encoder: &mut Self::RenderEncoder, mode: u64) {
+        // SAFETY: Apple's render encoders answer `setProvokingVertexMode:` (an NSUInteger).
+        unsafe {
+            let _: () = objc2::msg_send![&**encoder, setProvokingVertexMode: mode as usize];
+        }
+    }
+
     fn execute_draws(
         &self,
         encoder: &mut Self::RenderEncoder,

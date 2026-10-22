@@ -168,6 +168,16 @@
 //!   drawn on the GPU alone, the records read on the host, and the draws and pipeline barriers
 //!   recorded per frame (`rt_*`).
 //!
+//! - `provoking`: an OpenGL guest's flat-shaded draws, which Apple's GL draws at
+//!   `setProvokingVertexMode:` 1 (the last vertex): one render pass into a 512x512 `BGRA8Unorm`
+//!   target of `--draws` draws of two small triangles each, six vertices of their own, under a
+//!   pipeline whose fragment function reads a flat input; direct, indexed (16-bit, each draw its
+//!   own six indices of one buffer), indirect and indexed indirect, each at mode 0 and at mode 1.
+//!   Per draw: the encoding thread's wall time through `endEncoding`, the process's CPU time, and
+//!   the frame from the command buffer's creation to the wait's return; and the commit to the
+//!   wait's return. On the runtime's side, its draws through last-vertex pipelines, its listed
+//!   draws, dispatches and pipeline barriers per frame (`rt_*`).
+//!
 //! Options: `--rounds N` (3), `--draws N` (2000), `--timed N` (30), `--latency N` (200),
 //! `--heavy-iterations N` (64), `--heavy-runs N` (15), `--many-draws N` (6000), `--frames N`
 //! (120, the compositing workload's timed frames), `--scratch DIR` (metallibs and the runtime's
@@ -201,7 +211,7 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 use workloads::Sizes;
 
-const WORKLOADS: [&str; 16] = [
+const WORKLOADS: [&str; 18] = [
     "encode",
     "fixed",
     "calls",
@@ -219,6 +229,7 @@ const WORKLOADS: [&str; 16] = [
     "icb",
     "icb_draws",
     "signals",
+    "provoking",
 ];
 
 struct Options {
@@ -488,6 +499,7 @@ fn run<G: Gpu>(g: &G, opened: Instant, metallib: &Path, options: &Options) {
             "icb" => workloads::icb(g, &library, sizes),
             "icb_draws" => workloads::icb_draws(g, &library, sizes),
             "signals" => workloads::signals(g, &scene, sizes),
+            "provoking" => workloads::provoking(g, &library, sizes),
             _ => unreachable!(),
         }
     }

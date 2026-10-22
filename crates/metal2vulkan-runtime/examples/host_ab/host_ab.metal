@@ -28,6 +28,25 @@ vertex QuadOut quad_vertex(uint vid [[vertex_id]], constant float4 &rect [[buffe
     return out;
 }
 
+// An OpenGL guest's flat-shaded triangles (the provoking workload): each vertex at its position in
+// buffer 0, with a colour of its own that the fragment reads flat, from the primitive's provoking
+// vertex.
+struct FlatOut {
+    float4 position [[position]];
+    uint colour [[flat]];
+};
+
+vertex FlatOut flat_vertex(uint vid [[vertex_id]], const device float4 *positions [[buffer(0)]]) {
+    FlatOut out;
+    out.position = positions[vid] + float4(0.0, 0.0, float(NONCE) * 1.0e-12, 0.0);
+    out.colour = vid * 2654435761u;
+    return out;
+}
+
+fragment float4 flat_fragment(FlatOut in [[stage_in]]) {
+    return unpack_unorm4x8_to_float(in.colour) + float4(float(NONCE) * 1.0e-12);
+}
+
 // The small draws' fragment: one sample.
 fragment float4 textured_fragment(QuadOut in [[stage_in]],
                                   texture2d<float> tex [[texture(0)]],

@@ -2935,4 +2935,147 @@ pub fn calls<G: Gpu>(
         }
     }
     calls_resident(g, &objects, sizes, variants);
+
+/// The provoking workload's draws in a frame: each two small triangles of six vertices of their own
+/// in a 64 by 32 grid over the target (module docs of `main.rs`).
+const FLAT_VERTICES: usize = 6;
+
+/// How the provoking workload draws.
+#[derive(Clone, Copy)]
+enum FlatForm {
+    Direct,
+    Indexed,
+    Indirect,
+    IndexedIndirect,
+}
+
+impl FlatForm {
+    fn name(self) -> &'static str {
+        match self {
+            FlatForm::Direct => "direct",
+            FlatForm::Indexed => "indexed",
+            FlatForm::Indirect => "indirect",
+            FlatForm::IndexedIndirect => "indexed_indirect",
+        }
+    }
+}
+
+/// An OpenGL guest's flat-shaded draws (module docs of `main.rs`): per draw, at
+/// `setProvokingVertexMode:` 0 and at 1 (Apple's GL's last vertex), each form's encoding time,
+/// the process's CPU time, and the frame from the command buffer's creation to the wait's return.
+pub fn provoking<G: Gpu>(g: &G, library: &G::Library, sizes: &Sizes) {
+    let n = sizes.draws;
+    assert!(
+        n * FLAT_VERTICES <= 65536,
+        "--draws {n}: past 16-bit indices"
+    );
+    let mut positions = Vec::with_capacity(n * FLAT_VERTICES * 16);
+    for draw in 0..n {
+        let cell = draw % 2048;
+        let (x, y) = ((cell % 64) as f32, (cell / 64) as f32);
+        let (x0, x1) = (x / 32.0 - 1.0, (x + 0.8) / 32.0 - 1.0);
+        let (y0, y1) = (y / 16.0 - 1.0, (y + 0.8) / 16.0 - 1.0);
+        for (px, py) in [(x0, y0), (x1, y0), (x0, y1), (x0, y1), (x1, y0), (x1, y1)] {
+            positions.extend(floats(&[px, py, 0.0, 1.0]));
+        }
+    }
+    let words = |w: &[u32]| -> Vec<u8> { w.iter().flat_map(|w| w.to_le_bytes()).collect() };
+    let indices: Vec<u8> = (0..n * FLAT_VERTICES)
+        .flat_map(|i| (i as u16).to_le_bytes())
+        .collect();
+    let arguments: Vec<u32> = (0..n)
+        .flat_map(|d| [FLAT_VERTICES as u32, 1, (d * FLAT_VERTICES) as u32, 0])
+        .collect();
+    let indexed_arguments: Vec<u32> = (0..n)
+        .flat_map(|d| [FLAT_VERTICES as u32, 1, (d * FLAT_VERTICES) as u32, 0, 0])
+        .collect();
+    let positions = g.buffer_with(&positions);
+    let indices = g.buffer_with(&indices);
+    let arguments = g.buffer_with(&words(&arguments));
+    let indexed_arguments = g.buffer_with(&words(&indexed_arguments));
+    let pipeline = g.render_pipeline(
+        library,
+        "flat_vertex",
+        "flat_fragment",
+        Format::Bgra8,
+        false,
+    );
+    let target = g.texture(Format::Bgra8, TARGET_SIDE, TARGET_SIDE, true);
+    let forms = [
+        FlatForm::Direct,
+        FlatForm::Indexed,
+        FlatForm::Indirect,
+        FlatForm::IndexedIndirect,
+    ];
+    for form in forms {
+        for mode in [0u64, 1] {
+            let name = format!("{}_mode{mode}", form.name());
+            let counts = g.work_counts();
+            let mut times: [Vec<f64>; 4] = Default::default();
+            for run in 0..sizes.timed + 3 {
+                g.pool(|| {
+                    let cpu0 = process_cpu();
+                    let t0 = Instant::now();
+                    let command_buffer = g.command_buffer();
+                    let mut encoder = g.render_encoder(&command_buffer, &target, true);
+                    g.set_render_pipeline(&mut encoder, &pipeline);
+                    g.set_vertex_buffer(&mut encoder, &positions, 0, 0);
+                    g.set_provoking_vertex_mode(&mut encoder, mode);
+                    for draw in 0..n {
+                        let at = draw * FLAT_VERTICES;
+                        match form {
+                            FlatForm::Direct => g.draw_triangles(&mut encoder, at, FLAT_VERTICES),
+                            FlatForm::Indexed => {
+                                g.draw_indexed_at(&mut encoder, FLAT_VERTICES, &indices, at * 2)
+                            }
+                            FlatForm::Indirect => {
+                                g.draw_triangles_indirect(&mut encoder, &arguments, draw * 16)
+                            }
+                            FlatForm::IndexedIndirect => g.draw_indexed_indirect(
+                                &mut encoder,
+                                &indices,
+                                &indexed_arguments,
+                                draw * 20,
+                            ),
+                        }
+                    }
+                    g.end_render(encoder);
+                    let t1 = Instant::now();
+                    g.commit(&command_buffer);
+                    g.wait(&command_buffer);
+                    let t2 = Instant::now();
+                    let cpu1 = process_cpu();
+                    if run >= 3 {
+                        times[0].push(us(t1 - t0) / n as f64);
+                        times[1].push(us(cpu1 - cpu0) / n as f64);
+                        times[2].push(ms(t2 - t1));
+                        times[3].push(us(t2 - t0) / n as f64);
+                    }
+                });
+            }
+            let [encode, cpu, wait, frame] = &mut times;
+            emit("provoking", &format!("{name}_encode"), "us/draw", encode);
+            emit("provoking", &format!("{name}_process_cpu"), "us/draw", cpu);
+            emit("provoking", &format!("{name}_commit_to_done"), "ms", wait);
+            emit("provoking", &format!("{name}_frame"), "us/draw", frame);
+            let after = g.work_counts();
+            for ((counted, before), (_, now)) in counts.iter().zip(&after) {
+                if matches!(
+                    *counted,
+                    "provoking_last_pipeline_draws"
+                        | "provoking_listed_draws"
+                        | "dispatches"
+                        | "pipeline_barriers"
+                ) {
+                    let per_frame = (now - before) / (sizes.timed + 3) as f64;
+                    emit(
+                        "provoking",
+                        &format!("{name}_rt_{counted}"),
+                        "count",
+                        &mut [per_frame],
+                    );
+                }
+            }
+        }
+    }
 }
