@@ -428,10 +428,10 @@ pub struct StageIoPlan {
     /// `LoweringInputs::depth16_codes`: the `FragDepth` output and `FragCoord` input objects its
     /// entry stores the depth Metal stores for the fragment through ([`depth16`]).
     pub depth16: Option<Depth16Store>,
-    /// The render pipeline's private sample mask a fragment function applies itself
-    /// (`LoweringInputs::sample_mask`): the `SampleMask` output's object and the mask, which each
-    /// return ANDs into the function's own `[[sample_mask]]` output or stores as it.
-    pub private_mask: Option<(usize, u32)>,
+    /// The render pipeline's private masks a fragment function applies itself
+    /// (`LoweringInputs::sample_mask`), which each return ANDs into the function's own
+    /// `[[sample_mask]]` output or stores as it.
+    pub private_mask: Option<PrivateMask>,
     /// The render pipeline's private alpha test the fragment function runs at each return
     /// (`LoweringInputs::alpha_test`).
     pub alpha_test: Option<AlphaTest>,
@@ -1567,10 +1567,68 @@ fn u32_constant(fb: &mut FunctionBuilder<'_>, x: u32) -> BResult<SValue> {
     fb.module().const_value(c)
 }
 
+/// The render pipeline's private masks a fragment function applies itself
+/// (`LoweringInputs::sample_mask`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrivateMask {
+    /// The `SampleMask` output's object.
+    pub object: usize,
+    /// The masks by the window pixel's place in its 2x2 quad, index `(x & 1) | (y & 1) << 1`.
+    pub masks: [u32; 4],
+    /// The `FragCoord` input's object, whose pixel picks the mask, where the masks differ
+    /// between the places; `None` where they are alike.
+    pub coord: Option<usize>,
+}
+
+/// The private mask `m` of the fragment's pixel: the one mask where the masks are alike, else
+/// picked by the window pixel's coordinates modulo 2 from the masks packed a byte each (a
+/// mask that differs between places is Metal's sample coverage, at 4 samples or fewer).
+fn private_mask_value(
+    cx: &mut EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+    m: PrivateMask,
+) -> BResult<SValue> {
+    let Some(coord) = m.coord else {
+        return u32_constant(fb, m.masks[0]);
+    };
+    if m.masks.iter().any(|&mask| mask > 0xff) {
+        return Err(cx.fail("a per-pixel private mask past 8 samples"));
+    }
+    let packed = m
+        .masks
+        .iter()
+        .enumerate()
+        .fold(0u32, |packed, (i, &mask)| packed | mask << (8 * i));
+    let u32_ = fb.module().ty(SType::Int {
+        width: 32,
+        signed: false,
+    })?;
+    let g = global(cx, coord)?;
+    let p = fb.module().global_value(g)?;
+    let frag = fb.load(p, MemAccess::default())?;
+    // `FragCoord` is the pixel's center (or a sample's position inside the pixel): its integer
+    // part is the window pixel.
+    let fx = fb.composite_extract(frag, &[0])?;
+    let fy = fb.composite_extract(frag, &[1])?;
+    let x = fb.convert(ConvOp::ConvertFToU, fx, u32_)?;
+    let y = fb.convert(ConvOp::ConvertFToU, fy, u32_)?;
+    let one = u32_constant(fb, 1)?;
+    let x = fb.binary(BinOp::BitwiseAnd, x, one)?;
+    let y = fb.binary(BinOp::BitwiseAnd, y, one)?;
+    let y = fb.binary(BinOp::ShiftLeftLogical, y, one)?;
+    let place = fb.binary(BinOp::BitwiseOr, x, y)?;
+    let three = u32_constant(fb, 3)?;
+    let shift = fb.binary(BinOp::ShiftLeftLogical, place, three)?;
+    let packed = u32_constant(fb, packed)?;
+    let mask = fb.binary(BinOp::ShiftRightLogical, packed, shift)?;
+    let byte = u32_constant(fb, 0xff)?;
+    fb.binary(BinOp::BitwiseAnd, mask, byte)
+}
+
 /// Store the entry's returned value `v` into its stage outputs, before the return terminator
 /// (`fragment::emit_return`), and write the default point size. A gated-off output's field is
-/// not stored. A fragment function compiled under `LoweringInputs::sample_mask` ANDs the mask into
-/// its `[[sample_mask]]` output, or stores it as that output.
+/// not stored. A fragment function compiled under `LoweringInputs::sample_mask` ANDs its pixel's
+/// mask into its `[[sample_mask]]` output, or stores it as that output.
 pub fn emit_return(
     cx: &mut EmitCx<'_>,
     fb: &mut FunctionBuilder<'_>,
@@ -1584,8 +1642,8 @@ pub fn emit_return(
     let window_depth = plan.window_depth;
     let capture = plan.capture;
     let primitive_id = plan.primitive_id;
-    // The private sample mask: ANDed into the function's own `[[sample_mask]]` output where this
-    // return stores one, else stored as that output.
+    // The private masks: the pixel's ANDed into the function's own `[[sample_mask]]` output
+    // where this return stores one, else stored as that output.
     let private_mask = plan.private_mask;
     let mut masked = false;
     // The private alpha test, before any output is stored: a failing fragment is killed there.
@@ -1647,10 +1705,10 @@ pub fn emit_return(
                 if let Some(w) = window_depth.filter(|w| w.position == o.link.object) {
                     store_window_depth(cx, fb, w, part)?;
                 }
-                let part = match private_mask.filter(|&(object, _)| object == o.link.object) {
-                    Some((_, mask)) => {
+                let part = match private_mask.filter(|m| m.object == o.link.object) {
+                    Some(m) => {
                         masked = true;
-                        let mask = u32_constant(fb, mask)?;
+                        let mask = private_mask_value(cx, fb, m)?;
                         fb.binary(BinOp::BitwiseAnd, part, mask)?
                     }
                     None => part,
@@ -1670,9 +1728,9 @@ pub fn emit_return(
             }
         }
     }
-    if let Some((object, mask)) = private_mask.filter(|_| !masked) {
+    if let Some(m) = private_mask.filter(|_| !masked) {
         let link = Link {
-            object,
+            object: m.object,
             place: Place::Element0,
             form: Form {
                 held: Held::Int {
@@ -1682,7 +1740,7 @@ pub fn emit_return(
                 lanes: 1,
             },
         };
-        let mask = u32_constant(fb, mask)?;
+        let mask = private_mask_value(cx, fb, m)?;
         store(cx, fb, &link, mask)?;
     }
     // The primitive ID of the primitive the vertex provokes, wherever the function returns its

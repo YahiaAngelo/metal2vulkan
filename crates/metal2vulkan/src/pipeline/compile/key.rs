@@ -379,9 +379,18 @@ pub fn function_key(
         h.bytes(b"unattached-colors")
             .bytes(format!("{:?}", inputs.unattached_colors).as_bytes());
     }
-    // Appended only when set.
-    if let Some(mask) = inputs.sample_mask {
-        h.bytes(b"sample-mask").bytes(&mask.to_le_bytes());
+    // Appended only when set; masks alike at every place of a quad as the one mask.
+    match inputs.sample_mask {
+        Some(m) if crate::pipeline::private_state::uniform(&m) => {
+            h.bytes(b"sample-mask").bytes(&m[0].to_le_bytes());
+        }
+        Some(m) => {
+            h.bytes(b"sample-masks");
+            for mask in m {
+                h.bytes(&mask.to_le_bytes());
+            }
+        }
+        None => {}
     }
     // Appended only when set.
     if let Some(function) = inputs.alpha_test {

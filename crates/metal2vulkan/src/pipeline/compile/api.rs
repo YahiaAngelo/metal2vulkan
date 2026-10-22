@@ -354,11 +354,11 @@ impl Device {
                 // through the pixel interlock, and whether it reads the `[[viewport_array_index]]`
                 // or `[[render_target_array_index]]` its vertex function writes.
                 Some(source @ StageSource::Function(f)) => {
-                    // Whether the function applies the private sample mask itself shows only
-                    // in its module, so a pipeline whose mask drops a sample lowers it once.
+                    // Whether the function applies the private masks itself shows only in its
+                    // module, so a pipeline whose masks drop a sample lowers it once.
                     let mut pass: FragmentPass<'_> = d.into();
                     pass.color_group = group.as_ref();
-                    if crate::pipeline::private_state::applied_sample_mask(d).is_some() {
+                    if crate::pipeline::private_state::applied_masks(d).is_some() {
                         let inputs = InputsFrom::Fragment(
                             pass,
                             v,
@@ -803,8 +803,8 @@ impl Device {
                     &uniform,
                 );
                 let compiled = self.fragment_stage(f, inputs, entries.as_ref(), m)?;
-                // Compiled again applying the private sample mask itself where it could tell
-                // Vulkan's mask from Metal's.
+                // Compiled again applying the private masks itself where they differ between
+                // a quad's pixels, or where it could tell Vulkan's mask from Metal's.
                 match crate::pipeline::private_state::shader_sample_mask(d, compiled.artifact()) {
                     Some(mask) => {
                         let mut masked = pass();

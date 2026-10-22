@@ -537,16 +537,18 @@ pub struct LoweringInputs {
     #[cfg_attr(feature = "serde", serde(default))]
     pub unattached_colors: BTreeSet<u32>,
     /// The render pipeline's private sample mask, its bits below the pipeline's sample count,
-    /// which the fragment function applies itself: each return ANDs it into the function's
-    /// `[[sample_mask]]` output, or writes it as that output where the function writes none
-    /// (`StageIo::sample_mask`). Metal applies the mask after the function runs, so the function
-    /// still runs for the masked samples and reads the unmasked coverage, and under
-    /// `[[early_fragment_tests]]` the mask keeps only the colors. `Device::compile_render_pipeline`
-    /// sets it for a `Function` fragment stage that writes memory, reads `[[sample_mask]]` or
-    /// declares `[[early_fragment_tests]]`, in a pipeline whose mask drops a sample; the pipeline
-    /// then has no Vulkan sample mask. Any other function compiles as without it.
+    /// ANDed with its private sample coverage's, by the window pixel's place in its 2x2 quad
+    /// (index `(x & 1) | (y & 1) << 1`), which the fragment function applies itself: each return
+    /// ANDs the pixel's into the function's `[[sample_mask]]` output, or writes it as that output
+    /// where the function writes none (`StageIo::sample_mask`). Metal applies both after the
+    /// function runs, so the function still runs for the masked samples and reads the unmasked
+    /// coverage, and under `[[early_fragment_tests]]` they keep only the colors.
+    /// `Device::compile_render_pipeline` sets it for a `Function` fragment stage of a pipeline
+    /// whose masks drop a sample, where they differ between the places of a quad, or where the
+    /// function writes memory, reads `[[sample_mask]]` or declares `[[early_fragment_tests]]`;
+    /// the pipeline then has no Vulkan sample mask. Any other function compiles as without it.
     #[cfg_attr(feature = "serde", serde(default))]
-    pub sample_mask: Option<u32>,
+    pub sample_mask: Option<[u32; 4]>,
     /// The render pipeline's private alpha test (`alphaTestEnabled`, `alphaTestFunction`), which
     /// the fragment function runs itself after its body: each return kills the invocation unless
     /// its color 0's alpha passes the comparison against the encoder's reference

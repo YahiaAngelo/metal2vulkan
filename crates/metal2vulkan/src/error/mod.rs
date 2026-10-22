@@ -1449,7 +1449,9 @@ pub enum PrivateRenderField {
     /// attachment itself (a storage attachment, a shadow stencil or an imageblock), whose writes
     /// were not measured under the mask.
     SampleMask,
-    /// `sampleCoverage` other than 1.
+    /// `sampleCoverage` other than 1 at a sample count past 4, where Metal was not measured, or
+    /// in a pipeline whose fragment function writes an attachment itself (a storage attachment,
+    /// a shadow stencil or an imageblock), whose writes were not measured under it.
     SampleCoverage,
     /// `alphaTestEnabled` with a test the translation has not built: an `alphaTestFunction` past
     /// `MTLCompareFunctionAlways`, a pipeline without a fragment function, a fragment function

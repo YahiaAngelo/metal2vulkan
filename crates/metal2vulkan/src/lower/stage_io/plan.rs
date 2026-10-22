@@ -3276,10 +3276,11 @@ pub fn finish(cx: &mut SelectCx<'_>) -> Result<(), Error> {
         }
         cx.families.stage_io.interface.alpha_test = Some(function);
     }
-    // The render pipeline's private sample mask a fragment function applies itself: its
-    // `SampleMask` output, the function's own where it writes one, which each return ANDs the
-    // mask into or stores the mask as.
-    if let (Stage::Fragment, Some(mask)) = (cx.stage, cx.inputs.sample_mask) {
+    // The render pipeline's private masks a fragment function applies itself: its `SampleMask`
+    // output, the function's own where it writes one, which each return ANDs the pixel's mask
+    // into or stores it as; and the `FragCoord` input whose pixel picks the mask, where the masks
+    // differ between the places of a quad.
+    if let (Stage::Fragment, Some(masks)) = (cx.stage, cx.inputs.sample_mask) {
         let sp = &mut cx.families.stage_io;
         let object = builtin(
             sp,
@@ -3288,8 +3289,14 @@ pub fn finish(cx: &mut SelectCx<'_>) -> Result<(), Error> {
             Shape::U32Array(1),
             StageBuiltin::SampleMaskOut,
         );
-        sp.private_mask = Some((object, mask));
-        sp.interface.sample_mask = Some(mask);
+        let coord = (!crate::pipeline::private_state::uniform(&masks))
+            .then(|| builtin_object(sp, B::FragCoord, IoDir::Input, Shape::FVec(4)));
+        sp.private_mask = Some(super::PrivateMask {
+            object,
+            masks,
+            coord,
+        });
+        sp.interface.sample_mask = Some(masks);
     }
     // A fragment function that returns no depth under `LoweringInputs::depth16_codes` stores the
     // depth Metal stores for the fragment at entry, its Vulkan bias recorded as zero: objects of

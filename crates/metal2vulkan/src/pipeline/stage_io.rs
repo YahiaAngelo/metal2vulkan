@@ -281,12 +281,12 @@ pub struct StageIo {
     /// (`NeedsInput(ColorWrites)`); empty for any other function.
     #[cfg_attr(feature = "serde", serde(default))]
     pub unattached_colors: Vec<u32>,
-    /// The render pipeline's private sample mask the fragment function applies itself
-    /// (`LoweringInputs::sample_mask`): its returns AND it into the `SampleMask` output, which
-    /// [`builtins`](StageIo::builtins) then lists as `SampleMaskOut`. `None` for every other
-    /// function.
+    /// The render pipeline's private masks the fragment function applies itself, by the window
+    /// pixel's place in its 2x2 quad (`LoweringInputs::sample_mask`): its returns AND the
+    /// pixel's into the `SampleMask` output, which [`builtins`](StageIo::builtins) then lists as
+    /// `SampleMaskOut`. `None` for every other function.
     #[cfg_attr(feature = "serde", serde(default))]
-    pub sample_mask: Option<u32>,
+    pub sample_mask: Option<[u32; 4]>,
     /// The render pipeline's private alpha test the fragment function runs itself
     /// (`LoweringInputs::alpha_test`): its returns kill an invocation whose color 0's alpha fails
     /// the comparison against `PushField::AlphaTestReference`. `None` for every other function.

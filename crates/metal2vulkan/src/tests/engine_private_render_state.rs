@@ -17,8 +17,11 @@
 //!   under a no-op), so copy and no-op draw on every device; the others take Vulkan's `logicOp`
 //!   where the device has it (lavapipe), and are refused naming it where it does not
 //!   (MoltenVK), and where Vulkan's operation is not Metal's.
+//! - The sample coverage is Metal's masks by the window pixel's place in its quad, ANDed with the
+//!   sample mask: alike at every place the Vulkan mask, else applied by the fragment function from
+//!   its pixel.
 //! - Each property not built refuses a value other than Metal's default `NotImplemented`, naming
-//!   it. A compute pipeline's `needs_custom_border_color_samplers`, which changes nothing, keeps
+//!   it (the coverage at 8 samples, where Metal was not measured). A compute pipeline's `needs_custom_border_color_samplers`, which changes nothing, keeps
 //!   its key.
 //!
 //! `llvm-as` assembles the fixtures; a missing tool skips visibly. No GPU is used.
@@ -300,7 +303,7 @@ fn a_function_that_could_tell_applies_the_mask_itself() {
                 .unwrap_or_else(|e| panic!("{what}: {e}"));
             assert_eq!(keys.pipeline, p.key, "{what}");
             let inputs = keys.fragment_inputs.expect("fragment inputs");
-            assert_eq!(inputs.sample_mask, Some(0), "{what}");
+            assert_eq!(inputs.sample_mask, Some([0; 4]), "{what}");
             // The function compiled without the mask, under the inputs the unmasked pipeline
             // gives it, is compiled for the pipeline again.
             let unmasked = dev
@@ -324,15 +327,145 @@ fn a_function_that_could_tell_applies_the_mask_itself() {
     }
 }
 
+/// The `SampleMask` output's constant operands in `words`: the masks a function applies itself
+/// (the one mask, or the four masks packed a byte each where they differ between a quad's
+/// pixels) are among them.
+fn constants(words: &[u32]) -> Vec<u32> {
+    const CONSTANT: u32 = 43;
+    let mut out = Vec::new();
+    let mut i = 5;
+    while i < words.len() {
+        let (op, n) = (words[i] & 0xffff, (words[i] >> 16) as usize);
+        if op == CONSTANT && n == 4 {
+            out.push(words[i + 3]);
+        }
+        i += n.max(1);
+    }
+    out
+}
+
+/// The sample coverage: Metal's masks by the window pixel's place in its 2x2 quad
+/// (`private_state::coverage_masks`), ANDed with the sample mask. Masks alike at every place are
+/// the sample mask's (a Vulkan mask, the modules unchanged); masks that differ are applied by the
+/// fragment function from its pixel (packed a byte each), with no Vulkan mask, whatever the
+/// function observes; a coverage of 1 keeps the pipeline; a coverage keeping nothing at one
+/// sample is a mask of 0.
+#[test]
+fn the_sample_coverage_is_applied_by_the_pixels_place_in_its_quad() {
+    use crate::pipeline::private_state::coverage_masks;
+    // Metal's rule at the measured counts (`pipeline::private_state`'s docs).
+    assert_eq!(coverage_masks(0.5, 1), Some([0; 4]));
+    assert_eq!(
+        coverage_masks(f32::from_bits(0.5f32.to_bits() + 1), 1),
+        Some([1; 4])
+    );
+    assert_eq!(coverage_masks(f32::NAN, 4), Some([0; 4]));
+    assert_eq!(coverage_masks(f32::INFINITY, 4), Some([0xf; 4]));
+    assert_eq!(coverage_masks(-1.0, 2), Some([0; 4]));
+    // 0.3: code 77, 5 of a quad's 16 samples: (0, 0) two (samples 0, 3), the rest one.
+    assert_eq!(coverage_masks(0.3, 4), Some([0x9, 0x1, 0x1, 0x1]));
+    // 2 of a quad's 8: (0, 0) and (1, 1).
+    assert_eq!(coverage_masks(0.3, 2), Some([0x1, 0, 0, 0x1]));
+    // 0.0295: code 8, the first level.
+    assert_eq!(coverage_masks(0.0295, 4), Some([0x1, 0, 0, 0]));
+    assert_eq!(coverage_masks(0.029, 4), Some([0; 4]));
+    assert_eq!(coverage_masks(0.5, 8), None);
+    let Some(lib) = fixture("rt6_render_state") else {
+        return;
+    };
+    for stem in STEMS {
+        let dev = device(stem);
+        for samples in [1, 4] {
+            let what = format!("{stem} {samples}x");
+            let base = compile(&dev, &render(&lib, samples), &what);
+            // A coverage of 1 keeps the pipeline.
+            let mut d = render(&lib, samples);
+            d.private.sample_coverage = 1.0;
+            assert_eq!(compile(&dev, &d, &what).key, base.key, "{what}");
+            // Alike at every place: the Vulkan mask.
+            let (alike, mask) = match samples {
+                1 => (0.25, 0),
+                _ => (0.25, 0x1),
+            };
+            d.private.sample_coverage = alike;
+            let p = compile(&dev, &d, &what);
+            assert_eq!(p.graphics.sample_mask, Some(mask), "{what}");
+            assert!(same_modules(&p, &base), "{what}");
+            assert_ne!(p.key, base.key, "{what}");
+        }
+        // Different at the places: the function applies them from its pixel.
+        let what = format!("{stem} 4x 0.3");
+        let base = compile(&dev, &render(&lib, 4), &what);
+        let mut d = render(&lib, 4);
+        d.private.sample_coverage = 0.3;
+        // ANDed with the sample mask.
+        d.private.sample_mask = 0b1110;
+        let p = compile(&dev, &d, &what);
+        assert_eq!(p.graphics.sample_mask, None, "{what}");
+        assert_ne!(p.key, base.key, "{what}");
+        let fragment = p
+            .stages
+            .iter()
+            .find(|m| m.stage == crate::vk::ShaderStage::FRAGMENT)
+            .expect("fragment");
+        assert_eq!(sample_mask_variables(&fragment.spirv), vec![3], "{what}");
+        // (0, 0) 0x8, (1, 0) 0x0, (0, 1) 0x0, (1, 1) 0x0, a byte each.
+        assert!(constants(&fragment.spirv).contains(&0x8), "{what}");
+        for m in &p.stages {
+            check_words_valid(&m.spirv, &p.requirements, dev.profile())
+                .unwrap_or_else(|e| panic!("{what} {:?}: L3: {e}", m.stage));
+        }
+        let keys = dev
+            .render_pipeline_key(&d, &Budget::standard())
+            .unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(keys.pipeline, p.key, "{what}");
+        let inputs = keys.fragment_inputs.expect("fragment inputs");
+        assert_eq!(inputs.sample_mask, Some([0x8, 0, 0, 0]), "{what}");
+        // 0.6 alone: code 153, 10 of 16: (0, 0) and (1, 1) three, the others two.
+        d.private.sample_mask = u64::MAX;
+        d.private.sample_coverage = 0.6;
+        let inputs = dev
+            .render_pipeline_key(&d, &Budget::standard())
+            .unwrap_or_else(|e| panic!("{what}: {e}"))
+            .fragment_inputs
+            .expect("fragment inputs");
+        assert_eq!(inputs.sample_mask, Some([0xb, 0x9, 0x9, 0xb]), "{what}");
+        // The function compiled without the masks is compiled for the pipeline again.
+        let unmasked = dev
+            .render_pipeline_key(&render(&lib, 4), &Budget::standard())
+            .unwrap_or_else(|e| panic!("{what}: {e}"))
+            .fragment_inputs
+            .expect("fragment inputs");
+        let Some(StageSource::Function(f)) = &d.fragment else {
+            unreachable!("a function fragment stage")
+        };
+        let mut compiled = d.clone();
+        compiled.fragment = Some(StageSource::Compiled(
+            dev.compile_function(f, &unmasked, &Budget::standard())
+                .unwrap_or_else(|e| panic!("{what}: {e}")),
+        ));
+        match dev.compile_render_pipeline(&compiled, &Budget::standard()) {
+            Err(e) => assert_eq!(e, Error::NeedsInput(RuntimeInput::SampleMask), "{what}"),
+            Ok(_) => panic!("{what}: compiled"),
+        }
+        // Without a fragment function Metal ignores the coverage.
+        let mut bare = render(&lib, 4);
+        bare.fragment = None;
+        bare.depth_format = Some(PixelFormat::Depth32Float);
+        let base = compile(&dev, &bare, &what);
+        bare.private.sample_coverage = 0.3;
+        let p = compile(&dev, &bare, &what);
+        assert_eq!((p.key, p.graphics.sample_mask), (base.key, None), "{what}");
+    }
+}
+
 #[test]
 fn each_property_not_built_refuses_a_value_other_than_metals_default() {
     use PrivateRenderField as F;
     let Some(lib) = fixture("rt6_render_state") else {
         return;
     };
-    let cases: [(fn(&mut PrivateRenderState), PrivateRenderField); 4] = [
-        (|p| p.sample_coverage = 0.5, F::SampleCoverage),
-        (|p| p.sample_coverage = f32::NAN, F::SampleCoverage),
+    let cases: [(fn(&mut PrivateRenderState), PrivateRenderField); 2] = [
         (
             |p| {
                 p.alpha_test_enabled = true;
@@ -350,6 +483,17 @@ fn each_property_not_built_refuses_a_value_other_than_metals_default() {
             match dev.compile_render_pipeline(&d, &Budget::standard()) {
                 Err(e) => assert_eq!(e, refused(field), "{stem} {field:?}"),
                 Ok(_) => panic!("{stem} {field:?}: compiled"),
+            }
+        }
+        // A coverage at 8 samples, where Metal was not measured (a profile that draws at 8).
+        if stem == "lavapipe" {
+            for coverage in [0.5, f32::NAN] {
+                let mut d = render(&lib, 8);
+                d.private.sample_coverage = coverage;
+                match dev.compile_render_pipeline(&d, &Budget::standard()) {
+                    Err(e) => assert_eq!(e, refused(F::SampleCoverage), "{stem} {coverage}"),
+                    Ok(_) => panic!("{stem}: coverage {coverage} at 8 samples compiled"),
+                }
             }
         }
         // A visibility group where the pipeline amplifies.
