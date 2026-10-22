@@ -64,6 +64,23 @@ impl Runtime {
     }
 }
 
+/// Command `index` of `commands`' setters (`indirectComputeCommandAtIndex:`).
+fn compute_command(
+    commands: &rt::IndirectCommandBuffer,
+    index: usize,
+) -> rt::IndirectComputeCommand {
+    commands
+        .indirect_compute_command_at(index as u64)
+        .expect("indirect_compute_command_at")
+}
+
+/// Command `index` of `commands`' setters (`indirectRenderCommandAtIndex:`).
+fn render_command(commands: &rt::IndirectCommandBuffer, index: usize) -> rt::IndirectRenderCommand {
+    commands
+        .indirect_render_command_at(index as u64)
+        .expect("indirect_render_command_at")
+}
+
 fn pixel_format(format: Format) -> PixelFormat {
     match format {
         Format::Bgra8 => PixelFormat::BGRA8Unorm,
@@ -245,6 +262,128 @@ impl Gpu for Runtime {
 
     fn pipeline_id(&self, state: &rt::ComputePipelineState) -> u64 {
         state.gpu_resource_id().0
+    }
+
+    fn cpu_indirect_commands(&self, count: usize) -> rt::IndirectCommandBuffer {
+        let mut descriptor = rt::IndirectCommandBufferDescriptor::new();
+        descriptor.command_types = IndirectCommandType::CONCURRENT_DISPATCH;
+        descriptor.inherit_pipeline_state = false;
+        descriptor.inherit_buffers = false;
+        descriptor.max_kernel_buffer_bind_count = 1;
+        self.device
+            .new_indirect_command_buffer(&descriptor, count as u64, rt::ResourceOptions::shared())
+            .expect("new_indirect_command_buffer")
+    }
+
+    fn cpu_indirect_draws(&self, count: usize) -> rt::IndirectCommandBuffer {
+        let mut descriptor = rt::IndirectCommandBufferDescriptor::new();
+        descriptor.command_types = IndirectCommandType::DRAW;
+        descriptor.inherit_pipeline_state = false;
+        descriptor.inherit_buffers = false;
+        descriptor.max_vertex_buffer_bind_count = 1;
+        descriptor.max_fragment_buffer_bind_count = 1;
+        self.device
+            .new_indirect_command_buffer(&descriptor, count as u64, rt::ResourceOptions::shared())
+            .expect("new_indirect_command_buffer")
+    }
+
+    fn command_pipeline(
+        &self,
+        commands: &rt::IndirectCommandBuffer,
+        index: usize,
+        state: &rt::ComputePipelineState,
+    ) {
+        compute_command(commands, index)
+            .set_compute_pipeline_state(state)
+            .expect("set_compute_pipeline_state");
+    }
+
+    fn command_kernel_buffer(
+        &self,
+        commands: &rt::IndirectCommandBuffer,
+        index: usize,
+        buffer: &rt::Buffer,
+        offset: usize,
+    ) {
+        compute_command(commands, index)
+            .set_kernel_buffer(Some(buffer), offset as u64, 0)
+            .expect("set_kernel_buffer");
+    }
+
+    fn command_dispatch(&self, commands: &rt::IndirectCommandBuffer, index: usize, groups: usize) {
+        compute_command(commands, index)
+            .concurrent_dispatch_threadgroups(
+                rt::Size::new(groups as u64, 1, 1),
+                rt::Size::new(64, 1, 1),
+            )
+            .expect("concurrent_dispatch_threadgroups");
+    }
+
+    fn command_barrier(&self, commands: &rt::IndirectCommandBuffer, index: usize) {
+        compute_command(commands, index)
+            .set_barrier()
+            .expect("set_barrier");
+    }
+
+    fn command_kernel_buffer_address(
+        &self,
+        commands: &rt::IndirectCommandBuffer,
+        index: usize,
+    ) -> u64 {
+        compute_command(commands, index)
+            .kernel_buffer(0)
+            .expect("kernel_buffer")
+            .expect("a kernel buffer")
+            .address
+            .0
+    }
+
+    fn command_has_barrier(&self, commands: &rt::IndirectCommandBuffer, index: usize) -> bool {
+        compute_command(commands, index)
+            .has_barrier()
+            .expect("has_barrier")
+    }
+
+    fn draw_command_pipeline(
+        &self,
+        commands: &rt::IndirectCommandBuffer,
+        index: usize,
+        state: &rt::RenderPipelineState,
+    ) {
+        render_command(commands, index)
+            .set_render_pipeline_state(state)
+            .expect("set_render_pipeline_state");
+    }
+
+    fn draw_command_vertex_buffer(
+        &self,
+        commands: &rt::IndirectCommandBuffer,
+        index: usize,
+        buffer: &rt::Buffer,
+        offset: usize,
+    ) {
+        render_command(commands, index)
+            .set_vertex_buffer(Some(buffer), offset as u64, 0)
+            .expect("set_vertex_buffer");
+    }
+
+    fn draw_command_draw(&self, commands: &rt::IndirectCommandBuffer, index: usize) {
+        render_command(commands, index)
+            .draw_primitives(PrimitiveType::TriangleStrip, 0, 4, 1, 0)
+            .expect("draw_primitives");
+    }
+
+    fn draw_command_vertex_buffer_address(
+        &self,
+        commands: &rt::IndirectCommandBuffer,
+        index: usize,
+    ) -> u64 {
+        render_command(commands, index)
+            .vertex_buffer(0)
+            .expect("vertex_buffer")
+            .expect("a vertex buffer")
+            .address
+            .0
     }
 
     fn buffer(&self, length: usize) -> rt::Buffer {

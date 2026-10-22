@@ -4,8 +4,10 @@
 //! use it; the binder's device replay decodes records on the device instead.
 
 use super::descriptor::CommandDescriptor;
+#[cfg(doc)]
+use super::THREADGROUP_BUFFER_ARGUMENT_COUNT;
 use super::{
-    layout, require_length, Action, Bindings, BufferBinding, BufferStage, CommandRecord,
+    layout, require_length, writes_of, Action, Bindings, BufferBinding, BufferStage, CommandRecord,
     Inheritance, RecordError, StateSource, BINDING_COUNT, BUFFER_STAGES, BUFFER_WORDS,
     COMMAND_BUFFER_HEADER_BYTES, COMMAND_BYTES, HEADER_WORDS, THREADGROUP_COUNT, THREADGROUP_WORD,
 };
@@ -316,6 +318,28 @@ impl CommandRecord {
 
     /// Decode persistent state without executing it or resolving its host resource identities.
     pub fn decode(bytes: &[u8]) -> Result<Self, RecordError> {
+        RecordView::new(bytes).map(|view| view.record())
+    }
+}
+
+/// One record's bytes ([`COMMAND_BYTES`]), checked as [`CommandRecord::decode`] checks them, whose
+/// fields read one at a time as `decode` reads them: a getter's read of one field, without
+/// decoding the rest. `decode` is this view's [`record`](Self::record).
+#[derive(Clone, Copy, Debug)]
+pub struct RecordView<'a> {
+    bytes: &'a [u8],
+    action: Action,
+    barrier: bool,
+    /// The pipeline word: the pipeline the command executes with.
+    pipeline: Option<NonZeroU64>,
+    /// The state word says a reset retained it ([`CommandRecord::retained_pipeline`]).
+    retained: bool,
+}
+
+impl<'a> RecordView<'a> {
+    /// The record `bytes` hold, refused as [`CommandRecord::decode`] refuses them: its length, an
+    /// unknown action, a barrier flag other than 0 or 1, a malformed pipeline state word.
+    pub fn new(bytes: &'a [u8]) -> Result<RecordView<'a>, RecordError> {
         let (action, barrier) = validate_record(bytes)?;
         let pipeline = NonZeroU64::new(get_u64(bytes, 2));
         let retained = match get_word(bytes, layout::STATE as usize / 4) {
@@ -323,52 +347,116 @@ impl CommandRecord {
             layout::RETAINED if pipeline.is_some() => true,
             _ => return Err(RecordError::PipelineState),
         };
-        let mut record = Self {
+        Ok(RecordView {
+            bytes,
             action,
             barrier,
-            bindings: Bindings {
-                pipeline: pipeline.filter(|_| !retained),
-                ..Default::default()
-            },
-            retained_pipeline: pipeline.filter(|_| retained),
-            ..Default::default()
-        };
-        // An address and a stride of 0 are a slot no setter set, as Metal's getters answer a
-        // fresh slot's (and a nil buffer's set at offset 0 with stride 0, which is the same).
-        for (index, binding) in record.bindings.buffers.iter_mut().flatten().enumerate() {
-            let word = HEADER_WORDS + index * BUFFER_WORDS;
-            let address = get_u64(bytes, word);
-            let stride = get_u64(bytes, word + 2);
-            *binding = (address != 0 || stride != 0).then_some(BufferBinding {
-                address,
-                attribute_stride: (stride != u64::MAX).then_some(stride),
-            });
+            pipeline,
+            retained,
+        })
+    }
+
+    /// [`CommandRecord::action`].
+    pub fn action(&self) -> Action {
+        self.action
+    }
+
+    /// [`CommandRecord::barrier`].
+    pub fn barrier(&self) -> bool {
+        self.barrier
+    }
+
+    /// [`Bindings::pipeline`]: none where a reset retained the pipeline.
+    pub fn pipeline(&self) -> Option<NonZeroU64> {
+        self.pipeline.filter(|_| !self.retained)
+    }
+
+    /// [`CommandRecord::retained_pipeline`].
+    pub fn retained_pipeline(&self) -> Option<NonZeroU64> {
+        self.pipeline.filter(|_| self.retained)
+    }
+
+    /// Slot `slot` of `stage`'s buffers, as [`Bindings::buffers`] holds it; none past
+    /// [`BINDING_COUNT`].
+    pub fn buffer(&self, stage: BufferStage, slot: usize) -> Option<BufferBinding> {
+        (slot < BINDING_COUNT)
+            .then(|| binding_at(self.bytes, stage.index() * BINDING_COUNT + slot))
+            .flatten()
+    }
+
+    /// Threadgroup-memory length `index`, as [`CommandRecord::threadgroup_memory_lengths`] holds
+    /// it: 0 for the first two beside an indexed patch draw, whose control-point index buffer
+    /// takes their words; none past [`THREADGROUP_BUFFER_ARGUMENT_COUNT`].
+    pub fn threadgroup_memory_length(&self, index: usize) -> Option<u32> {
+        if index >= THREADGROUP_COUNT {
+            return None;
         }
-        // An indexed patch draw's control-point index buffer takes the first two threadgroup
-        // lengths' words.
-        let lengths_from = match record.action {
-            Action::DrawIndexedPatches { .. } => 2,
-            _ => 0,
-        };
-        for (index, length) in record
-            .threadgroup_memory_lengths
-            .iter_mut()
-            .enumerate()
-            .skip(lengths_from)
-        {
-            *length = get_word(bytes, THREADGROUP_WORD + index);
-        }
-        // An indexed or patch draw's arguments take the stage-in region's words.
-        if !record.action.takes_stage_in_words() {
-            for (index, value) in record.stage_in_region.iter_mut().enumerate() {
-                *value = get_word(bytes, layout::STAGE_IN as usize / 4 + index);
+        let taken = matches!(self.action, Action::DrawIndexedPatches { .. }) && index < 2;
+        Some(match taken {
+            true => 0,
+            false => get_word(self.bytes, THREADGROUP_WORD + index),
+        })
+    }
+
+    /// [`CommandRecord::stage_in_region`]: all zero beside an indexed or patch draw, whose
+    /// arguments take its words.
+    pub fn stage_in_region(&self) -> [u32; 6] {
+        let mut region = [0; 6];
+        if !self.action.takes_stage_in_words() {
+            for (index, value) in region.iter_mut().enumerate() {
+                *value = get_word(self.bytes, layout::STAGE_IN as usize / 4 + index);
             }
         }
-        let imageblock = layout::IMAGEBLOCK as usize;
-        for (index, value) in record.imageblock_size.iter_mut().enumerate() {
-            let at = imageblock + 2 * index;
-            *value = u16::from_le_bytes([bytes[at], bytes[at + 1]]);
-        }
-        Ok(record)
+        region
     }
+
+    /// [`CommandRecord::imageblock_size`].
+    pub fn imageblock_size(&self) -> [u16; 2] {
+        let at = layout::IMAGEBLOCK as usize;
+        [
+            u16::from_le_bytes([self.bytes[at], self.bytes[at + 1]]),
+            u16::from_le_bytes([self.bytes[at + 2], self.bytes[at + 3]]),
+        ]
+    }
+
+    /// [`CommandRecord::writes`] of the record.
+    pub fn writes(&self) -> crate::pipeline::CommandWrites {
+        writes_of(&self.action, self.barrier)
+    }
+
+    /// The whole record ([`CommandRecord::decode`]).
+    pub fn record(&self) -> CommandRecord {
+        let mut record = CommandRecord {
+            action: self.action,
+            barrier: self.barrier,
+            bindings: Bindings {
+                pipeline: self.pipeline(),
+                ..Default::default()
+            },
+            retained_pipeline: self.retained_pipeline(),
+            stage_in_region: self.stage_in_region(),
+            imageblock_size: self.imageblock_size(),
+            ..Default::default()
+        };
+        for (index, binding) in record.bindings.buffers.iter_mut().flatten().enumerate() {
+            *binding = binding_at(self.bytes, index);
+        }
+        for (index, length) in record.threadgroup_memory_lengths.iter_mut().enumerate() {
+            *length = self.threadgroup_memory_length(index).unwrap_or(0);
+        }
+        record
+    }
+}
+
+/// The buffer binding at `index` of a record's four stages' slots, in their words' order: an
+/// address and a stride of 0 are a slot no setter set, as Metal's getters answer a fresh slot's
+/// (and a nil buffer's set at offset 0 with stride 0, which is the same).
+fn binding_at(bytes: &[u8], index: usize) -> Option<BufferBinding> {
+    let word = HEADER_WORDS + index * BUFFER_WORDS;
+    let address = get_u64(bytes, word);
+    let stride = get_u64(bytes, word + 2);
+    (address != 0 || stride != 0).then_some(BufferBinding {
+        address,
+        attribute_stride: (stride != u64::MAX).then_some(stride),
+    })
 }

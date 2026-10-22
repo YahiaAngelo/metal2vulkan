@@ -618,3 +618,322 @@ fn buffer_slots_hold_the_answers_of_metal_s_getters() {
         None
     );
 }
+
+/// A small deterministic generator for the field tests (xorshift64*).
+struct Draws(u64);
+
+impl Draws {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    }
+
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+
+    /// A word that is often 0, else small or anything.
+    fn word(&mut self) -> u32 {
+        match self.below(4) {
+            0 => 0,
+            1 => self.below(8) as u32,
+            _ => self.next() as u32,
+        }
+    }
+
+    fn words<const N: usize>(&mut self) -> [u32; N] {
+        std::array::from_fn(|_| self.word())
+    }
+
+    fn action(&mut self) -> Action {
+        match self.below(9) {
+            0 => Action::Empty,
+            1 => Action::DispatchThreadgroups {
+                grid: self.words(),
+                local_size: self.words(),
+            },
+            2 => Action::DispatchThreads {
+                grid: self.words(),
+                local_size: self.words(),
+            },
+            3 => Action::DrawPrimitives {
+                primitive_type: self.word(),
+                vertex_start: self.word(),
+                vertex_count: self.word(),
+                instance_count: self.word(),
+                base_instance: self.word(),
+            },
+            4 => Action::DrawIndexedPrimitives {
+                primitive_type: self.word(),
+                index_count: self.word(),
+                index_type: self.word(),
+                index_buffer: self.next(),
+                instance_count: self.word(),
+                base_vertex: self.word() as i32,
+                base_instance: self.word(),
+            },
+            5 => Action::DrawPatches {
+                control_points: self.word(),
+                patch_start: self.word(),
+                patch_count: self.word(),
+                patch_index_buffer: self.next(),
+                instance_count: self.word(),
+                base_instance: self.word(),
+                factor_buffer: self.next(),
+                factor_instance_stride: self.word(),
+                factor_scale: self.word(),
+            },
+            6 => Action::DrawIndexedPatches {
+                control_points: self.word(),
+                patch_start: self.word(),
+                patch_count: self.word(),
+                patch_index_buffer: self.next(),
+                control_point_index_buffer: self.next(),
+                instance_count: self.word(),
+                base_instance: self.word(),
+                factor_buffer: self.next(),
+                factor_instance_stride: self.word(),
+                factor_scale: self.word(),
+            },
+            7 => Action::DrawMeshThreadgroups {
+                threadgroups: self.words(),
+                object_threads: self.words(),
+                mesh_threads: self.words(),
+            },
+            _ => Action::DrawMeshThreads {
+                threads: self.words(),
+                object_threads: self.words(),
+                mesh_threads: self.words(),
+            },
+        }
+    }
+
+    fn binding(&mut self) -> Option<BufferBinding> {
+        match self.below(4) {
+            0 => None,
+            _ => Some(BufferBinding {
+                address: match self.below(2) {
+                    0 => u64::from(self.word()),
+                    _ => self.next(),
+                },
+                attribute_stride: match self.below(3) {
+                    0 => None,
+                    1 => Some(u64::from(self.word())),
+                    // All ones is reserved: the encoder refuses it.
+                    _ => Some(self.next() | (u64::from(self.below(2) == 0) * u64::MAX)),
+                },
+            }),
+        }
+    }
+
+    fn stage(&mut self) -> BufferStage {
+        [
+            BufferStage::Kernel,
+            BufferStage::Vertex,
+            BufferStage::Fragment,
+            BufferStage::Object,
+            BufferStage::Mesh,
+        ][self.below(5) as usize]
+    }
+
+    /// A record `encode_into` takes: random fields, a stage-in region only beside an action that
+    /// leaves its words, the first two lengths 0 beside an indexed patch draw, and a pipeline
+    /// set or retained, not both.
+    fn record(&mut self) -> CommandRecord {
+        let action = self.action();
+        let mut record = CommandRecord {
+            action,
+            barrier: self.below(2) == 0,
+            ..Default::default()
+        };
+        let pipeline = NonZeroU64::new(self.next() * self.below(2));
+        match self.below(2) {
+            0 => record.bindings.pipeline = pipeline,
+            _ => record.retained_pipeline = pipeline,
+        }
+        for stage in BufferStage::of(false) {
+            for slot in record.bindings.buffers_mut(stage).iter_mut() {
+                *slot = self
+                    .binding()
+                    .filter(|b| b.attribute_stride != Some(u64::MAX));
+            }
+        }
+        for length in record.threadgroup_memory_lengths.iter_mut() {
+            *length = self.word();
+        }
+        if matches!(action, Action::DrawIndexedPatches { .. }) {
+            record.threadgroup_memory_lengths[..2].fill(0);
+        }
+        if !action.takes_stage_in_words() {
+            record.stage_in_region = self.words();
+        }
+        record.imageblock_size = [self.word() as u16, self.word() as u16];
+        record
+    }
+
+    fn field(&mut self) -> RecordField {
+        match self.below(7) {
+            0 => RecordField::Action(self.action()),
+            1 => RecordField::Barrier(self.below(2) == 0),
+            2 => RecordField::Pipeline(NonZeroU64::new(self.next() | 1).unwrap()),
+            3 => RecordField::Buffer {
+                stage: self.stage(),
+                slot: self.below(BINDING_COUNT as u64 + 2) as usize,
+                binding: self.binding(),
+            },
+            4 => RecordField::ThreadgroupMemoryLength {
+                index: self.below(THREADGROUP_COUNT as u64 + 2) as usize,
+                length: self.word(),
+            },
+            5 => RecordField::StageInRegion(match self.below(2) {
+                0 => [0; 6],
+                _ => self.words(),
+            }),
+            _ => RecordField::ImageblockSize([self.word() as u16, self.word() as u16]),
+        }
+    }
+}
+
+/// `record` with `field` set, as a setter of the field sets it; `None` past the record's slots.
+fn with_field(mut record: CommandRecord, field: RecordField) -> Option<CommandRecord> {
+    match field {
+        RecordField::Action(action) => record.action = action,
+        RecordField::Barrier(barrier) => record.barrier = barrier,
+        RecordField::Pipeline(pipeline) => {
+            record.bindings.pipeline = Some(pipeline);
+            record.retained_pipeline = None;
+        }
+        RecordField::Buffer {
+            stage,
+            slot,
+            binding,
+        } => *record.bindings.buffers_mut(stage).get_mut(slot)? = binding,
+        RecordField::ThreadgroupMemoryLength { index, length } => {
+            *record.threadgroup_memory_lengths.get_mut(index)? = length
+        }
+        RecordField::StageInRegion(region) => record.stage_in_region = region,
+        RecordField::ImageblockSize(size) => record.imageblock_size = size,
+    }
+    Some(record)
+}
+
+/// A field written alone (`CommandRecord::write_field`) is the record decoded, the field set and
+/// encoded again: over records `encode_into` wrote, byte for byte, and over bytes of any words
+/// that decode, as what they decode to; where `encode_into` refuses the record with the field
+/// set, or the field's index is past the record's, it refuses too and leaves the bytes as they
+/// were. It writes nothing outside the bytes it answers. `RecordView` reads each field as
+/// `decode` does.
+#[test]
+fn a_field_written_alone_is_the_record_encoded_again() {
+    let mut draws = Draws(0x9e37_79b9_7f4a_7c15);
+    let (mut written, mut refused) = (0, 0);
+    for round in 0..20_000 {
+        let mut bytes = vec![0u8; COMMAND_BYTES];
+        if round % 2 == 0 {
+            draws.record().encode_into(&mut bytes).unwrap();
+        } else {
+            // Words of any value, of a known action and barrier, with no state word.
+            for chunk in bytes.chunks_mut(8) {
+                chunk.copy_from_slice(&draws.next().to_le_bytes()[..chunk.len()]);
+            }
+            bytes[0..4].copy_from_slice(&(draws.below(9) as u32).to_le_bytes());
+            bytes[4..8].copy_from_slice(&(draws.below(2) as u32).to_le_bytes());
+            let state = layout::STATE as usize;
+            bytes[state..state + 4].fill(0);
+        }
+        let record = CommandRecord::decode(&bytes).unwrap();
+        let view = RecordView::new(&bytes).unwrap();
+        assert_eq!(view.record(), record, "round {round}: the view's record");
+        assert_eq!(view.writes(), record.writes(), "round {round}");
+        for stage in BufferStage::of(false)
+            .into_iter()
+            .chain([BufferStage::Mesh])
+        {
+            for slot in 0..BINDING_COUNT {
+                assert_eq!(
+                    view.buffer(stage, slot),
+                    record.bindings.buffers(stage)[slot],
+                    "round {round}: {stage:?} slot {slot}"
+                );
+            }
+            assert_eq!(view.buffer(stage, BINDING_COUNT), None);
+        }
+        for index in 0..THREADGROUP_COUNT {
+            assert_eq!(
+                view.threadgroup_memory_length(index),
+                Some(record.threadgroup_memory_lengths[index])
+            );
+        }
+        assert_eq!(view.threadgroup_memory_length(THREADGROUP_COUNT), None);
+        let field = draws.field();
+        let mut expected = vec![0u8; COMMAND_BYTES];
+        let encoded =
+            with_field(record.clone(), field).map(|changed| changed.encode_into(&mut expected));
+        let before = bytes.clone();
+        let result = CommandRecord::write_field(&mut bytes, field);
+        match encoded {
+            Some(Ok(())) => {
+                let span = result
+                    .unwrap_or_else(|error| panic!("round {round}: {field:?} refused: {error}"));
+                assert_eq!(
+                    CommandRecord::decode(&bytes).unwrap(),
+                    CommandRecord::decode(&expected).unwrap(),
+                    "round {round}: {field:?} of {record:?}"
+                );
+                if round % 2 == 0 {
+                    assert_eq!(bytes, expected, "round {round}: {field:?}, byte for byte");
+                }
+                for (at, (now, was)) in bytes.iter().zip(&before).enumerate() {
+                    assert!(
+                        now == was || span.contains(&at),
+                        "round {round}: {field:?} wrote byte {at} outside {span:?}"
+                    );
+                }
+                written += 1;
+            }
+            Some(Err(error)) => {
+                assert_eq!(result, Err(error), "round {round}: {field:?}");
+                assert_eq!(bytes, before, "round {round}: a refusal changes nothing");
+                refused += 1;
+            }
+            None => {
+                assert!(
+                    matches!(result, Err(RecordError::Index { .. })),
+                    "round {round}: {field:?}: {result:?}"
+                );
+                assert_eq!(bytes, before);
+                refused += 1;
+            }
+        }
+    }
+    assert!(
+        written > 15_000 && refused > 500,
+        "{written} written, {refused} refused"
+    );
+}
+
+/// A record that does not decode is refused as `decode` refuses it, by the view and by a field's
+/// write, which changes nothing.
+#[test]
+fn a_field_of_a_record_that_does_not_decode_is_refused() {
+    let mut bytes = vec![0u8; COMMAND_BYTES];
+    bytes[0..4].copy_from_slice(&9u32.to_le_bytes());
+    assert_eq!(
+        RecordView::new(&bytes).map(|_| ()),
+        Err(RecordError::Action { value: 9 })
+    );
+    let before = bytes.clone();
+    assert_eq!(
+        CommandRecord::write_field(&mut bytes, RecordField::Barrier(true)),
+        Err(RecordError::Action { value: 9 })
+    );
+    assert_eq!(bytes, before);
+    assert_eq!(
+        RecordView::new(&bytes[1..]).map(|_| ()),
+        Err(RecordError::Length {
+            actual: COMMAND_BYTES - 1
+        })
+    );
+}

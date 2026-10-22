@@ -6,9 +6,10 @@ use std::sync::Arc;
 use crate::degradation::Degradation;
 use crate::resource_ids::StateKind;
 use crate::unique_identifier::{
-    state_value_degradation, UniqueIdentifier, UniqueIdentifiers, BUFFERS_END, BUFFER_FIRST,
-    COMPUTE_FIRST, COMPUTE_STEP, INDIRECT_BASE, PLAIN_FIRST, RENDER_STEP,
+    state_value_degradation, ScheduledWork, UniqueIdentifier, UniqueIdentifiers, BUFFERS_END,
+    BUFFER_FIRST, COMPUTE_FIRST, COMPUTE_STEP, INDIRECT_BASE, PLAIN_FIRST, RENDER_STEP,
 };
+use crate::used_resources::EncoderKind;
 
 fn device() -> Arc<UniqueIdentifiers> {
     Arc::default()
@@ -91,14 +92,15 @@ fn compute_states_go_past_the_buffers_once_metal_s_region_is_full() {
     assert_eq!(buffer.value(), INDIRECT_BASE + BUFFER_FIRST);
 }
 
-/// Which identifiers are measured to be Metal's number: a buffer made before its device opened
-/// an encoder; not one made after, nor any state, each with the kind its answer announces.
+/// Which identifiers are measured to be Metal's number: a buffer made before Metal's own
+/// allocations go past the model (a resource state encoder opened, or a render encoder's command
+/// buffer scheduled); not one made after, nor any state, each with the kind its answer announces.
 #[test]
-fn only_buffers_made_before_an_encoder_are_metal_s_number() {
+fn only_buffers_made_before_unmodelled_work_are_metal_s_number() {
     let ids = device();
     let before = UniqueIdentifier::buffer(&ids, 0x4000).unwrap();
     assert_eq!(before.degradation(), None);
-    ids.encoder_opened();
+    ids.encoder_opened(EncoderKind::ResourceState);
     let after = UniqueIdentifier::buffer(&ids, 0x4000).unwrap();
     let unmeasured = Some(Degradation::UnmeasuredUniqueIdentifier);
     assert_eq!(after.degradation(), unmeasured);
@@ -112,4 +114,100 @@ fn only_buffers_made_before_an_encoder_are_metal_s_number() {
     assert_eq!(state_value_degradation(0), None);
     assert_eq!(state_value_degradation(indirect.value()), unmeasured);
     assert_eq!(state_value_degradation(plain.value()), run_to_run);
+}
+
+/// Metal's encoders take their pieces of the buffers' range as an M3 Max's do (macOS 27.0.1, the
+/// probes' sequences, each on a device of its own; buffers of one page, 32 KiB each): a blit
+/// encoder 256 KiB at its opening, a render encoder 384 KiB, the two sharing 192 KiB of it, and
+/// the first command buffer scheduled with a dispatch or a blit's command 32 KiB more, each at the
+/// lowest gap that holds it, once a device. A render command buffer scheduled leaves the model.
+#[test]
+fn encoders_take_metal_s_pieces_of_the_buffers_range() {
+    let page = |ids: &Arc<UniqueIdentifiers>| {
+        UniqueIdentifier::buffer(ids, 0x4000).unwrap().value() - INDIRECT_BASE
+    };
+    let held = |ids: &Arc<UniqueIdentifiers>| UniqueIdentifier::buffer(ids, 0x4000).unwrap();
+    // `n` more buffers, held, by their offsets.
+    let pages = |ids: &Arc<UniqueIdentifiers>, n: usize| -> Vec<u64> {
+        let made: Vec<UniqueIdentifier> = (0..n).map(|_| held(ids)).collect();
+        made.iter().map(|id| id.value() - INDIRECT_BASE).collect()
+    };
+    let dispatch = ScheduledWork {
+        dispatch: true,
+        render: false,
+    };
+    // A compute encoder takes nothing at its opening, its dispatch 32 KiB as it is scheduled,
+    // once.
+    let ids = device();
+    let first = held(&ids);
+    ids.encoder_opened(EncoderKind::Compute);
+    assert_eq!(page(&ids), 0x2_0000, "an open compute encoder");
+    let ids = device();
+    let first_too = held(&ids);
+    ids.encoder_opened(EncoderKind::Compute);
+    ids.scheduled(dispatch);
+    ids.scheduled(dispatch);
+    assert_eq!(page(&ids), 0x2_8000, "a dispatch scheduled");
+    // A blit encoder 256 KiB at its opening; its copy 32 KiB more as it is scheduled.
+    let ids = device();
+    ids.encoder_opened(EncoderKind::Blit);
+    assert_eq!(page(&ids), 0x5_8000, "an open blit encoder");
+    let ids = device();
+    let _first = held(&ids);
+    ids.encoder_opened(EncoderKind::Blit);
+    ids.scheduled(dispatch);
+    assert_eq!(page(&ids), 0x6_8000, "a blit encoder's copy");
+    // A dispatch and a copy share their 32 KiB, either first.
+    for blit_first in [false, true] {
+        let ids = device();
+        if blit_first {
+            ids.encoder_opened(EncoderKind::Blit);
+        }
+        ids.scheduled(dispatch);
+        ids.encoder_opened(EncoderKind::Blit);
+        ids.scheduled(dispatch);
+        assert_eq!(page(&ids), 0x6_0000, "blit first: {blit_first}");
+    }
+    // A render encoder 384 KiB at its opening, 192 KiB shared with a blit encoder's.
+    let ids = device();
+    ids.encoder_opened(EncoderKind::Render);
+    assert_eq!(page(&ids), 0x7_8000, "an open render encoder");
+    let ids = device();
+    ids.encoder_opened(EncoderKind::Blit);
+    ids.encoder_opened(EncoderKind::Render);
+    let after = UniqueIdentifier::buffer(&ids, 0x4000).unwrap();
+    assert_eq!(
+        after.value() - INDIRECT_BASE,
+        0x8_8000,
+        "the shared piece once"
+    );
+    assert_eq!(after.degradation(), None);
+    ids.scheduled(ScheduledWork {
+        dispatch: false,
+        render: true,
+    });
+    let past = UniqueIdentifier::buffer(&ids, 0x4000).unwrap();
+    assert_eq!(
+        past.degradation(),
+        Some(Degradation::UnmeasuredUniqueIdentifier),
+        "a render command buffer scheduled"
+    );
+    // Pieces take the lowest gap that holds them: of four buffers, the second and third
+    // released, a blit encoder's 64 KiB takes their gap, its 192 KiB and its copy's 32 KiB go
+    // past the fourth.
+    let ids = device();
+    let four: Vec<UniqueIdentifier> = (0..4).map(|_| held(&ids)).collect();
+    let [kept, second, third, fourth]: [UniqueIdentifier; 4] = four.try_into().unwrap();
+    drop((second, third));
+    ids.encoder_opened(EncoderKind::Blit);
+    ids.scheduled(dispatch);
+    assert_eq!(pages(&ids, 3), [0x7_0000, 0x7_8000, 0x8_0000]);
+    // Of three buffers, the second released, a dispatch scheduled takes its gap.
+    let ids = device();
+    let three: Vec<UniqueIdentifier> = (0..3).map(|_| held(&ids)).collect();
+    let [one, two, last]: [UniqueIdentifier; 3] = three.try_into().unwrap();
+    drop(two);
+    ids.scheduled(dispatch);
+    assert_eq!(pages(&ids, 2), [0x3_0000, 0x3_8000]);
+    drop((first, first_too, kept, fourth, one, last));
 }

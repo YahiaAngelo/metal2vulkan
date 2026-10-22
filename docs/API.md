@@ -823,8 +823,10 @@ reads no buffer and no `[[primitive_id]]` may instead merge into one draw (`Draw
 two merge passes (`draw_merge_module`) write each command's first vertex in the merged draw, and
 the vertex function, compiled as its merged variant (`VariantKey::merged_draws`), finds its
 command by that prefix and runs the command's vertex, instance and buffers, in the commands'
-order. A kernel that encodes commands writes the records at
-`bind::indirect_commands::records_address` of the buffer's ID, outside every Metal address.
+order. A kernel that encodes commands writes the records that start at
+`bind::indirect_commands::records_address` of the buffer's ID, outside every Metal address, and
+finds them only at their start: records may run past later IDs' starts, and a resident set
+(`bind::ResidentSet`) keeps each records range whole.
 
 ## 7. Caching
 
@@ -1397,25 +1399,28 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   records such an execution on the CPU then where the GPU cannot run it alone. A render execution:
   where its records may hold, at the commit or as its batch is ready, more than draws of one
   primitive type under the encoder's state, or what its check looks for; its notice names the first
-  rule that kept it from the GPU alone. A compute execution: with the caller's check
-  (`execute_commands_in_buffer_checked`); with its range read from a buffer; of a
-  buffer that inherits the encoder's buffers; where its records may name a pipeline state whose
-  kernel observes its threadgroup partition or fetches `[[stage_in]]` attributes, or a state the CPU
-  set that the program released since; and, on a device without `VK_EXT_device_generated_commands`,
-  where the host step is faster: where its commands run with no barrier between them and its
-  commands times the pipeline states its records may name past four pass 256 (the states: every live
-  one made with `supportIndirectCommandBuffers`, or the encoder's where the buffer inherits it),
-  where they run with one and its commands times the states past twelve pass 512, and where its
-  commands times its states pass 32,768. Every other execution runs on the GPU alone and announces
-  nothing. Cost: one GPU-to-CPU round trip per execution: its command buffer's work before it, and
-  every batch submitted before that on any queue, completes before the CPU records its commands from
-  their records and submits the rest; the device's scheduler submits nothing else while it records
-  them, and the first command of a threadgroup size or threadgroup lengths its pipeline state has
-  not dispatched makes that VkPipeline then. The commands run in the large-buffer form (their
-  range-limited buffer slots at device addresses, with in-shader bounds checks), whose variants the
-  commit compiles for every pipeline state a record may name (or, for an execution committed before
-  the buffer was made resident for writing, the use_resource call that made it so); without device
-  addresses, a command's first buffer shape compiles its variant then.
+  rule that kept it from the GPU alone. A compute execution: with a caller's check
+  (`execute_commands_in_buffer_checked`) that may see what it looks for
+  (`IndirectCommandCheckNeeds`: a state that may encode indirect commands, the encoder's where the
+  buffer inherits it, else one its records may name), at the commit or as its batch is ready; with
+  its range read from a buffer; of a buffer that inherits the encoder's buffers; where its records
+  may name a pipeline state whose kernel observes its threadgroup partition or fetches
+  `[[stage_in]]` attributes, or a state the CPU set that the program released since; and, on a
+  device without `VK_EXT_device_generated_commands`, where the host step is faster: where its
+  commands run with no barrier between them and its commands times the pipeline states its records
+  may name past four pass 256 (the states: every live one made with `supportIndirectCommandBuffers`,
+  or the encoder's where the buffer inherits it), where they run with one and its commands times the
+  states past twelve pass 512, and where its commands times its states pass 32,768. Every other
+  execution runs on the GPU alone and announces nothing. Cost: one GPU-to-CPU round trip per
+  execution: its command buffer's work before it, and every batch submitted before that on any
+  queue, completes before the CPU records its commands from their records and submits the rest; the
+  device's scheduler submits nothing else while it records them, and the first command of a
+  threadgroup size or threadgroup lengths its pipeline state has not dispatched makes that
+  VkPipeline then. The commands run in the large-buffer form (their range-limited buffer slots at
+  device addresses, with in-shader bounds checks), whose variants the commit compiles for every
+  pipeline state a record may name (or, for an execution committed before the buffer was made
+  resident for writing, the use_resource call that made it so); without device addresses, a
+  command's first buffer shape compiles its variant then.
 - `metal2vulkan-degrade-uncalibrated-gpu-times` (precision). `UncalibratedGpuTimes`: A command
   buffer's GPU times on a device that calibrates its timestamps against no host clock the runtime
   reads (no `VK_KHR_calibrated_timestamps` or `VK_EXT_calibrated_timestamps` with the device's time
@@ -1837,10 +1842,14 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   (VUID-vkCreateDescriptorSetLayout-support-09582).
 - `metal2vulkan-degrade-released-command-state` (precision). `ReleasedCommandState`: An indirect
   command naming the ID of a pipeline state the program released is executed where the runtime
-  cannot run what Metal runs. Cost: a command naming another ID than the state set on it runs
-  nothing, where Metal runs the released state's program; one naming that state's ID runs its
-  program, as Metal runs a command the CPU encoded, where for a record the GPU wrote Metal runs the
-  ID's holder since (nothing, for a state of the other kind).
+  cannot run what Metal runs. A record the GPU wrote runs the state that held the ID as the GPU
+  last could write the buffer's records, released since or not, as Metal's does: a buffer the GPU
+  may write keeps the programs of the states released after a command buffer that may write it
+  was first encoded. Cost: a command whose record the GPU wrote naming a state released before its
+  buffer could be written runs nothing, where Metal runs that state's program; one naming the ID
+  of the state set on it runs its program, as Metal runs a command the CPU encoded, where for a
+  record the GPU wrote while another state held the ID Metal runs that state (nothing, for a
+  state of the other kind).
 - `metal2vulkan-degrade-ycbcr-filter-not-exact` (precision). `YCbCrFilterNotExact`: A pipeline
   stage's filtered sample of a texture slot bound to a two-plane YCbCr texture does not take Metal's
   exact filter of the format: the stage records `PrecisionNote::HalfSampleFilter` or
@@ -1993,18 +2002,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   started alike, which the runtime's is not measured to be: a pipeline state's made with
   `supportIndirectCommandBuffers` (`ComputePipelineState::unique_identifier`,
   `RenderPipelineState::unique_identifier`, an indirect command's state identifier other than 0), or
-  an indirect command buffer's made after its device opened a command encoder
+  an indirect command buffer's made after a command buffer of its device that encoded a render
+  encoder was scheduled, or after a resource state encoder opened
   (`IndirectCommandBuffer::unique_identifier`). Cost: the identifier is unique and fixed for its
   holder's life, and a released one is reused as Metal reuses it, but it is not the number Metal
   answers there, which follows how the process was started, what it made and Metal's own encoders'
   allocations.
-- `metal2vulkan-degrade-indirect-value-past-record` (precision). `IndirectValuePastRecord`: A
-  program set a buffer at a slot past 31, or a threadgroup memory length at an index past 30, of a
-  command of an indirect command buffer whose descriptor counts more: Metal's validation stops such
-  a descriptor, and plain Metal keeps the value for its private getters alone, as no function binds
-  past index 30. Cost: the command's read-back (Metal's private getters) answers a fresh command's
-  value for a buffer slot past 31 or a threadgroup length past 30, where Metal answers the value
-  set; no command runs otherwise.
 - `metal2vulkan-degrade-cross-class-texture-neutral` (precision). `CrossClassTextureNeutral`: A draw
   or dispatch that binds, at a texture slot, a texture whose format's numeric class (float, signed
   or unsigned integer) is not the class the function declares there and that its plan has no exact
@@ -2822,7 +2825,8 @@ each item named states the rule in full.
   buffer resident has not completed.
 - **Resource IDs are numbered as Metal numbers them**: textures', sampler states', pipeline states'
   and indirect command buffers' IDs follow Metal's allocator, around reservations
-  (`Device::reserve_resource_ids`) too. IDs that end Metal's process are refused.
+  (`Device::reserve_resource_ids`) too. IDs that end Metal's process, or whose reservation Metal
+  never returns from, are refused.
 - **The device counts the sampler IDs it holds** (`Device::sampler_ids_live`,
   `Device::sampler_id_pool_size`), runtime extensions for a consumer that models Metal's sampler
   heap.
@@ -2842,7 +2846,10 @@ each item named states the rule in full.
 **Indirect command buffers**
 
 - **A command's read-back answers Metal's private getters**: `command_type`, the buffer addresses
-  and attribute strides, as Metal's `get*` getters answer them.
+  and attribute strides, as Metal's `get*` getters answer them. `IndirectComputeCommand` and
+  `IndirectRenderCommand` read one field of their record alone (`command_type`, `has_barrier`,
+  `dispatch` or `draw`, one buffer slot, `pipeline_unique_identifier`, and the rest), as
+  `IndirectCommandBuffer::commands` reads it, without decoding the whole command.
 - **Whether the GPU may have written the records** (`IndirectCommandBuffer::gpu_written`, no Metal
   counterpart) turns true at the first call that lets GPU work write them; from then on an
   execution runs the records as they stand once the work before it completed.
@@ -2864,10 +2871,15 @@ each item named states the rule in full.
   where what the records may hold grew by the time the pass's batch is ready to submit, a host step
   records the pass.
 - **A checked execution states what its check looks for**
-  (`execute_commands_in_buffer_checked`'s `IndirectCommandCheckNeeds`, no Metal counterpart): draws
-  of points, and commands under states that may encode indirect commands. Where what the records
-  may hold rules out every kind the check names (`IndirectCommandCheckNeeds::ALL` names both), the
-  check has nothing to see, is never called, and the execution may run on the GPU alone.
+  (`execute_commands_in_buffer_checked`'s and `execute_commands_in_buffer_indirect_checked`'s
+  `IndirectCommandCheckNeeds`, no Metal counterpart): draws of points, and commands under states
+  that may encode indirect commands. The check is called with each command the runtime records,
+  before it records any, wherever it reads the records: at `commit` for the CPU's records, in a
+  host step for records the GPU may have written. Where what the records may hold rules out every
+  kind the check names (`IndirectCommandCheckNeeds::ALL` names both; a record of no draw and no
+  dispatch runs nothing), the check has nothing to see, is not called, and the execution may run
+  on the GPU alone, render and compute alike; where that grows by the time the batch is ready, a
+  host step records it and calls the check.
 - **Command predication** (`encode_start_if`, `encode_start_else`, `encode_end_if` and the
   while and do-while loops) runs Metal's blocks and loops on every device, with or without
   buffer device addresses, its unbalanced records answering `NO` and dropping their ranges, and

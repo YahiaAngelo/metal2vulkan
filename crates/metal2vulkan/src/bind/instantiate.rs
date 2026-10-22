@@ -327,8 +327,9 @@ impl ResidentRange {
 
 /// A resident set a consumer uploads apart from the root tables that search it: its allocations
 /// coalesced as a root table's are (sorted by Metal address, one inside another dropped, a partial
-/// overlap trimmed of its head, an empty one dropped), each at its padded size, as entries in a
-/// root table's layout. The consumer uploads [`bytes`]( Self::bytes) at a 32-byte-aligned device
+/// overlap trimmed of its head, an empty one dropped; indirect command buffers' records, from
+/// `RECORDS_ADDRESS_BASE`, kept whole, one for each start), each at its padded size, as entries in
+/// a root table's layout. The consumer uploads [`bytes`]( Self::bytes) at a 32-byte-aligned device
 /// address and points root tables there ([`RootTable::resident_fields`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResidentSet {

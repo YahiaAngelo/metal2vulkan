@@ -17,7 +17,9 @@
 //! through it out of bounds). Entry 1 is the write-only sink (`host` its device address). Entry
 //! `2 + n` is `[[buffer(n)]]`. The **resident set** (the bound arguments and
 //! `BindState.used_resources`, overlaps coalesced into the outermost range) is the entries `R0 ..
-//! R0 + N`, sorted by `guest` and disjoint, each with `bind_offset = 0`. The binder states `R0` and
+//! R0 + N`, sorted by `guest` and disjoint but for indirect command buffers' records, which may
+//! overlap (each found only at its start, `lower::access::dynamic::search_start`), each with
+//! `bind_offset = 0`. The binder states `R0` and
 //! `N` in the sink entry's otherwise unread `guest` and `size` fields ([`RESIDENT_FIRST`],
 //! [`RESIDENT_COUNT`]); `N` is any count (At most 2¹⁶ before, a larger set
 //! `BindError::ResidentSetTooLarge`). `R0` counts entries from the table's address modulo 2⁶⁴, so

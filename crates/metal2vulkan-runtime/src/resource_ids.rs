@@ -92,10 +92,19 @@
 //!   textures, sampler states, pipeline states and indirect command buffers, Metal's types 0, 1,
 //!   4 and 5) keep IDs from plain allocation for good, whether a resource placed at one lives or
 //!   not. Only a space's first call with an ID counts: one once the space handed out an ID,
-//!   placed or plain, or took a reservation is ignored, with a diagnostic line, as Metal's is
-//!   (its pool logs "reserve() must be called before any allocation takes place" for both). A
-//!   call of no ID, or of 0 alone, changes nothing, and 0 beside other IDs reserves nothing:
-//!   Metal's pool, given 0, later hands IDs out twice (1 to 4 again after 9), a defect not copied.
+//!   placed or plain, or took a reservation is ignored whatever it holds, with a diagnostic
+//!   line, as Metal's is (its pool logs "reserve() must be called before any allocation takes
+//!   place" for both; an M3 Max, macOS 27.0.1, so ignored IDs of 2^31, 2^32 - 1, 2^32 + 5 and
+//!   0 alone of indirect command buffers, and 2^28 + 5 of textures, each refused or dropped in
+//!   a first call). A
+//!   call of no ID changes nothing, and 0 beside other IDs is no ID (0 and 5 reserve 5). A call
+//!   of 0 alone reserves nothing, but leaves the pool made, as a texture pool is by the device's
+//!   first queue ([`Pool::make`]): a later reservation keeps the pool's first range beside the
+//!   ranges it leaves, and Metal hands out that range's IDs twice, as the runtime does (an M3
+//!   Max, macOS 27.0.1, indirect command buffers: 0 then 10 gives 1 to 9, 11 to 31, then 1 to
+//!   15; 0 then 20, 21 to 31, 1 to 19, then 1 to 10; 0 then 40, 41 to 63, 1 to 31, then 1 to 16;
+//!   0 then 31, 1 to 30, then 1 to 50; 0 then 32, 1 to 31, then 33 on, the first range equal to
+//!   the one left; textures, 0 then 10, 11 to 15, 1 to 9, then 1 to 31).
 //!   A call holding an ID of 2^32 or more is dropped whole, silently, and a later call is the
 //!   reservation (2^32 to 2^63, alone or beside 10, for textures, sampler states and indirect
 //!   command buffers).
@@ -107,12 +116,17 @@
 //!   20001 next), and the runtime's. A texture or sampler state ID of [`RESERVED_POOL_LIMIT`]
 //!   (2^28) or more, whose pool would hold 2^29 IDs, ended Metal's process (2^27 + 5 was taken,
 //!   2^28 + 5 to 2^32 - 1 ended it, at the reservation or the first allocation after it): refused
-//!   `Invalid`. So is an indirect command buffer ID of [`RECORDS_RESERVED_LIMIT`] (2^30) or more
-//!   (2^30 - 1 was taken, 2^30 + 5 and up ended the process), and a placement of one at
-//!   [`RECORDS_PLACEMENT_LIMIT`] (16384) or more, past Metal's table of them. A reserved indirect
-//!   command buffer ID needs no records, but a buffer whose own ID is 2^23 or more has no records
-//!   address: it is refused `OutOfMemory` as it is made, as a buffer is once every ID below it is
-//!   held. Pipeline state IDs, measured to 1,000,000, are refused nowhere. The texture table
+//!   `Invalid`. An indirect command buffer ID is reserved to 2^31 - 1, and plain IDs are handed
+//!   out past it, each buffer made and run (an M3 Max, macOS 27.0.1: 2^23 + 5, 2^30 + 5 and
+//!   2^31 - 2 gave 2^23 + 6, 2^30 + 6 and 2^31 - 1 next); one of [`RECORDS_RESERVED_LIMIT`] (2^31)
+//!   to 2^32 - 1 never returned there (Metal's pool spins), and is refused `Invalid`
+//!   (`Problem::ReservationHangs`, which says so). An M4's
+//!   Metal ended the process at the first allocation after a reservation of 2^30 + 5 to 2^31 - 1,
+//!   which the M3 Max, of the same GPU family (Apple9), made and ran: the runtime follows the M3
+//!   Max. A placement of one at [`RECORDS_PLACEMENT_LIMIT`] (16384) or more, past Metal's table
+//!   of them, is refused `Invalid`. A buffer's records start at its ID's records address, at any
+//!   length (Metal made and ran 2^22 commands at 2^26 + 6 and 2^23 + 6); a buffer is refused
+//!   `OutOfMemory` only once every ID below 2^31 is held. Pipeline state IDs, measured to 1,000,000, are refused nowhere. The texture table
 //!   reaches every ID a heap array can (`heap_sets.rs`), so a texture Metal numbers past its
 //!   placement limit is reached as any other. A texture's ID indexes every set-1 array its usage
 //!   can bind it through (sampled where it reads, storage where it writes), so an ID past the least
@@ -128,8 +142,9 @@
 //!   answers it as its own. Once the holder is gone the slot reads the neutral resource, even
 //!   while an earlier resource with the ID lives (Metal's kernel read the gone holder's texels
 //!   there, probe 2). A pipeline state ID keeps the kind of its gone holder until a state takes
-//!   it again (`ResourceIds::released_pipeline`): a record the GPU wrote naming it runs the
-//!   released state's program on Metal, which the runtime no longer has.
+//!   it again (`ResourceIds::released_pipeline`), and the device its last holders, released or
+//!   not (`ResourceIds::pipeline_holder_by`): a record the GPU wrote naming the ID runs the state
+//!   that held it as the GPU wrote it on Metal, released since or not (`released_programs.rs`).
 //! - **When an ID is resolved.** A command reaches texture ID `X` whatever its encoder named,
 //!   as Metal's did (the M4 probe: a texture no encoder named, or one a later encoder
 //!   made resident, was read through its ID in an argument buffer): the device writes each
@@ -147,7 +162,7 @@ use super::texture::TextureShared;
 use metal2vulkan::device::VkLimit;
 use metal2vulkan::error::{Capability, Feature, Unsupported};
 use metal2vulkan::metal::{TextureType, TextureUsage};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
@@ -212,11 +227,12 @@ const RESERVED_POOL_LIMIT: u64 = 1 << 28;
 /// 16383 placed, 16384 to 65536 ended it).
 pub(super) const PIPELINE_ID_LIMIT: u64 = 16384;
 
-/// The first indirect command buffer ID whose reservation ended Metal's process: its pool would
-/// hold 2^31 IDs or more (on an M4: 2^29 + 5 and 2^30 - 1 were taken and plain
-/// IDs handed out past them; 2^30 + 5 to 2^31 - 1 ended it at the first allocation, 2^31 and up
-/// at the reservation).
-const RECORDS_RESERVED_LIMIT: u64 = 1 << 30;
+/// The first indirect command buffer ID whose reservation Metal never returns from: its pool
+/// would hold 2^32 IDs (on an M3 Max, macOS 27.0.1: 2^23 + 5, 2^29 + 5, 2^30 + 5, 3 * 2^29 and
+/// 2^31 - 2 were taken and plain IDs handed out past them, each buffer made and run; 2^31, 2^31 +
+/// 5 and 2^32 - 1 spun, and 2^32 was dropped). An M4 ended the process at the first allocation
+/// after 2^30 + 5 to 2^31 - 1, and at the reservation from 2^31.
+const RECORDS_RESERVED_LIMIT: u64 = 1 << 31;
 
 /// The first ID an indirect command buffer's placement is refused at: past Metal's table of
 /// them, which Metal writes past (on an M4: 16384 to 50367 made in each of six
@@ -287,6 +303,9 @@ pub(super) struct ResourceIds {
     /// The pipeline state IDs whose holder the program released, which no state took since,
     /// each with its last holder's kind and hold serial (`IdHold::serial`).
     released_pipelines: BTreeMap<u64, (StateKind, u64)>,
+    /// The last [`PIPELINE_HOLDERS`] holders of each pipeline state ID, oldest first, released
+    /// or not ([`ResourceIds::pipeline_holder_by`]).
+    pipeline_holders: BTreeMap<u64, VecDeque<PipelineHolder>>,
     /// The keys pipeline states numbered that a holder may hold, each with its ID
     /// (`numbered.rs`).
     numbered: BTreeMap<numbered::SamplerKey, (u64, Weak<Numbered>)>,
@@ -326,6 +345,7 @@ impl Default for ResourceIds {
             counter: 0,
             device_sampler: None,
             released_pipelines: BTreeMap::new(),
+            pipeline_holders: BTreeMap::new(),
             numbered: BTreeMap::new(),
             libraries: BTreeMap::new(),
             functions: BTreeMap::new(),
@@ -348,6 +368,35 @@ impl ResourceIds {
     fn next(&mut self) -> u64 {
         self.counter += 1;
         self.counter
+    }
+
+    /// A value of the counter past every hold serial handed out so far: a holder whose serial
+    /// is below it took its ID before now ([`ResourceIds::pipeline_holder_by`]).
+    pub(super) fn stamp(&mut self) -> u64 {
+        self.next()
+    }
+
+    /// The state that held pipeline state ID `id` at `stamp` ([`ResourceIds::stamp`]): the last
+    /// to take it before then, released since or not; none where none of the ID's last
+    /// [`PIPELINE_HOLDERS`] holders took it before then.
+    pub(super) fn pipeline_holder_by(&self, id: u64, stamp: u64) -> Option<HolderThen> {
+        let holder = self
+            .pipeline_holders
+            .get(&id)?
+            .iter()
+            .rev()
+            .find(|holder| holder.serial < stamp)?;
+        let holds = self
+            .pipelines
+            .slots
+            .get(&id)
+            .is_some_and(|slot| slot.serial == holder.serial);
+        Some(HolderThen {
+            kind: holder.kind,
+            serial: holder.serial,
+            identifier: holder.identifier,
+            holds,
+        })
     }
 
     /// The count of held sampler IDs and the sampler pool's size (the module docs), which the
@@ -379,6 +428,11 @@ impl ResourceIds {
     /// then). A call of no ID reserves nothing and leaves the space open, as Metal's does.
     pub(super) fn reserve(&mut self, space: IdSpace, ids: &[ResourceId]) -> bool {
         self.space(space).reserve(ids)
+    }
+
+    /// Whether `space`'s pool handed out an ID or took a reservation ([`Pool::started`]).
+    pub(super) fn started(&mut self, space: IdSpace) -> bool {
+        self.space(space).plain.started()
     }
 
     /// Take the sampler ID Metal's device keeps for itself as it makes its first object of a
@@ -576,6 +630,11 @@ impl Pool {
         pool
     }
 
+    /// Whether the pool handed out an ID or took a reservation: a reservation is ignored then.
+    pub(super) fn started(&self) -> bool {
+        self.started
+    }
+
     /// Count a resource of the space as an allocation, as Metal counts one placed at an ID:
     /// a reservation after it is ignored.
     pub(super) fn start(&mut self) {
@@ -592,14 +651,19 @@ impl Pool {
     }
 
     /// Reserve `ids` ([`Pool::keep`]): false, reserving nothing, once the pool started. 0, the
-    /// null handle, is no ID, and a call of no other ID leaves the pool as it was, as Metal's
-    /// does (Metal's pool, given 0, later hands IDs out twice: not copied). A made pool
-    /// ([`Pool::make`]) keeps its first range, from 1 to its first size, beside the ranges the
-    /// reservation leaves, as Metal's does.
+    /// null handle, is no ID: a call of no ID leaves the pool as it was, and one of 0 alone leaves
+    /// it made ([`Pool::make`]) before it started, and is ignored after (Metal logs it then, as
+    /// any late call), as Metal's does. A made pool keeps its first range, from 1 to its first
+    /// size, beside the ranges the reservation leaves, as Metal's does.
     pub(super) fn reserve(&mut self, ids: impl IntoIterator<Item = u64>) -> bool {
-        let ids: Vec<u64> = ids.into_iter().filter(|&id| id != 0).collect();
+        let all: Vec<u64> = ids.into_iter().collect();
+        let ids: Vec<u64> = all.iter().copied().filter(|&id| id != 0).collect();
         if ids.is_empty() {
-            return true;
+            if all.is_empty() {
+                return true;
+            }
+            self.make();
+            return !self.started;
         }
         if self.started {
             return false;
@@ -764,6 +828,31 @@ impl Elements {
     }
 }
 
+/// How many of each pipeline state ID's holders the device keeps
+/// ([`ResourceIds::pipeline_holder_by`]), and a buffer the programs of
+/// (`released_programs.rs`).
+pub(super) const PIPELINE_HOLDERS: usize = 4;
+
+/// A pipeline state that took an ID: its kind, its hold serial and its `uniqueIdentifier`.
+#[derive(Clone, Copy, Debug)]
+struct PipelineHolder {
+    kind: StateKind,
+    serial: u64,
+    identifier: u64,
+}
+
+/// The state that held a pipeline state ID at a stamp ([`ResourceIds::pipeline_holder_by`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct HolderThen {
+    pub(super) kind: StateKind,
+    /// Its hold serial (`IdHold::serial`).
+    pub(super) serial: u64,
+    /// Its `uniqueIdentifier`.
+    pub(super) identifier: u64,
+    /// It holds the ID still: the program has not released it.
+    pub(super) holds: bool,
+}
+
 /// One ID's slot, while its holder lives: the holder and its hold serial.
 #[derive(Debug)]
 struct Slot {
@@ -851,6 +940,23 @@ impl IdHold {
         }
     }
 
+    /// Make `holder`, a pipeline state of `kind` whose `uniqueIdentifier` is `identifier`, its
+    /// slot's holder ([`hold`](Self::hold)), and the ID's last holder
+    /// ([`ResourceIds::pipeline_holder_by`]).
+    pub(super) fn hold_state(&self, holder: Holder, kind: StateKind, identifier: u64) {
+        self.hold(holder);
+        let mut all = lock(&self.ids);
+        let holders = all.pipeline_holders.entry(self.id).or_default();
+        if holders.len() == PIPELINE_HOLDERS {
+            holders.pop_front();
+        }
+        holders.push_back(PipelineHolder {
+            kind,
+            serial: self.serial,
+            identifier,
+        });
+    }
+
     /// The ID.
     pub(super) fn id(&self) -> ResourceId {
         ResourceId(self.id)
@@ -930,24 +1036,37 @@ impl Device {
     /// runtime extension): keep `ids` of `kind` from plain allocation for the device's life,
     /// plain IDs then numbered as Metal numbers them (the module docs). Only the device's first
     /// call of `kind` with an ID counts: a later one, or one once the device handed out an ID of
-    /// `kind`, is ignored, as Metal's is, and the device says so in one diagnostic line (through
-    /// its message sink, else on stderr). A call of no ID changes nothing.
+    /// `kind`, is ignored whatever it holds (an ID of 2^32 or more, 0 alone, or one refused
+    /// below), as Metal's is, and the device says so in one diagnostic line (through its message
+    /// sink, else on stderr), as Metal logs it. A call of no ID changes nothing.
     ///
-    /// A call holding an ID of 2^32 or more is dropped whole, silently, and leaves the kind's
-    /// reservation to a later call, as Metal's is; 0, the null handle, reserves nothing.
+    /// Before that, a call holding an ID of 2^32 or more is dropped whole, silently, and leaves
+    /// the kind's reservation to a later call, as Metal's is; 0, the null handle, reserves nothing. A call
+    /// of 0 alone, before any ID of `kind`, leaves `kind`'s pool to keep its first range beside a
+    /// later reservation's ranges, so plain allocation hands that range's IDs out twice, as
+    /// Metal's does (the module docs).
     ///
-    /// Refused, reserving nothing: a texture or sampler state ID of 2^28 or more, and an indirect
-    /// command buffer ID of 2^30 or more (`Invalid`, `Problem::ResourceId`), which end Metal's
-    /// process; a texture ID no set-1 array of the device can hold (`Unsupported`, naming the
-    /// limit). An indirect command buffer ID needs no records to be reserved, but a buffer whose
-    /// own ID would be [`RECORDS_ID_LIMIT`](metal2vulkan::bind::indirect_commands::RECORDS_ID_LIMIT)
-    /// or more is refused `OutOfMemory` as it is made: its records would have no address.
+    /// Refused, reserving nothing, where the call is not ignored: a texture or sampler state ID
+    /// of 2^28 or more, which ends
+    /// Metal's process (`Invalid`, `Problem::ResourceId`); an indirect command buffer ID of 2^31
+    /// or more, at which Metal's reservation never returns (`Invalid`,
+    /// `Problem::ReservationHangs`); and a texture ID no set-1 array of the device can hold
+    /// (`Unsupported`, naming the limit). Plain indirect command buffer IDs past a reservation
+    /// are Metal's, to 2^31 - 1, each buffer made at any length.
     pub fn reserve_resource_ids(
         &self,
         kind: ResourceIdKind,
         ids: &[ResourceId],
     ) -> Result<(), Error> {
         const CALL: &str = "reserve_resource_ids";
+        // Metal ignores a late call before it looks at what the call holds (an M3 Max, macOS
+        // 27.0.1: after a buffer or a reservation, 2^31, 2^31 + 5, 2^32 - 1, 2^32 + 5 and 0 alone
+        // of indirect command buffers, and 2^28 + 5 and 2^31 + 5 of textures, each logged and
+        // ignored, plain IDs going on as before).
+        if !ids.is_empty() && self.reservation_closed(kind) {
+            self.ignore_late_reservation(kind, ids.len());
+            return Ok(());
+        }
         if ids.iter().any(|id| id.0 > u64::from(u32::MAX)) {
             return Ok(());
         }
@@ -960,9 +1079,16 @@ impl Device {
                     self.check_capacity(id, sampled.max(storage))?;
                 }
                 ResourceIdKind::SamplerState => check_limit(CALL, id, RESERVED_POOL_LIMIT)?,
-                ResourceIdKind::IndirectCommandBuffer => {
-                    check_limit(CALL, id, RECORDS_RESERVED_LIMIT)?
+                ResourceIdKind::IndirectCommandBuffer if id >= RECORDS_RESERVED_LIMIT => {
+                    return Err(invalid(
+                        CALL,
+                        Problem::ReservationHangs {
+                            id,
+                            limit: RECORDS_RESERVED_LIMIT,
+                        },
+                    ));
                 }
+                ResourceIdKind::IndirectCommandBuffer => {}
                 ResourceIdKind::PipelineState => {}
             }
         }
@@ -976,17 +1102,37 @@ impl Device {
                 lock(&self.shared().addresses).reserve_records(&ids)
             }
         };
+        // Another thread's allocation may have come between: the call is late then too.
         if !taken {
-            self.diagnose(
-                "metal2vulkan-late-reservation",
-                format!(
-                    "metal2vulkan: {CALL}: reserve() must be called before any allocation takes \
-                     place; the reservation of {} {kind:?} IDs is ignored, as Metal ignores it",
-                    ids.len()
-                ),
-            );
+            self.ignore_late_reservation(kind, ids.len());
         }
         Ok(())
+    }
+
+    /// Whether `kind`'s pool handed out an ID or took a reservation, so a reservation call is
+    /// ignored ([`Pool::started`]).
+    fn reservation_closed(&self, kind: ResourceIdKind) -> bool {
+        let space = |space| lock(&self.shared().resource_ids).started(space);
+        match kind {
+            ResourceIdKind::Texture => space(IdSpace::Texture),
+            ResourceIdKind::SamplerState => space(IdSpace::Sampler),
+            ResourceIdKind::PipelineState => space(IdSpace::Pipeline),
+            ResourceIdKind::IndirectCommandBuffer => {
+                lock(&self.shared().addresses).records_started()
+            }
+        }
+    }
+
+    /// Say that a late reservation call of `count` IDs of `kind` is ignored, as Metal logs it.
+    fn ignore_late_reservation(&self, kind: ResourceIdKind, count: usize) {
+        const CALL: &str = "reserve_resource_ids";
+        self.diagnose(
+            "metal2vulkan-late-reservation",
+            format!(
+                "metal2vulkan: {CALL}: reserve() must be called before any allocation takes \
+                 place; the reservation of {count} {kind:?} IDs is ignored, as Metal ignores it"
+            ),
+        );
     }
 
     /// How many sampler IDs the device holds now: one for each holder of one (the module docs'

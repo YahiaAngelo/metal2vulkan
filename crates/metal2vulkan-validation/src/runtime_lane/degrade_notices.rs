@@ -175,7 +175,7 @@ use super::heap_metal_sizes::{PAST_METAL_SIZES, UNMODELLED_SIZES};
 use super::heap_textures::{ALIASES, APART, COMPRESSED, OPTIMIZED};
 use super::host_memory::{not_importable, Mapping, GUEST_PAGE, READ_ONLY_PAGES};
 use super::index_fetches::INDEX_FETCHES;
-use super::indirect_command_buffers::{PAST_RECORD, UNMEASURED_IDENTIFIERS};
+use super::indirect_command_buffers::UNMEASURED_IDENTIFIERS;
 use super::indirect_dispatches::INDIRECT_DISPATCHES;
 use super::indirect_executions::{NIL_OFFSETS, RELEASED_STATES};
 use super::indirect_host_steps::HOST_STEPS;
@@ -537,7 +537,6 @@ fn every_kind_has_a_site_a_lane_test_takes() {
         &FRESH_PATTERNS,
         &UNMODELLED_SIZES,
         &UNMEASURED_IDENTIFIERS,
-        &PAST_RECORD,
         &CROSS_CLASS,
         &NIL_OFFSETS,
         &BLOCK_DECODES,

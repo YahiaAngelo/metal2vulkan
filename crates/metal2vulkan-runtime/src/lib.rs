@@ -167,6 +167,7 @@ mod rebind;
 mod recorder;
 mod recycle;
 mod release;
+mod released_programs;
 mod render;
 mod render_pass;
 mod render_state;

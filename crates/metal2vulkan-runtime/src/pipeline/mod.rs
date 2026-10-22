@@ -101,6 +101,7 @@ use super::Device;
 use crate::argument_table::AtBindViews;
 use crate::binary_archive::Used;
 use crate::degradation::{CompiledPipeline, Occurrence};
+use crate::released_programs::KeptProgram;
 use crate::residency::handle_stages;
 use crate::resource_ids::{
     function_name, number, pipeline_placement, Holder, IdHold, IdPlacement, IdSpace, Numbered,
@@ -239,6 +240,24 @@ impl std::ops::Deref for StateShared {
     type Target = Program;
     fn deref(&self) -> &Program {
         &self.program
+    }
+}
+
+/// The program's release of a state made with `supportIndirectCommandBuffers`: each buffer whose
+/// records the GPU may write keeps what it runs (`released_programs.rs`).
+impl Drop for StateShared {
+    fn drop(&mut self) {
+        let Some(id) = self.id.as_ref().filter(|id| id.id().0 != 0) else {
+            return;
+        };
+        let program = &self.program;
+        program
+            .device
+            .shared()
+            .keepers
+            .released(id.id().0, id.serial(), || {
+                KeptProgram::Compute(ComputeProgram(Arc::clone(program)))
+            });
     }
 }
 
@@ -690,7 +709,11 @@ impl ComputePipelineState {
             // command's record can name (`indirect_states`).
             let id = indirect.then(|| {
                 let id = IdHold::take(&device.shared().resource_ids, IdSpace::Pipeline, placement);
-                id.hold(Holder::Pipeline(Weak::clone(state)));
+                id.hold_state(
+                    Holder::Pipeline(Weak::clone(state)),
+                    StateKind::Compute,
+                    identifier.value(),
+                );
                 id
             });
             let program = Program {

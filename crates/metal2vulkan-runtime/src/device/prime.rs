@@ -1089,6 +1089,9 @@ impl Primer<'_> {
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::COMPUTE)];
             let info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
+            let mut support = vk::DescriptorSetLayoutSupport::default();
+            device.get_descriptor_set_layout_support(&info, &mut support);
+            self.made(Call::GetDescriptorSetLayoutSupport);
             let set_layout = device
                 .create_descriptor_set_layout(&info, None)
                 .map_err(vulkan)?;

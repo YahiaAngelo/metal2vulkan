@@ -5,11 +5,14 @@
 //! guest address, an allocation inside another dropped (the outermost wins: a heap over its
 //! sub-buffers), a partially overlapping one trimmed of its overlapping head (host and guest
 //! advancing together), and empty ones dropped, of any count (At most 2¹⁶ entries before, else
-//! `ResidentSetTooLarge`). Each stage that reads a root table gets its own (`stage_root_table`):
+//! `ResidentSetTooLarge`). Indirect command buffers' records (from `RECORDS_ADDRESS_BASE`) are
+//! kept whole however they overlap, one a start: a kernel finds an ID's records only where they
+//! start (`indirect_commands::records_address`). Each stage that reads a root table gets its own (`stage_root_table`):
 //! its `Psb` entries are that stage's slots; the resident set is shared.
 
 use crate::bind::instantiate::{padded, RootTable};
 use crate::bind::state::{BindState, BoundBuffer, ResourceClass};
+use crate::indirect_commands::RECORDS_ADDRESS_BASE;
 
 /// One root-table entry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -27,7 +30,10 @@ pub(crate) struct RootEntry {
 /// The resident set of `all` allocations: sorted by guest address; an allocation inside another one
 /// is dropped (the outermost wins: a heap over its sub-buffers); a partially overlapping one loses
 /// its overlapping head (its host and guest addresses advance together, which is exact when both
-/// ranges view one mapping); empty allocations are dropped.
+/// ranges view one mapping); empty allocations are dropped. Records of indirect command buffers
+/// (from `RECORDS_ADDRESS_BASE`, where no Metal allocation lies) are kept whole, one for each
+/// start (the largest): an ID's records may run past later IDs' starts, and a kernel searches
+/// them only at their start, so each start must stay an entry's.
 pub(crate) fn resident_set(mut all: Vec<RootEntry>) -> Vec<RootEntry> {
     all.retain(|e| e.size > 0);
     all.sort_by(|a, b| a.guest.cmp(&b.guest).then(b.size.cmp(&a.size)));
@@ -35,6 +41,14 @@ pub(crate) fn resident_set(mut all: Vec<RootEntry>) -> Vec<RootEntry> {
     let mut out: Vec<RootEntry> = Vec::with_capacity(all.len());
     for mut e in all {
         if let Some(last) = out.last() {
+            if e.guest >= RECORDS_ADDRESS_BASE {
+                if e.guest == last.guest {
+                    continue;
+                }
+                e.bind_offset = 0;
+                out.push(e);
+                continue;
+            }
             let last_end = end(last);
             if end(&e) <= last_end {
                 continue;
@@ -104,7 +118,8 @@ fn resident_allocations(state: &BindState) -> impl Iterator<Item = (u64, u64, u6
 /// (`BufferBinding::resolve_buffer`); the converse fails only for an address past a gap inside one
 /// padded window, which only allocations whose guest addresses are not 16-aligned leave. Sorting,
 /// then one forward pass per entry over the allocations that start inside its window (the windows
-/// are disjoint), bounds the work by the allocations' count times its logarithm.
+/// are disjoint but for records, which hold few allocations), bounds the work by the allocations'
+/// count times its logarithm.
 pub(crate) fn resident_extents(state: &BindState, resident: &[RootEntry]) -> Vec<u64> {
     let allocations = resident_allocations(state).map(|(_, guest, length)| (guest, length));
     extents_of(allocations, resident)

@@ -206,7 +206,15 @@ pub(crate) enum RenderCall {
         )>,
     ),
     /// `execute_commands_in_buffer_indirect_checked`, deferred, likewise.
-    ExecuteIndirectChecked(Box<(IndirectCommandBuffer, Buffer, u64, SharedCheck)>),
+    ExecuteIndirectChecked(
+        Box<(
+            IndirectCommandBuffer,
+            Buffer,
+            u64,
+            SharedCheck,
+            IndirectCommandCheckNeeds,
+        )>,
+    ),
     ColorResolveTarget(Option<Box<ResolveTarget>>, u32),
     DepthResolveTarget(Option<Box<ResolveTarget>>),
     StencilResolveTarget(Option<Box<ResolveTarget>>),
@@ -915,8 +923,14 @@ pub(super) fn render(
             encoder.execute_commands_in_buffer_checked(icb, range.clone(), check.boxed(), *needs)
         }
         C::ExecuteIndirectChecked(call) => {
-            let (icb, buffer, offset, check) = &**call;
-            encoder.execute_commands_in_buffer_indirect_checked(icb, buffer, *offset, check.boxed())
+            let (icb, buffer, offset, check, needs) = &**call;
+            encoder.execute_commands_in_buffer_indirect_checked(
+                icb,
+                buffer,
+                *offset,
+                check.boxed(),
+                *needs,
+            )
         }
         C::ColorResolveTarget(target, index) => {
             encoder.set_color_resolve_target(target.as_deref().cloned(), *index)

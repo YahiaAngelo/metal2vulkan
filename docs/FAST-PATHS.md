@@ -534,3 +534,11 @@ driver's. Each is open work.
   `mesh_order_mesh` or `mesh_order_solo` ends the process inside lavapipe's compiler ("LLVM ERROR:
   Cannot emit physreg copy instruction"); the validation case `mesh_order_mesh-payload-mesh-draw`
   runs on a GPU only. The construct behind the abort is not isolated yet.
+- **A record the GPU wrote before its ID changed holder, in a buffer the GPU wrote again since.**
+  A record the GPU wrote names the state that held its ID as the GPU last could write the
+  buffer's records (`released_programs.rs`). Where a command buffer wrote the record, another
+  state took its ID, and a later command buffer that may write the buffer completed without
+  rewriting it, the record runs and answers the later holder, where Metal's runs the state its
+  write resolved. No note announces it. The exact form needs the GPU's write to carry its
+  resolution: a word of the record the translated setter fills from a per-dispatch stamp of the
+  device's IDs, which the host step, the getter and the GPU-alone preprocess resolve.

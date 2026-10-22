@@ -5,7 +5,7 @@
 //! indirect-command object. Its handle load (`memory::provenance::object_handle_load`) reads the
 //! member's field, 8 bytes, as data ([`EncodeStrategy::Word`], a `u64`): a command buffer's word is
 //! its resource ID, Metal's `gpuResourceID`, whose records lie at the guest address
-//! `indirect_commands::records_address` of it, `2^63 + id * 2^40`; a pipeline state's word is the
+//! `indirect_commands::records_address` of it, `2^63 + id * 2^31`; a pipeline state's word is the
 //! template's host-registered token. A handle load is admitted only when every use of its value is
 //! an encoder operand of its class ([`plan_objects`]): the command operand of an encoder operation,
 //! or the pipeline operand of `air.set_pipeline_state_{compute,render}_command`. Any other use (an
@@ -13,9 +13,10 @@
 //! (`ArgumentBufferObjects`, `pointer::select`), so no other instruction observes the word.
 //!
 //! **Operations** ([`EncodeStrategy::Command`]). The command word's records address is searched
-//! in the resident set (`dynamic::search`), and the record buffer is accessed through its root
-//! entry, contained: an access through root 0 (an address no resident allocation holds) is counted
-//! under isolation and lands in the sink. Each operation reads the header's capacity, policy bits,
+//! in the resident set for the allocation that starts there (`dynamic::search_start`), and the
+//! record buffer is accessed through its root entry, contained: an access through root 0 (an
+//! address at which no resident allocation starts) is counted under isolation and lands in the
+//! sink. Each operation reads the header's capacity, policy bits,
 //! and binding counts; when the write is valid by the descriptor policy
 //! (`indirect_commands::Policy`) it writes the command's fields, and otherwise it sets the header's
 //! sticky fault flag (a relaxed atomic store of 1) and writes nothing, exactly as the old engine's
@@ -672,9 +673,9 @@ fn k32(fb: &mut FunctionBuilder<'_>, v: u32) -> BResult<SValue> {
     crate::memory::leaf::k32(fb, v)
 }
 
-/// The guest address of the records of the command buffer whose word (its resource ID, a `u64`)
-/// is `word`: `indirect_commands::records_address`, the ID shifted up `RECORDS_ADDRESS_SHIFT`
-/// bits past `RECORDS_ADDRESS_BASE`. No records lie at the null ID's.
+/// The guest address the records of the command buffer whose word (its resource ID, a `u64`) is
+/// `word` start at: `indirect_commands::records_address`, the ID shifted up
+/// `RECORDS_ADDRESS_SHIFT` bits past `RECORDS_ADDRESS_BASE`. No records start at the null ID's.
 fn records(fb: &mut FunctionBuilder<'_>, word: SValue) -> BResult<SValue> {
     let shift = k64(fb, u64::from(RECORDS_ADDRESS_SHIFT))?;
     let at = fb.binary(BinOp::ShiftLeftLogical, word, shift)?;
@@ -743,7 +744,7 @@ fn emit_command<'c>(cx: &mut EmitCx<'c>, fb: &mut FunctionBuilder<'_>, c: &Comma
     } = c.op.policy();
     let word = cx.operand(fb, c.command)?;
     let at = records(fb, word)?;
-    let p = dynamic::search(cx, fb, at)?;
+    let p = dynamic::search_start(cx, fb, at)?;
     let b = dynamic::plain_base(cx, fb, p)?;
     let capacity = header(cx, fb, b, layout::CAPACITY)?;
     let policy = header(cx, fb, b, layout::POLICY)?;
@@ -925,7 +926,7 @@ fn emit_command<'c>(cx: &mut EmitCx<'c>, fb: &mut FunctionBuilder<'_>, c: &Comma
         } => {
             let word = cx.operand(fb, *source)?;
             let at = records(fb, word)?;
-            let p = dynamic::search(cx, fb, at)?;
+            let p = dynamic::search_start(cx, fb, at)?;
             let base = dynamic::plain_base(cx, fb, p)?;
             let source_capacity = header(cx, fb, base, layout::CAPACITY)?;
             let source_policy = header(cx, fb, base, layout::POLICY)?;

@@ -654,9 +654,11 @@ degradations! {
         /// its records may hold, at the commit or as its batch is ready, more than draws of one
         /// primitive type under the encoder's state, or what its check looks for
         /// (`render/executions/gpu.rs`); its notice names the first rule that kept it from the GPU
-        /// alone. A compute execution: with the caller's check
-        /// (`execute_commands_in_buffer_checked`); with its range read from a buffer; of a buffer
-        /// that inherits the encoder's buffers; where its records may name a pipeline state whose
+        /// alone. A compute execution: with a caller's check (`execute_commands_in_buffer_checked`)
+        /// that may see what it looks for (`IndirectCommandCheckNeeds`: a state that may encode
+        /// indirect commands, the encoder's where the buffer inherits it, else one its records may
+        /// name), at the commit or as its batch is ready; with its range read from a buffer; of a
+        /// buffer that inherits the encoder's buffers; where its records may name a pipeline state whose
         /// kernel observes its threadgroup partition or fetches `[[stage_in]]` attributes, or a
         /// state the CPU set that the program released since; and, on a device without
         /// `VK_EXT_device_generated_commands`, where the host step is faster: where its commands
@@ -1256,27 +1258,33 @@ degradations! {
              driver's vkGetDescriptorSetLayoutSupport refuses the layout, so Vulkan's validation \
              layer reports each such layout (VUID-vkCreateDescriptorSetLayout-support-09582)";
         /// An indirect command naming the ID of a pipeline state the program released is
-        /// executed where the runtime cannot run what Metal runs (`indirect_command_buffer.rs`). A
-        /// command holds the program of the state the CPU set on it, and runs it while its record
-        /// names the state's ID, whoever took the ID since, as Metal's command the CPU encoded
-        /// does: that is announced nowhere. Announced: a record naming another ID (the GPU wrote
-        /// it) that no state took since the program released a state of the command's kind holding
-        /// it, whose program Metal runs and the runtime does not hold, so the command runs nothing;
-        /// and in a host step of records the GPU may write, a record naming the ID of the state the
-        /// CPU set, which the program released and which was not the ID's last holder, as the step
-        /// cannot tell the GPU's write of that ID from the CPU's, where Metal runs the ID's holder
-        /// since for the GPU's. A state of the other kind holding the ID runs nothing, as on Metal,
-        /// unannounced. Announced by the execution alone, where the runtime records it: in `commit`
-        /// of its command buffer, on the committing thread, for one recorded from the CPU's
-        /// records; in the host step, on the scheduler's thread, for one recorded there (records
-        /// the GPU may write, a range a buffer holds, or a render pass whose pipelines were still
-        /// being made at the commit). Reading the commands (`IndirectCommandBuffer::commands`)
-        /// announces nothing.
+        /// executed where the runtime cannot run what Metal runs (`indirect_command_buffer.rs`,
+        /// `released_programs.rs`). A command holds the program of the state the CPU set on it,
+        /// and runs it while its record names the state's ID, whoever took the ID since, as
+        /// Metal's command the CPU encoded does; a record the GPU wrote runs the state that held
+        /// the ID as the GPU last could write the buffer's records, released since or not, as
+        /// Metal's GPU write resolves the ID to the state that took it last and its record runs
+        /// that state after: those are announced nowhere. Announced: a record the GPU wrote whose
+        /// ID's holder then was a state of the command's kind the program released, whose program
+        /// the buffer does not keep (released before any command buffer that may write the
+        /// buffer's records was encoded, or past the ID's last four holders), which Metal runs, so
+        /// the command runs nothing; and in a host step of records the GPU may write, a record
+        /// naming the ID of the state the CPU set, which the program released, where the GPU could
+        /// write the records while another state held the ID, as the step cannot tell the GPU's
+        /// write of that ID from the CPU's, where Metal runs the other state for the GPU's. A
+        /// state of the other kind holding the ID runs nothing, as on Metal, unannounced.
+        /// Announced by the execution alone, where the runtime records it: in `commit` of its
+        /// command buffer, on the committing thread, for one recorded from the CPU's records; in
+        /// the host step, on the scheduler's thread, for one recorded there (records the GPU may
+        /// write, a range a buffer holds, or a render pass whose pipelines were still being made
+        /// at the commit). Reading the commands (`IndirectCommandBuffer::commands`) announces
+        /// nothing.
         ReleasedCommandState = "released-command-state", Precision,
-            "a command naming another ID than the state set on it runs nothing, where Metal runs \
-             the released state's program; one naming that state's ID runs its program, as \
-             Metal runs a command the CPU encoded, where for a record the GPU wrote Metal runs \
-             the ID's holder since (nothing, for a state of the other kind)";
+            "a command whose record the GPU wrote naming a state released before its buffer \
+             could be written runs nothing, where Metal runs that state's program; one naming the \
+             ID of the state set on it runs its program, as Metal runs a command the CPU encoded, \
+             where for a record the GPU wrote while another state held the ID Metal runs that \
+             state (nothing, for a state of the other kind)";
         /// A pipeline stage's filtered sample of a texture slot bound to a two-plane YCbCr
         /// texture does not take Metal's exact filter of the format: the stage records
         /// `PrecisionNote::HalfSampleFilter` or `FloatSampleFilter` under the slot's bound format
@@ -1509,29 +1517,21 @@ degradations! {
         /// to be: a pipeline state's made with `supportIndirectCommandBuffers`
         /// (`ComputePipelineState::unique_identifier`, `RenderPipelineState::unique_identifier`,
         /// an indirect command's state identifier other than 0), or an indirect command buffer's
-        /// made after its device opened a command encoder
-        /// (`IndirectCommandBuffer::unique_identifier`). Metal's is an address of its own
-        /// allocation: a state's follows how the process was started (an M3 Max's first such
-        /// compute state answered `0x1000000280` from a test binary, `0x100` more from a shell),
-        /// the states' functions and what the process made; a buffer's lies past the ranges
-        /// Metal's own encoders took. The runtime's keeps the relations a program can rely on
-        /// (a compute state's from one step into Metal's range, no workload's first). A buffer made
-        /// before any encoder answers Metal's number, quietly.
+        /// made after a command buffer of its device that encoded a render encoder was scheduled,
+        /// or after a resource state encoder opened (`IndirectCommandBuffer::unique_identifier`).
+        /// Metal's is an address of its own allocation: a state's follows how the process was
+        /// started (an M3 Max's first such compute state answered `0x1000000280` from a test
+        /// binary, `0x100` more from a shell), the states' functions and what the process made; a
+        /// buffer's lies past the ranges Metal's own encoders took, a render pass's run by its
+        /// targets' sizes and what the device drew before. The runtime's keeps the relations a
+        /// program can rely on (a compute state's from one step into Metal's range, no workload's
+        /// first). A buffer made before answers Metal's number, quietly, past the pieces Metal's
+        /// blit, compute and render encoders took.
         UnmeasuredUniqueIdentifier = "unmeasured-unique-identifier", Precision,
             "the identifier is unique and fixed for its holder's life, and a released one is \
              reused as Metal reuses it, but it is not the number Metal answers there, which \
              follows how the process was started, what it made and Metal's own encoders' \
              allocations";
-        /// A program set a buffer at a slot past 31, or a threadgroup memory length at an index
-        /// past 30, of a command of an indirect command buffer whose descriptor counts more:
-        /// Metal's validation stops such a descriptor, and plain Metal keeps the value for its
-        /// private getters alone, as no function binds past index 30. The runtime's records hold
-        /// 32 buffers of each stage and 31 lengths a command, so the value is not kept: the
-        /// read-back answers a fresh command's value there.
-        IndirectValuePastRecord = "indirect-value-past-record", Precision,
-            "the command's read-back (Metal's private getters) answers a fresh command's value \
-             for a buffer slot past 31 or a threadgroup length past 30, where Metal answers the \
-             value set; no command runs otherwise";
         /// A draw or dispatch that binds, at a texture slot, a texture whose format's numeric
         /// class (float, signed or unsigned integer) is not the class the function declares there
         /// and that its plan has no exact answer for (`PlanDiagnostic::CrossClassNeutral`): a

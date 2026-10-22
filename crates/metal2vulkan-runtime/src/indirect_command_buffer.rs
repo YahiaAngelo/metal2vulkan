@@ -22,8 +22,10 @@
 //!   and tessellation factor buffers so; and (probes) an indexed patch draw, its control-point
 //!   index buffer so too; and (a Metal probe) its object and mesh buffers, a mesh draw of
 //!   threadgroups or threads, and its barrier. What Metal's validation stops, or ends the process
-//!   for, is refused `Invalid` ([`Problem::IndirectCommandBuffer`]). A command keeps the pipeline
-//!   state set on it alive while its record names it.
+//!   for, is refused `Invalid` ([`Problem::IndirectCommandBuffer`]). A command names the pipeline
+//!   state set on it without holding it, as Metal's keeps no reference: the program's last
+//!   release of the state gives its ID back while the record still names it. The command keeps
+//!   what the state runs, and runs that while its record names the ID, as Metal's does.
 //! - **Render states a command does not inherit** (an M4 with macOS 27.0.1, each case plain and
 //!   under Metal's validation). macOS 26 lets a descriptor leave a render command's depth/stencil
 //!   state, depth bias, depth clip mode, cull mode, front-facing winding and triangle fill mode to
@@ -48,10 +50,13 @@
 //!   encoder's viewport, scissor, cull mode and winding); the scissor rectangle and viewport counts
 //!   and `allowOverrideRenderStates` are kept, and change nothing a command draws.
 //! - **Read-back.** [`IndirectCommandBuffer::commands`] decodes a range of records into typed
-//!   commands, a runtime extension standing for Metal's private getters.
+//!   commands, and each command's getters ([`IndirectComputeCommand::command_type`],
+//!   [`IndirectRenderCommand::draw`] and the rest) read one field of its record: runtime
+//!   extensions standing for Metal's private getters.
 //! - **Execution.** A compute encoder's `execute_commands_in_buffer` runs a range of the records
-//!   as they stand at commit ([`indirect_execute`](super::indirect_execute)); it refuses a buffer
-//!   of render commands, which a render encoder's runs (`render/executions.rs`).
+//!   as they stand when the execution's batch is submitted, or for records the GPU may write, once
+//!   the work before it completed ([`indirect_execute`](super::indirect_execute)); it refuses a
+//!   buffer of render commands, which a render encoder's runs (`render/executions.rs`).
 //! - **Creation.** The records of every command must fit one buffer of the device's
 //!   `max_buffer_length`; a larger buffer is refused, naming the limit. The record format holds
 //!   every render command type, mesh draws among them, whose object and mesh buffers a command sets
@@ -71,8 +76,9 @@ use super::pipeline::{
     ComputePipelineState, ComputeProgram, RenderPipelineState, RenderProgram, RenderStateKind,
     WeakComputePipelineState, WeakRenderPipelineState,
 };
+use super::released_programs::{KeptProgram, KeptPrograms};
 use super::render::{index_size, DrawProblem};
-use super::resource_ids::{records_placement, IdPlacement, ResourceId, StateKind};
+use super::resource_ids::{records_placement, HolderThen, IdPlacement, ResourceId, StateKind};
 use super::unique_identifier::{degrade_identifier, state_value_degradation, UniqueIdentifier};
 use super::values::{Origin, Region, Size};
 use super::written_commands::{Named, WrittenCommands};
@@ -82,8 +88,9 @@ use super::{
 };
 use metal2vulkan::bind::indirect_commands::{
     Action, BufferBinding, BufferStage, CommandBuffer, CommandBufferError, CommandDescriptor,
-    CommandRecord, ComputeDispatch, Inheritance, RenderDraws, StateSource, BINDING_COUNT,
-    COMMAND_BUFFER_HEADER_BYTES, COMMAND_BYTES, THREADGROUP_BUFFER_ARGUMENT_COUNT,
+    CommandRecord, ComputeDispatch, Inheritance, RecordError, RecordField, RecordView, RenderDraws,
+    StateSource, BINDING_COUNT, COMMAND_BUFFER_HEADER_BYTES, COMMAND_BYTES,
+    THREADGROUP_BUFFER_ARGUMENT_COUNT,
 };
 use metal2vulkan::bind::ReplayFaults;
 use metal2vulkan::metal::{
@@ -91,10 +98,10 @@ use metal2vulkan::metal::{
     Winding,
 };
 use metal2vulkan::pipeline::CommandWrites;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 use std::ops::Range;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 /// The threadgroup lengths a fresh descriptor binds, as Metal's answers.
@@ -490,8 +497,7 @@ impl Device {
     /// at 16384 or more is refused `Invalid` (`Problem::ResourceId`): Metal writes past its table
     /// of IDs there. Refused `NotImplemented`: records past one buffer of the device's
     /// `max_buffer_length` (`IndirectCommandBufferPastMaxBufferLength`). The device's memory can
-    /// refuse it too (`OutOfMemory`), and so can the IDs: a buffer whose own ID would be 2^23 or
-    /// more has no records address.
+    /// refuse it too (`OutOfMemory`), and so can the IDs, once every ID below 2^31 is held.
     pub fn new_indirect_command_buffer(
         &self,
         descriptor: &IndirectCommandBufferDescriptor,
@@ -551,9 +557,9 @@ impl Device {
             Place::Records(held.id),
         )?;
         // The slots past the record's, of their own buffer, as long as Metal's storage grows.
-        let overflow = match Overflow::past(descriptor) {
-            Some(past) => {
-                let bytes = u64::from(size) * Overflow::command_bytes(&past);
+        let overflow = match OverflowLayout::of(descriptor) {
+            Some(layout) => {
+                let bytes = layout.bytes(size);
                 if bytes > max_buffer_length {
                     return Err(past_length());
                 }
@@ -565,7 +571,12 @@ impl Device {
                     false,
                     AddressPlacement::Outside,
                 )?;
-                Some(Overflow { storage, past })
+                Some(Overflow {
+                    storage,
+                    past: layout.past,
+                    lengths: layout.lengths,
+                    commands: size,
+                })
             }
             None => None,
         };
@@ -583,9 +594,14 @@ impl Device {
             pipelines: Mutex::new(vec![None; size as usize]),
             gpu_written: AtomicBool::new(false),
             unforeseen: Mutex::new(Vec::new()),
+            cpu_writes: AtomicU64::new(0),
             barriers: AtomicBool::new(false),
             overflow,
+            tail: Mutex::default(),
+            gpu_writes: Arc::default(),
             written: Arc::default(),
+            kept: Arc::default(),
+            keeping: AtomicBool::new(false),
         }));
         icb.initialize()?;
         self.take_device_sampler();
@@ -599,11 +615,12 @@ impl Device {
 /// no reference: the program's last release of the state gives its ID back while the command
 /// still names it (the consumer's G323). It holds what the state runs, its program: while the
 /// record names the ID the command runs that program, whoever holds the ID since, as Metal's
-/// command the CPU encoded runs the released state's.
+/// command the CPU encoded runs the released state's. With it, what the state may do to indirect
+/// command buffers (`Named`), read as it was set.
 #[derive(Clone)]
 enum CommandState {
-    Compute(WeakComputePipelineState, ComputeProgram, IdStamp),
-    Render(WeakRenderPipelineState, RenderProgram, IdStamp),
+    Compute(WeakComputePipelineState, ComputeProgram, IdStamp, Named),
+    Render(WeakRenderPipelineState, RenderProgram, IdStamp, Named),
 }
 
 /// The ID a state had when the CPU set it on a command, and the serial of its hold of the ID,
@@ -620,7 +637,7 @@ impl CommandState {
     /// A compute command's state: the state while it lives, and its stamp.
     fn compute(&self) -> Option<(Option<ComputePipelineState>, IdStamp)> {
         match self {
-            CommandState::Compute(named, _, stamp) => Some((named.upgrade(), *stamp)),
+            CommandState::Compute(named, _, stamp, _) => Some((named.upgrade(), *stamp)),
             CommandState::Render(..) => None,
         }
     }
@@ -628,7 +645,7 @@ impl CommandState {
     /// A render command's state, as `compute` a compute command's.
     fn render(&self) -> Option<(Option<RenderPipelineState>, IdStamp)> {
         match self {
-            CommandState::Render(named, _, stamp) => Some((named.upgrade(), *stamp)),
+            CommandState::Render(named, _, stamp, _) => Some((named.upgrade(), *stamp)),
             CommandState::Compute(..) => None,
         }
     }
@@ -636,20 +653,7 @@ impl CommandState {
     /// What the state may do to indirect command buffers, of the program it runs.
     fn named(&self) -> Named {
         match self {
-            CommandState::Compute(_, program, _) => {
-                let state = program.state();
-                Named {
-                    encodes: state.can_encode_indirect_commands(),
-                    writes: state.indirect_command_writes(),
-                }
-            }
-            CommandState::Render(_, program, _) => {
-                let state = program.state();
-                Named {
-                    encodes: state.can_encode_indirect_commands(),
-                    writes: state.indirect_command_writes(),
-                }
-            }
+            CommandState::Compute(.., named) | CommandState::Render(.., named) => *named,
         }
     }
 
@@ -665,7 +669,7 @@ impl CommandState {
     /// A compute command's state's program, as a state of no ID (`ComputeProgram::state`).
     fn compute_program(&self) -> Option<ComputePipelineState> {
         match self {
-            CommandState::Compute(_, program, _) => Some(program.state()),
+            CommandState::Compute(_, program, ..) => Some(program.state()),
             CommandState::Render(..) => None,
         }
     }
@@ -673,9 +677,24 @@ impl CommandState {
     /// A render command's state's program, as a state of no ID (`RenderProgram::state`).
     fn render_program(&self) -> Option<RenderPipelineState> {
         match self {
-            CommandState::Render(_, program, _) => Some(program.state()),
+            CommandState::Render(_, program, ..) => Some(program.state()),
             CommandState::Compute(..) => None,
         }
+    }
+
+    /// Its ID's hold and program, where the program released the state (`released_programs.rs`).
+    fn kept(&self) -> Option<(IdStamp, KeptProgram)> {
+        if !self.released() {
+            return None;
+        }
+        Some(match self {
+            CommandState::Compute(_, program, stamp, _) => {
+                (*stamp, KeptProgram::Compute(program.clone()))
+            }
+            CommandState::Render(_, program, stamp, _) => {
+                (*stamp, KeptProgram::Render(program.clone()))
+            }
+        })
     }
 }
 
@@ -688,6 +707,8 @@ struct Of<S> {
     own: fn(&CommandState) -> Option<(Option<S>, IdStamp)>,
     /// Its program, as a state (`CommandState::compute_program`).
     program: fn(&CommandState) -> Option<S>,
+    /// A kept program of the kind, as a state (`KeptProgram::compute`).
+    kept: fn(&KeptProgram) -> Option<S>,
     /// A state's ID.
     id: fn(&S) -> u64,
     /// A state's `uniqueIdentifier`.
@@ -699,6 +720,7 @@ const COMPUTE: Of<ComputePipelineState> = Of {
     kind: StateKind::Compute,
     own: CommandState::compute,
     program: CommandState::compute_program,
+    kept: KeptProgram::compute,
     id: compute_id,
     identifier: ComputePipelineState::identifier_value,
 };
@@ -708,6 +730,7 @@ const RENDER: Of<RenderPipelineState> = Of {
     kind: StateKind::Render,
     own: CommandState::render,
     program: CommandState::render_program,
+    kept: KeptProgram::render,
     id: render_id,
     identifier: RenderPipelineState::identifier_value,
 };
@@ -739,14 +762,15 @@ pub(super) enum Reader {
 /// program released.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Unmatched {
-    /// The record names another ID than the state the CPU set (the GPU wrote it), which no state
-    /// holds since a state of the command's kind the program released held it: Metal runs that
-    /// state's program, which the runtime does not hold, so the command runs nothing.
+    /// The record names another ID than the state the CPU set (the GPU wrote it), whose holder
+    /// as the GPU last could write it was a state of the command's kind the program released
+    /// since, whose program the buffer does not keep (`released_programs.rs`): Metal runs that
+    /// state's program, so the command runs nothing.
     Unrun,
     /// The record names the ID of the state the CPU set, which the program released, and the
-    /// GPU may have written it: the runtime runs that state's program, as Metal runs a command
-    /// the CPU encoded, while another state held the ID since, which Metal runs for a record the
-    /// GPU wrote (nothing, for a state of the other kind or one released too).
+    /// GPU may have written it while another state held the ID: the runtime runs that state's
+    /// program, as Metal runs a command the CPU encoded, where Metal runs the other state for a
+    /// record the GPU wrote (nothing, for a state of the other kind).
     Unsure,
 }
 
@@ -929,28 +953,74 @@ struct IcbShared {
     /// The executions `commit` recorded from the CPU's records before the flag was set, held
     /// weakly until it is (`watch`, `written_by_gpu`).
     unforeseen: Mutex<Vec<Weak<Unforeseen>>>,
+    /// The CPU's writes of the records and of the slots past them so far, counted
+    /// ([`cpu_writes`](IndirectCommandBuffer::cpu_writes)). Each adds under `pipelines`, after it
+    /// wrote.
+    cpu_writes: AtomicU64,
     /// The CPU set a render command's barrier: an execution's render pass instance may split at
     /// it (`render/executions.rs`), for good.
     barriers: AtomicBool,
-    /// The buffer slots past the record's, where the descriptor counts more ([`Overflow`]).
+    /// The buffer slots past the record's, where the descriptor counts more, and a compute
+    /// buffer's threadgroup lengths 31 to 37 ([`Overflow`]).
     overflow: Option<Overflow>,
+    /// The threadgroup lengths set past the last command's 38 ([`LENGTH_STRIDE`]), by their
+    /// place past them, none 0. Metal keeps them in its storage's slack for its getter alone (an
+    /// M3 Max, 3 commands: the last command's lengths at 100, 300 and 1000 read back as set,
+    /// changing no other command's state); no command's copy or reset reaches them. Past about
+    /// 4000 places its setter ends the process (`SIGSEGV`, `SIGBUS`); the runtime keeps them all.
+    tail: Mutex<BTreeMap<u64, u32>>,
+    /// The command buffers that may write its records on the GPU ([`GpuWrite`]): how many have
+    /// not yet completed, and the stamp of the last one's completion.
+    gpu_writes: Arc<Mutex<GpuWrites>>,
     /// What its records may hold, from every route that writes them (`written_commands.rs`).
     written: Arc<WrittenCommands>,
+    /// The programs of the released pipeline states its records the GPU wrote may name, kept
+    /// from the first command buffer that may write them (`released_programs.rs`).
+    kept: Arc<Mutex<KeptPrograms>>,
+    /// The device's keepers list `kept` (`Keepers::add`).
+    keeping: AtomicBool,
 }
 
 /// The buffer slots of each command past the 32 of a stage its record holds, below the
-/// descriptor's count of the stage, in a host-visible buffer of their own outside the Metal
-/// address space: 16 bytes a slot, the address word and the stride word as a record's slot holds
-/// them (both 0 where none is set), each command's after the one before, its stages in
-/// [`OVERFLOW_STAGES`]' order. Metal keeps such a slot for its getters alone (no function binds
-/// past index 30), its storage growing with the count; its getters answer every slot below the
-/// count, its GPU copy carries them, and its resets clear them.
+/// descriptor's count of the stage, and a compute command's threadgroup lengths 31 to 37, past
+/// the 31 its record holds, in a host-visible buffer of their own outside the Metal address
+/// space. A command's block holds its buffer slots, 16 bytes a slot, the address word and the
+/// stride word as a record's slot holds them (both 0 where none is set), its stages in
+/// [`OVERFLOW_STAGES`]' order, then, in a buffer of compute commands, its lengths 31 to 37
+/// ([`LENGTHS_BYTES`]); each command's block follows the one before. Metal keeps such a slot or
+/// length for its getters alone (no function binds past index 30), its storage growing with the
+/// buffer count; its getters answer every slot below the count and every length, its GPU copy
+/// carries them, and its resets clear them.
 pub(super) struct Overflow {
     /// Made zeroed.
     storage: Buffer,
     /// The slots past the record's of each of [`OVERFLOW_STAGES`].
     past: [u32; 5],
+    /// Whether each command's block holds its threadgroup lengths 31 to 37: the buffer holds
+    /// compute commands.
+    lengths: bool,
+    /// The commands whose blocks it holds: the buffer's size.
+    commands: u32,
 }
+
+/// What [`Overflow`] holds of each command, of a descriptor: the slots past the record's of
+/// each stage, and whether it holds the threadgroup lengths 31 to 37.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct OverflowLayout {
+    past: [u32; 5],
+    lengths: bool,
+}
+
+/// How many threadgroup lengths Metal keeps a compute command, at `command * 38 + index` of one
+/// array of the buffer's, whatever the descriptor's count (an M3 Max, macOS 27.0.1, counts of 8,
+/// 31, 32, 40, 64 and 100: command 1's length set at 38 is command 2's at 0, at 50 command 2's
+/// at 12, and command 0's getter at 68 answers command 1's at 30). Neither the setter nor the
+/// getter checks the index against 38 or against the count; both take its low 32 bits.
+const LENGTH_STRIDE: u32 = 38;
+
+/// The bytes of a command's threadgroup lengths 31 to 37 in its [`Overflow`] block: 4 a length,
+/// padded to 8 bytes.
+const LENGTHS_BYTES: u64 = 32;
 
 /// The stages whose slots [`Overflow`] holds, in its order.
 const OVERFLOW_STAGES: [BufferStage; 5] = [
@@ -964,10 +1034,10 @@ const OVERFLOW_STAGES: [BufferStage; 5] = [
 /// The bytes of one buffer slot: the address word and the stride word.
 const SLOT_BYTES: u64 = 16;
 
-impl Overflow {
-    /// The slots past the record's of each stage `descriptor` counts, `None` where it counts no
-    /// more than a record holds of any.
-    fn past(descriptor: &IndirectCommandBufferDescriptor) -> Option<[u32; 5]> {
+impl OverflowLayout {
+    /// What `descriptor`'s commands hold past their records, `None` where it counts no more than
+    /// a record holds of any stage and holds no compute command.
+    fn of(descriptor: &IndirectCommandBufferDescriptor) -> Option<OverflowLayout> {
         let counts = [
             descriptor.max_kernel_buffer_bind_count,
             descriptor.max_vertex_buffer_bind_count,
@@ -976,18 +1046,50 @@ impl Overflow {
             descriptor.max_mesh_buffer_bind_count,
         ];
         let past = counts.map(|count| count.saturating_sub(RECORD_BUFFERS));
-        past.iter().any(|&slots| slots > 0).then_some(past)
+        // Any compute command may hold a length past its record: Metal's setter keeps one at
+        // any index, whatever the count.
+        let lengths = descriptor.command_types.intersects(COMPUTE_TYPES);
+        (lengths || past.iter().any(|&slots| slots > 0)).then_some(OverflowLayout { past, lengths })
     }
 
-    /// The bytes of one command's slots, of `past`.
-    fn command_bytes(past: &[u32; 5]) -> u64 {
-        past.iter().map(|&slots| u64::from(slots)).sum::<u64>() * SLOT_BYTES
+    /// The bytes of one command's buffer slots.
+    fn slot_bytes(&self) -> u64 {
+        self.past.iter().map(|&slots| u64::from(slots)).sum::<u64>() * SLOT_BYTES
     }
 
-    /// The bytes of commands `range`'s slots.
+    /// The bytes of one command's block: its buffer slots, then its lengths 31 to 37.
+    fn command_bytes(&self) -> u64 {
+        self.slot_bytes() + if self.lengths { LENGTHS_BYTES } else { 0 }
+    }
+
+    /// The bytes an overflow of `commands` commands holds.
+    fn bytes(&self, commands: u32) -> u64 {
+        u64::from(commands) * self.command_bytes()
+    }
+}
+
+impl Overflow {
+    /// Its layout.
+    fn layout(&self) -> OverflowLayout {
+        OverflowLayout {
+            past: self.past,
+            lengths: self.lengths,
+        }
+    }
+
+    /// The bytes of commands `range`'s blocks.
     pub(super) fn bytes(&self, range: Range<u32>) -> Range<u64> {
-        let each = Self::command_bytes(&self.past);
+        let each = self.layout().command_bytes();
         u64::from(range.start) * each..u64::from(range.end) * each
+    }
+
+    /// The offset of threadgroup length `slot` (31 to 37) of command `index`, `None` where the
+    /// blocks hold no lengths or `slot` lies past them.
+    fn length_at(&self, index: u32, slot: u32) -> Option<u64> {
+        let past = slot.checked_sub(THREADGROUP_BUFFER_ARGUMENT_COUNT)?;
+        (self.lengths && index < self.commands && slot < LENGTH_STRIDE).then(|| {
+            self.bytes(index..index).start + self.layout().slot_bytes() + u64::from(past) * 4
+        })
     }
 
     /// The offset of slot `slot` (at or past the record's) of `stage` of command `index`, `None`
@@ -1020,6 +1122,12 @@ impl Overflow {
             source += u64::from(held) * SLOT_BYTES;
             destination += u64::from(taken) * SLOT_BYTES;
         }
+        // The threadgroup lengths 31 to 37, as Metal's copy carries a command's 38.
+        match (self.lengths, into.lengths) {
+            (true, true) => runs.copies.push((source, destination, LENGTHS_BYTES)),
+            (false, true) => runs.clears.push((destination, LENGTHS_BYTES)),
+            _ => {}
+        }
         runs
     }
 
@@ -1028,10 +1136,47 @@ impl Overflow {
         &self.storage
     }
 
-    /// Whether `other` lays its slots out as this one does.
+    /// Whether `other` lays its commands' blocks out as this one does.
     pub(super) fn same_layout(&self, other: &Overflow) -> bool {
-        self.past == other.past
+        self.past == other.past && self.lengths == other.lengths
     }
+}
+
+/// The command buffers that may write a buffer's records on the GPU (`IcbShared::gpu_writes`).
+#[derive(Debug, Default)]
+struct GpuWrites {
+    /// Those not yet completed.
+    pending: u32,
+    /// The device's ID stamp (`ResourceIds::stamp`) as the last one completed.
+    end: u64,
+}
+
+/// A command buffer's note of a buffer whose records its work may write on the GPU (made
+/// resident for writing, or the destination of a blit's copy or reset of commands), from the
+/// encoding call until the command buffer completes (an encoder's retained object): its drop
+/// stamps the buffer's [`GpuWrites`]. It holds the buffer's writes alone, not the buffer, whose
+/// ID a blit's command does not hold, as Metal's does not.
+pub(super) struct GpuWrite {
+    device: Device,
+    writes: Arc<Mutex<GpuWrites>>,
+}
+
+impl Drop for GpuWrite {
+    fn drop(&mut self) {
+        let stamp = lock(&self.device.shared().resource_ids).stamp();
+        let mut writes = lock(&self.writes);
+        writes.pending = writes.pending.saturating_sub(1);
+        writes.end = writes.end.max(stamp);
+    }
+}
+
+/// Where a threadgroup length is kept (`IndirectCommandBuffer::length_place`): command and
+/// index of a record, an offset of the [`Overflow`], or a place past the last command's lengths
+/// (`IcbShared::tail`).
+enum LengthPlace {
+    Record(u32, u32),
+    Overflow(u64),
+    Tail(u64),
 }
 
 /// What a GPU copy of commands does to the destination's [`Overflow`]: the runs it copies from
@@ -1098,8 +1243,8 @@ impl IndirectCommandBuffer {
             .map_err(|_| internal("an indirect command buffer's header was refused"))
     }
 
-    /// The record of command `index` (below the size).
-    fn record(&self, index: u32) -> Result<CommandRecord, Error> {
+    /// The bytes of command `index`'s record (below the size), as they are now.
+    fn record_now(&self, index: u32) -> Result<[u8; COMMAND_BYTES], Error> {
         let mut bytes = [0; COMMAND_BYTES];
         // SAFETY: the record of a command below the size lies inside the mapped storage. A GPU
         // write to it meanwhile is the program's race, as on Metal.
@@ -1110,8 +1255,26 @@ impl IndirectCommandBuffer {
                 COMMAND_BYTES,
             );
         }
-        CommandRecord::decode(&bytes)
-            .map_err(|_| internal("an indirect command's record does not decode"))
+        Ok(bytes)
+    }
+
+    /// The record of command `index` (below the size).
+    fn record(&self, index: u32) -> Result<CommandRecord, Error> {
+        CommandRecord::decode(&self.record_now(index)?).map_err(|_| undecodable())
+    }
+
+    /// `read` of command `index`'s record (below the size) as it is now, field by field
+    /// (`RecordView`), as [`commands`](Self::commands) decodes it: one getter's read, counted
+    /// as a record read.
+    fn read_record<T>(
+        &self,
+        index: u32,
+        read: impl FnOnce(&RecordView<'_>) -> T,
+    ) -> Result<T, Error> {
+        self.device().shared().counts.indirect_records_read(1);
+        let bytes = self.record_now(index)?;
+        let view = RecordView::new(&bytes).map_err(|_| undecodable())?;
+        Ok(read(&view))
     }
 
     /// Write `record` as command `index` (below the size). The caller holds `pipelines`.
@@ -1128,7 +1291,24 @@ impl IndirectCommandBuffer {
                 COMMAND_BYTES,
             );
         }
+        self.wrote();
         Ok(())
+    }
+
+    /// Count a write of the CPU's ([`cpu_writes`](Self::cpu_writes)), made. The caller holds
+    /// `pipelines`.
+    fn wrote(&self) {
+        self.0.cpu_writes.fetch_add(1, Ordering::Release);
+    }
+
+    /// The CPU's writes of the records, and of the slots past them, so far: setters, resets and
+    /// the CPU's range resets. An execution `commit` recorded from the CPU's records reads it
+    /// before it reads them; where it moved by the time the execution's batch is ready to submit,
+    /// a host step records the execution again from the records as they stand then
+    /// (`indirect_execute.rs`, `render/executions.rs`), as Metal's execution reads them as it
+    /// runs.
+    pub(super) fn cpu_writes(&self) -> u64 {
+        self.0.cpu_writes.load(Ordering::Acquire)
     }
 
     /// Reset commands `range` (inside the size).
@@ -1193,10 +1373,13 @@ impl IndirectCommandBuffer {
     /// `uniqueIdentifier`, Apple's private property: 2^36 plus the buffer's place in Metal's
     /// range for indirect command buffers, as Metal answers it: the lowest gap from `0x18000` that
     /// holds its [`allocated_size`](Self::allocated_size) and one 16-KiB page more, at a multiple
-    /// of 32 KiB, free again once the buffer is gone. Metal's own encoders take ranges there too,
-    /// which the runtime does not, so after a blit encoder that copies, resets or fills, or a
-    /// render encoder, Metal's answer lies above the runtime's: a buffer made after its device
-    /// opened any command encoder announces
+    /// of 32 KiB, free again once the buffer is gone and no command buffer that executes it may
+    /// run. Metal's own encoders take ranges there too, which the runtime takes as an M3 Max's
+    /// do (macOS 27.0.1): a blit encoder's and a render encoder's at their opening, a dispatch's
+    /// or a blit command's as its command buffer is scheduled. A render pass's run takes more, by
+    /// its targets' sizes and what the device drew before, which the runtime does not model: a
+    /// buffer made after a command buffer that encoded a render encoder was scheduled, or after a
+    /// resource state encoder opened, announces
     /// [`Degradation::UnmeasuredUniqueIdentifier`](crate::Degradation::UnmeasuredUniqueIdentifier)
     /// once a device where this answers.
     pub fn unique_identifier(&self) -> u64 {
@@ -1302,32 +1485,52 @@ impl IndirectCommandBuffer {
                 && types.intersects(COMPUTE_TYPES))
     }
 
-    /// Change command `index`'s record (below the size) by `edit`, which may refuse, with the
-    /// pipeline state the CPU set on it.
-    fn edit(
-        &self,
-        index: u32,
-        edit: impl FnOnce(&mut CommandRecord, &mut Option<CommandState>) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+    /// Write `field` into command `index`'s record (below the size), and where the field names a
+    /// pipeline state, `set` as the state the CPU set on it: the field's words alone, as Metal's
+    /// setter writes its field, the rest of the record as the GPU and the CPU left it
+    /// (`CommandRecord::write_field`); then what the record holds joins what its records may.
+    fn edit(&self, index: u32, field: RecordField, set: Option<CommandState>) -> Result<(), Error> {
         let mut pipelines = lock(&self.0.pipelines);
-        let mut record = self.record(index)?;
-        edit(&mut record, &mut pipelines[index as usize])?;
-        self.write(index, &record)?;
-        let named = pipelines[index as usize].as_ref().map(CommandState::named);
-        self.0.written.add_record(&record, named);
+        let mut bytes = self.record_now(index)?;
+        let written =
+            CommandRecord::write_field(&mut bytes, field).map_err(|error| match error {
+                RecordError::Length { .. }
+                | RecordError::Action { .. }
+                | RecordError::Barrier { .. }
+                | RecordError::PipelineState => undecodable(),
+                _ => internal("an indirect command's record does not take a setter's field"),
+            })?;
+        // SAFETY: as `record_now`'s; `written` lies inside the record, and writes are one at a
+        // time (`pipelines`).
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes[written.clone()].as_ptr(),
+                self.bytes()?.add(record_offset(index) + written.start),
+                written.len(),
+            );
+        }
+        self.wrote();
+        let pipeline = &mut pipelines[index as usize];
+        if let Some(set) = set {
+            *pipeline = Some(set);
+        }
+        let named = pipeline.as_ref().map(CommandState::named);
+        let writes = RecordView::new(&bytes).map_err(|_| undecodable())?.writes();
+        self.0.written.add_record(writes, named);
         Ok(())
     }
 
-    /// Reset command `index` (below the size) by `edit`, as [`edit`](Self::edit) changes it,
-    /// and clear its slots past the record's, as Metal's reset clears every slot.
+    /// Reset command `index` (below the size) by `reset`, which changes its whole record and the
+    /// pipeline state the CPU set on it, and clear its slots past the record's, as Metal's reset
+    /// clears every slot.
     fn reset_command(
         &self,
         index: u32,
-        edit: impl FnOnce(&mut CommandRecord, &mut Option<CommandState>) -> Result<(), Error>,
+        reset: impl FnOnce(&mut CommandRecord, &mut Option<CommandState>),
     ) -> Result<(), Error> {
         let mut pipelines = lock(&self.0.pipelines);
         let mut record = self.record(index)?;
-        edit(&mut record, &mut pipelines[index as usize])?;
+        reset(&mut record, &mut pipelines[index as usize]);
         self.write(index, &record)?;
         self.clear_overflow(index..index + 1)
     }
@@ -1376,28 +1579,85 @@ impl IndirectCommandBuffer {
             let _writing = lock(&self.0.pipelines);
             return self.write_overflow(index, stage, slot, Some(binding));
         }
-        self.edit(index, |record, _| {
-            record.bindings.buffers_mut(stage)[slot as usize] = Some(binding);
-            Ok(())
-        })
+        let field = RecordField::Buffer {
+            stage,
+            slot: slot as usize,
+            binding: Some(binding),
+        };
+        self.edit(index, field, None)
     }
 
-    /// Announce `Degradation::IndirectValuePastRecord` for `call`'s threadgroup length at `slot`
-    /// of command `index`, past what a record holds.
-    fn degrade_past_record(&self, call: &'static str, index: u32, slot: u32) {
-        self.device()
-            .degrade(Degradation::IndirectValuePastRecord, || {
-                (
-                    format!(
-                        "{call} at index {slot} of command {index} of an indirect command buffer"
-                    ),
-                    "Metal keeps the length for its private getters alone (no function binds past \
-                     index 30), in storage that runs into the next command's past about index \
-                     38, which was not measured exactly; the runtime's records hold 31 \
-                     threadgroup lengths a command: its getter answers a fresh command's value"
-                        .to_owned(),
-                )
-            });
+    /// Where Metal keeps threadgroup length `slot` of command `index` of a compute buffer: at
+    /// `index * 38 + slot` of one array of the buffer's ([`LENGTH_STRIDE`]), the length of
+    /// command `(index * 38 + slot) / 38` at the remainder: in its record below 31, in its
+    /// [`Overflow`] block at 31 to 37, and past the last command's in [`IcbShared::tail`].
+    fn length_place(&self, index: u32, slot: u32) -> Result<LengthPlace, Error> {
+        let stride = u64::from(LENGTH_STRIDE);
+        let flat = u64::from(index) * stride + u64::from(slot);
+        let (command, slot) = (flat / stride, (flat % stride) as u32);
+        let size = u64::from(self.0.size);
+        if command >= size {
+            return Ok(LengthPlace::Tail(flat - size * stride));
+        }
+        let command = command as u32;
+        if slot < THREADGROUP_BUFFER_ARGUMENT_COUNT {
+            return Ok(LengthPlace::Record(command, slot));
+        }
+        self.0
+            .overflow
+            .as_ref()
+            .and_then(|overflow| overflow.length_at(command, slot))
+            .map(LengthPlace::Overflow)
+            .ok_or_else(|| internal("an indirect command's threadgroup length has no place"))
+    }
+
+    /// Set threadgroup length `slot` of command `index`, where Metal keeps it
+    /// ([`length_place`](Self::length_place)). A length past a record is no execution's: it
+    /// counts as no write of the records ([`cpu_writes`](Self::cpu_writes)).
+    fn set_length(&self, index: u32, slot: u32, length: u32) -> Result<(), Error> {
+        match self.length_place(index, slot)? {
+            LengthPlace::Record(command, slot) => {
+                let field = RecordField::ThreadgroupMemoryLength {
+                    index: slot as usize,
+                    length,
+                };
+                self.edit(command, field, None)
+            }
+            LengthPlace::Overflow(at) => {
+                let _pipelines = lock(&self.0.pipelines);
+                self.write_overflow_at(at, &length.to_le_bytes())
+            }
+            LengthPlace::Tail(at) => {
+                let mut tail = lock(&self.0.tail);
+                match length {
+                    0 => tail.remove(&at),
+                    _ => tail.insert(at, length),
+                };
+                Ok(())
+            }
+        }
+    }
+
+    /// Threadgroup length `slot` of command `index` as it is now, where Metal keeps it
+    /// ([`length_place`](Self::length_place)): 0 where none was set.
+    fn length(&self, index: u32, slot: u32) -> Result<u32, Error> {
+        match self.length_place(index, slot)? {
+            LengthPlace::Record(command, slot) => self
+                .read_record(command, |view| {
+                    view.threadgroup_memory_length(slot as usize)
+                })
+                .map(Option::unwrap_or_default),
+            LengthPlace::Overflow(at) => {
+                let mut bytes = [0u8; 4];
+                match self.read_overflow_at(at, &mut bytes) {
+                    true => Ok(u32::from_le_bytes(bytes)),
+                    false => Err(internal(
+                        "an indirect command buffer's overflow is not mapped",
+                    )),
+                }
+            }
+            LengthPlace::Tail(at) => Ok(lock(&self.0.tail).get(&at).copied().unwrap_or(0)),
+        }
     }
 
     /// Write `binding` (none: unset) at `slot` of `stage` of command `index`, past the record's
@@ -1409,9 +1669,12 @@ impl IndirectCommandBuffer {
         slot: u32,
         binding: Option<BufferBinding>,
     ) -> Result<(), Error> {
-        let missing = || internal("an indirect command's slot past its record has no place");
-        let overflow = self.0.overflow.as_ref().ok_or_else(missing)?;
-        let at = overflow.at(index, stage, slot).ok_or_else(missing)?;
+        let at = self
+            .0
+            .overflow
+            .as_ref()
+            .and_then(|overflow| overflow.at(index, stage, slot))
+            .ok_or_else(|| internal("an indirect command's slot past its record has no place"))?;
         let (address, stride) = binding.map_or((0, 0), |binding| {
             (
                 binding.address,
@@ -1421,13 +1684,23 @@ impl IndirectCommandBuffer {
         let mut bytes = [0u8; SLOT_BYTES as usize];
         bytes[..8].copy_from_slice(&address.to_le_bytes());
         bytes[8..].copy_from_slice(&stride.to_le_bytes());
-        let contents = overflow
-            .storage
-            .contents()
+        self.write_overflow_at(at, &bytes)?;
+        self.wrote();
+        Ok(())
+    }
+
+    /// Write `bytes` at `at` of the overflow, which holds them (`Overflow::at`,
+    /// `Overflow::length_at`). The caller holds `pipelines`.
+    fn write_overflow_at(&self, at: u64, bytes: &[u8]) -> Result<(), Error> {
+        let contents = self
+            .0
+            .overflow
+            .as_ref()
+            .and_then(|overflow| overflow.storage.contents())
             .ok_or_else(|| internal("an indirect command buffer's overflow is not mapped"))?;
-        // SAFETY: the overflow is host-visible and mapped for its life, and the slot lies inside
-        // it (`Overflow::at`); writes are one at a time (`pipelines`). A GPU write meanwhile is
-        // the program's race, as on Metal.
+        // SAFETY: the overflow is host-visible and mapped for its life, and `at` and `bytes` lie
+        // inside it (the caller's); writes are one at a time (`pipelines`). A GPU write meanwhile
+        // is the program's race, as on Metal.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 bytes.as_ptr(),
@@ -1436,6 +1709,28 @@ impl IndirectCommandBuffer {
             );
         }
         Ok(())
+    }
+
+    /// Read `bytes` from `at` of the overflow, which holds them (as
+    /// [`write_overflow_at`](Self::write_overflow_at)'s); false where it is not mapped.
+    fn read_overflow_at(&self, at: u64, bytes: &mut [u8]) -> bool {
+        let Some(contents) = self
+            .0
+            .overflow
+            .as_ref()
+            .and_then(|overflow| overflow.storage.contents())
+        else {
+            return false;
+        };
+        // SAFETY: as `write_overflow_at`'s; a write meanwhile is the program's race.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                contents.as_ptr().add(at as usize),
+                bytes.as_mut_ptr(),
+                bytes.len(),
+            );
+        }
+        true
     }
 
     /// The slots of `stage` of command `index` past the record's, below `count`, as set: none
@@ -1449,32 +1744,27 @@ impl IndirectCommandBuffer {
         let Some(overflow) = self.0.overflow.as_ref() else {
             return Vec::new();
         };
-        let Some(contents) = overflow.storage.contents() else {
-            return Vec::new();
-        };
         (RECORD_BUFFERS..count)
-            .map_while(|slot| overflow.at(index, stage, slot))
-            .map(|at| {
-                let mut bytes = [0u8; SLOT_BYTES as usize];
-                // SAFETY: as `write_overflow`'s; a write meanwhile is the program's race.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        contents.as_ptr().add(at as usize),
-                        bytes.as_mut_ptr(),
-                        bytes.len(),
-                    );
-                }
-                let word = |at: usize| {
-                    u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap_or_default())
-                };
-                let (address, stride) = (word(0), word(8));
-                // Both 0 is a slot no setter set, as a record's (`CommandRecord::decode`).
-                (address != 0 || stride != 0).then_some(BufferBinding {
-                    address,
-                    attribute_stride: (stride != u64::MAX).then_some(stride),
-                })
-            })
+            .take_while(|&slot| overflow.at(index, stage, slot).is_some())
+            .map(|slot| self.overflow_slot(index, stage, slot))
             .collect()
+    }
+
+    /// Slot `slot` of `stage` of command `index`, past the record's, as set: none where no setter
+    /// set it, a reset cleared it, or the descriptor counts none there.
+    fn overflow_slot(&self, index: u32, stage: BufferStage, slot: u32) -> Option<BufferBinding> {
+        let at = self.0.overflow.as_ref()?.at(index, stage, slot)?;
+        let mut bytes = [0u8; SLOT_BYTES as usize];
+        if !self.read_overflow_at(at, &mut bytes) {
+            return None;
+        }
+        let word = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap_or_default());
+        let (address, stride) = (word(0), word(8));
+        // Both 0 is a slot no setter set, as a record's (`CommandRecord::decode`).
+        (address != 0 || stride != 0).then_some(BufferBinding {
+            address,
+            attribute_stride: (stride != u64::MAX).then_some(stride),
+        })
     }
 
     /// Clear the slots past the record's of commands `range`, as a reset does. The caller holds
@@ -1496,6 +1786,7 @@ impl IndirectCommandBuffer {
                 (bytes.end - bytes.start) as usize,
             );
         }
+        self.wrote();
         Ok(())
     }
 
@@ -1570,9 +1861,8 @@ impl IndirectCommandBuffer {
             let (named, _) = self.name_records(read.clone(), Reader::Getter, &RENDER, live);
             read.zip(named)
                 .map(|((index, record, set), pipeline)| {
-                    let named = record.bindings.pipeline.or(record.retained_pipeline);
-                    let identifier =
-                        self.pipeline_identifier(named, set, &RENDER, pipeline.as_ref());
+                    let runs = record.bindings.pipeline.or(record.retained_pipeline);
+                    let (pipeline, identifier) = self.render_reading(runs, set, pipeline);
                     IndirectCommand::Render(self.render_command(
                         (index, record),
                         pipeline,
@@ -1585,15 +1875,11 @@ impl IndirectCommandBuffer {
             let (named, _) = self.name_records(read.clone(), Reader::Getter, &COMPUTE, live);
             read.zip(named)
                 .map(|((index, record, set), pipeline)| {
-                    // A pipeline a reset retained runs but reads as none, as Metal's getter
-                    // reports it.
-                    let reported = pipeline.filter(|_| record.bindings.pipeline.is_some());
-                    let named = record.bindings.pipeline;
-                    let identifier =
-                        self.pipeline_identifier(named, set, &COMPUTE, reported.as_ref());
+                    let reported = record.bindings.pipeline;
+                    let (pipeline, identifier) = self.compute_reading(reported, set, pipeline);
                     IndirectCommand::Compute(self.compute_command(
                         (index, record),
-                        reported,
+                        pipeline,
                         identifier,
                     ))
                 })
@@ -1615,10 +1901,29 @@ impl IndirectCommandBuffer {
         start: u32,
         recorded: &[Option<CommandRecord>],
     ) {
-        let held: Vec<(u32, &CommandRecord)> = (start..)
+        let held = (start..)
             .zip(recorded)
             .filter_map(|(index, record)| Some((index, record.as_ref()?)))
             .collect();
+        self.check_held(check, held);
+    }
+
+    /// Call `check` on each command of `read`, the records `commit` read of commands from
+    /// `start` (inside the size), in order, as [`commands`](Self::commands) reads them now:
+    /// `commit`'s check of the commands it records from the CPU's records, before it records any
+    /// ([`IndirectCommandCheck`]). None is read again.
+    pub(super) fn check_read<'r>(
+        &self,
+        check: &Mutex<IndirectCommandCheck>,
+        start: u32,
+        read: impl Iterator<Item = &'r CommandRecord>,
+    ) {
+        self.check_held(check, (start..).zip(read).collect());
+    }
+
+    /// Call `check` on each of `held`, a command's index and its record, in order, as
+    /// [`commands`](Self::commands) reads them now, the state the CPU set on each as it is now.
+    fn check_held(&self, check: &Mutex<IndirectCommandCheck>, held: Vec<(u32, &CommandRecord)>) {
         if held.is_empty() {
             return;
         }
@@ -1641,28 +1946,138 @@ impl IndirectCommandBuffer {
 
     /// Announce the kinds of the states' identifiers `commands` answer, none of which is measured
     /// to be Metal's number (`unique_identifier.rs`); a command that names no state answers 0, as
-    /// Metal's does.
+    /// Metal's does. Each kind once a call, in the order the commands first answer it.
     fn announce_identifiers(&self, commands: &[IndirectCommand]) {
-        let kinds: BTreeSet<Degradation> = commands
-            .iter()
-            .filter_map(|command| match command {
-                IndirectCommand::Compute(command) => command.pipeline_unique_identifier,
-                IndirectCommand::Render(command) => command.pipeline_unique_identifier,
-            })
-            .filter_map(state_value_degradation)
-            .collect();
-        for kind in kinds {
+        let mut kinds: [Option<Degradation>; 2] = [None; 2];
+        let answered = commands.iter().map(|command| match command {
+            IndirectCommand::Compute(command) => command.pipeline_unique_identifier,
+            IndirectCommand::Render(command) => command.pipeline_unique_identifier,
+        });
+        for kind in answered.filter_map(|answer| answer.and_then(state_value_degradation)) {
+            if let Some(free) = kinds
+                .iter_mut()
+                .find(|held| held.is_none_or(|held| held == kind))
+            {
+                *free = Some(kind);
+            }
+        }
+        for kind in kinds.into_iter().flatten() {
             degrade_identifier(self.device(), kind, "an indirect command's pipeline state");
         }
+    }
+
+    /// What the getter reads of a compute command's pipeline state, where its record reports
+    /// `reported` (`bindings.pipeline`), the CPU set `set` on it and the getter names `state`
+    /// for the pipeline it executes with (`name_state`): the state, which a pipeline a reset
+    /// retained runs but reads as none, as Metal's getter reports it; and its identifier
+    /// (`pipeline_identifier`).
+    fn compute_reading(
+        &self,
+        reported: Option<NonZeroU64>,
+        set: Option<&CommandState>,
+        state: Option<ComputePipelineState>,
+    ) -> (Option<ComputePipelineState>, Option<u64>) {
+        let state = state.filter(|_| reported.is_some());
+        let identifier = self.pipeline_identifier(reported, set, &COMPUTE, state.as_ref());
+        (state, identifier)
+    }
+
+    /// What the getter reads of a render command's pipeline state, as `compute_reading` a compute
+    /// one's, where its record executes with `runs`, which it reports, a retained one too.
+    fn render_reading(
+        &self,
+        runs: Option<NonZeroU64>,
+        set: Option<&CommandState>,
+        state: Option<RenderPipelineState>,
+    ) -> (Option<RenderPipelineState>, Option<u64>) {
+        let identifier = self.pipeline_identifier(runs, set, &RENDER, state.as_ref());
+        (state, identifier)
+    }
+
+    /// Command `index`'s (below the size) pipeline words as its record holds them now, the
+    /// pipeline it reports (`bindings.pipeline`) and the one it executes with (a retained one
+    /// too), and the state the CPU set on it, read together: one getter's read.
+    fn read_pipeline(
+        &self,
+        index: u32,
+    ) -> Result<(Option<NonZeroU64>, Option<NonZeroU64>, Option<CommandState>), Error> {
+        let pipelines = lock(&self.0.pipelines);
+        let (reported, runs) = self.read_record(index, |view| {
+            (
+                view.pipeline(),
+                view.pipeline().or(view.retained_pipeline()),
+            )
+        })?;
+        Ok((reported, runs, pipelines[index as usize].clone()))
+    }
+
+    /// What [`commands`](Self::commands) reads of compute command `index`'s pipeline state
+    /// (`compute_reading`), read alone.
+    fn compute_pipeline_now(
+        &self,
+        index: u32,
+    ) -> Result<(Option<ComputePipelineState>, Option<u64>), Error> {
+        let (reported, runs, set) = self.read_pipeline(index)?;
+        let live = || ComputePipelineState::indirect_states(self.device());
+        let read = std::iter::once((index, runs, set.as_ref()));
+        let (mut named, _) = self.name_pipelines(read, Reader::Getter, &COMPUTE, live);
+        Ok(self.compute_reading(reported, set.as_ref(), named.pop().flatten()))
+    }
+
+    /// What [`commands`](Self::commands) reads of render command `index`'s pipeline state
+    /// (`render_reading`), read alone.
+    fn render_pipeline_now(
+        &self,
+        index: u32,
+    ) -> Result<(Option<RenderPipelineState>, Option<u64>), Error> {
+        let (_, runs, set) = self.read_pipeline(index)?;
+        let live = || RenderPipelineState::indirect_states(self.device());
+        let read = std::iter::once((index, runs, set.as_ref()));
+        let (mut named, _) = self.name_pipelines(read, Reader::Getter, &RENDER, live);
+        Ok(self.render_reading(runs, set.as_ref(), named.pop().flatten()))
+    }
+
+    /// Announce the kind of a state's identifier a getter answered, as
+    /// [`announce_identifiers`](Self::announce_identifiers) does.
+    fn announce_identifier(&self, identifier: Option<u64>) {
+        if let Some(kind) = identifier.and_then(state_value_degradation) {
+            degrade_identifier(self.device(), kind, "an indirect command's pipeline state");
+        }
+    }
+
+    /// The buffer slot `slot` of `stage` of command `index` (below the size), below `count`, as
+    /// [`commands`](Self::commands) reads it: the record's, or past the slots it holds, the
+    /// overflow's ([`Overflow`]); none at or past `count`, and where no setter set it or a reset
+    /// cleared it. One getter's read.
+    fn read_buffer(
+        &self,
+        index: u32,
+        stage: BufferStage,
+        count: u32,
+        slot: u64,
+    ) -> Result<Option<IndirectBufferBinding>, Error> {
+        let Some(slot) = u32::try_from(slot).ok().filter(|&slot| slot < count) else {
+            return Ok(None);
+        };
+        let held = self.read_record(index, |view| view.buffer(stage, slot as usize))?;
+        let binding = match slot < RECORD_BUFFERS {
+            true => held,
+            false => self.overflow_slot(index, stage, slot),
+        };
+        Ok(binding.map(|binding| {
+            IndirectBufferBinding::new(GpuAddress(binding.address), binding.attribute_stride)
+        }))
     }
 
     /// `getPipelineStateUniqueIdentifier` of a command whose record names pipeline state ID
     /// `named`, the CPU having set `set` on it and the getter reading `state` of kind `of` for
     /// it (`name_state`): 0 where it names none; the identifier of the state the CPU set where
     /// the record names its ID, after the state's release too, as Metal answers it (measured on
-    /// an M3 Max by the consumer), unless the GPU may have written the record since and another
-    /// state took the ID meanwhile; the identifier of the live state of the ID for a record the
-    /// GPU wrote. `None` where the runtime cannot tell which state the record names.
+    /// an M3 Max by the consumer), unless the GPU may have written the record while another state
+    /// held the ID ([`may_name_another`](Self::may_name_another)); for a record the GPU wrote, the
+    /// identifier of the state that held the ID as the GPU last could write it
+    /// ([`written_identifier`](Self::written_identifier)), else the live state of the ID's. `None`
+    /// where the runtime cannot tell which state the record names.
     fn pipeline_identifier<S>(
         &self,
         named: Option<NonZeroU64>,
@@ -1675,10 +2090,12 @@ impl IndirectCommandBuffer {
         };
         match set.and_then(of.own).filter(|(_, stamp)| stamp.id == named) {
             Some((Some(_), stamp)) => Some(stamp.identifier),
-            Some((None, stamp)) => (!self.gpu_written()
-                || self.released_holder(named) == Some((of.kind, stamp.serial)))
-            .then_some(stamp.identifier),
-            None => state.map(of.identifier),
+            Some((None, stamp)) => {
+                (!self.may_name_another(named, of.kind, stamp.serial)).then_some(stamp.identifier)
+            }
+            None => self
+                .written_identifier(named, of.kind)
+                .or_else(|| state.map(of.identifier)),
         }
     }
 
@@ -1751,6 +2168,158 @@ impl IndirectCommandBuffer {
                 execution.settle(self.device());
             }
         }
+    }
+
+    /// A hold on the buffer for a command buffer whose work may write its records on the GPU,
+    /// which the encoder retains until it completes ([`GpuWrite`]). The first one has the buffer
+    /// keep, from now on, the programs of the states the program releases
+    /// (`released_programs.rs`).
+    pub(super) fn gpu_write(&self) -> GpuWrite {
+        if !self.0.keeping.swap(true, Ordering::AcqRel) {
+            self.device().shared().keepers.add(&self.0.kept);
+        }
+        lock(&self.0.gpu_writes).pending += 1;
+        GpuWrite {
+            device: self.device().clone(),
+            writes: Arc::clone(&self.0.gpu_writes),
+        }
+    }
+
+    /// For a blit's copy of `source`'s commands `range` into this buffer, which the copy's
+    /// [`gpu_write`](Self::gpu_write) has keep programs already: keep what `source` keeps, and the
+    /// programs of the released states the CPU set on the commands copied, whose records name
+    /// them as Metal's copied records do (`released_programs.rs`).
+    pub(super) fn keep_copied(&self, source: &IndirectCommandBuffer, range: Range<u32>) {
+        let mut copied = lock(&source.0.kept).clone();
+        let sets: Vec<CommandState> = {
+            let pipelines = lock(&source.0.pipelines);
+            range
+                .filter_map(|index| pipelines.get(index as usize).cloned().flatten())
+                .collect()
+        };
+        // Upgraded with no lock of either buffer held: a state dropped here releases its ID.
+        for (stamp, program) in sets.iter().filter_map(CommandState::kept) {
+            copied.keep(stamp.id, stamp.serial, program);
+        }
+        lock(&self.0.kept).keep_all(copied);
+    }
+
+    /// The stamp of the device's IDs (`ResourceIds::stamp`) as the GPU last could write the
+    /// buffer's records: at the completion of the last command buffer that could
+    /// ([`GpuWrite`]), or now (`u64::MAX`) while one has not completed; none where the GPU could
+    /// not write them.
+    fn window(&self) -> Option<u64> {
+        if !self.gpu_written() {
+            return None;
+        }
+        let writes = lock(&self.0.gpu_writes);
+        Some(match writes.pending {
+            0 => writes.end,
+            _ => u64::MAX,
+        })
+    }
+
+    /// The state that held pipeline state ID `named` as the GPU last could write the buffer's
+    /// records ([`window`](Self::window)), released since or not: the state a GPU write of the ID
+    /// resolved it to, as Metal's write resolves the ID as it runs and its record runs that state
+    /// and answers its identifier after (`released_programs.rs`). None where the GPU could not
+    /// write the records, or the ID's holder then is past the ones the device keeps.
+    fn window_holder(&self, named: u64) -> Option<HolderThen> {
+        let window = self.window()?;
+        lock(&self.device().shared().resource_ids).pipeline_holder_by(named, window)
+    }
+
+    /// How many programs of released states the buffer keeps (`released_programs.rs`).
+    #[cfg(test)]
+    pub(super) fn kept_count(&self) -> usize {
+        lock(&self.0.kept).count()
+    }
+
+    /// The `uniqueIdentifier` of the state of `kind` that held pipeline state ID `named` as the
+    /// GPU last could write the buffer's records ([`window_holder`](Self::window_holder)), as
+    /// Metal's record the GPU wrote answers (measured on an M3 Max by the consumer). None where
+    /// that is none, or one of another kind.
+    fn written_identifier(&self, named: u64, kind: StateKind) -> Option<u64> {
+        self.window_holder(named)
+            .filter(|then| then.kind == kind)
+            .map(|then| then.identifier)
+    }
+
+    /// Whether the GPU may have written ID `named` into the record of a command the CPU set the
+    /// state of kind `kind` whose hold of the ID had `serial` on, so that Metal's record names
+    /// another state than the CPU's: the GPU could write the buffer's records after the state
+    /// took the ID, and the ID's holder as it last could ([`window_holder`](Self::window_holder))
+    /// is another state.
+    fn may_name_another(&self, named: u64, kind: StateKind, serial: u64) -> bool {
+        let Some(window) = self.window() else {
+            return false;
+        };
+        serial < window
+            && lock(&self.device().shared().resource_ids)
+                .pipeline_holder_by(named, window)
+                .map(|then| (then.kind, then.serial))
+                != Some((kind, serial))
+    }
+
+    /// The program of the released state of kind `of` whose hold of ID `named` had `serial`, as a
+    /// state, where the buffer keeps it (`released_programs.rs`).
+    fn kept<S>(&self, named: u64, serial: u64, of: &Of<S>) -> Option<S> {
+        let program = lock(&self.0.kept).program(named, serial).cloned()?;
+        (of.kept)(&program)
+    }
+
+    /// For an execution of commands `range` on the GPU alone, which runs a record by its ID among
+    /// the compute states `live` lists, each with its ID: those states, but that where the GPU
+    /// last could write the records the ID's holder was a state the program released since, whose
+    /// program the buffer keeps, the ID names that program instead, as a record the GPU wrote then
+    /// runs it (`window_holder`), and no record the GPU writes later can name another, as no state
+    /// took the ID before the window. `None` where the CPU set on a command of `range` the live
+    /// state that took such an ID since: the ID names two states, which the host step tells apart
+    /// (`name_state`).
+    pub(super) fn gpu_states(
+        &self,
+        range: Range<u32>,
+        live: Vec<ComputePipelineState>,
+    ) -> Option<Vec<(u64, ComputePipelineState)>> {
+        let mut states: Vec<(u64, ComputePipelineState)> = live
+            .into_iter()
+            .map(|state| (compute_id(&state), state))
+            .collect();
+        let ids: Vec<u64> = lock(&self.0.kept).ids().collect();
+        let mut kept = Vec::new();
+        for id in ids {
+            let Some(then) = self.window_holder(id) else {
+                continue;
+            };
+            if then.holds || then.kind != StateKind::Compute {
+                continue;
+            }
+            if let Some(program) = self.kept(id, then.serial, &COMPUTE) {
+                kept.push((id, program));
+            }
+        }
+        if kept.is_empty() {
+            return Some(states);
+        }
+        let sets: Vec<CommandState> = {
+            let pipelines = lock(&self.0.pipelines);
+            range
+                .filter_map(|index| pipelines.get(index as usize).cloned().flatten())
+                .collect()
+        };
+        // Upgraded with no lock of the buffer held: a state dropped here releases its ID.
+        let set_live = sets
+            .iter()
+            .filter_map(CommandState::compute)
+            .filter(|(alive, _)| alive.is_some())
+            .map(|(_, stamp)| stamp.id)
+            .collect::<std::collections::BTreeSet<u64>>();
+        if kept.iter().any(|(id, _)| set_live.contains(id)) {
+            return None;
+        }
+        states.retain(|(id, _)| kept.iter().all(|(taken, _)| taken != id));
+        states.extend(kept);
+        Some(states)
     }
 
     /// Watch `execution`, which `commit` recorded from the CPU's records: its host step is
@@ -1986,13 +2555,32 @@ impl IndirectCommandBuffer {
         of: &Of<S>,
         live: impl Fn() -> Vec<S>,
     ) -> (Vec<Option<S>>, Released) {
+        // The pipeline each command executes with: a retained one too.
+        let runs = read.map(|(index, record, set)| {
+            (
+                index,
+                record.bindings.pipeline.or(record.retained_pipeline),
+                set,
+            )
+        });
+        self.name_pipelines(runs, reader, of, live)
+    }
+
+    /// [`name_records`](Self::name_records) of each command's index, the pipeline ID its
+    /// record executes with, and the state the CPU set on it.
+    fn name_pipelines<'r, S: Clone>(
+        &self,
+        read: impl Iterator<Item = (u32, Option<NonZeroU64>, Option<&'r CommandState>)>,
+        reader: Reader,
+        of: &Of<S>,
+        live: impl Fn() -> Vec<S>,
+    ) -> (Vec<Option<S>>, Released) {
         // The live states are listed with no lock of the buffer held, once.
         let mut listed: Option<Vec<S>> = None;
         let mut unmatched = Vec::new();
         let named = read
-            .map(|(index, record, set)| {
-                // The pipeline the command executes with: a retained one too.
-                let named = record.bindings.pipeline.or(record.retained_pipeline)?;
+            .map(|(index, runs, set)| {
+                let named = runs?;
                 let holder = || {
                     listed
                         .get_or_insert_with(&live)
@@ -2091,13 +2679,11 @@ impl IndirectCommandBuffer {
     /// - Where `set` had the ID: the state while it lives; once the program released it, its
     ///   program (as a state of no ID), whoever holds the ID since, as Metal's command the CPU
     ///   encoded runs it. A host step cannot tell a record the GPU wrote naming that ID from
-    ///   the CPU's: where the GPU may have written it and the state was not the ID's last
-    ///   holder, Metal's run of a GPU write would differ (`Unmatched::Unsure`). The getter
-    ///   reads it as the state holding the ID instead (`holder`), none where none lives.
-    /// - Else (the GPU wrote the ID): the state of the kind holding it (`holder`), else none:
-    ///   a state of the other kind holding it runs nothing, as on Metal; where none holds it
-    ///   since the program released a state of the kind that did, Metal runs that state's
-    ///   program, which the runtime does not hold (`Unmatched::Unrun`).
+    ///   the CPU's: where the GPU may have written it while another state held the ID
+    ///   ([`may_name_another`](Self::may_name_another)), Metal's run of a GPU write would differ
+    ///   (`Unmatched::Unsure`). The getter reads it as the state holding the ID instead
+    ///   (`holder`), none where none lives.
+    /// - Else (the GPU wrote the ID): [`name_written`](Self::name_written).
     ///
     /// The commands an execution runs otherwise than Metal's may are added to `unmatched`.
     fn name_state<S>(
@@ -2111,16 +2697,7 @@ impl IndirectCommandBuffer {
     ) -> Option<S> {
         let own = set.and_then(of.own).filter(|(_, stamp)| stamp.id == named);
         let Some((alive, stamp)) = own else {
-            let state = holder();
-            if state.is_none()
-                && reader != Reader::Getter
-                && self
-                    .released_holder(named)
-                    .is_some_and(|(kind, _)| kind == of.kind)
-            {
-                unmatched.push((index, named, Unmatched::Unrun));
-            }
-            return state;
+            return self.name_written((index, named), reader, of, holder, unmatched);
         };
         if alive.is_some() {
             return alive;
@@ -2129,14 +2706,54 @@ impl IndirectCommandBuffer {
             Reader::Getter => holder(),
             Reader::Commit => set.and_then(of.program),
             Reader::Step => {
-                if self.gpu_written()
-                    && self.released_holder(named) != Some((of.kind, stamp.serial))
-                {
+                if self.may_name_another(named, of.kind, stamp.serial) {
                     unmatched.push((index, named, Unmatched::Unsure));
                 }
                 set.and_then(of.program)
             }
         }
+    }
+
+    /// The state of kind `of` command `index`'s record the GPU wrote runs for `reader`, where it
+    /// names pipeline state ID `named`, as Metal's runs it: the state that held the ID as the GPU
+    /// last could write the records ([`window_holder`](Self::window_holder)), which Metal's write
+    /// resolved the ID to (`released_programs.rs`):
+    ///
+    /// - one of the other kind: none, as on Metal;
+    /// - one that holds the ID still: the state of the kind holding it (`holder`);
+    /// - one the program released since: its program, as a state of no ID, where the buffer keeps
+    ///   it; else none (`Unmatched::Unrun`). The getter reads it as none.
+    /// - none the device keeps (the records were the CPU's alone, or the ID's holders since are
+    ///   more than it keeps): the state of the kind holding the ID (`holder`), else none, the
+    ///   program having released a state of the kind that held it last (`Unmatched::Unrun`).
+    fn name_written<S>(
+        &self,
+        (index, named): (u32, u64),
+        reader: Reader,
+        of: &Of<S>,
+        holder: impl FnOnce() -> Option<S>,
+        unmatched: &mut Vec<(u32, u64, Unmatched)>,
+    ) -> Option<S> {
+        let state = match self.window_holder(named) {
+            Some(then) if then.kind != of.kind => return None,
+            Some(then) if then.holds => return holder(),
+            Some(_) if reader == Reader::Getter => return None,
+            Some(then) => self.kept(named, then.serial, of),
+            None => match holder() {
+                Some(state) => return Some(state),
+                None if self
+                    .released_holder(named)
+                    .is_some_and(|(kind, _)| kind == of.kind) =>
+                {
+                    None
+                }
+                None => return None,
+            },
+        };
+        if state.is_none() && reader != Reader::Getter {
+            unmatched.push((index, named, Unmatched::Unrun));
+        }
+        state
     }
 
     /// The kind and hold serial of the state that last held pipeline state ID `named`, where
@@ -2195,21 +2812,7 @@ impl IndirectCommandBuffer {
         pipeline: Option<ComputePipelineState>,
         pipeline_unique_identifier: Option<u64>,
     ) -> EncodedComputeCommand {
-        let size =
-            |[width, height, depth]: [u32; 3]| Size::new(width.into(), height.into(), depth.into());
-        let dispatch = match record.action {
-            Action::DispatchThreadgroups { grid, local_size } => {
-                Some(IndirectDispatch::Threadgroups {
-                    threadgroups_per_grid: size(grid),
-                    threads_per_threadgroup: size(local_size),
-                })
-            }
-            Action::DispatchThreads { grid, local_size } => Some(IndirectDispatch::Threads {
-                threads_per_grid: size(grid),
-                threads_per_threadgroup: size(local_size),
-            }),
-            _ => None,
-        };
+        let dispatch = dispatch_of(&record.action);
         let descriptor = &self.0.descriptor;
         let [x, y, z, width, height, depth] = record.stage_in_region.map(u64::from);
         EncodedComputeCommand {
@@ -2248,113 +2851,7 @@ impl IndirectCommandBuffer {
         pipeline: Option<RenderPipelineState>,
         pipeline_unique_identifier: Option<u64>,
     ) -> EncodedRenderCommand {
-        let size =
-            |[width, height, depth]: [u32; 3]| Size::new(width.into(), height.into(), depth.into());
-        let draw = match record.action {
-            Action::DrawPrimitives {
-                primitive_type,
-                vertex_start,
-                vertex_count,
-                instance_count,
-                base_instance,
-            } => PrimitiveType::try_from(primitive_type)
-                .ok()
-                .map(|primitive_type| IndirectDraw::Primitives {
-                    primitive_type,
-                    vertex_start: vertex_start.into(),
-                    vertex_count: vertex_count.into(),
-                    instance_count: instance_count.into(),
-                    base_instance: base_instance.into(),
-                }),
-            Action::DrawIndexedPrimitives {
-                primitive_type,
-                index_count,
-                index_type,
-                index_buffer,
-                instance_count,
-                base_vertex,
-                base_instance,
-            } => PrimitiveType::try_from(primitive_type)
-                .ok()
-                .zip(IndexType::try_from(index_type).ok())
-                .map(
-                    |(primitive_type, index_type)| IndirectDraw::IndexedPrimitives {
-                        primitive_type,
-                        index_count: index_count.into(),
-                        index_type,
-                        index_buffer: GpuAddress(index_buffer),
-                        instance_count: instance_count.into(),
-                        base_vertex: base_vertex.into(),
-                        base_instance: base_instance.into(),
-                    },
-                ),
-            Action::DrawPatches {
-                control_points,
-                patch_start,
-                patch_count,
-                patch_index_buffer,
-                instance_count,
-                base_instance,
-                factor_buffer,
-                factor_instance_stride,
-                factor_scale: _,
-            } => Some(IndirectDraw::Patches {
-                control_points: control_points.into(),
-                patch_start: patch_start.into(),
-                patch_count: patch_count.into(),
-                patch_index_buffer: (patch_index_buffer != 0)
-                    .then_some(GpuAddress(patch_index_buffer)),
-                instance_count: instance_count.into(),
-                base_instance: base_instance.into(),
-                factor_buffer: GpuAddress(factor_buffer),
-                factor_instance_stride: factor_instance_stride.into(),
-            }),
-            Action::DrawIndexedPatches {
-                control_points,
-                patch_start,
-                patch_count,
-                patch_index_buffer,
-                control_point_index_buffer,
-                instance_count,
-                base_instance,
-                factor_buffer,
-                factor_instance_stride,
-                factor_scale: _,
-            } => Some(IndirectDraw::IndexedPatches {
-                control_points: control_points.into(),
-                patch_start: patch_start.into(),
-                patch_count: patch_count.into(),
-                patch_index_buffer: (patch_index_buffer != 0)
-                    .then_some(GpuAddress(patch_index_buffer)),
-                control_point_index_buffer: (control_point_index_buffer != 0)
-                    .then_some(GpuAddress(control_point_index_buffer)),
-                instance_count: instance_count.into(),
-                base_instance: base_instance.into(),
-                factor_buffer: GpuAddress(factor_buffer),
-                factor_instance_stride: factor_instance_stride.into(),
-            }),
-            Action::DrawMeshThreadgroups {
-                threadgroups,
-                object_threads,
-                mesh_threads,
-            } => Some(IndirectDraw::MeshThreadgroups {
-                threadgroups_per_grid: size(threadgroups),
-                threads_per_object_threadgroup: size(object_threads),
-                threads_per_mesh_threadgroup: size(mesh_threads),
-            }),
-            Action::DrawMeshThreads {
-                threads,
-                object_threads,
-                mesh_threads,
-            } => Some(IndirectDraw::MeshThreads {
-                threads_per_grid: size(threads),
-                threads_per_object_threadgroup: size(object_threads),
-                threads_per_mesh_threadgroup: size(mesh_threads),
-            }),
-            Action::Empty
-            | Action::DispatchThreadgroups { .. }
-            | Action::DispatchThreads { .. } => None,
-        };
+        let draw = draw_of(&record.action);
         let descriptor = &self.0.descriptor;
         EncodedRenderCommand {
             draw,
@@ -2531,9 +3028,141 @@ fn command_type(action: &Action) -> IndirectCommandType {
     }
 }
 
+/// A record's dispatch, of `action`; none for an action that dispatches nothing.
+fn dispatch_of(action: &Action) -> Option<IndirectDispatch> {
+    let size =
+        |[width, height, depth]: [u32; 3]| Size::new(width.into(), height.into(), depth.into());
+    match *action {
+        Action::DispatchThreadgroups { grid, local_size } => Some(IndirectDispatch::Threadgroups {
+            threadgroups_per_grid: size(grid),
+            threads_per_threadgroup: size(local_size),
+        }),
+        Action::DispatchThreads { grid, local_size } => Some(IndirectDispatch::Threads {
+            threads_per_grid: size(grid),
+            threads_per_threadgroup: size(local_size),
+        }),
+        _ => None,
+    }
+}
+
+/// A record's draw, of `action`: none for an action that draws nothing, and for a draw of a
+/// primitive type or an index type Metal has no value for (a kernel's write), which runs nothing.
+fn draw_of(action: &Action) -> Option<IndirectDraw> {
+    let size =
+        |[width, height, depth]: [u32; 3]| Size::new(width.into(), height.into(), depth.into());
+    match *action {
+        Action::DrawPrimitives {
+            primitive_type,
+            vertex_start,
+            vertex_count,
+            instance_count,
+            base_instance,
+        } => PrimitiveType::try_from(primitive_type)
+            .ok()
+            .map(|primitive_type| IndirectDraw::Primitives {
+                primitive_type,
+                vertex_start: vertex_start.into(),
+                vertex_count: vertex_count.into(),
+                instance_count: instance_count.into(),
+                base_instance: base_instance.into(),
+            }),
+        Action::DrawIndexedPrimitives {
+            primitive_type,
+            index_count,
+            index_type,
+            index_buffer,
+            instance_count,
+            base_vertex,
+            base_instance,
+        } => PrimitiveType::try_from(primitive_type)
+            .ok()
+            .zip(IndexType::try_from(index_type).ok())
+            .map(
+                |(primitive_type, index_type)| IndirectDraw::IndexedPrimitives {
+                    primitive_type,
+                    index_count: index_count.into(),
+                    index_type,
+                    index_buffer: GpuAddress(index_buffer),
+                    instance_count: instance_count.into(),
+                    base_vertex: base_vertex.into(),
+                    base_instance: base_instance.into(),
+                },
+            ),
+        Action::DrawPatches {
+            control_points,
+            patch_start,
+            patch_count,
+            patch_index_buffer,
+            instance_count,
+            base_instance,
+            factor_buffer,
+            factor_instance_stride,
+            factor_scale: _,
+        } => Some(IndirectDraw::Patches {
+            control_points: control_points.into(),
+            patch_start: patch_start.into(),
+            patch_count: patch_count.into(),
+            patch_index_buffer: (patch_index_buffer != 0).then_some(GpuAddress(patch_index_buffer)),
+            instance_count: instance_count.into(),
+            base_instance: base_instance.into(),
+            factor_buffer: GpuAddress(factor_buffer),
+            factor_instance_stride: factor_instance_stride.into(),
+        }),
+        Action::DrawIndexedPatches {
+            control_points,
+            patch_start,
+            patch_count,
+            patch_index_buffer,
+            control_point_index_buffer,
+            instance_count,
+            base_instance,
+            factor_buffer,
+            factor_instance_stride,
+            factor_scale: _,
+        } => Some(IndirectDraw::IndexedPatches {
+            control_points: control_points.into(),
+            patch_start: patch_start.into(),
+            patch_count: patch_count.into(),
+            patch_index_buffer: (patch_index_buffer != 0).then_some(GpuAddress(patch_index_buffer)),
+            control_point_index_buffer: (control_point_index_buffer != 0)
+                .then_some(GpuAddress(control_point_index_buffer)),
+            instance_count: instance_count.into(),
+            base_instance: base_instance.into(),
+            factor_buffer: GpuAddress(factor_buffer),
+            factor_instance_stride: factor_instance_stride.into(),
+        }),
+        Action::DrawMeshThreadgroups {
+            threadgroups,
+            object_threads,
+            mesh_threads,
+        } => Some(IndirectDraw::MeshThreadgroups {
+            threadgroups_per_grid: size(threadgroups),
+            threads_per_object_threadgroup: size(object_threads),
+            threads_per_mesh_threadgroup: size(mesh_threads),
+        }),
+        Action::DrawMeshThreads {
+            threads,
+            object_threads,
+            mesh_threads,
+        } => Some(IndirectDraw::MeshThreads {
+            threads_per_grid: size(threads),
+            threads_per_object_threadgroup: size(object_threads),
+            threads_per_mesh_threadgroup: size(mesh_threads),
+        }),
+        Action::Empty | Action::DispatchThreadgroups { .. } | Action::DispatchThreads { .. } => {
+            None
+        }
+    }
+}
+
 /// The byte offset of command `index`'s record in the storage.
 fn record_offset(index: u32) -> usize {
     COMMAND_BUFFER_HEADER_BYTES + index as usize * COMMAND_BYTES
+}
+
+/// The runtime's error for a record that does not decode (a GPU write, the program's race).
+fn undecodable() -> Error {
+    internal("an indirect command's record does not decode")
 }
 
 fn problem(call: &'static str, problem: IndirectCommandBufferProblem) -> Error {
@@ -2550,12 +3179,10 @@ pub struct IndirectComputeCommand {
 }
 
 impl IndirectComputeCommand {
-    /// Change the record by `edit`, which may refuse.
-    fn edit(
-        &self,
-        edit: impl FnOnce(&mut CommandRecord, &mut Option<CommandState>) -> Result<(), Error>,
-    ) -> Result<(), Error> {
-        self.icb.edit(self.index, edit)
+    /// Write `field` into the record, with `set` as the state the CPU set where it names one
+    /// (`IndirectCommandBuffer::edit`).
+    fn edit(&self, field: RecordField, set: Option<CommandState>) -> Result<(), Error> {
+        self.icb.edit(self.index, field, set)
     }
 
     fn descriptor(&self) -> &IndirectCommandBufferDescriptor {
@@ -2585,21 +3212,17 @@ impl IndirectComputeCommand {
                 IndirectCommandBufferProblem::PipelineWithoutSupport,
             ));
         };
-        self.edit(|record, pipeline| {
-            record.bindings.pipeline = Some(id);
-            record.retained_pipeline = None;
-            let stamp = IdStamp {
-                id: id.get(),
-                serial,
-                identifier: state.identifier_value(),
-            };
-            *pipeline = Some(CommandState::Compute(
-                state.downgrade(),
-                state.program(),
-                stamp,
-            ));
-            Ok(())
-        })
+        let stamp = IdStamp {
+            id: id.get(),
+            serial,
+            identifier: state.identifier_value(),
+        };
+        let named = Named {
+            encodes: state.can_encode_indirect_commands(),
+            writes: state.indirect_command_writes(),
+        };
+        let set = CommandState::Compute(state.downgrade(), state.program(), stamp, named);
+        self.edit(RecordField::Pipeline(id), Some(set))
     }
 
     /// `setKernelBuffer:offset:atIndex:`: buffer `index` at `buffer`'s address plus `offset`'s
@@ -2668,7 +3291,7 @@ impl IndirectComputeCommand {
         threadgroups: Size,
         threads_per_threadgroup: Size,
     ) -> Result<(), Error> {
-        self.dispatch(Action::DispatchThreadgroups {
+        self.set_dispatch(Action::DispatchThreadgroups {
             grid: low_bits(threadgroups),
             local_size: low_bits(threads_per_threadgroup),
         })
@@ -2683,7 +3306,7 @@ impl IndirectComputeCommand {
         threads: Size,
         threads_per_threadgroup: Size,
     ) -> Result<(), Error> {
-        self.dispatch(Action::DispatchThreads {
+        self.set_dispatch(Action::DispatchThreads {
             grid: low_bits(threads),
             local_size: low_bits(threads_per_threadgroup),
         })
@@ -2691,51 +3314,30 @@ impl IndirectComputeCommand {
 
     /// Set the record's dispatch `action`, which every compute buffer's records hold
     /// (`CommandDescriptor::holds`).
-    fn dispatch(&self, action: Action) -> Result<(), Error> {
-        self.edit(|record, _| {
-            record.action = action;
-            Ok(())
-        })
+    fn set_dispatch(&self, action: Action) -> Result<(), Error> {
+        self.edit(RecordField::Action(action), None)
     }
 
     /// `setBarrier`: the command waits for the commands before it.
     pub fn set_barrier(&self) -> Result<(), Error> {
-        self.edit(|record, _| {
-            record.barrier = true;
-            Ok(())
-        })
+        self.edit(RecordField::Barrier(true), None)
     }
 
     /// `clearBarrier`.
     pub fn clear_barrier(&self) -> Result<(), Error> {
-        self.edit(|record, _| {
-            record.barrier = false;
-            Ok(())
-        })
+        self.edit(RecordField::Barrier(false), None)
     }
 
     /// `setThreadgroupMemoryLength:atIndex:`: as set, a multiple of 16 or not and past the
-    /// device's maximum alike, as Metal keeps it. Refused (`Invalid`): an index at or past the
-    /// descriptor's `max_kernel_threadgroup_memory_bind_count`.
+    /// device's maximum alike, where Metal keeps it, at any index, the descriptor's
+    /// `max_kernel_threadgroup_memory_bind_count` or not: 38 lengths a command, of one array, so
+    /// an index of 38 or more sets a later command's length (`index - 38` of the next command's,
+    /// and so on), and one past the last command's is kept beside the buffer for the getter. No
+    /// function binds one past index 30: Metal keeps lengths 31 to 37 for its private getter
+    /// alone, as the runtime does. Differs: far past the last command's lengths (about 4000
+    /// places on an M3 Max), Metal's setter ends the process; the runtime keeps the length.
     pub fn set_threadgroup_memory_length(&self, length: u32, index: u32) -> Result<(), Error> {
-        let limit = self.descriptor().max_kernel_threadgroup_memory_bind_count;
-        if index >= limit {
-            return Err(invalid(
-                "set_threadgroup_memory_length",
-                Problem::IndexOutOfRange { index, limit },
-            ));
-        }
-        // No function binds threadgroup memory past index 30: plain Metal keeps the length for
-        // its private getters alone, which the runtime does not (announced).
-        if index >= THREADGROUP_BUFFER_ARGUMENT_COUNT {
-            self.icb
-                .degrade_past_record("set_threadgroup_memory_length", self.index, index);
-            return Ok(());
-        }
-        self.edit(|record, _| {
-            record.threadgroup_memory_lengths[index as usize] = length;
-            Ok(())
-        })
+        self.icb.set_length(self.index, index, length)
     }
 
     /// `setStageInRegion:`: each origin and size value's low 32 bits, as Metal keeps them.
@@ -2749,10 +3351,8 @@ impl IndirectComputeCommand {
             size.height,
             size.depth,
         ];
-        self.edit(|record, _| {
-            record.stage_in_region = values.map(|value| value as u32);
-            Ok(())
-        })
+        let region = values.map(|value| value as u32);
+        self.edit(RecordField::StageInRegion(region), None)
     }
 
     /// `setImageblockWidth:height:`: as set. A side past 65535, which Metal keeps, is refused
@@ -2765,10 +3365,7 @@ impl IndirectComputeCommand {
                 height,
             }));
         };
-        self.edit(|record, _| {
-            record.imageblock_size = [w, h];
-            Ok(())
-        })
+        self.edit(RecordField::ImageblockSize([w, h]), None)
     }
 
     /// `reset`: the command as a fresh buffer's, but for the pipeline state it executes with,
@@ -2785,8 +3382,102 @@ impl IndirectComputeCommand {
                 imageblock_size: record.imageblock_size,
                 ..CommandRecord::default()
             };
-            Ok(())
         })
+    }
+    /// `getCommandType`, Apple's private getter: the command's
+    /// [`command_type`](EncodedComputeCommand::command_type) as
+    /// [`IndirectCommandBuffer::commands`] reads it now, its record's action alone read. Each of
+    /// the command's getters reads its field of the record as it is at the call (a runtime
+    /// extension standing for Metal's private getters, as `commands` is), so a field read after
+    /// the GPU may have written the records may not be what an execution committed earlier
+    /// runs ([`IndirectCommandBuffer::gpu_written`]).
+    pub fn command_type(&self) -> Result<IndirectCommandType, Error> {
+        self.icb
+            .read_record(self.index, |view| command_type(&view.action()))
+    }
+
+    /// `hasBarrier`, Apple's private getter: the command's
+    /// [`barrier`](EncodedComputeCommand::barrier), read alone.
+    pub fn has_barrier(&self) -> Result<bool, Error> {
+        self.icb.read_record(self.index, |view| view.barrier())
+    }
+
+    /// `dispatchThreadgroupsArguments` and `dispatchThreadsArguments`, Apple's private getters:
+    /// the command's [`dispatch`](EncodedComputeCommand::dispatch), read alone.
+    pub fn dispatch(&self) -> Result<Option<IndirectDispatch>, Error> {
+        self.icb
+            .read_record(self.index, |view| dispatch_of(&view.action()))
+    }
+
+    /// The kernel buffer set at `index`: the command's
+    /// [`kernel_buffers`](EncodedComputeCommand::kernel_buffers)`[index]`, read alone, none at or
+    /// past the descriptor's `max_kernel_buffer_bind_count`. Metal's private getters of the slot
+    /// (`getKernelBufferAddressAtIndex:`, `getKernelAttributeStrideAtIndex:`) answer it as
+    /// [`EncodedComputeCommand::kernel_buffer_address`] and
+    /// [`EncodedComputeCommand::kernel_attribute_stride`] do.
+    pub fn kernel_buffer(&self, index: u64) -> Result<Option<IndirectBufferBinding>, Error> {
+        let count = self.descriptor().max_kernel_buffer_bind_count;
+        self.icb
+            .read_buffer(self.index, BufferStage::Kernel, count, index)
+    }
+
+    /// `getThreadgroupMemoryLengthAtIndex:`, Apple's private getter: the length at `index`'s low
+    /// 32 bits, as Metal's takes them, where Metal keeps it, as
+    /// [`set_threadgroup_memory_length`](Self::set_threadgroup_memory_length) sets it (below 31,
+    /// the command's
+    /// [`threadgroup_memory_lengths`](EncodedComputeCommand::threadgroup_memory_lengths)`[index]`;
+    /// at 38 or more, a later command's), read alone: 0 where none was set, at any index, the
+    /// descriptor's `max_kernel_threadgroup_memory_bind_count` or not; always some. Differs: far
+    /// past the last command's lengths (an M3 Max: 100000 places past command 0's of 3), Metal's
+    /// getter ends the process; the runtime's answers.
+    pub fn threadgroup_memory_length(&self, index: u64) -> Result<Option<u32>, Error> {
+        self.icb.length(self.index, index as u32).map(Some)
+    }
+
+    /// `getStageInRegion`, Apple's private getter: the command's
+    /// [`stage_in_region`](EncodedComputeCommand::stage_in_region), read alone.
+    pub fn stage_in_region(&self) -> Result<Region, Error> {
+        let [x, y, z, width, height, depth] = self
+            .icb
+            .read_record(self.index, |view| view.stage_in_region())?
+            .map(u64::from);
+        Ok(Region {
+            origin: Origin::new(x, y, z),
+            size: Size::new(width, height, depth),
+        })
+    }
+
+    /// The imageblock size Apple's private getter answers: the command's
+    /// [`imageblock_width`](EncodedComputeCommand::imageblock_width) and
+    /// [`imageblock_height`](EncodedComputeCommand::imageblock_height), read alone.
+    pub fn imageblock_size(&self) -> Result<(u64, u64), Error> {
+        let [width, height] = self
+            .icb
+            .read_record(self.index, |view| view.imageblock_size())?;
+        Ok((width.into(), height.into()))
+    }
+
+    /// The command's [`pipeline`](EncodedComputeCommand::pipeline), read alone: the state set on
+    /// it, none when unset, reset, or when no state of the ID it names lives.
+    pub fn pipeline_state(&self) -> Result<Option<ComputePipelineState>, Error> {
+        Ok(self.icb.compute_pipeline_now(self.index)?.0)
+    }
+
+    /// The command's [`pipeline_id`](EncodedComputeCommand::pipeline_id), read alone: the ID of
+    /// the state its record names, none where it names none.
+    pub fn pipeline_id(&self) -> Result<Option<ResourceId>, Error> {
+        self.icb.read_record(self.index, |view| {
+            view.pipeline().map(|id| ResourceId(id.get()))
+        })
+    }
+
+    /// `getPipelineStateUniqueIdentifier`, Apple's private getter: the command's
+    /// [`pipeline_unique_identifier`](EncodedComputeCommand::pipeline_unique_identifier), read
+    /// alone, whose kind the device announces as `commands` announces it.
+    pub fn pipeline_unique_identifier(&self) -> Result<Option<u64>, Error> {
+        let (_, identifier) = self.icb.compute_pipeline_now(self.index)?;
+        self.icb.announce_identifier(identifier);
+        Ok(identifier)
     }
 }
 
@@ -2795,23 +3486,35 @@ fn low_bits(size: Size) -> [u32; 3] {
     [size.width, size.height, size.depth].map(|axis| axis as u32)
 }
 
-/// A check of the commands an execution's host step runs (a runtime extension; Metal has none),
-/// given to `execute_commands_in_buffer_checked` or `execute_commands_in_buffer_indirect_checked`
-/// of a render or a compute encoder. Where a host step records the execution from the records as
-/// the GPU and the CPU left them, it calls the check once for each command it will record, in
-/// order, before it records any command of the range, on the thread that runs the step: with the
+/// A check of the commands an execution runs (a runtime extension; Metal has none), given with
+/// what it looks for ([`IndirectCommandCheckNeeds`]) to `execute_commands_in_buffer_checked` or
+/// `execute_commands_in_buffer_indirect_checked` of a render or a compute encoder. Where the
+/// runtime reads the records of the commands it will record for the execution, it calls the check
+/// once for each of them, in order, before it records any command of the range, with the
 /// command's index in the buffer and the command as [`IndirectCommandBuffer::commands`] reads it
-/// then. A command whose record faulted runs nothing and is not checked; nor is any where the
-/// buffer's header faulted. The check may end the process, and must not unwind; returning lets the
-/// commands run. A command buffer dropped before its host step never calls it.
+/// then: at `commit`, on the thread that commits, where it records the execution from the CPU's
+/// records as they stand then; in a host step, on the thread that runs the step, where the step
+/// records it from the records as the GPU and the CPU left them. An execution `commit` recorded
+/// that a host step records again before its batch is submitted (an encoder made its buffer
+/// resident for writing since, or a route outgrew its render pass's form on the GPU) is checked
+/// again there. Neither calls it
+/// where what the records may hold leaves it nothing to see ([`IndirectCommandCheckNeeds`]). A
+/// command whose record faulted runs nothing and is not checked; nor is any where the buffer's
+/// header faulted. The check may end the process, and must not unwind; returning lets the commands
+/// run. A command buffer dropped before its host step never calls the step's check.
 pub type IndirectCommandCheck = Box<dyn FnMut(u64, &IndirectCommand) + Send + 'static>;
 
 /// What an [`IndirectCommandCheck`] looks for among an execution's commands (a runtime extension;
-/// Metal has none), given with it to `execute_commands_in_buffer_checked`. Where what the
-/// buffer's records may hold, as the runtime last decides on before the execution runs, rules out
-/// every kind it names, the check has nothing to see: an execution that then runs on the GPU
-/// alone never calls it, and no host step reads the records for it. Where it does not, a host
-/// step calls the check with every command, as for [`IndirectCommandCheckNeeds::ALL`].
+/// Metal has none), given with it to `execute_commands_in_buffer_checked` and
+/// `execute_commands_in_buffer_indirect_checked`. Where what the buffer's records may hold, as
+/// the runtime last decides on before it would read them for the check, rules out every kind it
+/// names, the check has nothing to see and is not called: an execution may then run on the GPU
+/// alone, and neither `commit` nor a host step calls the check, or reads the records for it. A
+/// record that holds no draw and no dispatch runs nothing, so a buffer into whose records no route
+/// wrote one leaves every check nothing to see. Where what the records may hold grows past what
+/// left the check nothing to see by the time an execution that runs on the GPU alone is ready to
+/// submit, a host step records it instead and calls the check. Where it does not rule them out,
+/// the check is called with every command, as for [`IndirectCommandCheckNeeds::ALL`].
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct IndirectCommandCheckNeeds {
@@ -2842,7 +3545,33 @@ impl IndirectCommandCheckNeeds {
             encoding_states,
         }
     }
+
+    /// What a check of these needs may see among commands whose records may hold `writes`, where
+    /// `encodes` answers whether a state they may run may encode indirect commands (asked only
+    /// where it decides): draws of points (a primitive type `writes` do not state counts as one)
+    /// and commands under such states, each where it looks for them; neither where no record may
+    /// hold a draw or a dispatch, as such a record runs nothing.
+    pub(super) fn sees(
+        self,
+        writes: CommandWrites,
+        encodes: impl FnOnce() -> bool,
+    ) -> (bool, bool) {
+        if !writes.may(RUNS) {
+            return (false, false);
+        }
+        let points =
+            self.point_draws && writes.may_draw_primitive_type(PrimitiveType::Point.as_raw());
+        (points, self.encoding_states && encodes())
+    }
 }
+
+/// The operations of a record that runs something: a draw of any kind, or a dispatch
+/// ([`IndirectCommandCheckNeeds::sees`]).
+const RUNS: u32 = CommandWrites::DRAW
+    | CommandWrites::DRAW_INDEXED
+    | CommandWrites::DRAW_PATCHES
+    | CommandWrites::DRAW_MESH
+    | CommandWrites::DISPATCH;
 
 /// One command of an indirect command buffer, as [`IndirectCommandBuffer::commands`] reads it: a
 /// runtime extension standing for Metal's private getters.
@@ -2878,9 +3607,15 @@ pub struct EncodedComputeCommand {
     /// [`unique_identifier`](ComputePipelineState::unique_identifier) of the state its record
     /// names, the one the CPU set after its release too, as Metal answers it (measured on an M3
     /// Max by the consumer); 0 where it names none (`pipeline_id`). For a record the GPU wrote,
-    /// the live state of its ID's. `None` where the runtime cannot tell which state the record
-    /// names: a state the program released, whose ID another took while the GPU could write the
-    /// record, or an ID no live state holds.
+    /// the state that held its ID as the GPU last could write the record (the completion of the
+    /// last command buffer that made the buffer resident for writing, or copied or reset commands
+    /// into it; now, while one has not completed), released since or not and after another state
+    /// took the ID, as Metal's GPU write resolves the ID as it runs and its record names that
+    /// state after (measured on an M3 Max by the consumer). Differs: a record written by an
+    /// earlier command buffer, its ID's holder changed before the last one completed, answers
+    /// the later holder's. `None` where the runtime cannot tell which state the record names:
+    /// the ID's holder then was a state of the other kind, or is past the last four holders of
+    /// the ID the device keeps, and no live state of this kind holds it.
     pub pipeline_unique_identifier: Option<u64>,
     /// Each kernel buffer below the descriptor's `max_kernel_buffer_bind_count`, past the 32 a
     /// record holds too, as set, a nil buffer included (its address the offset's low 32 bits): none
@@ -3010,17 +3745,19 @@ impl IndirectRenderCommand {
         !self.icb.is_render()
     }
 
-    /// Change the record by `edit`, for `call`: refused (`CommandKind`) for a command of a buffer
-    /// of dispatches (`of_compute`).
+    /// Write `field` into the record, with `set` as the state the CPU set where it names one
+    /// (`IndirectCommandBuffer::edit`), for `call`: refused (`CommandKind`) for a command of a
+    /// buffer of dispatches (`of_compute`).
     fn edit(
         &self,
         call: &'static str,
-        edit: impl FnOnce(&mut CommandRecord, &mut Option<CommandState>) -> Result<(), Error>,
+        field: RecordField,
+        set: Option<CommandState>,
     ) -> Result<(), Error> {
         if self.of_compute() {
             return Err(problem(call, IndirectCommandBufferProblem::CommandKind));
         }
-        self.icb.edit(self.index, edit)
+        self.icb.edit(self.index, field, set)
     }
 
     /// `setRenderPipelineState:`. Refused (`Invalid`): a buffer that inherits its pipeline
@@ -3066,17 +3803,17 @@ impl IndirectRenderCommand {
                 IndirectCommandBufferProblem::PipelineWithoutSupport,
             ));
         };
-        self.edit(CALL, |record, pipeline| {
-            record.bindings.pipeline = Some(id);
-            record.retained_pipeline = None;
-            let stamp = IdStamp {
-                id: id.get(),
-                serial,
-                identifier: state.identifier_value(),
-            };
-            *pipeline = Some(CommandState::Render(named, program, stamp));
-            Ok(())
-        })
+        let stamp = IdStamp {
+            id: id.get(),
+            serial,
+            identifier: state.identifier_value(),
+        };
+        let can = Named {
+            encodes: state.can_encode_indirect_commands(),
+            writes: state.indirect_command_writes(),
+        };
+        let set = CommandState::Render(named, program, stamp, can);
+        self.edit(CALL, RecordField::Pipeline(id), Some(set))
     }
 
     /// `setVertexBuffer:offset:atIndex:`: vertex buffer `index` at `buffer`'s address plus
@@ -3230,10 +3967,7 @@ impl IndirectRenderCommand {
             base_instance: base_instance as u32,
         };
         self.check_draw(CALL, IndirectCommandType::DRAW, &action)?;
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:
@@ -3296,10 +4030,7 @@ impl IndirectRenderCommand {
                 }),
             ));
         }
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// `drawPatches:patchStart:patchCount:patchIndexBuffer:patchIndexBufferOffset:instanceCount:
@@ -3368,10 +4099,7 @@ impl IndirectRenderCommand {
             None,
             tessellation_factor_buffer,
         )?;
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// `drawIndexedPatches:patchStart:patchCount:patchIndexBuffer:patchIndexBufferOffset:
@@ -3457,10 +4185,7 @@ impl IndirectRenderCommand {
             control_point_index_buffer,
             tessellation_factor_buffer,
         )?;
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// Refuse a patch draw's values for `call` as [`draw_patches`](Self::draw_patches) states:
@@ -3559,10 +4284,7 @@ impl IndirectRenderCommand {
             mesh_threads: low_bits(threads_per_mesh_threadgroup),
         };
         self.check_draw(CALL, IndirectCommandType::DRAW_MESH_THREADGROUPS, &action)?;
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// `drawMeshThreads:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`: the command
@@ -3582,10 +4304,7 @@ impl IndirectRenderCommand {
             mesh_threads: low_bits(threads_per_mesh_threadgroup),
         };
         self.check_draw(CALL, IndirectCommandType::DRAW_MESH_THREADS, &action)?;
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// `setBarrier`: the command's draw runs after the earlier draws of its execution and of the
@@ -3602,10 +4321,7 @@ impl IndirectRenderCommand {
         if self.of_compute() {
             return Ok(());
         }
-        self.edit("set_barrier", |record, _| {
-            record.barrier = true;
-            Ok(())
-        })?;
+        self.edit("set_barrier", RecordField::Barrier(true), None)?;
         self.icb.0.barriers.store(true, Ordering::Release);
         Ok(())
     }
@@ -3617,10 +4333,7 @@ impl IndirectRenderCommand {
         if self.of_compute() {
             return Ok(());
         }
-        self.edit("clear_barrier", |record, _| {
-            record.barrier = false;
-            Ok(())
-        })
+        self.edit("clear_barrier", RecordField::Barrier(false), None)
     }
 
     /// `reset`: the command as a fresh buffer's.
@@ -3631,7 +4344,6 @@ impl IndirectRenderCommand {
         self.icb.reset_command(self.index, |record, pipeline| {
             *record = CommandRecord::default();
             *pipeline = None;
-            Ok(())
         })
     }
 
@@ -3711,6 +4423,110 @@ impl IndirectRenderCommand {
             ));
         }
         Ok(())
+    }
+
+    /// Refuse, for `call`, a getter of a command of a buffer of dispatches (`CommandKind`,
+    /// `of_compute`), whose answers were not measured.
+    fn check_getter(&self, call: &'static str) -> Result<(), Error> {
+        match self.of_compute() {
+            true => Err(problem(call, IndirectCommandBufferProblem::CommandKind)),
+            false => Ok(()),
+        }
+    }
+
+    /// `getCommandType`, Apple's private getter: the command's
+    /// [`command_type`](EncodedRenderCommand::command_type) as
+    /// [`IndirectCommandBuffer::commands`] reads it now, its record's action alone read, as a
+    /// compute command's getters read theirs ([`IndirectComputeCommand::command_type`]). Each
+    /// getter is refused (`Invalid`, `CommandKind`) for a command of a buffer of dispatches,
+    /// where Metal's answer was not measured.
+    pub fn command_type(&self) -> Result<IndirectCommandType, Error> {
+        self.check_getter("command_type")?;
+        self.icb
+            .read_record(self.index, |view| command_type(&view.action()))
+    }
+
+    /// `hasBarrier`, Apple's private getter: the command's
+    /// [`barrier`](EncodedRenderCommand::barrier), read alone.
+    pub fn has_barrier(&self) -> Result<bool, Error> {
+        self.check_getter("has_barrier")?;
+        self.icb.read_record(self.index, |view| view.barrier())
+    }
+
+    /// `drawArguments`, `drawIndexedArguments`, `drawPatchesArguments`,
+    /// `drawIndexedPatchesArguments` and `getTessellationFactorArguments`, Apple's private
+    /// getters: the command's [`draw`](EncodedRenderCommand::draw), read alone.
+    pub fn draw(&self) -> Result<Option<IndirectDraw>, Error> {
+        self.check_getter("draw")?;
+        self.icb
+            .read_record(self.index, |view| draw_of(&view.action()))
+    }
+
+    /// The vertex buffer set at `index`: the command's
+    /// [`vertex_buffers`](EncodedRenderCommand::vertex_buffers)`[index]`, read alone, none at or
+    /// past the descriptor's `max_vertex_buffer_bind_count`, which Metal's private getters of the
+    /// slot answer as [`EncodedRenderCommand::vertex_buffer_address`] and
+    /// [`EncodedRenderCommand::vertex_attribute_stride`] do.
+    pub fn vertex_buffer(&self, index: u64) -> Result<Option<IndirectBufferBinding>, Error> {
+        self.check_getter("vertex_buffer")?;
+        let count = self.descriptor().max_vertex_buffer_bind_count;
+        self.icb
+            .read_buffer(self.index, BufferStage::Vertex, count, index)
+    }
+
+    /// The fragment buffer set at `index`, as [`vertex_buffer`](Self::vertex_buffer) reads a
+    /// vertex buffer, below the descriptor's `max_fragment_buffer_bind_count`
+    /// ([`EncodedRenderCommand::fragment_buffers`]).
+    pub fn fragment_buffer(&self, index: u64) -> Result<Option<IndirectBufferBinding>, Error> {
+        self.check_getter("fragment_buffer")?;
+        let count = self.descriptor().max_fragment_buffer_bind_count;
+        self.icb
+            .read_buffer(self.index, BufferStage::Fragment, count, index)
+    }
+
+    /// The object buffer set at `index`, as [`vertex_buffer`](Self::vertex_buffer) reads a
+    /// vertex buffer, below the descriptor's `max_object_buffer_bind_count`
+    /// ([`EncodedRenderCommand::object_buffers`]).
+    pub fn object_buffer(&self, index: u64) -> Result<Option<IndirectBufferBinding>, Error> {
+        self.check_getter("object_buffer")?;
+        let count = self.descriptor().max_object_buffer_bind_count;
+        self.icb
+            .read_buffer(self.index, BufferStage::Object, count, index)
+    }
+
+    /// The mesh buffer set at `index`, as [`vertex_buffer`](Self::vertex_buffer) reads a vertex
+    /// buffer, below the descriptor's `max_mesh_buffer_bind_count`
+    /// ([`EncodedRenderCommand::mesh_buffers`]).
+    pub fn mesh_buffer(&self, index: u64) -> Result<Option<IndirectBufferBinding>, Error> {
+        self.check_getter("mesh_buffer")?;
+        let count = self.descriptor().max_mesh_buffer_bind_count;
+        self.icb
+            .read_buffer(self.index, BufferStage::Mesh, count, index)
+    }
+
+    /// The command's [`pipeline`](EncodedRenderCommand::pipeline), read alone.
+    pub fn pipeline_state(&self) -> Result<Option<RenderPipelineState>, Error> {
+        self.check_getter("pipeline_state")?;
+        Ok(self.icb.render_pipeline_now(self.index)?.0)
+    }
+
+    /// The command's [`pipeline_id`](EncodedRenderCommand::pipeline_id), read alone.
+    pub fn pipeline_id(&self) -> Result<Option<ResourceId>, Error> {
+        self.check_getter("pipeline_id")?;
+        self.icb.read_record(self.index, |view| {
+            let runs = view.pipeline().or(view.retained_pipeline());
+            runs.map(|id| ResourceId(id.get()))
+        })
+    }
+
+    /// `getPipelineStateUniqueIdentifier`, Apple's private getter: the command's
+    /// [`pipeline_unique_identifier`](EncodedRenderCommand::pipeline_unique_identifier), read
+    /// alone, whose kind the device announces as `commands` announces it.
+    pub fn pipeline_unique_identifier(&self) -> Result<Option<u64>, Error> {
+        self.check_getter("pipeline_unique_identifier")?;
+        let (_, identifier) = self.icb.render_pipeline_now(self.index)?;
+        self.icb.announce_identifier(identifier);
+        Ok(identifier)
     }
 }
 

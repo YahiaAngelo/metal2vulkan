@@ -1,12 +1,16 @@
 //! Executing an indirect command buffer's compute commands in a compute encoder
 //! (`executeCommandsInBuffer:withRange:`).
 //!
-//! - **When.** The CPU may write a command's record until the command buffer is committed, and
-//!   an execution runs the records as they stand then. So the encoder records nothing for it at
-//!   the call: it leaves an [`Execute`] as a segment ([`EncoderCore::defer`]), recorded into a
-//!   `VkCommandBuffer` of its own ([`Execute::record`]), behind a barrier from everything before
-//!   it and with one to everything after it, which goes between the encoder's two as its batch
-//!   is submitted.
+//! - **When.** Metal's execution reads the records as it runs, so the CPU may write a command's
+//!   record after the call. So the encoder records nothing for it at the call: it leaves an
+//!   [`Execute`] as a segment ([`EncoderCore::defer`]), recorded into a `VkCommandBuffer` of its
+//!   own ([`Execute::record`]), behind a barrier from everything before it and with one to
+//!   everything after it, which goes between the encoder's two as its batch is submitted.
+//!   `commit` records it from the CPU's records as they stand then; where the CPU writes the
+//!   buffer's records again before the batch is ready to submit (an event wait holds it,
+//!   [`Execute::rewritten`]), a host step records it again from the records as they stand then,
+//!   waiting for no work on the GPU, and announcing nothing. A CPU write after the batch was
+//!   submitted races the GPU, as on Metal.
 //! - **Records the GPU may write**. A buffer an encoder made resident for writing
 //!   (`IndirectCommandBuffer::gpu_written`, for good) is written by functions as they run, so its
 //!   records are known only once the work before the execution completed. Its segment starts a part
@@ -26,7 +30,9 @@
 //!   `supportIndirectCommandBuffers` that lived at the commit (`ComputePipelineState::
 //!   indirect_states`); an ID of none runs nothing, as Metal's undefined one may not. A record
 //!   naming the ID of the state the CPU set on its command runs that state's program, though the
-//!   program released the state since (`IndirectCommandBuffer::step_states`).
+//!   program released the state since (`IndirectCommandBuffer::step_states`); one the GPU wrote,
+//!   the state that held the ID as the GPU last could write the records, released since or not
+//!   (`released_programs.rs`).
 //! - **Each command** runs through the plan path as the encoder's dispatch would
 //!   ([`record_dispatch`]): with its pipeline state, or the encoder's when the buffer inherits
 //!   it; its kernel buffers, or the encoder's bound ones when the buffer inherits them; its
@@ -61,6 +67,13 @@
 //! - **Threadgroup lengths** are kept as set: one past the device's `max_threadgroup_memory_length`
 //!   runs clamped to it (ruling c); one that is not a multiple of 16 bytes runs rounded up to one,
 //!   as the plan rounds every length.
+//! - **Checks.** An execution given a check (`execute_commands_in_buffer_checked`) calls it with
+//!   each command it will record, before it records any, where what the buffer's records may hold
+//!   leaves the check something to see ([`Execute::check_sees`]): `commit` with the CPU's records
+//!   it read, a host step with the records as the GPU and the CPU left them. An execution `commit`
+//!   recorded on the GPU alone (`gpu_execute.rs`), its check having nothing to see, whose check a
+//!   route encoded since gives something to see takes the host step before its batch is submitted
+//!   ([`Execute::outgrown`]).
 //! - **Order.** Between commands, the segment orders as the encoder orders its dispatches (a
 //!   serial encoder's where their uses meet; a concurrent one's not at all), and a command with
 //!   its barrier set runs after every earlier command of the segment.
@@ -91,6 +104,7 @@ use metal2vulkan::bind::{Dispatch, ImageblockSize, ReplayFaults, StageInRegion};
 use metal2vulkan::error::{BindError, Feature, Unsupported};
 use std::collections::BTreeMap;
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// The call an execution's refusals name.
@@ -142,15 +156,27 @@ pub(super) struct Execute {
     /// (`predication.rs`): a host step records it, and nothing where the counter skips.
     pub(super) gate: Option<HostGate>,
     /// Inside a block of command predication, for a range given as such
-    /// ([`ExecutionRange::Fixed`]) that is not empty and no caller's check: the gate its preprocess
-    /// runs from on the GPU-alone path (`gpu_execute.rs`), of one invocation per command of the
-    /// range, which the step before it writes (`Predication::gates`).
+    /// ([`ExecutionRange::Fixed`]) that is not empty: the gate its preprocess runs from on the
+    /// GPU-alone path (`gpu_execute.rs`), of one invocation per command of the range, which the
+    /// step before it writes (`Predication::gates`).
     pub(super) preprocess_gate: Option<Upload>,
-    /// The caller's check of the commands its host step records
-    /// (`execute_commands_in_buffer_checked`), and what it looks for: the step calls it before it
-    /// records them, and it keeps the execution off the GPU-alone path (`gpu_execute.rs`).
+    /// The caller's check of the commands it records (`execute_commands_in_buffer_checked`), and
+    /// what it looks for: `commit` or the host step calls it before it records them, where it may
+    /// see something ([`check_sees`](Self::check_sees)), and then it keeps the execution off the
+    /// GPU-alone path (`gpu_execute.rs`).
     pub(super) check: Option<(Mutex<IndirectCommandCheck>, IndirectCommandCheckNeeds)>,
+    /// Where `commit` recorded it on the GPU alone with a check that had nothing to see then: the
+    /// states its host step lets the records name, settled then ([`settle`](Self::settle)), for a
+    /// route encoded since that gives the check something to see
+    /// ([`outgrown`](Self::outgrown)). The step takes them.
+    pub(super) unchecked: Mutex<Option<Vec<ComputePipelineState>>>,
+    /// Where `commit` recorded it from the CPU's records, the count of the CPU's writes of them
+    /// it read them after (`IndirectCommandBuffer::cpu_writes`); [`NOT_READ`] until then.
+    pub(super) read_at: AtomicU64,
 }
+
+/// [`Execute::read_at`] of an execution `commit` did not record from the CPU's records.
+pub(super) const NOT_READ: u64 = u64::MAX;
 
 /// The commands an execution runs.
 pub(super) enum ExecutionRange {
@@ -416,6 +442,53 @@ impl Execute {
         self.range.indirect()
     }
 
+    /// Whether its check, if any, may see something among its commands, as its buffer's records
+    /// may hold them now (`IndirectCommandCheckNeeds::sees`): commands under states that may
+    /// encode indirect commands, where it looks for them (the encoder's state where the buffer
+    /// inherits it, else those the records may name,
+    /// `IndirectCommandBuffer::may_name_encoding_states`). A compute buffer's records hold no
+    /// draw: a command of one runs no draw of points.
+    pub(super) fn check_sees(&self) -> bool {
+        let Some((_, needs)) = &self.check else {
+            return false;
+        };
+        let needs = IndirectCommandCheckNeeds {
+            point_draws: false,
+            ..*needs
+        };
+        let encodes = || match &self.pipeline {
+            Some(pipeline) => pipeline.can_encode_indirect_commands(),
+            None => self.icb.may_name_encoding_states(),
+        };
+        let (points, encodes) = needs.sees(self.icb.command_writes(), encodes);
+        points || encodes
+    }
+
+    /// Whether `commit` recorded it on the GPU alone with a check that had nothing to see, and a
+    /// route encoded since gives the check something ([`check_sees`](Self::check_sees)): its host
+    /// step records it instead, before its batch is submitted, calling the check.
+    pub(super) fn outgrown(&self) -> bool {
+        let unchecked = lock(&self.unchecked).is_some();
+        unchecked && self.check_sees()
+    }
+
+    /// Where it is [`outgrown`](Self::outgrown), the states its host step lets the records name,
+    /// taken: the step records it for good.
+    pub(super) fn take_outgrown(&self) -> Option<Vec<ComputePipelineState>> {
+        match self.outgrown() {
+            true => lock(&self.unchecked).take(),
+            false => None,
+        }
+    }
+
+    /// Whether `commit` recorded it from the CPU's records and the CPU wrote the buffer's records
+    /// since ([`read_at`](Self::read_at)): its host step records it again, from the records as
+    /// they stand then, before its batch is submitted.
+    pub(super) fn rewritten(&self) -> bool {
+        let read_at = self.read_at.load(Ordering::Acquire);
+        read_at != NOT_READ && self.icb.cpu_writes() != read_at
+    }
+
     /// Whether it lies inside a block of command predication: a host step records it, once the
     /// steps before it left their counter (`predication.rs`), unless it runs on the GPU alone from
     /// its preprocess's gate (`gpu_execute.rs`).
@@ -448,13 +521,23 @@ impl Execute {
         // The execution announces the commands it runs otherwise than Metal's may, as it records
         // them.
         let Some(states) = states else {
+            let start = range.start;
+            // Counted before the records are read: a write meanwhile records it again.
+            self.read_at.store(self.icb.cpu_writes(), Ordering::Release);
             let (commands, released) = self.icb.records(range, Reader::Commit)?;
             self.icb.degrade_released(&released);
+            // The caller's check sees each command `commit` will record, before it records any,
+            // where it may see something.
+            if let Some((check, _)) = self.check.as_ref().filter(|_| self.check_sees()) {
+                let read = commands.iter().map(|(record, _)| record);
+                self.icb.check_read(check, start, read);
+            }
             return Ok((commands.into_iter().map(Some).collect(), faults));
         };
         let written = self.icb.written_records(range.clone())?;
-        // The caller's check sees each command the step will record, before it records any.
-        if let Some((check, _)) = &self.check {
+        // The caller's check sees each command the step will record, before it records any,
+        // where it may see something.
+        if let Some((check, _)) = self.check.as_ref().filter(|_| self.check_sees()) {
             self.icb
                 .check_recorded(check, range.start, &written.records);
         }
@@ -560,17 +643,20 @@ pub(super) fn degrade_nil_offset(device: &Device, binding: &BufferBinding, index
 /// Announce, once per device, that an execution is replayed on the host (the module's records
 /// the GPU may write, and ranges read from a buffer).
 pub(super) fn degrade_host_replay(device: &Device, execute: &Execute) {
+    let why = if execute.icb.gpu_written() {
+        "an encoder made it resident for writing, so the GPU may write the records an execution \
+         runs"
+    } else if execute.indirect() {
+        "an execution reads its range from a buffer \
+         (executeCommandsInBuffer:indirectBuffer:indirectBufferOffset:), which the GPU may write"
+    } else if execute.predicated() {
+        "an execution inside a block of command predication, whose condition is GPU memory"
+    } else {
+        // Recorded again for the CPU's writes since the commit (`Execute::rewritten`), waiting
+        // for no work on the GPU.
+        return;
+    };
     device.degrade(Degradation::HostReplayedIndirectCommands, || {
-        let why = if execute.icb.gpu_written() {
-            "an encoder made it resident for writing, so the GPU may write the records an \
-             execution runs"
-        } else if !execute.indirect() {
-            "an execution inside a block of command predication, whose condition is GPU memory"
-        } else {
-            "an execution reads its range from a buffer \
-             (executeCommandsInBuffer:indirectBuffer:indirectBufferOffset:), which the GPU may \
-             write"
-        };
         (
             format!(
                 "an indirect command buffer of {} commands",

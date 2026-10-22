@@ -16,10 +16,15 @@
 //! - a sticky encoding fault in the header runs no command, and the execution report says so;
 //! - an execution reads its range from a buffer as it runs;
 //! - a checked execution's host step checks each command before it records any, from the records
-//!   it read once;
+//!   it read once; `commit` checks the CPU's records it records the same way, where a state the
+//!   records may name may encode, and never where none may;
 //! - the blit encoder's copy, reset and optimize act on the commands as they run;
+//! - a record the kernel wrote runs the state its ID named as it wrote it, after the program
+//!   released it and after another state took its ID; where the state was released before the
+//!   buffer could be written, nothing, announced;
 //! - a kernel reaches the buffer made last with the ID it encodes through, placed or not, and
-//!   none once that one is gone;
+//!   none once that one is gone, the buffer at an ID a reservation leaves next, and an ID's
+//!   records where an earlier ID's run past their start;
 //! - a command buffer's executed-commands handler sees each execution where its records are read:
 //!   in `commit` for the CPU's, in the host step (or on the GPU alone) for the kernel's, with each
 //!   command's state's ability to encode indirect commands and the buffers made resident for
@@ -35,7 +40,9 @@
 use super::degrade_notices::{
     assert_made_once, counts, forced, on_device_with, shared_in_system_memory,
 };
+use super::generated_executions::flat_template;
 use super::host_memory::{gpu_fill, no_copy, Mapping, GUEST_PAGE};
+use super::indirect_executions::RELEASED_STATES;
 use super::resource_ids::DELAYED_DEALLOCATORS as DELAYED;
 use super::{buffer_with, read_buffer, WAIT};
 use crate::air_library::AirLibrary;
@@ -49,10 +56,9 @@ use metal2vulkan_runtime::{
     Error, EventRef, ExecutedCommands, ExecutedCommandsHandler, ExecutedPipeline, Execution,
     IdPlacement, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor,
     IndirectCommandBufferProblem, IndirectCommandCheckNeeds, Invalid, PipelineOptions, Problem,
-    RecordsRead, ResourceId, ResourceOptions, Size,
+    RecordsRead, ResourceId, ResourceIdKind, ResourceOptions, Size,
 };
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
@@ -237,6 +243,15 @@ impl Setup {
         }
     }
 
+    /// The setup with its template released, the writer's state in its place: the argument
+    /// buffer still names the template's ID, which a state made after may take.
+    fn releasing_template(self) -> Setup {
+        Setup {
+            template: self.writer.clone(),
+            ..self
+        }
+    }
+
     /// `out`, which the commands write.
     pub(super) fn out(&self) -> &Buffer {
         &self.out
@@ -251,13 +266,18 @@ impl Setup {
 /// A buffer of `COMMANDS` commands of both dispatch kinds with `bind_count` kernel buffers and
 /// one threadgroup length.
 fn commands_buffer(device: &Device, bind_count: u32) -> IndirectCommandBuffer {
+    commands_buffer_of(device, bind_count, COMMANDS)
+}
+
+/// [`commands_buffer`] of `count` commands.
+fn commands_buffer_of(device: &Device, bind_count: u32, count: u64) -> IndirectCommandBuffer {
     let mut descriptor = IndirectCommandBufferDescriptor::new();
     descriptor.command_types = IndirectCommandType::CONCURRENT_DISPATCH
         .union(IndirectCommandType::CONCURRENT_DISPATCH_THREADS);
     descriptor.max_kernel_buffer_bind_count = bind_count;
     descriptor.max_kernel_threadgroup_memory_bind_count = 1;
     device
-        .new_indirect_command_buffer(&descriptor, COMMANDS, ResourceOptions::shared())
+        .new_indirect_command_buffer(&descriptor, count, ResourceOptions::shared())
         .unwrap()
 }
 
@@ -423,9 +443,12 @@ fn commands_a_kernel_writes_run_after_it() {
 /// step calls the check once for each command it records, in order, with the command as
 /// `IndirectCommandBuffer::commands` reads it (each a dispatch), before it records any: the
 /// commands' windows of `out` are all still zero at every call. An execution of the CPU's records
-/// in a buffer no encoder made resident for writing, which `commit` records, never calls it, and
-/// both run as their plain forms run. The commands the check reads answer the runtime's unique
-/// identifiers of their states, which the device announces as the getter does.
+/// in a buffer no encoder made resident for writing, which `commit` records, calls it there, on
+/// the committing thread before `commit` returns, with each command, where the CPU set a state
+/// that may encode on one of them (since replaced by the template); where no state the records
+/// may name may, never. All run as their plain forms run. The commands the check reads answer
+/// the runtime's unique identifiers of their states, which the device announces as the getter
+/// does.
 #[test]
 fn a_checked_execution_checks_each_written_command_before_its_step_records_it() {
     on_device_forcing(&[Degradation::UnmeasuredUniqueIdentifier], |device| {
@@ -469,34 +492,60 @@ fn a_checked_execution_checks_each_written_command_before_its_step_records_it() 
             every,
             "each command, before any runs"
         );
-        // The CPU's records, recorded at the commit: no call.
-        let setup = Setup::new(device, 2);
-        setup.write_on_the_cpu();
-        let calls = Arc::new(AtomicUsize::new(0));
-        let counted = Arc::clone(&calls);
-        let command_buffer = queue.command_buffer().unwrap();
-        let mut encoder = command_buffer.compute_command_encoder().unwrap();
-        encoder
-            .use_resource(setup.params.as_resource(), ResourceUsage::READ)
-            .unwrap();
-        encoder
-            .use_resource(setup.out.as_resource(), ResourceUsage::WRITE)
-            .unwrap();
-        encoder
-            .execute_commands_in_buffer_checked(
-                &setup.icb,
-                0..COMMANDS,
-                Box::new(move |_, _| {
-                    counted.fetch_add(1, Ordering::SeqCst);
-                }),
-                IndirectCommandCheckNeeds::ALL,
-            )
-            .unwrap();
-        encoder.end_encoding().unwrap();
-        complete(&command_buffer);
-        assert!(!setup.icb.gpu_written());
-        assert_eq!(setup.output(), expected(), "the CPU's records run");
-        assert_eq!(calls.load(Ordering::SeqCst), 0, "no host step, no check");
+        // The CPU's records, recorded at the commit: checked there where a state they may name
+        // may encode.
+        let encoding = state(device, "icb_replay_encode", true);
+        for encodes in [false, true] {
+            let setup = Setup::new(device, 2);
+            if encodes {
+                let command = setup.icb.indirect_compute_command_at(0).unwrap();
+                command.set_compute_pipeline_state(&encoding).unwrap();
+            }
+            setup.write_on_the_cpu();
+            let seen: Arc<Mutex<Vec<(u64, std::thread::ThreadId)>>> = Arc::default();
+            let log = Arc::clone(&seen);
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            encoder
+                .use_resource(setup.params.as_resource(), ResourceUsage::READ)
+                .unwrap();
+            encoder
+                .use_resource(setup.out.as_resource(), ResourceUsage::WRITE)
+                .unwrap();
+            encoder
+                .execute_commands_in_buffer_checked(
+                    &setup.icb,
+                    0..COMMANDS,
+                    Box::new(move |index, _| {
+                        log.lock()
+                            .unwrap()
+                            .push((index, std::thread::current().id()));
+                    }),
+                    IndirectCommandCheckNeeds::ALL,
+                )
+                .unwrap();
+            encoder.end_encoding().unwrap();
+            command_buffer.commit().unwrap();
+            let at_commit = seen.lock().unwrap().clone();
+            wait(&command_buffer);
+            assert!(!setup.icb.gpu_written());
+            assert_eq!(
+                setup.output(),
+                expected(),
+                "the CPU's records run, encodes {encodes}"
+            );
+            let committing = std::thread::current().id();
+            let every: Vec<(u64, std::thread::ThreadId)> = match encodes {
+                true => (0..COMMANDS).map(|index| (index, committing)).collect(),
+                false => Vec::new(),
+            };
+            assert_eq!(at_commit, every, "checked in `commit`, encodes {encodes}");
+            assert_eq!(
+                *seen.lock().unwrap(),
+                every,
+                "and only there, encodes {encodes}"
+            );
+        }
     });
 }
 
@@ -580,6 +629,59 @@ fn a_kernel_writes_the_buffer_that_holds_the_id_now() {
     });
 }
 
+/// A record a kernel wrote runs the state its ID named as the kernel wrote it, released since or
+/// not, as Metal's runs it (measured on an M3 Max, `released_programs.rs`): where the program
+/// releases the template after the kernel wrote the commands, they run the template's program,
+/// and so they do after a state made after (the flat template of `generated_executions`) took its
+/// ID, unannounced. Where the program released the template before any command buffer that may
+/// write the buffer was encoded, the buffer keeps no program of it: Metal runs it, the commands
+/// run nothing, announced (`Degradation::ReleasedCommandState`).
+#[test]
+fn commands_a_kernel_wrote_run_the_state_their_id_named_then() {
+    for taken in [false, true] {
+        on_device(|device| {
+            let queue = device.new_command_queue().unwrap();
+            let setup = Setup::new(device, 2);
+            let id = setup.template.gpu_resource_id();
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            setup.write(&mut encoder);
+            encoder.end_encoding().unwrap();
+            complete(&command_buffer);
+            let setup = setup.releasing_template();
+            let taker = taken.then(|| flat_template(device));
+            if let Some(taker) = &taker {
+                assert_eq!(
+                    taker.gpu_resource_id(),
+                    id,
+                    "the flat template takes the ID"
+                );
+            }
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            setup.execute(&mut encoder);
+            encoder.end_encoding().unwrap();
+            complete(&command_buffer);
+            assert_eq!(setup.output(), expected(), "taken {taken}");
+        });
+    }
+    on_device_forcing(&RELEASED_STATES, |device| {
+        let queue = device.new_command_queue().unwrap();
+        let setup = Setup::new(device, 2).releasing_template();
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        setup.write(&mut encoder);
+        setup.execute(&mut encoder);
+        encoder.end_encoding().unwrap();
+        complete(&command_buffer);
+        assert_eq!(
+            setup.output(),
+            expected_in(0..0),
+            "the commands ran nothing"
+        );
+    });
+}
+
 /// A kernel encoding through an ID reaches the buffer made last with it, placed or not, as
 /// Metal's does (`r_*`): a buffer placed at the setup's buffer's ID takes it,
 /// so the kernel writes the placed buffer's commands and the setup's buffer keeps fresh ones,
@@ -650,6 +752,106 @@ fn a_kernel_reaches_the_buffer_made_last_with_its_id() {
             format!("{:?}", fresh.commands(0..COMMANDS).unwrap()),
             "the earlier buffer, written after the placed one is gone"
         );
+    });
+}
+
+/// A kernel encoding through the ID a reservation leaves next reaches its buffer's records, and
+/// the commands it writes run, as Metal's do (on an M3 Max, each buffer made past a reservation
+/// of 2^23 + 5, 2^30 + 5 or 2^31 - 2 ran), up to the last ID, 2^31 - 1, whose records start 2^62
+/// bytes below 2^64.
+#[test]
+fn a_kernel_reaches_the_records_of_a_buffer_past_a_reservation() {
+    for reserved in [(1 << 23) + 5, (1 << 26) - 2, (1 << 26) + 5, (1 << 31) - 2] {
+        on_device(|device| {
+            device
+                .reserve_resource_ids(
+                    ResourceIdKind::IndirectCommandBuffer,
+                    &[ResourceId(reserved)],
+                )
+                .unwrap();
+            let setup = Setup::new(device, 2);
+            assert_eq!(setup.icb.gpu_resource_id(), ResourceId(reserved + 1));
+            let queue = device.new_command_queue().unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            setup.write(&mut encoder);
+            setup.execute(&mut encoder);
+            encoder.end_encoding().unwrap();
+            complete(&command_buffer);
+            assert_eq!(setup.output(), expected(), "{reserved}");
+        });
+    }
+}
+
+/// A kernel reaches each ID's records at their start, however far an earlier ID's run, as Metal
+/// makes and runs buffers of any length past a reservation (on an M3 Max, 2^22 commands at
+/// 2^26 + 6): the records of ID r + 1, 955,300 commands (past 2^31 bytes), run past ID r + 2's
+/// start. Through r + 2 the kernel writes r + 2's commands, which run, and r + 1's stay fresh;
+/// with r + 2's buffer not resident, its writes miss, which the execution report counts, and
+/// reach none of r + 1's records where r + 2's would start.
+#[test]
+fn a_kernel_reaches_an_id_s_records_where_an_earlier_id_s_run_past_them() {
+    on_device(|device| {
+        let reserved = (1 << 26) + 5;
+        device
+            .reserve_resource_ids(
+                ResourceIdKind::IndirectCommandBuffer,
+                &[ResourceId(reserved)],
+            )
+            .unwrap();
+        let count = 955_300;
+        let long = commands_buffer_of(device, 2, count);
+        assert_eq!(long.gpu_resource_id(), ResourceId(reserved + 1));
+        let setup = Setup::new(device, 2);
+        assert_eq!(setup.icb.gpu_resource_id(), ResourceId(reserved + 2));
+        let queue = device.new_command_queue().unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        encoder
+            .use_resource(long.as_resource(), ResourceUsage::WRITE)
+            .unwrap();
+        setup.write(&mut encoder);
+        setup.execute(&mut encoder);
+        encoder.end_encoding().unwrap();
+        complete(&command_buffer);
+        assert_eq!(setup.output(), expected(), "through r + 2");
+        // The records about r + 2's start, 2^31 bytes into r + 1's, and r + 1's first: fresh.
+        let fresh = format!(
+            "{:?}",
+            commands_buffer(device, 2).commands(0..1).unwrap()[0]
+        );
+        let first = (1 << 31) / 2248 - 2;
+        let around = (first..first + 6).chain(0..COMMANDS);
+        let fresh_all = |what: &str| {
+            for index in around.clone() {
+                let command = long.commands(index..index + 1).unwrap();
+                assert_eq!(
+                    format!("{:?}", command[0]),
+                    fresh,
+                    "{what}: command {index}"
+                );
+            }
+        };
+        fresh_all("written through r + 2");
+        // r + 2's buffer not resident: the writes miss.
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        encoder
+            .use_resource(long.as_resource(), ResourceUsage::WRITE)
+            .unwrap();
+        encoder.set_compute_pipeline_state(&setup.writer).unwrap();
+        encoder.set_buffer(Some(&setup.arguments), 0, 0).unwrap();
+        encoder.set_buffer(Some(&setup.params), 0, 1).unwrap();
+        encoder.set_buffer(Some(&setup.out), 0, 2).unwrap();
+        let commands = Size::new(COMMANDS, 1, 1);
+        encoder.dispatch_threads(commands, commands).unwrap();
+        encoder.end_encoding().unwrap();
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+        let report = command_buffer.execution_report().unwrap();
+        assert!(report.resident_miss, "the writes miss: {report:?}");
+        fresh_all("with r + 2's records not resident");
     });
 }
 

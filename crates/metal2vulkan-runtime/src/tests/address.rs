@@ -551,10 +551,62 @@ fn records_take_the_lowest_free_id_and_leave_the_spaces_alone() {
         space.place(Place::Records(RECORDS_ID_LIMIT), PAGE).is_err(),
         "no records address"
     );
+    // Records of any length start at their ID's address, past later IDs' starts too, and end
+    // below 2^64 (2^62 bytes past the last ID's start).
+    for (id, length) in [
+        (1, (1 << 31) + 1),
+        (1 << 26, 1 << 36),
+        (RECORDS_ID_LIMIT - 1, 1 << 62),
+    ] {
+        let (at, records) = space.place(Place::Records(id), length).unwrap();
+        assert_eq!(at.0, records_address(id));
+        space.free(records);
+    }
     assert!(
-        space.place(Place::Records(1), (1 << 40) + 1).is_err(),
-        "past one ID's records"
+        space
+            .place(Place::Records(RECORDS_ID_LIMIT - 1), (1 << 62) + (1 << 31))
+            .is_err(),
+        "past 2^64"
     );
+    assert!(space.is_empty());
+}
+
+/// Indirect command buffers' plain IDs past a reservation of 2^23 or more are the ones Metal hands
+/// out (an M3 Max, macOS 27.0.1): the lower of the two free ranges the reserved ID splits, the
+/// shorter where they differ, to 2^31 - 1, each below the records' limit.
+#[test]
+fn records_ids_past_a_high_reservation_are_the_m3_max_s() {
+    let cases: [(u64, &[u64]); 11] = [
+        (1 << 23, &[1, 2]),
+        ((1 << 23) + 5, &[(1 << 23) + 6, (1 << 23) + 7]),
+        (16_000_000, &[16_000_001, 16_000_002]),
+        ((1 << 29) + 5, &[(1 << 29) + 6, (1 << 29) + 7]),
+        ((1 << 30) - 1, &[1, 2]),
+        (1 << 30, &[1, 2]),
+        ((1 << 30) + 5, &[(1 << 30) + 6, (1 << 30) + 7]),
+        (3 << 29, &[(3 << 29) + 1, (3 << 29) + 2]),
+        ((1 << 31) - 2, &[(1 << 31) - 1, 1]),
+        ((1 << 31) - 1, &[1, 2]),
+        ((1 << 26) - 3, &[(1 << 26) - 2, (1 << 26) - 1, 1]),
+    ];
+    for (reserved, ids) in cases {
+        let mut space = AddressSpace::new();
+        assert!(space.reserve_records(&[reserved]));
+        let mut held = Vec::new();
+        for &id in ids {
+            let next = space.take_records_id(None).unwrap();
+            assert_eq!(next.id, id, "{reserved}");
+            assert!(next.id < RECORDS_ID_LIMIT);
+            held.push(next);
+        }
+        for id in held {
+            space.give_records_id(id);
+        }
+    }
+    // Beside a low ID, the range below the low one is the shortest.
+    let mut space = AddressSpace::new();
+    assert!(space.reserve_records(&[10, (1 << 30) + 5]));
+    assert_eq!(space.take_records_id(None).unwrap().id, 1);
 }
 
 /// Indirect command buffers' records IDs after a reservation are the ones Metal hands out, from a
@@ -579,6 +631,36 @@ fn records_ids_after_a_reservation_are_metal_s() {
         for id in runs.iter().flat_map(|&(first, last)| first..=last) {
             let next = space.take_records_id(None).unwrap();
             assert_eq!(next.id, id, "{reserved:?}");
+            held.push(next);
+        }
+        for id in held {
+            space.give_records_id(id);
+        }
+    }
+}
+
+/// Indirect command buffers' plain IDs after a call of 0 alone, then a reservation, are Metal's:
+/// the pool's first range kept beside the reservation's, its IDs handed out twice (an M3 Max,
+/// macOS 27.0.1, and the consumer's runs of 0 then 100 and 0 then 2^31 - 1 there).
+#[test]
+fn records_ids_after_a_lone_zero_are_handed_out_twice_as_metal_s() {
+    let cases: [(u64, &[(u64, u64)]); 7] = [
+        (10, &[(1, 9), (11, 31), (1, 15)]),
+        (20, &[(21, 31), (1, 19), (1, 10)]),
+        (40, &[(41, 63), (1, 31), (1, 16)]),
+        (31, &[(1, 30), (1, 50)]),
+        (32, &[(1, 31), (33, 81)]),
+        (100, &[(101, 127), (1, 31), (1, 82)]),
+        ((1 << 31) - 1, &[(1, 31), (1, 40)]),
+    ];
+    for (reserved, runs) in cases {
+        let mut space = AddressSpace::new();
+        assert!(space.reserve_records(&[0]));
+        assert!(space.reserve_records(&[reserved]));
+        let mut held = Vec::new();
+        for id in runs.iter().flat_map(|&(first, last)| first..=last) {
+            let next = space.take_records_id(None).unwrap();
+            assert_eq!(next.id, id, "0, then {reserved}");
             held.push(next);
         }
         for id in held {

@@ -106,7 +106,6 @@ metal2vulkan-degrade-implementation-defined-reconvergence
 metal2vulkan-degrade-in-place-vertex-reads
 metal2vulkan-degrade-indirect-index-bounds-pass
 metal2vulkan-degrade-indirect-nil-buffer-offset
-metal2vulkan-degrade-indirect-value-past-record
 metal2vulkan-degrade-input-attachment-srgb-decode
 metal2vulkan-degrade-isolated-index-bytes
 metal2vulkan-degrade-landed-visibility-results

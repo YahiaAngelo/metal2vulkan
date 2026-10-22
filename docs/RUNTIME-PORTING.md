@@ -166,8 +166,8 @@ narrow refusal that the call's rustdoc describes.
 | `EncodeStartIf` | `encodeStartIf:offset:comparison:referenceValue:` (SPI) | `ComputeCommandEncoder::encode_start_if`, as Metal runs it, on a counter the runtime's step kernel moves; a live block open where its unit ends fails the command buffer where its commands skip there, as Metal's GPU recovery does (`PredicationOpenAtUnitEnd`); a word past its buffer reads as Metal reads it (the heap's bytes, or zero; zero announced where Metal reads unrelated memory); refused: a nil buffer with no block open where `encode_start_else` refuses *(partial)* |
 | `EncodeStartWhile` | `encodeStartWhile:offset:comparison:referenceValue:` (SPI) | `ComputeCommandEncoder::encode_start_while`, as Metal runs it, laid down as `encode_start_do_while`'s loops are; refused as `encode_start_if` refuses *(partial)* |
 | `EndEncoding` | `endEncoding` | `ComputeCommandEncoder::end_encoding` |
-| `ExecuteCommandsIndirect` | `executeCommandsInBuffer:indirectBuffer:indirectBufferOffset:` | `ComputeCommandEncoder::execute_commands_in_buffer_indirect`; `_checked` adds an `IndirectCommandCheck` its host step calls on each command first |
-| `ExecuteCommandsInBuffer` | `executeCommandsInBuffer:withRange:` | `ComputeCommandEncoder::execute_commands_in_buffer`; `_checked` adds an `IndirectCommandCheck` a host step calls on each command first, and the `IndirectCommandCheckNeeds` it looks for |
+| `ExecuteCommandsIndirect` | `executeCommandsInBuffer:indirectBuffer:indirectBufferOffset:` | `ComputeCommandEncoder::execute_commands_in_buffer_indirect`; `_checked` adds an `IndirectCommandCheck` its host step calls on each command first, and the `IndirectCommandCheckNeeds` it looks for |
+| `ExecuteCommandsInBuffer` | `executeCommandsInBuffer:withRange:` | `ComputeCommandEncoder::execute_commands_in_buffer`; `_checked` adds an `IndirectCommandCheck` that `commit` (for the CPU's records) or a host step calls on each command first, and the `IndirectCommandCheckNeeds` it looks for, which may rule it out (then it runs on the GPU alone where it can) |
 | `CompressedTextureReinterpretationFlush` | `insertCompressedTextureReinterpretationFlush` (SPI) | `ComputeCommandEncoder::insert_compressed_texture_reinterpretation_flush`: a no-op |
 | `MemoryBarrierWithResources` | `memoryBarrierWithResources:count:` | `ComputeCommandEncoder::memory_barrier_with_resources` |
 | `MemoryBarrierWithScope` | `memoryBarrierWithScope:` | `ComputeCommandEncoder::memory_barrier_with_scope` |
@@ -312,8 +312,8 @@ narrow refusal that the call's rustdoc describes.
 | Item | Metal | Runtime |
 |---|---|---|
 | `encode` |  | one `IndirectRenderCommand` method per `IcbRenderCmd` (above) |
-| `command_type`, `fragment_buffer_address`, `vertex_attribute_stride`, `vertex_buffer_address`, `has_barrier`, `draw_args`, `draw_indexed_args`, `draw_patches_args`, `draw_indexed_patches_args`, `tessellation_factor_args` | the getters (SPI) | `IndirectCommandBuffer::commands`: each render command decoded as an `EncodedRenderCommand` |
-| `pipeline_state_unique_identifier` | `getPipelineStateUniqueIdentifier` (SPI) | `pipeline_unique_identifier` of the command read back (`IndirectCommandBuffer::commands`) *(partial)* |
+| `command_type`, `fragment_buffer_address`, `vertex_attribute_stride`, `vertex_buffer_address`, `has_barrier`, `draw_args`, `draw_indexed_args`, `draw_patches_args`, `draw_indexed_patches_args`, `tessellation_factor_args` | the getters (SPI) | `IndirectRenderCommand::command_type`, `vertex_buffer`, `fragment_buffer`, `has_barrier`, `draw`: each reads its field of the record alone; or `IndirectCommandBuffer::commands`, each render command decoded as an `EncodedRenderCommand` |
+| `pipeline_state_unique_identifier` | `getPipelineStateUniqueIdentifier` (SPI) | `IndirectRenderCommand::pipeline_unique_identifier` (with `pipeline_state` and `pipeline_id`), or that of the command read back (`IndirectCommandBuffer::commands`) *(partial)* |
 
 ### `IcbComputeCmd`: `MTLIndirectComputeCommand` commands
 
@@ -336,8 +336,8 @@ narrow refusal that the call's rustdoc describes.
 | Item | Metal | Runtime |
 |---|---|---|
 | `encode` |  | one `IndirectComputeCommand` method per `IcbComputeCmd` (above) |
-| `command_type`, `kernel_attribute_stride`, `kernel_buffer_address`, `stage_in_region`, `threadgroup_memory_length`, `has_barrier`, `dispatch_threadgroups_args`, `dispatch_threads_args`, `image_block_args` | the getters (SPI) | `IndirectCommandBuffer::commands`: each compute command decoded as an `EncodedComputeCommand` |
-| `pipeline_state_unique_identifier` | `getPipelineStateUniqueIdentifier` (SPI) | `pipeline_unique_identifier` of the command read back (`IndirectCommandBuffer::commands`) *(partial)* |
+| `command_type`, `kernel_attribute_stride`, `kernel_buffer_address`, `stage_in_region`, `threadgroup_memory_length`, `has_barrier`, `dispatch_threadgroups_args`, `dispatch_threads_args`, `image_block_args` | the getters (SPI) | `IndirectComputeCommand::command_type`, `kernel_buffer`, `stage_in_region`, `threadgroup_memory_length`, `has_barrier`, `dispatch`, `imageblock_size`: each reads its field of the record alone; or `IndirectCommandBuffer::commands`, each compute command decoded as an `EncodedComputeCommand` |
+| `pipeline_state_unique_identifier` | `getPipelineStateUniqueIdentifier` (SPI) | `IndirectComputeCommand::pipeline_unique_identifier` (with `pipeline_state` and `pipeline_id`), or that of the command read back (`IndirectCommandBuffer::commands`) *(partial)* |
 
 ### `RateMap`: `MTLRasterizationRateMap`
 
@@ -387,8 +387,8 @@ narrow refusal that the call's rustdoc describes.
 | `DrawPrimitivesInstances` | `drawPrimitives:vertexStart:vertexCount:instanceCount:` | `RenderCommandEncoder::draw_primitives` *(partial)* |
 | `DrawPrimitivesBase` | `drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:` | `RenderCommandEncoder::draw_primitives` *(partial)* |
 | `EndEncoding` | `endEncoding` | `RenderCommandEncoder::end_encoding` |
-| `ExecuteCommandsIndirect` | `executeCommandsInBuffer:indirectBuffer:indirectBufferOffset:` | `RenderCommandEncoder::execute_commands_in_buffer_indirect`: the pass is recorded at a host step (announced once); `_checked` adds an `IndirectCommandCheck` the step calls on each command first *(partial)* |
-| `ExecuteCommandsInBuffer` | `executeCommandsInBuffer:withRange:` | `RenderCommandEncoder::execute_commands_in_buffer`: the records as they stand at commit, on the GPU alone where the commit can tell every command draws one primitive type under the inherited state (one merged draw for points, lines or triangles), or at a host step where the GPU writes them otherwise; `_checked` adds an `IndirectCommandCheck` that step calls on each command first, and the `IndirectCommandCheckNeeds` it looks for, which the GPU alone may rule out *(partial)* |
+| `ExecuteCommandsIndirect` | `executeCommandsInBuffer:indirectBuffer:indirectBufferOffset:` | `RenderCommandEncoder::execute_commands_in_buffer_indirect`: the pass is recorded at a host step (announced once); `_checked` adds an `IndirectCommandCheck` the step calls on each command first, and the `IndirectCommandCheckNeeds` it looks for *(partial)* |
+| `ExecuteCommandsInBuffer` | `executeCommandsInBuffer:withRange:` | `RenderCommandEncoder::execute_commands_in_buffer`: the records as they stand at commit, on the GPU alone where the commit can tell every command draws one primitive type under the inherited state (one merged draw for points, lines or triangles), or at a host step where the GPU writes them otherwise; `_checked` adds an `IndirectCommandCheck` that `commit` (for the CPU's records) or that step calls on each command first, and the `IndirectCommandCheckNeeds` it looks for, which may rule it out *(partial)* |
 | `MemoryBarrierWithScope` | `memoryBarrierWithScope:afterStages:beforeStages:` | `RenderCommandEncoder::memory_barrier_with_scope` |
 | `SetAlphaTestReferenceValue` | `setAlphaTestReferenceValue:` (SPI) | `RenderCommandEncoder::set_alpha_test_reference_value`: a no-op (no runtime pipeline has an alpha test) |
 | `SetBlendColorRed` | `setBlendColorRed:green:blue:alpha:` | `RenderCommandEncoder::set_blend_color` |

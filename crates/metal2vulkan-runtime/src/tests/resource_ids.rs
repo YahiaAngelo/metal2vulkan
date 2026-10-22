@@ -386,9 +386,9 @@ fn an_id_given_back_joins_its_free_neighbours() {
 }
 
 /// Only a space's first reservation with an ID counts, whether or not the space handed one out
-/// since; a call of no ID, or of 0 alone, changes nothing (16, then 5, keeps 16 alone;
-/// `empty_first`; whose later IDs the runtime hands out once, where Metal's pool handed out 1 to 4
-/// again).
+/// since; a call of no ID, or of 0 alone, reserves nothing (16, then 5, keeps 16 alone;
+/// `empty_first`; an M3 Max handed out these 17 IDs after it, where the M4's pool handed out 1 to
+/// 4 again later).
 #[test]
 fn only_the_first_reservation_with_an_id_counts() {
     let ids = ids();
@@ -401,6 +401,37 @@ fn only_the_first_reservation_with_an_id_counts() {
     let held: Vec<IdHold> = (0..17).map(|_| id(&ids, IdSpace::Texture)).collect();
     let got: Vec<u64> = held.iter().map(|held| held.id().0).collect();
     assert_eq!(got, expand(&[(1, 15), (17, 18)]));
+}
+
+/// A call of 0 alone leaves the pool made, so a later reservation keeps the pool's first range
+/// beside its own and plain allocation hands that range's IDs out twice, as Metal's does (an M3
+/// Max, macOS 27.0.1: textures, 0 then 10 gives 11 to 15, 1 to 9, then 1 to 31; 0 then 16, the
+/// first range equal to one left, 1 to 15, then 17 on); a lone 0 once the pool started is ignored,
+/// as Metal ignores and logs it (5, then 0: 1 to 4, then 6 on).
+#[test]
+fn a_lone_zero_leaves_the_pool_made() {
+    for (reserved, runs) in [
+        (10, &[(11, 15), (1, 9), (1, 31)][..]),
+        (16, &[(1, 15), (17, 61)][..]),
+    ] {
+        let ids = ids();
+        let mut all = ids.lock().unwrap();
+        assert!(all.reserve(IdSpace::Texture, &[ResourceId(0)]));
+        assert!(all.reserve(IdSpace::Texture, &[ResourceId(reserved)]));
+        drop(all);
+        let want = expand(runs);
+        let held: Vec<IdHold> = want.iter().map(|_| id(&ids, IdSpace::Texture)).collect();
+        let got: Vec<u64> = held.iter().map(|held| held.id().0).collect();
+        assert_eq!(got, want, "0, then {reserved}");
+    }
+    let ids = ids();
+    let mut all = ids.lock().unwrap();
+    assert!(all.reserve(IdSpace::Texture, &[ResourceId(5)]));
+    assert!(!all.reserve(IdSpace::Texture, &[ResourceId(0)]), "late");
+    drop(all);
+    let held: Vec<IdHold> = (0..8).map(|_| id(&ids, IdSpace::Texture)).collect();
+    let got: Vec<u64> = held.iter().map(|held| held.id().0).collect();
+    assert_eq!(got, expand(&[(1, 4), (6, 9)]));
 }
 
 /// Visible-function tables' first pool is 32, as Metal's (2 to 4 of 1 to 5

@@ -76,6 +76,8 @@ impl BlitCommandEncoder {
             return Ok(());
         }
         destination.written_by_gpu();
+        self.core().retain(destination.gpu_write());
+        destination.keep_copied(source, from.clone());
         destination.written().copied_from(source.written());
         // The slots past the records', carried as Metal's copy carries every slot below the count.
         self.copy_overflow(source, from.clone(), destination, to.start)?;
@@ -118,6 +120,7 @@ impl BlitCommandEncoder {
             .encode_into(&mut reset)
             .map_err(|_| internal("a reset record does not encode"))?;
         buffer.written_by_gpu();
+        self.core().retain(buffer.gpu_write());
         let bytes = IndirectCommandBuffer::record_bytes(range.clone());
         let overflow = buffer
             .overflow()
