@@ -31,11 +31,12 @@ use super::{validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::{VkExtension, VkFeature};
+use metal2vulkan::error::Feature;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, MeshPipelineDescriptor, StageSource};
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
-    ClearColor, CommandBufferStatus, CommandQueue, Degradation, Device, Library, LoadAction,
+    ClearColor, CommandBufferStatus, CommandQueue, Degradation, Device, Error, Library, LoadAction,
     PipelineOptions, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions, Size,
     StoreAction, TextureDescriptor,
 };
@@ -114,8 +115,8 @@ impl Lane {
         }
     }
 
-    /// The state of mesh function `mesh` with `fragment`'s.
-    fn pipeline(&self, mesh: &str, fragment: Fragment) -> RenderPipelineState {
+    /// The state of mesh function `mesh` with `fragment`'s, or its refusal.
+    fn pipeline(&self, mesh: &str, fragment: Fragment) -> Result<RenderPipelineState, Error> {
         let function = |name| {
             StageSource::Function(
                 self.library
@@ -131,7 +132,6 @@ impl Lane {
         }
         self.device
             .new_mesh_render_pipeline_state(&descriptor, &PipelineOptions::default())
-            .unwrap()
     }
 
     /// One mesh threadgroup of twelve threads drawn by `pipeline` at provoking vertex mode `mode`
@@ -346,6 +346,9 @@ fn run(withheld: bool, emulated: bool) {
             (false, false) => Path::LastCorners,
             (false, true) => Path::AsModeZero,
         };
+        let barycentric = enabled
+            .features
+            .contains(&VkFeature::FragmentShaderBarycentric);
         let name = device.name().to_owned();
         let lane = Lane::new(device);
         let mut announced = BTreeSet::new();
@@ -354,7 +357,19 @@ fn run(withheld: bool, emulated: bool) {
             let lines = primitives[0].len() == 2;
             for fragment in FRAGMENTS {
                 let what = format!("{mesh} {} on {name} ({path:?})", fragment.name);
-                let pipeline = lane.pipeline(mesh, fragment);
+                // A mesh function's pipeline reads the weights through BaryCoordKHR alone.
+                let pipeline = match lane.pipeline(mesh, fragment) {
+                    Ok(pipeline) => pipeline,
+                    Err(Error::Unsupported(refused))
+                        if fragment.weights
+                            && !barycentric
+                            && refused.feature == Feature::Barycentrics =>
+                    {
+                        eprintln!("{what}: refused without fragmentShaderBarycentric: skipped");
+                        continue;
+                    }
+                    Err(e) => panic!("{what}: {e}"),
+                };
                 let (first, last) = (lane.draw(&pipeline, 0), lane.draw(&pipeline, 1));
                 let seen = check(&what, primitives, fragment, path, (&first, &last));
                 eprintln!("{what}: {seen:?}");
