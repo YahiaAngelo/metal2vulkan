@@ -13,9 +13,11 @@
 //! pushes the blend color as `PushField::HalfBlendColor` exactly where the blend reads it, and its
 //! module passes L3; the whole pipeline is made there for `RGBA32Float`, color 0 a written storage
 //! attachment and no color attachment of the subpass, its stages passing L3 and its fragment stage
-//! carrying the note. Before, each was refused `NotImplemented(FramebufferFetch)` at its color. A
-//! blend that reads the second source stays refused, `NotImplemented(ExtendedRangeBlend
-//! (DualSource))`. No GPU is used.
+//! carrying the note. Before, each was refused `NotImplemented(FramebufferFetch)` at its color.
+//! A blend that reads the second source, or any blend beside a second (index 1) output (the owned
+//! fixture `engine/fbl_fetch_dual`), takes the generic blend too, a 16-bit float and an 8-bit
+//! unorm attachment's among them; one of a function that writes no second output stays refused,
+//! `NotImplemented(ExtendedRangeBlend(DualSource))`. No GPU is used.
 //!
 //! `llvm-as` assembles the fixtures; a missing tool skips visibly.
 
@@ -373,10 +375,69 @@ fn a_narrow_output_takes_the_generic_blend() {
     assert!(checked > 0, "no interlock profile took the storage form");
 }
 
-/// A generic blend that reads the second source is not built: refused
-/// `NotImplemented(ExtendedRangeBlend(DualSource))` at color 0, an 8-bit unorm one's too.
+/// A blend of the second source, or any blend beside a second (index 1) output, of a function that
+/// reads the attachment (the owned fixture `engine/fbl_fetch_dual`, under fast math and not): the
+/// generic blend, which reads the second output where the blend names it, into a 32-bit float, a
+/// 16-bit normalized, a 16-bit float and an 8-bit unorm attachment alike (Metal makes and draws
+/// such pipelines; its blend of a 16-bit float or 8-bit unorm one with the second source is not
+/// measured). Noted, its module valid.
 #[test]
-fn a_second_source_generic_blend_stays_refused() {
+fn a_second_source_blend_takes_the_generic_blend() {
+    let (Some(fast), Some(safe)) = (
+        assembled("fbl_fetch_dual", false),
+        assembled("fbl_fetch_dual", true),
+    ) else {
+        return;
+    };
+    use BlendFactor as F;
+    let formats = [
+        PixelFormat::RGBA32Float,
+        PixelFormat::RGBA16Unorm,
+        PixelFormat::RGBA16Float,
+        PixelFormat::RGBA8Unorm,
+    ];
+    let equations = [
+        BlendEquation {
+            source_rgb: F::Source1Color,
+            destination_rgb: F::OneMinusSource1Color,
+            ..OVER
+        },
+        BlendEquation {
+            source_alpha: F::Source1Alpha,
+            destination_alpha: F::OneMinusSource1Alpha,
+            ..OVER
+        },
+        OVER,
+    ];
+    let mut checked = 0;
+    for (stem, p) in committed_profiles().expect("profiles") {
+        if !crate::lower::fragment::interlock_orders(&p) {
+            continue;
+        }
+        for pf in formats {
+            for eq in equations {
+                let r = attachments(0, pf, eq, ColorWriteMask::ALL);
+                let inputs = state(0, &r, &p);
+                for bc in [&fast, &safe] {
+                    for entry in ["fbd_dual_half", "fbd_dual_float"] {
+                        let what = format!("{stem} {pf:?} {entry} {eq:?}");
+                        let Some(a) = compiled(bc, entry, &p, &inputs, &what) else {
+                            continue;
+                        };
+                        check_generic(&a, &p, (0, eq, false), &what);
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 0, "no interlock profile took the storage form");
+}
+
+/// A blend of the second source of a function that writes no second output: refused
+/// `NotImplemented(ExtendedRangeBlend(DualSource))` at color 0, whatever the format.
+#[test]
+fn a_second_source_blend_without_its_output_stays_refused() {
     let Some(fast) = assembled("fbl_fetch_blend8", false) else {
         return;
     };
@@ -393,6 +454,13 @@ fn a_second_source_generic_blend_stays_refused() {
             PixelFormat::RGBA16Unorm,
             BlendEquation {
                 destination_alpha: F::OneMinusSource1Alpha,
+                ..OVER
+            },
+        ),
+        (
+            PixelFormat::RGBA16Float,
+            BlendEquation {
+                destination_rgb: F::Source1Alpha,
                 ..OVER
             },
         ),

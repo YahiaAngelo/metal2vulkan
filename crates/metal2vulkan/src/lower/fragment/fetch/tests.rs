@@ -655,8 +655,8 @@ fn a_replacing_blend_and_a_write_that_stores_nothing_take_the_storage_form() {
 /// window server's one over one minus the source alpha among the factors and operations Metal's
 /// model holds, the blend color's difference with its one minus (under fast math Metal's form, the
 /// minuend's product fused and the subtrahend's rounded), and a write mask that keeps some
-/// channels. A factor of the second source is
-/// refused by name. A read-only attachment, a replacing blend under fast math and a write that
+/// channels. A factor of the second source takes the generic blend
+/// (`StorageView::generic_blend`). A read-only attachment, a replacing blend under fast math and a write that
 /// stores nothing take the form without one; a replacing blend without fast math keeps the
 /// destination's product by zero, so the shader computes it.
 #[test]
@@ -688,11 +688,6 @@ fn a_sixteen_bit_float_blend_is_computed_in_the_storage_form() {
         (F::SourceAlphaSaturated, F::One, O::Add),
         (F::One, F::One, O::Max),
     ];
-    let refused = |gap| {
-        Err(Unsupported::not_implemented(Feature::ExtendedRangeBlend(
-            gap,
-        )))
-    };
     let partial = ColorWriteMask::RED.union(ColorWriteMask::ALPHA);
     for stem in [
         "moltenvk-m3",
@@ -724,12 +719,12 @@ fn a_sixteen_bit_float_blend_is_computed_in_the_storage_form() {
                     }
                 }
                 let what = format!("{stem} {pf:?} {math:?}");
+                // A blend of the second source, which Metal's model does not hold: the generic
+                // blend.
                 let dual = descriptor(pf, (F::Source1Color, F::Zero, O::Add), ColorWriteMask::ALL);
-                assert_eq!(
-                    form(&of(dual), false, writes, &p),
-                    refused(ExtendedRangeBlend::DualSource),
-                    "{what}"
-                );
+                let view = form(&of(dual), false, writes, &p)
+                    .unwrap_or_else(|e| panic!("{what}: dual: {e:?}"));
+                assert!(view.generic_blend, "{what}: dual");
                 let differs = descriptor(
                     pf,
                     (F::BlendColor, F::OneMinusBlendColor, O::Subtract),

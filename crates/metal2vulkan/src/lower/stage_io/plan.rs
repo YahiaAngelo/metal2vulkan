@@ -2226,8 +2226,8 @@ pub fn entry(cx: &mut SelectCx<'_>) -> Result<(), Error> {
             if cx.stage == Stage::Fragment && cx.inputs.rotated_factors.contains_key(&color) {
                 continue;
             }
-            // The second source of an extended-range blend the shader computes in the storage
-            // form, which the blend reads from the returned value.
+            // The second source of an extended-range or generic blend the shader computes in the
+            // storage form, which the blend reads from the returned value.
             if cx.stage == Stage::Fragment
                 && crate::lower::fragment::blends_second_through_storage(cx, color)
             {

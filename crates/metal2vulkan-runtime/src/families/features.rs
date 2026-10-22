@@ -1007,10 +1007,10 @@ impl FeatureRow {
             // interlock's storage form (`lower::fragment::fetch`), exact for a fetch and for an
             // unblended write, and for Metal's blend of an extended-range, a 16-bit float, an
             // 8-bit unorm or a packed 16-bit attachment; another float-class format's blend is the
-            // shader's generic one, logged (`PrecisionNote::UnmeasuredFetchBlend`). Its blend of an
-            // sRGB attachment, a blend of the second source (but an extended-range one's), and its
-            // fetch of a one- or two-channel sRGB attachment are not built, refused per pipeline:
-            // the row's gap. A device with neither has no ordered fetch.
+            // shader's generic one, logged (`PrecisionNote::UnmeasuredFetchBlend`), as is a blend of
+            // the second source. Its blend of an sRGB attachment and its fetch of a one- or
+            // two-channel sRGB attachment are not built, refused per pipeline: the row's gap. A
+            // device with neither has no ordered fetch.
             F::ProgrammableBlending => first([
                 match (through_inputs(f.profile), through_storage(f.profile)) {
                     (true, _) => None,
