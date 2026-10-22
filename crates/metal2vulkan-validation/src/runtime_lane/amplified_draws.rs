@@ -75,18 +75,33 @@ const CLEARED: u32 = 0x11;
 const DEPTHS: [f32; 2] = [0.75, 1.0];
 
 /// One draw: the amplification count set before it (`None`: none set), its view mappings
-/// (`(viewport offset, render target offset)` each; `None` for `nil`), and its instances.
+/// (`(viewport offset, render target offset)` each; `None` for `nil`), the
+/// `setVertexAmplificationMode:value:` after them (`None`: none), and its instances.
 #[derive(Clone, Copy)]
 struct Draw {
     count: Option<u64>,
     mappings: Option<&'static [(u32, u32)]>,
+    mode: Option<(u64, u64)>,
     instances: u32,
+}
+
+impl Draw {
+    /// The count the draw takes: the amplification mode's (the value's set bits in mode 1, the
+    /// value in another mode) where one is set after the count, else the count set.
+    fn amplification(&self) -> Option<u64> {
+        match self.mode {
+            Some((1, value)) => Some(u64::from(value.count_ones())),
+            Some((_, value)) => Some(value),
+            None => self.count,
+        }
+    }
 }
 
 /// Probe 13's default draw: two amplifications into the pass's first two layers.
 const AMP2: Draw = Draw {
     count: Some(2),
     mappings: Some(&[(0, 0), (0, 1)]),
+    mode: None,
     instances: 1,
 };
 
@@ -221,7 +236,7 @@ impl Case {
     /// of its own and what follows the execution into another (`render/executions.rs`), so its
     /// pass splits wherever the encoder's own draw would not.
     fn renders_views(&self) -> bool {
-        self.draws.iter().any(|d| match d.count {
+        self.draws.iter().any(|d| match d.amplification() {
             Some(n) if n > 1 => true,
             Some(1) => {
                 self.max > 1
@@ -237,7 +252,11 @@ impl Case {
     /// amplified draws do, and announces `amplification-draws`: a count above 1 (a count of 1 is
     /// one draw either way).
     fn amplifies_singly(&self, drawn: Drawn) -> bool {
-        drawn == Drawn::OneAtATime && self.draws.iter().any(|d| d.count.unwrap_or(1) > 1)
+        drawn == Drawn::OneAtATime
+            && self
+                .draws
+                .iter()
+                .any(|d| d.amplification().unwrap_or(1) > 1)
     }
 }
 
@@ -529,6 +548,9 @@ impl Lane {
                     });
                 encoder.set_vertex_amplification_count(count, mappings.as_deref())?;
             }
+            if let Some((mode, value)) = draw.mode {
+                encoder.set_vertex_amplification_mode(mode, value)?;
+            }
             if case.indirect {
                 let icb = self.indirect(&pipeline, draw.instances)?;
                 encoder.execute_commands_in_buffer(&icb, 0..1)?;
@@ -741,6 +763,7 @@ fn as_views() -> Vec<(Case, Stored)> {
                         Draw {
                             count: Some(1),
                             mappings: None,
+                            mode: None,
                             instances: 2,
                         },
                     ]
@@ -756,6 +779,7 @@ fn as_views() -> Vec<(Case, Stored)> {
                 draws: &[Draw {
                     count: None,
                     mappings: None,
+                    mode: None,
                     instances: 1,
                 }],
                 ..PLAIN
@@ -770,6 +794,7 @@ fn as_views() -> Vec<(Case, Stored)> {
                 draws: &[Draw {
                     count: Some(1),
                     mappings: Some(&[(0, 1)]),
+                    mode: None,
                     instances: 1,
                 }],
                 ..PLAIN
@@ -786,6 +811,7 @@ fn as_views() -> Vec<(Case, Stored)> {
                 draws: &[Draw {
                     count: Some(1),
                     mappings: Some(&[(0, 1)]),
+                    mode: None,
                     instances: 1,
                 }],
                 ..PLAIN
@@ -799,6 +825,7 @@ fn as_views() -> Vec<(Case, Stored)> {
                 draws: &[Draw {
                     count: Some(1),
                     mappings: Some(&[(2, 0)]),
+                    mode: None,
                     instances: 1,
                 }],
                 viewports: Viewports::Columns,
@@ -814,6 +841,35 @@ fn as_views() -> Vec<(Case, Stored)> {
             },
             halves([(0x100, C), (0x101, C), (E, E), (E, E)]),
         ),
+        // `setVertexAmplificationMode:value:` after the count sets its count, the value's set
+        // bits in mode 1 and the value in another mode, and keeps the mappings (the consumer's
+        // M3 Max measurements): as `amp2_len4_rto12`, and as a count of 1 into the first mapping.
+        (
+            Case {
+                name: "mode1_two_bits_keeps_mappings",
+                split: true,
+                length: 4,
+                draws: &[Draw {
+                    count: Some(2),
+                    mappings: Some(&[(0, 1), (0, 2)]),
+                    mode: Some((1, 0b1010_0000)),
+                    instances: 1,
+                }],
+                ..PLAIN
+            },
+            colors([C, 0x100, 0x101, C]),
+        ),
+        (
+            Case {
+                name: "mode5_value1_after_amp2",
+                draws: &[Draw {
+                    mode: Some((5, 1)),
+                    ..AMP2
+                }],
+                ..PLAIN
+            },
+            colors([0x100, C, E, E]),
+        ),
     ]
 }
 
@@ -826,11 +882,13 @@ fn a_count_above_the_pipeline_s_maximum_draws_as_metal() {
     const THREE: Draw = Draw {
         count: Some(3),
         mappings: Some(&[(0, 0), (0, 1), (0, 2)]),
+        mode: None,
         instances: 1,
     };
     const FOUR: Draw = Draw {
         count: Some(4),
         mappings: Some(&[(0, 0), (0, 1), (0, 2), (0, 3)]),
+        mode: None,
         instances: 1,
     };
     Drawn::AsViews.compare(&[
@@ -911,6 +969,22 @@ fn what_multiview_does_not_express_draws_one_amplification_at_a_time() {
                 draws: &[Draw {
                     count: Some(3),
                     mappings: None,
+                    mode: None,
+                    instances: 1,
+                }],
+                ..PLAIN
+            },
+            colors([0x102, C, C, C]),
+        ),
+        // The same count set by `setVertexAmplificationMode:value:` in mode 0, no mappings set.
+        (
+            Case {
+                name: "mode0_3_on_2_nil",
+                length: 4,
+                draws: &[Draw {
+                    count: None,
+                    mappings: None,
+                    mode: Some((0, 3)),
                     instances: 1,
                 }],
                 ..PLAIN
@@ -995,6 +1069,7 @@ fn what_multiview_does_not_express_draws_one_amplification_at_a_time() {
                 draws: &[Draw {
                     count: Some(1),
                     mappings: Some(&[(0, 2)]),
+                    mode: None,
                     instances: 1,
                 }],
                 fragment: "rt6_amplified_slice_fragment",
@@ -1077,6 +1152,7 @@ fn what_multiview_does_not_express_draws_one_amplification_at_a_time() {
                 draws: &[Draw {
                     count: Some(1),
                     mappings: Some(&[(2, 0)]),
+                    mode: None,
                     instances: 1,
                 }],
                 viewports: Viewports::Columns,
@@ -1139,6 +1215,7 @@ fn a_visibility_result_counts_every_amplification() {
                 draws: &[Draw {
                     count: Some(1),
                     mappings: Some(&[(0, 0)]),
+                    mode: None,
                     instances: 1,
                 }],
                 visibility: Visibility::Before(Counting),
@@ -1258,6 +1335,7 @@ fn an_amplified_draw_is_refused_as_typed() {
                     draws: &[Draw {
                         count: Some(3),
                         mappings: Some(&[(0, 0), (0, 1), (0, 2)]),
+                        mode: None,
                         instances: 1,
                     }],
                     ..PLAIN
@@ -1271,6 +1349,7 @@ fn an_amplified_draw_is_refused_as_typed() {
                     draws: &[Draw {
                         count: Some(9),
                         mappings: None,
+                        mode: None,
                         instances: 1,
                     }],
                     ..PLAIN
@@ -1304,6 +1383,7 @@ fn an_amplified_draw_is_refused_as_typed() {
             draws: &[Draw {
                 count: Some(0),
                 mappings: None,
+                mode: None,
                 instances: 1,
             }],
             ..PLAIN

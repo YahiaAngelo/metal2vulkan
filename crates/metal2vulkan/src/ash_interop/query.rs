@@ -628,6 +628,7 @@ feature_sources! { c, x;
     TessellationShader => on(c.core.tessellation_shader);
     SampleRateShading => on(c.core.sample_rate_shading);
     DualSrcBlend => on(c.core.dual_src_blend);
+    LogicOp => on(c.core.logic_op);
     IndependentBlend => on(c.core.independent_blend);
     ShaderClipDistance => on(c.core.shader_clip_distance);
     ShaderCullDistance => on(c.core.shader_cull_distance);

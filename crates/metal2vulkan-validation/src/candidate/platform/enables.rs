@@ -935,6 +935,7 @@ members! {
     Core.core.tessellation_shader => Some(F::TessellationShader);
     Core.core.sample_rate_shading => Some(F::SampleRateShading);
     Core.core.dual_src_blend => Some(F::DualSrcBlend);
+    Core.core.logic_op => Some(F::LogicOp);
     Core.core.independent_blend => Some(F::IndependentBlend);
     Core.core.shader_clip_distance => Some(F::ShaderClipDistance);
     Core.core.shader_cull_distance => Some(F::ShaderCullDistance);

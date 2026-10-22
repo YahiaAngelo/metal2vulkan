@@ -90,6 +90,8 @@ pub const fn shape(f: PushField) -> FieldShape {
         PushField::ViewportMirrors => FieldShape::U32,
         // Which of a snapshot variant's draws runs.
         PushField::SnapshotPhase => FieldShape::U32,
+        // The alpha test reference's code.
+        PushField::AlphaTestReference => FieldShape::U32,
         // A draw's clamp of each vertex's depth, two `f32`s' bits.
         PushField::VertexDepthClamp => FieldShape::UVec2,
         // The blend color and one minus it, four `f32`s' bits each.

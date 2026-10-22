@@ -927,6 +927,12 @@ fn enabled_caps(
     if deviations.contains_key(&DriverDeviation::MetalFullQuads) {
         properties.insert(VkProperty::MetalFullQuads);
     }
+    if desc
+        .driver_facts()
+        .contains(&crate::device::DriverFact::DepthImageKeepsValuesOutsideUnitRange)
+    {
+        properties.insert(VkProperty::DepthImageKeepsValuesOutsideUnitRange);
+    }
     let l = &desc.limits;
     let sample_counts: [(vk::SampleCountFlags, fn(u32) -> VkProperty); 6] = [
         (

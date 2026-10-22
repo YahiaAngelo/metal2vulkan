@@ -714,6 +714,11 @@ pub struct Sampling {
     /// device's sample there, filtered codes, decodes through Metal's table
     /// (`texture::srgb_filtered_texel`), exactly where it read one texel.
     pub srgb_codes: bool,
+    /// A fragment function's depth comparison whose reference the pipeline's private
+    /// `fragmentDepthCompareClampMask` clamps (`LoweringInputs::depth_compare_clamp_mask`): the
+    /// reference is clamped to `[0, 1]`, a NaN taken as 0, before every comparison
+    /// ([`emit::reference`]).
+    pub clamp_reference: bool,
 }
 
 /// The declared result of a sampling whose slot's variant binds a texture of another numeric

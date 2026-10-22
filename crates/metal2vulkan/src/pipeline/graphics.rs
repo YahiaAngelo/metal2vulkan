@@ -291,6 +291,15 @@ pub struct GraphicsState {
     /// than one group. `None` where each attachment is at its own index.
     #[cfg_attr(feature = "serde", serde(default))]
     pub color_group: Option<crate::pipeline::lower_inputs::ColorGroup>,
+    /// `VkPipelineColorBlendStateCreateInfo::logicOp` with `logicOpEnable`: the descriptor's
+    /// private `logicOperation`
+    /// ([`PrivateRenderState::logic_operation`](crate::pipeline::PrivateRenderState::logic_operation)),
+    /// which Metal applies to the codes of each normalized and integer attachment as Vulkan
+    /// does, in a pipeline whose float attachments do not blend and that has no sRGB
+    /// attachment; the pipeline's requirements name `logicOp`. Copy and no-op need none: the
+    /// attachments' states already draw them. `None` with the logic operation off, and for those.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub logic_op: Option<vk::LogicOp>,
 }
 
 /// What a consumer and the binder need of a tessellation pipeline.
@@ -422,6 +431,7 @@ impl GraphicsState {
             color_write_rules: Vec::new(),
             snapshot_reads: false,
             color_group: None,
+            logic_op: None,
         }
     }
 

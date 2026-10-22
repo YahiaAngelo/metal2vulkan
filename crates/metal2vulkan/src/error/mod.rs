@@ -1444,13 +1444,24 @@ pub enum PrivateRenderField {
     SampleMask,
     /// `sampleCoverage` other than 1.
     SampleCoverage,
-    /// `alphaTestEnabled`.
+    /// `alphaTestEnabled` with a test the translation has not built: an `alphaTestFunction` past
+    /// `MTLCompareFunctionAlways`, a pipeline without a fragment function, a fragment function
+    /// whose color 0 is not four `float` or `half` lanes (Metal's compiler fails a function that
+    /// writes no color 0 under the test), or one that loops over its covered samples.
     AlphaTest,
-    /// `logicOperationEnabled`.
+    /// `logicOperationEnabled` with an operation other than copy and no-op: on a device without
+    /// `logicOp` (`Unsupported::needs` naming it), or where Vulkan's operation is not Metal's (an
+    /// sRGB attachment, a float attachment that blends, a format whose operation Metal was not
+    /// measured with, a fragment function that writes an attachment itself).
     LogicOperation,
     /// `pointSmoothEnabled`.
     PointSmooth,
-    /// `fragmentDepthCompareClampMask` other than 0.
+    /// `explicitVisibilityGroupID` other than the default in a pipeline whose
+    /// `maxVertexAmplificationCount` is past 1.
+    ExplicitVisibilityGroup,
+    /// `fragmentDepthCompareClampMask` other than 0 in a pipeline whose fragment function makes a
+    /// depth comparison through an argument buffer's sampler, which no bit of the mask names
+    /// (Metal's answer unmeasured).
     FragmentDepthCompareClamp,
     /// `textureWriteRoundingMode` 2 (`TextureWriteRoundingMode::NearestEven`) in a pipeline whose
     /// fragment function writes a texel that Metal's mode 2 stores otherwise than its default (a
@@ -1653,6 +1664,16 @@ pub enum RuntimeInput {
     /// or it applies another mask. It was compiled for another pipeline, and is compiled for this
     /// one again.
     SampleMask,
+    /// A fragment function in a render pipeline with the private alpha test on runs the test
+    /// itself (`LoweringInputs::alpha_test`), as Metal tests its color 0's alpha after it runs;
+    /// or it runs another comparison. It was compiled for another pipeline, and is compiled for
+    /// this one again.
+    AlphaTest,
+    /// A fragment function in a render pipeline with a private `fragmentDepthCompareClampMask`
+    /// clamps the references of its depth comparisons through the mask's samplers itself
+    /// (`LoweringInputs::depth_compare_clamp_mask`), as Metal clamps them; or it clamps others. It
+    /// was compiled for another pipeline, and is compiled for this one again.
+    DepthCompareClamp,
     /// A fragment function reads flat an interpolated varying that its pipeline's vertex function
     /// does not write the same at every vertex of a primitive: compiled for another vertex
     /// function, which wrote it so (`LoweringInputs::uniform_varyings`), it would read the

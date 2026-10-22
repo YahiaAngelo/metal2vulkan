@@ -627,6 +627,10 @@ pub(super) struct ColorTarget {
     /// texels copied there after the pass (`resolve::color_copy`), the last instance storing
     /// them whatever Metal's store action.
     pub(super) copied_resolve: Option<Target>,
+    /// The descriptor names a resolve texture of a pixel format Metal does not store the
+    /// multisampled attachment into, which it leaves untouched (`resolve::untouched_across_formats`):
+    /// the attachment does not resolve, and stores by its action.
+    pub(super) unresolved_across: bool,
     /// What `target` stands in for, when an image of the pass stands in for the attachment's
     /// own (`attachment_stand_in.rs`; the encoder decides it at a draw).
     pub(super) stand_in: Option<StandIn>,
@@ -653,6 +657,7 @@ impl std::fmt::Debug for ColorTarget {
             )
             .field("resolve", &self.resolve)
             .field("copied_resolve", &self.copied_resolve)
+            .field("unresolved_across", &self.unresolved_across)
             .field("stand_in", &self.stand_in)
             .field("planes", &self.planes)
             .finish()
@@ -662,21 +667,23 @@ impl std::fmt::Debug for ColorTarget {
 impl ColorTarget {
     /// Whether the pass clears the attachment and resolves it alone (`MultisampleResolve`) into a
     /// resolve texture of another pixel format than the attachment's own (its sRGB twin, the only
-    /// other format the runtime resolves into): pixel format identity, not the twin relation.
-    /// Where such a pass has no draw call, Metal keeps the samples' earlier texels, its texture
-    /// compressed or not (`RGBA8Unorm`, `BGRA8Unorm` and the extended-range
-    /// formats, each way, an Apple M4 under macOS 27.0.1), where a resolve into the attachment's
-    /// own format leaves the clear in a texture it compresses. The attachment's own texture is its
-    /// stand-in's where one stands in for it.
+    /// other format the runtime resolves into, or one Metal leaves untouched,
+    /// `unresolved_across`): pixel format identity, not the twin relation. Where such a pass has
+    /// no draw call, Metal keeps the samples' earlier texels, its texture compressed or not
+    /// (`RGBA8Unorm`, `BGRA8Unorm` and the extended-range formats, each way, an Apple M4 under
+    /// macOS 27.0.1; `BGRA8Unorm` and `BGRA8Unorm_sRGB` into `RGBA16Float`, `BGR10_XR` and its
+    /// twin, the consumer's M3 Max), where a resolve into the attachment's own format leaves the
+    /// clear in a texture it compresses. The attachment's own texture is its stand-in's where one
+    /// stands in for it.
     pub(super) fn clears_and_resolves_across_formats(&self) -> bool {
         let own = self.stand_in.as_ref().map_or(&self.target, |s| &s.own);
         let into = self
             .resolve
             .as_ref()
             .map(|r| r.copy_to.as_ref().unwrap_or(&r.attachment));
-        self.load == LoadAction::Clear
-            && self.store == StoreAction::MultisampleResolve
-            && into.is_some_and(|into| into.texture.pixel_format() != own.texture.pixel_format())
+        let across = self.unresolved_across
+            || into.is_some_and(|into| into.texture.pixel_format() != own.texture.pixel_format());
+        self.load == LoadAction::Clear && self.store == StoreAction::MultisampleResolve && across
     }
 }
 
@@ -1449,6 +1456,9 @@ pub(super) fn layout(
                 None,
             ),
         };
+        // A resolve texture Metal leaves untouched across formats (`resolve::destination`
+        // checked it and gave no resolve).
+        let unresolved_across = resolve.is_none() && resolve::unresolved_across(&target, &wanted);
         extents[attached] = (target.extent, target.samples);
         attached += 1;
         colors.push(Some(ColorTarget {
@@ -1461,6 +1471,7 @@ pub(super) fn layout(
             straight_clear,
             resolve,
             copied_resolve,
+            unresolved_across,
             stand_in,
             planes: None,
         }));

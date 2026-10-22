@@ -322,6 +322,9 @@ pub(crate) struct GraphicsContent {
     stencil: [vk::StencilOpState; 2],
     blends: Vec<vk::PipelineColorBlendAttachmentState>,
     blend_flags: vk::PipelineColorBlendStateCreateFlags,
+    /// The pipeline's logic operation (`GraphicsState::logic_op`): Metal's private
+    /// `logicOperation` where Vulkan's draws it.
+    logic_op: Option<vk::LogicOp>,
     patch_control_points: Option<u32>,
     /// A mesh pipeline: no vertex input and no input assembly.
     meshes: bool,
@@ -562,6 +565,7 @@ impl GraphicsContent {
                     &graphics.color_attachments,
                     key.fixed.masks_color,
                     key.pass.fetch_inputs,
+                    graphics.logic_op,
                 ))
                 .text(&multisample)
                 .finish(),
@@ -703,9 +707,12 @@ impl GraphicsContent {
             .stencil_test_enable(self.stencil_test)
             .front(self.stencil[0])
             .back(self.stencil[1]);
-        let blend = vk::PipelineColorBlendStateCreateInfo::default()
+        let mut blend = vk::PipelineColorBlendStateCreateInfo::default()
             .attachments(&self.blends)
             .flags(self.blend_flags);
+        if let Some(op) = self.logic_op {
+            blend = blend.logic_op_enable(true).logic_op(op);
+        }
         let dynamic = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&self.dynamic);
         let tessellation = self.patch_control_points.map(|points| {
             vk::PipelineTessellationStateCreateInfo::default().patch_control_points(points)
@@ -975,6 +982,7 @@ impl VariantObjects {
             stencil: [face(ds.front), face(ds.back)],
             blends,
             blend_flags,
+            logic_op: graphics.logic_op.map(Into::into),
             patch_control_points: graphics.tessellation.map(|t| t.patch_control_points),
             meshes: pipeline
                 .stages

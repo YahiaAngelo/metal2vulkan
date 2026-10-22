@@ -236,6 +236,8 @@ mod address_maps;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod alpha_in_red;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod alpha_tests;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod amplified_draws;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod anisotropic_filter;
@@ -331,6 +333,8 @@ mod degrade_notices;
 mod denormal_word_fetches;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod depth_as_color;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod depth_compare_clamps;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod depth_compare_levels;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
@@ -544,6 +548,8 @@ mod layered_passes;
 mod level_writes_by_usage;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod linear_attachments;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod logic_ops;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod made_at_creation;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]

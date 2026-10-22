@@ -414,6 +414,15 @@ pub(crate) fn round_scaled_product(
     fb.select(down, r_down, c)
 }
 
+/// The 8-bit unorm code of `v` (`f32` lanes of form `s`) as Metal converts it to an 8-bit unorm
+/// channel, as `f32` lanes holding the integer: NaN is 0, the value is clamped to `[0, 1]`, and
+/// the code is the exact product with 255 rounded to nearest ([`round_mersenne_product`]). The
+/// private alpha test compares its alpha so (`stage_io::alpha_test`).
+pub(crate) fn unorm8_code(fb: &mut FunctionBuilder<'_>, s: Form, v: Value) -> BResult<Value> {
+    let c = clamped(fb, s, v, 0.0, 0.0)?;
+    round_mersenne_product(fb, s, c, unorm_bits(8)?)
+}
+
 /// `v` clamped to `[lo, 1]` with NaN taken as `nan`.
 fn clamped(fb: &mut FunctionBuilder<'_>, s: Form, v: Value, nan: f64, lo: f64) -> BResult<Value> {
     let is_nan = fb.unary(UnOp::IsNan, v)?;

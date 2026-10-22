@@ -623,7 +623,7 @@ pub(super) fn blended(
         let l0 = fb.convert(ConvOp::ConvertFToU, whole, t.u32_)?;
         let l1 = fb.binary(BinOp::IAdd, l0, one)?;
         let l1 = fb.glsl(GlslOp::UMin, &[l1, last])?;
-        let dref = cx.operand(fb, c.dref)?;
+        let dref = super::emit::reference(cx, fb, s, c.dref)?;
         let test = TapCompare::of(cx, fb, t, (c.function, None), (dref, Bits::Spec(spec)))?;
         let mut passes = [q; 2];
         for (pass, level) in passes.iter_mut().zip([l0, l1]) {
@@ -852,7 +852,7 @@ fn passes(
     bits: Bits,
 ) -> BResult<SValue> {
     let t = Tys::new(fb)?;
-    let dref = cx.operand(fb, c.dref)?;
+    let dref = super::emit::reference(cx, fb, s, c.dref)?;
     let test = TapCompare::of(cx, fb, &t, (c.function, word), (dref, bits))?;
     match s.op {
         SampleOp::Gather { .. } => {

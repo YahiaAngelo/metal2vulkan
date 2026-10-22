@@ -155,7 +155,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::air::abi::{Builtin, ParamBinding, ParamRole};
 use crate::air::ir::{ArgIdx, InstId, Value, ValueId};
 use crate::error::{Error, Feature, LowerFamily, Unsupported};
-use crate::lower::arith::{narrow, ops, Form, Held};
+use crate::lower::arith::{narrow, ops, FloatFmt, Form, Held};
 use crate::lower::emit::EmitCx;
 use crate::lower::select::{Plan, SelectCx};
 use crate::pipeline::stage_io::{IoNumeric, StageIo};
@@ -338,6 +338,16 @@ pub struct AmplifiedOutput {
     pub below: PushField,
 }
 
+/// The private alpha test a fragment function compiled under `LoweringInputs::alpha_test` runs
+/// at each return ([`alpha_test`]): the returned field of its color 0, four `float` lanes (a
+/// `half` output held widened), and the comparison.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct AlphaTest {
+    /// The field of a returned struct ([`Returned::Struct`]); 0 for a returned value itself.
+    pub field: u32,
+    pub function: crate::metal::CompareFunction,
+}
+
 /// The stage-IO part of the per-function plan (`select::FamilyPlans`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StageIoPlan {
@@ -419,6 +429,9 @@ pub struct StageIoPlan {
     /// (`LoweringInputs::sample_mask`): the `SampleMask` output's object and the mask, which each
     /// return ANDs into the function's own `[[sample_mask]]` output or stores as it.
     pub private_mask: Option<(usize, u32)>,
+    /// The render pipeline's private alpha test the fragment function runs at each return
+    /// (`LoweringInputs::alpha_test`).
+    pub alpha_test: Option<AlphaTest>,
     /// A fragment function's per-primitive inputs (`StageIo::primitive_inputs`) are flat alone,
     /// not decorated `PerPrimitiveEXT`: its device does not enable `VK_EXT_mesh_shader`, so the
     /// pipeline's mesh function is emulated, and its synthesized vertex stage writes a
@@ -1560,6 +1573,11 @@ pub fn emit_return(
     // return stores one, else stored as that output.
     let private_mask = plan.private_mask;
     let mut masked = false;
+    // The private alpha test, before any output is stored: a failing fragment is killed there.
+    if let (Some(v), Some(test)) = (v, plan.alpha_test) {
+        let x = cx.operand(fb, v)?;
+        alpha_test(cx, fb, test, x, returned)?;
+    }
     match (v, returned) {
         (None, Returned::Void) => {}
         (None, _) => return Err(cx.fail("an entry with outputs returns no value")),
@@ -2375,6 +2393,76 @@ enum NanDrop {
     /// critical section, so a color stored in the shader is dropped as Vulkan's tests would drop an
     /// output.
     Record(GlobalId),
+}
+
+/// Kill the fragment whose returned value `x` fails the pipeline's private alpha test `test`
+/// (`LoweringInputs::alpha_test`), as Metal tests it after the function runs (probes on an
+/// Apple M3 Max): color 0's alpha and the encoder's reference are each clamped to `[0, 1]`, a NaN
+/// taken as 0, and converted to an 8-bit unorm code from the exact product with 255 rounded to
+/// nearest, as Metal stores an 8-bit unorm channel, whatever the attachment's format; the codes
+/// are compared, and a fragment whose comparison fails writes nothing and counts no visibility.
+/// The reference's code is `PushField::AlphaTestReference`, which the binder converts
+/// (`bind::alpha_test_code`); `Never` kills every fragment and reads no reference. Inside an
+/// interlocked body the failure is recorded in the `discarded` predicate, as a NaN depth's is
+/// ([`nan_drop`]).
+fn alpha_test(
+    cx: &mut EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+    test: AlphaTest,
+    x: SValue,
+    returned: Returned,
+) -> BResult<()> {
+    use crate::metal::CompareFunction as F;
+    let Some(drop) = nan_drop(cx)? else {
+        return Err(cx.fail("an alpha test in a function that loops over its covered samples"));
+    };
+    let fails = match test.function {
+        F::Never => {
+            let bool_ = fb.module().ty(SType::Bool)?;
+            let k = fb.module().constant(Constant::Scalar {
+                ty: bool_,
+                bits: ConstBits(1),
+            })?;
+            fb.module().const_value(k)?
+        }
+        function => {
+            let color = match returned {
+                Returned::Struct => fb.composite_extract(x, &[test.field])?,
+                Returned::Value | Returned::Void => x,
+            };
+            let alpha = fb.composite_extract(color, &[3])?;
+            let scalar = Form {
+                held: Held::Float(FloatFmt::F32),
+                lanes: 1,
+            };
+            let code = crate::lower::arith::color_write::unorm8_code(fb, scalar, alpha)?;
+            let u32_ = fb.module().ty(SType::Int {
+                width: 32,
+                signed: false,
+            })?;
+            let code = fb.convert(ConvOp::ConvertFToU, code, u32_)?;
+            let reference = cx.push_field(fb, PushField::AlphaTestReference)?;
+            let op = match function {
+                F::Less => BinOp::UGreaterThanEqual,
+                F::Equal => BinOp::INotEqual,
+                F::LessEqual => BinOp::UGreaterThan,
+                F::Greater => BinOp::ULessThanEqual,
+                F::NotEqual => BinOp::IEqual,
+                F::GreaterEqual => BinOp::ULessThan,
+                _ => return Err(cx.fail("an alpha test of a comparison that tests nothing")),
+            };
+            fb.binary(op, code, reference)?
+        }
+    };
+    match drop {
+        NanDrop::Kill(form) => crate::lower::fragment::kill_if(fb, fails, form),
+        NanDrop::Record(discarded) => {
+            let p = fb.module().global_value(discarded)?;
+            let was = fb.load(p, MemAccess::default())?;
+            let now = fb.binary(BinOp::LogicalOr, was, fails)?;
+            fb.store(p, now, MemAccess::default())
+        }
+    }
 }
 
 /// How the entry's returns drop a positive NaN depth, or `None` in a function looping over its

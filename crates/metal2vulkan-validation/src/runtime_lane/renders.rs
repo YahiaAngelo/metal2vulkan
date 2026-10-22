@@ -972,10 +972,12 @@ fn nans_resolved(pf: PixelFormat, texel: &[u8]) -> Vec<u8> {
 
 /// A NaN `Clear` of a new `Private` attachment (`nan_clear.rs`) of 4x4, 16x16 and 64x64, 1x and
 /// 4x, plain (a usage Metal compresses) and with `PixelFormatView` usage (kept uncompressed),
-/// in a pass without a draw call and in one whose draw (`rt6_restart`, `clear_reach::Lane`)
-/// lies wholly off the target, stores Metal's texel ([`NAN_CLEARS`]): the one with a `half`
-/// NaN's sign where Metal keeps it, at a plain level of 16 or more in a pass without a draw
-/// call, and without it elsewhere. A 1x attachment is read whole by a blit. Each sample of a 4x one
+/// in a pass without a draw call, in one whose draw (`rt6_restart`, `clear_reach::Lane`) lies
+/// wholly off the target, and in one whose only draw call draws no vertices, stores Metal's texel
+/// ([`NAN_CLEARS`]): the one with a `half` NaN's sign where Metal keeps it, at a plain level of 16
+/// or more in a pass without a draw call, and without it elsewhere (a draw call of no vertices is
+/// a draw call: the consumer's M3 Max, `R32Float`, `RG32Float` and `RGBA32Float` at 2 and 4
+/// samples, 16 a side, cleared to `-NaN`, resolves `0x7fc00000`). A 1x attachment is read whole by a blit. Each sample of a 4x one
 /// is read through an unsigned view of its texel size where its format has one (`RGBA16Float`,
 /// `R16Float` and `R32Float`, `runtime_samples::encode`): its own with `PixelFormatView` usage,
 /// else a same-format copy's with it (Metal's and the devices' copies keep every sample's bits, but
@@ -984,7 +986,8 @@ fn nans_resolved(pf: PixelFormat, texel: &[u8]) -> Vec<u8> {
 /// read by a blit. In a pass without a draw call Metal's resolve keeps the texel where it keeps the
 /// sign and stores zero in each small-float NaN channel and `0x7fc00000` in each 32-bit float one
 /// elsewhere, which the runtime writes on every device (an `R32Float` clear is Metal's conversion
-/// of the double at every level). In a pass with a draw Metal's resolve averages the samples, each
+/// of the double at every level); so does one whose draw calls draw nothing, its resolve then
+/// Metal's texel without the sign. In a pass with a draw Metal's resolve averages the samples, each
 /// NaN zero: a device's resolve whose NaN channels differ only so is its resolve rule, printed
 /// (`device-rounded-resolve`), not this clear's. A `BGR10_XR` NaN clear is printed beside them, or
 /// the device's refusal of the format. Each prints `MSAA-NAN-CLEAR`.
@@ -1022,15 +1025,13 @@ fn multisampled_nan_clears_store_metal_s_texel() {
         let measured = !small.is_empty();
         for (side, samples, viewed, drawn) in [4u32, 16, 64]
             .into_iter()
-            .flat_map(|side| [(side, 1u64), (side, 4)])
+            .flat_map(|side| [(side, 1u64), (side, 2), (side, 4)])
             .flat_map(|(side, samples)| [(side, samples, false), (side, samples, true)])
             .flat_map(|(side, samples, viewed)| {
-                [
-                    (side, samples, viewed, false),
-                    (side, samples, viewed, true),
-                ]
+                [Drawn::No, Drawn::OffTarget, Drawn::Nothing]
+                    .map(|drawn| (side, samples, viewed, drawn))
             })
-            .filter(|&(_, _, _, drawn)| measured || !drawn)
+            .filter(|&(_, _, _, drawn)| measured || drawn == Drawn::No)
         {
             let usage = TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ;
             let new = |samples: u64, viewed: bool| {
@@ -1050,7 +1051,11 @@ fn multisampled_nan_clears_store_metal_s_texel() {
             let label = format!(
                 "{pf:?} {color:?} {samples}x {side}x{side}{}{}",
                 if viewed { " PixelFormatView" } else { "" },
-                if drawn { " drawn off the target" } else { "" }
+                match drawn {
+                    Drawn::No => "",
+                    Drawn::OffTarget => " drawn off the target",
+                    Drawn::Nothing => " a draw call of no vertices",
+                }
             );
             let texture = match new(samples, viewed) {
                 Ok(texture) => texture,
@@ -1082,7 +1087,8 @@ fn multisampled_nan_clears_store_metal_s_texel() {
             };
             let [red, green, blue, alpha] = color;
             target.clear_color = ClearColor::new(red, green, blue, alpha);
-            let pipeline = drawn.then(|| lane.pipeline(&[pf], (None, None), samples));
+            let pipeline =
+                (drawn != Drawn::No).then(|| lane.pipeline(&[pf], (None, None), samples));
             let command_buffer = lane.queue.command_buffer().unwrap();
             let encoded = command_buffer
                 .render_command_encoder(&pass)
@@ -1090,7 +1096,11 @@ fn multisampled_nan_clears_store_metal_s_texel() {
                     if let Some(pipeline) = &pipeline {
                         encoder.set_render_pipeline_state(pipeline)?;
                         encoder.set_vertex_buffer(Some(&off), 0, 0)?;
-                        encoder.draw_primitives(PrimitiveType::Triangle, 0, 3, 1, 0)?;
+                        let vertices = match drawn {
+                            Drawn::Nothing => 0,
+                            _ => 3,
+                        };
+                        encoder.draw_primitives(PrimitiveType::Triangle, 0, vertices, 1, 0)?;
                     }
                     encoder.end_encoding()
                 });
@@ -1169,7 +1179,7 @@ fn multisampled_nan_clears_store_metal_s_texel() {
                 continue;
             }
             checked += 1;
-            let signed = side >= 16 && !viewed && !drawn;
+            let signed = side >= 16 && !viewed && drawn == Drawn::No;
             let texel = if signed { large } else { small };
             let samples_exact = sampled.iter().flatten().all(|sample| sample == texel);
             let verdict = if samples == 1 {
@@ -1194,7 +1204,10 @@ fn multisampled_nan_clears_store_metal_s_texel() {
                 };
                 match (samples_exact, stored.iter().all(|got| *got == metal)) {
                     (true, true) => Ok("Metal's texel, Metal's resolve".to_owned()),
-                    (true, false) if drawn && stored.iter().all(|got| resolve_rule(got)) => {
+                    (true, false)
+                        if drawn == Drawn::OffTarget
+                            && stored.iter().all(|got| resolve_rule(got)) =>
+                    {
                         Ok(format!(
                             "Metal's texel; the device's resolve rule, Metal's resolve \
                              {metal:02x?}"
@@ -1225,6 +1238,17 @@ fn multisampled_nan_clears_store_metal_s_texel() {
     drop(cache);
     let _ = messages.take_notices();
     assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// What a pass of [`multisampled_nan_clears_store_metal_s_texel`] draws.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Drawn {
+    /// No draw call.
+    No,
+    /// A triangle wholly off the target.
+    OffTarget,
+    /// A draw call of no vertices.
+    Nothing,
 }
 
 /// Each color clear Metal was measured with stores Metal's bytes, depth and stencil clears
@@ -1733,15 +1757,15 @@ fn passes_and_draws_are_refused_as_metal_refuses_them() {
         encoder.set_viewport_transform_enabled(false),
         apple(AppleOnly::ViewportTransformDisabled)
     );
+    // A count of 0 (no set bits in mode 1) draws a number of copies that changes from run to
+    // run on Metal: refused, the amplification set before kept.
     assert_eq!(
         encoder.set_vertex_amplification_mode(1, 0),
         apple(AppleOnly::VertexAmplificationMode)
     );
-    assert_eq!(encoder.set_depth_cleared(), apple(AppleOnly::DepthCleared));
-    assert_eq!(
-        encoder.set_stencil_cleared(),
-        apple(AppleOnly::StencilCleared)
-    );
+    // Depth and stencil "cleared" change nothing Metal draws.
+    assert_eq!(encoder.set_depth_cleared(), Ok(()));
+    assert_eq!(encoder.set_stencil_cleared(), Ok(()));
     // Nothing above drew; a draw of no vertices records nothing.
     encoder
         .draw_primitives(PrimitiveType::Triangle, 0, 0, 1, 0)

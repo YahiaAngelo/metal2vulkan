@@ -703,6 +703,9 @@ pub fn graphics_state(
         color_write_rules,
         snapshot_reads,
         color_group: r.color_group.clone(),
+        // The pipeline's private logic operation, once compile decided it
+        // (`private_state::logic_operation`).
+        logic_op: None,
     };
     // The sample count against the attachments' sample counts.
     state.sample_count_properties(&p.fields().enabled.properties)?;

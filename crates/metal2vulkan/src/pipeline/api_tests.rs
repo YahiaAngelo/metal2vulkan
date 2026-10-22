@@ -409,6 +409,8 @@ mod serde_round_trips {
             addressed_function_tables: true,
             unattached_colors: BTreeSet::from([5, 7]),
             sample_mask: Some(0b1010),
+            alpha_test: Some(metal::CompareFunction::GreaterEqual),
+            depth_compare_clamp_mask: 0x8000_0005,
             read_only_tests: true,
             shader_tests: true,
             shader_stencil: true,
@@ -674,6 +676,7 @@ mod serde_round_trips {
                 width: 4,
                 group: 0,
             }),
+            logic_op: Some(vk::LogicOp::EQUIVALENT),
         });
         let mut slots = BTreeMap::new();
         slots.insert(
@@ -1010,6 +1013,7 @@ mod bind_serde_round_trips {
             depth_clip_mode_clamp: true,
             stencil_references: [0x5A, 0xC3],
             blend_color: [0.25, -0.5, 1.5, 0.75],
+            alpha_test_reference: Some(0.375),
             primitive_type: Some(metal::PrimitiveType::TriangleStrip),
             depth_bias: [1.5 / 65535.0, -2.0, 0.125],
             depth16_pass: Some(true),

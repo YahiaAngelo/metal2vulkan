@@ -30,7 +30,7 @@ use crate::device::subgroup::SubgroupRequirement;
 use crate::library::{FunctionArtifact, FunctionCompileKey, KernelFacts};
 use crate::metal;
 use crate::metal::format::{ExtendedRange, WordAttachment, WordField};
-use crate::metal::TextureWriteRoundingMode;
+use crate::metal::{CompareFunction, TextureWriteRoundingMode};
 use crate::pipeline::artifact::{
     ComputePipeline, ComputePipelineMetalInfo, PrecisionNote, Reconvergence, RenderPipeline,
     RuntimeDependency, SpecClause, SpecConstant, SpecTest, SpecializationLayout, SpecializedNote,
@@ -57,9 +57,9 @@ use crate::pipeline::lower_inputs::{
     HalfOutputLane, RotatedBlendForm, VertexFetch,
 };
 use crate::pipeline::stage_io::{
-    CoverageLoop, CoverageLoopRefusal, DepthMode, Interpolation as IoInterpolation, IoNumeric,
-    IoRole, IoType, IoVariable, PulledInput, Sampling as IoSampling, SelectedWrite, StageBuiltin,
-    StageInFetch, StageInInput, StageIo,
+    CoverageLoop, CoverageLoopRefusal, DepthCompares, DepthMode, Interpolation as IoInterpolation,
+    IoNumeric, IoRole, IoType, IoVariable, PulledInput, Sampling as IoSampling, SelectedWrite,
+    StageBuiltin, StageInFetch, StageInInput, StageIo,
 };
 use crate::pipeline::sym::{
     AccelerationStructureLevel, AirUserKey, Axis, CombinedSampler, HandleClass, ImageAccess,
@@ -667,6 +667,7 @@ codec_vk_raw!(
     DynamicState: i32,
     BlendFactor: i32,
     BlendOp: i32,
+    LogicOp: i32,
     Filter: i32,
     SamplerMipmapMode: i32,
     SamplerAddressMode: i32,
@@ -847,6 +848,7 @@ codec_enum! {
         VerticesPerPrimitive,
         TessellationChunk,
         MergedDrawAddress,
+        AlphaTestReference,
     }
     Symbol { Binding(f0), DescriptorSet(f0), Location(f0), Component(f0), SpecId(f0) }
 }
@@ -928,7 +930,7 @@ codec_enum! {
         ShaderTessellationAndGeometryPointSize, MultiviewGeometryShader,
         AttachmentFeedbackLoopLayout, ExtendedDynamicState3ColorWriteMask,
         ShaderFmaFloat16,
-        ProvokingVertexLast,
+        ProvokingVertexLast, LogicOp,
     }
     VkExtension {
         ExtRobustness2, ExtImageRobustness, ExtShaderAtomicFloat, ExtShaderAtomicFloat2,
@@ -979,7 +981,7 @@ codec_enum! {
         MetalFragmentSimdgroups, MetalVertexSimdgroups, CenterFragCoordDepth, SampleFragCoordDepth,
         MetalHalfTexelWrites, MetalNormStorageWrites, Unorm8LinearFilter, DeviceSampling,
         MetalDepth16Stores, MetalDepth16BiasedStores, MetalInterpolation, MetalFirstVertexIndices,
-        MetalFullQuads, ProvokingVertexModePerPipeline,
+        MetalFullQuads, ProvokingVertexModePerPipeline, DepthImageKeepsValuesOutsideUnitRange,
     }
     VkLimit {
         MaxComputeWorkGroupSize(f0), MaxComputeWorkGroupCount(f0), MaxComputeWorkGroupInvocations,
@@ -1080,7 +1082,9 @@ codec_struct! {
         half_output_lanes, texture_write_rounding, uniform_outputs, uniform_inputs,
         instanced_attributes, selected_colors, half_blend_colors, half_fast_colors,
         float_blend_colors, zero_indices, color_group, word_colors, alpha_in_red_colors,
+        alpha_test, depth_compares,
     }
+    DepthCompares { samplers, clamped }
     ColorGroup { present, width, group }
     WordField { shift, bits }
     SelectedWrite { lanes, rounds, nans }
@@ -1130,6 +1134,7 @@ codec_enum! {
     CaptureForm { Vertices, Indexed(f0) }
     HalfOutputLane { Float32, Float32Added }
     TextureWriteRoundingMode { TowardZero, NearestEven }
+    CompareFunction { Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual, Always }
     CoverageLoopRefusal {
         Outputs, EarlyFragmentTests, Discard, QuadOperations, Attachments, InterpolationFunctions,
     }
@@ -1321,7 +1326,7 @@ codec_struct! {
         reads_position_depth,
         fragment_writes_memory, color_outputs, sample_mask, shader_tests, color_write_rules,
         snapshot_reads,
-        color_group,
+        color_group, logic_op,
     }
     TessellationState {
         patch_control_points, domain, control_points, factor_step_function, push_offset,

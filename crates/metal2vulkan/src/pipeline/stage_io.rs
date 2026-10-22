@@ -287,6 +287,17 @@ pub struct StageIo {
     /// function.
     #[cfg_attr(feature = "serde", serde(default))]
     pub sample_mask: Option<u32>,
+    /// The render pipeline's private alpha test the fragment function runs itself
+    /// (`LoweringInputs::alpha_test`): its returns kill an invocation whose color 0's alpha fails
+    /// the comparison against `PushField::AlphaTestReference`. `None` for every other function.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub alpha_test: Option<crate::metal::CompareFunction>,
+    /// The samplers a fragment function makes depth comparisons through, and those whose
+    /// references it clamps (`LoweringInputs::depth_compare_clamp_mask`). Link refuses a function
+    /// whose clamped samplers are not the pipeline's mask over its samplers
+    /// (`NeedsInput(DepthCompareClamp)`). Empty for every other function.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub depth_compares: DepthCompares,
     /// The channels taking a `half` output at `float` precision the function compiled under
     /// (`LoweringInputs::half_output_lanes`), by color index: those of the attachments it writes
     /// a `half` output to. Link refuses a stage one of whose entries is not the pipeline's
@@ -409,6 +420,27 @@ pub struct SelectedWrite {
     /// A lane of code `c` stores a NaN as the device encodes it
     /// (`PrecisionNote::DeviceNanEncoding`).
     pub nans: u8,
+}
+
+/// The samplers a fragment function makes depth comparisons through ([`StageIo::depth_compares`]),
+/// as bits of Metal's `fragmentDepthCompareClampMask`: bit `s` for `[[sampler(s)]]` (`s` below
+/// 16, Metal's sampler slots), bit 31 for a constexpr sampler, and bit 30
+/// ([`DepthCompares::ARGUMENT`]) for an argument buffer's sampler, which no mask bit names.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DepthCompares {
+    /// Every sampler the function compares through.
+    pub samplers: u32,
+    /// Those whose references the function clamps: the mask it compiled under over `samplers`.
+    pub clamped: u32,
+}
+
+impl DepthCompares {
+    /// The bit of a comparison through an argument buffer's sampler.
+    pub const ARGUMENT: u32 = 1 << 30;
+    /// The bit of a comparison through a constexpr sampler (Metal's mask bit 31, measured).
+    pub const CONSTEXPR: u32 = 1 << 31;
 }
 
 /// How a fragment function reads `[[sample_mask]]` where Metal runs it once per covered sample: it

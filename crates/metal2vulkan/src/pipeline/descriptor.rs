@@ -366,14 +366,23 @@ pub struct PrivateRenderState {
     pub sample_coverage: f32,
     /// `sampleCoverageInvert` (default off): changes nothing Metal draws.
     pub sample_coverage_invert: bool,
-    /// `alphaTestEnabled` (default off; not built: on is refused).
+    /// `alphaTestEnabled` (default off): the fragment passes where `alpha_test_function` holds
+    /// between color 0's alpha and the render encoder's reference, each as an 8-bit unorm code
+    /// (`pipeline::private_state`'s docs); one that fails writes nothing.
     pub alpha_test_enabled: bool,
     /// `alphaTestFunction` (default 0, `MTLCompareFunctionNever`), the raw value: read only
-    /// with the alpha test on.
+    /// with the alpha test on, where a value past `MTLCompareFunctionAlways` is refused.
     pub alpha_test_function: u64,
-    /// `logicOperationEnabled` (default off; not built: on is refused).
+    /// `logicOperationEnabled` (default off): `logic_operation` applies to the codes of each
+    /// normalized, sRGB and integer color attachment, which then blends nothing; a float
+    /// attachment ignores it (`pipeline::private_state`'s docs). Copy and no-op draw on every
+    /// device; the other operations need the device's `logicOp`, and are refused where an
+    /// attachment is sRGB, a float attachment blends, or a format was not measured.
     pub logic_operation_enabled: bool,
-    /// `logicOperation` (default 0), the raw value: read only with the logic operation on.
+    /// `logicOperation` (default 0), the raw value: read only with the logic operation on, by its
+    /// low four bits, in Direct3D's order (0 clear, 1 set, 2 copy, 3 copy inverted, 4 no-op,
+    /// 5 invert, 6 and, 7 nand, 8 or, 9 nor, 10 xor, 11 equivalent, 12 and reverse, 13 and
+    /// inverted, 14 or reverse, 15 or inverted).
     pub logic_operation: u64,
     /// `clipDistanceEnableMask` (default `0xff`): changes nothing Metal draws; every clip
     /// distance the vertex function writes clips.
@@ -391,14 +400,24 @@ pub struct PrivateRenderState {
     /// `vertexDepthCompareClampMask` (default 0): changes nothing Metal draws.
     pub vertex_depth_compare_clamp_mask: u32,
     /// `fragmentDepthCompareClampMask` (default 0): bit `s` clamps the reference of a fragment
-    /// function's depth comparison through sampler slot `s` (not built: a mask other than 0 is
-    /// refused).
+    /// function's depth comparison through `[[sampler(s)]]` to `[0, 1]`, a NaN taken as 0, and
+    /// bit 31 one through a constexpr sampler; a comparison through an argument buffer's sampler
+    /// is refused under a mask other than 0.
     pub fragment_depth_compare_clamp_mask: u32,
     /// `depthStencilWriteDisabled` (default off): changes nothing Metal draws.
     pub depth_stencil_write_disabled: bool,
     /// `needsCustomBorderColorSamplers` (default off): changes nothing Metal draws; a sampler's
     /// private custom border color samples transparent black with it or without.
     pub needs_custom_border_color_samplers: bool,
+    /// `vertexAmplificationMode` (default 0): 0 and 1 draw alike, the amplification count and view
+    /// mappings the encoder sets; Metal's descriptor asserts at 2 or more, which is refused as an
+    /// unknown value.
+    pub vertex_amplification_mode: u64,
+    /// `explicitVisibilityGroupID` (default `u32::MAX`, none): changes nothing Metal draws in a
+    /// pipeline whose `maxVertexAmplificationCount` is 1; any other group is refused where the
+    /// pipeline amplifies (Metal there draws one copy's color and counts every copy's samples,
+    /// a rule not built).
+    pub explicit_visibility_group_id: u32,
 }
 
 impl PrivateRenderState {
@@ -421,11 +440,13 @@ impl PrivateRenderState {
             fragment_depth_compare_clamp_mask: 0,
             depth_stencil_write_disabled: false,
             needs_custom_border_color_samplers: false,
+            vertex_amplification_mode: 0,
+            explicit_visibility_group_id: u32::MAX,
         }
     }
 
     /// The fields as plain bits, the coverage by its `f32` bits: what equality compares.
-    fn bits(&self) -> (u64, u32, [bool; 9], [u64; 2], u8, [u32; 2]) {
+    fn bits(&self) -> (u64, u32, [bool; 9], [u64; 3], u8, [u32; 3]) {
         (
             self.sample_mask,
             self.sample_coverage.to_bits(),
@@ -440,11 +461,16 @@ impl PrivateRenderState {
                 self.depth_stencil_write_disabled,
                 self.needs_custom_border_color_samplers,
             ],
-            [self.alpha_test_function, self.logic_operation],
+            [
+                self.alpha_test_function,
+                self.logic_operation,
+                self.vertex_amplification_mode,
+            ],
             self.clip_distance_enable_mask,
             [
                 self.vertex_depth_compare_clamp_mask,
                 self.fragment_depth_compare_clamp_mask,
+                self.explicit_visibility_group_id,
             ],
         )
     }

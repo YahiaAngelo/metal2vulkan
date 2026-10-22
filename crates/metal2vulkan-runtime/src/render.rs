@@ -3014,6 +3014,21 @@ impl RenderLowering {
         Ok(())
     }
 
+    /// Set the alpha test reference (`setAlphaTestReferenceValue:`, `apple_only.rs`), which a
+    /// pipeline with the private alpha test compares against (`BindState::alpha_test_reference`).
+    pub(crate) fn set_alpha_test_reference(&mut self, value: f32) {
+        self.state.set_alpha_test_reference(value);
+    }
+
+    /// Set the amplification count `count` with the view mappings set before kept
+    /// (`setVertexAmplificationMode:value:`, `apple_only.rs`); `None`, the amplification kept,
+    /// where the count passes them ([`Amplification::with_count`]).
+    pub(crate) fn amplify_with_kept_mappings(&mut self, count: u64) -> Option<()> {
+        let amplified = self.amplification.with_count(count)?;
+        *self.amplification = amplified;
+        Some(())
+    }
+
     /// The lowering of [`RenderCommandEncoder::draw_primitives`].
     pub(crate) fn draw_primitives(
         &mut self,
@@ -4534,10 +4549,10 @@ impl RenderLowering {
         // A clear holding a `half` or small-float NaN: written before the pass as Metal writes
         // it, through a scratch image of an integer format, and loaded in the pass
         // (`nan_clear.rs`). After the stand-ins' copies, which keep the attachment's own load.
-        // And, in a pass without a draw call, its resolves written after the pass as Metal's
-        // resolve stores them (`nan_clear.rs`).
+        // And, in a pass whose draws reach no tile, its resolves written after the pass as
+        // Metal's resolve stores them (`nan_clear.rs`).
         let (nan_clears, nan_resolves) =
-            NanClears::plan(core.command_buffer(), &mut layout, called)?;
+            NanClears::plan(core.command_buffer(), &mut layout, (called, drew))?;
         // A depth whose `Clear` load held a NaN, loaded instead: Metal's word written into its
         // texture over the clear's reach before the pass, before anything copies the depth out
         // of it (`nan_clear.rs`).
@@ -5605,6 +5620,9 @@ impl RenderLowering {
         state.viewport_count = self.state.viewport_count(true);
         // An extended-range blend computed in the shader reads the blend color as push data.
         state.blend_color = self.state.blend_color();
+        // A fragment function that runs the pipeline's private alpha test reads the reference as
+        // push data.
+        state.alpha_test_reference = self.state.alpha_test_reference();
         // A fragment function that runs the draw's depth test itself clamps its depth as the
         // encoder's depth clip mode says, read as push data (its range: `draw_resident`).
         state.depth_clip_mode_clamp = self.state.depth_clip_mode_clamp();

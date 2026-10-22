@@ -1499,6 +1499,19 @@ pub enum RuntimeGap {
         /// The descriptor's pixel format.
         pixel_format: PixelFormat,
     },
+    /// The multisample resolve (`MultisampleResolve`, `StoreAndMultisampleResolve`) of a color
+    /// attachment of an extended-range format (`BGRA10_XR`, `BGR10_XR` and their `_sRGB` twins),
+    /// which Metal makes. The runtime holds such an attachment's raw codes and builds no resolve of
+    /// them. Metal's, measured on an M3 Max under macOS 27.0.1 at 2 and 4 samples: `BGR10_XR`'s
+    /// channels and `BGRA10_XR`'s color are the average of the samples' stored 10-bit codes,
+    /// rounded half up (every texel probed); `BGRA10_XR`'s alpha is near the average of the
+    /// samples' alphas as `half` values clamped to `[0, 1]`, and the `_sRGB` twins' color near the
+    /// encoded average of the samples' linear values (not fitted to the code). Both of those read
+    /// the values the fragment function wrote, which the stored codes do not keep.
+    ExtendedRangeResolve {
+        /// The attachment's pixel format.
+        pixel_format: PixelFormat,
+    },
     /// An unbalanced command-predication record (`ComputeCommandEncoder::encode_end_if` and the
     /// other ends, or `encode_start_else`, with no block open; `encode_start_if` on a nil buffer
     /// with none) that is its unit's first record, after dispatches of the unit (of this encoder,

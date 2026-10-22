@@ -1386,6 +1386,7 @@ pub(super) const FEATURE_MEMBERS: &[(&str, VkFeature)] = {
         ("tessellationShader", F::TessellationShader),
         ("sampleRateShading", F::SampleRateShading),
         ("dualSrcBlend", F::DualSrcBlend),
+        ("logicOp", F::LogicOp),
         ("independentBlend", F::IndependentBlend),
         ("shaderClipDistance", F::ShaderClipDistance),
         ("shaderCullDistance", F::ShaderCullDistance),

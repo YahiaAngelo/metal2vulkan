@@ -149,6 +149,11 @@ pub struct FragmentPass<'a> {
     /// (`LoweringInputs::sample_mask`); `None` from a descriptor, set by the compile layer where
     /// the function compiled without it could tell Vulkan's mask from Metal's.
     pub(crate) sample_mask: Option<u32>,
+    /// The pipeline's private alpha test (`LoweringInputs::alpha_test`).
+    pub(crate) alpha_test: Option<crate::metal::CompareFunction>,
+    /// The pipeline's private `fragmentDepthCompareClampMask`
+    /// (`LoweringInputs::depth_compare_clamp_mask`).
+    pub(crate) depth_compare_clamp_mask: u32,
     /// The group of the pipeline's color attachments the function writes
     /// (`LoweringInputs::color_group`), whose variant's descriptor `color_attachments` is
     /// (`color_group::descriptor`); `None` from a descriptor, set by the compile layer.
@@ -168,6 +173,11 @@ impl<'a> From<&'a RenderPipelineDescriptor> for FragmentPass<'a> {
             max_call_stack_depth: d.max_fragment_call_stack_depth,
             texture_write_rounding_mode: d.texture_write_rounding_mode,
             sample_mask: None,
+            // Refused at the pipeline's creation where the test is not built.
+            alpha_test: crate::pipeline::private_state::alpha_test(&d.private)
+                .ok()
+                .flatten(),
+            depth_compare_clamp_mask: d.private.fragment_depth_compare_clamp_mask,
             color_group: None,
         }
     }
@@ -186,6 +196,8 @@ impl<'a> From<&'a MeshPipelineDescriptor> for FragmentPass<'a> {
             max_call_stack_depth: 1,
             texture_write_rounding_mode: d.texture_write_rounding_mode,
             sample_mask: None,
+            alpha_test: None,
+            depth_compare_clamp_mask: 0,
             color_group: None,
         }
     }
@@ -1796,6 +1808,8 @@ pub(crate) fn fragment_inputs(
     out.rotated_factors = crate::pipeline::color_writes::rotated_factors(d.color_attachments, p);
     out.rotated_blends = crate::pipeline::color_writes::rotated_blends(d.color_attachments, p);
     out.sample_mask = d.sample_mask;
+    out.alpha_test = d.alpha_test;
+    out.depth_compare_clamp_mask = d.depth_compare_clamp_mask;
     out.half_output_lanes = crate::pipeline::color_writes::half_output_lanes(d.color_attachments);
     out.texture_write_rounding = d.texture_write_rounding_mode;
     out.depth16_codes = depth16_codes(d, v, p);
@@ -2447,6 +2461,13 @@ fn compile_kept<K>(
     requirements
         .properties
         .extend(plan.families.texture.storage_properties.iter().copied());
+    // Depth comparisons the device makes, with no note, because its depth images keep values
+    // outside `[0, 1]` as Metal's do.
+    if plan.families.texture.kept_depth_range {
+        requirements
+            .properties
+            .insert(crate::device::requirements::VkProperty::DepthImageKeepsValuesOutsideUnitRange);
+    }
     // The set-1 heap's binding flags need their features beside the module's.
     requirements
         .features

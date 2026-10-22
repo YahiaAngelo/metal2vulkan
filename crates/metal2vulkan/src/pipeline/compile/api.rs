@@ -297,8 +297,11 @@ impl Device {
         entries: &StageEntries,
     ) -> Result<RenderPipelineKeys, Error> {
         guarded(|| {
-            crate::pipeline::private_state::check_render(&d.private)?;
+            crate::pipeline::private_state::check_render(d)?;
             let p = self.profile();
+            // The attachments as the private logic operation draws them (`render_pipeline`).
+            let (operated, _) = crate::pipeline::private_state::logic_operation(d, p)?;
+            let d = operated.as_ref();
             // A color group's variant is the pipeline of its group's attachments
             // (`render_pipeline`).
             let group = color_group::group(d, v, p)?;
@@ -733,8 +736,13 @@ impl Device {
         v: &VariantKey,
         m: &mut Meter,
     ) -> Result<RenderPipeline, Error> {
-        crate::pipeline::private_state::check_render(&d.private)?;
+        crate::pipeline::private_state::check_render(d)?;
         let p = self.profile();
+        // The attachments as the private logic operation draws them: its normalized and integer
+        // attachments unblended (unwritten under a no-op), and Vulkan's operation where one is
+        // needed.
+        let (operated, logic_op) = crate::pipeline::private_state::logic_operation(d, p)?;
+        let d = operated.as_ref();
         let group = color_group::group(d, v, p)?;
         let grouped = group.as_ref().map(|g| color_group::descriptor(d, g));
         let zeroed = with_zeroed_colors(grouped.as_ref().unwrap_or(d), v)?;
@@ -885,6 +893,21 @@ impl Device {
             fragment.as_ref().map(|f| f.artifact()),
             &graphics,
         )?;
+        crate::pipeline::private_state::alpha_tested(d, fragment.as_ref().map(|f| f.artifact()))?;
+        crate::pipeline::private_state::depth_compares_clamped(
+            d,
+            fragment.as_ref().map(|f| f.artifact()),
+        )?;
+        crate::pipeline::private_state::logic_operated(
+            logic_op,
+            fragment.as_ref().map(|f| f.artifact()),
+            &graphics,
+        )?;
+        graphics.logic_op = logic_op;
+        let mut requirements = requirements;
+        if logic_op.is_some() {
+            requirements.features.insert(VkFeature::LogicOp);
+        }
         let profile = self.profile_fingerprint();
         Ok(RenderPipeline {
             key: pipeline_key(

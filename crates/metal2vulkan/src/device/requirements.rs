@@ -329,6 +329,10 @@ pub enum VkFeature {
     /// under which a primitive's flat inputs read its last vertex, as Metal's
     /// `setProvokingVertexMode:` of 1 draws.
     ProvokingVertexLast,
+    /// `logicOp` (Vulkan 1.0): `VkPipelineColorBlendStateCreateInfo::logicOpEnable`, a logical
+    /// operation on the codes of each normalized and integer color attachment. A render pipeline
+    /// whose private `logicOperation` the device applies requires it (`GraphicsState::logic_op`).
+    LogicOp,
 }
 
 /// A Vulkan device extension the new core can require.
@@ -788,6 +792,14 @@ pub enum VkProperty {
     /// shading), including "any pipeline already bound when beginning the render pass instance"
     /// (`VUID-vkCmdBindPipeline-pipelineBindPoint-04881`).
     ProvokingVertexModePerPipeline,
+    /// The device's `D32_SFLOAT` images keep each value outside `[0, 1]` without
+    /// [`VkExtension::ExtDepthRangeUnrestricted`] enabled, as Metal's `Depth32Float` textures do
+    /// (the runtime's measured driver fact
+    /// [`DriverFact::DepthImageKeepsValuesOutsideUnitRange`](crate::device::DriverFact::DepthImageKeepsValuesOutsideUnitRange)).
+    /// No Vulkan query reports it: Vulkan leaves such a value undefined without the extension. A
+    /// module whose depth comparisons the device makes requires it on a device without the
+    /// extension in place of recording `PrecisionNote::RestrictedDepthRange`.
+    DepthImageKeepsValuesOutsideUnitRange,
 }
 
 /// One depth or stencil resolve mode (`VkResolveModeFlagBits`), named by

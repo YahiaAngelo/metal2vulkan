@@ -11,6 +11,12 @@
 //!   is refused where the fragment function could tell Metal's mask, applied after it runs, from
 //!   Vulkan's (the owned fixtures `engine/sample_rate`, reading `[[sample_mask]]`, and
 //!   `engine/multisample`, writing memory).
+//! - The alpha test is run by the fragment function, against the encoder's reference as a push
+//!   field; `Always` keeps the pipeline.
+//! - The logic operation leaves the normalized, sRGB and integer attachments unblended (unwritten
+//!   under a no-op), so copy and no-op draw on every device; the others take Vulkan's `logicOp`
+//!   where the device has it (lavapipe), and are refused naming it where it does not
+//!   (MoltenVK), and where Vulkan's operation is not Metal's.
 //! - Each property not built refuses a value other than Metal's default `NotImplemented`, naming
 //!   it. A compute pipeline's `needs_custom_border_color_samplers`, which changes nothing, keeps
 //!   its key.
@@ -46,12 +52,16 @@ fn fixture(stem: &str) -> Option<Library> {
 }
 
 fn device(stem: &str) -> Device {
+    device_with(stem, DevicePolicy::default())
+}
+
+fn device_with(stem: &str, policy: DevicePolicy) -> Device {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../metal2vulkan-validation/profiles")
         .join(format!("{stem}.json"));
     let text = std::fs::read_to_string(path).expect("profile");
     let description = DeviceDescription::from_khronos_json(&text, None).expect("description");
-    Device::new(description, DevicePolicy::default()).expect("device")
+    Device::new(description, policy).expect("device")
 }
 
 /// The fullscreen triangle drawn white into one `RGBA8Unorm` attachment at `samples`.
@@ -116,6 +126,10 @@ fn defaults_and_properties_that_change_nothing_keep_the_pipeline() {
         s.needs_custom_border_color_samplers,
     ]
     .contains(&true));
+    assert_eq!(
+        (s.vertex_amplification_mode, s.explicit_visibility_group_id),
+        (0, u32::MAX)
+    );
     assert_eq!(PrivateRenderState::default(), s);
     let Some(lib) = fixture("rt6_render_state") else {
         return;
@@ -137,6 +151,9 @@ fn defaults_and_properties_that_change_nothing_keep_the_pipeline() {
             p.vertex_depth_compare_clamp_mask = u32::MAX;
             p.depth_stencil_write_disabled = true;
             p.needs_custom_border_color_samplers = true;
+            p.vertex_amplification_mode = 1;
+            // A pipeline that does not amplify.
+            p.explicit_visibility_group_id = 3;
             // Every sample's bit set, and bits past the sample count cleared or set.
             p.sample_mask = ((1 << samples) - 1) | 0xf0_0000_0000;
             let kept = compile(&dev, &d, &what);
@@ -313,16 +330,17 @@ fn each_property_not_built_refuses_a_value_other_than_metals_default() {
     let Some(lib) = fixture("rt6_render_state") else {
         return;
     };
-    let cases: [(fn(&mut PrivateRenderState), PrivateRenderField); 6] = [
+    let cases: [(fn(&mut PrivateRenderState), PrivateRenderField); 4] = [
         (|p| p.sample_coverage = 0.5, F::SampleCoverage),
         (|p| p.sample_coverage = f32::NAN, F::SampleCoverage),
-        (|p| p.alpha_test_enabled = true, F::AlphaTest),
-        (|p| p.logic_operation_enabled = true, F::LogicOperation),
-        (|p| p.point_smooth_enabled = true, F::PointSmooth),
         (
-            |p| p.fragment_depth_compare_clamp_mask = 1,
-            F::FragmentDepthCompareClamp,
+            |p| {
+                p.alpha_test_enabled = true;
+                p.alpha_test_function = 8;
+            },
+            F::AlphaTest,
         ),
+        (|p| p.point_smooth_enabled = true, F::PointSmooth),
     ];
     for stem in STEMS {
         let dev = device(stem);
@@ -332,6 +350,347 @@ fn each_property_not_built_refuses_a_value_other_than_metals_default() {
             match dev.compile_render_pipeline(&d, &Budget::standard()) {
                 Err(e) => assert_eq!(e, refused(field), "{stem} {field:?}"),
                 Ok(_) => panic!("{stem} {field:?}: compiled"),
+            }
+        }
+        // A visibility group where the pipeline amplifies.
+        let mut d = render(&lib, 1);
+        d.max_vertex_amplification_count = 2;
+        d.private.explicit_visibility_group_id = 0;
+        match dev.compile_render_pipeline(&d, &Budget::standard()) {
+            Err(e) => assert_eq!(e, refused(F::ExplicitVisibilityGroup), "{stem}"),
+            Ok(_) => panic!("{stem}: an amplified visibility group compiled"),
+        }
+        // A mode Metal's descriptor asserts at.
+        let mut d = render(&lib, 1);
+        d.private.vertex_amplification_mode = 2;
+        match dev.compile_render_pipeline(&d, &Budget::standard()) {
+            Err(Error::InvalidDescriptor(_)) => {}
+            other => panic!("{stem}: vertexAmplificationMode 2: {other:?}"),
+        }
+    }
+}
+
+/// The private logic operation: every normalized, sRGB and integer attachment is unblended, and
+/// under a no-op unwritten, which draws copy and no-op on both profiles with no Vulkan operation;
+/// another operation (xor, raw 10, and raw 26, whose low four bits are xor's) is Vulkan's
+/// `logicOp` on lavapipe, its requirements naming the feature, and refused naming the feature on
+/// MoltenVK, which lacks it; a float attachment keeps its blend under copy and no-op and takes
+/// Vulkan's operation unblended; an sRGB attachment under xor, a blended float attachment under xor
+/// and a format whose operation Metal was not measured with are refused `NotImplemented`.
+#[test]
+fn the_logic_operation_draws_as_metal_s_or_is_refused() {
+    use crate::device::requirements::VkFeature;
+    use crate::error::{Attachment, Capability};
+    use crate::metal::BlendFactor;
+    use crate::vk;
+    let Some(lib) = fixture("rt6_render_state") else {
+        return;
+    };
+    let with = |pf: PixelFormat, blended: bool, op: Option<u64>| {
+        let mut d = render(&lib, 1);
+        let mut a = ColorAttachmentDescriptor::new(pf);
+        if blended {
+            a.blending_enabled = true;
+            a.source_rgb_blend_factor = BlendFactor::One;
+            a.destination_rgb_blend_factor = BlendFactor::One;
+        }
+        d.color_attachments[0] = Some(a);
+        if let Some(op) = op {
+            d.private.logic_operation_enabled = true;
+            d.private.logic_operation = op;
+        }
+        d
+    };
+    let not_built = |index: u32| {
+        Error::Unsupported(Unsupported::not_implemented(Feature::PrivateRenderState(
+            PrivateRenderField::LogicOperation,
+        )))
+        .at_attachment(Attachment::Color(index))
+    };
+    for stem in STEMS {
+        let dev = device(stem);
+        let has = stem == "lavapipe";
+        let state = |d: &RenderPipelineDescriptor, what: &str| {
+            let p = compile(&dev, d, &format!("{stem} {what}"));
+            let a = p.graphics.color_attachments[0].expect("attachment 0");
+            (p.graphics.logic_op, a.blend.is_some(), a.write_mask, p)
+        };
+        // Copy and no-op on every device, the blend dropped, no-op writing nothing.
+        let (op, blends, mask, _) = state(&with(PixelFormat::RGBA8Unorm, true, Some(2)), "copy");
+        assert_eq!((op, blends), (None, false), "{stem} copy");
+        assert_eq!(mask, vk::ColorComponentFlags::known_bits(), "{stem} copy");
+        let (op, blends, mask, _) = state(&with(PixelFormat::RGBA8Unorm, true, Some(4)), "no-op");
+        assert_eq!(
+            (op, blends, mask),
+            (None, false, vk::ColorComponentFlags::empty())
+        );
+        let (op, blends, _, _) = state(&with(PixelFormat::RGBA8UnormSRGB, true, Some(2)), "srgb");
+        assert_eq!((op, blends), (None, false), "{stem} sRGB copy");
+        // A float attachment keeps its blend under copy.
+        let (op, blends, _, _) = state(&with(PixelFormat::RGBA16Float, true, Some(2)), "float");
+        assert_eq!((op, blends), (None, true), "{stem} float copy");
+        for raw in [10, 26] {
+            for pf in [
+                PixelFormat::RGBA8Unorm,
+                PixelFormat::RGBA8Snorm,
+                PixelFormat::RGB10A2Unorm,
+                PixelFormat::R16Unorm,
+                PixelFormat::RGBA16Float,
+            ] {
+                let blended = pf != PixelFormat::RGBA16Float;
+                let d = with(pf, blended, Some(raw));
+                match (has, dev.compile_render_pipeline(&d, &Budget::standard())) {
+                    (true, Ok(p)) => {
+                        assert_eq!(p.graphics.logic_op, Some(vk::LogicOp::XOR), "{pf:?}");
+                        let a = p.graphics.color_attachments[0].expect("attachment 0");
+                        assert!(a.blend.is_none(), "{stem} {pf:?} blends");
+                        assert!(p.requirements.features.contains(&VkFeature::LogicOp));
+                    }
+                    (false, Err(e)) => assert_eq!(
+                        e,
+                        Error::Unsupported(Unsupported::needs(
+                            Feature::PrivateRenderState(PrivateRenderField::LogicOperation),
+                            Capability::Feature(VkFeature::LogicOp),
+                        )),
+                        "{stem} {pf:?}"
+                    ),
+                    (_, other) => panic!("{stem} {pf:?} xor: {other:?}"),
+                }
+            }
+        }
+        // Where Vulkan's operation is not Metal's, on either device.
+        for (pf, blended) in [
+            (PixelFormat::RGBA8UnormSRGB, false),
+            (PixelFormat::RGBA16Float, true),
+            (PixelFormat::RG11B10Float, false),
+        ] {
+            match dev.compile_render_pipeline(&with(pf, blended, Some(10)), &Budget::standard()) {
+                Err(e) => assert_eq!(e, not_built(0), "{stem} {pf:?}"),
+                Ok(_) => panic!("{stem} {pf:?} xor compiled"),
+            }
+        }
+        // Each Vulkan operation keys a pipeline of its own, apart from copy's, whose attachments
+        // are the same unblended ones.
+        if has {
+            let key = |raw: u64| {
+                compile(&dev, &with(PixelFormat::RGBA8Unorm, true, Some(raw)), "key").key
+            };
+            let keys = [key(0), key(10), key(15), key(2)];
+            for (i, a) in keys.iter().enumerate() {
+                assert!(keys[i + 1..].iter().all(|b| a != b), "{stem} keys {keys:?}");
+            }
+        }
+        // Off, the pipeline is the one without the property.
+        let off = compile(&dev, &with(PixelFormat::RGBA8Unorm, true, None), "off");
+        let mut d = with(PixelFormat::RGBA8Unorm, true, None);
+        d.private.logic_operation = 10;
+        let unset = compile(&dev, &d, "off, an operation set");
+        assert!(off.graphics.logic_op.is_none() && unset.graphics.logic_op.is_none());
+        assert_eq!(off.graphics, unset.graphics, "{stem}");
+    }
+}
+
+/// The private alpha test: the fragment function runs it at its returns, reading the encoder's
+/// reference as a push field for every function but `Never`, which kills every fragment; `Always`
+/// keeps the pipeline as without the test. The keys a consumer looks the pipeline up by name the
+/// tested compile, and a function compiled without the test is compiled for the pipeline again. A
+/// pipeline without a fragment function, and a function past `Always`, are refused.
+#[test]
+fn the_alpha_test_runs_in_the_fragment_function() {
+    use crate::metal::CompareFunction;
+    use crate::pipeline::sym::{PushField, Stage};
+    let Some(lib) = fixture("rt6_render_state") else {
+        return;
+    };
+    let reads_reference = |p: &RenderPipeline| {
+        p.interface.push.iter().any(|pl| {
+            pl.stage == Stage::Fragment
+                && pl
+                    .fields
+                    .iter()
+                    .any(|f| f.field == PushField::AlphaTestReference)
+        })
+    };
+    for stem in STEMS {
+        let dev = device(stem);
+        let plain = render(&lib, 1);
+        let base = compile(&dev, &plain, stem);
+        let untested = dev
+            .render_pipeline_key(&plain, &Budget::standard())
+            .unwrap_or_else(|e| panic!("{stem}: {e}"))
+            .fragment_inputs
+            .expect("fragment inputs");
+        assert_eq!(untested.alpha_test, None, "{stem}");
+        for raw in 0..=7u64 {
+            let what = format!("{stem} function {raw}");
+            let mut d = render(&lib, 1);
+            d.private.alpha_test_enabled = true;
+            d.private.alpha_test_function = raw;
+            let p = compile(&dev, &d, &what);
+            let function = CompareFunction::try_from(raw as u32).expect("function");
+            if function == CompareFunction::Always {
+                assert_eq!(p.key, base.key, "{what}");
+                assert!(same_modules(&p, &base), "{what}");
+                continue;
+            }
+            assert_ne!(p.key, base.key, "{what}");
+            assert!(!same_modules(&p, &base), "{what}");
+            assert_eq!(
+                reads_reference(&p),
+                function != CompareFunction::Never,
+                "{what}"
+            );
+            for m in &p.stages {
+                check_words_valid(&m.spirv, &p.requirements, dev.profile())
+                    .unwrap_or_else(|e| panic!("{what} {:?}: L3: {e}", m.stage));
+            }
+            let keys = dev
+                .render_pipeline_key(&d, &Budget::standard())
+                .unwrap_or_else(|e| panic!("{what}: {e}"));
+            assert_eq!(keys.pipeline, p.key, "{what}");
+            let inputs = keys.fragment_inputs.expect("fragment inputs");
+            assert_eq!(inputs.alpha_test, Some(function), "{what}");
+            let Some(StageSource::Function(f)) = &d.fragment else {
+                unreachable!("a function fragment stage")
+            };
+            let mut compiled = d.clone();
+            compiled.fragment = Some(StageSource::Compiled(
+                dev.compile_function(f, &untested, &Budget::standard())
+                    .unwrap_or_else(|e| panic!("{what}: {e}")),
+            ));
+            match dev.compile_render_pipeline(&compiled, &Budget::standard()) {
+                Err(e) => assert_eq!(e, Error::NeedsInput(RuntimeInput::AlphaTest), "{what}"),
+                Ok(_) => panic!("{what}: compiled"),
+            }
+        }
+        let mut bare = render(&lib, 1);
+        bare.fragment = None;
+        bare.private.alpha_test_enabled = true;
+        bare.private.alpha_test_function = 1;
+        match dev.compile_render_pipeline(&bare, &Budget::standard()) {
+            Err(e) => assert_eq!(e, refused(PrivateRenderField::AlphaTest), "{stem}"),
+            Ok(_) => panic!("{stem}: compiled without a fragment function"),
+        }
+    }
+}
+
+/// `fragmentDepthCompareClampMask` over the owned fixture `engine/pdc_compare_clamp`: a fragment
+/// function clamps the reference of a comparison through `[[sampler(s)]]` where bit `s` is set and
+/// through a constexpr sampler where bit 31 is, and records the samplers it compares through and
+/// those it clamps; a mask over none of them keeps its module. A function compiled for another
+/// mask over its samplers is compiled for the pipeline again, and one comparing through an
+/// argument buffer's sampler is refused under a mask other than 0.
+#[test]
+fn the_depth_compare_clamp_mask_clamps_its_samplers_references() {
+    use crate::pipeline::stage_io::DepthCompares;
+    let Some(lib) = fixture("pdc_compare_clamp") else {
+        return;
+    };
+    let pipeline = |fragment: &str, mask: u32| {
+        let stage = |name: &str| {
+            StageSource::Function(FunctionDescriptor::new(
+                lib.function(name).expect("function"),
+            ))
+        };
+        let mut d = RenderPipelineDescriptor::new(stage("pdc_vertex"));
+        d.fragment = Some(stage(fragment));
+        d.color_attachments[0] = Some(ColorAttachmentDescriptor::new(PixelFormat::RGBA8Unorm));
+        d.private.fragment_depth_compare_clamp_mask = mask;
+        d
+    };
+    // (fragment, its comparisons' samplers, (mask, clamped)).
+    let slot = 1u32 << 2;
+    let cases: [(&str, u32, [(u32, u32); 4]); 2] = [
+        (
+            "pdc_slot",
+            slot,
+            [(0, 0), (slot, slot), (!slot, 0), (u32::MAX, slot)],
+        ),
+        (
+            "pdc_constexpr",
+            DepthCompares::CONSTEXPR,
+            [
+                (0, 0),
+                (DepthCompares::CONSTEXPR, DepthCompares::CONSTEXPR),
+                (0x7fff_ffff, 0),
+                (u32::MAX, DepthCompares::CONSTEXPR),
+            ],
+        ),
+    ];
+    // Under exact sampling lavapipe's shader makes the constexpr comparison and the slot's gather
+    // itself (`compared::select`), which clamp alike.
+    let devices = STEMS.map(|stem| (stem, device(stem))).into_iter().chain([(
+        "lavapipe exact sampling",
+        device_with("lavapipe", crate::pipeline::testing::EXACT_SAMPLING),
+    )]);
+    for (stem, dev) in devices {
+        for (fragment, samplers, masks) in cases {
+            let base = compile(&dev, &pipeline(fragment, 0), stem);
+            for (mask, clamped) in masks {
+                let what = format!("{stem} {fragment} mask {mask:#x}");
+                let d = pipeline(fragment, mask);
+                let p = compile(&dev, &d, &what);
+                assert_eq!(same_modules(&p, &base), clamped == 0, "{what}");
+                for m in &p.stages {
+                    check_words_valid(&m.spirv, &p.requirements, dev.profile())
+                        .unwrap_or_else(|e| panic!("{what} {:?}: L3: {e}", m.stage));
+                }
+                let inputs = dev
+                    .render_pipeline_key(&d, &Budget::standard())
+                    .unwrap_or_else(|e| panic!("{what}: {e}"))
+                    .fragment_inputs
+                    .expect("fragment inputs");
+                assert_eq!(inputs.depth_compare_clamp_mask, mask, "{what}");
+                let Some(StageSource::Function(f)) = &d.fragment else {
+                    unreachable!("a function fragment stage")
+                };
+                let own = dev
+                    .compile_function(f, &inputs, &Budget::standard())
+                    .unwrap_or_else(|e| panic!("{what}: {e}"));
+                let compares = own.artifact().interface.io.depth_compares;
+                assert_eq!(compares.samplers, samplers, "{what}");
+                assert_eq!(compares.clamped, clamped, "{what}");
+                // The function compiled without the mask clamps nothing.
+                let unclamped = dev
+                    .compile_function(
+                        f,
+                        &crate::pipeline::LoweringInputs {
+                            depth_compare_clamp_mask: 0,
+                            ..inputs
+                        },
+                        &Budget::standard(),
+                    )
+                    .unwrap_or_else(|e| panic!("{what}: {e}"));
+                let mut compiled = d.clone();
+                compiled.fragment = Some(StageSource::Compiled(unclamped));
+                match (
+                    dev.compile_render_pipeline(&compiled, &Budget::standard()),
+                    clamped,
+                ) {
+                    (Ok(_), 0) => {}
+                    (Err(e), 0) => panic!("{what}: {e}"),
+                    (Err(e), _) => assert_eq!(
+                        e,
+                        Error::NeedsInput(RuntimeInput::DepthCompareClamp),
+                        "{what}"
+                    ),
+                    (Ok(_), _) => panic!("{what}: compiled without the clamp"),
+                }
+            }
+        }
+        // An argument buffer's sampler: no mask bit names it.
+        compile(&dev, &pipeline("pdc_argument", 0), stem);
+        for mask in [1, slot, DepthCompares::CONSTEXPR] {
+            match dev.compile_render_pipeline(&pipeline("pdc_argument", mask), &Budget::standard())
+            {
+                // Refused at the comparison, which the refusal locates.
+                Err(Error::Unsupported(u)) => assert_eq!(
+                    u.feature,
+                    Feature::PrivateRenderState(PrivateRenderField::FragmentDepthCompareClamp),
+                    "{stem} {mask:#x}"
+                ),
+                Err(e) => panic!("{stem} {mask:#x}: {e}"),
+                Ok(_) => panic!("{stem} {mask:#x}: compiled"),
             }
         }
     }

@@ -528,6 +528,23 @@ pub struct LoweringInputs {
     /// then has no Vulkan sample mask. Any other function compiles as without it.
     #[cfg_attr(feature = "serde", serde(default))]
     pub sample_mask: Option<u32>,
+    /// The render pipeline's private alpha test (`alphaTestEnabled`, `alphaTestFunction`), which
+    /// the fragment function runs itself after its body: each return kills the invocation unless
+    /// its color 0's alpha passes the comparison against the encoder's reference
+    /// (`PushField::AlphaTestReference`), both as Metal compares them, 8-bit unorm codes
+    /// (`StageIo::alpha_test`). `Device::compile_render_pipeline` sets it for a `Function`
+    /// fragment stage of a pipeline with the test on, for every function but `Always`, which
+    /// tests nothing. Any other function compiles as without it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub alpha_test: Option<crate::metal::CompareFunction>,
+    /// The render pipeline's private `fragmentDepthCompareClampMask`: a fragment function's depth
+    /// comparison through `[[sampler(s)]]` where bit `s` is set, or through a constexpr sampler
+    /// where bit 31 is, clamps its reference to `[0, 1]`, a NaN taken as 0, before comparing, as
+    /// Metal's does (`StageIo::depth_compares`); one through an argument buffer's sampler is
+    /// refused under a mask other than 0. `Device::compile_render_pipeline` sets it for a
+    /// `Function` fragment stage. Any other function compiles as with 0.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub depth_compare_clamp_mask: u32,
     /// The depth and stencil tests of the draws that run the fragment function write neither
     /// attachment and count no visibility result (`VariantKey::read_only_tests`): a function that
     /// stores a color through the interlocked storage form and declares no early tests only

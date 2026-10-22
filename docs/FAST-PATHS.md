@@ -542,3 +542,8 @@ driver's. Each is open work.
   write resolved. No note announces it. The exact form needs the GPU's write to carry its
   resolution: a word of the record the translated setter fills from a per-dispatch stamp of the
   device's IDs, which the host step, the getter and the GPU-alone preprocess resolve.
+- **A private logic operation other than copy and no-op without Vulkan's form.** On a device
+  without `logicOp` (MoltenVK), and on any device where an attachment is sRGB, a float attachment
+  blends, a format's operation was not measured or the function writes an attachment itself, the
+  pipeline is refused (`PrivateRenderField::LogicOperation`), where the function could apply
+  Metal's operation to the codes it reads and writes in the pixel interlock.

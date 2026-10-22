@@ -2,14 +2,14 @@
 
 use crate::{AppleOnly, AppleOnlyCall, DEFAULT_PROTECTION_OPTIONS};
 
-/// The 12 Apple-only calls of the table, each at Metal's default where it has one and at a value
+/// The 12 Apple-only calls of the table, each at Metal's default where it has one and at values
 /// off it, with the runtime's answer. The getter (`protectionOptions`) is
 /// `no_getter_answers_off_metals_default`'s. A texture's rotation is no longer the table's: the
 /// runtime builds it.
 #[test]
 fn every_apple_only_call_answers_typed() {
     use AppleOnlyCall as C;
-    let table: [(&str, AppleOnlyCall, Result<(), AppleOnly>); 25] = [
+    let table: [(&str, AppleOnlyCall, Result<(), AppleOnly>); 26] = [
         // Compressed-texture controls: no compression is visible on Vulkan.
         (
             "invalidateCompressedTexture:",
@@ -97,6 +97,8 @@ fn every_apple_only_call_answers_typed() {
             C::SetViewportTransformEnabled(false),
             Err(AppleOnly::ViewportTransformDisabled),
         ),
+        // The amplification mode's count: the value's set bits in mode 1, the value otherwise;
+        // 1 to 8 taken, 0 (copies that change from run to run) and past 8 refused.
         (
             "setVertexAmplificationMode:value:",
             C::SetVertexAmplificationMode { mode: 0, value: 0 },
@@ -105,18 +107,48 @@ fn every_apple_only_call_answers_typed() {
         (
             "setVertexAmplificationMode:value:",
             C::SetVertexAmplificationMode { mode: 1, value: 2 },
+            Ok(()),
+        ),
+        (
+            "setVertexAmplificationMode:value:",
+            C::SetVertexAmplificationMode {
+                mode: 1,
+                value: 255,
+            },
+            Ok(()),
+        ),
+        (
+            "setVertexAmplificationMode:value:",
+            C::SetVertexAmplificationMode {
+                mode: 1,
+                value: 257,
+            },
+            Ok(()),
+        ),
+        (
+            "setVertexAmplificationMode:value:",
+            C::SetVertexAmplificationMode { mode: 0, value: 8 },
+            Ok(()),
+        ),
+        (
+            "setVertexAmplificationMode:value:",
+            C::SetVertexAmplificationMode {
+                mode: 255,
+                value: 9,
+            },
             Err(AppleOnly::VertexAmplificationMode),
         ),
         (
-            "setDepthCleared",
-            C::SetDepthCleared,
-            Err(AppleOnly::DepthCleared),
+            "setVertexAmplificationMode:value:",
+            C::SetVertexAmplificationMode {
+                mode: 1,
+                value: u64::MAX,
+            },
+            Err(AppleOnly::VertexAmplificationMode),
         ),
-        (
-            "setStencilCleared",
-            C::SetStencilCleared,
-            Err(AppleOnly::StencilCleared),
-        ),
+        // Depth and stencil "cleared" change nothing Metal draws.
+        ("setDepthCleared", C::SetDepthCleared, Ok(())),
+        ("setStencilCleared", C::SetStencilCleared, Ok(())),
         (
             "setAlphaTestReferenceValue:",
             C::SetAlphaTestReferenceValue(f32::NAN),
@@ -131,7 +163,7 @@ fn every_apple_only_call_answers_typed() {
             selectors.push(selector);
         }
     }
-    // The 12 calls of the table's 21 rows (some calls have several rows).
+    // The 12 calls of the table's 26 rows (some calls have several rows).
     assert_eq!(selectors.len(), 12, "{selectors:?}");
 }
 
@@ -156,8 +188,6 @@ fn each_apple_only_refusal_names_its_gap() {
         (AppleOnly::LineWidth, Unmeasured),
         (AppleOnly::ViewportTransformDisabled, Unmeasured),
         (AppleOnly::VertexAmplificationMode, Unmeasured),
-        (AppleOnly::DepthCleared, Unmeasured),
-        (AppleOnly::StencilCleared, Unmeasured),
         (AppleOnly::SurfaceClientDirection, Unmeasured),
     ];
     for (feature, gap) in table {
