@@ -2886,6 +2886,9 @@ each item named states the rule in full.
 
 - **A heap's size and alignment answers are the device's own**
   (`Device::heap_texture_size_and_align`): the requirement of the image the runtime makes.
+- **A heap's texture answers the size that placed it** (`Texture::allocated_size`, Metal's
+  `allocatedSize`): the size query's answer for its descriptor, a view's its texture's, as Metal
+  answers; `None` for a texture outside a heap, whose Metal answer the runtime does not model.
 - **Metal's own heap answer, for bookkeeping** (`Device::metal_heap_texture_size_and_align`, no Metal
   counterpart): what plain Metal answers, for a consumer that lays out a guest's heap.
 - **Where Metal's answer is not its image's, every device answers Metal's**, for the few formats

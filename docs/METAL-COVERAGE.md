@@ -869,7 +869,7 @@ Cheap items a plain app calls first, then medium pieces by how often a plain app
 | Item | Kind | Status | Counterpart or note |
 |---|---|---|---|
 | `MTLAllocation` | protocol | implemented | `Buffer` (runtime) |
-| `MTLAllocation.allocatedSize` | property | missing | S: a buffer's, texture's or heap's allocated bytes (`IndirectCommandBuffer` and `VisibleFunctionTable` answer it) |
+| `MTLAllocation.allocatedSize` | property | missing | S: a buffer's, texture's or heap's allocated bytes (`IndirectCommandBuffer` and `VisibleFunctionTable` answer it, and `Texture::allocated_size` a heap's texture's) |
 
 ### MTLArgument.h
 

@@ -87,6 +87,8 @@ mod gpu_pools;
 mod gpu_time;
 mod heap;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod heap_allocated_size;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod heap_refused_notice;
 mod heap_sets;
 mod heap_tiled;

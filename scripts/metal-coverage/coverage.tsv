@@ -630,7 +630,7 @@ MTLAccelerationStructureCommandEncoder.h	MTLAccelerationStructurePassDescriptor	
 MTLAccelerationStructureTypes.h		function	MTLPackedFloat3Make		O			ray tracing		
 MTLAccelerationStructureTypes.h		function	MTLPackedFloatQuaternionMake		O			ray tracing		
 MTLAllocation.h	MTLAllocation	protocol	MTLAllocation		I	runtime	Buffer			
-MTLAllocation.h	MTLAllocation	property	allocatedSize		M			a buffer's, texture's or heap's allocated bytes (`IndirectCommandBuffer` and `VisibleFunctionTable` answer it)	S	queries
+MTLAllocation.h	MTLAllocation	property	allocatedSize		M			a buffer's, texture's or heap's allocated bytes (`IndirectCommandBuffer` and `VisibleFunctionTable` answer it, and `Texture::allocated_size` a heap's texture's)	S	queries
 MTLArgument.h	MTLType	class	MTLType		I	translator	Type			
 MTLArgument.h	MTLType	property	dataType		I	translator	StructMember::data_type	each reflection type's `data_type`		
 MTLArgument.h	MTLStructMember	class	MTLStructMember		I	translator	StructMember			
