@@ -94,6 +94,7 @@ struct HeapBlocks {
     bc: Option<BlockPlacement>,
     etc: Option<BlockPlacement>,
     astc: Option<BlockPlacement>,
+    pvrtc: Option<BlockPlacement>,
     /// How its GPU counts a level's tiles a row, every family alike.
     gpu_rows: GpuRows,
 }
@@ -112,6 +113,7 @@ const MACOS_26_7: Row = Row {
         bc: Some(BlockPlacement::Halved),
         etc: Some(BlockPlacement::Halved),
         astc: Some(BlockPlacement::Halved),
+        pvrtc: None,
         gpu_rows: GpuRows::Own,
     },
     // The package share-cblit on the consumer's M3 Max (25G229): every line of the predicate,
@@ -136,11 +138,14 @@ const MACOS_27_0_1: Row = Row {
     unknown: &[],
     // Every BC, ETC2, EAC and ASTC format, every element of every level of 815 textures on an
     // Apple M4; the M3 Max answers the 809 of `tests/heap_tiled_blocks.rs` alike, each one's size,
-    // alignment, CPU span and GPU span.
+    // alignment, CPU span and GPU span. PVRTC on the M3 Max: 320 answers and every block of six
+    // textures' levels (a PVRTC texture is square, its side a power of two, which both placements
+    // place alike).
     heap_blocks: HeapBlocks {
         bc: Some(BlockPlacement::Narrow),
         etc: Some(BlockPlacement::Narrow),
         astc: Some(BlockPlacement::Halved),
+        pvrtc: Some(BlockPlacement::Halved),
         gpu_rows: GpuRows::AsCpu,
     },
     // Each rule matched every texel of its formats' blits through a texture Metal compresses
@@ -209,6 +214,7 @@ impl MetalLevel {
             BlockFamily::Bc => blocks.bc,
             BlockFamily::Etc => blocks.etc,
             BlockFamily::Astc => blocks.astc,
+            BlockFamily::Pvrtc => blocks.pvrtc,
         }
     }
 

@@ -1958,14 +1958,14 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   host pages whose placement the device's Metal level does not measure: Metal places a format
   family's blocks in each level by a rule that differs by family and by release, measured for BC,
   ETC2, EAC and ASTC under macOS 27.0.1 (an Apple M3 Max and an Apple M4 alike) and 26.7 (an
-  Apple M3 Max), where those lie as Metal lays them out, and not for PVRTC at any level, whose
-  blocks lie in the runtime's layout. Cost: the texture's
+  Apple M3 Max), and for PVRTC under 27.0.1 (an Apple M3 Max), where those lie as Metal lays them
+  out, and not for PVRTC under 26.7, whose blocks lie in the runtime's layout. Cost: the texture's
   reads, writes and copies are Metal's, but its blocks lie in the heap's bytes in the runtime's
   layout, where Metal tiles them: a buffer or texture over them meets the blocks at other bytes than
   on Metal.
 - `metal2vulkan-degrade-heap-texture-untiled-layout` (precision). `HeapTextureUntiledLayout`: A
   texture made in a heap over host pages that Metal lays out tiled where the runtime does not: a
-  layout not measured (a two-aspect depth and stencil format, a PVRTC format), an image that holds
+  layout not measured (a two-aspect depth and stencil format), an image that holds
   other bytes than Metal's elements, or moves past the device's limits. Cost: the texture's reads,
   writes and copies are Metal's, but its texels lie in the heap's bytes in the runtime's layout,
   where Metal tiles them: a buffer or texture over them meets the texels at other bytes than on

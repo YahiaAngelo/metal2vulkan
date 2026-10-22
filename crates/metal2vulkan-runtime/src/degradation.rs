@@ -1449,12 +1449,12 @@ degradations! {
              bytes than Metal's would";
         /// A texture of a block-compressed format made in a heap over host pages whose
         /// placement the device's Metal level does not measure: Metal places a format family's
-        /// blocks in each level by a rule that differs by family and by machine
-        /// (`texture/heap_tiled.rs`), measured for BC, ETC2, EAC and ASTC on an Apple M4 under
-        /// macOS 27.0.1 and an Apple M3 Max under 26.7 (whether the GPU or the release makes
-        /// their difference is not known), where those lie as Metal lays them out, and not for
-        /// PVRTC at any level, whose blocks lie in the runtime's layout. Its size and alignment
-        /// answers are its device's. Announced once per device, in the call that made the first such
+        /// blocks in each level by a rule that differs by family and by release
+        /// (`texture/heap_tiled.rs`), measured for BC, ETC2, EAC and ASTC under macOS 27.0.1 (an
+        /// Apple M3 Max and an Apple M4 alike) and 26.7 (an Apple M3 Max), and for PVRTC under
+        /// 27.0.1 (an Apple M3 Max), where those lie as Metal lays them out, and not for PVRTC
+        /// under 26.7, whose blocks lie in the runtime's layout. Its size and alignment answers
+        /// are its device's. Announced once per device, in the call that made the first such
         /// texture, with its ID ([`DegradeNotice::object_id`]), or for each texture where
         /// `DeviceOptions::announce_each` asks; each texture counted
         /// ([`Device::degraded_objects`](crate::Device::degraded_objects)).
@@ -1464,7 +1464,7 @@ degradations! {
              over them meets the blocks at other bytes than on Metal";
         /// A texture made in a heap over host pages that Metal lays out tiled where the runtime
         /// does not (`texture/heap_tiled.rs`): a layout not measured (a two-aspect depth and
-        /// stencil format, a PVRTC format), an image that holds other
+        /// stencil format), an image that holds other
         /// bytes than Metal's elements, or moves past the device's limits. The notice's reason
         /// names which (the first texture's). Announced once per device, in the call that made
         /// the first such texture, with its ID ([`DegradeNotice::object_id`]), or for each

@@ -1175,8 +1175,8 @@ impl Device {
     /// stencil one `Invalid`, as every creator does. Metal's private usage 0x8 alone is one it
     /// compresses, where its texture is of `Unknown` usage: the descriptor keeps it
     /// ([`TextureUsage::DROPPED`]), so the answer is Metal's. A descriptor whose layout in Metal's
-    /// heaps the runtime does not model (a format or sample count not measured: a PVRTC format, 8
-    /// samples) answers its device's image's size, announced `unmeasured-heap-texture-size` (a
+    /// heaps the runtime does not model (a format or sample count not measured: a PVRTC format at
+    /// a Metal level of macOS 26.7, 8 samples) answers its device's image's size, announced `unmeasured-heap-texture-size` (a
     /// mipmapped texture Metal compresses and a `Depth32Float_Stencil8` one answer Metal's).
     pub fn heap_texture_size_and_align(
         &self,
@@ -1204,7 +1204,8 @@ impl Device {
     /// Metal's own answer to `heapTextureSizeAndAlignWithDescriptor:` for `descriptor`, as the
     /// runtime models it (`texture/heap_tiled.rs`), whatever this device's images need: the same
     /// on every device at the same Metal level (`DeviceProperties::metal_level`). `None` where the
-    /// model has no answer (a PVRTC format, 8 samples, any other layout not measured), where
+    /// model has no answer (a PVRTC format at macOS 26.7's level, 8 samples, any other layout not
+    /// measured), where
     /// [`Device::heap_texture_size_and_align`] announces `unmeasured-heap-texture-size`. No Metal
     /// counterpart: Metal answers its own GPU's.
     ///

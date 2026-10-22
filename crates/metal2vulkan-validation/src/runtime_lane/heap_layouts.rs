@@ -22,7 +22,8 @@
 //!   writes of the CPU's bytes.
 //! - **Layouts the runtime does not follow** ([`HEAP_LAYOUTS`]). A texture Metal keeps
 //!   losslessly compressed (`heap-texture-lossless-layout`), one of a block-compressed format
-//!   whose placement no level measures (PVRTC, `heap-texture-block-compressed-layout`) and one
+//!   whose placement its device's Metal level does not measure (PVRTC at macOS 26.7's,
+//!   `heap-texture-block-compressed-layout`) and one
 //!   of a format whose layout is not measured
 //!   (`heap-texture-untiled-layout`, a two-aspect depth and stencil format) are each counted
 //!   (`Device::degraded_objects`, and its kind's `WorkCounts` field) and usable: the notice is
@@ -622,13 +623,15 @@ fn a_command_writing_a_tiled_texture_two_ways_keeps_both_writes() {
 }
 
 /// A texture Metal keeps losslessly compressed, one of a block-compressed format whose placement
-/// no level measures (PVRTC) and one of a two-aspect depth and stencil format, each in a heap
-/// over host pages, are counted in their kind's field and `Device::degraded_objects`, and the
-/// first of each kind is announced in the call that made it, with its ID; each is usable after.
-/// Two compressed textures, one notice, a count of two.
+/// its device's Metal level does not measure (PVRTC at macOS 26.7's, `DeviceOptions::metal_level`)
+/// and one of a two-aspect depth and stencil format, each in a heap over host pages, are counted in
+/// their kind's field and `Device::degraded_objects`, and the first of each kind is announced in
+/// the call that made it, with its ID; each is usable after. Two compressed textures, one notice, a
+/// count of two.
 #[test]
 fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced_once() {
-    on_device(|device, messages| {
+    let at_26_7 = |options: &mut DeviceOptions| options.metal_level = Some(MetalLevel::MacOS26_7);
+    on_device_with(at_26_7, |device, messages| {
         let mapping = Mapping::anonymous(HEAP);
         let Some(heap) = heap_over(device, &mapping) else {
             return;

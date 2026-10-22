@@ -51,8 +51,12 @@
 //!   `tests/heap_tiled_blocks.rs` as the M4 does, its CPU's spans and its GPU's. The device's Metal
 //!   level names each family's placement and its GPU's count (`MetalLevel::heap_blocks`,
 //!   `MetalLevel::heap_block_gpu_rows`): the CPU copies place blocks by `TiledLevel::across`, the
-//!   kernel's moves by `TiledLevel::gpu_across`, as Metal's own two paths do. A PVRTC texture stays
-//!   untiled (`heap-texture-block-compressed-layout`), its answer its device's.
+//!   kernel's moves by `TiledLevel::gpu_across`, as Metal's own two paths do. PVRTC's blocks lie
+//!   so too, `Halved`, under 27.0.1 (an Apple M3 Max: 320 answers, every PVRTC format square from
+//!   4 to 2048 texels, one level and full chains, one slice and three; every block of each level of
+//!   six textures, written by a row-linear blit; `tests/heap_tiled_blocks.rs`); under 26.7 they
+//!   are not measured, so a PVRTC texture there stays untiled
+//!   (`heap-texture-block-compressed-layout`), its answer its device's.
 //! - **Lossless compression** (14174 answers of every plain format, type, shape, usage and storage
 //!   mode). Metal keeps a texture losslessly compressed where `allowGPUOptimizedContents` holds and
 //!   the shorter side of its level 0 is 16 texels or more (16 x 16 compressed; 16 x 8, 6 x 43 and
@@ -105,8 +109,9 @@
 //!   heap one whose image the heap's memory or Metal's answer cannot hold lies in memory of its own
 //!   too.
 //! - **Not measured**: a two-aspect depth and stencil format's layout (`Depth32Float_Stencil8`'s
-//!   answer is, above) and a PVRTC format's; the runtime holds them untiled
-//!   (`heap-texture-untiled-layout`), a PVRTC texture at its device's answer.
+//!   answer is, above) and a PVRTC format's under macOS 26.7; the runtime holds them untiled
+//!   (`heap-texture-untiled-layout`, `heap-texture-block-compressed-layout`), a PVRTC texture
+//!   there at its device's answer.
 //!
 //! **Held** as the texture's image in memory of its own, a shadow of the heap's bytes
 //! (`shadow.rs`, `ShadowTarget::Tiled`): into the image, the texture's bytes copied into a
@@ -287,10 +292,12 @@ pub(crate) enum BlockFamily {
     Etc,
     /// ASTC of every block size, LDR, sRGB and HDR.
     Astc,
+    /// PVRTC of 2 and 4 bits a pixel, RGB and RGBA, linear and sRGB.
+    Pvrtc,
 }
 
 impl BlockFamily {
-    /// The family of `pf`; `None` for a format of none (PVRTC's and every plain format).
+    /// The family of `pf`; `None` for a format of none (every plain format).
     pub(crate) fn of(pf: PixelFormat) -> Option<BlockFamily> {
         use PixelFormat as P;
         Some(match block_family(pf) {
@@ -318,6 +325,9 @@ impl BlockFamily {
             | P::ASTC10x10LDR
             | P::ASTC12x10LDR
             | P::ASTC12x12LDR => BlockFamily::Astc,
+            P::PVRTCRGB2BPP | P::PVRTCRGB4BPP | P::PVRTCRGBA2BPP | P::PVRTCRGBA4BPP => {
+                BlockFamily::Pvrtc
+            }
             _ => return None,
         })
     }
@@ -1018,9 +1028,9 @@ pub(crate) fn metal_heap_layout(
         answer,
         layout: HeapLayout::Untiled(why),
     };
-    // Block-compressed formats: Metal's allocations are its blocks' (every BC, ETC2, EAC and ASTC
-    // format), alike under both placements, so a placement the level does not measure answers
-    // `Halved`'s; PVRTC's are not measured.
+    // Block-compressed formats: Metal's allocations are its blocks' (every BC, ETC2, EAC, ASTC
+    // and PVRTC format), alike under both placements, so a placement the level does not measure
+    // answers `Halved`'s; PVRTC's are measured only where its placement is.
     if let Some([bw, bh]) = block_extent(pf) {
         let block = [u64::from(bw), u64::from(bh)];
         let family = BlockFamily::of(pf);
@@ -1031,7 +1041,8 @@ pub(crate) fn metal_heap_layout(
             gpu_rows: level.heap_block_gpu_rows(),
         };
         let unit = block_bytes(pf).map(u64::from);
-        let tiled = unit.filter(|_| family.is_some()).and_then(|unit| {
+        let measured = placement.is_some() || family.is_some_and(|f| f != BlockFamily::Pvrtc);
+        let tiled = unit.filter(|_| measured).and_then(|unit| {
             let ty = layout.texture_type;
             let extent = [width, height, depth];
             TiledLayout::of(unit, elements, ty, extent, layout.levels, slices)

@@ -732,9 +732,9 @@ fn texture(
 }
 
 /// How the runtime lays a heap texture out over host pages, by its format, usage and shape: a
-/// plain or block-compressed format whose image holds Metal's bytes tiled; a compressed, PVRTC,
-/// multisample or two-aspect texture, or one whose image holds other bytes, untiled, each with
-/// its kind, and the answers Metal's where measured.
+/// plain or block-compressed format whose image holds Metal's bytes tiled (PVRTC under 27.0.1); a
+/// compressed, multisample or two-aspect texture, a PVRTC one under 26.7, or one whose image holds
+/// other bytes, untiled, each with its kind, and the answers Metal's where measured.
 #[test]
 fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
     use crate::degradation::Degradation as D;
@@ -780,15 +780,20 @@ fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
         [64, 64, 1],
         (7, 1, 1),
     );
-    for level in [M3, M4] {
-        let format = Format::PVRTC1_4BPP_UNORM_BLOCK_IMG;
-        let pvrtc = metal_heap_layout(&pvrtc, read, true, format, level);
-        assert_eq!(pvrtc.answer, None, "{level}");
-        let HeapLayout::Untiled(untiled) = pvrtc.layout else {
-            panic!("{level}: a PVRTC texture is tiled");
-        };
-        assert_eq!(untiled.kind, D::HeapTextureBlockCompressedLayout, "{level}");
-    }
+    // PVRTC: Metal's answer and its tiles under 27.0.1, untiled and unanswered under 26.7.
+    let format = Format::PVRTC1_4BPP_UNORM_BLOCK_IMG;
+    let m3_pvrtc = metal_heap_layout(&pvrtc, read, true, format, M3);
+    assert_eq!(m3_pvrtc.answer, None);
+    let HeapLayout::Untiled(untiled) = m3_pvrtc.layout else {
+        panic!("a PVRTC texture is tiled at 26.7's level");
+    };
+    assert_eq!(untiled.kind, D::HeapTextureBlockCompressedLayout);
+    let m4_pvrtc = metal_heap_layout(&pvrtc, read, true, format, M4);
+    assert_eq!(
+        m4_pvrtc.answer.map(|a| (a.size, a.align)),
+        Some((3200, 128))
+    );
+    assert!(matches!(m4_pvrtc.layout, HeapLayout::Tiled(_)));
     let decoded = metal_heap_layout(&bc1, read, true, Format::R8G8B8A8_UNORM, M4);
     assert_eq!(decoded.answer, blocks.answer);
     let HeapLayout::Untiled(untiled) = decoded.layout else {
