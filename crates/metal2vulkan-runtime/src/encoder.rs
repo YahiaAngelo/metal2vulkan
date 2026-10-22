@@ -1839,6 +1839,14 @@ impl EncoderCore {
             .get_or_insert(CommandBufferError::GpuHang);
     }
 
+    /// Metal's GPU discards the command buffer at this encoder (an object grid past what it runs
+    /// within its watchdog), as it commits: it fails from the encoder on with
+    /// `CommandBufferError::GpuRecoveryVictim`, unless the encoder fails it otherwise first.
+    pub(super) fn discard(&mut self) {
+        self.fails_command_buffer
+            .get_or_insert(CommandBufferError::GpuRecoveryVictim);
+    }
+
     /// Metal's GPU faults this encoder, as the command buffer commits: the encoder runs nothing,
     /// and the command buffer completes with `error` (`CommandBufferError::PageFault`, or
     /// `GpuRecoveryVictim`), the first faulted encoder's (`State::fault`).

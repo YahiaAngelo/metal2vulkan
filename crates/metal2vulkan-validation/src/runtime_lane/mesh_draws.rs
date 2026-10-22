@@ -27,8 +27,9 @@
 //! nothing ([`OBJECT_PAST_CASES`]). Object grids of any count run as Metal runs them (the owned
 //! fixture `mesh_object_grid` and Metal probe 5, [`object_grids_run_as_metal_runs_them`]): in
 //! pieces within the task stage's limits, threads per grid wrapped to 32 bits as Metal's, and
-//! one of 2^29 threadgroups, which Metal's GPU fails, failing the command buffer typed
-//! (`CommandBufferError::MeshGridPastLimits`).
+//! one of more than 2^29 threadgroups, which Metal's GPU discards (probe 6), failing the command
+//! buffer with Metal's error (`CommandBufferError::GpuRecoveryVictim`), a direct draw's from its
+//! encoder on.
 //! A `drawMeshThreads` that leaves a partial object threadgroup is refused
 //! (`NotImplemented(MeshShading)`); Metal's answers for it are printed (a partial object
 //! threadgroup runs the threads left). What Metal's validation
@@ -741,16 +742,19 @@ const OBJECT_GRID_CASES: [GridCase; 17] = {
     ]
 };
 
-/// Object grids of 2^29 threadgroups, direct and indirect, which the M3 Max fails after its GPU's
-/// watchdog (`MTLCommandBufferErrorInternal`, none of the command buffer's writes landing):
-/// drawn nothing, failing the command buffer with Metal's code
-/// (`CommandBufferError::MeshGridPastLimits`).
-const PAST_GRID: [u32; 3] = [1 << 29, 1, 1];
+/// An object grid of more threadgroups than Metal's GPU runs within its watchdog
+/// (`bind::METAL_OBJECT_GRID_TOTAL`), direct and indirect, which the M3 Max discards
+/// (`MTLCommandBufferErrorInternal`, nothing running from the draw's encoder on; probe 6 measured
+/// 2^29 of this fixture's function and 2^30 of one that does next to nothing so): drawn nothing,
+/// failing the command buffer with Metal's error (`CommandBufferError::GpuRecoveryVictim`), a
+/// direct draw's from its encoder on, so a blit encoder after it runs nothing.
+const PAST_GRID: [u32; 3] = [(1 << 29) + 1, 1, 1];
 
 /// Each of [`OBJECT_GRID_CASES`] leaves Metal's words on a device with `VK_EXT_mesh_shader`, its
 /// grid folded into the task stage's limits where it passes them, and each draw of [`PAST_GRID`]
-/// draws nothing and fails its command buffer typed; the emulation refuses what passes its compute
-/// limits, and its indirect draws (`Unsupported{MeshShading}`), printed.
+/// draws nothing and fails its command buffer as Metal's GPU discards it, a direct one from its
+/// encoder on; the emulation refuses what passes its compute limits, and its indirect draws
+/// (`Unsupported{MeshShading}`), printed.
 #[test]
 fn object_grids_run_as_metal_runs_them() {
     let cache = ScratchCache::new().unwrap();
@@ -804,6 +808,12 @@ fn object_grids_run_as_metal_runs_them() {
                 false => encoder.draw_mesh_threadgroups_indirect(&arguments, 0, size(threads), one),
             };
             encoder.end_encoding().unwrap();
+            // An encoder after the draw's, which runs unless the command buffer fails from the
+            // draw's encoder on.
+            let tail = buffer_with(&device, &[0u8; 4]).unwrap();
+            let mut blit = command_buffer.blit_command_encoder().unwrap();
+            blit.fill_buffer(&tail, 0..4, 0x22).unwrap();
+            blit.end_encoding().unwrap();
             let started = std::time::Instant::now();
             command_buffer.commit().unwrap();
             command_buffer.wait_until_completed_for(WAIT).unwrap();
@@ -818,12 +828,13 @@ fn object_grids_run_as_metal_runs_them() {
                 "{groups:?} of {threads:?}, {} on {name}",
                 if direct { "direct" } else { "indirect" }
             );
+            let tail = read_buffer(&tail, 0, 4).unwrap() == [0x22; 4];
             eprintln!(
                 "TIMING {what}: {} ms, {:?}",
                 started.elapsed().as_millis(),
                 command_buffer.error()
             );
-            (drawn, command_buffer.error(), words, what)
+            (drawn, command_buffer.error(), words, what, tail)
         };
         // The emulation's refusals: an indirect draw with an object function, and a grid past its
         // compute limits.
@@ -838,7 +849,7 @@ fn object_grids_run_as_metal_runs_them() {
             if cfg!(m2v_cpu_icd) && c.words[0] > 1 << 20 {
                 continue;
             }
-            let (drawn, error, words, what) = run(c.groups, c.threads, c.direct);
+            let (drawn, error, words, what, tail) = run(c.groups, c.threads, c.direct);
             if refused(&drawn) {
                 eprintln!("{what}: refused, emulated: {drawn:?}");
                 continue;
@@ -848,9 +859,10 @@ fn object_grids_run_as_metal_runs_them() {
             }
             assert_eq!(error, None, "{what}");
             assert_eq!(words, c.words, "{what}");
+            assert!(tail, "{what}: the encoder after the draw's");
         }
         for direct in [true, false] {
-            let (drawn, error, words, what) = run(PAST_GRID, [1; 3], direct);
+            let (drawn, error, words, what, tail) = run(PAST_GRID, [1; 3], direct);
             if refused(&drawn) {
                 eprintln!("{what}: refused, emulated: {drawn:?}");
                 continue;
@@ -858,12 +870,11 @@ fn object_grids_run_as_metal_runs_them() {
             if let Err(e) = drawn {
                 panic!("{what}: {e}");
             }
-            assert_eq!(
-                error,
-                Some(CommandBufferError::MeshGridPastLimits),
-                "{what}"
-            );
+            assert_eq!(error, Some(CommandBufferError::GpuRecoveryVictim), "{what}");
             assert_eq!(words, RAN_NONE, "{what}");
+            // Metal runs nothing from the draw's encoder on; an indirect draw's count is the GPU's,
+            // and the runtime runs the encoders after it (docs/API.md, "Accepted differences").
+            assert_eq!(tail, !direct, "{what}: the encoder after the draw's");
         }
     }
     let reported = messages.take();

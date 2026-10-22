@@ -21,10 +21,15 @@
 //!   last barrier, which Metal does not order before the draw, is read as it was before the pass.
 //! - **A folded object function's direct draw** uploads its fold ([`FoldUpload`]): the record its
 //!   object stage reads, and its pieces' commands where it has more than one.
-//! - **An object grid past what runs**: one of 2^29 threadgroups or more (whose draw Metal's GPU
-//!   fails after its watchdog's 5 seconds, `MTLCommandBufferErrorInternal`), and, on a device that
-//!   does not fold object grids, an indirect one past the device's task limits. It draws nothing
-//!   and fails the command buffer (`CommandBufferError::MeshGridPastLimits`, Metal's code):
+//! - **An object grid Metal's GPU discards**: one of more than 2^29 threadgroups
+//!   (`bind::METAL_OBJECT_GRID_TOTAL`, past what Metal runs within its watchdog's 5 seconds). It
+//!   draws nothing and fails the command buffer with Metal's error
+//!   (`CommandBufferError::GpuRecoveryVictim`): a direct draw from its encoder on, as Metal's
+//!   (`render.rs`); an indirect one as the pass reports it (`MESH_GRID_DISCARDED`), the rest of
+//!   its encoder and the encoders after it running.
+//! - **A grid the device cannot launch**: on a device that does not fold object grids, an
+//!   indirect object grid past the device's task limits, which Metal draws. It draws nothing and
+//!   fails the command buffer (`CommandBufferError::MeshGridPastLimits`, the runtime's failure):
 //!   nothing is drawn short silently.
 
 use crate::device::functions::Vk;

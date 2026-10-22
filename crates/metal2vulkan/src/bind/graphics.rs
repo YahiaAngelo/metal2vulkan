@@ -284,7 +284,11 @@
 //!   them and the device's first stage launches them, else none. A folded object function
 //!   (`lower::mesh::folds_object_grids`) runs any object grid in pieces within the task stage's
 //!   limits instead, reading its grid from its region record: a direct draw's fold is the
-//!   consumer's upload (`DrawCommands::object_fold`), an indirect one's its arguments pass's.
+//!   consumer's upload (`DrawCommands::object_fold`), an indirect one's its arguments pass's. A
+//!   direct object grid is Metal's (`metal_object_grid`: its threads per grid wrap at 2^32, and it
+//!   runs the threadgroups they fill); one of more threadgroups than Metal runs
+//!   (`METAL_OBJECT_GRID_TOTAL`) launches nothing and fails its command buffer as Metal's GPU
+//!   discards it (`DrawCommands::discards_command_buffer`), on every device.
 //!   A mesh function writes `Layer` in every variant: a pass of more layers than
 //!   `maxMeshOutputLayers`, into which a mesh function choosing its slice could render, is
 //!   `Unsupported{MeshShading}` naming it. A view mapping with a viewport offset, or with a slice
@@ -318,7 +322,7 @@ use crate::bind::instantiate::{
 };
 use crate::bind::mesh_arguments::{
     fold_object_grid, metal_mesh_grid_draws_nothing, metal_object_grid, MeshArguments,
-    MeshArgumentsForm, MeshGridLimits, ObjectFold,
+    MeshArgumentsForm, MeshGridLimits, ObjectFold, METAL_OBJECT_GRID_TOTAL,
 };
 use crate::bind::neutral::{zero_buffer_bytes, NeutralResource};
 use crate::bind::plan::compute::{internal, not_implemented, spec_key, tile_memory};
@@ -549,10 +553,17 @@ pub struct DrawCommands {
     /// and `INDIRECT_BUFFER` usage, where the host's write is visible to the draw. The object
     /// stage's `PushHole::ReplayRegionAddress` takes that address, and a `draw` of
     /// `DrawMeshTasksIndirect` (its pieces) reads its commands from the upload, its offset into
-    /// it. A fold `past` what runs draws nothing (`draw` launches no threadgroup), and the consumer
-    /// fails the command buffer as Metal's GPU does (as `ExecutionStatus`'s
-    /// `MESH_GRID_PAST_LIMITS`). `None` for every other draw.
+    /// it. A fold `past` the device's pieces draws nothing (`draw` launches no threadgroup), and
+    /// the consumer fails the command buffer as for `ExecutionStatus`'s `MESH_GRID_PAST_LIMITS`.
+    /// `None` for every other draw.
     pub object_fold: Option<crate::bind::ObjectFold>,
+    /// A direct mesh draw whose object grid Metal's GPU discards: more threadgroups than
+    /// [`METAL_OBJECT_GRID_TOTAL`](crate::bind::METAL_OBJECT_GRID_TOTAL), past what Metal runs
+    /// within its watchdog's 5 seconds (`bind::mesh_arguments`). `draw` launches no threadgroup,
+    /// and the consumer fails the command buffer from the draw's encoder on as Metal does: the
+    /// encoder and every one after it run nothing, and the command buffer completes with
+    /// `MTLCommandBufferErrorInternal` (1, "Discarded (victim of GPU error/recovery)").
+    pub discards_command_buffer: bool,
 }
 
 /// No draw's commands: empty vectors and a draw of no vertices, which
@@ -580,6 +591,7 @@ impl Default for DrawCommands {
             index_bounds_pass: false,
             mesh_arguments: None,
             object_fold: None,
+            discards_command_buffer: false,
             amplifications: Vec::new(),
             specialization: None,
             mesh_dispatch: None,
@@ -3077,6 +3089,9 @@ struct MeshDraw {
     /// A direct draw's fold of its object grid, of a folded object function
     /// (`DrawCommands::object_fold`).
     fold: Option<ObjectFold>,
+    /// A direct draw whose object grid Metal's GPU discards
+    /// (`DrawCommands::discards_command_buffer`).
+    discards: bool,
 }
 
 impl MeshDraw {
@@ -3267,18 +3282,24 @@ fn mesh_draw(
     let folded = t.folded && t.object.is_some();
     // An unfolded object stage's direct grid as Metal runs it (`metal_object_grid`): each axis's
     // threads per grid wrap at 2^32, the draw runs the threadgroups the wrapped threads fill, and
-    // the builtins report the wrapped threads.
-    let (command, wrapped) = match command {
+    // the builtins report the wrapped threads; past what Metal runs, Metal's GPU discards it.
+    let (command, wrapped, discards) = match command {
         vk::DrawCommand::DrawMeshTasks {
             group_count_x: x,
             group_count_y: y,
             group_count_z: z,
         } if t.object.is_some() && !folded => {
             let (runs, threads) = metal_object_grid([x, y, z], lo, true).unwrap_or_default();
-            let runs = if runs.contains(&0) { [0; 3] } else { runs };
-            (mesh_tasks(runs, lo), Some((threads, runs)))
+            let n: u64 = runs.iter().map(|&c| u64::from(c)).product();
+            let discards = n > u64::from(METAL_OBJECT_GRID_TOTAL);
+            let runs = if discards || runs.contains(&0) {
+                [0; 3]
+            } else {
+                runs
+            };
+            (mesh_tasks(runs, lo), Some((threads, runs)), discards)
         }
-        other => (other, None),
+        other => (other, None, false),
     };
     let groups = match command {
         vk::DrawCommand::DrawMeshTasks {
@@ -3396,6 +3417,7 @@ fn mesh_draw(
     } else {
         (None, region(grid, lm)?)
     };
+    let discards = discards || fold.is_some_and(|f| f.discarded);
     Ok(MeshDraw {
         command,
         specialization,
@@ -3403,6 +3425,7 @@ fn mesh_draw(
         mesh_region,
         dispatch,
         fold,
+        discards,
     })
 }
 
@@ -4316,6 +4339,7 @@ fn instantiate(
         tessellation_dispatch: tessellation_dispatch_out,
         mesh_arguments: mesh_arguments_out,
         object_fold: object_fold_out,
+        discards_command_buffer: discards_out,
     } = out;
     let overrun = index_overrun(t.robust_index_fetch, draw);
     let (command, base) = vk_draw(draw, overrun);
@@ -4731,6 +4755,7 @@ fn instantiate(
     // pass writes the counts the draw reads.
     // A folded object function's direct draw reads its uploaded fold instead.
     let object_fold = mesh.as_ref().and_then(|m| m.fold);
+    let discards = mesh.as_ref().is_some_and(|m| m.discards);
     let mesh_arguments = match (command, &t.mesh) {
         (vk::DrawCommand::DrawMeshTasksIndirectCount { .. }, Some(_)) => {
             Some(MeshArgumentsForm::FoldedObject)
@@ -4774,6 +4799,7 @@ fn instantiate(
     *index_bounds_pass = index_unbounded && !arguments_elsewhere;
     *mesh_arguments_out = mesh_arguments;
     *object_fold_out = object_fold;
+    *discards_out = discards;
     *draw_command = command;
     *overrun_out = overrun;
     *amplifications_out = amplifications;

@@ -25,8 +25,8 @@ impl ExecutionStatus {
 
     /// What the buffer's bytes report after the command buffer ran. The consumer maps `overflow`, a
     /// replay fault, an index pool overflow, an absent argument read, a mesh records fault, a mesh
-    /// grid past the device's limits, and a cubic argument sampler's sample to a command-buffer
-    /// execution error, treats resident-set
+    /// grid Metal's GPU discards or the device cannot launch, and a cubic argument sampler's sample
+    /// to a command-buffer execution error, treats resident-set
     /// misses by its own policy, and announces a captured reach the rule does not answer as its
     /// pass's fallback to every tile.
     pub fn decode(bytes: &[u8; ExecutionStatus::BYTES]) -> StatusReport {
@@ -47,6 +47,7 @@ impl ExecutionStatus {
             absent_argument_read: bits.contains(StatusBits::ABSENT_ARGUMENT_READ),
             cubic_argument_sampler: bits.contains(StatusBits::CUBIC_ARGUMENT_SAMPLER),
             captured_reach_unmeasured: bits.contains(StatusBits::CAPTURED_REACH_UNMEASURED),
+            mesh_grid_discarded: bits.contains(StatusBits::MESH_GRID_DISCARDED),
             mesh_grid_past_limits: bits.contains(StatusBits::MESH_GRID_PAST_LIMITS),
             mesh_records_overflow: (bits.contains(StatusBits::MESH_RECORDS_OVERFLOW)).then(|| {
                 // The fault words are the first records fault's: a tessellation draw's when its
@@ -117,8 +118,13 @@ pub struct StatusReport {
     /// capture settle took every tile of the pass's mask (`bind::CaptureSettleModule`): the
     /// pass's reach is the announced fallback, not its draws' tiles.
     pub captured_reach_unmeasured: bool,
-    /// An indirect mesh draw's arguments pass met an object grid past what runs
-    /// (`StatusBits::MESH_GRID_PAST_LIMITS`): that draw drew nothing.
+    /// An indirect mesh draw's arguments pass met an object grid that Metal's GPU discards
+    /// (`StatusBits::MESH_GRID_DISCARDED`): that draw drew nothing, and the command buffer fails
+    /// as Metal's does (`MTLCommandBufferErrorInternal`).
+    pub mesh_grid_discarded: bool,
+    /// An indirect mesh draw's arguments pass met a grid that Metal draws and the device cannot
+    /// launch (`StatusBits::MESH_GRID_PAST_LIMITS`): that draw drew nothing, and the command buffer
+    /// fails (not Metal's failure).
     pub mesh_grid_past_limits: bool,
 }
 
@@ -243,10 +249,15 @@ impl StatusBits {
     /// nothing (`bind::TessellationScanModule`); the fault words name the command buffer's first
     /// records fault of either kind.
     pub const TESSELLATION_RECORDS_OVERFLOW: StatusBits = StatusBits(1 << 8);
-    /// An indirect mesh draw's arguments pass met an object grid past what runs (2^29 or more
-    /// threadgroups, or, unfolded, past the device's task limits), and the draw drew nothing
-    /// (`bind::MeshArguments`).
+    /// An indirect mesh draw's arguments pass met a grid that Metal draws and the device cannot
+    /// launch: a mesh grid past the mesh stage's limits, an unfolded object grid past the task
+    /// stage's, or a folded one of more pieces than `MeshArguments::OBJECT_PIECES` (only under task
+    /// limits below Vulkan's required least); the draw drew nothing (`bind::MeshArguments`).
     pub const MESH_GRID_PAST_LIMITS: StatusBits = StatusBits(1 << 9);
+    /// An indirect mesh draw's arguments pass met an object grid of more threadgroups than
+    /// `bind::METAL_OBJECT_GRID_TOTAL`, which Metal's GPU discards; the draw drew nothing
+    /// (`bind::MeshArguments`).
+    pub const MESH_GRID_DISCARDED: StatusBits = StatusBits(1 << 10);
     /// Either records fault: the command buffer's first one of either kind writes the fault
     /// words.
     pub const RECORDS_FAULTS: StatusBits = StatusBits(

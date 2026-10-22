@@ -443,8 +443,8 @@ driver's. Each is open work.
   limits fails its command buffer (`CommandBufferError::MeshGridPastLimits`, drawing nothing) and
   a direct one is refused (`Unsupported{MeshShading}` naming the limit). The emulation (MoltenVK,
   ANV on the Iris Xe) refuses an indirect draw with an object function
-  (`NotImplemented(MeshShading)`) and a direct object grid past the compute stage's limits
-  (`Unsupported{MeshShading}` naming `maxComputeWorkGroupCount`).
+  (`NotImplemented(MeshShading)`) and a direct object grid past the compute stage's limits or
+  whose work buffer passes `maxStorageBufferRange` (`Unsupported{MeshShading}` naming the limit).
 - **An object threadgroup that sets a mesh grid Metal launches nothing for keeps its own writes.**
   On the M3 Max such a threadgroup's device writes (an atomic add before the set) do not land
   either, while the draw's other threadgroups run; the runtime runs the threadgroup and launches
