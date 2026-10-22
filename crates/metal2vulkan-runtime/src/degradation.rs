@@ -995,13 +995,14 @@ degradations! {
         /// A depth or stencil texture with `allowGPUOptimizedContents` off sized or made in a heap
         /// (never a device's own texture, whose layout nothing shows), on a device whose driver
         /// keeps depth and stencil images GPU-optimized whatever their create info
-        /// ([`metal2vulkan::device::DriverFact::DepthStencilImagesStayGpuOptimized`]): Metal lays
-        /// the texture out without its compression metadata, and the runtime's image keeps it.
+        /// ([`metal2vulkan::device::DriverFact::DepthStencilImagesStayGpuOptimized`]), that no
+        /// shadow of Metal's tiles in the heap's bytes serves (a multisample texture, a depth twin,
+        /// a format whose layout is not measured; `texture/heap.rs`): Metal lays the texture out
+        /// without its compression metadata, and the runtime's image keeps it.
         OptimizedDepthStencilTexture = "optimized-depth-stencil-texture", Precision,
             "the texture keeps its GPU-optimized layout: heap_texture_size_and_align answers \
-             Metal's size for the texture with the property on, larger than Metal's with it off \
-             (16512 bytes for a 64x64 Depth32Float texture, where Metal answers 16384), so a \
-             heap sized by Metal's answers holds fewer such textures";
+             Metal's size for the texture with the property on, larger than Metal's with it off, \
+             so a heap sized by Metal's answers holds fewer such textures";
         /// A texture of an IOSurface plane of more than one row under 16 bytes a row
         /// (`Buffer::new_texture_with_iosurface_plane`, `linear_plan.rs`): Metal's GPU writes its
         /// rows 16 bytes apart and reads every row past the first as memory-dependent bytes
@@ -1135,15 +1136,31 @@ degradations! {
         UndeclaredUsageShadow = "undeclared-usage-shadow", Performance,
             "its texels are copied into an image of its own before each command that binds it \
              beyond its declared usage, and back after each write through it";
-        /// A texture of `RGB10A8_2P_XR10` or its sRGB twin made in a heap
-        /// (`texture/heap.rs`) other than a 2D texture of one level, whose planes the heap's
-        /// bytes keep: its one image holds each texel's colour word and alpha byte side by side,
-        /// more than Metal's two planes take in the heap, so it lies in memory of its own.
+        /// A texture of `RGB10A8_2P_XR10` or its sRGB twin made in a heap (`texture/heap.rs`)
+        /// whose planes no shadow of the heap's bytes holds: a 3D texture of more than one depth
+        /// slice (Metal's writes lay its depth slices over one another), or one whose moves pass
+        /// the device's limits (`texture/heap_two_planes.rs`). Its one image holds each texel's
+        /// colour word and alpha byte side by side, more than Metal's two planes take in the
+        /// heap, so it lies in memory of its own.
         HeapTwoPlaneTexture = "heap-two-plane-texture", Precision,
             "the texture's size and alignment answers are Metal's and its reads, writes and \
              copies as outside a heap, but its texels lie in memory of its own, apart from the \
              heap's bytes: a buffer or texture over its range of the heap neither sees nor \
              changes them, where Metal's texture keeps its two planes there";
+        /// A texture of `RGB10A8_2P_XR10` or its sRGB twin made in a heap whose first level's
+        /// planes lie in the heap's bytes (`texture/heap_two_planes.rs`), of more than one level,
+        /// or a 1D array: Metal's paths address the texture's levels past the first at bytes that
+        /// differ by path (its CPU copies at its first level's rows from past that level, its
+        /// blits and an array's GPU writes over the first level's bytes, a 2D texture's GPU
+        /// writes nowhere, its GPU reads at other bytes again), and a 1D array's GPU reads every
+        /// texel at the texture's first word. The runtime keeps the first level's slices in the
+        /// heap's bytes, as Metal's CPU copies and GPU writes lay them, and the other levels in the
+        /// texture's image alone.
+        HeapTwoPlaneLayout = "heap-two-plane-layout", Precision,
+            "the first level's texels lie in the heap's bytes as Metal's CPU copies and GPU \
+             writes lay them, and read as written; the later levels' texels lie apart from the \
+             heap's bytes, and a 1D array's GPU reads read each texel, where Metal's paths \
+             address those texels at bytes that differ by path";
         /// A MoltenVK device at a release whose `pipelineCacheUUID` layout the runtime has not
         /// read (`device/argument_buffers.rs`): whether MoltenVK binds through Metal argument
         /// buffers is unknown, so a device without them is not refused (as at a read release).
@@ -1413,13 +1430,17 @@ degradations! {
         ZeroLayerMapAfterRelease = "zero-layer-map-after-release", Precision,
             "the draws write nothing, where Metal draws rows of the pass (a 64-pixel map's rows 0 \
              to 15, at the positions of a pass with no map)";
-        /// A texture made in a heap over host pages (`new_heap_with_bytes_no_copy`) that Metal
-        /// keeps losslessly compressed (`allowGPUOptimizedContents`, the shorter side of level
-        /// 0 16 texels or more, and a colour format of neither `ShaderWrite` nor
-        /// `PixelFormatView` usage, or a depth or stencil format): its bytes
-        /// on Metal are no layout of its texels, so the runtime lays them out as its own
-        /// (`texture/heap_tiled.rs`). A multisample texture so (its sample grid's shorter side
-        /// 16 or more) lies in memory of its own, the heap's bytes keeping what they held.
+        /// A texture made in a heap over host pages (`new_heap_with_bytes_no_copy`), or a depth
+        /// or stencil texture made in any heap as a shadow of Metal's tiles (on a driver that
+        /// lays such images apart from their memory or keeps them GPU-optimized: MoltenVK), that
+        /// Metal keeps losslessly compressed (`allowGPUOptimizedContents`, the shorter side of
+        /// level 0 16 texels or more, and a colour format of neither `ShaderWrite` nor
+        /// `PixelFormatView` usage, or a depth or stencil format): its bytes on Metal are no
+        /// layout of its texels, so the runtime lays them out as its own, its uncompressed tiles
+        /// where it tiles them (`texture/heap_tiled.rs`). A multisample texture so (its sample
+        /// grid's shorter side 16 or more) lies in memory of its own, the heap's bytes keeping
+        /// what they held. Also such a texture whose image lies in a heap over the device's
+        /// memory: the image, of the runtime's usage, need not be compressed as Metal's.
         /// Announced once per device, in the call that made the first such texture, with its ID
         /// ([`DegradeNotice::object_id`]), or for each texture where `DeviceOptions::announce_each`
         /// asks; each texture counted
@@ -1432,12 +1453,12 @@ degradations! {
              bytes than Metal's would";
         /// A texture of a block-compressed format made in a heap over host pages whose
         /// placement the device's Metal level does not measure: Metal places a format family's
-        /// blocks in each level by a rule that differs by family and by machine
-        /// (`texture/heap_tiled.rs`), measured for BC, ETC2, EAC and ASTC on an Apple M4 under
-        /// macOS 27.0.1 and an Apple M3 Max under 26.7 (whether the GPU or the release makes
-        /// their difference is not known), where those lie as Metal lays them out, and not for
-        /// PVRTC at any level, whose blocks lie in the runtime's layout. Its size and alignment
-        /// answers are its device's. Announced once per device, in the call that made the first such
+        /// blocks in each level by a rule that differs by family and by release
+        /// (`texture/heap_tiled.rs`), measured for BC, ETC2, EAC and ASTC under macOS 27.0.1 (an
+        /// Apple M3 Max and an Apple M4 alike) and 26.7 (an Apple M3 Max), and for PVRTC under
+        /// 27.0.1 (an Apple M3 Max), where those lie as Metal lays them out, and not for PVRTC
+        /// under 26.7, whose blocks lie in the runtime's layout. Its size and alignment answers
+        /// are its device's. Announced once per device, in the call that made the first such
         /// texture, with its ID ([`DegradeNotice::object_id`]), or for each texture where
         /// `DeviceOptions::announce_each` asks; each texture counted
         /// ([`Device::degraded_objects`](crate::Device::degraded_objects)).
@@ -1446,12 +1467,18 @@ degradations! {
              heap's bytes in the runtime's layout, where Metal tiles them: a buffer or texture \
              over them meets the blocks at other bytes than on Metal";
         /// A texture made in a heap over host pages that Metal lays out tiled where the runtime
-        /// does not (`texture/heap_tiled.rs`): a layout not measured (a two-aspect depth and
-        /// stencil format, a PVRTC format), an image that holds other
-        /// bytes than Metal's elements, or moves past the device's limits. The notice's reason
-        /// names which (the first texture's). Announced once per device, in the call that made
-        /// the first such texture, with its ID ([`DegradeNotice::object_id`]), or for each
-        /// texture where `DeviceOptions::announce_each` asks; each texture counted
+        /// does not (`texture/heap_tiled.rs`): a layout not measured (a format whose layout in
+        /// Metal's heaps is not probed), an image that holds other bytes than Metal's elements, or
+        /// moves past the device's limits. Also a texture made in any other heap (over the device's
+        /// memory) whose bytes there are not Metal's layout (`texture/heap.rs`): its image bound
+        /// there in the driver's layout, on a driver whose colour images are not measured to lie as
+        /// Metal's heap textures
+        /// ([`metal2vulkan::device::DriverFact::ColorImagesLieAsMetalHeapTextures`]) or of a depth
+        /// or stencil texture there; its image a shadow of the bytes in rows; a multisample
+        /// texture; or a layout not measured. The notice's reason names which (the first
+        /// texture's). Announced once per device, in the call that made the first such texture,
+        /// with its ID ([`DegradeNotice::object_id`]), or for each texture where
+        /// `DeviceOptions::announce_each` asks; each texture counted
         /// ([`Device::degraded_objects`](crate::Device::degraded_objects)).
         HeapTextureUntiledLayout = "heap-texture-untiled-layout", Precision,
             "the texture's reads, writes and copies are Metal's, but its texels lie in the \
@@ -2911,10 +2938,11 @@ impl Device {
         self.deliver_placed(kind, notice.message(), misplaced);
     }
 
-    /// Count the texture of `texture`, made in a heap over host pages in this program call, as
-    /// laid out otherwise than Metal tiles it, for `untiled`'s reason (`heap-texture-*-layout`,
-    /// `texture/heap_tiled.rs`), and announce it, with its ID, where it is the first of its kind
-    /// (or at each texture, where the device's options ask).
+    /// Count the texture of `texture`, made in a heap in this program call, as laid out
+    /// otherwise than Metal lays it in the heap's bytes, for `untiled`'s reason
+    /// (`heap-texture-*-layout`, `texture/heap_tiled.rs`, `texture/heap.rs`), and announce it, with
+    /// its ID, where it is the first of its kind (or at each texture, where the device's options
+    /// ask).
     pub(super) fn degrade_heap_layout(&self, untiled: Untiled, texture: ObjectId) {
         let shared = self.shared();
         let kind = untiled.kind;
@@ -2934,8 +2962,8 @@ impl Device {
 
     /// How many objects this device met as `kind` so far, for a kind it meets once per object
     /// and announces once (naming the first object, [`DegradeNotice::object_id`]), so that a
-    /// census counts them without a notice each: the textures made in heaps over host pages laid
-    /// out otherwise than Metal tiles them ([`Degradation::HeapTextureLosslessLayout`],
+    /// census counts them without a notice each: the textures made in heaps laid out otherwise
+    /// than Metal lays them in the heap's bytes ([`Degradation::HeapTextureLosslessLayout`],
     /// [`Degradation::HeapTextureBlockCompressedLayout`] and
     /// [`Degradation::HeapTextureUntiledLayout`], each counted as it is made), and the textures
     /// over detached bytes a command buffer could reach unnamed

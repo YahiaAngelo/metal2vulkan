@@ -1850,18 +1850,247 @@ fn the_gpu_rows_tell_the_counts_apart() {
     }
 }
 
-/// Every block-compressed format the crate holds a texture of but PVRTC's has a family, and every
-/// format of a family is among each level's rows.
+/// Every block-compressed format the crate holds a texture of has a family, and every format of a
+/// family but PVRTC's (`pvrtc_blocks_lie_where_27_0_1_places_them`) is among each level's rows.
 #[test]
 fn every_block_compressed_format_has_a_measured_family() {
     for (level, rows, _) in levels() {
         let measured: std::collections::BTreeSet<P> = rows.iter().map(|row| row.pf).collect();
         for &pf in P::ALL {
-            let held = block_extent(pf).is_some() && direct_format(pf).is_some();
+            let held = block_extent(pf).is_some() && (direct_format(pf).is_some() || is_pvrtc(pf));
             let family = BlockFamily::of(pf);
-            assert_eq!(family.is_some(), held && !is_pvrtc(pf), "{pf:?}");
-            if family.is_some() {
+            assert_eq!(family.is_some(), held, "{pf:?}");
+            if family.is_some() && !is_pvrtc(pf) {
                 assert!(measured.contains(&pf), "{level} {pf:?} not measured");
+            }
+        }
+    }
+}
+
+/// Metal's answers for PVRTC textures of 2 bits a pixel under macOS 27.0.1 (an Apple M3 Max,
+/// `Private`, `ShaderRead`; our probe), each format of them alike: the side (square), levels,
+/// array length (3: a 2D array), size and alignment.
+const PVRTC_2BPP_ROWS: &str = "
+4 1 1 128 128
+4 1 3 384 128
+4 3 1 384 128
+4 3 3 1152 128
+8 1 1 128 128
+8 1 3 384 128
+8 4 1 512 128
+8 4 3 1536 128
+16 1 1 128 128
+16 1 3 384 128
+16 5 1 640 128
+16 5 3 1920 128
+32 1 1 256 128
+32 1 3 768 128
+32 6 1 896 128
+32 6 3 2688 128
+64 1 1 1024 128
+64 1 3 3072 128
+64 7 1 1920 128
+64 7 3 5760 128
+128 1 1 4096 128
+128 1 3 12288 128
+128 8 1 6016 128
+128 8 3 18048 128
+256 1 1 16384 128
+256 1 3 49152 16384
+256 9 1 22400 128
+256 9 3 98304 16384
+512 1 1 65536 128
+512 1 3 196608 16384
+512 10 1 87936 128
+512 10 3 294912 16384
+1024 1 1 262144 128
+1024 1 3 786432 16384
+1024 11 1 350080 128
+1024 11 3 1081344 16384
+2048 1 1 1048576 128
+2048 1 3 3145728 16384
+2048 12 1 1398656 128
+2048 12 3 4227072 16384
+";
+
+/// Metal's answers for PVRTC textures of 4 bits a pixel, as [`PVRTC_2BPP_ROWS`].
+const PVRTC_4BPP_ROWS: &str = "
+4 1 1 128 128
+4 1 3 384 128
+4 3 1 384 128
+4 3 3 1152 128
+8 1 1 128 128
+8 1 3 384 128
+8 4 1 512 128
+8 4 3 1536 128
+16 1 1 128 128
+16 1 3 384 128
+16 5 1 640 128
+16 5 3 1920 128
+32 1 1 512 128
+32 1 3 1536 128
+32 6 1 1152 128
+32 6 3 3456 128
+64 1 1 2048 128
+64 1 3 6144 128
+64 7 1 3200 128
+64 7 3 9600 128
+128 1 1 8192 128
+128 1 3 24576 128
+128 8 1 11392 128
+128 8 3 34176 128
+256 1 1 32768 128
+256 1 3 98304 16384
+256 9 1 44160 128
+256 9 3 147456 16384
+512 1 1 131072 128
+512 1 3 393216 16384
+512 10 1 175232 128
+512 10 3 540672 16384
+1024 1 1 524288 128
+1024 1 3 1572864 16384
+1024 11 1 699520 128
+1024 11 3 2113536 16384
+2048 1 1 2097152 128
+2048 1 3 6291456 16384
+2048 12 1 2796672 128
+2048 12 3 8404992 16384
+";
+
+/// Where Metal under macOS 27.0.1 placed the blocks of six PVRTC textures (an Apple M3 Max; our
+/// probe: each level of a `Shared` placement heap's texture written by a row-linear blit of blocks
+/// naming themselves, found in a buffer over the heap): the format, side and levels, and each
+/// level's first byte from the texture's and the bytes from it of its first 12 blocks in row
+/// order (fewer where the level has fewer), every other block of each level at the Morton index
+/// of its tile.
+const PVRTC_PLACES: [(P, u64, u32, &[(u64, &[u64])]); 6] = {
+    const BIG: &[u64] = &[0, 8, 32, 40, 128, 136, 160, 168, 512, 520, 544, 552];
+    const MID: &[u64] = &[0, 8, 32, 40, 128, 136, 160, 168, 16, 24, 48, 56];
+    const SMALL: &[u64] = &[0, 8, 32, 40, 16, 24, 48, 56, 64, 72, 96, 104];
+    const TWO: &[u64] = &[0, 8, 16, 24];
+    const TALL: &[u64] = &[0, 8, 16, 24, 32, 40, 48, 56];
+    const PAIR: &[u64] = &[0, 8];
+    const ONE: &[u64] = &[0];
+    [
+        (P::PVRTCRGB4BPP, 64, 1, &[(0, BIG)]),
+        (P::PVRTCRGBA2BPP, 64, 1, &[(0, MID)]),
+        (
+            P::PVRTCRGBA4BPP,
+            256,
+            9,
+            &[
+                (0, BIG),
+                (0x8000, BIG),
+                (0xa000, BIG),
+                (0xa800, MID),
+                (0xaa00, SMALL),
+                (0xaa80, TWO),
+                (0xab00, ONE),
+                (0xab80, ONE),
+                (0xac00, ONE),
+            ],
+        ),
+        (
+            P::PVRTCRGBA2BPP,
+            128,
+            8,
+            &[
+                (0, BIG),
+                (0x1000, MID),
+                (0x1400, SMALL),
+                (0x1500, TALL),
+                (0x1580, PAIR),
+                (0x1600, ONE),
+                (0x1680, ONE),
+                (0x1700, ONE),
+            ],
+        ),
+        (
+            P::PVRTCRGBA4BPP,
+            16,
+            5,
+            &[
+                (0, SMALL),
+                (0x80, TWO),
+                (0x100, ONE),
+                (0x180, ONE),
+                (0x200, ONE),
+            ],
+        ),
+        (
+            P::PVRTCRGB2BPP,
+            32,
+            6,
+            &[
+                (0, SMALL),
+                (0x100, TALL),
+                (0x180, PAIR),
+                (0x200, ONE),
+                (0x280, ONE),
+                (0x300, ONE),
+            ],
+        ),
+    ]
+};
+
+/// A PVRTC texture's tiled layout at `level`: its family's placement there.
+fn pvrtc_layout(level: MetalLevel, pf: P, side: u64, levels: u32, array: u64) -> TiledLayout {
+    let unit = u64::from(block_bytes(pf).unwrap());
+    let block = block_extent(pf).unwrap().map(u64::from);
+    let elements = Elements::Blocks {
+        block,
+        placement: placement(level, pf),
+        gpu_rows: level.heap_block_gpu_rows(),
+    };
+    let ty = if array > 1 { T::Type2DArray } else { T::Type2D };
+    TiledLayout::of(unit, elements, ty, [side, side, 1], levels, array).unwrap()
+}
+
+/// Every PVRTC format's answer under macOS 27.0.1 is the tiled layout's of its family's placement
+/// there (`Halved`), its blocks of 8 bytes (`PVRTC_2BPP_ROWS`, `PVRTC_4BPP_ROWS`), and each block of
+/// the probe's six textures lies where the layout places it (`PVRTC_PLACES`); under 26.7 the
+/// family's placement is not measured.
+#[test]
+fn pvrtc_blocks_lie_where_27_0_1_places_them() {
+    let level = MetalLevel::MacOS27_0_1;
+    assert_eq!(MetalLevel::MacOS26_7.heap_blocks(BlockFamily::Pvrtc), None);
+    let pvrtc: Vec<P> = P::ALL.iter().copied().filter(|&pf| is_pvrtc(pf)).collect();
+    assert_eq!(pvrtc.len(), 8);
+    for pf in pvrtc {
+        let wide = block_extent(pf).unwrap()[0] == 8;
+        let table = if wide {
+            PVRTC_2BPP_ROWS
+        } else {
+            PVRTC_4BPP_ROWS
+        };
+        for line in table.lines().filter(|line| !line.is_empty()) {
+            let fields: Vec<u64> = line.split(' ').map(|f| f.parse().unwrap()).collect();
+            let [side, levels, array, size, align] = fields[..] else {
+                panic!("a row of five fields: {line}");
+            };
+            let layout = pvrtc_layout(level, pf, side, levels as u32, array);
+            let what = format!("{pf:?} {side} {levels} {array}");
+            assert_eq!((layout.size, layout.align), (size, align), "{what}");
+        }
+    }
+    for (pf, side, levels, places) in PVRTC_PLACES {
+        let layout = pvrtc_layout(level, pf, side, levels, 1);
+        let [bw, bh] = block_extent(pf).unwrap().map(u64::from);
+        for (l, &(first, offsets)) in places.iter().enumerate() {
+            let s = (side >> l).max(1);
+            let across = s.div_ceil(bw);
+            let count = across * s.div_ceil(bh);
+            assert_eq!(
+                offsets.len() as u64,
+                count.min(12),
+                "{pf:?} {side} level {l}"
+            );
+            let what = format!("{pf:?} {side} level {l}");
+            assert_eq!(layout.element(0, l, 0, 0), first, "{what}");
+            for (i, &offset) in offsets.iter().enumerate() {
+                let i = i as u64;
+                let at = layout.element(0, l, i % across, i / across);
+                assert_eq!(at - first, offset, "{what} block {i}");
             }
         }
     }

@@ -566,15 +566,7 @@ fn texture_fills_write_metal_s_bytes() {
             // uploads into a depth image (the twin's texture holds its texels in colour), what
             // a float depth's may store, and the combined format's clamp; the `Shared` buffers.
             let pf = format(raw);
-            let shapes: Vec<bool> = CASES
-                .iter()
-                .map(|name| {
-                    let case = case(raw, name, false);
-                    !case.array && case.levels == 1
-                })
-                .collect();
-            let one_level = shapes.iter().any(|&one| one);
-            let every_one_level = shapes.iter().all(|&one| one);
+            let mipmapped = CASES.iter().any(|name| case(raw, name, false).levels > 1);
             let twin = pf == PixelFormat::Depth32Float && twins_depth(device);
             let combined = pf == PixelFormat::Depth32FloatStencil8;
             let depth_image = combined || (pf == PixelFormat::Depth32Float && !twin);
@@ -605,13 +597,10 @@ fn texture_fills_write_metal_s_bytes() {
                     Degradation::SharedInSystemMemory,
                     shared_in_system_memory(device),
                 ),
-                // A two-plane format's cases lie in a heap: a 2D texture of one level a shadow of
-                // its planes in the heap's bytes, any other apart from them.
-                (Degradation::ShadowedTexture, heap > 0 && one_level),
-                (
-                    Degradation::HeapTwoPlaneTexture,
-                    heap > 0 && !every_one_level,
-                ),
+                // A two-plane format's cases lie in a heap, a shadow of their first level's
+                // planes in the heap's bytes; a mipmapped one's later levels apart from them.
+                (Degradation::ShadowedTexture, heap > 0),
+                (Degradation::HeapTwoPlaneLayout, heap > 0 && mipmapped),
             ]);
             let announced = assert_made_once(messages, kinds, &first);
             let clamped = announced.contains_key(&Degradation::RestrictedDepthUpload);

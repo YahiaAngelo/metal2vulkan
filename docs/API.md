@@ -1655,12 +1655,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-optimized-depth-stencil-texture` (precision).
   `OptimizedDepthStencilTexture`: A depth or stencil texture with `allowGPUOptimizedContents` off
   sized or made in a heap (never a device's own texture, whose layout nothing shows), on a device
-  whose driver keeps depth and stencil images GPU-optimized whatever their create info: Metal lays
-  the texture out without its compression metadata, and the runtime's image keeps it. Cost: the
-  texture keeps its GPU-optimized layout: heap_texture_size_and_align answers Metal's size for the
-  texture with the property on, larger than Metal's with it off (16512 bytes for a 64x64
-  Depth32Float texture, where Metal answers 16384), so a heap sized by Metal's answers holds fewer
-  such textures.
+  whose driver keeps depth and stencil images GPU-optimized whatever their create info, that no
+  shadow of Metal's tiles in the heap's bytes serves (a multisample texture, a depth twin, a format
+  whose layout is not measured): Metal lays the texture out without its compression metadata, and
+  the runtime's image keeps it. Cost: the texture keeps its GPU-optimized layout:
+  heap_texture_size_and_align answers Metal's size for the texture with the property on, larger
+  than Metal's with it off, so a heap sized by Metal's answers holds fewer such textures.
 - `metal2vulkan-degrade-narrow-surface-rows` (precision). `NarrowSurfaceRows`: A texture of an
   IOSurface plane of more than one row under 16 bytes a row: Metal's GPU writes its rows 16 bytes
   apart and reads every row past the first as memory-dependent bytes (zeros in a fresh process;
@@ -1760,13 +1760,25 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   the texture's texels. Cost: its texels are copied into an image of its own before each command
   that binds it beyond its declared usage, and back after each write through it.
 - `metal2vulkan-degrade-heap-two-plane-texture` (precision). `HeapTwoPlaneTexture`: A texture of
-  `RGB10A8_2P_XR10` or its sRGB twin made in a heap other than a 2D texture of one level, whose
-  planes the heap's bytes keep: its one image holds each texel's colour word and alpha byte side by
-  side, more than Metal's two planes take in the heap, so it lies in memory of its own. Cost: the
-  texture's size and alignment answers are Metal's and its reads, writes and copies as outside a
-  heap, but its texels lie in memory of its own, apart from the heap's bytes: a buffer or texture
-  over its range of the heap neither sees nor changes them, where Metal's texture keeps its two
-  planes there.
+  `RGB10A8_2P_XR10` or its sRGB twin made in a heap whose planes no shadow of the heap's bytes
+  holds: a 3D texture of more than one depth slice (Metal's writes lay its depth slices over one
+  another), or one whose moves pass the device's limits. Its one image holds each texel's colour
+  word and alpha byte side by side, more than Metal's two planes take in the heap, so it lies in
+  memory of its own. Cost: the texture's size and alignment answers are Metal's and its reads,
+  writes and copies as outside a heap, but its texels lie in memory of its own, apart from the
+  heap's bytes: a buffer or texture over its range of the heap neither sees nor changes them, where
+  Metal's texture keeps its two planes there.
+- `metal2vulkan-degrade-heap-two-plane-layout` (precision). `HeapTwoPlaneLayout`: A texture of
+  `RGB10A8_2P_XR10` or its sRGB twin made in a heap whose first level's planes lie in the heap's
+  bytes, of more than one level, or a 1D array: Metal's paths address the texture's levels past the
+  first at bytes that differ by path (its CPU copies at its first level's rows from past that level,
+  its blits and an array's GPU writes over the first level's bytes, a 2D texture's GPU writes
+  nowhere, its GPU reads at other bytes again), and a 1D array's GPU reads every texel at the
+  texture's first word. The runtime keeps the first level's slices in the heap's bytes, as Metal's
+  CPU copies and GPU writes lay them, and the other levels in the texture's image alone. Cost: the
+  first level's texels lie in the heap's bytes as Metal's CPU copies and GPU writes lay them, and
+  read as written; the later levels' texels lie apart from the heap's bytes, and a 1D array's GPU
+  reads read each texel, where Metal's paths address those texels at bytes that differ by path.
 - `metal2vulkan-degrade-moltenvk-argument-buffers-unread` (precision).
   `MoltenVkArgumentBuffersUnread`: A MoltenVK device at a release whose `pipelineCacheUUID` layout
   the runtime has not read: whether MoltenVK binds through Metal argument buffers is unknown, so a
@@ -1935,9 +1947,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   released a map of one or more layers. Cost: the draws write nothing, where Metal draws rows of the
   pass (a 64-pixel map's rows 0 to 15, at the positions of a pass with no map).
 - `metal2vulkan-degrade-heap-texture-lossless-layout` (precision). `HeapTextureLosslessLayout`: A
-  texture made in a heap over host pages (`new_heap_with_bytes_no_copy`) that Metal keeps losslessly
-  compressed: its bytes on Metal are no layout of its texels, so the runtime lays them out as its
-  own. Cost: the texture's reads, writes and copies are Metal's, but its bytes in the heap are not
+  texture made in a heap over host pages (`new_heap_with_bytes_no_copy`), or a depth or stencil
+  texture made in any heap as a shadow of Metal's tiles (on a driver that lays such images apart from
+  their memory or keeps them GPU-optimized: MoltenVK), that Metal keeps losslessly compressed: its
+  bytes on Metal are no layout of its texels, so the runtime lays them out as its own, its
+  uncompressed tiles where it tiles them. Also such a texture whose image lies in a heap over the
+  device's memory: the image, of the runtime's usage, need not be compressed as Metal's. Cost: the texture's reads, writes and copies are Metal's, but its bytes in the heap are not
   Metal's compressed bytes (a single-sample texture's texels in the runtime's layout; a multisample
   texture's image lies in memory of its own, the heap's bytes keeping what they held): a buffer or
   texture over them reads and writes other bytes than Metal's would.
@@ -1946,18 +1961,22 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   host pages whose placement the device's Metal level does not measure: Metal places a format
   family's blocks in each level by a rule that differs by family and by release, measured for BC,
   ETC2, EAC and ASTC under macOS 27.0.1 (an Apple M3 Max and an Apple M4 alike) and 26.7 (an
-  Apple M3 Max), where those lie as Metal lays them out, and not for PVRTC at any level, whose
-  blocks lie in the runtime's layout. Cost: the texture's
+  Apple M3 Max), and for PVRTC under 27.0.1 (an Apple M3 Max), where those lie as Metal lays them
+  out, and not for PVRTC under 26.7, whose blocks lie in the runtime's layout. Cost: the texture's
   reads, writes and copies are Metal's, but its blocks lie in the heap's bytes in the runtime's
   layout, where Metal tiles them: a buffer or texture over them meets the blocks at other bytes than
   on Metal.
 - `metal2vulkan-degrade-heap-texture-untiled-layout` (precision). `HeapTextureUntiledLayout`: A
   texture made in a heap over host pages that Metal lays out tiled where the runtime does not: a
-  layout not measured (a two-aspect depth and stencil format, a PVRTC format), an image that holds
-  other bytes than Metal's elements, or moves past the device's limits. Cost: the texture's reads,
-  writes and copies are Metal's, but its texels lie in the heap's bytes in the runtime's layout,
-  where Metal tiles them: a buffer or texture over them meets the texels at other bytes than on
-  Metal.
+  layout not measured (a format whose layout in Metal's heaps is not probed), an image that holds
+  other bytes than Metal's elements, or moves past the device's limits. Also a texture made in any
+  other heap (over the device's memory) whose bytes there are not Metal's layout: its image bound
+  there in the driver's layout, on a driver whose colour images are not measured to lie as Metal's
+  heap textures (`DriverFact::ColorImagesLieAsMetalHeapTextures`) or of a depth or stencil texture
+  there; its image a shadow of the bytes in rows; a multisample texture; or a layout not measured.
+  Cost: the texture's reads, writes and copies are Metal's, but its texels lie in the heap's bytes
+  in the runtime's layout, where Metal tiles them: a buffer or texture over them meets the texels at
+  other bytes than on Metal.
 - `metal2vulkan-degrade-shader-side-depth-test` (performance). `ShaderSideDepthTest`: A render
   pass's draws test the depth in the fragment shader: a fragment function that stores a color
   through the pixel interlock before Vulkan's tests, in a draw whose depth test may drop the

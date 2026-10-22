@@ -96,6 +96,7 @@ metal2vulkan-degrade-heap-texture-larger-than-metal
 metal2vulkan-degrade-heap-texture-linear
 metal2vulkan-degrade-heap-texture-lossless-layout
 metal2vulkan-degrade-heap-texture-untiled-layout
+metal2vulkan-degrade-heap-two-plane-layout
 metal2vulkan-degrade-heap-two-plane-texture
 metal2vulkan-degrade-helper-branch-drops-simdgroup-stores
 metal2vulkan-degrade-host-deallocator-delayed

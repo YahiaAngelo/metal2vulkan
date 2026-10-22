@@ -15,7 +15,9 @@
 //!   the texture to imported host memory, the texture is a shadow of the heap's bytes, announced
 //!   once (`shadowed-texture`), whose texels lie in the bytes level by level, rows packed, or,
 //!   for a texture Metal keeps uncompressed, in Metal's tiles (`heap_layouts`): there the bytes are
-//!   asserted exactly. `NOCOPYHEAP` lines print each texture's route.
+//!   asserted exactly. One Metal keeps losslessly compressed (`heap-texture-lossless-layout`),
+//!   whose bytes on Metal are no layout of its texels, lies rows packed or in the tiles Metal lays
+//!   it in uncompressed. `NOCOPYHEAP` lines print each texture's route.
 //! - **Refusals.** Storage other than `Shared`, a sparse heap and a size of 0 are `Invalid`, as
 //!   is memory whose first byte is off the import's unit
 //!   (`HeapProblem::HostMemoryAlignment`); each refused call drops its deallocator unrun. A
@@ -341,7 +343,8 @@ fn same_texels(after: &[u8], before: &[u8], bytes: u64) -> usize {
 fn texture_round_trip(pf: PixelFormat, side: u64, bytes: u64, offset: u64) -> Option<bool> {
     let what = format!("{pf:?} {side}x{side} at {offset}");
     // Whether the heap made the texture, and whether its texels lay in the caller's bytes rows
-    // packed from its offset, or in Metal's tiles there where the runtime counts it tiled.
+    // packed from its offset, or in Metal's tiles there where the runtime counts it tiled (either
+    // where it counts it laid out losslessly: Metal's bytes are no layout of its texels).
     let (mut made, mut laid) = (false, false);
     let shadows = on_device(Degradation::ShadowedTexture, |device| {
         let queue = device.new_command_queue().unwrap();
@@ -360,6 +363,8 @@ fn texture_round_trip(pf: PixelFormat, side: u64, bytes: u64, offset: u64) -> Op
             TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE
         };
         let tiled_before = device.work_counts().heap_textures_tiled;
+        let lossless = Degradation::HeapTextureLosslessLayout;
+        let lossless_before = device.degraded_objects(lossless).unwrap();
         let texture = match heap.new_texture_at_offset(&descriptor, offset) {
             Ok(texture) => texture,
             Err(error @ Error::NotImplemented(RuntimeGap::HeapTextureMemory)) => {
@@ -370,6 +375,7 @@ fn texture_round_trip(pf: PixelFormat, side: u64, bytes: u64, offset: u64) -> Op
         };
         made = true;
         let tiled = device.work_counts().heap_textures_tiled - tiled_before == 1;
+        let lossless = device.degraded_objects(lossless).unwrap() - lossless_before == 1;
         assert_eq!(texture.heap_offset(), offset);
         let size = device
             .heap_texture_size_and_align(&descriptor)
@@ -443,7 +449,7 @@ fn texture_round_trip(pf: PixelFormat, side: u64, bytes: u64, offset: u64) -> Op
             third,
             "{what}"
         );
-        laid = if tiled {
+        let in_tiles = || {
             let n = bytes as usize;
             (0..side).all(|y| {
                 (0..side).all(|x| {
@@ -452,19 +458,23 @@ fn texture_round_trip(pf: PixelFormat, side: u64, bytes: u64, offset: u64) -> Op
                     mapping.read(at..at + n) == third[from..from + n]
                 })
             })
-        } else {
-            mapping.read(start..start + len) == third
+        };
+        let in_rows = || mapping.read(start..start + len) == third;
+        laid = match (tiled, lossless) {
+            (true, _) => in_tiles(),
+            (false, true) => in_rows() || in_tiles(),
+            (false, false) => in_rows(),
         };
         eprintln!(
             "NOCOPYHEAP {what}: size {size}, {changed} bytes changed by the texture's write, \
-             texels laid at the offset (tiled {tiled}): {laid}"
+             texels laid at the offset (tiled {tiled}, lossless {lossless}): {laid}"
         );
         drop((texture, buffer, heap));
         drop(mapping);
     });
     eprintln!("NOCOPYHEAP {what}: {shadows} shadowed-texture notices");
     // A shadow's texels are the heap's bytes, rows packed from the texture's offset or in Metal's
-    // tiles there.
+    // tiles there (uncompressed, for a texture Metal keeps compressed).
     assert!(
         shadows == 0 || laid,
         "{what}: a shadow's texels lie elsewhere"
@@ -486,7 +496,8 @@ fn a_no_copy_heap_s_texture_and_buffer_alias_both_ways() {
 
 /// A no-copy heap's depth texture aliases as its colour textures do: where the device binds no
 /// depth image to imported host memory (every device measured), a shadow of the heap's bytes,
-/// announced once.
+/// announced once. Metal keeps it losslessly compressed (`allowGPUOptimizedContents` on), so its
+/// texels lie rows packed or in Metal's uncompressed tiles.
 #[test]
 fn a_no_copy_heap_s_depth_texture_aliases_both_ways() {
     if let Some(shadow) = texture_round_trip(PixelFormat::Depth16Unorm, 32, 2, 0) {

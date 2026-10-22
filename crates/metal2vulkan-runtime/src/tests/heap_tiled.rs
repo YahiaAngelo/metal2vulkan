@@ -8,12 +8,12 @@
 use crate::metal_level::MetalLevel;
 use crate::texture::heap_tiled::{
     fresh_pattern, level_bytes, lossless_answer, metal_compresses, metal_heap_layout,
-    pattern_levels, sample_grid, BlockPlacement, Elements, FreshDepth, FreshPattern, GpuRows,
-    HeapLayout, TiledLayout, Untiled,
+    pattern_levels, sample_grid, shadow_tiles, BlockPlacement, Elements, FreshDepth, FreshPattern,
+    GpuRows, HeapLayout, TiledLayout, Untiled,
 };
 use crate::texture_descriptor::TextureLayout;
 use metal2vulkan::metal::{PixelFormat, TextureType as T, TextureUsage};
-use metal2vulkan::vk::Format;
+use metal2vulkan::vk::{Format, ImageAspectFlags};
 
 /// One L row: its id, element bytes, block, type, level-0 extent, levels (0 the full chain) and
 /// array length, Metal's size, alignment and chain stride (an array's, cube's or 3D texture's),
@@ -732,9 +732,9 @@ fn texture(
 }
 
 /// How the runtime lays a heap texture out over host pages, by its format, usage and shape: a
-/// plain or block-compressed format whose image holds Metal's bytes tiled; a compressed, PVRTC,
-/// multisample or two-aspect texture, or one whose image holds other bytes, untiled, each with
-/// its kind, and the answers Metal's where measured.
+/// plain or block-compressed format whose image holds Metal's bytes tiled (PVRTC under 27.0.1); a
+/// compressed, multisample or two-aspect texture, a PVRTC one under 26.7, or one whose image holds
+/// other bytes, untiled, each with its kind, and the answers Metal's where measured.
 #[test]
 fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
     use crate::degradation::Degradation as D;
@@ -780,15 +780,20 @@ fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
         [64, 64, 1],
         (7, 1, 1),
     );
-    for level in [M3, M4] {
-        let format = Format::PVRTC1_4BPP_UNORM_BLOCK_IMG;
-        let pvrtc = metal_heap_layout(&pvrtc, read, true, format, level);
-        assert_eq!(pvrtc.answer, None, "{level}");
-        let HeapLayout::Untiled(untiled) = pvrtc.layout else {
-            panic!("{level}: a PVRTC texture is tiled");
-        };
-        assert_eq!(untiled.kind, D::HeapTextureBlockCompressedLayout, "{level}");
-    }
+    // PVRTC: Metal's answer and its tiles under 27.0.1, untiled and unanswered under 26.7.
+    let format = Format::PVRTC1_4BPP_UNORM_BLOCK_IMG;
+    let m3_pvrtc = metal_heap_layout(&pvrtc, read, true, format, M3);
+    assert_eq!(m3_pvrtc.answer, None);
+    let HeapLayout::Untiled(untiled) = m3_pvrtc.layout else {
+        panic!("a PVRTC texture is tiled at 26.7's level");
+    };
+    assert_eq!(untiled.kind, D::HeapTextureBlockCompressedLayout);
+    let m4_pvrtc = metal_heap_layout(&pvrtc, read, true, format, M4);
+    assert_eq!(
+        m4_pvrtc.answer.map(|a| (a.size, a.align)),
+        Some((3200, 128))
+    );
+    assert!(matches!(m4_pvrtc.layout, HeapLayout::Tiled(_)));
     let decoded = metal_heap_layout(&bc1, read, true, Format::R8G8B8A8_UNORM, M4);
     assert_eq!(decoded.answer, blocks.answer);
     let HeapLayout::Untiled(untiled) = decoded.layout else {
@@ -817,20 +822,67 @@ fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
         panic!("a multisample texture is tiled");
     };
     assert_eq!(untiled.kind, D::HeapTextureUntiledLayout);
-    // Two-aspect: its depth plane at 16 KiB, then its stencil plane, untiled.
+    // Two-aspect: its depth plane's tiles at 0, then its stencil plane's at 16 KiB; kept
+    // compressed, its depth plane is, and a shadow's stencil plane lies past the depth plane's
+    // compressed answer (`shadow_tiles`).
     let ds = texture(
         T::Type2D,
         PixelFormat::Depth32FloatStencil8,
         [64, 64, 1],
         (1, 1, 1),
     );
-    let two = metal_heap_layout(&ds, write, false, Format::D32_SFLOAT_S8_UINT, M4);
+    let format = Format::D32_SFLOAT_S8_UINT;
+    let two = metal_heap_layout(&ds, write, false, format, M4);
     assert_eq!(two.answer.map(|a| (a.size, a.align)), Some((0x5000, 128)));
-    assert!(matches!(two.layout, HeapLayout::Untiled(_)));
+    let HeapLayout::Tiled(tiles) = &two.layout else {
+        panic!("a two-aspect texture is untiled");
+    };
+    let parts: Vec<_> = (tiles.parts.iter())
+        .map(|part| (part.aspect, part.at, part.layout.unit, part.layout.size))
+        .collect();
+    let (depth, stencil) = (
+        Some(ImageAspectFlags::DEPTH),
+        Some(ImageAspectFlags::STENCIL),
+    );
+    assert_eq!(parts, [(depth, 0, 4, 0x4000), (stencil, 0x4000, 1, 0x1000)]);
+    let kept = metal_heap_layout(&ds, write, true, format, M4);
+    assert_eq!(kept.answer.map(|a| (a.size, a.align)), Some((0x9080, 128)));
+    let HeapLayout::Untiled(untiled) = kept.layout else {
+        panic!("a compressed two-aspect texture is tiled");
+    };
+    assert_eq!(untiled.kind, D::HeapTextureLosslessLayout);
+    let shadow = shadow_tiles(&ds, format, M4, &kept.layout);
+    let Some(HeapLayout::Uncompressed(tiles)) = shadow else {
+        panic!("a compressed two-aspect texture has no shadow's tiles");
+    };
+    let ats: Vec<_> = tiles.parts.iter().map(|part| part.at).collect();
+    assert_eq!((ats, tiles.size), (vec![0, 0x8000], 0x9000));
+    let other = metal_heap_layout(&ds, write, false, Format::D32_SFLOAT, M4);
+    assert!(matches!(other.layout, HeapLayout::Untiled(_)));
     // A depth texture without GPU-optimized contents: tiled.
     let depth = texture(T::Type2D, PixelFormat::Depth32Float, [64, 64, 1], (1, 1, 1));
     let tiled_depth = metal_heap_layout(&depth, read, false, Format::D32_SFLOAT, M4);
     assert!(matches!(tiled_depth.layout, HeapLayout::Tiled(_)));
+    // A stencil view: a `Stencil8` texture's tiles and answers (the M3 Max under 27.0.1), the
+    // tiles its image's stencil aspect's; kept compressed, a shadow's uncompressed tiles alike.
+    let view = texture(T::Type2D, PixelFormat::X32Stencil8, [100, 70, 1], (1, 1, 1));
+    let x32 = metal_heap_layout(&view, read, false, format, M4);
+    assert_eq!(x32.answer.map(|a| (a.size, a.align)), Some((0x4000, 128)));
+    let HeapLayout::Tiled(tiles) = &x32.layout else {
+        panic!("a stencil view is untiled");
+    };
+    let parts: Vec<_> = (tiles.parts.iter())
+        .map(|part| (part.aspect, part.at, part.layout.unit, part.layout.size))
+        .collect();
+    assert_eq!(parts, [(stencil, 0, 1, 0x4000)]);
+    let kept = metal_heap_layout(&view, read, true, format, M4);
+    assert_eq!(kept.answer.map(|a| (a.size, a.align)), Some((0x4200, 128)));
+    let shadow = shadow_tiles(&view, format, M4, &kept.layout);
+    let Some(HeapLayout::Uncompressed(tiles)) = shadow else {
+        panic!("a compressed stencil view has no shadow's tiles");
+    };
+    assert_eq!(tiles.parts.len(), 1);
+    assert_eq!((tiles.parts[0].aspect, tiles.size), (stencil, 0x4000));
 }
 
 /// A multisample texture's answers and layout kind (on an Apple M4 under macOS 27.0.1; the M3 Max
@@ -839,7 +891,7 @@ fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
 /// all their samples in Metal's tiles, a multisample array's slices an array's; compressed, that
 /// plus metadata over the sample grid for each slice. A `Depth32Float_Stencil8` texture answers
 /// neither (its device's); a compressed one is held in memory of its own
-/// (`Untiled::LOSSLESS_MULTISAMPLE`), any other refused over host pages.
+/// (`Untiled::LOSSLESS_MULTISAMPLE`), and over host pages any other too, announced untiled.
 #[test]
 fn multisample_answers_are_metal_s() {
     use crate::degradation::Degradation as D;

@@ -668,10 +668,8 @@ fn a_heap_shadow_lays_colour_compressed_and_3d_levels_out_tightly() {
 /// 300 x 70, 118797 for 333 x 61); its CPU copies move plane 0's words at those rows.
 #[test]
 fn a_heap_two_plane_texture_lays_its_planes_out_as_metal_does() {
-    use crate::texture::heap::heap_plane_layout;
     use crate::texture::heap_two_planes::TwoPlaneHeapLayout;
-    use metal2vulkan::metal::PixelFormat as P;
-    use metal2vulkan::vk::Format as F;
+    use metal2vulkan::metal::TextureType as T;
     for ([w, h], color, alpha, alpha_row, span) in [
         ([16, 12], 64, 16384, 16, 16576),
         ([37, 5], 160, 16384, 48, 16613),
@@ -691,18 +689,46 @@ fn a_heap_two_plane_texture_lays_its_planes_out_as_metal_does() {
             (color, alpha, alpha_row, span),
             "{w} x {h}"
         );
-        for pf in [P::RGB10A82PXR10, P::RGB10A82PXR10SRGB] {
-            let extent = [w as u32, h as u32, 1];
-            let (planes, end) = heap_plane_layout(F::R32G32_UINT, pf, extent, 1, 1);
-            assert_eq!(end, span);
-            assert_eq!(planes.len(), 1);
-            assert_eq!((planes[0].unit, planes[0].pitch), (4, color));
-            assert_eq!(
-                planes[0].row(0, h - 1, w - 1),
-                (h - 1) * color + 4 * (w - 1)
-            );
+        // A mipmapped texture's first level, and a 3D one's first depth slice, lie alike.
+        for ty in [T::Type2D, T::Type3D] {
+            assert_eq!(TwoPlaneHeapLayout::of_texture(ty, [w, h], 1), layout);
         }
+        let plane = layout.color_plane();
+        assert_eq!((plane.unit, plane.pitch, plane.images), (4, color, 1));
+        assert_eq!(plane.row(0, h - 1, w - 1), (h - 1) * color + 4 * (w - 1));
     }
+}
+
+/// A heap's two-plane array keeps its first level's slices' color words in the heap's bytes as an
+/// Apple M3 Max under macOS 27.0.1 lays them (CPU copies and GPU writes alike): each slice's rows
+/// as a 2D texture's, the slices `align(h · align(4 w, 16), 128)` bytes apart (0x380 for 37 x 5,
+/// 0x200 for 16 x 8, 0x100 for a 1D array of 37), and no alpha plane, which Metal's GPU neither
+/// writes nor reads (its alpha reads 0). A 1D texture lays its row out as a 2D one of one row,
+/// plane 1 at 16 KiB.
+#[test]
+fn a_heap_two_plane_array_lays_its_slices_out_as_metal_does() {
+    use crate::texture::heap_two_planes::TwoPlaneHeapLayout;
+    use metal2vulkan::metal::TextureType as T;
+    for (ty, [w, h], slices, slice, span) in [
+        (T::Type2DArray, [37, 5], 2, 0x380, 0x380 + 4 * 160 + 148),
+        (T::Type2DArray, [16, 8], 3, 0x200, 2 * 0x200 + 7 * 64 + 64),
+        (T::Type1DArray, [37, 1], 3, 0x100, 2 * 0x100 + 148),
+    ] {
+        let layout = TwoPlaneHeapLayout::of_texture(ty, [w, h], slices);
+        assert!(
+            !layout.alpha_kept && !layout.blit_rows(),
+            "{ty:?} {w} x {h}"
+        );
+        assert_eq!((layout.color_slice, layout.span()), (slice, span), "{ty:?}");
+        let plane = layout.color_plane();
+        assert_eq!((plane.images, plane.image_pitch), (slices, slice));
+        assert_eq!(plane.row(slices - 1, h - 1, w - 1), span - 4);
+    }
+    let one = TwoPlaneHeapLayout::of_texture(T::Type1D, [37, 1], 1);
+    assert_eq!(
+        (one.alpha_at, one.span(), one.blit_rows()),
+        (0x4000, 0x4025, true)
+    );
 }
 
 /// A heap numbers its textures in the order it makes them: an encoder that made the textures

@@ -22,7 +22,8 @@
 //!   writes of the CPU's bytes.
 //! - **Layouts the runtime does not follow** ([`HEAP_LAYOUTS`]). A texture Metal keeps
 //!   losslessly compressed (`heap-texture-lossless-layout`), one of a block-compressed format
-//!   whose placement no level measures (PVRTC, `heap-texture-block-compressed-layout`) and one
+//!   whose placement its device's Metal level does not measure (PVRTC at macOS 26.7's,
+//!   `heap-texture-block-compressed-layout`) and one
 //!   of a format whose layout is not measured
 //!   (`heap-texture-untiled-layout`, a two-aspect depth and stencil format) are each counted
 //!   (`Device::degraded_objects`, and its kind's `WorkCounts` field) and usable: the notice is
@@ -31,8 +32,8 @@
 //! - **Multisample textures**. One Metal keeps losslessly compressed lies in memory of its own:
 //!   counted and announced `heap-texture-lossless-layout`, usable (a pass clears and resolves it),
 //!   the heap's bytes keeping every byte they held; the heap's detach is refused while it lives (no
-//!   stand-in zeroes samples). One Metal keeps uncompressed is refused
-//!   `NotImplemented(HostHeapUncompressedMultisample)`. The size query answers at least Metal's
+//!   stand-in zeroes samples). One Metal keeps uncompressed lies in memory of its own too: counted
+//!   and announced `heap-texture-untiled-layout`, usable. The size query answers at least Metal's
 //!   for both.
 
 use super::degrade_notices::{counts, on_device, on_device_with};
@@ -621,14 +622,17 @@ fn a_command_writing_a_tiled_texture_two_ways_keeps_both_writes() {
     });
 }
 
-/// A texture Metal keeps losslessly compressed, one of a block-compressed format whose placement
-/// no level measures (PVRTC) and one of a two-aspect depth and stencil format, each in a heap
-/// over host pages, are counted in their kind's field and `Device::degraded_objects`, and the
-/// first of each kind is announced in the call that made it, with its ID; each is usable after.
-/// Two compressed textures, one notice, a count of two.
+/// A texture Metal keeps losslessly compressed (a colour one, a `Depth32Float_Stencil8` one and an
+/// `X32_Stencil8` one), one of a block-compressed format whose placement its device's Metal level
+/// does not measure (PVRTC at macOS 26.7's, `DeviceOptions::metal_level`) and one whose samples
+/// Metal lays out in the heap's bytes (an uncompressed multisample one, which lies apart from
+/// them), each in a heap over host pages, are counted in their kind's field and
+/// `Device::degraded_objects`, and the first of each kind is announced in the call that made it,
+/// with its ID; each is usable after. Four compressed textures, one notice, a count of four.
 #[test]
 fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced_once() {
-    on_device(|device, messages| {
+    let at_26_7 = |options: &mut DeviceOptions| options.metal_level = Some(MetalLevel::MacOS26_7);
+    on_device_with(at_26_7, |device, messages| {
         let mapping = Mapping::anonymous(HEAP);
         let Some(heap) = heap_over(device, &mapping) else {
             return;
@@ -645,6 +649,15 @@ fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced
             TextureDescriptor::texture_2d(PixelFormat::Depth32FloatStencil8, 32, 32, false);
         aspects.resource_options = shared();
         aspects.usage = read | TextureUsage::RENDER_TARGET;
+        let mut stencil = TextureDescriptor::texture_2d(PixelFormat::X32Stencil8, 32, 32, false);
+        stencil.resource_options = shared();
+        stencil.usage = read;
+        let mut samples = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 32, 32, false);
+        samples.resource_options = shared();
+        samples.texture_type = TextureType::Type2DMultisample;
+        samples.sample_count = 4;
+        samples.usage = TextureUsage::RENDER_TARGET;
+        samples.allow_gpu_optimized_contents = false;
         // Metal's answer for the compressed shape (`heap_textures`): its
         // metadata included.
         let answer = device.heap_texture_size_and_align(&compressed).unwrap();
@@ -653,7 +666,9 @@ fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced
             (compressed, Degradation::HeapTextureLosslessLayout, 1),
             (compressed, Degradation::HeapTextureLosslessLayout, 1),
             (blocks, Degradation::HeapTextureBlockCompressedLayout, 2),
-            (aspects, Degradation::HeapTextureUntiledLayout, 3),
+            (aspects, Degradation::HeapTextureLosslessLayout, 1),
+            (stencil, Degradation::HeapTextureLosslessLayout, 1),
+            (samples, Degradation::HeapTextureUntiledLayout, 3),
         ];
         let mut offset = 0u64;
         let mut kept = Vec::new();
@@ -697,10 +712,10 @@ fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced
                 Some(objects + 1),
                 "{what}: counted"
             );
-            // Usable: its texels round-trip.
-            let (row, rows) = match descriptor.pixel_format {
-                PixelFormat::PVRTCRGBA4BPP => (16 * 8, 16),
-                PixelFormat::RGBA8Unorm => (64 * 4, 64),
+            // Usable: its texels round-trip (a single-sample texture's, which the CPU copies).
+            let (row, rows) = match (descriptor.pixel_format, descriptor.sample_count) {
+                (PixelFormat::PVRTCRGBA4BPP, _) => (16 * 8, 16),
+                (PixelFormat::RGBA8Unorm, 1) => (64 * 4, 64),
                 _ => (0, 0),
             };
             if row > 0 {
@@ -1178,13 +1193,15 @@ fn block_rows_lie_as_their_level_lays_them_out(
 /// counted and announced (`heap-texture-lossless-layout`, the first of its kind, with its ID); the
 /// heap's detach refused while it lives (`NotImplemented(DetachTextures)`); a pass clears it and
 /// resolves it into a texture that reads the clear colour in every texel, and the heap's bytes
-/// keep every byte they held. Without it, which Metal keeps uncompressed, refused
-/// `NotImplemented(HostHeapUncompressedMultisample)`. The size query answers at least Metal's for
+/// keep every byte they held. Without it, which Metal keeps uncompressed (its samples side by side
+/// in Metal's tiles in the heap's bytes), made in memory of its own too, counted and announced
+/// `heap-texture-untiled-layout` with its ID; a pass clears and resolves it alike, the heap's
+/// bytes kept. The size query answers at least Metal's for
 /// each on every device (66048 and 65536 bytes at 128; and measured for the
 /// uncompressed one where the device cannot hold its samples in the heap's bytes, an NVIDIA GPU's:
 /// no optimal image in host-visible memory, no multisample linear image).
 #[test]
-fn a_host_heap_s_compressed_multisample_texture_lies_apart_from_its_bytes() {
+fn a_host_heap_s_multisample_textures_lie_apart_from_its_bytes() {
     on_device(|device, messages| {
         if device.properties().supports_texture_sample_count(4) != Ok(true) {
             eprintln!("HEAPLAYOUT multisample: the device takes no 4-sample texture");
@@ -1207,10 +1224,6 @@ fn a_host_heap_s_compressed_multisample_texture_lies_apart_from_its_bytes() {
                 Ok(answer) => assert!(answer.size >= size && answer.align >= 128, "{answer:?}"),
                 Err(error) => panic!("the size query: {error:?}"),
             }
-        }
-        match heap.new_texture_at_offset(&plain, OFFSET) {
-            Err(Error::NotImplemented(RuntimeGap::HostHeapUncompressedMultisample)) => {}
-            other => panic!("an uncompressed multisample texture: {other:?}"),
         }
         let before = named(HEAP, 11);
         mapping.write(0, &before);
@@ -1235,37 +1248,50 @@ fn a_host_heap_s_compressed_multisample_texture_lies_apart_from_its_bytes() {
             Err(Error::NotImplemented(RuntimeGap::DetachTextures)) => {}
             other => panic!("a detach with a multisample texture: {other:?}"),
         }
+        // Without it: made apart too, its samples' layout announced.
+        let untiled = Degradation::HeapTextureUntiledLayout;
+        let untiled_objects = device
+            .degraded_objects(untiled)
+            .expect("a kind counted per texture");
+        let uncompressed = heap.new_texture_at_offset(&plain, 3 * OFFSET).unwrap();
+        assert_eq!(
+            layout_notices(messages),
+            [(untiled, Some(uncompressed.object_id()))]
+        );
+        assert_eq!(device.degraded_objects(untiled), Some(untiled_objects + 1));
         let mut target = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 64, 64, false);
         target.usage = TextureUsage::RENDER_TARGET;
         target.resource_options = shared();
         let resolved = device.new_texture(&target).unwrap();
-        let mut pass = RenderPassDescriptor::new();
-        let color = &mut pass.color_attachments[0];
-        color.texture = Some(texture.clone());
-        color.load_action = LoadAction::Clear;
-        color.clear_color = ClearColor::new(0.2, 0.4, 0.6, 1.0);
-        color.store_action = StoreAction::MultisampleResolve;
-        color.resolve_texture = Some(resolved.clone());
         let queue = device.new_command_queue().unwrap();
-        let command_buffer = queue.command_buffer().unwrap();
-        let encoder = command_buffer.render_command_encoder(&pass).unwrap();
-        encoder.end_encoding().unwrap();
-        run(&command_buffer);
-        let mut texels = vec![0u8; 64 * 64 * 4];
-        let region = Region::new_2d(0, 0, 64, 64);
-        resolved
-            .get_bytes(&mut texels, 64 * 4, 0, region, 0, 0)
-            .unwrap();
-        assert!(
-            texels.chunks(4).all(|texel| texel == [51, 102, 153, 255]),
-            "resolved: {:?}",
-            &texels[..16]
-        );
+        for source in [&texture, &uncompressed] {
+            let mut pass = RenderPassDescriptor::new();
+            let color = &mut pass.color_attachments[0];
+            color.texture = Some(source.clone());
+            color.load_action = LoadAction::Clear;
+            color.clear_color = ClearColor::new(0.2, 0.4, 0.6, 1.0);
+            color.store_action = StoreAction::MultisampleResolve;
+            color.resolve_texture = Some(resolved.clone());
+            let command_buffer = queue.command_buffer().unwrap();
+            let encoder = command_buffer.render_command_encoder(&pass).unwrap();
+            encoder.end_encoding().unwrap();
+            run(&command_buffer);
+            let mut texels = vec![0u8; 64 * 64 * 4];
+            let region = Region::new_2d(0, 0, 64, 64);
+            resolved
+                .get_bytes(&mut texels, 64 * 4, 0, region, 0, 0)
+                .unwrap();
+            assert!(
+                texels.chunks(4).all(|texel| texel == [51, 102, 153, 255]),
+                "resolved: {:?}",
+                &texels[..16]
+            );
+        }
         let after = mapping.read(0..HEAP);
         let differ = (0..HEAP).filter(|&i| after[i] != before[i]).count();
         assert_eq!(differ, 0, "the heap's bytes changed");
-        drop((texture, resolved, heap));
+        drop((texture, uncompressed, resolved, heap));
         drop(mapping);
-        eprintln!("HEAPLAYOUT multisample: compressed made apart, uncompressed refused");
+        eprintln!("HEAPLAYOUT multisample: compressed and uncompressed made apart");
     });
 }

@@ -51,8 +51,12 @@
 //!   `tests/heap_tiled_blocks.rs` as the M4 does, its CPU's spans and its GPU's. The device's Metal
 //!   level names each family's placement and its GPU's count (`MetalLevel::heap_blocks`,
 //!   `MetalLevel::heap_block_gpu_rows`): the CPU copies place blocks by `TiledLevel::across`, the
-//!   kernel's moves by `TiledLevel::gpu_across`, as Metal's own two paths do. A PVRTC texture stays
-//!   untiled (`heap-texture-block-compressed-layout`), its answer its device's.
+//!   kernel's moves by `TiledLevel::gpu_across`, as Metal's own two paths do. PVRTC's blocks lie
+//!   so too, `Halved`, under 27.0.1 (an Apple M3 Max: 320 answers, every PVRTC format square from
+//!   4 to 2048 texels, one level and full chains, one slice and three; every block of each level of
+//!   six textures, written by a row-linear blit; `tests/heap_tiled_blocks.rs`); under 26.7 they
+//!   are not measured, so a PVRTC texture there stays untiled
+//!   (`heap-texture-block-compressed-layout`), its answer its device's.
 //! - **Lossless compression** (14174 answers of every plain format, type, shape, usage and storage
 //!   mode). Metal keeps a texture losslessly compressed where `allowGPUOptimizedContents` holds and
 //!   the shorter side of its level 0 is 16 texels or more (16 x 16 compressed; 16 x 8, 6 x 43 and
@@ -100,13 +104,28 @@
 //!   the consumer's report), and so does a one-sample one, of every type and level count,
 //!   compressed or not (every one of 14552 answers each on the M4 and the M3 Max, 2D, and 12330 on
 //!   the M4, 2D arrays, cubes and cube arrays). Over host pages a compressed one lies in memory of
-//!   its own and is announced `heap-texture-lossless-layout`; an uncompressed one is refused
-//!   (`RuntimeGap::HostHeapUncompressedMultisample`, `heap.rs`). In any
+//!   its own and is announced `heap-texture-lossless-layout`; an uncompressed one lies in memory
+//!   of its own too, its samples apart from the heap's bytes (`heap-texture-untiled-layout`,
+//!   `heap.rs`). In any
 //!   heap one whose image the heap's memory or Metal's answer cannot hold lies in memory of its own
 //!   too.
-//! - **Not measured**: a two-aspect depth and stencil format's layout (`Depth32Float_Stencil8`'s
-//!   answer is, above) and a PVRTC format's; the runtime holds them untiled
-//!   (`heap-texture-untiled-layout`), a PVRTC texture at its device's answer.
+//! - **Two aspects.** A single-sample `Depth32Float_Stencil8` texture lies in two planes, its depth
+//!   elements as a `Depth32Float` texture of its shape lies, from its first byte, and its stencil
+//!   elements as a `Stencil8` one lies, from the `Depth32Float` answer rounded up to 16 KiB
+//!   (`TiledTexture`; an Apple M3 Max under macOS 27.0.1, `allowGPUOptimizedContents` off: every
+//!   texel of each aspect of one-level 16 x 16 to 300 x 200 textures, of 7-level 64 x 64 and
+//!   100 x 70 ones and of arrays of 2 and 3 slices, 1 to 4 levels, written by blits and found in
+//!   the heap's bytes, and the bytes written there read back by blits). With it on Metal keeps the
+//!   depth plane compressed, and a shadow holds its uncompressed tiles, the stencil plane past the
+//!   compressed answer (`heap-texture-lossless-layout`).
+//! - **A stencil view.** An `X32_Stencil8` texture lies as a `Stencil8` texture of its shape lies,
+//!   compressed or not, and answers as one (an Apple M3 Max under macOS 27.0.1: 1720 answers, 1 to
+//!   1024 texels a side, 1 to 3 levels, 1 and 3 slices, allowGPUOptimizedContents off and on; every
+//!   texel of one-level 8 x 8 to 300 x 200 textures written by blits and found where a `Stencil8`
+//!   texture's lie, and the bytes written there read back by blits). Its image's tiles are its
+//!   stencil aspect's; the image's depth holds none of its texels.
+//! - **Not measured**: a PVRTC format's layout under macOS 26.7; the runtime holds it untiled
+//!   (`heap-texture-block-compressed-layout`) at its device's answer.
 //!
 //! **Held** as the texture's image in memory of its own, a shadow of the heap's bytes
 //! (`shadow.rs`, `ShadowTarget::Tiled`): into the image, the texture's bytes copied into a
@@ -287,10 +306,12 @@ pub(crate) enum BlockFamily {
     Etc,
     /// ASTC of every block size, LDR, sRGB and HDR.
     Astc,
+    /// PVRTC of 2 and 4 bits a pixel, RGB and RGBA, linear and sRGB.
+    Pvrtc,
 }
 
 impl BlockFamily {
-    /// The family of `pf`; `None` for a format of none (PVRTC's and every plain format).
+    /// The family of `pf`; `None` for a format of none (every plain format).
     pub(crate) fn of(pf: PixelFormat) -> Option<BlockFamily> {
         use PixelFormat as P;
         Some(match block_family(pf) {
@@ -318,6 +339,9 @@ impl BlockFamily {
             | P::ASTC10x10LDR
             | P::ASTC12x10LDR
             | P::ASTC12x12LDR => BlockFamily::Astc,
+            P::PVRTCRGB2BPP | P::PVRTCRGB4BPP | P::PVRTCRGBA2BPP | P::PVRTCRGBA4BPP => {
+                BlockFamily::Pvrtc
+            }
             _ => return None,
         })
     }
@@ -759,6 +783,53 @@ fn depth_stencil_planes(depth: SizeAndAlign, stencil: SizeAndAlign) -> SizeAndAl
     }
 }
 
+/// A single-sample `Depth32Float_Stencil8` texture of `layout`'s two planes in Metal's tiles
+/// (the module docs), its image of `format`: the depth plane's elements laid out as a
+/// `Depth32Float` texture of its shape is, from the texture's first byte, and the stencil plane's
+/// as a `Stencil8` one's, from the depth plane's answer (kept compressed where `compressed`, its
+/// metadata counted) rounded up to 16 KiB. `None` where the image holds other elements than
+/// those planes' or a plane has no layout.
+fn depth_stencil_tiles(
+    layout: &TextureLayout,
+    format: Format,
+    compressed: bool,
+) -> Option<TiledTexture> {
+    let holds = matches!(
+        copy_units(format, layout.pixel_format)[..],
+        [
+            (ImageAspectFlags::DEPTH, 4, [1, 1]),
+            (ImageAspectFlags::STENCIL, 1, [1, 1])
+        ]
+    );
+    if !holds || layout.samples > 1 {
+        return None;
+    }
+    let extent = layout.extent.map(u64::from);
+    let (ty, levels, slices) = (layout.texture_type, layout.levels, u64::from(layout.layers));
+    let plane = |unit| TiledLayout::of(unit, Elements::Texels, ty, extent, levels, slices);
+    let (depth, stencil) = (plane(4)?, plane(1)?);
+    let depth_bytes = match compressed {
+        true => lossless_answer(&depth)?.size,
+        false => depth.size,
+    };
+    let at = depth_bytes.next_multiple_of(PAGE);
+    Some(TiledTexture {
+        size: at + stencil.size,
+        parts: vec![
+            TiledPart {
+                aspect: Some(ImageAspectFlags::DEPTH),
+                at: 0,
+                layout: depth,
+            },
+            TiledPart {
+                aspect: Some(ImageAspectFlags::STENCIL),
+                at,
+                layout: stencil,
+            },
+        ],
+    })
+}
+
 /// The answer of a texture laid out uncompressed as `layout`, kept compressed with `metadata`
 /// bytes for each chain.
 fn with_metadata(layout: &TiledLayout, metadata: u64) -> SizeAndAlign {
@@ -823,7 +894,7 @@ pub(crate) struct Untiled {
 
 impl Untiled {
     /// A texture Metal may keep losslessly compressed (`heap-texture-lossless-layout`).
-    const LOSSLESS: Untiled = Untiled {
+    pub(crate) const LOSSLESS: Untiled = Untiled {
         kind: Degradation::HeapTextureLosslessLayout,
         reason: "Metal may keep it losslessly compressed (allowGPUOptimizedContents, 256 texels \
                  or more, and none of ShaderWrite, PixelFormatView and ShaderAtomic usage, or a \
@@ -839,6 +910,21 @@ impl Untiled {
                  stencil format), whose bytes in the heap are no layout of its samples: its \
                  image lies in memory of its own, and the heap's bytes keep what they held",
     };
+    /// A texture of a heap over the device's memory whose image lies in the heap's bytes in the
+    /// driver's layout (`heap-texture-untiled-layout`, `heap.rs`).
+    pub(crate) const DRIVER: Untiled = Untiled::other(
+        "its image lies in the heap's bytes in the device driver's layout, which no driver fact \
+         measures as Metal's tiles (DriverFact::ColorImagesLieAsMetalHeapTextures)",
+    );
+    /// A texture of a heap over the device's memory whose image is a shadow of the heap's bytes
+    /// in rows, where Metal tiles its elements (`heap-texture-untiled-layout`, `heap.rs`).
+    pub(crate) const ROWS: Untiled = Untiled::other(
+        "its image is a shadow of the heap's bytes in rows, where Metal tiles its elements",
+    );
+    /// A multisample texture whose image lies in the heap's bytes, where Metal lays its samples
+    /// out by a layout no image of the runtime's is measured to hold
+    /// (`heap-texture-untiled-layout`, `heap.rs`).
+    pub(crate) const MULTISAMPLE: Untiled = Untiled::other(MULTISAMPLE_SAMPLES);
     /// A block-compressed texture whose placement the device's Metal level does not measure
     /// (`heap-texture-block-compressed-layout`).
     const BLOCK_COMPRESSED: Untiled = Untiled {
@@ -868,17 +954,106 @@ const MULTISAMPLE_SAMPLES: &str = "Metal lays the multisample texture's samples 
                                    bytes, which no route of the runtime's holds yet, or their \
                                    layout is not measured";
 
+/// A texture's elements in Metal's tiles: one layout of all of them ([`TiledTexture::one`]), or a
+/// `Depth32Float_Stencil8` texture's two planes, each one aspect's elements laid out as a texture
+/// of that aspect's format and the texture's shape is (the module docs).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TiledTexture {
+    /// Its parts, in the order of their bytes.
+    pub(crate) parts: Vec<TiledPart>,
+    /// The bytes from the texture's first to past its last part's last.
+    pub(crate) size: u64,
+}
+
+/// One part of a [`TiledTexture`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TiledPart {
+    /// The aspect of the image whose elements it lays out; `None` for each of the image's.
+    pub(crate) aspect: Option<ImageAspectFlags>,
+    /// Its first byte, from the texture's.
+    pub(crate) at: u64,
+    /// Its elements' layout, from its first byte.
+    pub(crate) layout: TiledLayout,
+}
+
+impl TiledTexture {
+    /// A texture whose elements lie as `layout` says, from its first byte.
+    pub(crate) fn one(layout: TiledLayout) -> TiledTexture {
+        TiledTexture {
+            size: layout.size,
+            parts: vec![TiledPart {
+                aspect: None,
+                at: 0,
+                layout,
+            }],
+        }
+    }
+
+    /// The part that lays out `aspect`'s elements.
+    pub(crate) fn part(&self, aspect: ImageAspectFlags) -> Option<&TiledPart> {
+        (self.parts.iter()).find(|part| part.aspect.is_none_or(|own| own == aspect))
+    }
+}
+
 /// What the runtime holds of Metal's layout of a heap texture's bytes (the module docs).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum HeapLayout {
     /// Its elements as Metal lays them: over host pages a shadow of them
     /// (`HeapTiledCopies`).
-    Tiled(TiledLayout),
+    Tiled(TiledTexture),
     /// Not laid out as Metal's: over host pages, announced once per texture.
     Untiled(Untiled),
     /// Laid out as a measured route of its own lays it (a 4:2:2 texture's rows, a two-plane
     /// texture's planes; `heap.rs`).
     Measured,
+    /// A texture Metal keeps losslessly compressed, whose bytes are no layout of its texels
+    /// ([`Untiled::LOSSLESS`]), held by a shadow of its elements in the tiles Metal lays it in
+    /// uncompressed (`heap.rs`): announced once per texture as `heap-texture-lossless-layout`.
+    Uncompressed(TiledTexture),
+}
+
+impl HeapLayout {
+    /// The tiles a shadow of the texture's bytes lays its elements in: Metal's
+    /// ([`HeapLayout::Tiled`]), or its uncompressed ones ([`HeapLayout::Uncompressed`]).
+    pub(crate) fn tiles(&self) -> Option<&TiledTexture> {
+        match self {
+            HeapLayout::Tiled(tiled) | HeapLayout::Uncompressed(tiled) => Some(tiled),
+            HeapLayout::Untiled(_) | HeapLayout::Measured => None,
+        }
+    }
+}
+
+/// The layout a shadow of the heap's bytes holds a single-sample texture of `layout` (its image of
+/// `format`, at the Metal level `level`) in, where Metal lays it out as `metal`: Metal's tiles
+/// where it tiles the texture ([`HeapLayout::Tiled`]); where it keeps the texture losslessly
+/// compressed ([`Untiled::LOSSLESS`]), the tiles it lays the texture in uncompressed
+/// ([`HeapLayout::Uncompressed`]); `None` for any other (a layout not measured, or an image that
+/// holds other bytes than Metal's elements).
+pub(crate) fn shadow_tiles(
+    layout: &TextureLayout,
+    format: Format,
+    level: MetalLevel,
+    metal: &HeapLayout,
+) -> Option<HeapLayout> {
+    if layout.samples > 1 {
+        return None;
+    }
+    match metal {
+        HeapLayout::Tiled(_) => Some(metal.clone()),
+        HeapLayout::Untiled(untiled) if *untiled == Untiled::LOSSLESS => {
+            // A two-aspect texture's depth plane kept compressed, its stencil plane after it.
+            if layout.pixel_format == PixelFormat::Depth32FloatStencil8 {
+                return depth_stencil_tiles(layout, format, true).map(HeapLayout::Uncompressed);
+            }
+            // With `allowGPUOptimizedContents` off Metal keeps every texture uncompressed.
+            let plain = metal_heap_layout(layout, TextureUsage::SHADER_READ, false, format, level);
+            match plain.layout {
+                HeapLayout::Tiled(tiled) => Some(HeapLayout::Uncompressed(tiled)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Metal's answer for a heap texture where the runtime knows it, and the runtime's layout of it.
@@ -907,6 +1082,13 @@ fn image_element(pf: PixelFormat, format: Format) -> Option<(u64, [u64; 2])> {
             .find(|(aspect, _, _)| *aspect == ImageAspectFlags::STENCIL)
             .filter(|_| units.len() == 1)
             .map(|&(_, bytes, block)| (bytes, block)),
+        // A stencil view's image holds a depth aspect it does not name (`heap_plane_layout`).
+        PixelFormat::X32Stencil8 => match units[..] {
+            [(ImageAspectFlags::DEPTH, _, _), (ImageAspectFlags::STENCIL, bytes, block)] => {
+                Some((bytes, block))
+            }
+            _ => None,
+        },
         PixelFormat::Depth16Unorm | PixelFormat::Depth32Float => match units[..] {
             [(ImageAspectFlags::DEPTH, bytes, block)] => {
                 (depth_bytes(format) == Some(bytes)).then_some((bytes, block))
@@ -936,7 +1118,7 @@ fn metal_element(pf: PixelFormat) -> Option<u64> {
     match pf {
         PixelFormat::Depth16Unorm => Some(2),
         PixelFormat::Depth32Float => Some(4),
-        PixelFormat::Stencil8 => Some(1),
+        PixelFormat::Stencil8 | PixelFormat::X32Stencil8 => Some(1),
         pf if is_depth_stencil(pf) => None,
         pf => block_bytes(pf).map(u64::from),
     }
@@ -974,9 +1156,9 @@ pub(crate) fn metal_heap_layout(
         answer,
         layout: HeapLayout::Untiled(why),
     };
-    // Block-compressed formats: Metal's allocations are its blocks' (every BC, ETC2, EAC and ASTC
-    // format), alike under both placements, so a placement the level does not measure answers
-    // `Halved`'s; PVRTC's are not measured.
+    // Block-compressed formats: Metal's allocations are its blocks' (every BC, ETC2, EAC, ASTC
+    // and PVRTC format), alike under both placements, so a placement the level does not measure
+    // answers `Halved`'s; PVRTC's are measured only where its placement is.
     if let Some([bw, bh]) = block_extent(pf) {
         let block = [u64::from(bw), u64::from(bh)];
         let family = BlockFamily::of(pf);
@@ -987,7 +1169,8 @@ pub(crate) fn metal_heap_layout(
             gpu_rows: level.heap_block_gpu_rows(),
         };
         let unit = block_bytes(pf).map(u64::from);
-        let tiled = unit.filter(|_| family.is_some()).and_then(|unit| {
+        let measured = placement.is_some() || family.is_some_and(|f| f != BlockFamily::Pvrtc);
+        let tiled = unit.filter(|_| measured).and_then(|unit| {
             let ty = layout.texture_type;
             let extent = [width, height, depth];
             TiledLayout::of(unit, elements, ty, extent, layout.levels, slices)
@@ -1007,7 +1190,7 @@ pub(crate) fn metal_heap_layout(
         }
         return MetalHeapLayout {
             answer,
-            layout: HeapLayout::Tiled(tiled),
+            layout: HeapLayout::Tiled(TiledTexture::one(tiled)),
         };
     }
     if layout.samples > 1 {
@@ -1019,8 +1202,8 @@ pub(crate) fn metal_heap_layout(
     let colour = !is_depth_stencil(pf);
     let compressed = metal_compresses(colour, usage, allow_gpu_optimized_contents, level0);
     // `Depth32Float_Stencil8`: its two planes, `Depth32Float`'s and `Stencil8`'s answers for the
-    // descriptor, the depth plane rounded up to 16 KiB; their layout is not measured, so a heap
-    // over host pages holds it untiled as before.
+    // descriptor, the depth plane rounded up to 16 KiB, each laid out as a texture of its format
+    // (`depth_stencil_tiles`); Metal may keep the depth plane compressed.
     if pf == PixelFormat::Depth32FloatStencil8 {
         let plane = |pixel_format| {
             let one = TextureLayout {
@@ -1032,7 +1215,19 @@ pub(crate) fn metal_heap_layout(
         let answer = plane(PixelFormat::Depth32Float)
             .zip(plane(PixelFormat::Stencil8))
             .map(|(depth, stencil)| depth_stencil_planes(depth, stencil));
-        return untiled(answer, Untiled::other(UNMEASURED_FORMAT));
+        if compressed {
+            return untiled(answer, Untiled::LOSSLESS);
+        }
+        return match depth_stencil_tiles(layout, format, false) {
+            Some(tiles) => MetalHeapLayout {
+                answer,
+                layout: HeapLayout::Tiled(tiles),
+            },
+            None => untiled(
+                answer,
+                Untiled::other("its image holds other bytes than Metal's elements"),
+            ),
+        };
     }
     let Some(unit) = metal_element(pf) else {
         return untiled(None, Untiled::other(UNMEASURED_FORMAT));
@@ -1062,9 +1257,14 @@ pub(crate) fn metal_heap_layout(
             Untiled::other("its image holds other bytes than Metal's elements"),
         );
     }
+    // A stencil view's tiles are its image's stencil aspect's.
+    let mut tiles = TiledTexture::one(tiled);
+    if pf == PixelFormat::X32Stencil8 {
+        tiles.parts[0].aspect = Some(ImageAspectFlags::STENCIL);
+    }
     MetalHeapLayout {
         answer: plain,
-        layout: HeapLayout::Tiled(tiled),
+        layout: HeapLayout::Tiled(tiles),
     }
 }
 
@@ -1076,7 +1276,8 @@ pub(crate) fn metal_heap_layout(
 /// two planes: the depth plane (`Depth32Float`'s answer) rounded up to 16 KiB, then the stencil
 /// plane (`Stencil8`'s), at the depth plane's alignment. A sample count Apple's GPUs do not make
 /// is not measured. Metal's compression decides how a heap over host pages holds it
-/// ([`Untiled::LOSSLESS_MULTISAMPLE`], in memory of its own; any other is refused, `heap.rs`).
+/// ([`Untiled::LOSSLESS_MULTISAMPLE`]; any other, its samples apart from the heap's bytes): in
+/// memory of its own (`heap.rs`).
 fn multisample_heap_layout(
     layout: &TextureLayout,
     usage: TextureUsage,
@@ -1085,12 +1286,12 @@ fn multisample_heap_layout(
     let pf = layout.pixel_format;
     let [width, height, _] = layout.extent.map(u64::from);
     let samples = layout.samples;
-    let refused = |answer| MetalHeapLayout {
+    let apart = |answer| MetalHeapLayout {
         answer,
         layout: HeapLayout::Untiled(Untiled::other(MULTISAMPLE_SAMPLES)),
     };
     let Some(grid) = sample_grid(samples, [width, height]) else {
-        return refused(None);
+        return apart(None);
     };
     let colour = !is_depth_stencil(pf);
     let compressed = metal_compresses(colour, usage, allow_gpu_optimized_contents, grid);
@@ -1123,7 +1324,7 @@ fn multisample_heap_layout(
             layout: HeapLayout::Untiled(Untiled::LOSSLESS_MULTISAMPLE),
         };
     }
-    refused(answer)
+    apart(answer)
 }
 
 /// One direction of the kernel's moves: its shape, where it lies in the shape buffer, and the
@@ -1139,7 +1340,7 @@ struct Move {
 /// (into the image, then back).
 pub(crate) struct HeapTiledCopies {
     /// Metal's layout of the texture's elements.
-    pub(crate) layout: TiledLayout,
+    pub(crate) tiles: TiledTexture,
     /// The image's elements, each level's from its plane's offset; held for the texture's life.
     /// No command's uses name it: every copy writes the image or the heap's bytes, so the
     /// tracker orders it after every other copy of the texture, and each records a full barrier
@@ -1163,36 +1364,40 @@ impl HeapTiledCopies {
         &self.regions
     }
 
-    /// The kernel's levels of a texture of `layout` whose image's elements lie in the tight
-    /// buffer as `planes` say (`heap_plane_layout`, one plane a level); `None` where a byte the
-    /// moves name lies past `u32`, or the planes are not the levels'.
-    fn levels(layout: &TiledLayout, planes: &[HeapPlane]) -> Option<Vec<TiledLevelMove>> {
-        if planes.len() != layout.levels.len() {
-            return None;
-        }
+    /// The kernel's levels of a texture of `tiles` whose image's elements lie in the tight
+    /// buffer as `planes` say (`heap_plane_layout`, one plane a level of each aspect), each
+    /// part's levels its aspect's planes'; `None` where a byte the moves name lies past `u32`, or
+    /// the planes are not the levels'.
+    fn levels(tiles: &TiledTexture, planes: &[HeapPlane]) -> Option<Vec<TiledLevelMove>> {
         let narrow = |v: u64| u32::try_from(v).ok();
-        layout
-            .levels
-            .iter()
-            .zip(planes)
-            .map(|(level, plane)| {
-                let images = plane.images;
+        let mut moves = Vec::new();
+        for part in &tiles.parts {
+            let layout = &part.layout;
+            let own: Vec<&HeapPlane> = (planes.iter())
+                .filter(|plane| part.aspect.is_none_or(|aspect| aspect == plane.aspect))
+                .collect();
+            if own.len() != layout.levels.len() {
+                return None;
+            }
+            for (level, plane) in layout.levels.iter().zip(own) {
                 if plane.blocks != level.extent || plane.unit != layout.unit {
                     return None;
                 }
-                Some(TiledLevelMove::new(
+                moves.push(TiledLevelMove::new(
                     narrow(layout.unit)?,
                     [narrow(level.extent[0])?, narrow(level.extent[1])?],
-                    narrow(images)?,
+                    narrow(plane.images)?,
                     [narrow(level.tile[0])?, narrow(level.tile[1])?],
                     narrow(level.gpu_across)?,
-                    narrow(level.base)?,
+                    narrow(part.at + level.base)?,
                     narrow(layout.stride)?,
                     narrow(plane.offset)?,
                     narrow(level.bytes)?,
-                ))
-            })
-            .collect()
+                ));
+            }
+        }
+        // Every plane is a part's.
+        (moves.len() == planes.len()).then_some(moves)
     }
 
     /// The workgroups of a dispatch of `invocations` within `device`'s counts, or `None`.
@@ -1206,13 +1411,13 @@ impl HeapTiledCopies {
         fits.then_some([across as u32, down as u32])
     }
 
-    /// Whether the moves of a texture of `layout`, its tight buffer laid out as `planes` and
+    /// Whether the moves of a texture of `tiles`, its tight buffer laid out as `planes` and
     /// `tight_len` bytes long, fit `device`: every byte they name within `u32`, at most
-    /// `TiledTexelsModule::MAX_LEVELS` levels, each buffer within `maxStorageBufferRange`, and
-    /// each dispatch within `maxComputeWorkGroupCount`.
+    /// `TiledTexelsModule::MAX_LEVELS` levels of all its parts, each buffer within
+    /// `maxStorageBufferRange`, and each dispatch within `maxComputeWorkGroupCount`.
     pub(crate) fn fit(
         device: &Device,
-        layout: &TiledLayout,
+        tiles: &TiledTexture,
         planes: &[HeapPlane],
         tight_len: u64,
     ) -> bool {
@@ -1223,7 +1428,7 @@ impl HeapTiledCopies {
                 .limits
                 .max_storage_buffer_range,
         );
-        let Some(levels) = Self::levels(layout, planes) else {
+        let Some(levels) = Self::levels(tiles, planes) else {
             return false;
         };
         let moves = [true, false].iter().all(|&into| {
@@ -1234,36 +1439,39 @@ impl HeapTiledCopies {
             u32::try_from(invocations).is_ok() && Self::grid(device, invocations).is_some()
         });
         levels.len() <= TiledTexelsModule::MAX_LEVELS as usize
-            && layout.size <= range
-            && u32::try_from(layout.size).is_ok()
+            && tiles.size <= range
+            && u32::try_from(tiles.size).is_ok()
             && tight_len.next_multiple_of(4) <= range
             && u32::try_from(tight_len).is_ok()
             && moves
     }
 
-    /// The staging buffer of a texture of `layout` whose first byte lies at `at` of the heap's
+    /// The staging buffer of a texture of `tiles` whose first byte lies at `at` of the heap's
     /// `VkBuffer`: the texture's bytes, from its first to its last, at its start, of the
-    /// texture's `hazard` tracking; each level's bytes of each chain copied back.
+    /// texture's `hazard` tracking; each level's bytes of each chain of each part copied back.
     pub(crate) fn staging(
         device: &Device,
-        layout: &TiledLayout,
+        tiles: &TiledTexture,
         at: u64,
         hazard: HazardTrackingMode,
     ) -> Result<ShadowStaging, Error> {
         let options =
             ResourceOptions::new(StorageMode::Private, CpuCacheMode::DefaultCache, hazard);
-        let buffer = device.own_buffer(layout.size, options)?;
+        let buffer = device.own_buffer(tiles.size, options)?;
         let (_, start) = buffer.at(0);
-        let back = (0..layout.chains)
-            .flat_map(|chain| {
-                layout.levels.iter().filter_map(move |level| {
-                    // A 3D level lies in the chains of its depth slices alone.
-                    let used = !layout.volume || chain < level.depth;
-                    let first = chain * layout.stride + level.base;
-                    used.then_some(vk::BufferCopy {
-                        src_offset: start + first,
-                        dst_offset: at + first,
-                        size: level.bytes,
+        let back = (tiles.parts.iter())
+            .flat_map(|part| {
+                let layout = &part.layout;
+                (0..layout.chains).flat_map(move |chain| {
+                    layout.levels.iter().filter_map(move |level| {
+                        // A 3D level lies in the chains of its depth slices alone.
+                        let used = !layout.volume || chain < level.depth;
+                        let first = part.at + chain * layout.stride + level.base;
+                        used.then_some(vk::BufferCopy {
+                            src_offset: start + first,
+                            dst_offset: at + first,
+                            size: level.bytes,
+                        })
                     })
                 })
             })
@@ -1272,14 +1480,14 @@ impl HeapTiledCopies {
             into: vk::BufferCopy {
                 src_offset: at,
                 dst_offset: start,
-                size: layout.size,
+                size: tiles.size,
             },
             back,
             buffer,
         })
     }
 
-    /// The moves of a texture of `layout` through `staging` (its `staging`),
+    /// The moves of a texture of `tiles` through `staging` (its `staging`),
     /// whose image's elements lie in its tight buffer as `planes` say, `tight_len` bytes, copied
     /// to and from the image by `regions` (offsets in that buffer), of the texture's `hazard`
     /// tracking. Refused as `new_buffer` refuses the tight and shape buffers; the caller checked
@@ -1287,12 +1495,12 @@ impl HeapTiledCopies {
     pub(crate) fn new(
         device: &Device,
         staging: &ShadowStaging,
-        layout: TiledLayout,
+        tiles: TiledTexture,
         (planes, tight_len): (&[HeapPlane], u64),
         regions: &[vk::BufferImageCopy],
         hazard: HazardTrackingMode,
     ) -> Result<HeapTiledCopies, Error> {
-        let levels = Self::levels(&layout, planes)
+        let levels = Self::levels(&tiles, planes)
             .ok_or_else(|| internal("a tiled heap texture's moves past u32"))?;
         let options =
             ResourceOptions::new(StorageMode::Private, CpuCacheMode::DefaultCache, hazard);
@@ -1326,7 +1534,7 @@ impl HeapTiledCopies {
                 .map(|step| {
                     vec![
                         (tight_raw, tight_at, tight_bytes),
-                        (staging_raw, staging_at, layout.size),
+                        (staging_raw, staging_at, tiles.size),
                         (shapes_raw, step.at, shape_bytes),
                     ]
                 })
@@ -1340,7 +1548,7 @@ impl HeapTiledCopies {
             })
             .collect();
         Ok(HeapTiledCopies {
-            layout,
+            tiles,
             _tight: tight,
             tight_raw,
             regions,
