@@ -6,6 +6,7 @@
 //! that answers otherwise fails here, naming the streams.
 
 use crate::gpu::compile;
+use crate::gpu::wait::metal::commit_and_wait;
 use crate::runtime_lane::predication::{cmp_rows, measured_streams, CMP_BRANCHES};
 use core::ffi::c_void;
 use core::ptr::NonNull;
@@ -14,10 +15,9 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSRange, NSString};
 use objc2_metal::{
-    MTLBarrierScope, MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandBufferStatus,
-    MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineState,
-    MTLDevice, MTLDispatchType, MTLFence, MTLLibrary, MTLResourceOptions, MTLResourceUsage,
-    MTLSize,
+    MTLBarrierScope, MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder,
+    MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineState, MTLDevice, MTLDispatchType,
+    MTLFence, MTLLibrary, MTLResourceOptions, MTLResourceUsage, MTLSize,
 };
 
 type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
@@ -47,14 +47,13 @@ struct Probe {
     fence: Retained<ProtocolObject<dyn MTLFence>>,
 }
 
-/// A stream's end on Metal: the count of each tag, what its Ends answered, and its command
-/// buffer's status and error code.
+/// A stream's end on Metal: the count of each tag, what its Ends answered, and how its command
+/// buffer ended (`Ok` where it completed; the bounded wait's error where not).
 #[derive(Debug, PartialEq, Eq)]
 struct Ran {
     counts: Vec<u32>,
     answers: String,
-    status: MTLCommandBufferStatus,
-    error: Option<isize>,
+    settled: Result<(), String>,
 }
 
 impl Ran {
@@ -186,16 +185,14 @@ impl Probe {
         if let Some(encoder) = open {
             encoder.endEncoding();
         }
-        command_buffer.commit();
-        command_buffer.waitUntilCompleted();
+        let settled = commit_and_wait(&command_buffer, "Metal predication stream");
         let contents = self.log.contents().cast::<u32>();
-        // SAFETY: the Shared log's words, read after the command buffer completed.
+        // SAFETY: the Shared log's words, read once the command buffer's work ended.
         let counts = unsafe { std::slice::from_raw_parts(contents.as_ptr(), LOG_WORDS) }.to_vec();
         Ran {
             counts,
             answers,
-            status: command_buffer.status(),
-            error: command_buffer.error().map(|error| error.code()),
+            settled,
         }
     }
 
@@ -319,8 +316,7 @@ fn metal_runs_the_measured_streams() {
     let mut wrong = Vec::new();
     for (name, script, ran, answers) in &streams {
         let got = probe.run(script);
-        let completed = got.status == MTLCommandBufferStatus::Completed;
-        if got.once().as_ref() != Some(ran) || got.answers != *answers || !completed {
+        if got.once().as_ref() != Some(ran) || got.answers != *answers || got.settled.is_err() {
             wrong.push(format!(
                 "{name} `{script}`: {got:?}, recorded {ran:?} {answers:?}"
             ));
@@ -366,8 +362,7 @@ fn metal_compares_as_recorded() {
         }
     }
     encoder.endEncoding();
-    command_buffer.commit();
-    command_buffer.waitUntilCompleted();
+    commit_and_wait(&command_buffer, "Metal predication comparisons").unwrap();
     let contents = probe.log.contents().cast::<u32>();
     // SAFETY: the Shared log's words, read after the command buffer completed.
     let log = unsafe { std::slice::from_raw_parts(contents.as_ptr(), LOG_WORDS) };
@@ -490,7 +485,7 @@ fn metal_runs_loops_as_the_lane_expects() {
         for (tag, n) in want {
             counts[tag] = n;
         }
-        assert_eq!(got.status, MTLCommandBufferStatus::Completed, "{script}");
+        assert_eq!(got.settled, Ok(()), "{script}");
         assert_eq!(got.counts, counts, "{script}");
         assert_eq!(got.answers, answers, "{script}");
     }
@@ -498,27 +493,13 @@ fn metal_runs_loops_as_the_lane_expects() {
 
 /// A block open where its unit ends, on Metal (the runtime lane's
 /// `a_block_open_where_its_unit_ends_fails_where_metals_recovery_does`): where the unit's commands
-/// skip there, Metal's GPU recovery fails the command buffer, `MTLCommandBufferErrorInternal` (1)
-/// or, in some runs, `PageFault` (3); where they run, it completes with every mark recorded.
-/// Ignored: each failing case is a GPU recovery of this host's GPU, which may fail other work on
-/// it; run it on request (`--run-ignored only`), under the GPU lock.
+/// run there (a held If, a held While, which ran once, a DoWhile, a failed If's Else) and in a
+/// killed block, the command buffer completes with every mark recorded. Where they skip there,
+/// Metal's GPU recovery fails the command buffer (`MTLCommandBufferErrorInternal`, `PageFault` in
+/// some runs), which the bounded wait records as a GPU fault: those cases are not run here.
 #[test]
-#[ignore = "each failing case is a GPU recovery of this host's GPU"]
-fn metal_fails_a_skipping_block_open_where_its_unit_ends() {
+fn metal_runs_a_block_left_open_where_its_commands_run() {
     let probe = Probe::new();
-    let failing = [
-        "T1 I0 T2",
-        "T1 I0 T2 B T3",
-        "T1 W0 T2 B T3",
-        "T1 I1 T2 L T3 B T4",
-        "T1 I1 I0 T2 B T3",
-        "T1 I0 T2 Fu | E T4",
-    ];
-    for script in failing {
-        let got = probe.run(script);
-        assert_eq!(got.status, MTLCommandBufferStatus::Error, "{script}");
-        assert!(matches!(got.error, Some(1 | 3)), "{script}: {got:?}");
-    }
     let harmless: [(&str, &[u32]); 6] = [
         ("T5 B I1 T1 B T3", &[1, 3, 5]),
         ("T5 B W1 T1 B T3", &[1, 3, 5]),
@@ -529,7 +510,7 @@ fn metal_fails_a_skipping_block_open_where_its_unit_ends() {
     ];
     for (script, ran) in harmless {
         let got = probe.run(script);
-        assert_eq!(got.status, MTLCommandBufferStatus::Completed, "{script}");
+        assert_eq!(got.settled, Ok(()), "{script}");
         assert_eq!(got.once().as_deref(), Some(ran), "{script}");
     }
 }
