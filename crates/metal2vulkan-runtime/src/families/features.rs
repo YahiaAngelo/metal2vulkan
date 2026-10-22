@@ -1340,12 +1340,12 @@ impl FeatureRow {
                 not_implemented(Feature::Imageblocks),
             ]),
             // Tile dispatches run in the render encoder: a tile function over the pass's tiles, in
-            // a single-sampled pass of one layer, in threadgroups of a measured layout (squares to
-            // 32x32 and power-of-two rectangles). The compile layer and the binder refuse the rest
-            // of what Metal takes (`NotImplemented(TileShading)`): a multisampled pass's tile
-            // function, and so its sample coverage, a threadgroup of another shape (odd sides,
-            // 16x2), and a layered pass. Threadgroup memory that persists through the pass is
-            // built.
+            // a single-sampled pass of one layer, in threadgroups of even sides to 32x32 (and the
+            // single thread), each thread at Metal's place. The compile layer and the binder
+            // refuse the rest of what Metal takes (`NotImplemented(TileShading)`): a multisampled
+            // pass's tile function, and so its sample coverage, a threadgroup with an odd side,
+            // whose quads leave lanes empty, and a layered pass. Threadgroup memory that persists
+            // through the pass is built.
             F::TileShaders | F::ImageblockSampleCoverageControl | F::NonsquareTileDispatch => {
                 first([not_implemented(Feature::TileShading)])
             }

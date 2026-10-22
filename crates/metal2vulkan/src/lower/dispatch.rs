@@ -27,17 +27,18 @@
 //!   dispatch, the region push field (below).
 //!
 //! **Tile functions**. Metal's tile dispatch lays its threads out as a fragment pass does, measured
-//! on Apple silicon for squares of 1 to 32 threads a side and power-of-two rectangles: the
-//! threadgroup is columns `min(width, 16)` wide, each holding its share of the simdgroups in order;
-//! a column's simdgroup is a `b x 32/b` block of positions with `b = min(width, 8)` (8x4 in a
-//! threadgroup at least 8 wide, the blocks in row-major order), whose lanes run over its 2x2 quads
-//! in row-major order, each quad's four threads in row-major order; and
-//! `thread_index_in_threadgroup` runs over the threadgroup's 2x2 quads in row-major order across
-//! its whole width, so for a 16-wide threadgroup it is not `sg · 32 + lane`. A tile function
+//! on an Apple M3 Max for every threadgroup of 1 to 32 threads a side, in 16x16, 32x16 and 32x32
+//! tiles alike: the threadgroup is `⌈width / 2⌉` by `⌈height / 2⌉` 2x2 quads, which simdgroups
+//! take eight at a time in Metal's quad order (columns 8 quads wide, within a column its rows of 2
+//! quads, within a row its blocks 4 quads wide, within a block its quads row-major), each quad's
+//! four threads its lanes in row-major order, where a thread past an odd side leaves its lane
+//! empty; and `thread_index_in_threadgroup` runs over the threadgroup's quads in row-major order
+//! across its whole width, so for a 16-wide threadgroup it is not `sg · 32 + lane`. A tile function
 //! therefore takes `lin` as Metal's `sg · 32 + lane` (its simd builtins and operations are
-//! unchanged) and derives its position from it by that layout (`KernelDecl::tile_pos`), and its
+//! unchanged) and derives its position from it by that order (`KernelDecl::tile_pos`), and its
 //! thread and quadgroup indices from the position (`KernelDecl::tile_index`). The binder runs a
-//! tile function only over threadgroups of the measured shapes (`bind::dispatch`).
+//! tile function only over threadgroups whose lanes it fills, both sides even, or the single
+//! thread (`bind::dispatch`).
 //!
 //! **Regions**. A kernel that reads a grid builtin (`thread_position_in_grid`,
 //! `threadgroup_position_in_grid`, `threads_per_grid`, `threadgroups_per_grid`, and the
@@ -1074,12 +1075,14 @@ impl KernelDecl {
     }
 
     /// A tile function's position of the thread whose `sg · 32 + lane` is `lin`, in a threadgroup
-    /// `sx` by `sy`: the threadgroup is columns `c = min(sx, 16)` wide, each holding `max(c · sy /
-    /// 32, 1)` simdgroups in order; with `b = min(c, 8)`, a column's simdgroup `s` is its block `(s
-    /// mod (c / b), s / (c / b))` of `b x 32 / b` positions, and lane `l` of it is thread `l mod 4`
-    /// (row-major) of the block's quad `l / 4` (row-major, `b / 2` quads a row). Every divisor is
-    /// at least 1 for any local size, so the unmeasured shapes the binder refuses never divide by
-    /// zero.
+    /// `sx` by `sy` of `qw = ⌈sx / 2⌉` by `qh = ⌈sy / 2⌉` 2x2 quads: lane `lin mod 4` is thread
+    /// `lin mod 4` (row-major) of the threadgroup's quad `k = lin / 4` in Metal's quad order. That
+    /// order runs over columns 8 quads wide (the last narrower), within a column over its rows of
+    /// 2 quads (the last 1 where `qh` is odd), within such a row over its blocks 4 quads wide (the
+    /// last narrower), and within a block over its quads row-major: so a full column is `8 · qh`
+    /// quads, its row `2 · cw` for a column `cw` wide, and its block `4 · rh` for a row `rh` high.
+    /// Every divisor is at least 1 for any local size, so the shapes the binder refuses never divide
+    /// by zero.
     fn tile_pos(&self, fb: &mut FunctionBuilder<'_>, lin: SValue) -> BResult<SValue> {
         let bin = |fb: &mut FunctionBuilder<'_>, op, a, n: u32| -> BResult<SValue> {
             let n = Self::k(fb, n)?;
@@ -1096,46 +1099,59 @@ impl KernelDecl {
             let none = fb.binary(BinOp::IEqual, a, zero)?;
             fb.select(none, one, a)
         };
+        // `n - taken`, at most `most` and at least 1: the extent left of a column, row or block.
+        let left = |fb: &mut FunctionBuilder<'_>, n, taken, most: u32| -> BResult<SValue> {
+            let below = fb.binary(BinOp::ULessThan, taken, n)?;
+            let rest = fb.binary(BinOp::ISub, n, taken)?;
+            let zero = Self::k(fb, 0)?;
+            let rest = fb.select(below, rest, zero)?;
+            let rest = at_most(fb, rest, most)?;
+            at_least_one(fb, rest)
+        };
         let sx = fb.module().const_value(self.size[0])?;
         let sy = fb.module().const_value(self.size[1])?;
-        let c = at_most(fb, sx, 16)?;
-        let b = at_most(fb, c, 8)?;
-        let half = bin(fb, BinOp::ShiftRightLogical, b, 1)?;
-        let quads = at_least_one(fb, half)?;
-        let thirty_two = Self::k(fb, 32)?;
-        let height = fb.binary(BinOp::UDiv, thirty_two, b)?;
-        let per_row = fb.binary(BinOp::UDiv, c, b)?;
-        let column_threads = fb.binary(BinOp::IMul, c, sy)?;
-        let per_column = bin(fb, BinOp::ShiftRightLogical, column_threads, 5)?;
-        let per_column = at_least_one(fb, per_column)?;
-        let sg = bin(fb, BinOp::ShiftRightLogical, lin, 5)?;
-        let lane = bin(fb, BinOp::BitwiseAnd, lin, 31)?;
-        let column = fb.binary(BinOp::UDiv, sg, per_column)?;
-        let s = fb.binary(BinOp::UMod, sg, per_column)?;
-        let bx = fb.binary(BinOp::UMod, s, per_row)?;
-        let by = fb.binary(BinOp::UDiv, s, per_row)?;
-        let q = bin(fb, BinOp::ShiftRightLogical, lane, 2)?;
-        let rx = bin(fb, BinOp::BitwiseAnd, lane, 1)?;
-        let ry = bin(fb, BinOp::ShiftRightLogical, lane, 1)?;
+        let wide = bin(fb, BinOp::IAdd, sx, 1)?;
+        let qw = bin(fb, BinOp::ShiftRightLogical, wide, 1)?;
+        let tall = bin(fb, BinOp::IAdd, sy, 1)?;
+        let qh = bin(fb, BinOp::ShiftRightLogical, tall, 1)?;
+        let k = bin(fb, BinOp::ShiftRightLogical, lin, 2)?;
+        let rx = bin(fb, BinOp::BitwiseAnd, lin, 1)?;
+        let ry = bin(fb, BinOp::ShiftRightLogical, lin, 1)?;
         let ry = bin(fb, BinOp::BitwiseAnd, ry, 1)?;
-        let qx = fb.binary(BinOp::UMod, q, quads)?;
-        let qy = fb.binary(BinOp::UDiv, q, quads)?;
-        let cx = fb.binary(BinOp::IMul, column, c)?;
-        let bx_b = fb.binary(BinOp::IMul, bx, b)?;
-        let x0 = fb.binary(BinOp::IAdd, cx, bx_b)?;
-        let qx2 = bin(fb, BinOp::ShiftLeftLogical, qx, 1)?;
-        let x1 = fb.binary(BinOp::IAdd, x0, qx2)?;
-        let x = fb.binary(BinOp::IAdd, x1, rx)?;
-        let y0 = fb.binary(BinOp::IMul, by, height)?;
-        let qy2 = bin(fb, BinOp::ShiftLeftLogical, qy, 1)?;
-        let y1 = fb.binary(BinOp::IAdd, y0, qy2)?;
-        let y = fb.binary(BinOp::IAdd, y1, ry)?;
+        // The column: `8 · qh` quads each but the last.
+        let column_quads = bin(fb, BinOp::ShiftLeftLogical, qh, 3)?;
+        let column_quads = at_least_one(fb, column_quads)?;
+        let c = fb.binary(BinOp::UDiv, k, column_quads)?;
+        let kc = fb.binary(BinOp::UMod, k, column_quads)?;
+        let c0 = bin(fb, BinOp::ShiftLeftLogical, c, 3)?;
+        let cw = left(fb, qw, c0, 8)?;
+        // The column's row of quads: `2 · cw` quads each but the last.
+        let row_quads = bin(fb, BinOp::ShiftLeftLogical, cw, 1)?;
+        let r = fb.binary(BinOp::UDiv, kc, row_quads)?;
+        let kr = fb.binary(BinOp::UMod, kc, row_quads)?;
+        let r0 = bin(fb, BinOp::ShiftLeftLogical, r, 1)?;
+        let rh = left(fb, qh, r0, 2)?;
+        // The row's block: `4 · rh` quads each but the last.
+        let block_quads = bin(fb, BinOp::ShiftLeftLogical, rh, 2)?;
+        let b = fb.binary(BinOp::UDiv, kr, block_quads)?;
+        let kb = fb.binary(BinOp::UMod, kr, block_quads)?;
+        let b0 = bin(fb, BinOp::ShiftLeftLogical, b, 2)?;
+        let bw = left(fb, cw, b0, 4)?;
+        let in_x = fb.binary(BinOp::UMod, kb, bw)?;
+        let in_y = fb.binary(BinOp::UDiv, kb, bw)?;
+        let qx = fb.binary(BinOp::IAdd, c0, b0)?;
+        let qx = fb.binary(BinOp::IAdd, qx, in_x)?;
+        let qy = fb.binary(BinOp::IAdd, r0, in_y)?;
+        let x = bin(fb, BinOp::ShiftLeftLogical, qx, 1)?;
+        let x = fb.binary(BinOp::IAdd, x, rx)?;
+        let y = bin(fb, BinOp::ShiftLeftLogical, qy, 1)?;
+        let y = fb.binary(BinOp::IAdd, y, ry)?;
         let z = Self::k(fb, 0)?;
         fb.composite_construct(self.uvec3, &[x, y, z])
     }
 
     /// A tile function's `thread_index_in_threadgroup` of the thread at position `pos`: its 2x2
-    /// quad's index in row-major order over the threadgroup's `sx / 2` quads a row, times four,
+    /// quad's index in row-major order over the threadgroup's `⌈sx / 2⌉` quads a row, times four,
     /// plus its place in the quad (row-major).
     fn tile_index(&self, fb: &mut FunctionBuilder<'_>, pos: SValue) -> BResult<SValue> {
         let bin = |fb: &mut FunctionBuilder<'_>, op, a, n: u32| -> BResult<SValue> {
@@ -1145,7 +1161,8 @@ impl KernelDecl {
         let x = fb.composite_extract(pos, &[0])?;
         let y = fb.composite_extract(pos, &[1])?;
         let sx = fb.module().const_value(self.size[0])?;
-        let quads = bin(fb, BinOp::ShiftRightLogical, sx, 1)?;
+        let wide = bin(fb, BinOp::IAdd, sx, 1)?;
+        let quads = bin(fb, BinOp::ShiftRightLogical, wide, 1)?;
         let qy = bin(fb, BinOp::ShiftRightLogical, y, 1)?;
         let qx = bin(fb, BinOp::ShiftRightLogical, x, 1)?;
         let row = fb.binary(BinOp::IMul, qy, quads)?;

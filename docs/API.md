@@ -565,8 +565,9 @@ render pass's color attachment formats) into a `ComputePipeline` that stands in 
 `dispatchThreadsPerTile:`. Dispatch it as `Dispatch::Threadgroups` over the render area, one
 threadgroup per tile, with `BindState::imageblock_size` and `BindState::render_area` set, and bind
 each attachment it reaches as a storage image where the plan writes `WriteSource::TileAttachment`.
-Its threads are numbered as Metal's tile dispatch numbers them, for the threadgroup layouts that
-were measured; others are refused. A tile function runs on a single-sample pass: a multisample
+Its threads are numbered as Metal's tile dispatch numbers them, for every threadgroup of even sides
+up to 32x32 and the single thread; a threadgroup with an odd side, whose quads Metal leaves partly
+empty, is refused. A tile function runs on a single-sample pass: a multisample
 imageblock's operations (its sample count, the colors a pixel holds and their coverage masks, a
 store to the samples a coverage mask selects) are refused as not implemented
 (`Feature::Imageblocks`, naming the intrinsic).

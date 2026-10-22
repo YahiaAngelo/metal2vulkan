@@ -563,8 +563,8 @@ pub(crate) struct LocalRules {
     /// The emulated simdgroups' scratch (`RuntimeFact::SimdgroupEmulation`).
     pub scratch: Option<ScratchRule>,
     /// The pipeline is a tile function (`RuntimeFact::TileFunction`): its threads take Metal's
-    /// tile-dispatch layout, measured only for the threadgroups `dispatch::tile_layout_measured`
-    /// takes, dispatched by threadgroups.
+    /// tile-dispatch layout, built for the threadgroups `dispatch::tile_layout_measured` takes,
+    /// dispatched by threadgroups.
     pub tile: bool,
     /// The threadgroup Metal answers a tile function whose threadgroup is the tile
     /// (`RuntimeFact::TileThreadgroup` with `tile_sized`): the shape's tile, its imageblock size,
