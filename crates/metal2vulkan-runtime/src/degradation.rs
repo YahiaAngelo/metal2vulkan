@@ -1891,11 +1891,13 @@ degradations! {
         /// patches and mesh draws, whose flat inputs read the first vertex. On a device with it,
         /// a strip whose vertex function computes `[[primitive_id]]` into its varying (a device
         /// without `geometryShader` and `tessellationShader`), whose IDs read each primitive's
-        /// last vertex; and a slice or viewport a vertex function selects, which a device without
-        /// `shaderOutputLayer` or `shaderOutputViewportIndex` selects in a geometry stage, from
-        /// each primitive's first vertex. And on every device, a mode from 2 to `2^63 - 1`, which
-        /// Metal draws a third way that differs between pipeline states (every line's flat inputs
-        /// and `[[primitive_id]]` 0) and the runtime as mode 1: announced at the call.
+        /// last vertex; and a slice or viewport a vertex function selects where the pipeline
+        /// selects it in a synthesized geometry stage (a device without `shaderOutputLayer` or
+        /// `shaderOutputViewportIndex`, an index that differs between a primitive's vertices, or
+        /// weights the stage writes), from each primitive's first vertex. And on every device, a
+        /// mode from 2 to `2^63 - 1`, which Metal draws a third way that differs between
+        /// pipeline states (every line's flat inputs and `[[primitive_id]]` 0) and the runtime as
+        /// mode 1: announced at the call.
         ProvokingVertexUnmatched = "provoking-vertex-unmatched", Precision,
             "flat inputs or a computed primitive ID read another vertex than Metal's, or \
              barycentric weights come in another order than Metal's";

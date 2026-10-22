@@ -36,11 +36,13 @@
 //!   ([`RewriteOrder::Last`]). Announced (`Degradation::ProvokingVertexUnmatched`): a strip whose
 //!   vertex function computes `[[primitive_id]]` into its varying (a device without
 //!   `geometryShader` and `tessellationShader`), whose IDs then read its primitives' last
-//!   vertices; and a slice or viewport the vertex function selects on a device that selects it in
-//!   a geometry stage (without `shaderOutputLayer` or `shaderOutputViewportIndex`), from each
-//!   primitive's first vertex. Tessellated patches take the vertex Vulkan leaves to the device
-//!   ("the provoking vertex may be any of the vertices in each primitive", the Vulkan
-//!   specification's Flat Shading), which `PrecisionNote::TessellationTriangleOrder` covers.
+//!   vertices; and a slice or viewport the vertex function selects where the pipeline selects it
+//!   in a synthesized geometry stage (a device without `shaderOutputLayer` or
+//!   `shaderOutputViewportIndex`, an index that differs between a primitive's vertices, or
+//!   weights the stage writes), from each primitive's first vertex. Tessellated patches take the
+//!   vertex Vulkan leaves to the device ("the provoking vertex may be any of the vertices in each
+//!   primitive", the Vulkan specification's Flat Shading), which
+//!   `PrecisionNote::TessellationTriangleOrder` covers.
 //! - **Listed**, on any other device: the draw is drawn as the list the index rewrite pass writes
 //!   (the CPU for a direct draw without indices, `index_rewrite.rs`), each primitive in Metal's
 //!   mode-1 order with its last vertex moved first ([`RewriteOrder::LastFirst`]), so the
@@ -236,22 +238,24 @@ impl RenderLowering {
                     )
                 });
             }
-            // A slice or viewport the synthesized geometry stage selects is its primitive's first
-            // vertex's (`link::geometry`) on a device that cannot store it from a vertex function.
-            let features = &device.compile_device().profile().enabled().features;
-            let geometry_slice = pipeline.vertex_chooses_slice()
-                && !features.contains(&VkFeature::ShaderOutputLayer);
-            let geometry_viewport = pipeline.base().graphics.writes_viewport_index
-                && !features.contains(&VkFeature::ShaderOutputViewportIndex);
-            if geometry_slice || geometry_viewport {
+            // A pipeline with synthesized geometry stages selects its slice and viewport there,
+            // from each primitive's first vertex (`link::geometry`; `lower::stage_io`'s
+            // `IndexStore::Selected`).
+            let base = pipeline.base();
+            let geometry = base
+                .stages
+                .iter()
+                .any(|s| s.stage == metal2vulkan::vk::ShaderStage::GEOMETRY);
+            let selects = pipeline.vertex_chooses_slice() || base.graphics.writes_viewport_index;
+            if geometry && selects {
                 device.degrade(Degradation::ProvokingVertexUnmatched, || {
                     (
                         format!(
                             "{call}: a draw under setProvokingVertexMode: 1 whose vertex function \
                              selects its primitives' slice or viewport"
                         ),
-                        "the device selects it in a geometry stage, from each primitive's first \
-                         vertex"
+                        "the pipeline selects it in a geometry stage, from each primitive's \
+                         first vertex"
                             .to_owned(),
                     )
                 });

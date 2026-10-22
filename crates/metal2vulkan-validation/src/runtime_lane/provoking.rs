@@ -1,6 +1,8 @@
 //! Device tests of Apple's provoking vertex mode (`setProvokingVertexMode:`) on the device the cfg
 //! selects, under the validation layer, with the device's last provoking vertex
-//! (`VK_EXT_provoking_vertex`'s `provokingVertexLast`) and with it withheld. The owned fixture
+//! (`VK_EXT_provoking_vertex`'s `provokingVertexLast`) and with it withheld, each also with
+//! `fragmentShaderBarycentric` withheld, so a generated geometry stage writes the weights (on a
+//! device with `geometryShader`; skipped elsewhere). The owned fixture
 //! `rt6_provoking` places vertex `v` at the clip-space position buffer 0 holds at
 //! `min(v, 65535)`, and its fragment functions write the barycentric weights, a smooth value of the
 //! vertex ID, the flat vertex ID and the primitive ID, or some of them.
@@ -31,12 +33,14 @@ use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::VkFeature;
 use metal2vulkan::metal::{IndexType, PixelFormat, PrimitiveType, TextureUsage};
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
+use metal2vulkan::vk;
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBufferStatus, CommandQueue, Degradation, Device, DrawPrimitiveType,
-    Error, Library, LoadAction, PipelineOptions, Region, RenderCommandEncoder,
+    Error, ExecutedPipeline, Library, LoadAction, PipelineOptions, Region, RenderCommandEncoder,
     RenderPassDescriptor, RenderPipelineState, ResourceOptions, StoreAction, TextureDescriptor,
 };
+use std::cell::Cell;
 
 /// The target's side, in pixels.
 const SIDE: u64 = 32;
@@ -361,6 +365,9 @@ struct Lane {
     queue: CommandQueue,
     library: Library,
     positions: Buffer,
+    /// The geometry stages the pipeline of the last draw carries (`None` where it recorded
+    /// none).
+    geometry_stages: Cell<Option<usize>>,
 }
 
 impl Lane {
@@ -370,6 +377,7 @@ impl Lane {
             queue: device.new_command_queue().unwrap(),
             library: device.new_library_with_air(&bitcode).unwrap(),
             positions: buffer_with(&device, &positions()).unwrap(),
+            geometry_stages: Cell::new(None),
             device,
         }
     }
@@ -484,6 +492,20 @@ impl Lane {
             "{case:?}: {:?}",
             command_buffer.error()
         );
+        let stages = command_buffer
+            .executions()
+            .iter()
+            .find_map(|e| match e.pipeline() {
+                ExecutedPipeline::Render(executed) => Some(
+                    executed
+                        .stages
+                        .iter()
+                        .filter(|s| s.stage == vk::ShaderStage::GEOMETRY)
+                        .count(),
+                ),
+                _ => None,
+            });
+        self.geometry_stages.set(stages);
         Ok(targets
             .iter()
             .map(|target| {
@@ -613,8 +635,9 @@ struct Found {
 }
 
 /// Every case of every type under every fragment function, at modes 0 and 1, on `device`, whose
-/// last provoking vertex is `native`: the checks the module docs state.
-fn check_every_case(device: Device, native: bool, messages: &Messages) -> Found {
+/// last provoking vertex is `native` and which reads the weights as `weights` says: the checks the
+/// module docs state.
+fn check_every_case(device: Device, native: bool, weights: Weights, messages: &Messages) -> Found {
     let name = device.name().to_owned();
     let lane = Lane::new(device);
     let mut found = Found::default();
@@ -634,6 +657,13 @@ fn check_every_case(device: Device, native: bool, messages: &Messages) -> Found 
                     })
                 };
                 let (first, last) = (at(0), at(1));
+                if weights == Weights::Withheld && fragment.weights {
+                    assert!(
+                        lane.geometry_stages.get().is_none_or(|stages| stages > 0),
+                        "{case:?} {fragment:?} on {name}: no geometry stage with the weights \
+                         withheld"
+                    );
+                }
                 found.cases += 1;
                 let reads = fragment.flat || fragment.weights;
                 if !reads {
@@ -701,17 +731,30 @@ fn check_every_case(device: Device, native: bool, messages: &Messages) -> Found 
         "{name}: {kinds:?}"
     );
     eprintln!(
-        "{name} (native {native}): {} cases, {} covered pixels at mode 1 all Metal's; {} pixels \
-         of the mode-0 draws not; draws {natively} through last-vertex pipelines, {listed} \
-         listed; {} pixels of listed lines covered otherwise",
+        "{name} (native {native}, weights {weights:?}): {} cases, {} covered pixels at mode 1 \
+         all Metal's; {} pixels of the mode-0 draws not; draws {natively} through last-vertex \
+         pipelines, {listed} listed; {} pixels of listed lines covered otherwise",
         found.cases, found.covered, found.told_apart, found.lines_moved
     );
     found
 }
 
+/// How the lane's device reads the barycentric weights.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Weights {
+    /// As the device is made (`BaryCoordKHR` where it has `fragmentShaderBarycentric`).
+    Device,
+    /// With `fragmentShaderBarycentric` withheld: varyings a generated geometry stage writes,
+    /// whose primitive's provoking vertex is the stage's last vertex under a last-vertex
+    /// pipeline (the Vulkan specification's Flat Shading: "the provoking vertex is determined by
+    /// the primitive topology defined by the ... OutputTriangleStrip execution mode").
+    Withheld,
+}
+
 /// Run [`check_every_case`] on the cfg's device, with its last provoking vertex withheld where
-/// `withheld`.
-fn run(withheld: bool) {
+/// `withheld`, reading the weights as `weights` says. A device without `geometryShader` cannot
+/// read them withheld, and the run is skipped, printed.
+fn run(withheld: bool, weights: Weights) {
     let cache = ScratchCache::new().unwrap();
     let messages = Messages::default();
     {
@@ -721,16 +764,30 @@ fn run(withheld: bool) {
                     .withheld_features
                     .insert(VkFeature::ProvokingVertexLast);
             }
+            if weights == Weights::Withheld {
+                options
+                    .withheld_features
+                    .insert(VkFeature::FragmentShaderBarycentric);
+            }
         })
         .unwrap();
-        let native = !withheld
-            && device
+        let has = |feature| {
+            device
                 .compile_device()
                 .profile()
                 .enabled()
                 .features
-                .contains(&VkFeature::ProvokingVertexLast);
-        let found = check_every_case(device, native, &messages);
+                .contains(&feature)
+        };
+        let native = !withheld && has(VkFeature::ProvokingVertexLast);
+        if weights == Weights::Withheld && !has(VkFeature::GeometryShader) {
+            eprintln!(
+                "{}: no geometryShader, so no weights without BaryCoordKHR: skipped",
+                device.name()
+            );
+            return;
+        }
+        let found = check_every_case(device, native, weights, &messages);
         assert!(found.covered > 10_000, "{found:?}");
         assert!(found.told_apart > 1_000, "{found:?}");
     }
@@ -745,13 +802,26 @@ fn run(withheld: bool) {
 /// (else listed).
 #[test]
 fn draws_take_metal_s_last_vertex() {
-    run(false);
+    run(false, Weights::Device);
 }
 
 /// Every case draws Metal's mode 1 listed, the device's last provoking vertex withheld.
 #[test]
 fn draws_take_metal_s_last_vertex_listed() {
-    run(true);
+    run(true, Weights::Device);
+}
+
+/// Every case draws Metal's mode 1 with the weights a geometry stage writes, through the
+/// device's last provoking vertex where it has one (else listed).
+#[test]
+fn draws_take_metal_s_last_vertex_through_a_geometry_stage() {
+    run(false, Weights::Withheld);
+}
+
+/// Every case draws Metal's mode 1 listed with the weights a geometry stage writes.
+#[test]
+fn draws_take_metal_s_last_vertex_listed_through_a_geometry_stage() {
+    run(true, Weights::Withheld);
 }
 
 /// A mode from 2 to `2^63 - 1`, which Metal draws a third way, is drawn as mode 1, bit for bit,
