@@ -423,7 +423,11 @@ pub fn encode<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes, variants: &[String]) {
             continue;
         }
         let (mut wall, mut cpu, mut total) = (vec![], vec![], vec![]);
+        let mut counts = None;
         for run in 0..sizes.timed + 3 {
+            if run == 3 {
+                counts = Some(g.work_counts());
+            }
             g.pool(|| {
                 let cpu0 = process_cpu();
                 let t0 = Instant::now();
@@ -460,6 +464,8 @@ pub fn encode<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes, variants: &[String]) {
             "ms",
             &mut total,
         );
+        let dispatches = (sizes.timed * n) as f64;
+        emit_memo_shares(g, counts, dispatches, &format!("dispatch_{name}"));
     }
     encode_resident(g, s, sizes, &runs);
 }
@@ -532,20 +538,34 @@ fn encode_resident<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes, runs: &dyn Fn(Str
         emit("encode", &metric("encode"), "us/dispatch", &mut wall);
         emit("encode", &metric("process_cpu"), "us/dispatch", &mut cpu);
         emit("encode", &metric("cb_total"), "ms", &mut total);
-        // The runtime's dispatches that took what the one before settled, a share of them.
-        let after = g.work_counts();
         let dispatches = (sizes.timed * n) as f64;
-        for ((counted, before), (_, now)) in counts.unwrap_or_default().iter().zip(&after) {
-            if *counted == "dispatches_settled_as_before" {
-                let share = (now - before) / dispatches;
-                emit(
-                    "encode",
-                    &metric("rt_settled_as_before"),
-                    "share",
-                    &mut [share],
-                );
-            }
-        }
+        emit_memo_shares(g, counts, dispatches, &format!("dispatch_resident_{name}"));
+    }
+}
+
+/// The share of `dispatches` since `counts` the runtime took as settled before
+/// (`dispatches_settled_as_before`) and as planned before (`dispatches_planned_as_before`), as
+/// the encode workload's `<variant>_rt_*` lines.
+fn emit_memo_shares<G: Gpu>(
+    g: &G,
+    counts: Option<Vec<(&'static str, f64)>>,
+    dispatches: f64,
+    variant: &str,
+) {
+    let after = g.work_counts();
+    for ((counted, before), (_, now)) in counts.unwrap_or_default().iter().zip(&after) {
+        let metric = match *counted {
+            "dispatches_settled_as_before" => "rt_settled_as_before",
+            "dispatches_planned_as_before" => "rt_planned_as_before",
+            _ => continue,
+        };
+        let share = (now - before) / dispatches;
+        emit(
+            "encode",
+            &format!("{variant}_{metric}"),
+            "share",
+            &mut [share],
+        );
     }
 }
 

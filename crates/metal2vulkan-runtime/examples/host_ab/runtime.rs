@@ -922,6 +922,10 @@ impl Gpu for Runtime {
                 "dispatches_settled_as_before",
                 c.dispatches_settled_as_before,
             ),
+            (
+                "dispatches_planned_as_before",
+                c.dispatches_planned_as_before,
+            ),
         ]
         .into_iter()
         .map(|(name, count)| (name, count as f64))
