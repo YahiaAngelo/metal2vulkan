@@ -159,6 +159,7 @@ fn notes() -> Vec<(&'static str, Ledger)> {
             DeviceSignedZeroInfNan,
             DeviceInterpolation,
             HalfOutputFastMathBlend,
+            UnmeasuredFetchBlend,
             ReductionOrder,
             FunctionStorageAssumed,
             ColorAttachmentGroups,

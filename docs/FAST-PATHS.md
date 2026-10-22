@@ -72,6 +72,7 @@ known. The rest of the differences are docs/API.md section 9's precision notes.
 | Signed zeros, infinities and NaNs where the device lacks `SignedZeroInfNanPreserve` at the operation's width. | A device capability. | `DeviceSignedZeroInfNan` (`device-signed-zero-inf-nan`) |
 | Every device but MoltenVK interpolates varyings by its own rounding, up to about `1.5e-4` from Metal's (`3e-4` on lavapipe). MoltenVK hands the varyings to Metal. | The exact path needs Metal's interpolation formula, which is not known. | `DeviceInterpolation` (`device-interpolation`) |
 | A fast-math function's `half` color into a blend: within three `half` ulps (16-bit float) or two `float` ulps (32-bit float). A fetched 16-bit float attachment's blend, computed in the pixel interlock, where Metal folds the output's own arithmetic into it or regroups it: within 2 `half` ulps at the operands' magnitude, 16 at the stored value's under cancellation; exact elsewhere. | Metal's compiler regroups the blend per pipeline, following its passes over the whole function; no form the function and the blend state decide is Metal's. | `HalfOutputFastMathBlend` (`half-output-fast-math-blend`) |
+| A fetched blended attachment of a format whose Metal blend arithmetic is not built (32-bit float, 16-bit normalized, 8-bit signed normalized, 10-bit, packed float, `A8Unorm`; an 8-bit unorm one through fewer than four output lanes), on a device that orders fetch only through the pixel interlock (MoltenVK, RADV, ANV): the shader blends in `float`, each step rounded, the source and blend color clamped to a normalized format's range, the device's conversion storing the result. Bound not measured. | No Vulkan blend applies to the interlock's storage write, and Metal's blend arithmetic for these formats is not measured, so no exact form is known. | `UnmeasuredFetchBlend` (`unmeasured-fetch-blend`) |
 | Float simdgroup reductions sum in the device's association order. | Apple's order is not modelled. | `ReductionOrder` (`reduction-order`) |
 | A vertex or fragment function keeps more than 16 KiB a thread of private memory, up to the 192 KiB Metal holds, on a device whose Function storage was not measured: it runs on the driver's scratch, which past what the driver holds answers wrongly or hangs the GPU with no error. | Vulkan states no amount of Function storage; only a measurement of the device does. No other form is exact: a fragment function's helper invocations may not write the memory it would move to, and a vertex function's, a compute pre-pass, is not built. | `FunctionStorageAssumed` (`function-storage-assumed`) |
 | A render pipeline of more color attachments than the device draws at once (the lesser of `maxColorAttachments` and `maxFragmentOutputAttachments`, four at Vulkan's floor; Metal takes eight) draws each draw once per group of that many, each group in a render pass of its own over a twin of the pass's depth and stencil. Every variant's vertex stage is one module, `Position` invariant, and every fragment variant's `FragDepth`, `SampleMask` and `FragStencilRefEXT` are `Invariant`; groups past the first may differ at discard or depth edges if the driver compiles the variants differently. | The device holds no more attachments in one subpass. Vulkan's invariance rules make only identical pipelines repeat exactly, and the groups' fragment modules and attachments differ. | `ColorAttachmentGroups` (`color-attachment-groups`) |
@@ -511,16 +512,16 @@ driver's. Each is open work.
   than the arms (on ANV 512 arms make in 0.63 s, 1536 in 5.9 s). Applying the offset in the shader
   is exact only where the shader filters, so a filtered sample past the bound has no exact form yet.
 - **A fetched attachment's blend through the pixel interlock (RADV, ANV, NVIDIA, MoltenVK).** No
-  Vulkan blend applies to the storage form's write, so the function computes Metal's blend: an
-  extended-range or 16-bit float attachment's, and an 8-bit unorm one's (`R8Unorm`, `RG8Unorm`,
-  `RGBA8Unorm`, `BGRA8Unorm`) of a four-lane output under any factor, operation, write mask and
-  blend color. Refused (`FramebufferFetch`, `NotImplemented`): a factor of the second source; under
-  fast math, a lerp, common factor or contracted pair into `R8Unorm` or `RG8Unorm`, which Metal
-  sums in forms not measured; and a blend into any other format, `RGB10A2Unorm`, `BGR10A2Unorm`,
-  `RGBA8Snorm`, `RGBA16Unorm`, `RGBA16Snorm`, `RGBA32Float` and the 8-bit `_sRGB` ones among them.
-  A source-over survey on the M3 fits the 8-bit model to the 10-bit unorm and 8-bit snorm formats
-  (with their clamps), and shows the 16-bit norms and `RGBA32Float` blending in `float` even for a
-  `half4` output; their factor sets are not measured.
+  Vulkan blend applies to the storage form's write, so the function computes the blend: Metal's
+  for an extended-range or 16-bit float attachment, and for an 8-bit unorm one (`R8Unorm`,
+  `RG8Unorm`, `RGBA8Unorm`, `BGRA8Unorm`) of a four-lane output under any factor, operation,
+  write mask and blend color; the generic `float` blend, announced (`UnmeasuredFetchBlend`, the
+  row above), for every other format whose channels read as floats. Refused: a factor of the
+  second source (`ExtendedRangeBlend`, `DualSource`), and a blend into an 8-bit `_sRGB` format
+  (`FramebufferFetch`, `NotImplemented`). A source-over survey on the M3 fits the 8-bit model to
+  the 10-bit unorm and 8-bit snorm formats (with their clamps), and shows the 16-bit norms and
+  `RGBA32Float` blending in `float` even for a `half4` output; their factor sets are not measured,
+  so their exact forms are not built.
 - **A blended signed normalized attachment on lavapipe.** lavapipe blends no snorm format
   (`R8Snorm`, `RG8Snorm`, `RGBA8Snorm`, `R16Snorm`, `RG16Snorm`, `RGBA16Snorm`: no
   `COLOR_ATTACHMENT_BLEND`), so a pipeline that blends one is refused as the device lacking the

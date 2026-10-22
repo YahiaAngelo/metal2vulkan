@@ -1410,9 +1410,10 @@ fn a_vertex_pipeline_makes_its_input_assembly_dynamic_exactly_with_both_extended
 /// requires `rasterizationOrderColorAttachmentAccess` (enabled with its extension). With only the
 /// ordered pixel interlock it reads and writes the attachment as a storage image inside the
 /// interlock: no input attachment, no color attachment state for it, the interlock, the
-/// fragment-stage store, and the format's storage access required. Where the pipeline's state
-/// blocks that form (a blending attachment), the pipeline is refused with the blocker; with
-/// neither form, refused naming both: an unordered read is never compiled.
+/// fragment-stage store, and the format's storage access required; a blending attachment's blend
+/// the shader computes (`R32Float`'s the generic one, noted). Where the pipeline's state blocks
+/// that form (alpha to coverage), the pipeline is refused with the blocker; with neither form,
+/// refused naming both: an unordered read is never compiled.
 #[test]
 fn a_framebuffer_fetch_pipeline_is_ordered_exactly_where_the_device_orders_it() {
     use crate::device::requirements::{FormatUsage, VkExtension, VkFeature};
@@ -1435,8 +1436,8 @@ fn a_framebuffer_fetch_pipeline_is_ordered_exactly_where_the_device_orders_it() 
         RenderPipelineDescriptor::new(StageSource::Function(FunctionDescriptor::new(vertex)));
     d.fragment = Some(StageSource::Function(FunctionDescriptor::new(fragment)));
     d.color_attachments[0] = Some(ColorAttachmentDescriptor::new(metal::PixelFormat::R32Float));
-    // Blended, adding the destination: a blend of one and zero, added, stores the source as no
-    // blending does, and takes the storage form.
+    // Blended, adding the destination (a blend of one and zero, added, stores the source as no
+    // blending does).
     let mut blended = d.clone();
     if let Some(c) = blended.color_attachments[0].as_mut() {
         c.blending_enabled = true;
@@ -1505,7 +1506,24 @@ fn a_framebuffer_fetch_pipeline_is_ordered_exactly_where_the_device_orders_it() 
             .formats
             .contains(&(vk::Format::R32_SFLOAT, FormatUsage::StorageImage)));
     }
-    match compile(&interlocked, DevicePolicy::default(), &blended) {
+    // The blend, which the shader computes: the generic one of `R32Float`, noted.
+    {
+        let pipe = compile(&interlocked, DevicePolicy::default(), &blended).expect("blended");
+        let [s] = pipe.graphics.storage_attachments.as_slice() else {
+            panic!("{:?}", pipe.graphics.storage_attachments);
+        };
+        assert_eq!((s.color_index, s.writes), (0, true));
+        let fragment = (pipe.stages.iter())
+            .find(|s| s.stage == vk::ShaderStage::FRAGMENT)
+            .expect("a fragment stage");
+        assert!(fragment
+            .precision_notes
+            .contains(&crate::pipeline::PrecisionNote::UnmeasuredFetchBlend));
+    }
+    // Alpha to coverage, which can drop the fragment's samples, blocks the form.
+    let mut covered = d.clone();
+    covered.alpha_to_coverage = true;
+    match compile(&interlocked, DevicePolicy::default(), &covered) {
         Err(Error::Unsupported(u)) => assert_eq!(
             (u.feature, u.needs),
             (Feature::FramebufferFetch, Needs::NotImplemented)

@@ -1757,6 +1757,24 @@ pub enum PrecisionNote {
     /// Validation derives no tolerance and no explanation from it: a difference stays a
     /// mismatch for review, deferred in C3 until an exact path exists.
     CoverageReadsRoundedAlpha,
+    /// A fragment function reads a color attachment the pipeline blends, in the interlocked
+    /// storage form (`lower::fragment::fetch`, on a device that orders framebuffer fetch only
+    /// through the pixel interlock), of a format whose blend arithmetic of Metal's the translation
+    /// does not build: a format held directly whose channels read as floats, but a 16-bit float
+    /// one, an sRGB one and an extended-range one (a 32-bit float, 16-bit normalized, 8-bit signed
+    /// normalized, 10-bit, packed float or `A8Unorm` format, among others), and an 8-bit unorm one
+    /// written by an output of fewer than four lanes. No Vulkan blend applies to a storage write,
+    /// so the shader computes the pipeline's blend itself: in `float`, each factor, product and sum
+    /// rounded to nearest even, a factor of zero keeping its product, the source and the blend
+    /// color clamped first to a normalized format's range (`[0, 1]`, `[-1, 1]`; a NaN to its low
+    /// end) as Vulkan's blend clamps them, an output's missing lane zero, the result stored through
+    /// the device's conversion. Metal's blend arithmetic for these formats is not measured, so the
+    /// recorded bound is not known; a blend in `float` of a 32-bit float format agrees with one
+    /// that fuses a product within that product's rounding, and one of a format of fewer bits than
+    /// a `float` within the format's own rounding of the result where Metal's arithmetic is at
+    /// least as fine. A factor of the second source is not built. Validation derives no tolerance
+    /// from it.
+    UnmeasuredFetchBlend,
 }
 
 /// The math mode of an entry's module, which decides, on a device whose `float` functions are

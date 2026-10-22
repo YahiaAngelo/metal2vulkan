@@ -1156,6 +1156,30 @@ impl Blend {
         }
     }
 
+    /// The generic blend `eq` into a format whose Metal blend is not built (see
+    /// `lower::fragment::fetch`'s module docs), of a format with an alpha channel where
+    /// `has_alpha` (else the destination alpha is one), storing the channels `written` of four (a
+    /// channel the format lacks counts as written), computed by [`blend_generic`]: in `float`, each
+    /// factor, product and sum rounded to `float`, nearest even, a factor of zero keeping its
+    /// product as IEEE 754 adds, the forms of [`BlendMath::Rounded`] whatever the module's math. A
+    /// factor of the second source is not built (`Feature::ExtendedRangeBlend` `DualSource`).
+    pub fn generic(
+        eq: &BlendEquation,
+        has_alpha: bool,
+        written: ColorWriteMask,
+    ) -> Result<Blend, Error> {
+        let b = planned_for(
+            eq,
+            (has_alpha, Family::HalfFloat),
+            written,
+            (false, BlendMath::Rounded),
+        )?;
+        match b.reads_second() {
+            true => Err(refused(ExtendedRangeBlend::DualSource)),
+            false => Ok(b),
+        }
+    }
+
     /// Metal's blend `eq` of a four-lane output of a module of math `math`, blended in `arith`
     /// (the output's type), into an 8-bit unorm attachment of format `pf` (`R8Unorm`, `RG8Unorm`,
     /// `RGBA8Unorm`, `BGRA8Unorm`) storing the channels `written` of four (a channel the format
@@ -2172,6 +2196,58 @@ pub fn blend_unorm8(
     let s = clamped(fb, s, (0.0, 1.0))?;
     let d = unorm8_tile_value(fb, texel, arith)?;
     clamped_blend(fb, b, arith, (s, d), color)
+}
+
+/// The generic blend `b` ([`Blend::generic`]) of a four-lane output `s` (a `vec4` of `f32`) over
+/// `d`, the attachment's texel as the storage image reads it (a `vec4` of `f32`; a channel the
+/// format lacks reads 0, alpha 1), in `float`: a `vec4` of `f32` holding each blended lane, which
+/// the caller stores through the device's conversion. Where the format is normalized, the source
+/// and the blend color are clamped to its `range` first (`[0, 1]` unorm, `[-1, 1]` snorm, every
+/// lane, a NaN to the low end), as a fixed-function blend clamps them; `color`, the encoder's blend
+/// color (a `uvec4` of its `f32`s' bits, `PushField::HalfBlendColor`, where `b` reads it,
+/// [`Blend::reads_constant`]), is what `BlendColor` reads, and `OneMinusBlendColor` reads one minus
+/// it. Not Metal's arithmetic for the format, which is not built: a near-equivalent.
+pub fn blend_generic(
+    fb: &mut FunctionBuilder<'_>,
+    b: &Blend,
+    range: Option<(f32, f32)>,
+    (s, d): (Value, Value),
+    color: Option<Value>,
+) -> BResult<Value> {
+    let f = floats();
+    let clamp = |fb: &mut FunctionBuilder<'_>, v: Value| -> BResult<Value> {
+        let Some((lo, hi)) = range else {
+            return Ok(v);
+        };
+        let low = per_lane_f(fb, [lo; 4])?;
+        let high = per_lane_f(fb, [hi; 4])?;
+        let nan = fb.unary(UnOp::IsNan, v)?;
+        let v = fb.select(nan, low, v)?;
+        fb.glsl(GlslOp::FClamp, &[v, low, high])
+    };
+    let s = clamp(fb, s)?;
+    let constant = match color {
+        Some(words) => {
+            let ft = ty(fb, f)?;
+            let c = fb.convert(ConvOp::Bitcast, words, ft)?;
+            let c = clamp(fb, c)?;
+            let one = fsplat(fb, f, 1.0)?;
+            let m = fb.binary_no_contraction(BinOp::FSub, one, c)?;
+            Some((c, m, c))
+        }
+        None => None,
+    };
+    let inputs = Inputs {
+        s,
+        d,
+        constant,
+        sf: None,
+        math: BlendMath::Rounded,
+        s1: None,
+        arith: BlendArith::Float,
+        negates_one_minus: false,
+    };
+    lanes(fb, b, &inputs)
 }
 
 /// Blend `b` of the clamped output `s` over the destination `d`, both `vec4`s of `f32` in

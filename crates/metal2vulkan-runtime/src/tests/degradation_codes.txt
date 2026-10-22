@@ -212,6 +212,7 @@ metal2vulkan-degrade-uncovered-color-kept
 metal2vulkan-degrade-undeclared-usage-shadow
 metal2vulkan-degrade-unlisted-argument-sampler
 metal2vulkan-degrade-unmeasured-driver
+metal2vulkan-degrade-unmeasured-fetch-blend
 metal2vulkan-degrade-unmeasured-group-speculation
 metal2vulkan-degrade-unmeasured-heap-texture-size
 metal2vulkan-degrade-unmeasured-resolve

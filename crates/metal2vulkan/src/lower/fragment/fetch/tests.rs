@@ -153,10 +153,11 @@ fn a_clean_state_takes_the_storage_form() {
 }
 
 /// What the form does not model is `NotImplemented`: an amplified pipeline, a one- or two-channel
-/// sRGB format, and,
-/// for a written attachment only, blending (but one and zero, added), a signed normalized format under a write mask that
-/// keeps some of its channels, alpha to coverage, a returned sample mask at one sample, and a depth
-/// or stencil attachment without early fragment tests, but where each draw's plan checks its tests.
+/// sRGB format, and, for a written attachment only, an sRGB format's blend (but one and zero,
+/// added), a signed normalized format under a write mask that keeps some of its channels, alpha to
+/// coverage, a returned sample mask at one sample, and a depth or stencil attachment without early
+/// fragment tests, but where each draw's plan checks its tests. Another format's blend is the
+/// generic one ([`StorageView::generic_blend`]).
 #[test]
 fn unmodelled_states_are_not_implemented() {
     let p = profile("moltenvk-m3", &[]);
@@ -169,10 +170,16 @@ fn unmodelled_states_are_not_implemented() {
         let srgb = state(pf, |_| {});
         assert_eq!(form(&srgb, false, READS, &p), ni, "{pf:?}");
     }
-    let blended = state(PixelFormat::R32Float, |c| {
+    let blended = state(PixelFormat::RGBA8UnormSRGB, |c| {
         c.blending_enabled = true;
         c.destination_rgb_blend_factor = crate::metal::BlendFactor::One;
     });
+    let generic = state(PixelFormat::R32Float, |c| {
+        c.blending_enabled = true;
+        c.destination_rgb_blend_factor = crate::metal::BlendFactor::One;
+    });
+    let view = form(&generic, false, WRITES, &p).expect("the generic blend");
+    assert!(view.generic_blend && view.blend.is_some(), "{view:?}");
     // Only the red channel of a one-channel format needs writing.
     let red = state(PixelFormat::R32Float, |c| {
         c.write_mask = ColorWriteMask::RED
@@ -573,9 +580,9 @@ fn an_a8_unorm_attachment_is_fetched_without_a_format_by_its_own_bit() {
 }
 
 /// A blend of one and zero, added, for color and alpha stores the source as no blend does, so a
-/// written attachment under it takes the storage form, but for a signed normalized format (its NaN
-/// stores another code under the blend); one and zero for color alone is a blend, which a format
-/// whose blend the shader does not compute refuses. A write whose
+/// written attachment under it takes the storage form unblended, but for a signed normalized format
+/// (its NaN stores another code under the blend), whose blend the shader computes, the generic
+/// one; one and zero for color alone is a blend, the generic one of `R32Float`. A write whose
 /// mask covers none of the format's channels stores nothing: no blend, alpha to coverage, one
 /// sample's returned mask, or late depth test bears on it, but an `Unspecialized` mask stays
 /// refused.
@@ -592,20 +599,22 @@ fn a_replacing_blend_and_a_write_that_stores_nothing_take_the_storage_form() {
     ] {
         assert!(form(&replacing(pf), false, WRITES, &p).is_ok(), "{pf:?}");
     }
-    assert_eq!(
-        form(&replacing(PixelFormat::RG8Snorm), false, WRITES, &p),
-        ni
-    );
+    let generic = |inputs: &FramebufferFetchInputs| {
+        let view = form(inputs, false, WRITES, &p).expect("the generic blend");
+        view.generic_blend && view.blend.is_some()
+    };
+    assert!(generic(&replacing(PixelFormat::RG8Snorm)));
+    assert!(!generic(&replacing(PixelFormat::R32Float)));
     let alpha_adds = state(PixelFormat::R32Float, |c| {
         c.blending_enabled = true;
         c.destination_alpha_blend_factor = BlendFactor::One;
     });
-    assert_eq!(form(&alpha_adds, false, WRITES, &p), ni);
+    assert!(generic(&alpha_adds));
     let subtracts = state(PixelFormat::R32Float, |c| {
         c.blending_enabled = true;
         c.rgb_blend_operation = BlendOperation::Subtract;
     });
-    assert_eq!(form(&subtracts, false, WRITES, &p), ni);
+    assert!(generic(&subtracts));
     // A write that stores nothing, under each state that refuses a store.
     let none = |edit: fn(&mut ColorAttachmentDescriptor)| {
         state(PixelFormat::RG16Float, |c| {

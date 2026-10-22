@@ -17,7 +17,7 @@
 //! subpass, its stages passing L3. Before the shader computed the
 //! blend, each was refused `NotImplemented(FramebufferFetch)` at color 0. Other blends (the blend
 //! color's among them) and write masks that keep channels compile the same way; a blend that reads
-//! the second source is refused so still. No GPU is used.
+//! the second source is refused `NotImplemented(ExtendedRangeBlend(DualSource))`. No GPU is used.
 //!
 //! `llvm-as` assembles the fixtures; a missing tool skips visibly.
 
@@ -25,7 +25,7 @@ use std::path::Path;
 
 use crate::budget::Budget;
 use crate::device::{Device, DeviceDescription, DevicePolicy, DeviceProfile};
-use crate::error::{Attachment, Error, Feature, Needs};
+use crate::error::{Attachment, Error, ExtendedRangeBlend, Feature, Needs};
 use crate::library::{FunctionArtifact, Library};
 use crate::metal::{BlendFactor, BlendOperation, ColorWriteMask, PixelFormat};
 use crate::pipeline::artifact::PrecisionNote;
@@ -354,9 +354,9 @@ fn another_eight_bit_unorm_blend_or_mask_computes_metals_blend() {
     assert!(checked > 0, "no interlock profile took the storage form");
 }
 
-/// A blend of an 8-bit unorm attachment that reads the second source is not measured: on every
-/// committed profile that orders fetch through the pixel interlock alone it is refused
-/// `NotImplemented(FramebufferFetch)` at color 0.
+/// A blend of an 8-bit unorm attachment that reads the second source is not measured, nor built
+/// generically: on every committed profile that orders fetch through the pixel interlock alone it
+/// is refused `NotImplemented(ExtendedRangeBlend(DualSource))` at color 0.
 #[test]
 fn an_eight_bit_unorm_second_source_blend_stays_refused() {
     let Some(fast) = assembled("fbl_fetch_blend8") else {
@@ -383,7 +383,8 @@ fn an_eight_bit_unorm_second_source_blend_stays_refused() {
             let what = format!("{stem} {eq:?}");
             match compile_with(&fast, "fbl8_over_loaded", &p, &inputs) {
                 Err(Error::Unsupported(u)) if u.needs == Needs::NotImplemented => {
-                    assert_eq!(u.feature, Feature::FramebufferFetch, "{what}");
+                    let dual = Feature::ExtendedRangeBlend(ExtendedRangeBlend::DualSource);
+                    assert_eq!(u.feature, dual, "{what}");
                     assert_eq!(
                         u.location.as_ref().and_then(|at| at.attachment()),
                         Some(Attachment::Color(0)),

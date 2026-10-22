@@ -1005,9 +1005,11 @@ impl FeatureRow {
             // device with the ordered pixel interlock but not that access (MoltenVK, whose
             // interlock is Metal's raster order groups, and RADV and ANV) fetches through the
             // interlock's storage form (`lower::fragment::fetch`), exact for a fetch and for an
-            // unblended write; its blend of an attachment of another format than an
-            // extended-range, a 16-bit float, an 8-bit unorm or a packed 16-bit one, and its
-            // fetch of a one- or two-channel sRGB attachment, are not built, refused per pipeline:
+            // unblended write, and for Metal's blend of an extended-range, a 16-bit float, an
+            // 8-bit unorm or a packed 16-bit attachment; another float-class format's blend is the
+            // shader's generic one, logged (`PrecisionNote::UnmeasuredFetchBlend`). Its blend of an
+            // sRGB attachment, a blend of the second source (but an extended-range one's), and its
+            // fetch of a one- or two-channel sRGB attachment are not built, refused per pipeline:
             // the row's gap. A device with neither has no ordered fetch.
             F::ProgrammableBlending => first([
                 match (through_inputs(f.profile), through_storage(f.profile)) {
