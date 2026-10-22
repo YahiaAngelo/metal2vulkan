@@ -2632,6 +2632,7 @@ fn select_one(
     if tangled {
         cx.tangled.insert(value);
     }
+    let clamp_reference = clamps_reference(cx, &op, sampler)?;
     let sampling = Sampling {
         source,
         op,
@@ -2665,10 +2666,56 @@ fn select_one(
         offset_base,
         anisotropic,
         srgb_codes,
+        clamp_reference,
     };
     // The sampling routines it calls, for the census.
     super::routine::note(&mut cx.families.sampler, &sampling);
     Ok(sampling)
+}
+
+/// Whether a fragment function's depth comparison `op` through `sampler` clamps its reference, as
+/// the pipeline's private `fragmentDepthCompareClampMask` says (`LoweringInputs::
+/// depth_compare_clamp_mask`; probes on an Apple M3 Max, macOS 27.0.1): bit `s` clamps a
+/// comparison through `[[sampler(s)]]`, whichever texture slot it compares, and bit 31 one
+/// through any constexpr sampler; the reference is clamped to `[0, 1]`, a NaN taken as 0, for
+/// `sample_compare` and `gather_compare` alike. Each comparison's sampler is recorded
+/// (`StageIo::depth_compares`); one through an argument buffer's sampler, which no bit names, is
+/// refused under a mask other than 0.
+fn clamps_reference(
+    cx: &mut SelectCx<'_>,
+    op: &SampleOp,
+    sampler: SamplerArg,
+) -> Result<bool, Error> {
+    use crate::pipeline::stage_io::DepthCompares;
+    let compares = matches!(
+        op,
+        SampleOp::Sample { dref: Some(_), .. } | SampleOp::Gather { dref: Some(_), .. }
+    );
+    if cx.stage != Stage::Fragment || !compares {
+        return Ok(false);
+    }
+    let bit = match sampler {
+        SamplerArg::Static(SamplerRef::Slot(n), _) if n < 16 => 1u32 << n,
+        SamplerArg::Static(SamplerRef::Slot(_), _) => {
+            return Err(cx.invariant("a sampler slot past Metal's 16"))
+        }
+        SamplerArg::Static(SamplerRef::Constexpr(_), _) => DepthCompares::CONSTEXPR,
+        SamplerArg::Heap(_) => DepthCompares::ARGUMENT,
+    };
+    let mask = cx.inputs.depth_compare_clamp_mask;
+    if bit == DepthCompares::ARGUMENT && mask != 0 {
+        return Err(Unsupported::not_implemented(Feature::PrivateRenderState(
+            crate::error::PrivateRenderField::FragmentDepthCompareClamp,
+        ))
+        .into());
+    }
+    let compares = &mut cx.families.stage_io.interface.depth_compares;
+    compares.samplers |= bit;
+    let clamps = mask & bit != 0;
+    if clamps {
+        compares.clamped |= bit;
+    }
+    Ok(clamps)
 }
 
 /// Where sampling `op` through a sampler of pixel coordinates `pixel` hands the device a

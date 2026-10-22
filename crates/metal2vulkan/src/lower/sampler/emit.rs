@@ -1373,7 +1373,7 @@ pub(super) fn sampled_value(
             if let Some(g) = &s.cube_gather {
                 let component = *component;
                 let dref = match dref {
-                    Some(r) => Some(cx.operand(fb, *r)?),
+                    Some(r) => Some(reference(cx, fb, s, *r)?),
                     None => None,
                 };
                 let device = |fb: &mut FunctionBuilder<'_>, si: SValue| match dref {
@@ -1434,7 +1434,7 @@ pub(super) fn sampled_value(
                 return texel_value(cx, fb, s, image, (x, TexelOrigin::Computed), None);
             }
             let dref = match dref {
-                Some(r) => Some(cx.operand(fb, *r)?),
+                Some(r) => Some(reference(cx, fb, s, *r)?),
                 None => None,
             };
             observe(cx, fb, si, &|fb, si, sparse| match (dref, sparse) {
@@ -2012,10 +2012,30 @@ pub(super) fn sample_operands(
     }
     offset_operands(cx, fb, offset, s.lanes, &mut ops)?;
     let dref = match dref {
-        Some(r) => Some(cx.operand(fb, r)?),
+        Some(r) => Some(reference(cx, fb, s, r)?),
         None => None,
     };
     Ok((ops, dref, beyond))
+}
+
+/// The reference `r` of sampling `s`'s depth comparison as the comparison reads it: clamped to
+/// `[0, 1]`, a NaN taken as 0, where the pipeline's `fragmentDepthCompareClampMask` clamps it
+/// ([`Sampling::clamp_reference`]), else as computed.
+pub(super) fn reference(
+    cx: &mut EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+    s: &Sampling,
+    r: ValueId,
+) -> BResult<SValue> {
+    let r = cx.operand(fb, r)?;
+    if !s.clamp_reference {
+        return Ok(r);
+    }
+    let zero = f32_const(fb, 0)?;
+    let one = f32_const(fb, 1.0f32.to_bits())?;
+    let is_nan = fb.unary(UnOp::IsNan, r)?;
+    let r = fb.select(is_nan, zero, r)?;
+    fb.glsl(GlslOp::NClamp, &[r, zero, one])
 }
 
 /// The device's sample at `coord` with comparison `dref` and operands `ops`, from the sampled

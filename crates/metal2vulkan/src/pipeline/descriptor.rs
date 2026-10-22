@@ -393,8 +393,9 @@ pub struct PrivateRenderState {
     /// `vertexDepthCompareClampMask` (default 0): changes nothing Metal draws.
     pub vertex_depth_compare_clamp_mask: u32,
     /// `fragmentDepthCompareClampMask` (default 0): bit `s` clamps the reference of a fragment
-    /// function's depth comparison through sampler slot `s` (not built: a mask other than 0 is
-    /// refused).
+    /// function's depth comparison through `[[sampler(s)]]` to `[0, 1]`, a NaN taken as 0, and
+    /// bit 31 one through a constexpr sampler; a comparison through an argument buffer's sampler
+    /// is refused under a mask other than 0.
     pub fragment_depth_compare_clamp_mask: u32,
     /// `depthStencilWriteDisabled` (default off): changes nothing Metal draws.
     pub depth_stencil_write_disabled: bool,

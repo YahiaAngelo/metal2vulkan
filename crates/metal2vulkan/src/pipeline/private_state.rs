@@ -33,10 +33,16 @@
 //!   changes nothing. Metal's compiler fails a function that writes no color 0 under the test,
 //!   and a function past `Always`, a pipeline without a fragment function and a color 0 other
 //!   than four `float` or `half` lanes are refused, their answers unmeasured.
-//! - `sampleCoverage`, `logicOperationEnabled`, `pointSmoothEnabled` and
-//!   `fragmentDepthCompareClampMask` change what Metal draws; until the translation builds one,
-//!   a value other than Metal's default refuses the pipeline `NotImplemented`
-//!   ([`Feature::PrivateRenderState`]) naming it.
+//! - `fragmentDepthCompareClampMask` clamps the reference of a fragment function's depth
+//!   comparison (`sample_compare` and `gather_compare`) to `[0, 1]`, a NaN taken as 0: bit `s`
+//!   through `[[sampler(s)]]`, whichever texture slot it compares, and bit 31 through any
+//!   constexpr sampler (probes on an Apple M3 Max, macOS 27.0.1). The fragment function clamps
+//!   them itself (`LoweringInputs::depth_compare_clamp_mask`, [`depth_compares_clamped`]); a
+//!   comparison through an argument buffer's sampler, which no bit names, is refused under a mask
+//!   other than 0.
+//! - `sampleCoverage`, `logicOperationEnabled` and `pointSmoothEnabled` change what Metal draws;
+//!   until the translation builds one, a value other than Metal's default refuses the pipeline
+//!   `NotImplemented` ([`Feature::PrivateRenderState`]) naming it.
 //! - `textureWriteRoundingMode` 2 rounds a fragment function's texture writes to half-float and
 //!   `RG11B10Float` textures to nearest even, which the translation has not built: such a write is
 //!   refused naming it (`PrivateRenderField::TextureWriteRounding`), where the function's slot
@@ -49,7 +55,7 @@ use crate::error::{Error, Feature, PrivateRenderField, RuntimeInput, Unsupported
 use crate::library::FunctionArtifact;
 use crate::metal::CompareFunction;
 use crate::pipeline::descriptor::{PrivateRenderState, RenderPipelineDescriptor};
-use crate::pipeline::stage_io::StageBuiltin;
+use crate::pipeline::stage_io::{DepthCompares, StageBuiltin};
 use crate::pipeline::GraphicsState;
 
 /// The refusal of `field` at a value the translation has not built.
@@ -68,10 +74,6 @@ pub(crate) fn check_render(s: &PrivateRenderState) -> Result<(), Error> {
         (s.sample_coverage != 1.0, F::SampleCoverage),
         (s.logic_operation_enabled, F::LogicOperation),
         (s.point_smooth_enabled, F::PointSmooth),
-        (
-            s.fragment_depth_compare_clamp_mask != 0,
-            F::FragmentDepthCompareClamp,
-        ),
     ];
     match unbuilt.into_iter().find(|(set, _)| *set) {
         Some((_, field)) => Err(refused(field)),
@@ -111,6 +113,29 @@ pub(crate) fn alpha_tested(
             Err(Error::NeedsInput(RuntimeInput::AlphaTest))
         }
         Some(_) => Ok(()),
+    }
+}
+
+/// `Ok` where the fragment function `fragment` of the pipeline `d` clamps the references of its
+/// depth comparisons as the pipeline's `fragmentDepthCompareClampMask` says
+/// (`LoweringInputs::depth_compare_clamp_mask`): one through an argument buffer's sampler under a
+/// mask other than 0 is refused (`PrivateRenderField::FragmentDepthCompareClamp`, Metal's answer
+/// unmeasured), and one compiled for another mask over its samplers is compiled for the pipeline
+/// again (`NeedsInput(DepthCompareClamp)`).
+pub(crate) fn depth_compares_clamped(
+    d: &RenderPipelineDescriptor,
+    fragment: Option<&FunctionArtifact>,
+) -> Result<(), Error> {
+    let mask = d.private.fragment_depth_compare_clamp_mask;
+    let Some(c) = fragment.map(|f| f.interface.io.depth_compares) else {
+        return Ok(());
+    };
+    if mask != 0 && c.samplers & DepthCompares::ARGUMENT != 0 {
+        return Err(refused(PrivateRenderField::FragmentDepthCompareClamp));
+    }
+    match c.clamped == mask & c.samplers & !DepthCompares::ARGUMENT {
+        true => Ok(()),
+        false => Err(Error::NeedsInput(RuntimeInput::DepthCompareClamp)),
     }
 }
 

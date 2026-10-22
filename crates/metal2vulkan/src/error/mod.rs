@@ -1453,7 +1453,9 @@ pub enum PrivateRenderField {
     LogicOperation,
     /// `pointSmoothEnabled`.
     PointSmooth,
-    /// `fragmentDepthCompareClampMask` other than 0.
+    /// `fragmentDepthCompareClampMask` other than 0 in a pipeline whose fragment function makes a
+    /// depth comparison through an argument buffer's sampler, which no bit of the mask names
+    /// (Metal's answer unmeasured).
     FragmentDepthCompareClamp,
     /// `textureWriteRoundingMode` 2 (`TextureWriteRoundingMode::NearestEven`) in a pipeline whose
     /// fragment function writes a texel that Metal's mode 2 stores otherwise than its default (a
@@ -1661,6 +1663,11 @@ pub enum RuntimeInput {
     /// or it runs another comparison. It was compiled for another pipeline, and is compiled for
     /// this one again.
     AlphaTest,
+    /// A fragment function in a render pipeline with a private `fragmentDepthCompareClampMask`
+    /// clamps the references of its depth comparisons through the mask's samplers itself
+    /// (`LoweringInputs::depth_compare_clamp_mask`), as Metal clamps them; or it clamps others. It
+    /// was compiled for another pipeline, and is compiled for this one again.
+    DepthCompareClamp,
     /// A fragment function reads flat an interpolated varying that its pipeline's vertex function
     /// does not write the same at every vertex of a primitive: compiled for another vertex
     /// function, which wrote it so (`LoweringInputs::uniform_varyings`), it would read the

@@ -566,7 +566,7 @@ fn snapped(
             offset_operands(cx, fb, offset, first.lanes, &mut ops)?;
             let component = *component;
             let dref = match dref {
-                Some(r) => Some(cx.operand(fb, *r)?),
+                Some(r) => Some(super::emit::reference(cx, fb, first, *r)?),
                 None => None,
             };
             let read = |cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, a: &Sampling| {

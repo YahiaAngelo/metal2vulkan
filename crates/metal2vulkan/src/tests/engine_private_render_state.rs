@@ -315,7 +315,7 @@ fn each_property_not_built_refuses_a_value_other_than_metals_default() {
     let Some(lib) = fixture("rt6_render_state") else {
         return;
     };
-    let cases: [(fn(&mut PrivateRenderState), PrivateRenderField); 6] = [
+    let cases: [(fn(&mut PrivateRenderState), PrivateRenderField); 5] = [
         (|p| p.sample_coverage = 0.5, F::SampleCoverage),
         (|p| p.sample_coverage = f32::NAN, F::SampleCoverage),
         (
@@ -327,10 +327,6 @@ fn each_property_not_built_refuses_a_value_other_than_metals_default() {
         ),
         (|p| p.logic_operation_enabled = true, F::LogicOperation),
         (|p| p.point_smooth_enabled = true, F::PointSmooth),
-        (
-            |p| p.fragment_depth_compare_clamp_mask = 1,
-            F::FragmentDepthCompareClamp,
-        ),
     ];
     for stem in STEMS {
         let dev = device(stem);
@@ -425,6 +421,123 @@ fn the_alpha_test_runs_in_the_fragment_function() {
         match dev.compile_render_pipeline(&bare, &Budget::standard()) {
             Err(e) => assert_eq!(e, refused(PrivateRenderField::AlphaTest), "{stem}"),
             Ok(_) => panic!("{stem}: compiled without a fragment function"),
+        }
+    }
+}
+
+/// `fragmentDepthCompareClampMask` over the owned fixture `engine/pdc_compare_clamp`: a fragment
+/// function clamps the reference of a comparison through `[[sampler(s)]]` where bit `s` is set and
+/// through a constexpr sampler where bit 31 is, and records the samplers it compares through and
+/// those it clamps; a mask over none of them keeps its module. A function compiled for another
+/// mask over its samplers is compiled for the pipeline again, and one comparing through an
+/// argument buffer's sampler is refused under a mask other than 0.
+#[test]
+fn the_depth_compare_clamp_mask_clamps_its_samplers_references() {
+    use crate::pipeline::stage_io::DepthCompares;
+    let Some(lib) = fixture("pdc_compare_clamp") else {
+        return;
+    };
+    let pipeline = |fragment: &str, mask: u32| {
+        let stage = |name: &str| {
+            StageSource::Function(FunctionDescriptor::new(
+                lib.function(name).expect("function"),
+            ))
+        };
+        let mut d = RenderPipelineDescriptor::new(stage("pdc_vertex"));
+        d.fragment = Some(stage(fragment));
+        d.color_attachments[0] = Some(ColorAttachmentDescriptor::new(PixelFormat::RGBA8Unorm));
+        d.private.fragment_depth_compare_clamp_mask = mask;
+        d
+    };
+    // (fragment, its comparisons' samplers, (mask, clamped)).
+    let slot = 1u32 << 2;
+    let cases: [(&str, u32, [(u32, u32); 4]); 2] = [
+        (
+            "pdc_slot",
+            slot,
+            [(0, 0), (slot, slot), (!slot, 0), (u32::MAX, slot)],
+        ),
+        (
+            "pdc_constexpr",
+            DepthCompares::CONSTEXPR,
+            [
+                (0, 0),
+                (DepthCompares::CONSTEXPR, DepthCompares::CONSTEXPR),
+                (0x7fff_ffff, 0),
+                (u32::MAX, DepthCompares::CONSTEXPR),
+            ],
+        ),
+    ];
+    for stem in STEMS {
+        let dev = device(stem);
+        for (fragment, samplers, masks) in cases {
+            let base = compile(&dev, &pipeline(fragment, 0), stem);
+            for (mask, clamped) in masks {
+                let what = format!("{stem} {fragment} mask {mask:#x}");
+                let d = pipeline(fragment, mask);
+                let p = compile(&dev, &d, &what);
+                assert_eq!(same_modules(&p, &base), clamped == 0, "{what}");
+                for m in &p.stages {
+                    check_words_valid(&m.spirv, &p.requirements, dev.profile())
+                        .unwrap_or_else(|e| panic!("{what} {:?}: L3: {e}", m.stage));
+                }
+                let inputs = dev
+                    .render_pipeline_key(&d, &Budget::standard())
+                    .unwrap_or_else(|e| panic!("{what}: {e}"))
+                    .fragment_inputs
+                    .expect("fragment inputs");
+                assert_eq!(inputs.depth_compare_clamp_mask, mask, "{what}");
+                let Some(StageSource::Function(f)) = &d.fragment else {
+                    unreachable!("a function fragment stage")
+                };
+                let own = dev
+                    .compile_function(f, &inputs, &Budget::standard())
+                    .unwrap_or_else(|e| panic!("{what}: {e}"));
+                let compares = own.artifact().interface.io.depth_compares;
+                assert_eq!(compares.samplers, samplers, "{what}");
+                assert_eq!(compares.clamped, clamped, "{what}");
+                // The function compiled without the mask clamps nothing.
+                let unclamped = dev
+                    .compile_function(
+                        f,
+                        &crate::pipeline::LoweringInputs {
+                            depth_compare_clamp_mask: 0,
+                            ..inputs
+                        },
+                        &Budget::standard(),
+                    )
+                    .unwrap_or_else(|e| panic!("{what}: {e}"));
+                let mut compiled = d.clone();
+                compiled.fragment = Some(StageSource::Compiled(unclamped));
+                match (
+                    dev.compile_render_pipeline(&compiled, &Budget::standard()),
+                    clamped,
+                ) {
+                    (Ok(_), 0) => {}
+                    (Err(e), 0) => panic!("{what}: {e}"),
+                    (Err(e), _) => assert_eq!(
+                        e,
+                        Error::NeedsInput(RuntimeInput::DepthCompareClamp),
+                        "{what}"
+                    ),
+                    (Ok(_), _) => panic!("{what}: compiled without the clamp"),
+                }
+            }
+        }
+        // An argument buffer's sampler: no mask bit names it.
+        compile(&dev, &pipeline("pdc_argument", 0), stem);
+        for mask in [1, slot, DepthCompares::CONSTEXPR] {
+            match dev.compile_render_pipeline(&pipeline("pdc_argument", mask), &Budget::standard())
+            {
+                // Refused at the comparison, which the refusal locates.
+                Err(Error::Unsupported(u)) => assert_eq!(
+                    u.feature,
+                    Feature::PrivateRenderState(PrivateRenderField::FragmentDepthCompareClamp),
+                    "{stem} {mask:#x}"
+                ),
+                Err(e) => panic!("{stem} {mask:#x}: {e}"),
+                Ok(_) => panic!("{stem} {mask:#x}: compiled"),
+            }
         }
     }
 }

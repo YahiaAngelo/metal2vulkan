@@ -886,6 +886,10 @@ impl Device {
             &graphics,
         )?;
         crate::pipeline::private_state::alpha_tested(d, fragment.as_ref().map(|f| f.artifact()))?;
+        crate::pipeline::private_state::depth_compares_clamped(
+            d,
+            fragment.as_ref().map(|f| f.artifact()),
+        )?;
         let profile = self.profile_fingerprint();
         Ok(RenderPipeline {
             key: pipeline_key(

@@ -334,6 +334,8 @@ mod denormal_word_fetches;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod depth_as_color;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod depth_compare_clamps;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod depth_compare_levels;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod depth_compares;

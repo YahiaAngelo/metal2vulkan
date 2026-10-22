@@ -57,9 +57,9 @@ use crate::pipeline::lower_inputs::{
     HalfOutputLane, RotatedBlendForm, VertexFetch,
 };
 use crate::pipeline::stage_io::{
-    CoverageLoop, CoverageLoopRefusal, DepthMode, Interpolation as IoInterpolation, IoNumeric,
-    IoRole, IoType, IoVariable, PulledInput, Sampling as IoSampling, SelectedWrite, StageBuiltin,
-    StageInFetch, StageInInput, StageIo,
+    CoverageLoop, CoverageLoopRefusal, DepthCompares, DepthMode, Interpolation as IoInterpolation,
+    IoNumeric, IoRole, IoType, IoVariable, PulledInput, Sampling as IoSampling, SelectedWrite,
+    StageBuiltin, StageInFetch, StageInInput, StageIo,
 };
 use crate::pipeline::sym::{
     AccelerationStructureLevel, AirUserKey, Axis, CombinedSampler, HandleClass, ImageAccess,
@@ -1081,8 +1081,9 @@ codec_struct! {
         half_output_lanes, texture_write_rounding, uniform_outputs, uniform_inputs,
         instanced_attributes, selected_colors, half_blend_colors, half_fast_colors,
         float_blend_colors, zero_indices, color_group, word_colors, alpha_in_red_colors,
-        alpha_test,
+        alpha_test, depth_compares,
     }
+    DepthCompares { samplers, clamped }
     ColorGroup { present, width, group }
     WordField { shift, bits }
     SelectedWrite { lanes, rounds, nans }
