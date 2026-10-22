@@ -40,7 +40,9 @@
 use std::sync::Arc;
 
 use crate::bind::index_bounds::finished;
-use crate::bind::mesh_arguments::{METAL_MESH_GRID_AXIS, METAL_MESH_GRID_TOTAL};
+use crate::bind::mesh_arguments::{
+    METAL_MESH_GRID_AXIS, METAL_MESH_GRID_TOTAL, METAL_OBJECT_GRID_TOTAL,
+};
 use crate::bind::replay::checked_mul;
 use crate::bind::status::{StatusBits, StatusWord};
 use crate::device::requirements::Requirements;
@@ -76,6 +78,9 @@ impl MeshScanModule {
     pub const STATUS_BINDING: u32 = 1;
     /// The Metal indirect buffer, a storage buffer.
     pub const ARGUMENTS_BINDING: u32 = 2;
+    /// The draw's records, a storage buffer: the command buffer's records pool, where an indirect
+    /// draw with an object function keeps its slots and offsets (`MeshDispatch::object_arguments`).
+    pub const RECORDS_BINDING: u32 = 3;
     /// Invocations of the one workgroup, along x.
     pub const LOCAL_SIZE: u32 = 64;
 }
@@ -91,6 +96,12 @@ pub const ARGUMENTS: ResourceSlot = ResourceSlot {
     stage: Stage::Kernel,
     kind: ResourceKind::Buffer,
     index: 1,
+};
+/// The records' binding symbol ([`MeshScanModule::RECORDS_BINDING`]).
+pub const RECORDS: ResourceSlot = ResourceSlot {
+    stage: Stage::Kernel,
+    kind: ResourceKind::Buffer,
+    index: 2,
 };
 /// The status buffer's binding symbol ([`MeshScanModule::STATUS_BINDING`]).
 pub const STATUS: ResourceSlot = ResourceSlot {
@@ -238,6 +249,61 @@ pub(crate) fn for_range<'a>(
     f.loop_(&mut (), LoopSpec::default(), body)
 }
 
+/// Where the draw's slots and offsets begin (`work::SLOTS`): whether in the records, and the word
+/// of their first in the buffer that holds them.
+#[derive(Clone, Copy)]
+pub(crate) struct Slots {
+    work: Value,
+    records: Value,
+    pooled: Value,
+    start: Value,
+}
+
+impl Slots {
+    pub(crate) fn of(f: &mut FunctionBuilder<'_>, work: Value, records: Value) -> BResult<Slots> {
+        let word = load_at(f, work, work::SLOTS)?;
+        let zero = k(f, 0)?;
+        let one = k(f, 1)?;
+        let pooled = f.binary(BinOp::INotEqual, word, zero)?;
+        let in_pool = f.binary(BinOp::ISub, word, one)?;
+        let header = k(f, work::HEADER)?;
+        let start = f.select(pooled, in_pool, header)?;
+        Ok(Slots {
+            work,
+            records,
+            pooled,
+            start,
+        })
+    }
+
+    /// Word `at` of the slots and offsets (from their first).
+    pub(crate) fn load(self, f: &mut FunctionBuilder<'_>, at: Value) -> BResult<Value> {
+        let zero = k(f, 0)?;
+        let at = f.binary(BinOp::IAdd, self.start, at)?;
+        let in_work = f.select(self.pooled, zero, at)?;
+        let in_pool = f.select(self.pooled, at, zero)?;
+        let from_work = load(f, self.work, in_work)?;
+        let from_pool = load(f, self.records, in_pool)?;
+        f.select(self.pooled, from_pool, from_work)
+    }
+
+    /// Store `v` at word `at` of the slots and offsets (from their first).
+    pub(crate) fn store(self, f: &mut FunctionBuilder<'_>, at: Value, v: Value) -> BResult<()> {
+        let at = f.binary(BinOp::IAdd, self.start, at)?;
+        let (records, work) = (self.records, self.work);
+        let pool: ArmFn<'_, ()> = Box::new(move |f, _| {
+            store(f, records, at, v)?;
+            Ok(ArmEnd::FallThrough(Vec::new()))
+        });
+        let local: ArmFn<'_, ()> = Box::new(move |f, _| {
+            store(f, work, at, v)?;
+            Ok(ArmEnd::FallThrough(Vec::new()))
+        });
+        f.if_(&mut (), self.pooled, pool, Some(local))?;
+        Ok(())
+    }
+}
+
 /// Run `then(f)` where `c` holds.
 pub(crate) fn when<'a>(
     f: &mut FunctionBuilder<'_>,
@@ -285,6 +351,7 @@ pub fn scan_typed_module() -> BResult<TypedModule> {
     let work = words_buffer(&mut b, WORK, u32_)?;
     let arguments = words_buffer(&mut b, ARGUMENTS, u32_)?;
     let status = words_buffer(&mut b, STATUS, u32_)?;
+    let records = words_buffer(&mut b, RECORDS, u32_)?;
     let invocation = b.builtin(
         crate::spv::BuiltIn::LocalInvocationIndex,
         IoDir::Input,
@@ -295,6 +362,7 @@ pub fn scan_typed_module() -> BResult<TypedModule> {
     let work = f.module().global_value(work)?;
     let arguments = f.module().global_value(arguments)?;
     let status = f.module().global_value(status)?;
+    let records = f.module().global_value(records)?;
     let partial = f.module().global_value(partial)?;
     let total_var = f.module().global_value(total_var)?;
     let invocation = f.module().global_value(invocation)?;
@@ -311,7 +379,7 @@ pub fn scan_typed_module() -> BResult<TypedModule> {
     let draw_id = load_at(&mut f, work, work::DRAW_ID)?;
     let row = load_at(&mut f, work, work::ROW)?;
     let argument_word = load_at(&mut f, work, work::ARGUMENTS)?;
-    let header = k(&mut f, work::HEADER)?;
+    let slots = Slots::of(&mut f, work, records)?;
 
     // An indirect draw's grid (slot 0, `O = 1`): Metal's arguments, read by every invocation.
     let indirect = f.binary(BinOp::INotEqual, argument_word, zero)?;
@@ -338,13 +406,12 @@ pub fn scan_typed_module() -> BResult<TypedModule> {
     })?;
     // The mesh threadgroups object threadgroup `o` launches.
     let groups = move |f: &mut FunctionBuilder<'_>, o: Value| -> BResult<Value> {
-        let into = f.binary(BinOp::IMul, o, slot_words)?;
-        let slot = f.binary(BinOp::IAdd, header, into)?;
+        let slot = f.binary(BinOp::IMul, o, slot_words)?;
         let mut g = [slot; 3];
         for (i, v) in g.iter_mut().enumerate() {
             let off = k(f, i as u32)?;
             let w = f.binary(BinOp::IAdd, slot, off)?;
-            *v = load(f, work, w)?;
+            *v = slots.load(f, w)?;
         }
         let set = bounded_groups(f, g)?;
         f.select(indirect, argued, set)
@@ -388,15 +455,14 @@ pub fn scan_typed_module() -> BResult<TypedModule> {
     })?;
     barrier(&mut f)?;
     // The offsets of the run's object threadgroups.
-    let slots = f.binary(BinOp::IMul, objects, slot_words)?;
-    let offsets = f.binary(BinOp::IAdd, header, slots)?;
+    let offsets = f.binary(BinOp::IMul, objects, slot_words)?;
     let own = f.access_chain(partial, &[lin])?;
     let base = f.load(own, MemAccess::default())?;
     f.store(sum, base, MemAccess::default())?;
     for_range(&mut f, u32_, (lo, hi), move |f, o| {
         let running = f.load(sum, MemAccess::default())?;
         let at = f.binary(BinOp::IAdd, offsets, o)?;
-        store(f, work, at, running)?;
+        slots.store(f, at, running)?;
         let n = groups(f, o)?;
         let next = saturating_add(f, running, n)?;
         f.store(sum, next, MemAccess::default())
@@ -407,7 +473,7 @@ pub fn scan_typed_module() -> BResult<TypedModule> {
         let one = k(f, 1)?;
         let total = f.load(total_var, MemAccess::default())?;
         let at = f.binary(BinOp::IAdd, offsets, objects)?;
-        store(f, work, at, total)?;
+        slots.store(f, at, total)?;
         let cursor_at = k(f, StatusWord::MeshRecordsCursor.index())?;
         let cursor_ptr = word_ptr(f, status, cursor_at)?;
         let cursor = f.load(cursor_ptr, MemAccess::default())?;
@@ -483,6 +549,165 @@ pub fn scan_typed_module() -> BResult<TypedModule> {
     b.finalize()
 }
 
+/// The object arguments pass as a typed module, before serialization: the module
+/// [`mesh_object_arguments_module`] serializes for a device of `compute`
+/// (`maxComputeWorkGroupCount`), which the CPU interpreter runs. One invocation reads Metal's
+/// arguments, the object grid, at the header's `OBJECT_ARGUMENTS` word (the module docs), and:
+///
+/// - a grid with a zero count runs nothing;
+/// - one of more threadgroups than [`METAL_OBJECT_GRID_TOTAL`], which Metal's GPU discards, runs
+///   nothing and sets [`StatusBits::MESH_GRID_DISCARDED`];
+/// - one with a count past `compute` on its axis, or whose threads per grid wrap to 32 bits along
+///   an axis (whose grid builtins the object dispatch cannot report as Metal's), runs nothing and
+///   sets [`StatusBits::MESH_GRID_PAST_LIMITS`];
+/// - else it reserves `O · S + O + 1` words of the records pool from its cursor for the slots and
+///   offsets, and writes `O` (`OBJECT_GROUPS`), their first word plus 1 (`SLOTS`) and the object
+///   dispatch (`OBJECT_DISPATCH`, the grid); where the rest of the pool cannot hold them it runs
+///   nothing and sets [`StatusBits::MESH_RECORDS_OVERFLOW`], naming the draw and its object
+///   threadgroups (and no mesh threadgroup) where it is the command buffer's first records fault.
+///
+/// A grid that runs nothing writes 0 for `O`, `SLOTS` and the dispatch. Its bindings are the
+/// scan's.
+pub fn object_arguments_typed_module(compute: [u32; 3]) -> BResult<TypedModule> {
+    let mut b = ModuleBuilder::new();
+    let u32_ = b.ty(Type::Int {
+        width: 32,
+        signed: false,
+    })?;
+    let work = words_buffer(&mut b, WORK, u32_)?;
+    let arguments = words_buffer(&mut b, ARGUMENTS, u32_)?;
+    let status = words_buffer(&mut b, STATUS, u32_)?;
+    // The records are bound for the scan's layout; this pass only reserves from their cursor.
+    words_buffer(&mut b, RECORDS, u32_)?;
+    let void = b.ty(Type::Void)?;
+    let mut f = b.function(void)?;
+    let work = f.module().global_value(work)?;
+    let arguments = f.module().global_value(arguments)?;
+    let status = f.module().global_value(status)?;
+    let zero = k(&mut f, 0)?;
+    let one = k(&mut f, 1)?;
+    let argument_word = load_at(&mut f, work, work::OBJECT_ARGUMENTS)?;
+    let at = f.binary(BinOp::ISub, argument_word, one)?;
+    let packed = load_at(&mut f, work, work::OBJECT_THREADS)?;
+    let mask = k(&mut f, (1 << crate::lower::dispatch::NOMINAL_AXIS_BITS) - 1)?;
+    let mut grid = [zero; 3];
+    let mut any_zero = boolean(&mut f, false)?;
+    let mut past = boolean(&mut f, false)?;
+    for (i, g) in grid.iter_mut().enumerate() {
+        let off = k(&mut f, i as u32)?;
+        let w = f.binary(BinOp::IAdd, at, off)?;
+        *g = contained(&mut f, arguments, w)?;
+        let z = f.binary(BinOp::IEqual, *g, zero)?;
+        any_zero = f.binary(BinOp::LogicalOr, any_zero, z)?;
+        let limit = k(&mut f, compute[i])?;
+        let over = f.binary(BinOp::UGreaterThan, *g, limit)?;
+        past = f.binary(BinOp::LogicalOr, past, over)?;
+        let shift = k(&mut f, crate::lower::dispatch::NOMINAL_AXIS_BITS * i as u32)?;
+        let t = f.binary(BinOp::ShiftRightLogical, packed, shift)?;
+        let t = f.binary(BinOp::BitwiseAnd, t, mask)?;
+        let t = f.binary(BinOp::IAdd, t, one)?;
+        let (_, wraps) = checked_mul(&mut f, *g, t, zero)?;
+        past = f.binary(BinOp::LogicalOr, past, wraps)?;
+    }
+    let some = f.unary(UnOp::LogicalNot, any_zero)?;
+    let (xy, wraps_xy) = checked_mul(&mut f, grid[0], grid[1], zero)?;
+    let (n, wraps_n) = checked_mul(&mut f, xy, grid[2], zero)?;
+    let mut many = f.binary(BinOp::LogicalOr, wraps_xy, wraps_n)?;
+    let most = k(&mut f, METAL_OBJECT_GRID_TOTAL)?;
+    let over = f.binary(BinOp::UGreaterThan, n, most)?;
+    many = f.binary(BinOp::LogicalOr, many, over)?;
+    let discarded = f.binary(BinOp::LogicalAnd, some, many)?;
+    let kept = f.unary(UnOp::LogicalNot, many)?;
+    let past = f.binary(BinOp::LogicalAnd, past, kept)?;
+    let past = f.binary(BinOp::LogicalAnd, past, some)?;
+    // The slots and offsets: `n · S + n + 1` words, held below 2^29 · 2^17 by the grid's bound
+    // and the slot's (a payload of at most 16 KiB); counted without wrapping all the same.
+    let slot_words = load_at(&mut f, work, work::SLOT_WORDS)?;
+    let pool_words = load_at(&mut f, work, work::POOL_WORDS)?;
+    let draw_id = load_at(&mut f, work, work::DRAW_ID)?;
+    let (slots, wraps_slots) = checked_mul(&mut f, n, slot_words, zero)?;
+    let offsets = f.binary(BinOp::IAdd, n, one)?;
+    let words = saturating_add(&mut f, slots, offsets)?;
+    let cursor_at = k(&mut f, StatusWord::MeshRecordsCursor.index())?;
+    let cursor_ptr = word_ptr(&mut f, status, cursor_at)?;
+    let cursor = f.load(cursor_ptr, MemAccess::default())?;
+    let used = f.glsl(GlslOp::UMin, &[cursor, pool_words])?;
+    let room = f.binary(BinOp::ISub, pool_words, used)?;
+    let fits = f.binary(BinOp::ULessThanEqual, words, room)?;
+    let wraps_slots = f.unary(UnOp::LogicalNot, wraps_slots)?;
+    let fits = f.binary(BinOp::LogicalAnd, fits, wraps_slots)?;
+    let launched = f.binary(BinOp::LogicalOr, discarded, past)?;
+    let launched = f.unary(UnOp::LogicalNot, launched)?;
+    let launched = f.binary(BinOp::LogicalAnd, launched, some)?;
+    let runs = f.binary(BinOp::LogicalAnd, launched, fits)?;
+    let short = f.unary(UnOp::LogicalNot, fits)?;
+    let overflow = f.binary(BinOp::LogicalAnd, launched, short)?;
+    let next = f.binary(BinOp::IAdd, used, words)?;
+    let cursor_after = f.select(runs, next, cursor)?;
+    f.store(cursor_ptr, cursor_after, MemAccess::default())?;
+    let first_word = f.binary(BinOp::IAdd, used, one)?;
+    let objects = f.select(runs, n, zero)?;
+    let slots_word = f.select(runs, first_word, zero)?;
+    store_at(&mut f, work, work::OBJECT_GROUPS, objects)?;
+    store_at(&mut f, work, work::SLOTS, slots_word)?;
+    for (i, g) in grid.into_iter().enumerate() {
+        let v = f.select(runs, g, zero)?;
+        store_at(&mut f, work, work::OBJECT_DISPATCH + i as u32, v)?;
+    }
+    // What runs nothing says why: Metal's discard, the device's limits, or the pool.
+    let discard_bit = k(&mut f, StatusBits::MESH_GRID_DISCARDED.0)?;
+    let past_bit = k(&mut f, StatusBits::MESH_GRID_PAST_LIMITS.0)?;
+    let discard_bit = f.select(discarded, discard_bit, zero)?;
+    let past_bit = f.select(past, past_bit, zero)?;
+    let bits = f.binary(BinOp::BitwiseOr, discard_bit, past_bit)?;
+    let set = f.binary(BinOp::INotEqual, bits, zero)?;
+    when(&mut f, set, move |f| {
+        let word = k(f, StatusWord::Status.index())?;
+        let p = word_ptr(f, status, word)?;
+        f.atomic(AtomicOp::Or, p, Scope::Device, Semantics::RELAXED, bits)?;
+        Ok(())
+    })?;
+    when(&mut f, overflow, move |f| {
+        let zero = k(f, 0)?;
+        let word = k(f, StatusWord::Status.index())?;
+        let bit = k(f, StatusBits::MESH_RECORDS_OVERFLOW.0)?;
+        let p = word_ptr(f, status, word)?;
+        let old = f.atomic(AtomicOp::Or, p, Scope::Device, Semantics::RELAXED, bit)?;
+        let either = k(f, StatusBits::RECORDS_FAULTS.0)?;
+        let had = f.binary(BinOp::BitwiseAnd, old, either)?;
+        let new = f.binary(BinOp::IEqual, had, zero)?;
+        when(f, new, move |f| {
+            let zero = k(f, 0)?;
+            for (w, v) in [
+                (StatusWord::MeshFaultDraw, draw_id),
+                (StatusWord::MeshFaultObjects, n),
+                (StatusWord::MeshFaultGroups, zero),
+            ] {
+                store_at(f, status, w.index(), v)?;
+            }
+            Ok(())
+        })
+    })?;
+    f.ret(None)?;
+    let id = f.finish()?;
+    b.entry(
+        ExecModel::GLCompute,
+        id,
+        vec![ExecMode::LocalSize { x: 1, y: 1, z: 1 }],
+    )?;
+    b.finalize()
+}
+
+/// The `bool` constant `v`.
+fn boolean(f: &mut FunctionBuilder<'_>, v: bool) -> BResult<Value> {
+    let ty = f.module().ty(Type::Bool)?;
+    let c = f.module().constant(Constant::Scalar {
+        ty,
+        bits: ConstBits(u64::from(v)),
+    })?;
+    f.module().const_value(c)
+}
+
 /// The fixed binding numbers of the scan's symbols.
 fn binding_of(sym: &Symbol) -> Option<u32> {
     match sym {
@@ -490,8 +715,32 @@ fn binding_of(sym: &Symbol) -> Option<u32> {
         Symbol::Binding(s) if *s == WORK => Some(MeshScanModule::WORK_BINDING),
         Symbol::Binding(s) if *s == ARGUMENTS => Some(MeshScanModule::ARGUMENTS_BINDING),
         Symbol::Binding(s) if *s == STATUS => Some(MeshScanModule::STATUS_BINDING),
+        Symbol::Binding(s) if *s == RECORDS => Some(MeshScanModule::RECORDS_BINDING),
         _ => None,
     }
+}
+
+/// The object arguments pass of `device` ([`object_arguments_typed_module`] of its
+/// `maxComputeWorkGroupCount`), which an emulated indirect draw with an object function dispatches
+/// (one workgroup of one invocation) before its object dispatch, under the scan's bindings
+/// (`MeshDispatch::object_arguments`): built with the typed builder, verified, serialized, and
+/// numbered with the fixed bindings of [`MeshScanModule`].
+pub fn mesh_object_arguments_module(device: &Device) -> Result<MeshScanModule, Error> {
+    let compute = device
+        .profile()
+        .fields()
+        .limits
+        .max_compute_work_group_count;
+    let (spirv, requirements) = finished(
+        device,
+        object_arguments_typed_module(compute)?,
+        binding_of,
+        "the mesh object arguments pass",
+    )?;
+    Ok(MeshScanModule {
+        spirv,
+        requirements,
+    })
 }
 
 /// The mesh scan module of `device`: built with the typed builder, verified, serialized, and

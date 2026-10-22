@@ -87,6 +87,7 @@ fn modules() -> Vec<Build> {
         index_bounds_fill_module,
         index_bounds_plan_module,
         indirect_clamp_module,
+        mesh_object_arguments_module,
         mesh_scan_module,
         plane_bytes_copy_module,
         plane_copy_module,

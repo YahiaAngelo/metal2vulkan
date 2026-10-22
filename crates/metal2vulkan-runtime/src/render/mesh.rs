@@ -83,8 +83,14 @@
 //!   everything after. An indirect command's record before its pass too, or, behind the command's
 //!   barrier where an earlier draw's stages before its fragments touched what they use, before the
 //!   run of the execution's that the barrier begins (`render/executions.rs`). Such draws announce
-//!   `emulated-mesh-draws` once. An indirect draw of a pipeline with an object function is not
-//!   emulated yet (`NotImplemented(MeshShading)`).
+//!   `emulated-mesh-draws` once. An indirect draw of a pipeline with an object function first runs
+//!   the object arguments pass (`bind::mesh_object_arguments_module`), which reads Metal's
+//!   arguments, reserves the object threadgroups' slots in the records pool and writes the object
+//!   dispatch, which then launches indirectly: a grid Metal's GPU discards fails the command
+//!   buffer as Metal's (`CommandBufferError::GpuRecoveryVictim`), one past the compute limits or
+//!   whose threads per grid wrap fails it as one the device cannot launch
+//!   (`CommandBufferError::MeshGridPastLimits`), and one whose slots the pool cannot hold as a
+//!   records overflow (`CommandBufferError::MeshRecordsOverflow`, naming no mesh threadgroup).
 
 use super::replay::Samplers;
 use super::RenderCommandEncoder;
@@ -863,8 +869,8 @@ impl RenderCommandEncoder {
     /// object grid Metal's GPU discards fails the command buffer as Metal's does
     /// (`CommandBufferError::GpuRecoveryVictim`), and one past a device's task limits where it
     /// does not fold them (`CommandBufferError::MeshGridPastLimits`, the module docs). On one
-    /// without it, a draw of a
-    /// pipeline with an object function is `NotImplemented(MeshShading)` (the module docs).
+    /// without it the emulation reads the counts on the GPU: a draw with an object function
+    /// through its object arguments pass (the module docs).
     pub fn draw_mesh_threadgroups_indirect(
         &mut self,
         indirect_buffer: &Buffer,
@@ -973,27 +979,30 @@ impl MeshWork {
     }
 }
 
-/// An emulated mesh draw's scan (`bind::MeshScanModule`): the device's kernel and its set over
-/// the draw's work buffer, the command buffer's status words, and Metal's arguments.
+/// An emulated mesh draw's scan (`bind::MeshScanModule`), or its object arguments pass
+/// (`bind::mesh_object_arguments_module`): the device's kernel and its set over the draw's work
+/// buffer, the command buffer's status words, Metal's arguments, and the records.
 pub(crate) struct Scan {
     kernel: OwnedKernel,
     sets: Vec<vk::DescriptorSet>,
 }
 
 impl Scan {
-    /// The scan of `work`, in `core`'s command buffer (which holds its set until it completes),
-    /// reading Metal's arguments at `arguments` (the `VkBuffer` and the binder's range in it) for
-    /// an indirect draw. Refused as kernels, uploads and sets are.
+    /// The scan of `work` (`OwnedModule::MeshScan`), or its object arguments pass
+    /// (`OwnedModule::MeshObjectArguments`), as `which`, in `core`'s command buffer (which holds
+    /// its set until it completes), reading Metal's arguments at `arguments` (the `VkBuffer` and
+    /// the binder's range in it) for an indirect draw. Refused as kernels, uploads and sets are.
     pub(crate) fn new(
         core: &mut EncoderCore,
+        which: OwnedModule,
         work: &MeshWork,
         arguments: Option<(vk::Buffer, BufferRange)>,
     ) -> Result<Scan, Error> {
         let device = core.device().clone();
-        let kernel = device.owned_kernel(OwnedModule::MeshScan)?;
+        let kernel = device.owned_kernel(which)?;
         let status = core.command_buffer().state().status_words(&device)?;
         let status = (status.raw(), status.offset(), ExecutionStatus::BYTES as u64);
-        let mut set = [(vk::Buffer::null(), 0, 0); 3];
+        let mut set = [(vk::Buffer::null(), 0, 0); 4];
         set[MeshScanModule::WORK_BINDING as usize] =
             (work.work.raw(), work.work.offset(), work.work.len());
         set[MeshScanModule::STATUS_BINDING as usize] = status;
@@ -1002,6 +1011,7 @@ impl Scan {
             Some((raw, range)) => (raw, range.offset, range.range),
             None => status,
         };
+        set[MeshScanModule::RECORDS_BINDING as usize] = work.records;
         let owned = OwnedSets::write(&device, &kernel, &[set.to_vec()])?;
         let sets = owned.sets.clone();
         core.retain(owned);
@@ -1009,12 +1019,33 @@ impl Scan {
     }
 }
 
-/// How an emulated mesh draw launches its mesh threadgroups.
+/// How an emulated mesh draw launches its object or mesh threadgroups.
 pub(crate) enum Launch {
     /// `vkCmdDispatch` of these counts.
     Direct([u32; 3]),
-    /// `vkCmdDispatchIndirect` from this `VkBuffer` and byte: the scan's.
+    /// `vkCmdDispatchIndirect` from this `VkBuffer` and byte: the object arguments pass's, or
+    /// the scan's.
     Indirect(vk::Buffer, u64),
+}
+
+impl Launch {
+    /// Record the dispatch.
+    ///
+    /// # Safety
+    ///
+    /// `command_buffer` is recording outside a render pass with a compute pipeline bound, and an
+    /// indirect launch's arguments are written and visible to `DRAW_INDIRECT` reads.
+    unsafe fn record(&self, raw: &Vk, command_buffer: vk::CommandBuffer) {
+        // SAFETY: as the caller states.
+        unsafe {
+            match *self {
+                Launch::Direct([x, y, z]) => raw.cmd_dispatch(command_buffer, x, y, z),
+                Launch::Indirect(buffer, offset) => {
+                    raw.cmd_dispatch_indirect(command_buffer, buffer, offset)
+                }
+            }
+        }
+    }
 }
 
 /// An emulated mesh draw's compute work (`DrawCommands::mesh_dispatch`), ready to record before
@@ -1030,8 +1061,11 @@ pub(crate) struct MeshSteps {
     pub(crate) heap: Option<vk::DescriptorSet>,
     /// The draw's push writes of the compute stage.
     pub(crate) push: Vec<PushWrite>,
-    /// The object function's pipeline and threadgroups, where the pipeline has one.
-    pub(crate) object: Option<(Arc<RawPipeline>, [u32; 3])>,
+    /// The object arguments pass, of an indirect draw with an object function.
+    pub(crate) arguments: Option<Scan>,
+    /// The object function's pipeline and its launch, where the pipeline has one: indirect from
+    /// the work buffer where the object arguments pass writes it.
+    pub(crate) object: Option<(Arc<RawPipeline>, Launch)>,
     /// The scan, of a draw whose mesh threadgroups the GPU decides.
     pub(crate) scan: Option<Scan>,
     /// The mesh function's pipeline.
@@ -1097,8 +1131,8 @@ impl MeshSteps {
         }
     }
 
-    /// The object dispatch, the scan and the mesh dispatch, each after a barrier from the one
-    /// before.
+    /// The object arguments pass, the object dispatch, the scan and the mesh dispatch, each after
+    /// a barrier from the one before.
     ///
     /// # Safety
     ///
@@ -1137,15 +1171,8 @@ impl MeshSteps {
                 }
             }
         };
-        if let Some((pipeline, [x, y, z])) = &self.object {
-            bind(pipeline.raw);
-            // SAFETY: as the caller states.
-            unsafe {
-                raw.cmd_dispatch(command_buffer, *x, *y, *z);
-                Barrier::everything().record(raw, command_buffer);
-            }
-        }
-        if let Some(scan) = &self.scan {
+        // One workgroup of an owned kernel, then a barrier.
+        let owned = |scan: &Scan| {
             // SAFETY: as the caller states; the kernel is the device's.
             unsafe {
                 raw.cmd_bind_pipeline(command_buffer, point, scan.kernel.pipeline);
@@ -1160,17 +1187,25 @@ impl MeshSteps {
                 raw.cmd_dispatch(command_buffer, 1, 1, 1);
                 Barrier::everything().record(raw, command_buffer);
             }
+        };
+        if let Some(arguments) = &self.arguments {
+            owned(arguments);
+        }
+        if let Some((pipeline, launch)) = &self.object {
+            bind(pipeline.raw);
+            // SAFETY: as the caller states; an indirect launch's arguments lie in the work
+            // buffer, which the object arguments pass wrote before the barrier.
+            unsafe {
+                launch.record(raw, command_buffer);
+                Barrier::everything().record(raw, command_buffer);
+            }
+        }
+        if let Some(scan) = &self.scan {
+            owned(scan);
         }
         bind(self.pipeline.raw);
         // SAFETY: as the caller states; an indirect launch's arguments lie in the work buffer,
         // which the scan wrote before the barrier.
-        unsafe {
-            match self.launch {
-                Launch::Direct([x, y, z]) => raw.cmd_dispatch(command_buffer, x, y, z),
-                Launch::Indirect(buffer, offset) => {
-                    raw.cmd_dispatch_indirect(command_buffer, buffer, offset)
-                }
-            }
-        }
+        unsafe { self.launch.record(raw, command_buffer) }
     }
 }

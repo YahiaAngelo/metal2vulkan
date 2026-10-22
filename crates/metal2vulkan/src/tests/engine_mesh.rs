@@ -1123,9 +1123,12 @@ fn without_the_extension_a_mesh_pipeline_draws_its_records() {
 /// `mesh_draws_mesh` and `mesh_draws_fragment`): the object function's compute stage first, one
 /// push range of both compute stages' windows, both work bindings; a draw of object threadgroups
 /// dispatches them, is scanned into the records pool, and is drawn from the work buffer, whose
-/// slots hold the payload.
+/// slots hold the payload; an indirect one runs its object arguments pass first, its slots in the
+/// pool.
 fn object_records_draws(dev: &crate::device::Device, draws: &crate::library::Library, stem: &str) {
-    use crate::bind::{BindState, DrawCall, MeshDispatch, MeshGroups, MeshRecordsRegion};
+    use crate::bind::{
+        BindState, DrawCall, MeshDispatch, MeshGroups, MeshRecordsRegion, UseTarget,
+    };
     use crate::budget::Budget;
     use crate::lower::mesh::work;
     use crate::metal::PixelFormat;
@@ -1134,6 +1137,7 @@ fn object_records_draws(dev: &crate::device::Device, draws: &crate::library::Lib
     };
     use crate::pipeline::layout::BindingSource;
     use crate::pipeline::sym::SyntheticBinding;
+    use crate::pipeline::AccessSet;
     use crate::vk;
     let stage = |name: &str| {
         StageSource::Function(FunctionDescriptor::new(
@@ -1195,6 +1199,12 @@ fn object_records_draws(dev: &crate::device::Device, draws: &crate::library::Lib
         Some(vk::ShaderStageFlags::COMPUTE | vk::ShaderStageFlags::VERTEX),
         "{stem}"
     );
+    // The object function's slots of an indirect draw lie in the records (`work::SLOTS`).
+    assert_eq!(
+        stages_of(Stage::Object, SyntheticBinding::MeshRecords),
+        Some(vk::ShaderStageFlags::COMPUTE),
+        "{stem}"
+    );
     let records = pipeline
         .graphics
         .mesh_records
@@ -1242,26 +1252,58 @@ fn object_records_draws(dev: &crate::device::Device, draws: &crate::library::Lib
         4 * work::words(6, records.slot_words),
         "{stem}"
     );
-    // A partial object threadgroup is not implemented; an indirect draw is not either.
+    // An indirect draw runs its object arguments pass first: Metal's arguments at word 1 plus
+    // the offset's residual, the object threadgroup packed, no object count yet, and the slots in
+    // the pool, which the pass reserves.
+    let indirect = DrawCall::MeshThreadgroupsIndirect {
+        indirect: crate::bind::IndirectRef::new(1, 4),
+        threads_per_object_group: [4, 1, 1],
+        threads_per_mesh_group: [8, 1, 1],
+    };
+    let cmds = plan
+        .instantiate_draw(&state, &indirect)
+        .unwrap_or_else(|e| panic!("{stem}: an indirect draw: {e}"));
+    let d = cmds.mesh_dispatch.expect("the draw's dispatch");
+    assert_eq!(d.object_groups, None, "{stem}");
+    let range = d.object_arguments.expect("the object arguments pass");
+    assert_eq!(range.offset + range.range, 16, "{stem}");
+    assert_eq!(d.mesh, MeshGroups::Scanned { arguments: None }, "{stem}");
+    assert_eq!(d.records, MeshRecordsRegion::Pool, "{stem}");
+    assert_eq!(
+        d.work[work::OBJECT_ARGUMENTS as usize],
+        u32::try_from((4 - range.offset) / 4 + 1).expect("a word"),
+        "{stem}"
+    );
+    assert_eq!(
+        d.work[work::OBJECT_THREADS as usize],
+        crate::lower::dispatch::pack_nominal([4, 1, 1]).expect("packs"),
+        "{stem}"
+    );
+    assert_eq!(d.work[work::OBJECT_GROUPS as usize], 0, "{stem}");
+    assert_eq!(
+        d.work_bytes,
+        4 * work::words(0, records.slot_words),
+        "{stem}"
+    );
+    assert!(
+        cmds.uses
+            .iter()
+            .any(|u| u.resource == UseTarget::Indirect && u.access == AccessSet::READ),
+        "{stem}: the pass reads Metal's arguments"
+    );
+    // A partial object threadgroup is not implemented.
     let threads = DrawCall::MeshThreads {
         threads: [6, 1, 1],
         threads_per_object_group: [4, 1, 1],
         threads_per_mesh_group: [8, 1, 1],
     };
-    let indirect = DrawCall::MeshThreadgroupsIndirect {
-        indirect: crate::bind::IndirectRef::new(1, 0),
-        threads_per_object_group: [4, 1, 1],
-        threads_per_mesh_group: [8, 1, 1],
-    };
-    for draw in [threads, indirect] {
-        assert_eq!(
-            plan.instantiate_draw(&state, &draw).err(),
-            Some(crate::error::BindError::Unsupported(
-                crate::error::Unsupported::not_implemented(Feature::MeshShading)
-            )),
-            "{stem}: {draw:?}"
-        );
-    }
+    assert_eq!(
+        plan.instantiate_draw(&state, &threads).err(),
+        Some(crate::error::BindError::Unsupported(
+            crate::error::Unsupported::not_implemented(Feature::MeshShading)
+        )),
+        "{stem}: {threads:?}"
+    );
 }
 
 /// The binder's draws of mesh pipeline `p` with an object function: each stage's threadgroup size

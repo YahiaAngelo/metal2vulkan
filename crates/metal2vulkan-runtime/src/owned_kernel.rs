@@ -111,6 +111,9 @@ pub(super) enum OwnedModule {
     /// `bind::mesh_scan_module`: a scanned emulated mesh draw's mesh threadgroups, records and
     /// draw (`render/mesh.rs`).
     MeshScan,
+    /// `bind::mesh_object_arguments_module`: an emulated indirect draw's object grid, its slots
+    /// reserved and its object dispatch written, under the scan's bindings (`render/mesh.rs`).
+    MeshObjectArguments,
     /// `bind::mesh_arguments_module` of one form: an indirect mesh draw's group counts, as Metal
     /// draws them within the device's limits, or a folded object function's pieces
     /// (`render/mesh_arguments.rs`).
@@ -350,7 +353,13 @@ impl OwnedModule {
             OwnedModule::MeshScan => {
                 let module = metal2vulkan::bind::mesh_scan_module(device.compile_device())
                     .map_err(Error::Compile)?;
-                Ok((module.spirv.to_vec(), 3, 0))
+                Ok((module.spirv.to_vec(), 4, 0))
+            }
+            OwnedModule::MeshObjectArguments => {
+                let module =
+                    metal2vulkan::bind::mesh_object_arguments_module(device.compile_device())
+                        .map_err(Error::Compile)?;
+                Ok((module.spirv.to_vec(), 4, 0))
             }
             OwnedModule::MeshArguments(form) => {
                 let module =
@@ -531,6 +540,7 @@ pub(super) struct OwnedKernels {
     shadow_copy_ins: HashMap<ShadowTexelView, OwnedKernel>,
     mipmap_filters: HashMap<MipmapFilterKernel, OwnedKernel>,
     mesh_scan: Option<OwnedKernel>,
+    mesh_object_arguments: Option<OwnedKernel>,
     mesh_arguments_mesh: Option<OwnedKernel>,
     mesh_arguments_object: Option<OwnedKernel>,
     mesh_arguments_folded: Option<OwnedKernel>,
@@ -575,6 +585,7 @@ impl OwnedKernels {
             self.shadow_merge,
             self.depth_magnitude,
             self.mesh_scan,
+            self.mesh_object_arguments,
             self.mesh_arguments_mesh,
             self.mesh_arguments_object,
             self.mesh_arguments_folded,
@@ -725,6 +736,7 @@ impl OwnedKernels {
             | OwnedModule::TwinDecode(_)
             | OwnedModule::TessellationScan(_) => return None,
             OwnedModule::MeshScan => &mut self.mesh_scan,
+            OwnedModule::MeshObjectArguments => &mut self.mesh_object_arguments,
             OwnedModule::MeshArguments(metal2vulkan::bind::MeshArgumentsForm::Mesh) => {
                 &mut self.mesh_arguments_mesh
             }

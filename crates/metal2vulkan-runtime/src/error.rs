@@ -1602,8 +1602,9 @@ pub enum CommandBufferError {
     /// the command buffer fails (`NotImplemented(SamplerBicubicFilter)`'s reach, decided where the
     /// function ran). A command buffer whose functions never reach such a sampler runs as Metal's.
     CubicArgumentSampler,
-    /// An emulated mesh draw's records did not fit the rest of the command buffer's mesh records
-    /// pool, or its vertices passed a `u32`: such draws drew nothing. Metal draws them; the
+    /// An emulated mesh draw's records, or an emulated indirect draw's object slots (one per object
+    /// threadgroup, the grid and payload its object function writes), did not fit the rest of the
+    /// command buffer's mesh records pool, or its vertices passed a `u32`: such draws drew nothing. Metal draws them; the
     /// runtime's pool is the device's budget, so nothing is drawn short silently. The first such
     /// draw, as its scan saw it.
     MeshRecordsOverflow(MeshRecordsOverflow),
@@ -1619,7 +1620,10 @@ pub enum CommandBufferError {
     /// as the GPU wrote it, past the task stage's limits (`maxTaskWorkGroupCount`,
     /// `maxTaskWorkGroupTotalCount`), or a mesh grid past the mesh stage's; on one that folds them,
     /// a grid of more pieces than `MeshArguments::OBJECT_PIECES` (only under task limits below
-    /// Vulkan's required least). Nothing is drawn short silently. A direct draw of such a grid on
+    /// Vulkan's required least); on a device without `VK_EXT_mesh_shader` (the emulation), an
+    /// indirect draw's object grid past the device's `maxComputeWorkGroupCount`, or one whose
+    /// threads per grid along an axis reach 2^32 (Metal reports the wrapped grid, which the
+    /// emulation's dispatch cannot). Nothing is drawn short silently. A direct draw of such a grid on
     /// a device that does not fold is refused as it is encoded (`Unsupported{MeshShading}` naming
     /// the limit). Not Metal's failure: an object grid Metal's GPU discards is
     /// [`GpuRecoveryVictim`](Self::GpuRecoveryVictim).
@@ -1947,7 +1951,8 @@ pub struct MeshRecordsOverflow {
     pub draw: u32,
     /// Its object threadgroups (1 for a pipeline without an object function).
     pub object_threadgroups: u32,
-    /// The mesh threadgroups it launched, saturated at `u32::MAX`.
+    /// The mesh threadgroups it launched, saturated at `u32::MAX`; 0 where its object slots did
+    /// not fit, before any launched.
     pub mesh_threadgroups: u32,
     /// The bytes of the command buffer's records pool, the device's budget.
     pub budget: u64,

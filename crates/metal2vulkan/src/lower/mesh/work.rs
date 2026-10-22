@@ -1,7 +1,9 @@
 //! The words of an emulated mesh draw's work buffer (`SyntheticBinding::MeshWork`, `lower::mesh`'s
 //! module docs), each a `u32`: a header of [`HEADER`] words, then a slot of `S` words per object
 //! threadgroup (its grid's three counts and a zero, then its payload), then `O + 1` offsets: the
-//! first mesh threadgroup of each object threadgroup, and `T`.
+//! first mesh threadgroup of each object threadgroup, and `T`. An indirect draw with an object
+//! function keeps its slots and offsets in its records binding instead, where its object arguments
+//! pass reserves them (`bind::mesh_scan`, [`SLOTS`]).
 //!
 //! The binder, the mesh scan (`bind::mesh_scan`) and the runtime read these words at run time,
 //! so this file is a runtime input (`validation/build.rs`); the lowering writes them.
@@ -34,8 +36,22 @@ pub const ROW: u32 = 15;
 /// arguments range where Metal's indirect arguments (the mesh grid of a pipeline without an
 /// object function) begin, which the scan reads into slot 0.
 pub const ARGUMENTS: u32 = 16;
+/// 0 where the slots and offsets follow the header; else 1 plus the word of the records binding
+/// (the command buffer's records pool) where they begin: an indirect draw with an object function,
+/// whose object arguments pass reserves them.
+pub const SLOTS: u32 = 17;
+/// The object dispatch's `VkDispatchIndirectCommand`, three words, which the object arguments pass
+/// writes (an indirect draw with an object function).
+pub const OBJECT_DISPATCH: u32 = 18;
+/// 0 for any other draw; else 1 plus the word of the bound arguments range where Metal's indirect
+/// arguments (the object grid of an indirect draw with an object function) begin, which the
+/// object arguments pass reads.
+pub const OBJECT_ARGUMENTS: u32 = 21;
+/// The threads per object threadgroup, packed as a region record packs them
+/// (`lower::dispatch::pack_nominal`), of an indirect draw with an object function.
+pub const OBJECT_THREADS: u32 = 22;
 /// The header's words.
-pub const HEADER: u32 = 20;
+pub const HEADER: u32 = 24;
 /// The words of a slot before its payload: the grid's three counts and a zero.
 pub const GRID: u32 = 4;
 

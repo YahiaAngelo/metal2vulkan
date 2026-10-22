@@ -92,10 +92,12 @@
 //! Every emulated draw has a work buffer ([`work`], `SyntheticBinding::MeshWork`): its header
 //! (the object threadgroups `O`, the mesh threadgroups `T`, the records' first word, the mesh
 //! dispatch's and the draw's indirect arguments), a slot per object threadgroup (the grid it
-//! launched, then its payload's words), and each object threadgroup's first mesh threadgroup.
-//! An object function is a `GLCompute` entry too: its payload is workgroup memory, its wrapper
-//! zeroes its grid, runs the body between two barriers, and writes the grid it set (held to
-//! Metal's limit) and its payload into its slot. The binder or a scan
+//! launched, then its payload's words), and each object threadgroup's first mesh threadgroup. An
+//! indirect draw with an object function keeps its slots and offsets in its records instead,
+//! where its object arguments pass reserved them (`work::SLOTS`); the wrappers and the scan read
+//! the header's word to find them. An object function is a `GLCompute` entry too: its payload is
+//! workgroup memory, its wrapper zeroes its grid, runs the body between two barriers, and writes
+//! the grid it set (held to Metal's limit) and its payload into its slot. The binder or a scan
 //! (`bind::mesh_scan_module`) fills the rest of the header. The mesh wrapper's threadgroup is
 //! number `w` of the draw's `T` (past `T` it returns); it finds its object threadgroup by
 //! bisecting the offsets, and its place in that threadgroup's grid, which every grid builtin
@@ -1056,6 +1058,14 @@ pub const OBJECT_WORK_SLOT: ResourceSlot = ResourceSlot {
     index: 0,
 };
 
+/// The binding symbol of the records for an emulated object function ([`RECORDS_SLOT`]), where
+/// an indirect draw keeps its slots (`work::SLOTS`).
+pub const OBJECT_RECORDS_SLOT: ResourceSlot = ResourceSlot {
+    stage: Stage::Object,
+    kind: ResourceKind::Synthetic(SyntheticBinding::MeshRecords),
+    index: 0,
+};
+
 pub mod work;
 
 /// An emulated mesh function's records ([`MeshRecords`]) with each output's word offset in its
@@ -1182,9 +1192,11 @@ pub fn declare(
         let uvec3 = mb.ty(Type::Vector { elem: u32_, len: 3 })?;
         d.grid = Some(mb.plain_global(StorageClass::Workgroup, uvec3, None)?);
     }
-    // An emulated object function that sets its grid writes its slot of the work buffer.
+    // An emulated object function that sets its grid writes its slot: in the work buffer, or in
+    // the records where an indirect draw's object arguments pass reserved it (`work::SLOTS`).
     if mp.emulated && mp.object {
         d.work = Some(words_buffer(mb, OBJECT_WORK_SLOT)?);
+        d.records = Some(words_buffer(mb, OBJECT_RECORDS_SLOT)?);
     }
     let Some(shape) = mp.mesh else {
         return Ok(d);
@@ -1454,6 +1466,70 @@ fn load_word(fb: &mut FunctionBuilder<'_>, buffer: GlobalId, at: SValue) -> BRes
     let base = fb.module().global_value(buffer)?;
     let ptr = fb.access_chain(base, &[zero, at])?;
     fb.load(ptr, MemAccess::default())
+}
+
+/// Where an emulated draw's slots and offsets begin (`work::SLOTS`): in the records, at the word
+/// the header names, for an indirect draw with an object function (whose object arguments pass
+/// reserved them), else after the work buffer's header.
+#[derive(Clone, Copy)]
+struct Slots {
+    work: GlobalId,
+    records: GlobalId,
+    pooled: SValue,
+    start: SValue,
+}
+
+impl Slots {
+    fn of(fb: &mut FunctionBuilder<'_>, work: GlobalId, records: GlobalId) -> BResult<Slots> {
+        let at = k32(fb, work::SLOTS)?;
+        let word = load_word(fb, work, at)?;
+        let zero = k32(fb, 0)?;
+        let one = k32(fb, 1)?;
+        let pooled = fb.binary(BinOp::INotEqual, word, zero)?;
+        let in_pool = fb.binary(BinOp::ISub, word, one)?;
+        let header = k32(fb, work::HEADER)?;
+        let start = fb.select(pooled, in_pool, header)?;
+        Ok(Slots {
+            work,
+            records,
+            pooled,
+            start,
+        })
+    }
+
+    /// Word `at` of the slots and offsets (from their first).
+    fn load(self, fb: &mut FunctionBuilder<'_>, at: SValue) -> BResult<SValue> {
+        let zero = k32(fb, 0)?;
+        let at = fb.binary(BinOp::IAdd, self.start, at)?;
+        let in_work = fb.select(self.pooled, zero, at)?;
+        let in_pool = fb.select(self.pooled, at, zero)?;
+        let from_work = load_word(fb, self.work, in_work)?;
+        let from_pool = load_word(fb, self.records, in_pool)?;
+        fb.select(self.pooled, from_pool, from_work)
+    }
+
+    /// Store `value` at word `at` of the slots and offsets (from their first).
+    fn store<C>(
+        self,
+        fb: &mut FunctionBuilder<'_>,
+        cx: &mut C,
+        at: SValue,
+        value: SValue,
+        access: MemAccess,
+    ) -> BResult<()> {
+        let at = fb.binary(BinOp::IAdd, self.start, at)?;
+        let (records, work) = (self.records, self.work);
+        let pool: ArmFn<'_, C> = Box::new(move |fb, _| {
+            store_word(fb, records, at, value, access)?;
+            Ok(ArmEnd::FallThrough(Vec::new()))
+        });
+        let local: ArmFn<'_, C> = Box::new(move |fb, _| {
+            store_word(fb, work, at, value, access)?;
+            Ok(ArmEnd::FallThrough(Vec::new()))
+        });
+        fb.if_(cx, self.pooled, pool, Some(local))?;
+        Ok(())
+    }
 }
 
 /// Store `value`, an element of output `output` of an emulated mesh function, as words in record
@@ -2033,9 +2109,9 @@ fn payload_word(
 }
 
 /// An emulated object function's wrapper (the module docs): its grid zeroed, the body between
-/// two barriers, then its slot of the work buffer, placed by its threadgroup's linear index in
-/// the grid: the grid it stored, held to Metal's limit, and its payload's words that the slot
-/// holds.
+/// two barriers, then its slot ([`Slots`]: in the work buffer, or in the records for an indirect
+/// draw), placed by its threadgroup's linear index in the grid: the grid it stored, held to
+/// Metal's limit, and its payload's words that the slot holds.
 fn emulated_object_wrapper(
     cx: &mut EmitCx<'_>,
     mut fb: FunctionBuilder<'_>,
@@ -2043,8 +2119,8 @@ fn emulated_object_wrapper(
     body: FuncId,
 ) -> BResult<FuncId> {
     let d = &cx.decl.families.mesh;
-    let (Some(g), Some(work)) = (d.grid, d.work) else {
-        return Err(cx.fail("an emulated object wrapper without its grid or work buffer"));
+    let (Some(g), Some(work), Some(records)) = (d.grid, d.work, d.records) else {
+        return Err(cx.fail("an emulated object wrapper without its grid, work buffer or records"));
     };
     let coherence = coherence(cx.plan);
     let zero = k32(&mut fb, 0)?;
@@ -2059,7 +2135,8 @@ fn emulated_object_wrapper(
     device_barrier(cx, &mut fb)?;
     fb.call(body, &[])?;
     device_barrier(cx, &mut fb)?;
-    // Its slot: `HEADER + o · S`, `o = x + X · (y + Y · z)` its threadgroup's linear index.
+    // Its slot: word `o · S` of the slots, `o = x + X · (y + Y · z)` its threadgroup's linear
+    // index.
     let at = builtin(cx, &mut fb, KernelBuiltin::ThreadgroupPositionInGrid)?;
     let grid = builtin(cx, &mut fb, KernelBuiltin::ThreadgroupsPerGrid)?;
     let [x, y, z] = [0, 1, 2].map(|i| fb.composite_extract(at, &[i]));
@@ -2070,9 +2147,8 @@ fn emulated_object_wrapper(
     let o = fb.binary(BinOp::IAdd, x?, xyz)?;
     let at_s = k32(&mut fb, work::SLOT_WORDS)?;
     let s = load_word(&mut fb, work, at_s)?;
-    let header = k32(&mut fb, work::HEADER)?;
-    let into = fb.binary(BinOp::IMul, o, s)?;
-    let slot = fb.binary(BinOp::IAdd, header, into)?;
+    let slots = Slots::of(&mut fb, work, records)?;
+    let slot = fb.binary(BinOp::IMul, o, s)?;
     when(&mut fb, cx, first, move |fb, cx| {
         let p = fb.module().global_value(g)?;
         let access = word_access(coherence, fb, false)?;
@@ -2082,7 +2158,7 @@ fn emulated_object_wrapper(
         for (i, v) in bounded.into_iter().enumerate() {
             let off = k32(fb, i as u32)?;
             let w = fb.binary(BinOp::IAdd, slot, off)?;
-            store_word(fb, work, w, v, MemAccess::default())?;
+            slots.store(fb, cx, w, v, MemAccess::default())?;
         }
         Ok(())
     })?;
@@ -2100,7 +2176,7 @@ fn emulated_object_wrapper(
                     return Err(cx.fail("a payload read without its value"));
                 };
                 let w = fb.binary(BinOp::IAdd, start, i)?;
-                store_word(fb, work, w, v, MemAccess::default())
+                slots.store(fb, cx, w, v, MemAccess::default())
             })
         })?;
     }
@@ -2166,9 +2242,8 @@ fn emulated_wrapper(
     let objects = load_word(&mut fb, work, at)?;
     let at = k(&mut fb, work::SLOT_WORDS)?;
     let s = load_word(&mut fb, work, at)?;
-    let header = k(&mut fb, work::HEADER)?;
-    let slots = fb.binary(BinOp::IMul, objects, s)?;
-    let offsets = fb.binary(BinOp::IAdd, header, slots)?;
+    let slots = Slots::of(&mut fb, work, records)?;
+    let offsets = fb.binary(BinOp::IMul, objects, s)?;
     let lo = fb.local_var(u32_, None)?;
     let hi = fb.local_var(u32_, None)?;
     let (lo, hi) = (fb.var_ptr(lo)?, fb.var_ptr(hi)?);
@@ -2189,7 +2264,7 @@ fn emulated_wrapper(
         let half = fb.binary(BinOp::ShiftRightLogical, gap, one)?;
         let mid = fb.binary(BinOp::IAdd, a, half)?;
         let at = fb.binary(BinOp::IAdd, offsets, mid)?;
-        let offset = load_word(fb, work, at)?;
+        let offset = slots.load(fb, at)?;
         let below = fb.binary(BinOp::ULessThanEqual, offset, w)?;
         let a = fb.select(below, mid, a)?;
         let b = fb.select(below, b, mid)?;
@@ -2199,16 +2274,15 @@ fn emulated_wrapper(
     fb.loop_(cx, LoopSpec::default(), search)?;
     let o = fb.load(lo, MemAccess::default())?;
     // Its place in the object threadgroup's grid: `w − offsets[o]`, x fastest.
-    let into = fb.binary(BinOp::IMul, o, s)?;
-    let slot = fb.binary(BinOp::IAdd, header, into)?;
+    let slot = fb.binary(BinOp::IMul, o, s)?;
     let mut axis = |i: u32| -> BResult<SValue> {
         let off = k(&mut fb, i)?;
         let at = fb.binary(BinOp::IAdd, slot, off)?;
-        load_word(&mut fb, work, at)
+        slots.load(&mut fb, at)
     };
     let [gx, gy, gz] = [axis(0)?, axis(1)?, axis(2)?];
     let at = fb.binary(BinOp::IAdd, offsets, o)?;
-    let start = load_word(&mut fb, work, at)?;
+    let start = slots.load(&mut fb, at)?;
     let local = fb.binary(BinOp::ISub, w, start)?;
     // The object threadgroup launched `w`, so none of its counts is 0.
     let x = fb.binary(BinOp::UMod, local, gx)?;
@@ -2240,7 +2314,7 @@ fn emulated_wrapper(
             let held = fb.binary(BinOp::ULessThan, i, room)?;
             let at = fb.binary(BinOp::IAdd, from, i)?;
             let at = fb.select(held, at, from)?;
-            let read = load_word(fb, work, at)?;
+            let read = slots.load(fb, at)?;
             let zero = k32(fb, 0)?;
             let v = fb.select(held, read, zero)?;
             payload_word(cx, fb, i, Some(v)).map(|_| ())

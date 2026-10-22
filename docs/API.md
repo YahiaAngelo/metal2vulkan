@@ -601,6 +601,16 @@ through `StatusBits::MESH_GRID_PAST_LIMITS`, or a fold of more pieces than
 A direct object grid past the task limits of a device that does not fold is refused naming the
 limit.
 
+Without the extension, an indirect draw with an object function first dispatches an object
+arguments pass (`MeshDispatch::object_arguments`, `bind::mesh_object_arguments_module`, one
+invocation over the scan's bindings): it reads Metal's arguments, reserves the object threadgroups'
+slots in the command buffer's records pool, and writes the object function's
+`VkDispatchIndirectCommand` into the work buffer (`MeshDispatch::OBJECT_DISPATCH_OFFSET`). A grid
+Metal's GPU discards sets `StatusBits::MESH_GRID_DISCARDED`; one past the device's compute limits,
+or whose threads per grid wrap along an axis (Metal reports the wrapped grid, which the object
+dispatch cannot), sets `MESH_GRID_PAST_LIMITS`; slots the rest of the pool cannot hold set
+`MESH_RECORDS_OVERFLOW`. Each draws nothing.
+
 ### Tile pipelines
 
 `Device::compile_tile_pipeline` compiles a `TileRenderPipelineDescriptor` (the tile function and the

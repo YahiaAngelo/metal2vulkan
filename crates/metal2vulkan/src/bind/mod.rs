@@ -252,7 +252,7 @@ pub use mesh_arguments::{
     MeshArgumentsModule, MeshGridLimits, MeshGridRule, ObjectFold, METAL_MESH_GRID_AXIS,
     METAL_MESH_GRID_TOTAL, METAL_OBJECT_GRID_TOTAL,
 };
-pub use mesh_scan::{mesh_scan_module, MeshScanModule};
+pub use mesh_scan::{mesh_object_arguments_module, mesh_scan_module, MeshScanModule};
 pub use mipmap_filter::{
     mipmap_filter_module, MipmapFilterChain, MipmapFilterKernel, MipmapFilterLevel,
     MipmapFilterModule, MipmapRule,

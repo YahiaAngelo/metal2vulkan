@@ -99,9 +99,11 @@ pub struct StatusReport {
     /// command buffer is Metal's.
     pub absent_argument_read: bool,
     /// A mesh scan found no room in the command buffer's records pool for an emulated mesh
-    /// draw's records, or the draw's vertices passed a `u32` (`bind::MeshScanModule`): such draws
-    /// drew nothing. The first one, as the scan saw it, where it was the command buffer's first
-    /// records fault; a fault of all zeros where a tessellation draw's was.
+    /// draw's records, or the draw's vertices passed a `u32` (`bind::MeshScanModule`), or an
+    /// object arguments pass none for an emulated indirect draw's object slots
+    /// (`bind::mesh_object_arguments_module`, no mesh threadgroups yet): such draws drew nothing.
+    /// The first one, as the pass saw it, where it was the command buffer's first records fault;
+    /// a fault of all zeros where a tessellation draw's was.
     pub mesh_records_overflow: Option<MeshRecordsFault>,
     /// A tessellation scan found no room in the command buffer's records pool for an emulated
     /// tessellation draw's records, or the draw's records passed a `u32`
@@ -118,13 +120,13 @@ pub struct StatusReport {
     /// capture settle took every tile of the pass's mask (`bind::CaptureSettleModule`): the
     /// pass's reach is the announced fallback, not its draws' tiles.
     pub captured_reach_unmeasured: bool,
-    /// An indirect mesh draw's arguments pass met an object grid that Metal's GPU discards
-    /// (`StatusBits::MESH_GRID_DISCARDED`): that draw drew nothing, and the command buffer fails
-    /// as Metal's does (`MTLCommandBufferErrorInternal`).
+    /// An indirect mesh draw's arguments pass (or an emulated one's object arguments pass) met an
+    /// object grid that Metal's GPU discards (`StatusBits::MESH_GRID_DISCARDED`): that draw drew
+    /// nothing, and the command buffer fails as Metal's does (`MTLCommandBufferErrorInternal`).
     pub mesh_grid_discarded: bool,
-    /// An indirect mesh draw's arguments pass met a grid that Metal draws and the device cannot
-    /// launch (`StatusBits::MESH_GRID_PAST_LIMITS`): that draw drew nothing, and the command buffer
-    /// fails (not Metal's failure).
+    /// An indirect mesh draw's arguments pass (or an emulated one's object arguments pass) met a
+    /// grid that Metal draws and the device cannot launch (`StatusBits::MESH_GRID_PAST_LIMITS`):
+    /// that draw drew nothing, and the command buffer fails (not Metal's failure).
     pub mesh_grid_past_limits: bool,
 }
 
@@ -137,7 +139,8 @@ pub struct MeshRecordsFault {
     pub draw: u32,
     /// The draw's object threadgroups (1 without an object function).
     pub object_threadgroups: u32,
-    /// The mesh threadgroups the draw's object threadgroups launched, saturated at `u32::MAX`.
+    /// The mesh threadgroups the draw's object threadgroups launched, saturated at `u32::MAX`; 0
+    /// where its object slots did not fit, before any launched.
     pub mesh_threadgroups: u32,
 }
 
@@ -231,9 +234,10 @@ impl StatusBits {
     /// gives no value, and took zero for it (`RuntimeFact::AbsentArgumentRead`).
     pub const ABSENT_ARGUMENT_READ: StatusBits = StatusBits(1 << 4);
     /// A mesh scan found no room in the command buffer's records pool for an emulated mesh
-    /// draw's records, or the draw's vertices passed a `u32`, and the draw drew nothing
-    /// (`bind::MeshScanModule`); the fault words name the command buffer's first records fault of
-    /// either kind.
+    /// draw's records, or the draw's vertices passed a `u32`, or an object arguments pass none for
+    /// an emulated indirect draw's object slots, and the draw drew nothing
+    /// (`bind::MeshScanModule`, `bind::mesh_object_arguments_module`); the fault words name the
+    /// command buffer's first records fault of either kind.
     pub const MESH_RECORDS_OVERFLOW: StatusBits = StatusBits(1 << 5);
     /// A function sampled, gathered, or queried through a sampler an argument buffer holds whose
     /// min or mag filter is `Cubic`, whose bicubic filter it does not emulate there
@@ -252,11 +256,15 @@ impl StatusBits {
     /// An indirect mesh draw's arguments pass met a grid that Metal draws and the device cannot
     /// launch: a mesh grid past the mesh stage's limits, an unfolded object grid past the task
     /// stage's, or a folded one of more pieces than `MeshArguments::OBJECT_PIECES` (only under task
-    /// limits below Vulkan's required least); the draw drew nothing (`bind::MeshArguments`).
+    /// limits below Vulkan's required least); or an emulated indirect draw's object arguments pass
+    /// met an object grid past the device's compute limits, or one whose threads per grid wrap
+    /// along an axis (`bind::mesh_object_arguments_module`); the draw drew nothing
+    /// (`bind::MeshArguments`).
     pub const MESH_GRID_PAST_LIMITS: StatusBits = StatusBits(1 << 9);
     /// An indirect mesh draw's arguments pass met an object grid of more threadgroups than
-    /// `bind::METAL_OBJECT_GRID_TOTAL`, which Metal's GPU discards; the draw drew nothing
-    /// (`bind::MeshArguments`).
+    /// `bind::METAL_OBJECT_GRID_TOTAL`, which Metal's GPU discards (or an emulated draw's object
+    /// arguments pass did); the draw drew nothing (`bind::MeshArguments`,
+    /// `bind::mesh_object_arguments_module`).
     pub const MESH_GRID_DISCARDED: StatusBits = StatusBits(1 << 10);
     /// Either records fault: the command buffer's first one of either kind writes the fault
     /// words.
