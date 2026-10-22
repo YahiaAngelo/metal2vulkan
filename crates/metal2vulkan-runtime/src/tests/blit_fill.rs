@@ -2,8 +2,9 @@
 //! from our probe `ms.m`'s read-backs, and a texture buffer's, from our probe `tb.m`'s (the M3
 //! Max under macOS 27.0.1), and the formats a fill has a unit for.
 
-use crate::blit_fill::{fill_unit, sample_units, words, StreamFill};
-use metal2vulkan::metal::PixelFormat;
+use crate::blit_fill::{fill_unit, read_pattern, sample_units, words, StreamFill};
+use crate::blit_fill::{unit_of, TEXTURE_BUFFER_PATTERN_BYTES};
+use metal2vulkan::metal::{PixelFormat, TextureType};
 use std::ops::Range;
 
 /// Bytes from hex.
@@ -205,6 +206,87 @@ fn texture_buffer_fill_spans_are_its_bytes() {
                     stream.reads_leftover(bytes.clone()),
                     leftover,
                     "{n} {bytes:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The `n` bytes of our probe `tblf.m`'s pattern, a xorshift stream: no run of it repeats.
+fn probe_stream(n: usize) -> Vec<u8> {
+    let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+    (0..n)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 24) as u8 | 1
+        })
+        .collect()
+}
+
+/// A long pattern's fill of a texture buffer writes every byte the rule gives, its block made
+/// here as the brute force makes it (the pattern's whole copies, then zeros), while the fill's
+/// spans hold units of at most the block's bytes, read from the pattern: patterns of 4097, 16385
+/// and 32752 bytes (Metal's longest) into 100,000 bytes from byte 4, the probe `tblf.m`'s
+/// fills of up to 100,000 `R8Uint` texels, which Metal writes so byte for byte.
+#[test]
+fn a_long_texture_buffer_pattern_streams_in_units_of_its_block() {
+    for n in [4097, 16385, TEXTURE_BUFFER_PATTERN_BYTES] {
+        let pattern = probe_stream(n);
+        let block = n.next_power_of_two().max(16);
+        let copies = block / n * n;
+        let mut memory: Vec<u8> = pattern.iter().copied().cycle().take(copies).collect();
+        memory.resize(block + 16, 0);
+        let bytes = 4..100_004u64;
+        let stream = StreamFill::new(&pattern);
+        let mut written = vec![None; bytes.end as usize];
+        for (span, unit) in stream.spans(bytes.clone()) {
+            assert!(unit.len() <= block, "{n}: a unit of {} bytes", unit.len());
+            for (k, at) in span.enumerate() {
+                assert!(written[at as usize].is_none(), "{n}: {at} twice");
+                written[at as usize] = Some(unit[k % unit.len()]);
+            }
+        }
+        for at in bytes.clone() {
+            let want = match (16..100_000).contains(&at) {
+                true => memory[(((at / 16 * 16 - 4) as usize & (n - 1)) & !3) + at as usize % 16],
+                false => pattern[(at - 4) as usize & (n - 1)],
+            };
+            assert_eq!(written[at as usize], Some(want), "{n}: byte {at}");
+            assert_eq!(stream.byte(&bytes, at), want, "{n}: byte {at}");
+        }
+        assert_eq!(written[..4], [None; 4]);
+    }
+}
+
+/// The encoder's log keeps the bytes of a pattern its fill reads: a texture buffer's whole
+/// pattern, cut one byte past Metal's longest (refused again where the call is encoded again);
+/// another texture's first 16, from which every unit and every multisampled texel's samples
+/// come out as from the whole pattern.
+#[test]
+fn a_fill_s_log_keeps_the_bytes_its_fill_reads() {
+    let long = probe_stream(1 << 20);
+    let buffer = read_pattern(TextureType::TextureBuffer, &long);
+    assert_eq!(buffer, &long[..TEXTURE_BUFFER_PATTERN_BYTES + 1]);
+    assert_eq!(
+        read_pattern(TextureType::TextureBuffer, &long[..300]),
+        &long[..300]
+    );
+    for n in [1, 3, 15, 16, 17, 64, 1 << 20] {
+        let kept = read_pattern(TextureType::Type2D, &long[..n]);
+        assert_eq!(kept, &long[..n.min(16)]);
+        for bytes in 1..=16 {
+            assert_eq!(
+                unit_of(kept, bytes),
+                unit_of(&long[..n], bytes),
+                "{n} {bytes}"
+            );
+            for count in [2, 4, 8] {
+                assert_eq!(
+                    sample_units(kept, bytes, count),
+                    sample_units(&long[..n], bytes, count),
+                    "{n} {bytes} {count}"
                 );
             }
         }

@@ -22,6 +22,13 @@
 //!   ending at the width and at a level, slice, row, height and depth past 0 and 1, a color packed
 //!   in each format of no more bytes than the texel, and fills of no texels between others.
 //!
+//! - **Long patterns** (our probe `tblf.m`, the same M3 Max): patterns of 4097 to 32752 bytes, a
+//!   xorshift stream, into texture buffers of `R8Uint`, `R32Uint` and `RGBA32Uint` up to 65,536
+//!   texels wide, at offsets 4 to 64 of a `Shared` buffer 64 bytes past the texels, its byte `i`
+//!   first `i · 37 mod 251`, one fill of every texel, every byte read back: Metal writes them by
+//!   the same rule. A pattern of more than 32752 bytes ends Metal's process in the call, which
+//!   the runtime refuses (`Problem::LongTextureBufferFillPattern`).
+//!
 //! `tests::blit_fill` checks the bytes of the fills without a device. A differing case prints a
 //! `TEXTURE-BUFFER-FILLS-DIFFERS` line with the runs of bytes its fills changed.
 
@@ -31,8 +38,8 @@ use super::degrade_notices::{
 use super::{buffer_with, read_buffer, WAIT};
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
 use metal2vulkan_runtime::{
-    ClearColor, CommandQueue, Degradation, Device, Origin, Region, ResourceOptions, Size,
-    TextureDescriptor,
+    ClearColor, CommandQueue, Degradation, Device, Error, Invalid, Origin, Problem, Region,
+    ResourceOptions, Size, TextureDescriptor,
 };
 use sha2::{Digest, Sha256};
 
@@ -239,9 +246,41 @@ const GROUPS: [Group; 16] = [
     ("rgba32-at-64", 125, 64, RGBA32, "ebaf73cdcde2c014"),
 ];
 
+/// The longest pattern a texture buffer's fill takes, Metal's.
+const LONGEST: usize = 32752;
+
+/// The long patterns' fills (`tblf.m`): the format's raw value, its texel's bytes, the texture's
+/// offset and width, the pattern's bytes, and Metal's answer.
+const LONG: [(u32, u64, u64, u64, usize, &str); 6] = [
+    (13, 1, 4, 400, LONGEST, "fb41732d0bf8d61d"),
+    (13, 1, 4, 12331, 4097, "270ffc1b247b7363"),
+    (13, 1, 4, 49195, 16385, "b9e0af569f1c7db6"),
+    (13, 1, 4, 65536, LONGEST, "4a510282aef3fc37"),
+    (53, 4, 16, 16384, 30000, "154908c746d80c08"),
+    (123, 16, 64, 4096, 5000, "8d4a10e63b972ade"),
+];
+
 /// The buffer's first bytes: byte `i` is `i · 37 mod 251`.
 fn first_bytes() -> Vec<u8> {
-    (0..BYTES).map(|i| (i * 37 % 251) as u8).collect()
+    stripes(BYTES)
+}
+
+/// `length` bytes, byte `i` of them `i · 37 mod 251`.
+fn stripes(length: usize) -> Vec<u8> {
+    (0..length).map(|i| (i * 37 % 251) as u8).collect()
+}
+
+/// The `n` bytes of `tblf.m`'s pattern, a xorshift stream.
+fn probe_stream(n: usize) -> Vec<u8> {
+    let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+    (0..n)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 24) as u8 | 1
+        })
+        .collect()
 }
 
 /// The buffer's bytes after `fills` of a texture buffer of `format` at `offset`.
@@ -345,6 +384,59 @@ fn texture_buffer_fills_write_metal_s_bytes() {
                     println!("TEXTURE-BUFFER-FILLS-DIFFERS {name} {k}:{}", runs(bytes));
                 }
                 wrong.push(name.to_owned());
+            }
+        }
+        let mut kinds = forced(&[(
+            Degradation::SharedInSystemMemory,
+            shared_in_system_memory(device),
+        )]);
+        kinds.extend(TEXTURE_BUFFER_FILL);
+        assert_once(&messages.take_notices(), &Vec::from_iter(kinds));
+        assert!(wrong.is_empty(), "fills unlike Metal's: {wrong:?}");
+    });
+}
+
+/// Each long pattern's fill writes the buffer's bytes as Metal's does, and a pattern one byte
+/// longer than Metal's longest is refused, as Metal's process ends there, and writes nothing
+/// (the module docs): the bytes past the pattern's copies announced once.
+#[test]
+fn long_patterns_write_metal_s_bytes_and_a_longer_one_is_refused() {
+    on_device(|device, messages| {
+        let queue = device.new_command_queue().unwrap();
+        let mut wrong = Vec::new();
+        for (format, bytes, offset, width, n, metal) in LONG {
+            let length = offset + width * bytes + 64;
+            let buffer = buffer_with(device, &stripes(length as usize)).unwrap();
+            let d = TextureDescriptor::texture_buffer(
+                PixelFormat::try_from(format).unwrap(),
+                width,
+                ResourceOptions::shared(),
+                TextureUsage::SHADER_READ,
+            );
+            let row = (width * bytes).next_multiple_of(256);
+            let texture = buffer.new_texture(&d, offset, row).unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut blit = command_buffer.blit_command_encoder().unwrap();
+            let region = Region::new_1d(0, width);
+            blit.fill_texture(&texture, 0, 0, region, &probe_stream(n))
+                .unwrap();
+            if n == LONGEST {
+                let longer = probe_stream(n + 1);
+                let refused = blit.fill_texture(&texture, 0, 0, Region::new_1d(0, 0), &longer);
+                let length = n as u64 + 1;
+                let invalid = Invalid::new(
+                    "fill_texture",
+                    Problem::LongTextureBufferFillPattern { length },
+                );
+                assert_eq!(refused, Err(Error::Invalid(invalid)), "{format} {width}");
+            }
+            blit.end_encoding().unwrap();
+            command_buffer.commit().unwrap();
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            let ours = read_buffer(&buffer, 0, length).unwrap();
+            if digest(&ours) != metal {
+                println!("TEXTURE-BUFFER-FILLS-DIFFERS {format} {width} {n}");
+                wrong.push((format, width, n));
             }
         }
         let mut kinds = forced(&[(

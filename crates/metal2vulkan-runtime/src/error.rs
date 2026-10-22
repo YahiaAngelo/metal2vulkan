@@ -615,6 +615,16 @@ pub enum Problem {
     /// bytes); plain Metal reads a unit's bytes from the pattern's address all the same, bytes the
     /// call does not give (an Apple M3 Max under macOS 27.0.1).
     EmptyFillPattern,
+    /// A texture buffer's fill given a pattern of more than 32752 bytes
+    /// (`fillTexture:...:bytes:length:`): Metal's process ends in the call, in the blit's
+    /// dispatch, whatever the region, of no texels or past the buffer too (an Apple M3 Max under
+    /// macOS 27.0.1: `R8Uint`, `R32Uint` and `RGBA32Uint` texture buffers; 32752 bytes are
+    /// filled). A fill of any other texture takes a pattern of any length, of which it reads 16
+    /// bytes at most.
+    LongTextureBufferFillPattern {
+        /// The pattern's bytes.
+        length: u64,
+    },
     /// `offset..offset + size` runs past a resource of `length` bytes: Metal stops it
     /// (`Invalid`). A resource placed past its heap's end is [`HeapProblem::PastEnd`].
     RangeOutOfBounds {

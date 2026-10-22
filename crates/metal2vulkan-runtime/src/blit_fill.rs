@@ -93,7 +93,15 @@
 //! copies from its start and, past them and past the block, bytes of the calling thread's stack:
 //! zeros in every probe of ours, a 9-byte fill after an 8-byte one in the same encoder too, while
 //! the consumer's process read an earlier fill's bytes there. The runtime writes zeros there,
-//! announced once where a chunk reads them (`Degradation::TextureBufferFillLeftover`).
+//! announced once where a chunk reads them (`Degradation::TextureBufferFillLeftover`). The rule
+//! holds byte for byte for long patterns too (our probe `tblf.m`: 18 fills of patterns of 16 to
+//! 32752 bytes into `R8Uint`, `R32Uint` and `RGBA32Uint` texture buffers at offsets 4 to 64, up
+//! to 100,000 texels wide). A pattern of more than 32752 bytes ends Metal's process in the call,
+//! in the blit's dispatch, whatever the format (`R8Uint`, `R32Uint`, `RGBA32Uint`) and region
+//! (of 0 texels, past the buffer, up to 100,000 texels; our probes `tblf.m` and `tbz.m`); the
+//! runtime refuses it (`Problem::LongTextureBufferFillPattern`). A fill of any other texture
+//! takes a pattern of any length (up to 1 MiB in our probe `tl.m`) and reads 16 bytes of it at
+//! most.
 //!
 //! **Multisample textures** (the M3 Max, our probe `ms.m`: 32 formats at 4 samples and 11 at 2,
 //! every sample of a 5 x 3 texture or 2-slice array read back through an unsigned view, as its
@@ -122,9 +130,10 @@
 //! a heap's two-plane texture, one copy of the color words into the heap's bytes; a two-plane
 //! texture held apart, the plane words' copy (`two_planes.rs`) into the rectangles of texels the
 //! words land on; a texture buffer (its bytes before the first whole chunk, its chunks' period
-//! repeated, its bytes after the last) and a packed YCbCr texture, copies into the buffer's bytes. A
-//! multisample texture's samples: the sample planes' merge writes each sample's bits into a
-//! multisampled image of the unsigned-integer format of the texel's size
+//! repeated, its bytes after the last: units of at most the block's 32 KiB, read from the pattern
+//! as they are made, whatever the region's length) and a packed YCbCr texture, copies into the
+//! buffer's bytes. A multisample texture's samples: the sample planes' merge writes each sample's
+//! bits into a multisampled image of the unsigned-integer format of the texel's size
 //! (`sample_planes::BitsCopy::fill`), and a copy between multisampled textures moves the region
 //! into the texture (`blit_texture.rs`): a color image's bits by an image copy, or by the sample
 //! planes' copies where the device's own converts float NaNs; a depth or stencil aspect by
@@ -218,13 +227,26 @@ pub(super) fn fill_unit(pf: PixelFormat) -> Option<FillUnit> {
 }
 
 /// `pattern` repeated from its start and cut at `bytes`.
-fn unit_of(pattern: &[u8], bytes: u32) -> Vec<u8> {
+pub(super) fn unit_of(pattern: &[u8], bytes: u32) -> Vec<u8> {
     pattern
         .iter()
         .copied()
         .cycle()
         .take(bytes as usize)
         .collect()
+}
+
+/// The bytes of `pattern` a fill of a texture of type `ty` reads, which the encoder's log keeps
+/// (`replay.rs`): a texture buffer's fill the whole pattern, up to one byte past
+/// [`TEXTURE_BUFFER_PATTERN_BYTES`] (a longer one, refused, is refused again where the call is
+/// encoded again); another texture's 16 bytes at most, a unit's or a texel's samples'
+/// ([`unit_of`], [`sample_units`]).
+pub(super) fn read_pattern(ty: TextureType, pattern: &[u8]) -> &[u8] {
+    let read = match ty {
+        TextureType::TextureBuffer => TEXTURE_BUFFER_PATTERN_BYTES + 1,
+        _ => 16,
+    };
+    &pattern[..pattern.len().min(read)]
 }
 
 /// The bits each sample of a multisampled texel of `bytes` bytes and `samples` samples takes
@@ -254,44 +276,56 @@ pub(super) fn words(unit: &[u8]) -> [u32; 4] {
     out
 }
 
+/// The longest pattern a texture buffer's fill takes: Metal's process ends in the fill of a longer
+/// one (the module docs).
+pub(super) const TEXTURE_BUFFER_PATTERN_BYTES: usize = 32752;
+
 /// The bytes Metal's fill of a texture buffer writes into its buffer's bytes `start..end` (the
 /// region's texels from the texture's offset), from `pattern` of `n` bytes (the module docs):
 /// byte `j` of the region (from its first) is `pattern[j & (n - 1)]`, but a 16-byte chunk of the
 /// buffer the region covers whole, `j` its first byte's, takes 16 bytes of the fill's block from
 /// byte `(j & (n - 1)) & !3`. The block is the power of two of bytes at least `n` and 16, holding
 /// the pattern's whole copies from its start; its other bytes, and those after it, are Metal's
-/// stack's, zeros in our probes, which the runtime writes.
-pub(super) struct StreamFill {
-    pattern: Vec<u8>,
-    /// The block and the bytes after it, as many as a chunk may read.
-    memory: Vec<u8>,
+/// stack's, zeros in our probes, which the runtime writes. The block is read from the pattern
+/// where a byte of it is asked for, never made.
+pub(super) struct StreamFill<'a> {
+    pattern: &'a [u8],
     /// The bytes of the pattern's whole copies at the block's start.
-    copies: usize,
+    copies: u64,
 }
 
-impl StreamFill {
+impl<'a> StreamFill<'a> {
     /// The fill of `pattern` (not empty).
-    pub(super) fn new(pattern: &[u8]) -> StreamFill {
-        let block = StreamFill::block(pattern.len());
-        let copies = block / pattern.len() * pattern.len();
-        let mut memory: Vec<u8> = pattern.iter().copied().cycle().take(copies).collect();
-        // A chunk reads 16 bytes from at most `n - 1` (rounded down to 4) into the block.
-        memory.resize(block + 16, 0);
+    pub(super) fn new(pattern: &'a [u8]) -> StreamFill<'a> {
+        let n = pattern.len() as u64;
         StreamFill {
-            pattern: pattern.to_vec(),
-            memory,
-            copies,
+            pattern,
+            copies: StreamFill::block_of(n) / n * n,
         }
     }
 
     /// The bytes of the block of a pattern of `n` bytes: the power of two at least `n` and 16.
-    fn block(n: usize) -> usize {
+    fn block_of(n: u64) -> u64 {
         n.next_power_of_two().max(16)
+    }
+
+    /// The bytes of this fill's block, which are also the period of its chunks' bytes:
+    /// `j & (n - 1)` repeats every power of two past `n - 1`.
+    fn block(&self) -> u64 {
+        StreamFill::block_of(self.pattern.len() as u64)
     }
 
     /// The mask of a byte's index into the pattern.
     fn mask(&self) -> u64 {
         self.pattern.len() as u64 - 1
+    }
+
+    /// Byte `at` of the block and of the bytes after it: the pattern's whole copies, then zeros.
+    fn block_byte(&self, at: u64) -> u8 {
+        match at < self.copies {
+            true => self.pattern[(at % self.pattern.len() as u64) as usize],
+            false => 0,
+        }
     }
 
     /// The whole 16-byte chunks of the buffer that `bytes` covers.
@@ -312,7 +346,7 @@ impl StreamFill {
         if chunks.contains(&at) {
             let chunk = at / 16 * 16;
             let from = ((chunk - bytes.start) & self.mask()) & !3;
-            self.memory[(from + at % 16) as usize]
+            self.block_byte(from + at % 16)
         } else {
             self.pattern[(j & self.mask()) as usize]
         }
@@ -321,18 +355,19 @@ impl StreamFill {
     /// Whether the fill of `bytes` writes a byte of the block past the pattern's whole copies.
     pub(super) fn reads_leftover(&self, bytes: Range<u64>) -> bool {
         let chunks = StreamFill::chunks(&bytes);
-        let period = (self.mask() + 1).next_power_of_two().max(16);
-        (chunks.start..chunks.end.min(chunks.start + period))
+        (chunks.start..chunks.end.min(chunks.start + self.block()))
             .step_by(16)
             .any(|chunk| {
                 let from = ((chunk - bytes.start) & self.mask()) & !3;
-                from as usize + 16 > self.copies
+                from + 16 > self.copies
             })
     }
 
     /// The fill of `bytes` as spans of the buffer, each with the unit it holds repeated from its
-    /// first byte: the bytes before the first whole chunk, the chunks (a period of them), and the
-    /// bytes after the last.
+    /// first byte: the bytes before the first whole chunk (fewer than 16, or fewer than 32 where
+    /// no chunk is whole), the chunks (a period of them, the block's bytes, at most 32 KiB for a
+    /// pattern of [`TEXTURE_BUFFER_PATTERN_BYTES`]), and the bytes after the last (fewer than
+    /// 16): nothing of the region's length.
     pub(super) fn spans(&self, bytes: Range<u64>) -> Vec<(Range<u64>, Vec<u8>)> {
         let chunks = StreamFill::chunks(&bytes);
         let explicit = |span: Range<u64>| {
@@ -342,10 +377,7 @@ impl StreamFill {
         if chunks.is_empty() {
             return vec![explicit(bytes.clone())];
         }
-        // The chunks repeat every `period` bytes: `j & (n - 1)` repeats every power of two
-        // past `n - 1`.
-        let period = (self.mask() + 1).next_power_of_two().max(16);
-        let first = chunks.start..(chunks.start + period).min(chunks.end);
+        let first = chunks.start..(chunks.start + self.block()).min(chunks.end);
         let unit: Vec<u8> = first.map(|at| self.byte(&bytes, at)).collect();
         [
             explicit(bytes.start..chunks.start),
@@ -473,9 +505,12 @@ impl BlitCommandEncoder {
     /// pattern where a texel's samples hold 16 bytes or fewer, else the pattern cut at the texel
     /// (the module docs).
     ///
-    /// Refused: a texture of another device (`Invalid`), and an empty pattern
+    /// Refused: a texture of another device (`Invalid`), an empty pattern
     /// (`Invalid(EmptyFillPattern)`), which Metal's validation stops and whose bytes plain Metal
-    /// reads from past the call's. A multisample texture's fill is refused, `Unsupported`, where
+    /// reads from past the call's, and a texture buffer's fill of a pattern of more than 32752
+    /// bytes (`Invalid(LongTextureBufferFillPattern)`), in which Metal's process ends, whatever
+    /// the region; another texture's fill takes a pattern of any length and reads 16 bytes of it
+    /// at most. A multisample texture's fill is refused, `Unsupported`, where
     /// the device cannot run the sample planes' merge (sample-rate shading, the sample count among
     /// its integer color attachments') or the copy into the texture (`copy_from_texture`'s
     /// refusals of copies between multisampled textures).
@@ -491,7 +526,7 @@ impl BlitCommandEncoder {
             |log| {
                 BlitCall::FillTexture(
                     Box::new((texture.clone(), level, slice, region)),
-                    log.byte_span(pattern),
+                    log.byte_span(read_pattern(texture.texture_type(), pattern)),
                 )
             },
             |this| this.fill("fill_texture", texture, (level, slice), region, pattern),
@@ -654,7 +689,7 @@ impl BlitCommandEncoder {
             .ok_or_else(|| internal("a fill of a format the runtime makes no texture of"))?;
         // A texture buffer's fill writes one row whatever the region's height and depth.
         if texture.texture_type() == TextureType::TextureBuffer {
-            return self.texture_buffer_fill(texture, unit, region, pattern);
+            return self.texture_buffer_fill(call, texture, unit, region, pattern);
         }
         let Size {
             width,
@@ -914,14 +949,23 @@ impl BlitCommandEncoder {
     /// Write `pattern` into the bytes of the texture buffer `texture`'s buffer that the texels `x`
     /// to `x + width` of `region` cover from its offset, past its width too (cut at the buffer's
     /// end), whatever the level, slice, row, height and depth, as Metal writes them
-    /// ([`StreamFill`]; the module docs): a width of 0 writes nothing.
+    /// ([`StreamFill`]; the module docs): a width of 0 writes nothing. A pattern of more than
+    /// [`TEXTURE_BUFFER_PATTERN_BYTES`] is refused, as Metal's process ends there.
     fn texture_buffer_fill(
         &mut self,
+        call: &'static str,
         texture: &Texture,
         unit: FillUnit,
         region: Region,
         pattern: &[u8],
     ) -> Result<(), Error> {
+        if pattern.len() > TEXTURE_BUFFER_PATTERN_BYTES {
+            let length = pattern.len() as u64;
+            return Err(invalid(
+                call,
+                Problem::LongTextureBufferFillPattern { length },
+            ));
+        }
         let FillUnit::Texels { bytes, .. } = unit else {
             return Err(internal("a texture buffer of no texel format"));
         };

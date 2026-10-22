@@ -12,9 +12,9 @@
 //! them, `unpacked` where Metal's bytes do not follow the color (bytes of its stack's; the
 //! runtime's fill there, in a command buffer of no earlier color fill, must write what the bytes
 //! form writes for one zero byte, and the device announce `unpacked-fill-color` once: changed),
-//! or `held-apart` for a heap's two-plane texture of more than one level or slice, which the
-//! runtime holds apart from the heap's bytes Metal's fill writes (its fills are checked through
-//! `get_bytes` in `surface_fills.rs`). A format the device holds no texture of is
+//! or `two-plane-heap-fills` for a heap's two-plane texture of more than one level or slice, whose
+//! fill writes the heap's bytes at level 0's rows, as Metal's does, which `two_plane_heap_fills.rs`
+//! checks byte for byte against the M3 Max's. A format the device holds no texture of is
 //! skipped, with an `XR-TEXTURE-FILLS-SKIPPED` line, and so is `Depth32Float_Stencil8` where its
 //! uploads announce that the device may store depth outside `[0, 1]` clamped
 //! (`restricted-depth-upload`, checked to fire exactly where the runtime plans a depth image that
@@ -93,8 +93,8 @@ const FORMATS: [(u32, u64, &str); 50] = [
     (253, 0, "3e98e4db29723b7e"),
     (260, 0, "6bad089e9ea96a78"),
     (261, 0, "dbb9a8f56e387de0"),
-    (550, 180224, "dadda8e50239e9ba"),
-    (551, 180224, "dadda8e50239e9ba"),
+    (550, 180224, "6e27fb9c47da9062"),
+    (551, 180224, "6e27fb9c47da9062"),
 ];
 
 /// A format's unit as the probes count it: its block's bytes, width and height (a texel's for an
@@ -341,7 +341,8 @@ fn descriptor(raw: u32, case: &Case, options: ResourceOptions) -> TextureDescrip
 }
 
 /// Case `name` of the two-plane format `raw` in a shared heap of `heap` bytes, its fill one zero
-/// byte where `zeros`: the probe's "changed" line, or the refusal.
+/// byte where `zeros`: the digest of the probe's "changed" line, or `two-plane-heap-fills` for a
+/// texture of more than one level or slice (the module docs).
 fn two_plane_case(
     device: &Device,
     queue: &CommandQueue,
@@ -376,10 +377,10 @@ fn two_plane_case(
     if let Err(error) = filled {
         panic!("{raw} {name}: a fill refused: {error}");
     }
-    // A texture of more levels or slices is held apart from the heap's bytes, which Metal's fill
-    // writes (`heap-two-plane-texture`).
+    // A texture of more levels or slices: its fill writes the heap's bytes at level 0's rows,
+    // which `two_plane_heap_fills.rs` checks byte for byte against Metal's.
     if case.levels > 1 || case.slices > 1 {
-        return "held-apart".to_owned();
+        return "two-plane-heap-fills".to_owned();
     }
     let got = get(device, queue, &bytes, heap);
     let mut runs = Vec::new();
