@@ -875,7 +875,8 @@ impl Device {
     /// resources in (`memory::keep_room`): called by the creation calls that may wait (a queue's,
     /// a pipeline state's, a buffer's, a texture's, a heap's), so that no encoding or commit makes
     /// a memory block, whose `vkAllocateMemory` waited 2.37 s for other processes' GPU work on
-    /// NVIDIA's driver. Nothing in a host step, which makes no object.
+    /// NVIDIA's driver. Nothing in a host step, a serial point of the command buffers' stream
+    /// that makes only what it needs.
     pub(crate) fn keep_room(&self) {
         if crate::exit_guard::in_host_step() {
             return;

@@ -42,11 +42,12 @@
 //!   or binds per-bind strides that are not dynamic state; a draw in a run of another shape; a
 //!   command whose buffers ask another variant all the same (the commit compiles that variant where
 //!   the encoder's state asks it, an inherited buffer slot bound with bytes among it); and a state
-//!   made after the commit. The step makes no neutral (`neutral.rs`): the commit makes those of the
-//!   plans it settles, and a state made with `supportIndirectCommandBuffers` made, at its creation,
-//!   those its variants' plans may bind with nothing bound (`GraphicsState::make_neutrals`). Nor
-//!   does it make an image, a render pass or a framebuffer (`creation.rs`): one it needs that
-//!   nothing made before fails the command buffer `CommandBufferError::HostStepObject`.
+//!   made after the commit. The commit makes the neutrals of the plans it settles, a state made
+//!   with `supportIndirectCommandBuffers` made, at its creation, those its variants' plans may bind
+//!   with nothing bound (`GraphicsState::make_neutrals`), and the commit makes the runs' passes
+//!   and memoryless backings ahead (`ahead.rs`), so the step, a serial point of the command
+//!   buffers' stream, seldom makes one; what nothing made before it, the step makes itself
+//!   (`neutral.rs`, `creation.rs`).
 //! - **Each command** draws as the encoder's `draw_primitives`, `draw_indexed_primitives` or
 //!   `draw_patches` would, through the same steps (`RenderCommandEncoder::draw`; part 5c for the
 //!   indexed and patch draws), into the instance the execution was encoded in, with the
@@ -128,9 +129,9 @@
 //! - **A command's barrier** (an M4). Plain Metal orders a command whose barrier is set after the
 //!   draws before it, their writes visible to it, where its validation stops `setBarrier` on a
 //!   buffer without mesh draws. Such a command's draw records into the execution's next run, as one
-//!   ordered after a draw that reached the tile memory does, where the CPU set a barrier of the
-//!   buffer before the encoder ended (the instance then has its `RunPasses`); a barrier set later
-//!   refuses the commit `NotImplemented(IndirectRenderCommands)`. The barrier does not order the
+//!   ordered after a draw that reached the tile memory does, in passes the encoder made where a
+//!   record may have held a barrier as it ended (`RunPasses`), else ones the commit or the host
+//!   step makes, for a barrier the CPU set later. The barrier does not order the
 //!   earlier draws' fragments before the command's vertex, object and mesh functions (the M3 Max
 //!   and an M4): those read the buffers of their tables from before the pass where a fragment stage
 //!   of it wrote them, from a copy the recording takes before the pass
@@ -1813,9 +1814,9 @@ impl RenderLowering {
         let device = self.core.device();
         let stages = &variant.pipeline().stages;
         device.degrade_argument_pixel_samplers(stages, argument_samplers.take(device));
-        // The neutrals the plan binds, which the step makes none of (`neutral.rs`). One not made
-        // here (the device out of memory) leaves the variant settled: the step refuses the
-        // neutral where it binds it, typed (`CommandBufferError::HostStepObject`).
+        // The neutrals the plan binds, made here so the step need not (`neutral.rs`). One not made
+        // here (the device out of memory) leaves the variant settled: the step makes it where it
+        // binds it.
         let _ = crate::binding::make_neutrals(self.core.device(), &plan);
         let graphics = &variant.pipeline().graphics;
         let storage = self.storage_attachments(graphics)?;
@@ -1915,7 +1916,7 @@ impl RenderExecution {
     /// execution's instance, through an encoder of `core` (`replaying`, so a draw that needs
     /// another instance begins a run of its shape or is refused, and one ordered after another
     /// that reached the tile threadgroup memory begins the next run, as does a command whose
-    /// barrier is set where the instance may split, `splits`), over the pass's `storage` (each
+    /// barrier is set), over the pass's `storage` (each
     /// part `None` where no draw made it yet), in a pass whose instances `rendered` lays out,
     /// with `residency`, the command buffer's (`residency.rs`): from the CPU's records as they
     /// stand now, or, for the host step (`step`), from the records as the GPU and the CPU left
@@ -1925,7 +1926,7 @@ impl RenderExecution {
         &self,
         core: EncoderCore,
         (command_buffer, residency): (&CommandBuffer, &Residency),
-        (step, splits, gpu): (bool, bool, Option<&GpuForm>),
+        (step, gpu): (bool, Option<&GpuForm>),
         found: &mut Found,
         (storage, rendered): (PassStorage, &mut Rendered),
     ) -> Result<Recorded, Error> {
@@ -1994,18 +1995,16 @@ impl RenderExecution {
             // A command's barrier: its draw records into the execution's next run, which its
             // pass runs in a render pass instance of its own after a barrier from everything
             // before, so it sees the earlier draws' writes as plain Metal's does; but where the
-            // run so far is one the execution began with nothing in it. The runs need the
-            // instance's run passes, made where a record may hold a barrier before the encoder
-            // ended (the CPU set one, or the GPU may have written the records): one set later is
-            // refused. A barrier neither may have set is a record the runtime does not write, a
-            // fault, as before.
+            // run so far is one the execution began with nothing in it. The runs take the
+            // instance's run passes where the encoder made them (a record may have held a barrier
+            // before it ended: the CPU set one, or the GPU may have written the records), else
+            // those the commit made ahead or the recording makes (`record_forms`), for a barrier
+            // the CPU set later. A barrier neither may have set is a record the runtime does not
+            // write, a fault, as before.
             if record.barrier {
                 if !self.icb.may_hold_barriers() {
                     found.faults = ReplayFaults(found.faults.0 | ReplayFaults::RECORD.0);
                     continue;
-                }
-                if !splits {
-                    return Err(Error::NotImplemented(RuntimeGap::IndirectRenderCommands));
                 }
                 encoder.run_barrier |= encoder.current.recorded || encoder.earlier.is_empty();
             }
@@ -2664,9 +2663,9 @@ impl DeferredPass {
     }
 
     /// Make, at the commit of `command_buffer` and on its thread, what the host step that
-    /// records the pass needs and would otherwise make on the scheduler's thread, which makes
-    /// no render pass, framebuffer or image (`creation.rs`): `ahead.rs`. Once; a part it fails
-    /// to make the step refuses as it meets it (`CommandBufferError::HostStepObject`).
+    /// records the pass needs and would otherwise make on the scheduler's thread, a serial point
+    /// of the command buffers' stream: `ahead.rs`. Once; a part it fails to make the step makes
+    /// as it meets it.
     pub(crate) fn make_ahead(&self, command_buffer: &CommandBuffer) {
         if self.ahead.get().is_some() {
             return;
@@ -2916,19 +2915,11 @@ impl DeferredPass {
             queue: command_buffer.command_queue().id(),
         };
         for (at, execution) in self.executions.iter().enumerate() {
-            // Whether the execution's instance has its run passes.
-            let splits = self.instances.iter().any(|instance| {
-                instance.runs.is_some()
-                    && instance
-                        .pieces
-                        .iter()
-                        .any(|piece| matches!(*piece, Piece::Execution(x) if x == at))
-            });
             let gpu = forms.get(at).and_then(Option::as_ref);
             let back = execution.record(
                 core,
                 (command_buffer, &residency),
-                (step, splits, gpu),
+                (step, gpu),
                 &mut found,
                 (storage, &mut rendered),
             )?;

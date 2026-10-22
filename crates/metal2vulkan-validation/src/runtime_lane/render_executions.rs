@@ -815,7 +815,7 @@ fn a_host_step_draws_on_what_its_commit_compiled() {
 /// it, as plain Metal orders it where its validation stops `setBarrier` (an M4): command 0 writes
 /// window 0 of `out`, and command 1, behind its barrier, reads that window as its `params` and
 /// writes window 1, so window 1 holds what command 0's words make. A barrier set after the encoder
-/// that executes it ended, whose pass the encoder made without runs, refuses the commit.
+/// that executes it ended, whose pass the encoder made without runs, orders the draw the same.
 #[test]
 fn a_command_s_barrier_orders_its_draw_after_the_earlier_ones() {
     on_device(|device, _| {
@@ -875,15 +875,16 @@ fn a_command_s_barrier_orders_its_draw_after_the_earlier_ones() {
         }
         assert_eq!(setup.output(), want);
 
+        let contents = setup.out.contents().expect("a Shared buffer");
+        // SAFETY: `out` holds `out.length()` bytes at `contents`, and no command uses them now.
+        unsafe { std::ptr::write_bytes(contents.as_ptr(), 0, setup.out.length() as usize) };
         let late = icb(device, &descriptor(), 2);
         let second = commands(&late);
         let command_buffer = queue.command_buffer().unwrap();
         execute(&command_buffer, &late);
         second.set_barrier().unwrap();
-        assert_eq!(
-            command_buffer.commit().err(),
-            Some(Error::NotImplemented(RuntimeGap::IndirectRenderCommands))
-        );
+        complete(&command_buffer);
+        assert_eq!(setup.output(), want);
     });
 }
 
@@ -2464,11 +2465,7 @@ fn a_host_step_s_variant_of_a_state_made_after_the_commit_shares_the_state_s_sam
 /// `render_arguments::SAMPLED`), binds the device's neutrals its plan names (its set 1's heap
 /// array's neutral element and its argument samplers' neutrals), which the state's creation made
 /// on the program's thread: the step, on the scheduler's thread inside the exit guard's section,
-/// makes no image, memory or submission of its own. Before, the step made the neutral image
-/// itself (`vkCreateImage`, outside the guard's table), and in builds with debug assertions the
-/// section's table ended the process (`SIGABRT`, "Unable to load create_image"), nothing else on
-/// the test's own device having made a neutral of that kind; a release build made it on the
-/// scheduler's thread. The buffer's records are the GPU's to write (an earlier blit copied one),
+/// makes no image, memory or submission of its own. The buffer's records are the GPU's to write (an earlier blit copied one),
 /// so its execution is a host step's; the command buffer waits for an event, and once the commit
 /// returned the test makes the state, encodes command 0 with it and the argument buffer on the
 /// CPU, and signals. The draw writes Metal's texels, under the validation layer, announcing the
@@ -2576,10 +2573,10 @@ fn a_host_step_s_draw_of_a_state_made_after_the_commit_binds_a_neutral_made_befo
 /// makes to crowd its variant's set-1 sampler arrays (`resource_ids`' crowd).
 const HOST_CROWD: u64 = 2048;
 
-/// A command a host step records after its command buffer's commit is listed again by no commit
-/// (`sampler_listing.rs`), so one that leaves a live sampler state out of its argument samplers,
-/// more states living than its variant's set-1 sampler arrays hold (`heap_sets::fit_samplers`),
-/// runs with the states it lists, announced once (`UNLISTED`) and counted once
+/// A command a host step records after its command buffer's commit that leaves a live sampler
+/// state out of its argument samplers, more states living than its variant's set-1 sampler arrays
+/// hold (`heap_sets::fit_samplers`), runs with the states it lists, announced once (`UNLISTED`)
+/// and counted once
 /// (`WorkCounts::unlisted_argument_sampler_buffers`): the command buffer completes, and a function
 /// reading a state left out would read the neutral sampler. The host step draws, as in
 /// [`a_host_step_s_draw_of_a_state_made_after_the_commit_binds_a_neutral_made_before_it`], a state

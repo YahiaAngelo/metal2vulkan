@@ -507,8 +507,7 @@ fn executed_runs_keep_a_memoryless_attachment() {
 /// same memoryless texture each resolve to Metal's mean. The barrier splits the commands into
 /// runs; where the texture's image is lazily allocated (MoltenVK) the runs render it into a
 /// backing, which the commit takes from the texture and with which it makes the runs' passes and
-/// framebuffer ahead: the step makes none (before, it failed the command buffer
-/// `HostStepObject(Image)` there, and once ended the process in a build with debug assertions). The
+/// framebuffer ahead, so the step makes none. The
 /// texture keeps one backing for the three passes (`WorkCounts::kept_backings_made`), made where
 /// the pass announced the backing (`memoryless-backed`) and nowhere else. The commits' make-ahead
 /// work is printed, as its cost.

@@ -38,13 +38,11 @@
 //!
 //!   The program's own calls on its own threads (making objects, encoding) take no section:
 //!   their race with an exit is the program's.
-//! - **A host step makes no image, render pass, framebuffer or neutral**. Those are outside the
-//!   entry points a host step ([`host_step`]) calls in its section ([`HOST_STEP`]): what one may
-//!   need is made before it, on the program's thread. The device's lowering thread makes them in
-//!   its sections, as the program's calls it lowers would (`render/lowering_worker.rs`), so the
-//!   table holds their entry points. Their one door (`creation.rs`, and `neutral.rs` for the neutrals)
-//!   refuses one in a host step before any Vulkan call, `Error::HostStepObject`, in every build; a
-//!   source test fails when another file makes such an object.
+//! - **A host step makes what it needs**: an image, a render pass, a framebuffer or a neutral no
+//!   earlier settle made, as the program's thread or the device's lowering thread
+//!   (`render/lowering_worker.rs`) would, through their one door (`creation.rs`; `neutral.rs` for
+//!   the neutrals). Their entry points are in the table and among the calls a host step makes
+//!   ([`HOST_STEP`]); a source test fails when another file makes such an object.
 //! - **The hook.** A device made or adopted registers an exit handler ([`register_device`]), once
 //!   its driver and layers are loaded and primed (`device/prime.rs`: the first call of each entry
 //!   point of the table, made on the creating thread), so it runs before their destructors, those
@@ -490,7 +488,7 @@ calls! {
     CmdBindIndexBuffer2 => c"vkCmdBindIndexBuffer2",
     // The objects a render encoder's lowering makes as it draws (its pass's render pass and
     // framebuffer, stand-in and scratch images, `creation.rs`), on the device's lowering thread
-    // (`render/lowering_worker.rs`); never in a host step.
+    // (`render/lowering_worker.rs`), and a host step's ([`HOST_STEP`]).
     CreateImage => c"vkCreateImage",
     GetImageMemoryRequirements => c"vkGetImageMemoryRequirements",
     BindImageMemory => c"vkBindImageMemory",
@@ -512,7 +510,8 @@ calls! {
 /// recorded on the program's thread calls (a command buffer of its pool, the barriers, binds, push
 /// constants and dispatch, the shadows' copies, descriptor pools and sets, upload chunks, the views
 /// and samplers of bound textures, a `VkPipeline` from a compiled variant), on a device without
-/// device addresses a variant's translation, and an indirect sparse update's read of its regions.
+/// device addresses a variant's translation, an indirect sparse update's read of its regions, and
+/// the objects a render pass's recording makes (`creation.rs`, `neutral.rs`).
 /// Its section marks them all as called as it ends ([`called`]), a superset of what one step calls,
 /// so the process's first step registers the hook again after it.
 pub(crate) const HOST_STEP: &[Call] = &[
@@ -590,6 +589,15 @@ pub(crate) const HOST_STEP: &[Call] = &[
     // A render pass's steps around its instances (`render/pass_steps.rs`), which a pass of
     // such draws records in the host step too: a sample plane's or a stencil shadow's clear.
     Call::CmdClearColorImage,
+    // What the step makes that no earlier settle made (`creation.rs`): a neutral image, an
+    // attachment's stand-in, scratch, sample planes or memoryless backing, a stencil shadow, a
+    // fragment imageblock's storage, and a run's render pass and framebuffer.
+    Call::CreateImage,
+    Call::GetImageMemoryRequirements,
+    Call::BindImageMemory,
+    Call::CreateRenderPass,
+    Call::CreateRenderPass2,
+    Call::CreateFramebuffer,
 ];
 
 impl Call {

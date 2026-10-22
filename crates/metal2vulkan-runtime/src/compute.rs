@@ -78,7 +78,6 @@ use super::replay::{CallLog, ComputeCall, Replay, Resource, SamplersWithLodClamp
 use super::residency::Residency;
 use super::resource::ResourceRef;
 use super::sampler::SamplerState;
-use super::sampler_listing::SamplerListing;
 use super::shadow;
 use super::texture::Texture;
 use super::tracker::Barrier;
@@ -1953,13 +1952,17 @@ fn record(
         return Ok(true);
     }
     // Set 1, the heap: its writes at the elements of their resource IDs, and the device's texture
-    // table at the texture handle tables.
-    let heap = heap_sets::heap_elements(&variant.pipeline().layout, plan, state)?;
-    let texture_table = heap_sets::texture_table(core.device(), &variant.pipeline().layout)?;
+    // and sampler tables at the handle tables.
+    let compiled = variant.pipeline();
+    let heap = heap_sets::heap_elements(&compiled.layout, plan, state)?;
+    let texture_table = heap_sets::texture_table(core.device(), &compiled.layout)?;
+    let sampler_table =
+        heap_sets::sampler_table(core.device(), &compiled.layout, &compiled.dependencies)?;
     let stages = [(Stage::Kernel, tables.table)];
     let mut bound_tables = binding::Tables::new(&stages)
         .with_residency(tables.residency)
         .with_texture_table(texture_table.as_ref())
+        .with_sampler_table(sampler_table.as_ref())
         .with_sampler_maps(sampler_maps.clone());
     // The flat dispatch's preprocess: its scratch holds the region record the variant reads.
     let preprocess = match &flat {
@@ -2164,21 +2167,10 @@ fn record(
             &objects,
             &mut core.command_buffer().state().heaps,
             heap_writes,
-            Some(&*uses),
+            &uses,
         )?),
         None => None,
     };
-    // Its sampler tables, which the command buffer lists again as it commits.
-    let listing = SamplerListing::of(
-        (plan, &objects),
-        variant.pipeline().layout.sets.get(1),
-        (&state.argument_samplers, state.heap_placement),
-        bound.sampler_tables,
-        || format!("kernel `{kernel}`'s dispatches"),
-    );
-    if let Some(listing) = listing {
-        core.command_buffer().state().list_samplers(listing);
-    }
     // A dispatch that records later goes on in a new `VkCommandBuffer`, made now.
     let pending = match pending {
         Some((dispatch, begun)) => Some((dispatch, begun, core.continuation()?)),
@@ -2303,7 +2295,7 @@ fn record(
             unlisted,
             &format!("kernel `{kernel}`'s dispatches"),
         );
-        // A host step's dispatch, which no commit lists again, runs with the states it listed.
+        // It runs with the states its sampler arrays hold.
         let mut held = core.command_buffer().state();
         held.unlisted_argument_sampler(&device);
     }

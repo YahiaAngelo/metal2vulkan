@@ -1485,10 +1485,10 @@ fn every_release_goes_through_the_release_door() {
     );
 }
 
-/// Every image, render pass and framebuffer the runtime makes goes through `creation.rs`, which
-/// refuses it in a host step before any Vulkan call: no other file calls `vkCreateImage`,
-/// `vkCreateRenderPass`, `vkCreateRenderPass2` or `vkCreateFramebuffer`, but the device's
-/// priming, on the thread that makes the device.
+/// Every image, render pass and framebuffer the runtime makes goes through `creation.rs`, whose
+/// entry points are in the exit guard's table and among a host step's: no other file calls
+/// `vkCreateImage`, `vkCreateRenderPass`, `vkCreateRenderPass2` or `vkCreateFramebuffer`, but the
+/// device's priming, on the thread that makes the device.
 #[test]
 fn every_image_render_pass_and_framebuffer_goes_through_the_creation_door() {
     let found: Vec<String> = [
@@ -1589,23 +1589,6 @@ fn every_command_the_runtime_records_is_routed() {
         unrouted.is_empty(),
         "commands named outside recorder/ that it does not route: {unrouted:#?}"
     );
-}
-
-/// The creation door refuses each kind of object in a host step, typed, and lets it through
-/// outside one.
-#[test]
-fn the_creation_door_refuses_each_kind_in_a_host_step() {
-    use crate::{creation, Error, HostStepObject};
-    for object in [
-        HostStepObject::Neutral,
-        HostStepObject::Image,
-        HostStepObject::RenderPass,
-        HostStepObject::Framebuffer,
-    ] {
-        let refused = exit_guard::host_step(|| creation::outside_host_step(object));
-        assert_eq!(refused, Err(Error::HostStepObject(object)));
-        assert_eq!(creation::outside_host_step(object), Ok(()));
-    }
 }
 
 /// Every thread the runtime starts is started by `exit_guard::spawn`, so the check knows it, and

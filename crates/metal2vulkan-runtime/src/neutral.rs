@@ -2,14 +2,13 @@
 //! uses a texture or sampler slot that nothing is bound to (`NeutralResource`).
 //!
 //! The device makes each kind at its first use and keeps it for its lifetime; the kinds are a
-//! finite set (the compile layer's `Device::neutral_kinds`). A host step makes none: it runs on the
-//! scheduler's thread inside the exit guard's section, which reaches only the guard's table of
-//! entry points, and a neutral image is an image, its memory and a submission of the device's own.
-//! Whatever may draw in a host step made the neutrals its plans may bind before, on the program's
-//! thread (`binding::make_neutrals`: a compute execution's commit, and a render state's creation
-//! where indirect command buffers may draw it, and an execution's commit); in a host step one not
-//! made is refused, never made (`Error::HostStepObject`, which fails the command buffer
-//! `CommandBufferError::HostStepObject`). A neutral image is one texel (six layers for a cube type)
+//! finite set (the compile layer's `Device::neutral_kinds`). Whatever may draw in a host step makes
+//! the neutrals its plans may bind before, on the program's thread (`binding::make_neutrals`: a
+//! compute execution's commit, and a render state's creation where indirect command buffers may
+//! draw it, and an execution's commit), so a step finds them; one no earlier settle made a host
+//! step makes itself, inside its section, whose table holds the entry points (`creation.rs`,
+//! `exit_guard::HOST_STEP`), its first work taken by the step's batch's submission, after the
+//! step. A neutral image is one texel (six layers for a cube type)
 //! of the kind's format and sample count, cleared to zero, in the `GENERAL` layout like every
 //! runtime image, so a read returns zero and a store reaches nothing another command reads. A
 //! neutral sampler is the default one: nearest filtering, clamped to the edge, depth comparison
@@ -32,7 +31,6 @@ use super::memory::{Memory, MemoryClass, Placement};
 use super::resource::ResourceKey;
 use super::texture::first_move::{Filled, FirstMove, Fresh};
 use super::Device;
-use crate::error::HostStepObject;
 use crate::{creation, release};
 use ash::vk;
 use metal2vulkan::bind::NeutralResource;
@@ -120,12 +118,6 @@ impl Neutrals {
     }
 }
 
-/// Refused in a host step (the module docs): a neutral its plan may bind was made before it, on
-/// the program's thread, so one not made is a plan no earlier settle saw (`HostStepObject`).
-fn not_in_host_step() -> Result<(), Error> {
-    creation::outside_host_step(HostStepObject::Neutral)
-}
-
 /// The image type, layer count and create flags of a one-texel image viewed as `view_type`.
 fn image_shape(view_type: vk::ImageViewType) -> (vk::ImageType, u32, vk::ImageCreateFlags) {
     use vk::ImageViewType as V;
@@ -149,7 +141,6 @@ impl Device {
         if let Some(image) = neutrals.images.get(&kind) {
             return Ok(image.view);
         }
-        not_in_host_step()?;
         let image = self.new_neutral_image(kind)?;
         let view = image.view;
         neutrals.images.insert(kind, image);
@@ -168,7 +159,6 @@ impl Device {
         if let Some(texels) = neutrals.texels.get(&(format, storage)) {
             return Ok(texels.view);
         }
-        not_in_host_step()?;
         let texels = self.new_neutral_texels(format, storage)?;
         let view = texels.view;
         neutrals.texels.insert((format, storage), texels);
@@ -279,7 +269,6 @@ impl Device {
         if let Some(&sampler) = neutrals.samplers.get(&compare) {
             return Ok(sampler);
         }
-        not_in_host_step()?;
         let mut info = vk::SamplerCreateInfo::default()
             .mag_filter(vk::Filter::NEAREST)
             .min_filter(vk::Filter::NEAREST)

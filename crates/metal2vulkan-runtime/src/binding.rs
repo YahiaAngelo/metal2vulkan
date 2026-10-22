@@ -34,10 +34,11 @@
 //! - **The heap** (set 1): the device's heap set of the command's layout, which holds every live
 //!   texture at its resource ID and each array's neutral at element 0 (`heap_sets.rs`), so a heap
 //!   entry writes nothing: the texture it names (made resident, or bound at a slot) is checked as a
-//!   slot's view is. An argument sampler takes the `VkSampler` of the listed state for the array's
-//!   use, at the element its ID's entry names (`bind::HeapElements`), and a write no handle can
-//!   reach is left out. A texture handle table is the device's texture table
-//!   (`heap_sets::texture_table`), so a handle reaches every live texture, as Metal's does.
+//!   slot's view is. It holds every live sampler state at its element too, so an argument sampler
+//!   writes nothing either. A texture handle table is the device's texture table
+//!   (`heap_sets::texture_table`), and a sampler table the device's sampler table of the layout's
+//!   kind (`heap_sets::sampler_table`), so a handle reaches every live texture and sampler state
+//!   by its ID as the command runs, as Metal's does.
 //! - **Function tables** an argument buffer names: a set-1 element takes a listed table's words
 //!   buffer whole. On a device without the function-table array's features the stage's snapshot
 //!   takes the listed tables' words copied into the arena (`function_table.rs`), which the command
@@ -52,7 +53,7 @@ use super::command_buffer::{NotedTable, State};
 use super::device::lock;
 use super::error::{internal, Error, RuntimeGap};
 use super::function_table::{self, TableSnapshot, VisibleFunctionTable};
-use super::heap_sets::{Keeper, TextureTable, HEAP_SET};
+use super::heap_sets::{Keeper, SamplerTable, TextureTable, HEAP_SET};
 use super::key_hash::KeyMap;
 use super::render_pass::{PassLayout, Target};
 use super::render_target;
@@ -95,6 +96,8 @@ pub(super) struct Tables<'a> {
     heap: Option<&'a HeapElements>,
     /// The device's texture table, which the layout's texture handle tables bind.
     texture_table: Option<&'a TextureTable>,
+    /// The device's sampler table, which the layout's sampler tables bind.
+    sampler_table: Option<&'a SamplerTable>,
     /// The tables the bind state lists as function tables, in its order.
     function_tables: &'a [VisibleFunctionTable],
     /// A tile dispatch's scratch images, by color index, which its storage attachments read and
@@ -164,6 +167,7 @@ impl<'a> Tables<'a> {
             argument_samplers: &[],
             heap: None,
             texture_table: None,
+            sampler_table: None,
             function_tables: &[],
             tile_scratch: None,
             shadow: None,
@@ -359,6 +363,14 @@ impl<'a> Tables<'a> {
         }
     }
 
+    /// The tables, with the device's sampler table at the layout's sampler tables.
+    pub(super) fn with_sampler_table(self, table: Option<&'a SamplerTable>) -> Tables<'a> {
+        Tables {
+            sampler_table: table,
+            ..self
+        }
+    }
+
     /// The tables, with the visible-function tables the bind state lists as function tables.
     pub(super) fn with_function_tables(self, tables: &'a [VisibleFunctionTable]) -> Tables<'a> {
         Tables {
@@ -513,9 +525,6 @@ pub(super) struct Bound {
     pub(super) holes: Vec<Hole>,
     /// The Vulkan samplers the writes name, which the command buffer holds until it completes.
     pub(super) samplers: Vec<Arc<OwnedSampler>>,
-    /// Each sampler table's `(set, binding)` and its region of the arena, which the command
-    /// buffer writes again as it commits (`sampler_listing.rs`).
-    pub(super) sampler_tables: Vec<((u32, u32), Upload)>,
 }
 
 /// The buffer bound at buffer slot `slot`, if any.
@@ -610,9 +619,6 @@ pub(super) fn bind_into(
     writes.clear();
     writes.reserve(plan.descriptors.len());
     samplers.clear();
-    // The sampler tables, whose regions the command buffer writes again as it commits.
-    let sampler_keys = plan.sampler_tables();
-    let mut sampler_tables = Vec::with_capacity(sampler_keys.len());
     for write in &plan.descriptors {
         let element = match tables.heap {
             Some(heap) => match heap.element(write) {
@@ -623,12 +629,16 @@ pub(super) fn bind_into(
             None => write.array_element,
         };
         let ty: vk::DescriptorType = write.ty.into();
-        // The device's heap set holds every texture and the neutrals (the module docs): a
-        // texture the command names is checked as a slot's view, and nothing is written.
+        // The device's heap set holds every texture, every sampler state and the neutrals (the
+        // module docs): a texture the command names is checked as a slot's view, and nothing is
+        // written.
         if tables.heap.is_some() && write.set == HEAP_SET {
             if let WriteSource::HeapEntry { source, view, .. } = &write.source {
                 let storage = ty == vk::DescriptorType::STORAGE_IMAGE;
                 heap_texture(tables, *source)?.bound_view(call, view, storage)?;
+                continue;
+            }
+            if let WriteSource::ArgumentSampler { .. } = write.source {
                 continue;
             }
             if element == metal2vulkan::bind::NEUTRAL_HEAP_ELEMENT {
@@ -638,13 +648,6 @@ pub(super) fn bind_into(
         let info = match (&write.source, ty) {
             (WriteSource::HeapEntry { .. }, _) => {
                 return Err(internal("a heap entry outside the heap set"))
-            }
-            (WriteSource::HandleTable { bytes_len, .. }, _)
-                if sampler_keys.contains(&(write.set, write.binding)) =>
-            {
-                let (info, region) = sampler_table(device, state, command, write, *bytes_len)?;
-                sampler_tables.push(((write.set, write.binding), region));
-                Info::Buffer(info)
             }
             (_, ty) => match ty {
                 vk::DescriptorType::UNIFORM_BUFFER | vk::DescriptorType::STORAGE_BUFFER => {
@@ -762,87 +765,7 @@ pub(super) fn bind_into(
     Ok(Bound {
         holes,
         samplers: Vec::new(),
-        sampler_tables,
     })
-}
-
-/// The descriptor of sampler table `write` (of `bytes_len` bytes, the plan's) and its region of
-/// the command buffer's arena, holding `command`'s bytes.
-fn sampler_table(
-    device: &Device,
-    state: &mut State,
-    command: &Command<'_>,
-    write: &DescriptorWrite,
-    bytes_len: u32,
-) -> Result<(vk::DescriptorBufferInfo, Upload), Error> {
-    let key = (write.set, write.binding);
-    let bytes = command
-        .descriptor_bytes
-        .iter()
-        .find(|d| (d.set, d.binding) == key)
-        .map(|d| d.bytes.as_slice())
-        .ok_or_else(|| internal("a table write without its bytes"))?;
-    if bytes.len() != bytes_len as usize {
-        return Err(internal("a sampler table of another length than planned"));
-    }
-    let region = state.uploads.upload(device, bytes, padded(bytes.len()))?;
-    let info = vk::DescriptorBufferInfo::default()
-        .buffer(region.raw())
-        .offset(region.offset())
-        .range(u64::from(bytes_len));
-    Ok((info, region))
-}
-
-/// The set-1 writes of `plan`'s argument sampler elements for `samplers`, the states a command
-/// lists again as its command buffer commits (`sampler_listing.rs`): listed state `i` at its
-/// element of each sampler array, made for the array's use as [`bind`] makes it; an element
-/// past the list is no handle's, and is not written. With the Vulkan samplers the writes name.
-pub(super) fn argument_sampler_writes(
-    device: &Device,
-    plan: &BindingPlan,
-    samplers: &[SamplerState],
-) -> Result<(Vec<Write>, Vec<Arc<OwnedSampler>>), Error> {
-    let mut writes = Vec::new();
-    let mut owned = Vec::new();
-    for write in &plan.descriptors {
-        let WriteSource::ArgumentSampler {
-            index,
-            compare,
-            integer,
-            cube_gradient,
-        } = write.source
-        else {
-            continue;
-        };
-        let Some(state) = samplers.get(index as usize) else {
-            continue;
-        };
-        if write.set != HEAP_SET {
-            return Err(internal("an argument sampler outside the heap set"));
-        }
-        let element = u32::try_from(state.heap_element())
-            .map_err(|_| internal("an argument sampler past every array"))?;
-        let desc = metal2vulkan::bind::sampler_desc(
-            device.compile_device(),
-            state.descriptor(),
-            SamplerUse::new(compare, integer).with_cube_gradient(cube_gradient),
-            OpaqueBlackBorder::Stated,
-            None,
-        )
-        .map_err(Error::Bind)?;
-        let sampler = state.vk_sampler(&desc)?;
-        let info = vk::DescriptorImageInfo::default().sampler(sampler.raw());
-        writes.push(Write {
-            set: write.set,
-            binding: write.binding,
-            element,
-            ty: write.ty.into(),
-            info: Info::Image(info),
-            held: Some(Box::new(Arc::clone(&sampler)) as Keeper),
-        });
-        owned.push(sampler);
-    }
-    Ok((writes, owned))
 }
 
 /// Make the device's neutral images, texel buffers and samplers that [`bind`] may write for
@@ -2012,6 +1935,17 @@ fn descriptor(
                 .texture_table
                 .map(|table| table.info)
                 .ok_or_else(|| internal("a texture table gone"))?
+        }
+        // A sampler table: the device's, every live sampler state at its ID (`heap_sets.rs`).
+        WriteSource::HandleTable { .. }
+            if tables
+                .sampler_table
+                .is_some_and(|table| table.at.contains(&key)) =>
+        {
+            tables
+                .sampler_table
+                .map(|table| table.info)
+                .ok_or_else(|| internal("a sampler table gone"))?
         }
         WriteSource::HandleTable { bytes_len, .. } => {
             let bytes = bytes()?;

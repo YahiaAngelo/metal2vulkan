@@ -5,8 +5,9 @@
 //! - **What they are for.** A program writes a resource's ID into an argument buffer, as on
 //!   Metal. A translated function resolves a texture's through the device's texture table, which
 //!   maps the ID of every live texture to the elements of set 1's heap arrays at that ID
-//!   (`heap_sets.rs`), and a sampler's through its command's sampler table. An ID no table holds
-//!   misses: it reads the neutral resource.
+//!   (`heap_sets.rs`), and a sampler state's through the device's sampler table, which maps the
+//!   ID of every live state to its element of set 1's sampler arrays. An ID no table holds misses:
+//!   it reads the neutral resource.
 //! - **Spaces.** Textures, sampler states, visible-function tables and pipeline states made with
 //!   `supportIndirectCommandBuffers` have a space of IDs each, as Metal's resource types do (an
 //!   M3 Max and an M4: three tables made among textures and a sampler state took 1, 2 and 3, and
@@ -133,8 +134,9 @@
 //!   of those arrays' update-after-bind limits is refused `Unsupported`; a reservation is refused
 //!   only past the larger, since no usage is known then. A sampler state is never refused for the
 //!   sampler arrays: its element there is not its ID but the lowest no live state holds
-//!   (`ElementHold`), which the sampler table maps its ID to, so a state at any ID is listed; only
-//!   where more states live than an array holds is one left out,
+//!   (`ElementHold`), which the sampler table maps its ID to (its two windows reach IDs 0 to 32767
+//!   and 32768 more from the first ID past them, a reservation's, `heap_sets.rs`); only where more
+//!   states live than an array holds, or at an ID in neither window, is one left out,
 //!   [`Degradation::UnlistedArgumentSampler`](super::Degradation::UnlistedArgumentSampler), and a
 //!   function reading it through an argument buffer then reads the neutral sampler.
 //! - **Slots.** Each ID has one slot, held by the resource last made with it, placed or plain:
@@ -151,8 +153,8 @@
 //!   slot's holder into its texture table and heap sets as the holder takes the slot, and the
 //!   neutral as it goes (`heap_sets.rs`), so a command reads the holder as it runs. Each slot's
 //!   generation changes with its holder, so the device writes a slot again only where it
-//!   changed. A sampler state is reached where a command's sampler table lists it: the device's
-//!   live states as the command was encoded (`Device::argument_samplers`).
+//!   changed. A sampler state is reached likewise: the device writes it into its heap sets' sampler
+//!   arrays and its sampler tables as it takes its slot, and the neutral as it goes.
 
 use super::device::{lock, DebugMessage, Device, MessageKind, MessageSeverity};
 use super::error::{invalid, Error, Problem};
@@ -491,6 +493,17 @@ impl ResourceIds {
                 (slot.generation, holder)
             }
             None => (0, None),
+        }
+    }
+
+    /// The holder of sampler ID `id`'s slot, where a sampler state holds it, with its hold serial
+    /// ([`IdHold::serial`]): what a function reading the ID reaches now. The caller upgrades the
+    /// holder once it no longer holds the lock (dropping the last handle of a state takes it).
+    pub(super) fn sampler(&self, id: u64) -> Option<(u64, Weak<SamplerShared>)> {
+        let slot = self.samplers.slots.get(&id)?;
+        match &slot.holder {
+            Holder::Sampler(state) => Some((slot.serial, Weak::clone(state))),
+            _ => None,
         }
     }
 

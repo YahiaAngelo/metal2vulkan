@@ -1,10 +1,10 @@
 //! What a host step's recording of a [`DeferredPass`] needs that the commit makes ahead of it.
 //!
-//! A host step records the pass on the scheduler's thread inside the exit guard's section, which
-//! makes no render pass, framebuffer or image (`creation.rs`): one the step needs that nothing
-//! made before fails its command buffer `CommandBufferError::HostStepObject`, where Metal draws
-//! the commands. So the commit of a pass its host step records makes, on the committing thread,
-//! what the step may need that the pass alone decides, whatever its commands turn out to be:
+//! A host step records the pass on the scheduler's thread, a serial point of the command buffers'
+//! stream: the work before its batch completed and the batch waits for the step. So the commit of
+//! a pass its host step records makes, on the committing thread, what the step may need that the
+//! pass alone decides, whatever its commands turn out to be, and the step makes only what the
+//! commit could not know:
 //!
 //! - **The runs' passes of an instance** that holds an execution and that the encoder gave none
 //!   (`RunPasses`, made as the encoder ends only where an execution may split its instance): a
@@ -22,7 +22,7 @@
 //! keeps them unused until its command buffer completes: render passes and framebuffers, and of
 //! memory only the backings, one per memoryless texture, subresource and queue however many
 //! passes there are (Metal's memoryless texture takes none). A part the commit fails to make is
-//! left unmade, and the step refuses it, typed, as it meets it.
+//! left unmade, and the step makes it as it meets it.
 
 use super::{back, backing, Backing, DeferredPass, PassInstance, Piece, RunPasses};
 use crate::command_buffer::CommandBuffer;

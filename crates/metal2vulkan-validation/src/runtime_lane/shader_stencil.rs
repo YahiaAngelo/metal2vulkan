@@ -40,7 +40,7 @@
 //! host step, drawing by `stx_stencil_ms_color` with a state made after the command buffer's
 //! commit: over an `R32Uint` colour alone, the function's stencil reaches no attachment and the
 //! shadow's plan binds a neutral its state's creation made; beside a stencil, the shadow's run is
-//! one of another shape, whose objects a host step does not make.
+//! one of another shape, whose render pass, framebuffer and shadow the host step makes.
 
 use super::degrade_notices::shared_in_system_memory;
 use super::degrade_notices::{assert_made_once, forced, made_compute_kinds, made_render_kinds};
@@ -58,12 +58,11 @@ use metal2vulkan::metal::{
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
-    BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferError, CommandBufferStatus,
-    CommandQueue, CpuCacheMode, Degradation, DepthStencilState, Device, Error, EventRef, Function,
-    HazardTrackingMode, IndirectCommandBufferDescriptor, LoadAction,
-    MultisampleStencilResolveFilter, Origin, PipelineOptions, RenderCommandEncoder,
-    RenderPassDescriptor, RenderPipelineState, ResourceOptions, Size, StorageMode, StoreAction,
-    Texture, TextureDescriptor,
+    BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue, CpuCacheMode,
+    Degradation, DepthStencilState, Device, Error, EventRef, Function, HazardTrackingMode,
+    IndirectCommandBufferDescriptor, LoadAction, MultisampleStencilResolveFilter, Origin,
+    PipelineOptions, RenderCommandEncoder, RenderPassDescriptor, RenderPipelineState,
+    ResourceOptions, Size, StorageMode, StoreAction, Texture, TextureDescriptor,
 };
 use std::collections::BTreeSet;
 
@@ -938,16 +937,14 @@ fn a_host_step_s_draw_whose_stencil_output_reaches_no_attachment_binds_the_neutr
 
 /// The host step's pass beside a stencil (the module docs), on the device as opened and with
 /// `VK_EXT_shader_stencil_export` withheld. Where the device exports the stencil, the command
-/// draws in the execution's instance and the step completes, the first colour at every pixel
-/// (the first state's `Always` test). Through the shadow, the command's draw needs a run of
+/// draws in the execution's instance. Through the shadow, the command's draw needs a run of
 /// another shape, whose render pass, framebuffer and shadow nothing made before the step, the
-/// state having been made after the commit: the step makes none of them, and the command buffer
-/// fails with `CommandBufferError::HostStepObject`, Metal's code 1, where before the change a
-/// build with debug assertions ended the process (`vkCreateImage` and `vkCreateRenderPass2` are
-/// outside the exit guard's table) and a release build made them on the scheduler's thread.
-/// Under the validation layer either way.
+/// state having been made after the commit: the step makes them, inside the exit guard's section
+/// (in a build with debug assertions, an entry point outside its table ends the process). Either
+/// way the command buffer completes with the first colour at every pixel (the first state's
+/// `Always` test), as Metal draws it, under the validation layer.
 #[test]
-fn a_host_step_s_run_of_another_shape_fails_its_command_buffer_with_a_host_step_object() {
+fn a_host_step_s_run_of_another_shape_makes_its_objects_and_draws() {
     for withheld in [false, true] {
         let cache = ScratchCache::new().unwrap();
         let messages = Messages::default();
@@ -971,35 +968,27 @@ fn a_host_step_s_run_of_another_shape_fails_its_command_buffer_with_a_host_step_
             let lane = Lane::new(device);
             let (command_buffer, read) = lane.stepped(true).unwrap();
             let (status, error) = (command_buffer.status(), command_buffer.error());
-            match shadow {
-                true => {
-                    assert_eq!(status, CommandBufferStatus::Error, "{form} on {name}");
-                    assert!(
-                        matches!(error, Some(CommandBufferError::HostStepObject(_))),
-                        "{form} on {name}: {error:?}"
-                    );
-                    assert_eq!(error.map(CommandBufferError::metal_code), Some(1));
-                    eprintln!("{form} on {name}: {error:?}");
-                }
-                false => {
-                    assert_eq!(
-                        (status, error),
-                        (CommandBufferStatus::Completed, None),
-                        "{form} on {name}"
-                    );
-                    let color: Vec<u32> = read_buffer(&read, 0, 4 * u64::from(WIDTH))
-                        .unwrap()
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .map(|word| u32::from_le_bytes(*word))
-                        .collect();
-                    assert_eq!(color, [COLORS[0]; WIDTH as usize], "{form} on {name}");
-                }
-            }
-            // The commands and the buffers are `Shared`.
+            assert_eq!(
+                (status, error),
+                (CommandBufferStatus::Completed, None),
+                "{form} on {name}"
+            );
+            let color: Vec<u32> = read_buffer(&read, 0, 4 * u64::from(WIDTH))
+                .unwrap()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|word| u32::from_le_bytes(*word))
+                .collect();
+            assert_eq!(color, [COLORS[0]; WIDTH as usize], "{form} on {name}");
+            // The commands and the buffers are `Shared`; through the shadow, the run of another
+            // shape splits the pass around the shadow's copies.
             let descriptor = lane.stepped_descriptor(true);
-            let mut first = forced(&[(Degradation::SharedInSystemMemory, system_memory)]);
+            let mut first = forced(&[
+                (Degradation::SharedInSystemMemory, system_memory),
+                (Degradation::ShaderSideStencil, shadow),
+                (Degradation::RenderPassSplit, shadow),
+            ]);
             first.extend(made_render_kinds(&lane.device, &descriptor));
             assert_made_once(&messages, &super::indirect_host_steps::HOST_STEPS, &first);
             drop(lane);

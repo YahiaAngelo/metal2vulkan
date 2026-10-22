@@ -4314,9 +4314,8 @@ impl IndirectRenderCommand {
     /// call ("setBarrier is not enabled on this indirect command buffer (requires
     /// DrawMeshThreadgroups or DrawMeshThreads)"; an M4). An execution draws such a command in a
     /// render pass instance of its own (`render/executions.rs`), a memoryless attachment kept
-    /// across it; a barrier set after the encoder that executes the command ended refuses the
-    /// commit (`NotImplemented(IndirectRenderCommands)`). A command of a buffer of dispatches does
-    /// nothing, as plain Metal's.
+    /// across it, whether the barrier was set before or after the encoder that executes the
+    /// command ended. A command of a buffer of dispatches does nothing, as plain Metal's.
     pub fn set_barrier(&self) -> Result<(), Error> {
         if self.of_compute() {
             return Ok(());

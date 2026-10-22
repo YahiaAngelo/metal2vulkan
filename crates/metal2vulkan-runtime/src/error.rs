@@ -135,11 +135,6 @@ pub enum Error {
     /// problem, and Metal's error ([`MetalError`]), which a consumer answering as Metal does can
     /// hand on as it is.
     MetalError(MetalError),
-    /// A host step needed a Vulkan object of this kind that nothing made before it, and made
-    /// none: a host step runs inside the exit guard's section, which makes no such object. Only a
-    /// host step's recording returns it, and its command buffer fails with
-    /// [`CommandBufferError::HostStepObject`] of the same kind.
-    HostStepObject(HostStepObject),
     /// What the runtime cannot prove plain Metal's answer for: the call and the problem
     /// ([`Unproven`]). Metal may make the object, or refuse it; the runtime does neither, so a
     /// consumer answering its guest as Metal does stops, naming the problem, rather than guess.
@@ -211,10 +206,6 @@ impl fmt::Display for Error {
                 f,
                 "Metal answers nil for {} with error {} {} \"{}\": {:?}",
                 error.call, error.domain, error.code, error.localized_description, error.problem
-            ),
-            Error::HostStepObject(object) => write!(
-                f,
-                "a host step needed a Vulkan object nothing made before it: {object:?}"
             ),
             Error::Unproven(unproven) => write!(
                 f,
@@ -1723,14 +1714,6 @@ pub enum CommandBufferError {
     /// state and gives the driver's error. Metal makes a state's pipelines as it makes the state,
     /// and has no such failure.
     PipelineCreation(PipelineCreationCause),
-    /// A host step (`Degradation::HostReplayedIndirectCommands`: a render encoder's execution of
-    /// an indirect command buffer the GPU may write, or of a range read from a buffer) needed a
-    /// Vulkan object of this kind that nothing made before it, and made none: the step runs
-    /// inside the exit guard's section, which makes none. What a step may need is made before, as a
-    /// state is made, an encoder ends or its command buffer commits. The batch the step recorded
-    /// for, and those after it, did not run. Metal draws such commands; a release build previously
-    /// made the object in the step.
-    HostStepObject(HostStepObject),
     /// A command of the command buffer named a buffer over the caller's host pages (a no-copy
     /// buffer, a heap over the caller's memory, or a resource placed in one) that was rebound
     /// (`rebind_bytes_no_copy`) after the command was encoded and before the command buffer's
@@ -1868,24 +1851,6 @@ pub enum FailureOrigin {
     Runtime,
 }
 
-/// The kind of Vulkan object a host step needed and nothing made before it
-/// ([`Error::HostStepObject`], [`CommandBufferError::HostStepObject`]).
-#[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum HostStepObject {
-    /// A neutral image, texel buffer or sampler, which a binding plan writes at a slot nothing is
-    /// bound to.
-    Neutral,
-    /// An image: an attachment's stand-in, scratch, sample planes or memoryless backing, a
-    /// shader-side stencil's shadow, or a fragment imageblock's storage.
-    Image,
-    /// A render pass: of a run of commands in a render pass instance of its own, or of a step
-    /// around such a run.
-    RenderPass,
-    /// A framebuffer of such a run or step.
-    Framebuffer,
-}
-
 /// Why the driver did not make a draw's `VkPipeline` ([`CommandBufferError::PipelineCreation`]).
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2014,7 +1979,6 @@ impl CommandBufferError {
             | CommandBufferError::Refused
             | CommandBufferError::RenderTargetSize
             | CommandBufferError::CubicArgumentSampler
-            | CommandBufferError::HostStepObject(_)
             | CommandBufferError::EncodedUseRebound
             | CommandBufferError::PredicatedLoopPastCopies
             | CommandBufferError::PredicatedLoopLetGo
@@ -2061,7 +2025,6 @@ impl CommandBufferError {
             | CommandBufferError::TessellationRecordsOverflow(_)
             | CommandBufferError::Refused
             | CommandBufferError::PipelineCreation(_)
-            | CommandBufferError::HostStepObject(_)
             | CommandBufferError::EncodedUseRebound
             | CommandBufferError::PredicatedLoopPastCopies
             | CommandBufferError::PredicatedLoopLetGo
