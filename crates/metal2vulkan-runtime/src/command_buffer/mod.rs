@@ -509,6 +509,10 @@ pub(super) struct State {
     /// Its encoders' deferred command buffers and their replays, where the device records them
     /// so (`recorder`): `None` until the first, and once let go of.
     pub(super) replays: Option<Arc<Replays>>,
+    /// The pool of a predicated loop's check while it records again the work its laying left
+    /// apart (`rerun.rs`): every `VkCommandBuffer` the command buffer hands out meanwhile comes
+    /// from it, and goes back to it for the next run again.
+    rerun_pool: Option<Arc<Mutex<CommandPool>>>,
     /// The ended encoders' recordings, in encoding order.
     recorded: Vec<Recorded>,
     /// The last ended encoder's last `VkCommandBuffer`, still recording: its batch's end goes
@@ -1421,6 +1425,7 @@ impl State {
             .recorded
             .iter_mut()
             .flat_map(|encoder| encoder.segments.iter_mut());
+        let mut checks = Vec::new();
         for (segment, prepared) in segments.zip(prepared) {
             let Prepared {
                 recorded,
@@ -1435,6 +1440,14 @@ impl State {
             segment.pipelines |= pipelines;
             segment.inputs = Some(inputs);
             self.retained.extend(retained);
+            if let Deferred::Loop(check) = &segment.work {
+                checks.push(Arc::clone(check));
+            }
+        }
+        // A loop's check learns how a run again records the work its laying left apart, from
+        // the segments the laying's parts hold, each prepared now (`rerun.rs`).
+        for check in checks {
+            check.learn(self.recorded.get(check.from()..).unwrap_or_default());
         }
     }
 
@@ -1654,6 +1667,7 @@ impl CommandBuffer {
                 committing: false,
                 pool: None,
                 replays: None,
+                rerun_pool: None,
                 recorded: Vec::new(),
                 tail: None,
                 folds: Vec::new(),
@@ -3453,12 +3467,16 @@ impl CommandBufferShared {
     /// of its replays, which take a spare pool of the device's for their replays as the first is
     /// made (outside a section, where a spare is taken; else the first replay makes one);
     /// elsewhere, or once every deferred handle is live, one from this command buffer's pool
-    /// ([`allocate`](Self::allocate)).
+    /// ([`allocate`](Self::allocate)). One of a predicated loop's check's pool while it records
+    /// again (`rerun.rs`).
     fn allocate_deferred(
         &self,
         state: &mut State,
         level: vk::CommandBufferLevel,
     ) -> Result<vk::CommandBuffer, Error> {
+        if let Some(pool) = &state.rerun_pool {
+            return hand_out(&self.device, &mut lock(pool), level);
+        }
         match self.deferred(state, level)? {
             Some(raw) => Ok(raw),
             None => self.allocate(state, level),
@@ -3498,17 +3516,7 @@ impl CommandBufferShared {
         state: &mut State,
         level: vk::CommandBufferLevel,
     ) -> Result<vk::CommandBuffer, Error> {
-        let pool = self.pool(state)?;
-        if let Some(buffer) = pool.reuse(level) {
-            return Ok(buffer);
-        }
-        let info = vk::CommandBufferAllocateInfo::default()
-            .command_pool(pool.raw)
-            .level(level)
-            .command_buffer_count(1);
-        let buffer = self.device.allocate_command_buffers(&info)?[0];
-        pool.made(level, buffer);
-        Ok(buffer)
+        hand_out(&self.device, self.pool(state)?, level)
     }
 
     /// [`CommandBuffer::encoder_primary`]: a deferred one where the device records them so, to
@@ -3526,32 +3534,9 @@ impl CommandBufferShared {
     /// This command buffer's pool, taken on first use: a spare of the device's, or a new one.
     /// The caller holds `state` (the pool is externally synchronized).
     fn pool<'a>(&self, state: &'a mut State) -> Result<&'a mut CommandPool, Error> {
-        let device = &self.device;
-        let raw = device.shared().vk();
         if state.pool.is_none() {
-            let family = device.shared().queue_family_of(self.queue.vk_queue());
-            let pool = match device
-                .shared()
-                .spares
-                .command_pool(device.shared(), family)?
-            {
-                Some(spare) => spare,
-                None => {
-                    // Its command buffers are reset as they are begun again (`spares.rs`).
-                    let info = vk::CommandPoolCreateInfo::default()
-                        .flags(
-                            vk::CommandPoolCreateFlags::TRANSIENT
-                                | vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
-                        )
-                        .queue_family_index(family);
-                    // SAFETY: the device is live and `info` valid.
-                    let pool = unsafe { raw.create_command_pool(&info, None) };
-                    exit_guard::called(Call::CreateCommandPool);
-                    device.shared().counts.command_pool_made();
-                    CommandPool::new(pool.map_err(vulkan)?, family)
-                }
-            };
-            state.pool = Some(pool);
+            let family = self.device.shared().queue_family_of(self.queue.vk_queue());
+            state.pool = Some(command_pool(&self.device, family)?);
         }
         state
             .pool
@@ -4071,12 +4056,6 @@ impl CommandBufferShared {
                         state.status = CommandBufferStatus::Error;
                         state.error = Some(CommandBufferError::MeshGridPastLimits);
                     }
-                    // A predicated loop would have run past its copies (`predication.rs`): the
-                    // command buffer failed.
-                    if state.predication.halted() && state.error.is_none() {
-                        state.status = CommandBufferStatus::Error;
-                        state.error = Some(CommandBufferError::PredicatedLoopPastCopies);
-                    }
                     // A scanned emulated mesh draw drew nothing of records its pool could not
                     // hold (`render/mesh.rs`): the command buffer failed.
                     if let Some(fault) = report.mesh_records_overflow {
@@ -4414,6 +4393,47 @@ fn scheduled(state: &State) -> bool {
             state.status,
             CommandBufferStatus::Completed | CommandBufferStatus::Error
         )
+}
+
+/// A command pool of `device` for queue family `family`: a spare of the device's (outside a
+/// section of the exit guard), or a new one, whose command buffers are reset as they are begun
+/// again (`spares.rs`).
+pub(super) fn command_pool(device: &Device, family: u32) -> Result<CommandPool, Error> {
+    let shared = device.shared();
+    if let Some(spare) = shared.spares.command_pool(shared, family)? {
+        return Ok(spare);
+    }
+    let info = vk::CommandPoolCreateInfo::default()
+        .flags(
+            vk::CommandPoolCreateFlags::TRANSIENT
+                | vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+        )
+        .queue_family_index(family);
+    // SAFETY: the device is live and `info` valid.
+    let pool = unsafe { shared.vk().create_command_pool(&info, None) };
+    exit_guard::called(Call::CreateCommandPool);
+    shared.counts.command_pool_made();
+    Ok(CommandPool::new(pool.map_err(vulkan)?, family))
+}
+
+/// A `VkCommandBuffer` of `level` from `pool`, of `device`: one it made before and has not
+/// handed out since it was taken, whose begin resets it, else a new one. The caller holds the
+/// pool alone (Vulkan synchronizes it externally).
+pub(super) fn hand_out(
+    device: &Device,
+    pool: &mut CommandPool,
+    level: vk::CommandBufferLevel,
+) -> Result<vk::CommandBuffer, Error> {
+    if let Some(buffer) = pool.reuse(level) {
+        return Ok(buffer);
+    }
+    let info = vk::CommandBufferAllocateInfo::default()
+        .command_pool(pool.raw)
+        .level(level)
+        .command_buffer_count(1);
+    let buffer = device.allocate_command_buffers(&info)?[0];
+    pool.made(level, buffer);
+    Ok(buffer)
 }
 
 /// The command-buffer error of a barrier command buffer that could not be allocated, or of a

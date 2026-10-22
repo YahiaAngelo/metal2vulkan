@@ -2258,9 +2258,9 @@ fn record(
         .and_then(|kept| kept.made.get())
         .or_else(|| planned.made_for(commands))
         .filter(|_| !apart_samplers(&device, &objects));
-    // Inside a predicated loop's laying, it waits for them too: the laying stays one run of
-    // command buffers its check may submit again (`command_buffer/rerun.rs`); but where its
-    // variant records in one of its own.
+    // Inside a predicated loop's laying, it waits for them too, so the laying, which its check
+    // may submit again (`command_buffer/rerun.rs`), is not split for it; but where its variant
+    // records in one of its own.
     let laying = core.command_buffer().state().predication.laying();
     let waits = core.encodes_again() || (laying && !apart_samplers(&device, &objects));
     let (pipelines, pending) = match (own.filter(|_| !waits), kept_made) {

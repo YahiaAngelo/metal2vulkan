@@ -1551,6 +1551,72 @@ fn every_dispatch_form_runs_in_each_pass() {
     });
 }
 
+/// Every dispatch form inside a loop that runs past its copies runs in each pass: the forms of
+/// [`every_dispatch_form_runs_as_its_block_says`], whose indirect dispatches of `prd_mark_group`
+/// and whose executions host steps record apart from the loop's command buffers, in a DoWhile of
+/// 100 passes (64 copies, run again once), and in a DoWhile of 20 passes, then one more, inside a
+/// DoWhile of two (16 copies of the inner loop). Each run again records the work apart again where
+/// it lies, as its first run did.
+#[test]
+fn every_dispatch_form_runs_in_each_pass_past_the_copies() {
+    on_device(|device| {
+        let queue = device.new_command_queue().unwrap();
+        let base = Forms::command_tag(2) - 6;
+        let again = || device.work_counts().predicated_loop_runs_again;
+        // One DoWhile of 100 passes.
+        let marks = Marks::new(device);
+        let forms = Forms::new(device, &marks);
+        let before = again();
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        forms.resident(&mut encoder, &marks);
+        encoder.encode_start_do_while().unwrap();
+        forms.encode(&mut encoder, &marks, 2);
+        marks.mark(&mut encoder, 0);
+        let end = encoder.encode_end_do_while(Some(&marks.log), 0, LESS, 100);
+        assert_eq!(end, Ok(true));
+        encoder.end_encoding().unwrap();
+        complete(&command_buffer);
+        let mut counts = vec![0; LOG_WORDS];
+        counts[0] = 100;
+        for tag in base..base + FORMS {
+            counts[tag as usize] = 100;
+        }
+        assert_eq!(marks.counts(), counts);
+        assert_eq!(
+            again() - before,
+            1,
+            "the 100 passes ran again past 64 copies"
+        );
+        // An inner DoWhile of 20 passes, then of one, in a DoWhile of two.
+        let marks = Marks::new(device);
+        let forms = Forms::new(device, &marks);
+        let before = again();
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        forms.resident(&mut encoder, &marks);
+        encoder.encode_start_do_while().unwrap();
+        encoder.encode_start_do_while().unwrap();
+        forms.encode(&mut encoder, &marks, 2);
+        marks.mark(&mut encoder, 0);
+        let end = encoder.encode_end_do_while(Some(&marks.log), 0, LESS, 20);
+        assert_eq!(end, Ok(true));
+        marks.mark(&mut encoder, 1);
+        let end = encoder.encode_end_do_while(Some(&marks.log), 4, LESS, 2);
+        assert_eq!(end, Ok(true));
+        encoder.end_encoding().unwrap();
+        complete(&command_buffer);
+        let mut counts = vec![0; LOG_WORDS];
+        counts[0] = 21;
+        counts[1] = 2;
+        for tag in base..base + FORMS {
+            counts[tag as usize] = 21;
+        }
+        assert_eq!(marks.counts(), counts);
+        assert!(again() > before, "the inner loop ran past its 16 copies");
+    });
+}
+
 /// A loop that runs past the copies the runtime lays down (64, or 16 inside another loop) runs on
 /// as Metal's runs: its check runs its laying again until it ends, as many times as the passes past
 /// the copies need (counted), and its command buffer completes with every pass Metal ran (a While
