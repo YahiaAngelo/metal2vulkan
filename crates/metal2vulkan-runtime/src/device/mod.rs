@@ -115,6 +115,8 @@ pub(super) struct InstanceShared {
     pub(super) raw: ash::Instance,
     /// The `VkApplicationInfo::apiVersion` the instance was created with.
     pub(super) api_version: metal2vulkan::vk::ApiVersion,
+    /// The instance extensions the runtime created it with; none for an adopted instance.
+    pub(super) extensions: Vec<std::ffi::CString>,
     /// The runtime created the instance and destroys it with its last device.
     owned: bool,
     messenger: Option<create::Messenger>,
@@ -192,6 +194,8 @@ pub(super) struct DeviceShared {
     pub(super) depth_ranges: DepthRanges,
     /// What the `VkDevice` enabled, in the compile layer's vocabulary.
     enabled: EnableSet,
+    /// The names of the device extensions it enabled ([`Device::enables_extension`]).
+    extensions: Vec<std::ffi::CString>,
     properties: DeviceProperties,
     /// The kinds of degradation the device announced (`degradation.rs`).
     pub(super) announced: Announced,
@@ -847,6 +851,18 @@ impl Device {
         &self.0.enabled
     }
 
+    /// Whether the Vulkan device enabled the device extension `name`: one the options asked for
+    /// (`DeviceOptions::device_extensions`, and each of `optional_device_extensions` the device
+    /// could enable), or one the runtime enabled itself (of the vocabulary's names, the one the
+    /// device listed). An adopted device answers for its `RawDevice::device_extensions`. No Metal
+    /// counterpart.
+    pub fn enables_extension(&self, name: &std::ffi::CStr) -> bool {
+        self.0
+            .extensions
+            .iter()
+            .any(|enabled| enabled.as_c_str() == name)
+    }
+
     pub(super) fn shared(&self) -> &DeviceShared {
         &self.0
     }
@@ -977,6 +993,8 @@ pub(super) struct Parts {
     /// The description `compile` was built from: what the device enables.
     pub(super) description: DeviceDescription,
     pub(super) enabled: EnableSet,
+    /// The names of the device extensions it enables ([`Device::enables_extension`]).
+    pub(super) extensions: Vec<std::ffi::CString>,
     /// The form of `VK_KHR_calibrated_timestamps` it enables, outside `enabled`'s vocabulary.
     pub(super) calibration: Option<gpu_time::Extension>,
     /// It answers GPU times from the host, writing no timestamps (`gpu_time.rs`).
@@ -1050,6 +1068,7 @@ impl Device {
             compile,
             description,
             enabled,
+            extensions,
             calibration,
             gpu_times_from_host,
             announce_each,
@@ -1592,6 +1611,7 @@ impl Device {
             compile,
             depth_ranges,
             enabled,
+            extensions,
             properties,
             announced: Announced::new(&announce_each),
             lowering_refuses,

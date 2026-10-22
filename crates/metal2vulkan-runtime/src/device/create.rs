@@ -83,6 +83,15 @@ pub struct DeviceOptions {
     /// `instance_extensions`, for example) refuses the options before the instance is made
     /// ([`Error::InstanceExtensionRequired`](crate::Error::InstanceExtensionRequired)).
     pub device_extensions: Vec<CString>,
+    /// Device extensions each device enables only where it can, never refused for one: where the
+    /// device lists it, the instance enables every instance extension its registry dependency
+    /// names (as for `device_extensions`), and, for an extension whose feature structure the
+    /// runtime knows (as for `device_extensions`), the device has every feature of it, which it
+    /// then enables too. Elsewhere the device leaves it out, and is made all the same. Which a
+    /// device enabled, [`Device::enables_extension`](crate::Device::enables_extension) answers
+    /// (window-system extensions, for a consumer whose windows present where the device can).
+    /// One also in `device_extensions` is that list's. Metal has no such setting.
+    pub optional_device_extensions: Vec<CString>,
     /// Features of the recommended enables a created device leaves disabled (the robustness
     /// features, for a run of the in-shader containment encoding, for example). The compile
     /// device is made from what is enabled, so it compiles for that. Withholding a feature another
@@ -674,6 +683,7 @@ fn create_instance(options: &DeviceOptions) -> Result<Arc<InstanceShared>, Error
         entry,
         raw,
         api_version,
+        extensions: extensions.iter().map(|&name| name.to_owned()).collect(),
         owned: true,
         messenger,
         relay,
@@ -1216,12 +1226,28 @@ fn create_on(
         .into_iter()
         .filter(|(name, _)| listed.contains(*name))
         .collect();
-    if !caller.is_empty() {
-        // SAFETY: `physical` was enumerated from the instance, made at Vulkan 1.2, and lists
-        // each extension `caller` names.
-        let reported = unsafe { listed_reported(&instance.raw, physical, &caller) };
-        enables.enable_listed(&caller, reported)?;
-    }
+    // The caller's optional extensions the device may enable: those it lists whose instance
+    // requirements the instance enables, enabled where it has their features.
+    let instance_names: Vec<&CStr> = instance.extensions.iter().map(CString::as_c_str).collect();
+    let optional: Vec<CString> = (options.optional_device_extensions.iter())
+        .filter(|name| listed.contains(*name) && !options.device_extensions.contains(name))
+        .filter(|name| {
+            instance_requirements_met(std::slice::from_ref(name), &instance_names).is_ok()
+        })
+        .cloned()
+        .collect();
+    let asked: Vec<_> = caller
+        .iter()
+        .copied()
+        .chain(listed_structures(&optional))
+        .collect();
+    // SAFETY: `physical` was enumerated from the instance, made at Vulkan 1.2, and lists each
+    // extension `asked` names.
+    let reported =
+        (!asked.is_empty()).then(|| unsafe { listed_reported(&instance.raw, physical, &asked) });
+    let has = |feature: &'static str| reported.as_ref().is_some_and(|reported| reported(feature));
+    enables.enable_listed(&caller, has)?;
+    enables.enable_where_featured(&optional, has);
     // The runtime's own need, outside the vocabulary: Metal's views of another component layout
     // (`view_plan.rs`), which a portability subset allows only with
     // `imageViewFormatReinterpretation`, enabled where it has it, unless the options withhold
@@ -1340,6 +1366,7 @@ fn create_on(
         compile,
         description: enabled,
         enabled: set,
+        extensions: enables.names().map(CStr::to_owned).collect(),
         calibration,
         gpu_times_from_host: options.gpu_times_from_host,
         announce_each: options.announce_each.clone(),
@@ -1456,6 +1483,7 @@ fn same_options(a: &DeviceOptions, b: &DeviceOptions) -> bool {
         layer_settings,
         instance_extensions,
         device_extensions,
+        optional_device_extensions,
         withheld_features,
         withheld_extensions,
         messages: _,
@@ -1477,6 +1505,7 @@ fn same_options(a: &DeviceOptions, b: &DeviceOptions) -> bool {
         && *layer_settings == b.layer_settings
         && *instance_extensions == b.instance_extensions
         && *device_extensions == b.device_extensions
+        && *optional_device_extensions == b.optional_device_extensions
         && *withheld_features == b.withheld_features
         && *withheld_extensions == b.withheld_extensions
         && *loader == b.loader

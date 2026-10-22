@@ -138,6 +138,8 @@ mod multisample_buffer_layouts;
 mod nan_signs;
 mod noted_apart;
 mod numbered_samplers;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod optional_extensions;
 mod options;
 mod own;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
