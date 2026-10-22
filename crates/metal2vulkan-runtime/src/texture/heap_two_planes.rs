@@ -28,8 +28,9 @@
 //! first level's rows from past it, an array's GPU writes over the first level's bytes, a 2D
 //! texture's GPU writes nowhere, its GPU reads at other bytes again), and the GPU writes of a
 //! first level land only at some extents (16 x 8, not 37 x 5 nor 64 x 64). A 3D texture's GPU
-//! writes of every depth slice land over the first's bytes ([`TwoPlaneHeapLayout::of_texture`];
-//! `heap.rs` holds the shapes apart that no layout serves).
+//! writes of every depth slice land over the first's bytes, and its reads, samples and GPU blits
+//! out read its first texel ([`TwoPlaneHeapLayout::of_texture`]; its accesses keep to its image's
+//! first depth slice, `lower::texture::emit::planes_volume`, `two_planes.rs`).
 //!
 //! **Held** as the texture's one `R32G32_UINT` image (each texel's color word, then its alpha
 //! byte), in memory of its own, a shadow of its first level's slices in the heap's bytes

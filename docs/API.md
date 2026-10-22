@@ -1789,8 +1789,7 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   that binds it beyond its declared usage, and back after each write through it.
 - `metal2vulkan-degrade-heap-two-plane-texture` (precision). `HeapTwoPlaneTexture`: A texture of
   `RGB10A8_2P_XR10` or its sRGB twin made in a heap whose planes no shadow of the heap's bytes
-  holds: a 3D texture of more than one depth slice (Metal's writes lay its depth slices over one
-  another), or one whose moves pass the device's limits. Its one image holds each texel's colour
+  holds: one whose moves pass the device's limits. Its one image holds each texel's colour
   word and alpha byte side by side, more than Metal's two planes take in the heap, so it lies in
   memory of its own. Cost: the texture's size and alignment answers are Metal's and its reads,
   writes and copies as outside a heap, but its texels lie in memory of its own, apart from the

@@ -62,6 +62,19 @@
 //!   surface. Such a texture is its bytes to a blit, so a copy not modelled (within one texture,
 //!   between two over one buffer, past a storage buffer) is refused rather than copied as texels.
 //!
+//! - **A 3D texture** lies on Metal as one 2D slice's planes, every depth slice over the first's
+//!   (an Apple M3 Max under macOS 27.0.1, `Shared` and `Private`, in a heap and of its own
+//!   memory): a blit from a buffer writes each image of its region over texel `(x, y)` of the
+//!   first slice in turn, so the last image stays; a blit into a buffer reads texel `(0, 0, 0)`'s
+//!   color word at every texel of every image; `replaceRegion` writes the region's first image
+//!   at the first slice and `getBytes` reads that slice into the first image, the caller's other
+//!   images as they were. The runtime holds such a texture's texels in its image's first depth
+//!   slice alone (`BlitCommandEncoder::plane_first_texel_copy`, `HostCopy::first_image`, and the
+//!   shader's reads and writes, `lower::texture::emit::planes_volume`). A copy between it and
+//!   another two-plane texture copies its texels at the first slice, announced
+//!   (`two-plane-texture-copy`): Metal's copy out of it reads texel `(0, 0, 0)` at every texel,
+//!   and into it at a width of 12 wrote nothing, not modelled.
+//!
 //! Refused `NotImplemented(Format)` naming the format, Metal's answer not measured: a layout
 //! whose rows or images overlap or lie below a row or an image apart, or whose offset, rows or
 //! images are off 4 bytes; a copy between such a texture and one of another pixel format.
@@ -93,6 +106,21 @@ pub(super) use buffer_rows::later_row_stands;
 pub(super) use buffer_rows::{between_rows, buffer_blit_rows, row_spans, rows_held};
 
 use heap_bytes::{stage_planes, BytePlanes, Staged};
+
+/// `copy` between two such textures, one of them 3D, at the first depth slice and layer of each
+/// (the module docs): one image of the region, at `z` 0.
+pub(super) fn first_slices(copy: &ImageCopyRegion) -> ImageCopyRegion {
+    let first = |r: &ImageRegion| ImageRegion {
+        layers: 1,
+        origin: [r.origin[0], r.origin[1], 0],
+        size: [r.size[0], r.size[1], 1],
+        ..*r
+    };
+    ImageCopyRegion {
+        src: first(&copy.src),
+        dst: first(&copy.dst),
+    }
+}
 
 /// Whether `pf` is a two-plane extended-range format.
 pub(super) fn holds_planes(pf: PixelFormat) -> bool {
@@ -273,6 +301,36 @@ impl BlitCommandEncoder {
         layout: &BufferLayout,
         into_texture: bool,
     ) -> Result<(), Error> {
+        self.plane_words_moves(buffer, texture, region, layout, (into_texture, false))
+    }
+
+    /// Record a blit out of the two-plane 3D `texture` into `buffer`, laid out as `layout` (a
+    /// measured layout), of `region`: texel `(0, 0, 0)`'s color word at every texel of every
+    /// image, as Metal's blit reads such a texture (an Apple M3 Max under macOS 27.0.1: a blit
+    /// of one and of two images at slices 0, 1 and 3 of a `Shared` heap's 16 x 8 x 4 texture),
+    /// one command of the encoder. The caller made Metal's checks of the copy.
+    pub(super) fn plane_first_texel_copy(
+        &mut self,
+        buffer: &Buffer,
+        texture: &Texture,
+        region: &ImageRegion,
+        layout: &BufferLayout,
+    ) -> Result<(), Error> {
+        self.plane_words_moves(buffer, texture, region, layout, (false, true))
+    }
+
+    /// [`plane_words_copy`](Self::plane_words_copy), its texels out of the image texel
+    /// `(0, 0, 0)` of level 0 at every one of them where `first_texel`
+    /// ([`plane_first_texel_copy`](Self::plane_first_texel_copy)): that texel copied into the
+    /// scratch's first, then the scratch's texels doubled until they fill its largest band.
+    fn plane_words_moves(
+        &mut self,
+        buffer: &Buffer,
+        texture: &Texture,
+        region: &ImageRegion,
+        layout: &BufferLayout,
+        (into_texture, first_texel): (bool, bool),
+    ) -> Result<(), Error> {
         let device = self.core().device().clone();
         let pf = texture.pixel_format();
         let limits = &device.properties().description.limits;
@@ -372,8 +430,37 @@ impl BlitCommandEncoder {
                 write,
             )
         };
-        let levels = region.level..region.level + 1;
-        let layers = region.layer..region.layer + region.layers;
+        let (levels, layers) = match first_texel {
+            true => (0..1, 0..1),
+            false => (
+                region.level..region.level + 1,
+                region.layer..region.layer + region.layers,
+            ),
+        };
+        // The first texel's copy, and the doublings that spread it over the largest band.
+        let first = vk::BufferImageCopy {
+            buffer_offset: at,
+            ..buffer_image_copy(&ImageRegion {
+                level: 0,
+                layer: 0,
+                layers: 1,
+                origin: [0; 3],
+                size: [1; 3],
+                ..*region
+            })
+        };
+        let largest = texels / TEXEL_BYTES;
+        let mut doublings = Vec::new();
+        let mut held = 1;
+        while first_texel && held < largest {
+            let more = held.min(largest - held);
+            doublings.push(vk::BufferCopy {
+                src_offset: at,
+                dst_offset: at + TEXEL_BYTES * held,
+                size: TEXEL_BYTES * more,
+            });
+            held += more;
+        }
         let image_use = if into_texture {
             let access = Access::new(
                 TRANSFER,
@@ -406,16 +493,37 @@ impl BlitCommandEncoder {
                         vk::PipelineBindPoint::COMPUTE,
                         kernel.pipeline,
                     );
-                    for (set, (_, _, copy, groups)) in descriptor_sets.iter().zip(&steps) {
+                    if first_texel {
                         Barrier::everything().record(device, command_buffer);
                         device.cmd_copy_image_to_buffer(
                             command_buffer,
                             image,
                             vk::ImageLayout::GENERAL,
                             raw_scratch,
-                            std::slice::from_ref(copy),
+                            std::slice::from_ref(&first),
                         );
+                        for doubling in &doublings {
+                            Barrier::everything().record(device, command_buffer);
+                            device.cmd_copy_buffer(
+                                command_buffer,
+                                raw_scratch,
+                                raw_scratch,
+                                std::slice::from_ref(doubling),
+                            );
+                        }
+                    }
+                    for (set, (_, _, copy, groups)) in descriptor_sets.iter().zip(&steps) {
                         Barrier::everything().record(device, command_buffer);
+                        if !first_texel {
+                            device.cmd_copy_image_to_buffer(
+                                command_buffer,
+                                image,
+                                vk::ImageLayout::GENERAL,
+                                raw_scratch,
+                                std::slice::from_ref(copy),
+                            );
+                            Barrier::everything().record(device, command_buffer);
+                        }
                         device.cmd_bind_descriptor_sets(
                             command_buffer,
                             vk::PipelineBindPoint::COMPUTE,
@@ -486,8 +594,15 @@ impl BlitCommandEncoder {
                 && d == 1;
             Ok((measured && TEXEL_BYTES * u64::from(w) * u64::from(h) <= limit).then_some([w, h]))
         };
+        let volume = [source, destination]
+            .iter()
+            .any(|t| t.texture_type() == TextureType::Type3D);
         let why_not = if source.same_storage(destination) {
             Some("a copy within one texture")
+        } else if volume {
+            Some(
+                "a 3D texture, out of which Metal's blit reads the first texel at every texel and                  into which it wrote nothing at some widths, not modelled: the texels copy at the                  first depth slice",
+            )
         } else {
             match (level(source)?, level(destination)?) {
                 (Some(_), Some(_)) => None,

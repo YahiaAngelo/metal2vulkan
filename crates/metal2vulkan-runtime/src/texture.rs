@@ -5259,19 +5259,26 @@ impl Texture {
         bytes_per_image: u64,
     ) -> Result<(), Error> {
         const CALL: &str = "replace_region";
-        let Some(HostCopy {
-            region: image_region,
-            host,
-            cpu_order,
-            planes,
-        }) = self.host_copy(CALL, &region, level, slice, bytes_per_row, bytes_per_image)?
+        let Some(copy) =
+            self.host_copy(CALL, &region, level, slice, bytes_per_row, bytes_per_image)?
         else {
             return Ok(());
         };
         self.refuse_detached_texels()?;
-        if host.host_len().is_none_or(|len| (bytes.len() as u64) < len) {
+        if copy
+            .host
+            .host_len()
+            .is_none_or(|len| (bytes.len() as u64) < len)
+        {
             return Err(invalid(CALL, Problem::Copy(CopyProblem::BufferRange)));
         }
+        let HostCopy {
+            region: image_region,
+            host,
+            cpu_order,
+            planes,
+            ..
+        } = copy.first_image();
         // A PVRTC level's blocks in Metal's CPU order, as the rows the copy packs.
         let rows;
         let bytes = match cpu_order {
@@ -5450,19 +5457,26 @@ impl Texture {
         slice: u64,
     ) -> Result<(), Error> {
         const CALL: &str = "get_bytes";
-        let Some(HostCopy {
-            region: image_region,
-            host,
-            cpu_order,
-            planes,
-        }) = self.host_copy(CALL, &region, level, slice, bytes_per_row, bytes_per_image)?
+        let Some(copy) =
+            self.host_copy(CALL, &region, level, slice, bytes_per_row, bytes_per_image)?
         else {
             return Ok(());
         };
         self.refuse_detached_texels()?;
-        if host.host_len().is_none_or(|len| (bytes.len() as u64) < len) {
+        if copy
+            .host
+            .host_len()
+            .is_none_or(|len| (bytes.len() as u64) < len)
+        {
             return Err(invalid(CALL, Problem::Copy(CopyProblem::BufferRange)));
         }
+        let HostCopy {
+            region: image_region,
+            host,
+            cpu_order,
+            planes,
+            ..
+        } = copy.first_image();
         // A two-plane texture's color words, each texel's first word; those a heap shadow holds
         // are the heap's bytes, which `read_region` reads (as `replace_region` writes them), and
         // a level it does not hold (a mipmapped texture's later one) lies in the image alone.
@@ -5776,6 +5790,7 @@ impl Texture {
             host,
             cpu_order,
             planes,
+            volume: planes && record.texture_type == TextureType::Type3D,
         }))
     }
 }
@@ -5790,6 +5805,34 @@ struct HostCopy {
     /// A two-plane extended-range texture's color words, its image's texels 8 bytes each
     /// (`two_planes.rs`).
     planes: bool,
+    /// Such a texture is 3D: its copy moves the region's first image alone, at its first slice
+    /// ([`HostCopy::first_image`]).
+    volume: bool,
+}
+
+impl HostCopy {
+    /// The copy of a two-plane 3D texture's region ([`HostCopy::volume`]), as Metal makes it (an
+    /// Apple M3 Max under macOS 27.0.1, `Shared` and in a heap): `replaceRegion` writes the
+    /// region's first image over texel `(x, y)` of the first slice whatever the region's `z`, and
+    /// `getBytes` reads that slice's texels into the first image, the caller's other images as
+    /// they were. The checks before it took the whole region.
+    fn first_image(self) -> HostCopy {
+        match self.volume {
+            true => HostCopy {
+                region: ImageRegion {
+                    origin: [self.region.origin[0], self.region.origin[1], 0],
+                    size: [self.region.size[0], self.region.size[1], 1],
+                    ..self.region
+                },
+                host: HostLayout {
+                    images: 1,
+                    ..self.host
+                },
+                ..self
+            },
+            false => self,
+        }
+    }
 }
 
 /// What `replaceRegion` reads (`Texture::replace`): a slice, or bytes at a pointer
