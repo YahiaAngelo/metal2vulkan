@@ -7969,9 +7969,11 @@ impl RenderLowering {
             }
             _ => None,
         };
-        let fold = match (&commands.object_fold, empty || culled) {
-            (Some(fold), false) => Some(mesh_arguments::FoldUpload::new(&mut self.core, fold)?),
-            _ => None,
+        // Uploaded for a draw that launches nothing too: its object stage's hole takes the
+        // record's address all the same.
+        let fold = match &commands.object_fold {
+            Some(fold) => Some(mesh_arguments::FoldUpload::new(&mut self.core, fold)?),
+            None => None,
         };
         // A folded object function reads its region record at its scratch's address.
         let region_record = match (&arguments, &fold) {
