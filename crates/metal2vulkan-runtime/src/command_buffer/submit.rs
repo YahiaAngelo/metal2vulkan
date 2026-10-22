@@ -238,8 +238,7 @@ pub(crate) struct Submission {
     /// It ends a command buffer with a switch of storage forms riding on it, which settles by its
     /// submission's outcome ([`Submission::rides_forms`]).
     forms: bool,
-    /// It makes its command buffer `Scheduled`: it ends it, or, behind its GPU hang, it is the
-    /// batch before the hang's wait and the hang's time to read `Scheduled` came
+    /// It makes its command buffer `Scheduled`: it ends it, and no hang's thread makes or made it
     /// (`hang::schedules`).
     schedules: bool,
     /// Its command buffer became `Scheduled` as it was held in a group
@@ -479,7 +478,8 @@ impl CommandBufferShared {
         // next value (`WorkCounts::batches_with_none_pending` and kin).
         let completed = shared.queues[queue].completed_value();
         (shared.counts).batch_submitted_behind(scheduler.values[queue].saturating_sub(completed));
-        if index == 0 {
+        // One a hang's thread made `Scheduled` early began then (`hang.rs`).
+        if index == 0 && self.kernel.start() == 0 {
             self.kernel.begin();
         }
         let slot = state
@@ -978,11 +978,16 @@ impl CommandBufferShared {
                 return Err(error);
             }
         }
-        // It makes its command buffer `Scheduled` where it ends it, or, behind the command
-        // buffer's GPU hang, where it is the batch before the hang's wait and the hang's time to
-        // read `Scheduled` came (`hang.rs`). A held batch's kernel end is its group's
-        // (`Group::submit`).
-        let schedules = hang::schedules(&mut state.hang_scheduling, index, last);
+        // It makes its command buffer `Scheduled` where it ends it, unless a hang's thread makes
+        // it (`hang.rs`): the command buffer's own hang's, once this batch, the one before the
+        // hang's wait, is taken (the thread waits for it on `changed`), or, for one committed
+        // during a hang, early, where it did not wait past the hang. A held batch's kernel end is
+        // its group's (`Group::submit`).
+        let (schedules, took) = hang::schedules(&mut state.hang_scheduling, index, last);
+        if took {
+            let parked = state.parked > 0;
+            self.wake_parked(parked);
+        }
         if schedules && !grouped {
             self.kernel.end_at(gpu_time::host_nanos());
         }

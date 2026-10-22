@@ -567,8 +567,9 @@ pub(super) struct State {
     fails_from: Option<(usize, CommandBufferError)>,
     /// The hold of the encoder Metal's GPU hangs at, where one does (`hang.rs`).
     hang: Option<Hang>,
-    /// Its transition to `Scheduled` behind its own GPU hang, from its commit on (`hang.rs`):
-    /// made as the batch before the hang's wait is taken, or later, once its time came.
+    /// Its transition to `Scheduled` around a GPU hang of its queue, from its commit on
+    /// (`hang.rs`): its own hang's, which the hang's thread makes, or one committed during a
+    /// hang, which the hang's thread makes early unless its last batch did.
     hang_scheduling: Option<hang::Scheduling>,
     /// It was committed with an event wait while a hang of its queue was in flight: the verdict
     /// its first batch's submission applies (`hang.rs`, `checks.rs`).
@@ -2287,20 +2288,31 @@ impl CommandBuffer {
             // here without an event wait and at its first batch's submission with one; its own
             // hang hangs where its encoder runs and its signals fire under what it was committed
             // as (`hang.rs`).
+            // Either reads `Scheduled` early, from the hang's on, once its waits are met.
             let event_waits = state.batches.events().0;
-            let failure = match failure {
+            let discarded = match failure {
                 None if run != CommitRun::Refused => hang::discarded(&self.0.queue, event_waits),
-                failure => failure,
-            };
-            state.behind_hang = match run != CommitRun::Refused && failure.is_none() {
-                true if event_waits > 0 => hang::behind(&self.0.queue, || {
-                    let batches = state.batches.all().iter();
-                    batches
-                        .flat_map(|batch| batch.waits.iter().cloned())
-                        .collect()
-                }),
                 _ => None,
             };
+            let joins = discarded.is_some();
+            let failure = failure.or(discarded);
+            let behind = run != CommitRun::Refused
+                && failure.is_none()
+                && event_waits > 0
+                && hang::in_flight(&self.0.queue);
+            let waits: Vec<(Arc<EventShared>, u64)> = match behind {
+                true => (state.batches.all().iter())
+                    .flat_map(|batch| batch.waits.iter().cloned())
+                    .collect(),
+                false => Vec::new(),
+            };
+            state.behind_hang = match behind {
+                true => hang::behind(&self.0.queue, &waits),
+                false => None,
+            };
+            if joins || state.behind_hang.is_some() {
+                hang::join(&self.0, &mut state, waits);
+            }
             let hangs = run != CommitRun::Refused
                 && matches!(state.fails_from, Some((at, CommandBufferError::GpuHang))
                     if failure.as_ref().is_none_or(|f| f.signals && !f.encoders.fails(at)));

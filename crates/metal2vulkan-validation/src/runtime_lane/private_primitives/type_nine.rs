@@ -2,19 +2,22 @@
 //! the device the cfg selects, under the validation layer: its command buffer fails as Metal's
 //! GPU fails it, and the queue's other command buffers answer as Metal's do.
 //!
-//! Metal's answers (probes on the Apple M3 Max, macOS 27.0.1, 21 runs, the scenario below and
-//! one that also commits after the hang read `Scheduled` and 20 ms on):
+//! Metal's answers (probes on the Apple M3 Max, macOS 27.0.1, 47 runs, 33 of them hangs: the
+//! scenario below, one that also commits after the hang read `Scheduled` and 20 ms on, and the
+//! consumer's, which commits after 1 to 8 ms):
 //!
 //! - **A direct draw of 3 vertices or more** (1 or 2 instances) hangs Metal's GPU: the command
-//!   buffer reads `Scheduled` 5.06 to 13.2 ms after its commit and fails with
-//!   `MTLCommandBufferErrorTimeout` ([`CommandBufferError::GpuHang`]) 32.7 to 42.7 ms after it.
-//!   Its encoders before the pass run; the pass (its clear too) and every
-//!   encoder after it run nothing; its event signal fires. Every command buffer of its queue
-//!   scheduled meanwhile runs nothing and completes with no error together with it, its event
-//!   signals firing: committed at once or 10 ms on, or with an event wait met during the hang by
-//!   the host or by another queue's command buffer. One whose event wait the host met after the
-//!   hang completed ran, as did one of another queue (in 4 ms, during the hang) and one committed
-//!   after the hang.
+//!   buffer reads `Scheduled` 0.68 to 13.2 ms after its commit and fails with
+//!   `MTLCommandBufferErrorTimeout` ([`CommandBufferError::GpuHang`]) 28.3 to 46.2 ms after it.
+//!   Its encoders before the pass run; the pass (its clear too) and every encoder after it run
+//!   nothing; its event signal fires. Every command buffer of its queue scheduled meanwhile reads
+//!   `Scheduled` from the hang's on, as committed or as its wait is met, and completes with no
+//!   error together with it, its event signals firing: committed at once or 10 ms on, or with an
+//!   event wait met during the hang by the host or by another queue's command buffer. Whether
+//!   their work runs is a race, which the runtime answers as Metal mostly did where its hang read
+//!   `Scheduled` 4.6 ms or more in: they run nothing (`command_buffer/hang.rs`). One whose event
+//!   wait the host met after the hang completed ran, as did one of another queue (in 4 ms, during
+//!   the hang) and one committed after the hang.
 //! - **A direct draw of 1 or 2 vertices, or of no vertex or instance** draws nothing: the pass
 //!   clears, and every command buffer runs.
 //! - **An indexed draw** (1, 2 or 3 indices) faults Metal's GPU: the command buffer fails with
@@ -450,6 +453,24 @@ fn check(outcome: &Outcome, expected: Expected, label: &str) {
             assert!(
                 (SCHEDULED..HANG).contains(&scheduled),
                 "{label}: read Scheduled {scheduled:?} after its commit"
+            );
+            // The queue's command buffers committed during the hang read `Scheduled` from the
+            // hang's on, before it completes, the host-met wait's once the host met it; the one
+            // whose wait is met after the hang, after it.
+            for (answer, which) in discarded {
+                assert!(
+                    answer.scheduled >= drawn.scheduled && answer.scheduled < drawn.completed,
+                    "{label}: {which} read Scheduled {:?} after its commit",
+                    answer.to_scheduled()
+                );
+            }
+            assert!(
+                during.scheduled >= drawn.committed + DURING,
+                "{label}: the host-met wait's read Scheduled before the host met it"
+            );
+            assert!(
+                held.scheduled >= drawn.completed,
+                "{label}: held read Scheduled before the hang completed"
             );
             assert!(!outcome.cleared, "{label}: the pass ran nothing");
             assert_eq!(outcome.marks, marked(&[0, 7, 8, 9]), "{label}");

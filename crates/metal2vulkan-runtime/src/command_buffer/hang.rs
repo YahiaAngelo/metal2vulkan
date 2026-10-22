@@ -21,19 +21,21 @@
 //!   follows it in the command buffer (its later event signals, its completion) waits; its commit
 //!   signals 3 after all its work. The signals and the wait are the runtime's, counted among no
 //!   event command. The encoder and every one after it run nothing (`State::fail_from`).
-//! - **`Scheduled`** with the batch before the wait, not with its last batch, which the wait
-//!   holds: as that batch is submitted (or held in a group, `group.rs`) where [`SCHEDULED`] (the
-//!   earliest Metal's read it) passed since the commit, else on the hang's thread once it did
-//!   ([`Scheduling`]), its submission handlers first. Where a switch of storage forms rides on its
-//!   commit, which settles by its last batch's submission, with its last batch.
+//! - **`Scheduled`** [`SCHEDULED`] (the earliest Metal's read it) after the commit, not with its
+//!   last batch, which the wait holds: the hang's thread makes it then, once the batch before the
+//!   wait was taken, submitted or held in a group (`group.rs`), its submission handlers first
+//!   ([`Scheduling::Hang`]). Where that batch is not taken within [`SIGNAL_BOUND`] (an event wait
+//!   before the hang not met), or a switch of storage forms rides on its commit, which settles by
+//!   its last batch's submission, it reads `Scheduled` with its last batch.
 //! - **In flight** from its commit until its work signalled 3, the queue counting it
-//!   (`CommandQueue::hangs`): a thread of the hang's own makes it `Scheduled` where it is due,
-//!   waits for 1 (the GPU reached the hang), lets the wait go ([`FROM_COMMIT`] after the commit,
-//!   and [`FROM_REACHED`] after reaching it, the earliest Metal failed one), waits for 3, and only
-//!   then stops counting it, inside a trail (`trails.rs`): a waiter of the command buffer returns
-//!   once the queue no longer counts it. A command buffer that does not run its hang (its commit
-//!   refused, a commit failure that fails the encoder or drops its signals, or itself discarded at
-//!   its commit) sets 3 at once.
+//!   (`CommandQueue::hangs`): a thread of the hang's own makes it `Scheduled`, waits for 1 (the
+//!   GPU reached the hang), makes the queue's command buffers committed meanwhile `Scheduled`
+//!   (below) until it lets the wait go ([`FROM_COMMIT`] after the commit, and [`FROM_REACHED`]
+//!   after reaching it, the earliest Metal failed one), waits for 3, and only then stops counting
+//!   it, inside a trail (`trails.rs`): a waiter of the command buffer returns once the queue no
+//!   longer counts it. A command buffer that does not run its hang (its commit refused, a commit
+//!   failure that fails the encoder or drops its signals, or itself discarded at its commit) sets
+//!   3 at once.
 //! - **The queue's others.** A command buffer committed on the queue while a hang of it is in
 //!   flight, with no event wait of its own, runs nothing and completes with no error, its event
 //!   signals firing, as `commit_failed` of code 0 does ([`discarded`]); it completes after the
@@ -45,15 +47,24 @@
 //!   goes: they follow the hang's last batch in the queue's order. One committed after the
 //!   decision but while the hang is still counted is decided at that submission instead, by
 //!   whether the hang still is.
+//! - **Their `Scheduled`**, as Metal's: from the hang's on, as they are committed, each once its
+//!   event waits are met. Each joins the hang's list at its commit ([`join`]); the hang's thread,
+//!   once it made the hang `Scheduled`, makes each listed one `Scheduled` in the queue's order,
+//!   once its waits are met, its submission handlers first and its kernel times then
+//!   ([`QueueHangs::schedule_early`], [`Scheduling::Behind`]), until it lets the wait go. One
+//!   whose waits are not met by then, and every one after it, read `Scheduled` with their last
+//!   batch, after the hang's, as does every one where the hang's own came with its last batch.
 //!
 //! [`Batches::hold`]: super::batches::Batches::hold
 
 use super::super::event::{EventShared, SharedEvent};
+use super::super::exit_guard;
 use super::super::gpu_time;
 use super::super::{CommandQueue, Device, Error};
 use super::{lock, CommandBufferShared, CommitFailure, FailedEncoders, Item, State};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Condvar, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 /// When after its commit a command buffer its GPU hangs at reads `Scheduled`: 5.06 ms, the
@@ -73,12 +84,33 @@ pub(super) const FROM_REACHED: Duration = Duration::from_micros(27_500);
 /// came: a device that lost its work never signals.
 const SIGNAL_BOUND: Duration = Duration::from_secs(10);
 
-/// A queue's hangs: how many are in flight, and the command buffers committed with an event wait
-/// meanwhile, not yet decided (the module docs).
+/// A queue's hangs: how many are in flight, the command buffers committed with an event wait
+/// meanwhile, not yet decided, and those committed meanwhile, not yet `Scheduled` (the module
+/// docs).
 #[derive(Default)]
 pub(crate) struct QueueHangs {
     in_flight: AtomicUsize,
     behind: Mutex<Vec<Behind>>,
+    early: Mutex<Early>,
+    /// Signaled as a command buffer joins `early`.
+    joined: Condvar,
+}
+
+/// The command buffers committed on a queue while a hang of it is in flight, in their order, for
+/// the hang's thread to make `Scheduled` early (the module docs); each of the hang it joined
+/// under, which the hang's start counts.
+#[derive(Default)]
+struct Early {
+    hang: u64,
+    joined: VecDeque<Joined>,
+}
+
+/// A command buffer that joined [`Early`]: the hang it joined under, the command buffer, and its
+/// event waits.
+struct Joined {
+    hang: u64,
+    buffer: Weak<CommandBufferShared>,
+    waits: Vec<(Arc<EventShared>, u64)>,
 }
 
 /// A command buffer committed with event waits while a hang of its queue was in flight: its
@@ -108,6 +140,44 @@ impl Verdict {
 }
 
 impl QueueHangs {
+    /// Until `until`, make the command buffers that joined [`Early`] under hang `hang`
+    /// `Scheduled`, in their order, each once its event waits are met (the module docs). One
+    /// whose waits are not met by then, and every one after it, read `Scheduled` with their last
+    /// batch.
+    fn schedule_early(&self, hang: u64, until: Instant) {
+        loop {
+            let next = {
+                let mut early = lock(&self.early);
+                loop {
+                    if let Some(joined) = early.joined.pop_front() {
+                        break Some(joined);
+                    }
+                    let left = until.saturating_duration_since(Instant::now());
+                    if left.is_zero() || exit_guard::closed() {
+                        break None;
+                    }
+                    early = (self.joined.wait_timeout(early, left))
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .0;
+                }
+            };
+            let Some(joined) = next else {
+                return;
+            };
+            if joined.hang != hang {
+                continue;
+            }
+            let met = (joined.waits.iter()).all(|(event, value)| {
+                event.wait_until(*value, until.saturating_duration_since(Instant::now()))
+            });
+            if !met {
+                sleep_until(until);
+                return;
+            }
+            behind_scheduled(joined.buffer);
+        }
+    }
+
     /// Decide every listed command buffer from its events' values now: one whose every wait is
     /// met runs nothing.
     fn decide(&self) {
@@ -133,14 +203,14 @@ pub(super) struct Hang {
     batch: usize,
 }
 
-/// A hanging command buffer's transition to `Scheduled` (the module docs): due once
-/// [`SCHEDULED`] passed since its commit, and taken once the batch before its hold
-/// ([`Hang::batch`]) was submitted, or held in a group (`group.rs`); whichever comes second
-/// makes it.
-pub(super) struct Scheduling {
-    batch: usize,
-    due: bool,
-    taken: bool,
+/// A command buffer's transition to `Scheduled` around a hang of its queue (the module docs).
+pub(super) enum Scheduling {
+    /// The hang's own: its thread makes it [`SCHEDULED`] after the commit, once the batch before
+    /// its wait (`batch`, [`Hang::batch`]) was taken, submitted or held in a group (`group.rs`).
+    Hang { batch: usize, taken: bool },
+    /// One committed while a hang of its queue was in flight: the hang's thread makes it early,
+    /// or its last batch does, whichever comes first.
+    Behind { made: bool },
 }
 
 impl Hang {
@@ -171,13 +241,14 @@ impl Hang {
     }
 
     /// The command buffer `buffer`, of state `state`, committed at `committed`, runs its hang:
-    /// its queue counts it until its work signalled [`Hang::DONE`], it reads `Scheduled`
-    /// [`SCHEDULED`] after the commit or once the batch before its wait was submitted, whichever
-    /// comes later ([`Scheduling`]), and its wait goes [`FROM_COMMIT`] after the commit and
+    /// its queue counts it until its work signalled [`Hang::DONE`]; it reads `Scheduled`
+    /// [`SCHEDULED`] after the commit, or later once the batch before its wait was taken
+    /// ([`Scheduling::Hang`]), and the queue's command buffers committed meanwhile follow
+    /// ([`QueueHangs::schedule_early`]); its wait goes [`FROM_COMMIT`] after the commit and
     /// [`FROM_REACHED`] after the GPU reached the hang. One with a switch of storage forms riding
     /// on its commit, which settles by its last batch's submission, reads `Scheduled` with that
-    /// batch. Where no thread can be made for that, the wait goes at once, the queue not counting
-    /// it.
+    /// batch, as do the queue's others. Where no thread can be made for that, the wait goes at
+    /// once, the queue not counting it.
     pub(super) fn start(
         self,
         buffer: &Arc<CommandBufferShared>,
@@ -188,10 +259,14 @@ impl Hang {
         let hangs = Arc::clone(queue.hangs());
         let trails = Arc::clone(&queue.device().shared().trails);
         hangs.in_flight.fetch_add(1, Ordering::SeqCst);
+        let hang = {
+            let mut early = lock(&hangs.early);
+            early.hang += 1;
+            early.hang
+        };
         if state.storage_form.is_none() {
-            state.hang_scheduling = Some(Scheduling {
+            state.hang_scheduling = Some(Scheduling::Hang {
                 batch: self.batch,
-                due: false,
                 taken: false,
             });
         }
@@ -200,13 +275,18 @@ impl Hang {
         let builder = std::thread::Builder::new().name("metal2vulkan-hang".to_owned());
         let ended = crate::exit_guard::spawn(builder, move || {
             sleep_until(committed + SCHEDULED);
-            scheduled(weak);
+            let scheduled = hang_scheduled(weak);
             event.wait_until_signaled_value(Hang::REACHED, SIGNAL_BOUND);
-            sleep_until((committed + FROM_COMMIT).max(Instant::now() + FROM_REACHED));
+            let release = (committed + FROM_COMMIT).max(Instant::now() + FROM_REACHED);
+            match scheduled {
+                true => hangs.schedule_early(hang, release),
+                false => sleep_until(release),
+            }
             let trail = trails.open();
             hangs.decide();
             event.set_signaled_value(Hang::RELEASED);
             event.wait_until_signaled_value(Hang::DONE, SIGNAL_BOUND);
+            lock(&hangs.early).joined.clear();
             hangs.in_flight.fetch_sub(1, Ordering::SeqCst);
             drop(event);
             drop(hangs);
@@ -215,6 +295,7 @@ impl Hang {
         if ended.is_err() {
             state.hang_scheduling = None;
             queue.hangs().decide();
+            lock(&queue.hangs().early).joined.clear();
             queue.hangs().in_flight.fetch_sub(1, Ordering::SeqCst);
             self.event.set_signaled_value(Hang::DONE);
         }
@@ -229,36 +310,91 @@ fn sleep_until(until: Instant) {
 }
 
 /// The hanging command buffer `buffer` holds, where something still holds it, came to its time to
-/// read `Scheduled` ([`Scheduling`]): it does here where the batch before its wait was taken
-/// (its kernel end then, and its submission handlers on this thread first), and else as that
-/// batch is ([`schedules`]). This thread never lets go of the command buffer's last reference,
-/// which holds the device: that goes in a context of its own (`Device::let_go_elsewhere`).
-fn scheduled(buffer: Weak<CommandBufferShared>) {
+/// read `Scheduled` ([`Scheduling::Hang`]): it does once the batch before its wait was taken, its
+/// submission handlers first on this thread. Where that batch is not taken within
+/// [`SIGNAL_BOUND`] (an event wait before the hang not met), its last batch makes it instead.
+/// Whether it was made here.
+fn hang_scheduled(buffer: Weak<CommandBufferShared>) -> bool {
+    let Some(buffer) = buffer.upgrade() else {
+        return false;
+    };
+    let deadline = Instant::now() + SIGNAL_BOUND;
+    let made = {
+        let mut state = lock(&buffer.state);
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match state.hang_scheduling {
+                Some(Scheduling::Hang { taken: true, .. }) => {
+                    let handlers = !state.submission.is_empty();
+                    state.submitting = handlers;
+                    break Some(handlers);
+                }
+                Some(Scheduling::Hang { taken: false, .. })
+                    if !left.is_zero() && !exit_guard::closed() => {}
+                Some(Scheduling::Hang { taken: false, .. }) => {
+                    state.hang_scheduling = None;
+                    break None;
+                }
+                _ => break None,
+            }
+            state.parked += 1;
+            state = (buffer
+                .changed
+                .wait_timeout(state, left.min(exit_guard::WAKE)))
+            .unwrap_or_else(PoisonError::into_inner)
+            .0;
+            state.parked -= 1;
+        }
+    };
+    if let Some(handlers) = made {
+        transition(&buffer, handlers);
+    }
+    let_go(buffer);
+    made.is_some()
+}
+
+/// The command buffer `buffer` holds, where something still holds it, committed while a hang of
+/// its queue was in flight, reads `Scheduled` here, where its last batch has not made it
+/// ([`Scheduling::Behind`]): its kernel times then, its submission handlers first on this
+/// thread.
+fn behind_scheduled(buffer: Weak<CommandBufferShared>) {
     let Some(buffer) = buffer.upgrade() else {
         return;
     };
     let made = {
         let mut state = lock(&buffer.state);
-        let taken = match &mut state.hang_scheduling {
-            Some(scheduling) => {
-                scheduling.due = true;
-                scheduling.taken
+        match &mut state.hang_scheduling {
+            Some(Scheduling::Behind { made }) if !*made => {
+                *made = true;
+                let handlers = !state.submission.is_empty();
+                state.submitting = handlers;
+                Some(handlers)
             }
-            None => false,
-        };
-        let handlers = taken && !state.submission.is_empty();
-        if taken {
-            state.submitting = handlers;
+            _ => None,
         }
-        taken.then_some(handlers)
     };
     if let Some(handlers) = made {
-        buffer.kernel.end_at(gpu_time::host_nanos());
-        buffer.schedule();
-        if handlers {
-            buffer.run_submission_handlers();
-        }
+        buffer.kernel.begin();
+        transition(&buffer, handlers);
     }
+    let_go(buffer);
+}
+
+/// `buffer` becomes `Scheduled` here, its kernel end now: its transition, then its submission
+/// handlers on this thread, which the transition waits for where `handlers` (the caller set
+/// `submitting` under the state's lock).
+fn transition(buffer: &Arc<CommandBufferShared>, handlers: bool) {
+    buffer.kernel.end_at(gpu_time::host_nanos());
+    buffer.schedule();
+    if handlers {
+        buffer.run_submission_handlers();
+    }
+}
+
+/// Let go of `buffer` here, unless this is its last reference, which holds the device: that goes
+/// in a context of its own (`Device::let_go_elsewhere`), so the hang's thread never runs the
+/// device's teardown.
+fn let_go(buffer: Arc<CommandBufferShared>) {
     if let Some(last) = Arc::into_inner(buffer) {
         let (contexts, context) = last.device.elsewhere();
         contexts.post(context, Item::Release(Box::new(last)));
@@ -266,17 +402,48 @@ fn scheduled(buffer: Weak<CommandBufferShared>) {
 }
 
 /// Whether batch `index` of a command buffer, its last where `last`, makes it `Scheduled` as it
-/// is submitted or held in a group: its last, or, behind its GPU hang (`scheduling`), the batch
-/// before the hang's wait where its time to read `Scheduled` came; no other ([`Scheduling`]).
-pub(super) fn schedules(scheduling: &mut Option<Scheduling>, index: usize, last: bool) -> bool {
+/// is submitted or held in a group ([`Scheduling`]): its last, but where its hang's thread makes
+/// it or the hang's thread made it early; and whether it is the hang's batch before its wait,
+/// taken now, which the hang's thread waits for (on the command buffer's `changed`).
+pub(super) fn schedules(
+    scheduling: &mut Option<Scheduling>,
+    index: usize,
+    last: bool,
+) -> (bool, bool) {
     match scheduling {
-        None => last,
-        Some(scheduling) if index == scheduling.batch => {
-            scheduling.taken = true;
-            scheduling.due
+        None => (last, false),
+        Some(Scheduling::Hang { batch, taken }) => {
+            let took = index == *batch && !*taken;
+            *taken |= took;
+            (false, took)
         }
-        Some(_) => false,
+        Some(Scheduling::Behind { made }) => {
+            let makes = last && !*made;
+            *made |= makes;
+            (makes, false)
+        }
     }
+}
+
+/// The command buffer `buffer`, of state `state`, committed on its queue while a hang of it is in
+/// flight with the event waits `waits`, joins the hang's command buffers to make `Scheduled`
+/// early ([`QueueHangs::schedule_early`]).
+pub(super) fn join(
+    buffer: &Arc<CommandBufferShared>,
+    state: &mut State,
+    waits: Vec<(Arc<EventShared>, u64)>,
+) {
+    state.hang_scheduling = Some(Scheduling::Behind { made: false });
+    let hangs = buffer.queue.hangs();
+    let mut early = lock(&hangs.early);
+    let hang = early.hang;
+    early.joined.push_back(Joined {
+        hang,
+        buffer: Arc::downgrade(buffer),
+        waits,
+    });
+    drop(early);
+    hangs.joined.notify_all();
 }
 
 /// Whether a hang of `queue` is in flight (the module docs).
@@ -287,16 +454,13 @@ pub(super) fn in_flight(queue: &CommandQueue) -> bool {
 /// The verdict of a command buffer committed on `queue` with the event waits `waits` gives,
 /// listed for the hang's decision where a hang of the queue is in flight; `None` where none is
 /// (the module docs).
-pub(super) fn behind(
-    queue: &CommandQueue,
-    waits: impl FnOnce() -> Vec<(Arc<EventShared>, u64)>,
-) -> Option<Verdict> {
+pub(super) fn behind(queue: &CommandQueue, waits: &[(Arc<EventShared>, u64)]) -> Option<Verdict> {
     if !in_flight(queue) {
         return None;
     }
     let verdict = Verdict::default();
     lock(&queue.hangs().behind).push(Behind {
-        waits: waits(),
+        waits: waits.to_vec(),
         verdict: verdict.clone(),
     });
     Some(verdict)
