@@ -2450,6 +2450,75 @@ pub fn icb<G: Gpu>(g: &G, library: &G::Library, sizes: &Sizes) {
     }
 }
 
+/// The commands of each of the icb_cpu workload's buffers.
+const ICB_CPU_COMMANDS: usize = 4096;
+
+/// The icb_cpu workload (main.rs): the CPU's encoding of indirect commands and their read-back,
+/// each call's time. Per pass, over [`ICB_CPU_COMMANDS`] commands of a buffer of dispatches and
+/// one of draws (`Shared`, inheriting nothing), each setter on every command in turn, then each
+/// getter; each call takes the command (`indirectComputeCommandAtIndex:` or
+/// `indirectRenderCommandAtIndex:`) first, as a program that encodes once per command does. The
+/// medians over the passes, in nanoseconds a call; [`ICB_WARM`] untimed passes first.
+pub fn icb_cpu<G: Gpu>(g: &G, library: &G::Library, sizes: &Sizes) {
+    let state = g.indirect_compute_pipeline(library, "icb_step0");
+    let draw = g.indirect_render_pipeline(library, "icb_draw_vertex", "icb_draw_fragment");
+    let buffer = g.buffer(ICB_CPU_COMMANDS * 256);
+    let dispatches = g.cpu_indirect_commands(ICB_CPU_COMMANDS);
+    let draws = g.cpu_indirect_draws(ICB_CPU_COMMANDS);
+    let names = [
+        "set_compute_pipeline",
+        "set_kernel_buffer",
+        "dispatch_threadgroups",
+        "set_barrier",
+        "kernel_buffer_address",
+        "has_barrier",
+        "set_render_pipeline",
+        "set_vertex_buffer",
+        "draw_primitives",
+        "vertex_buffer_address",
+    ];
+    let mut times: Vec<Vec<f64>> = vec![Vec::new(); names.len()];
+    let mut sink = 0u64;
+    for pass in 0..ICB_WARM + sizes.timed {
+        g.pool(|| {
+            let mut timed = |at: usize, call: &mut dyn FnMut(usize)| {
+                let t = Instant::now();
+                for index in 0..ICB_CPU_COMMANDS {
+                    call(index);
+                }
+                if pass >= ICB_WARM {
+                    let each = t.elapsed().as_secs_f64() * 1e9 / ICB_CPU_COMMANDS as f64;
+                    times[at].push(each);
+                }
+            };
+            timed(0, &mut |i| g.command_pipeline(&dispatches, i, &state));
+            timed(1, &mut |i| {
+                g.command_kernel_buffer(&dispatches, i, &buffer, i * 256)
+            });
+            timed(2, &mut |i| g.command_dispatch(&dispatches, i, 1 + i % 4));
+            timed(3, &mut |i| g.command_barrier(&dispatches, i));
+            timed(4, &mut |i| {
+                sink = sink.wrapping_add(g.command_kernel_buffer_address(&dispatches, i))
+            });
+            timed(5, &mut |i| {
+                sink = sink.wrapping_add(u64::from(g.command_has_barrier(&dispatches, i)))
+            });
+            timed(6, &mut |i| g.draw_command_pipeline(&draws, i, &draw));
+            timed(7, &mut |i| {
+                g.draw_command_vertex_buffer(&draws, i, &buffer, i * 256)
+            });
+            timed(8, &mut |i| g.draw_command_draw(&draws, i));
+            timed(9, &mut |i| {
+                sink = sink.wrapping_add(g.draw_command_vertex_buffer_address(&draws, i))
+            });
+        });
+    }
+    std::hint::black_box(sink);
+    for (name, times) in names.iter().zip(&mut times) {
+        emit("icb_cpu", name, "ns", times);
+    }
+}
+
 /// The icb_draws workload's objects, as many as Apple's "Encoding Indirect Command Buffers on the GPU"
 /// draws (`AAPLNumObjects`), on a grid of `ICB_DRAW_GRID` columns.
 const ICB_DRAW_OBJECTS: usize = 65536;

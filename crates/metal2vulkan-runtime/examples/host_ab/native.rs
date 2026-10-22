@@ -2,6 +2,7 @@
 
 use crate::gpu::{Format, Gpu};
 use block2::RcBlock;
+use objc2::msg_send;
 use objc2::rc::{autoreleasepool, Retained};
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSString, NSURL};
@@ -12,11 +13,7 @@ use objc2_metal::{
     MTLCreateSystemDefaultDevice, MTLCullMode, MTLDepthStencilDescriptor, MTLDepthStencilState,
     MTLDevice, MTLDispatchType, MTLHazardTrackingMode, MTLHeap, MTLHeapDescriptor, MTLHeapType,
     MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
-    MTLIndirectCommandType, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPipelineOption,
-    MTLPixelFormat, MTLPrimitiveType, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLRenderPipelineDescriptor, MTLRenderPipelineState, MTLRenderStages, MTLResource,
-    MTLResourceOptions, MTLResourceUsage, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
-    MTLSamplerState, MTLSharedEvent, MTLSharedEventListener, MTLSize, MTLStorageMode,
+    MTLIndirectCommandType, MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPipelineOption, MTLPixelFormat, MTLPrimitiveType, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor, MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLSharedEvent, MTLSharedEventListener, MTLSize, MTLStorageMode,
     MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLWinding,
 };
 use std::ffi::c_void;
@@ -240,6 +237,159 @@ impl Gpu for Native {
 
     fn pipeline_id(&self, state: &Self::ComputePipeline) -> u64 {
         state.gpuResourceID().to_raw()
+    }
+
+    fn cpu_indirect_commands(&self, count: usize) -> Self::IndirectCommands {
+        let descriptor = MTLIndirectCommandBufferDescriptor::new();
+        descriptor.setCommandTypes(MTLIndirectCommandType::ConcurrentDispatch);
+        descriptor.setInheritPipelineState(false);
+        descriptor.setInheritBuffers(false);
+        descriptor.setMaxKernelBufferBindCount(1);
+        // SAFETY: `count` is within Metal's most commands (16,384), which the workload keeps.
+        unsafe {
+            self.device
+                .newIndirectCommandBufferWithDescriptor_maxCommandCount_options(
+                    &descriptor,
+                    count,
+                    MTLResourceOptions::StorageModeShared,
+                )
+        }
+        .expect("newIndirectCommandBufferWithDescriptor")
+    }
+
+    fn cpu_indirect_draws(&self, count: usize) -> Self::IndirectCommands {
+        let descriptor = MTLIndirectCommandBufferDescriptor::new();
+        descriptor.setCommandTypes(MTLIndirectCommandType::Draw);
+        descriptor.setInheritPipelineState(false);
+        descriptor.setInheritBuffers(false);
+        descriptor.setMaxVertexBufferBindCount(1);
+        descriptor.setMaxFragmentBufferBindCount(1);
+        // SAFETY: the descriptor is a draw buffer's, of a count within Metal's most.
+        unsafe {
+            self.device
+                .newIndirectCommandBufferWithDescriptor_maxCommandCount_options(
+                    &descriptor,
+                    count,
+                    MTLResourceOptions::StorageModeShared,
+                )
+        }
+        .expect("newIndirectCommandBufferWithDescriptor")
+    }
+
+    fn command_pipeline(
+        &self,
+        commands: &Self::IndirectCommands,
+        index: usize,
+        state: &Self::ComputePipeline,
+    ) {
+        // SAFETY: `index` is below the buffer's count (the workload's).
+        let command = unsafe { commands.indirectComputeCommandAtIndex(index) };
+        command.setComputePipelineState(state);
+    }
+
+    fn command_kernel_buffer(
+        &self,
+        commands: &Self::IndirectCommands,
+        index: usize,
+        buffer: &Self::Buffer,
+        offset: usize,
+    ) {
+        // SAFETY: `index` is below the buffer's count, the buffer binds index 0, and `offset`
+        // lies inside `buffer` (the workload's).
+        unsafe {
+            let command = commands.indirectComputeCommandAtIndex(index);
+            command.setKernelBuffer_offset_atIndex(buffer, offset, 0);
+        }
+    }
+
+    fn command_dispatch(&self, commands: &Self::IndirectCommands, index: usize, groups: usize) {
+        let size = |width| MTLSize {
+            width,
+            height: 1,
+            depth: 1,
+        };
+        // SAFETY: `index` is below the buffer's count (the workload's).
+        let command = unsafe { commands.indirectComputeCommandAtIndex(index) };
+        command.concurrentDispatchThreadgroups_threadsPerThreadgroup(size(groups), size(64));
+    }
+
+    fn command_barrier(&self, commands: &Self::IndirectCommands, index: usize) {
+        // SAFETY: `index` is below the buffer's count (the workload's).
+        let command = unsafe { commands.indirectComputeCommandAtIndex(index) };
+        command.setBarrier();
+    }
+
+    fn command_kernel_buffer_address(
+        &self,
+        commands: &Self::IndirectCommands,
+        index: usize,
+    ) -> u64 {
+        // SAFETY: `index` is below the buffer's count; Apple's private getter takes an index the
+        // descriptor binds and answers a `uint64_t` (measured by the consumer on an M3 Max).
+        unsafe {
+            let command = commands.indirectComputeCommandAtIndex(index);
+            msg_send![&*command, getKernelBufferAddressAtIndex: 0usize]
+        }
+    }
+
+    fn command_has_barrier(&self, commands: &Self::IndirectCommands, index: usize) -> bool {
+        // SAFETY: `index` is below the buffer's count; Apple's private getter answers a `BOOL`.
+        unsafe {
+            let command = commands.indirectComputeCommandAtIndex(index);
+            msg_send![&*command, hasBarrier]
+        }
+    }
+
+    fn draw_command_pipeline(
+        &self,
+        commands: &Self::IndirectCommands,
+        index: usize,
+        state: &Self::RenderPipeline,
+    ) {
+        // SAFETY: `index` is below the buffer's count (the workload's).
+        let command = unsafe { commands.indirectRenderCommandAtIndex(index) };
+        command.setRenderPipelineState(state);
+    }
+
+    fn draw_command_vertex_buffer(
+        &self,
+        commands: &Self::IndirectCommands,
+        index: usize,
+        buffer: &Self::Buffer,
+        offset: usize,
+    ) {
+        // SAFETY: `index` is below the buffer's count, the buffer binds vertex index 0, and
+        // `offset` lies inside `buffer` (the workload's).
+        unsafe {
+            let command = commands.indirectRenderCommandAtIndex(index);
+            command.setVertexBuffer_offset_atIndex(buffer, offset, 0);
+        }
+    }
+
+    fn draw_command_draw(&self, commands: &Self::IndirectCommands, index: usize) {
+        // SAFETY: `index` is below the buffer's count; a strip of four vertices, one instance.
+        unsafe {
+            let command = commands.indirectRenderCommandAtIndex(index);
+            command.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
+                MTLPrimitiveType::TriangleStrip,
+                0,
+                4,
+                1,
+                0,
+            );
+        }
+    }
+
+    fn draw_command_vertex_buffer_address(
+        &self,
+        commands: &Self::IndirectCommands,
+        index: usize,
+    ) -> u64 {
+        // SAFETY: as `command_kernel_buffer_address`'s, of Apple's private vertex getter.
+        unsafe {
+            let command = commands.indirectRenderCommandAtIndex(index);
+            msg_send![&*command, getVertexBufferAddressAtIndex: 0usize]
+        }
     }
 
     fn buffer(&self, length: usize) -> Self::Buffer {

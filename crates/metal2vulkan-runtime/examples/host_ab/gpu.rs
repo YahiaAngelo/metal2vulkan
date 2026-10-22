@@ -87,6 +87,65 @@ pub trait Gpu {
     fn commands_id(&self, commands: &Self::IndirectCommands) -> u64;
     /// The `gpuResourceID` of `state`, made with `supportIndirectCommandBuffers`.
     fn pipeline_id(&self, state: &Self::ComputePipeline) -> u64;
+    /// `newIndirectCommandBufferWithDescriptor:maxCommandCount:options:` of `count` concurrent
+    /// dispatches of `Shared` storage that inherit nothing and bind one kernel buffer, for the
+    /// CPU to encode.
+    fn cpu_indirect_commands(&self, count: usize) -> Self::IndirectCommands;
+    /// As `cpu_indirect_commands`, of draws of primitives binding one vertex and one fragment
+    /// buffer.
+    fn cpu_indirect_draws(&self, count: usize) -> Self::IndirectCommands;
+    /// `indirectComputeCommandAtIndex:`, then the command's `setComputePipelineState:`.
+    fn command_pipeline(
+        &self,
+        commands: &Self::IndirectCommands,
+        index: usize,
+        state: &Self::ComputePipeline,
+    );
+    /// `indirectComputeCommandAtIndex:`, then `setKernelBuffer:offset:atIndex:` at index 0.
+    fn command_kernel_buffer(
+        &self,
+        commands: &Self::IndirectCommands,
+        index: usize,
+        buffer: &Self::Buffer,
+        offset: usize,
+    );
+    /// `indirectComputeCommandAtIndex:`, then
+    /// `concurrentDispatchThreadgroups:threadsPerThreadgroup:` of `groups` of 64 threads.
+    fn command_dispatch(&self, commands: &Self::IndirectCommands, index: usize, groups: usize);
+    /// `indirectComputeCommandAtIndex:`, then `setBarrier`.
+    fn command_barrier(&self, commands: &Self::IndirectCommands, index: usize);
+    /// `indirectComputeCommandAtIndex:`, then Apple's private `getKernelBufferAddressAtIndex:` of
+    /// index 0 (the runtime's read-back of it).
+    fn command_kernel_buffer_address(&self, commands: &Self::IndirectCommands, index: usize)
+        -> u64;
+    /// `indirectComputeCommandAtIndex:`, then Apple's private `hasBarrier`.
+    fn command_has_barrier(&self, commands: &Self::IndirectCommands, index: usize) -> bool;
+    /// `indirectRenderCommandAtIndex:`, then `setRenderPipelineState:`.
+    fn draw_command_pipeline(
+        &self,
+        commands: &Self::IndirectCommands,
+        index: usize,
+        state: &Self::RenderPipeline,
+    );
+    /// `indirectRenderCommandAtIndex:`, then `setVertexBuffer:offset:atIndex:` at index 0.
+    fn draw_command_vertex_buffer(
+        &self,
+        commands: &Self::IndirectCommands,
+        index: usize,
+        buffer: &Self::Buffer,
+        offset: usize,
+    );
+    /// `indirectRenderCommandAtIndex:`, then
+    /// `drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:` of a triangle strip of
+    /// four vertices, one instance.
+    fn draw_command_draw(&self, commands: &Self::IndirectCommands, index: usize);
+    /// `indirectRenderCommandAtIndex:`, then Apple's private `getVertexBufferAddressAtIndex:` of
+    /// index 0 (the runtime's read-back of it).
+    fn draw_command_vertex_buffer_address(
+        &self,
+        commands: &Self::IndirectCommands,
+        index: usize,
+    ) -> u64;
 
     /// `newBufferWithLength:options:` of `Shared` storage.
     fn buffer(&self, length: usize) -> Self::Buffer;

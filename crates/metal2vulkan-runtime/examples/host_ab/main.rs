@@ -167,6 +167,11 @@
 //!   the kernel's code and so reads the records on the host. On the runtime's side, the commands
 //!   drawn on the GPU alone, the records read on the host, and the draws and pipeline barriers
 //!   recorded per frame (`rt_*`).
+//! - `icb_cpu`: the CPU's encoding of indirect commands, each call's time: of 4096 commands of a
+//!   buffer of dispatches and one of draws, each setter (pipeline state, buffer, dispatch or draw,
+//!   barrier) on every command in turn, then Apple's private getters of a buffer's address and of
+//!   the barrier (the runtime's read-back of them), each call taking its command first
+//!   (`workloads::icb_cpu`).
 //!
 //! - `provoking`: an OpenGL guest's flat-shaded draws, which Apple's GL draws at
 //!   `setProvokingVertexMode:` 1 (the last vertex): one render pass into a 512x512 `BGRA8Unorm`
@@ -211,7 +216,7 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 use workloads::Sizes;
 
-const WORKLOADS: [&str; 18] = [
+const WORKLOADS: [&str; 19] = [
     "encode",
     "fixed",
     "calls",
@@ -230,6 +235,7 @@ const WORKLOADS: [&str; 18] = [
     "icb_draws",
     "signals",
     "provoking",
+    "icb_cpu",
 ];
 
 struct Options {
@@ -500,6 +506,7 @@ fn run<G: Gpu>(g: &G, opened: Instant, metallib: &Path, options: &Options) {
             "icb_draws" => workloads::icb_draws(g, &library, sizes),
             "signals" => workloads::signals(g, &scene, sizes),
             "provoking" => workloads::provoking(g, &library, sizes),
+            "icb_cpu" => workloads::icb_cpu(g, &library, sizes),
             _ => unreachable!(),
         }
     }
