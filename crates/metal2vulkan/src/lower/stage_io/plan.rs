@@ -1469,6 +1469,25 @@ pub(super) fn primitive_id(sp: &mut StageIoPlan, dir: IoDir) -> Result<usize, Er
     flat_uint(sp, VaryingKey::primitive_id(), IoRole::PrimitiveId, dir)
 }
 
+/// Where a vertex function reads its draw's first vertex, Vulkan's base vertex of a draw without
+/// indices: the `BaseVertex` builtin with `shaderDrawParameters`, lane 0 of
+/// `PushField::BaseVertexInstance` without (as for `[[base_vertex]]`, whose fact it states).
+fn first_vertex(cx: &mut SelectCx<'_>) -> super::FirstVertex {
+    cx.facts.insert(RuntimeFact::BaseVertexInstance);
+    if !cx.profile.fields().draw_parameters {
+        cx.push.insert(PushField::BaseVertexInstance);
+        return super::FirstVertex::Push;
+    }
+    let index = builtin(
+        &mut cx.families.stage_io,
+        B::BaseVertex,
+        IoDir::Input,
+        Shape::U32,
+        StageBuiltin::BaseVertex,
+    );
+    super::FirstVertex::Builtin { index }
+}
+
 /// Plan a vertex function's primitive ID (`LoweringInputs::primitive_id_varying`,
 /// [`super::PrimitiveIdStore`]): its varying, the vertex index it divides, the draw's first
 /// vertex (the `BaseVertex` builtin with `shaderDrawParameters`, lane 0 of
@@ -1480,7 +1499,8 @@ pub(super) fn primitive_id(sp: &mut StageIoPlan, dir: IoDir) -> Result<usize, Er
 /// function that reads `[[primitive_id]]` behind one (`link::tessellation`). A form
 /// that reads its draw's indices at their address ([`captured_index_type`]) draws them as
 /// `index count` vertices from vertex 0: its first vertex is 0
-/// ([`super::FirstVertex::Zero`]).
+/// ([`super::FirstVertex::Zero`]). The private list form draws its list from its first vertex,
+/// as a draw without indices does.
 fn primitive_id_output(cx: &mut SelectCx<'_>) -> Result<(), Error> {
     if matches!(cx.entry.ep.stage, AirStage::Vertex { patch: Some(_) }) {
         return match crate::lower::tessellation::emulates(cx.profile) {
@@ -1489,14 +1509,10 @@ fn primitive_id_output(cx: &mut SelectCx<'_>) -> Result<(), Error> {
         };
     }
     cx.push.insert(PushField::VerticesPerPrimitive);
-    let deindexed = captured_index_type(cx).is_some();
-    let draw_parameters = cx.profile.fields().draw_parameters;
-    if !deindexed {
-        cx.facts.insert(RuntimeFact::BaseVertexInstance);
-        if !draw_parameters {
-            cx.push.insert(PushField::BaseVertexInstance);
-        }
-    }
+    let first = match captured_index_type(cx).is_some() && !listed(cx) {
+        true => super::FirstVertex::Zero,
+        false => first_vertex(cx),
+    };
     let sp = &mut cx.families.stage_io;
     let vertex = builtin(
         sp,
@@ -1505,19 +1521,6 @@ fn primitive_id_output(cx: &mut SelectCx<'_>) -> Result<(), Error> {
         Shape::U32,
         StageBuiltin::VertexIndex,
     );
-    let first = match (deindexed, draw_parameters) {
-        (true, _) => super::FirstVertex::Zero,
-        (false, true) => super::FirstVertex::Builtin {
-            index: builtin(
-                sp,
-                B::BaseVertex,
-                IoDir::Input,
-                Shape::U32,
-                StageBuiltin::BaseVertex,
-            ),
-        },
-        (false, false) => super::FirstVertex::Push,
-    };
     let object = primitive_id(sp, IoDir::Output)?;
     sp.primitive_id = Some(super::PrimitiveIdStore {
         vertex,
@@ -2567,12 +2570,14 @@ fn capture(cx: &mut SelectCx<'_>, form: CaptureForm) -> Result<(), Error> {
 }
 
 /// The index type of the draw whose indices a vertex function reads at their address: the
-/// indexed capture form's (`CaptureForm::Indexed`), else the primitive ID's de-indexed form's
+/// indexed capture form's (`CaptureForm::Indexed`), else the private list form's `u32`
+/// (`LoweringInputs::private_list`), else the primitive ID's de-indexed form's
 /// (`LoweringInputs::primitive_id_indices`, under `primitive_id_varying`); `None` for any other
 /// function.
 pub(super) fn captured_index_type(cx: &SelectCx<'_>) -> Option<crate::metal::IndexType> {
     match (cx.stage, cx.inputs.captured_positions) {
         (Stage::Vertex, Some(form)) => form.index_type(),
+        (Stage::Vertex, None) if cx.inputs.private_list => Some(crate::metal::IndexType::UInt32),
         (Stage::Vertex, None) => cx
             .inputs
             .primitive_id_indices
@@ -2581,11 +2586,19 @@ pub(super) fn captured_index_type(cx: &SelectCx<'_>) -> Option<crate::metal::Ind
     }
 }
 
+/// Whether a vertex function runs in the private list form (`LoweringInputs::private_list`): its
+/// list's positions from the draw's first vertex, Metal's base vertex in the word before.
+pub(super) fn listed(cx: &SelectCx<'_>) -> bool {
+    cx.stage == Stage::Vertex && cx.inputs.captured_positions.is_none() && cx.inputs.private_list
+}
+
 /// The feature a form that reads a draw's indices or records at their addresses serves: tile
-/// reach for the capture form, the primitive ID for its de-indexed form.
+/// reach for the capture form, Metal's private primitive types for the private list form, the
+/// primitive ID for its de-indexed form.
 fn indices_feature(cx: &SelectCx<'_>) -> Feature {
     match cx.inputs.captured_positions {
         Some(_) => Feature::TileReach,
+        None if listed(cx) => Feature::PrivatePrimitives,
         None => Feature::PrimitiveId,
     }
 }
@@ -2603,9 +2616,11 @@ fn refuse_unaddressed(cx: &SelectCx<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Plan the index read of type `ty` of the indexed capture form or the de-indexed form once
-/// ([`super::CapturedIndex`]): its address and layout push fields and the vertex index builtin.
-/// Refused ([`indices_feature`]) on a device without device addresses.
+/// Plan the index read of type `ty` of the indexed capture form, the de-indexed form or the
+/// private list form once ([`super::CapturedIndex`]): its address push field, the capture and
+/// de-indexed forms' layout, the private list form's first vertex (as the primitive ID's,
+/// [`first_vertex`]) and its fact, and the vertex index builtin. Refused ([`indices_feature`]) on
+/// a device without device addresses.
 pub(super) fn captured_index(
     cx: &mut SelectCx<'_>,
     ty: crate::metal::IndexType,
@@ -2615,7 +2630,16 @@ pub(super) fn captured_index(
     }
     refuse_unaddressed(cx)?;
     cx.push.insert(PushField::CaptureIndexAddress);
-    cx.push.insert(PushField::CaptureLayout);
+    let first = match listed(cx) {
+        true => {
+            cx.facts.insert(RuntimeFact::PrivateList);
+            Some(first_vertex(cx))
+        }
+        false => {
+            cx.push.insert(PushField::CaptureLayout);
+            None
+        }
+    };
     let sp = &mut cx.families.stage_io;
     let vertex = builtin(
         sp,
@@ -2624,7 +2648,7 @@ pub(super) fn captured_index(
         Shape::U32,
         StageBuiltin::VertexIndex,
     );
-    sp.captured_index = Some(super::CapturedIndex { vertex, ty });
+    sp.captured_index = Some(super::CapturedIndex { vertex, ty, first });
     sp.words = sp.words.saturating_add(super::CAPTURED_INDEX_WORDS);
     Ok(())
 }
@@ -2647,6 +2671,11 @@ fn captured_param(
             captured_index(cx, index)?;
             Source::CapturedVertex(f)
         }
+        // The private list form's base vertex lies before its list, found from its first vertex.
+        None if listed(cx) => {
+            captured_index(cx, crate::metal::IndexType::UInt32)?;
+            Source::CapturedBaseVertex(f)
+        }
         None => {
             cx.push.insert(PushField::CaptureLayout);
             Source::CapturedBaseVertex(f)
@@ -2663,13 +2692,14 @@ fn captured_param(
 /// index builtins, the header's address, and its fact. Refused
 /// (`Unsupported{GpuEncodedIndirectCommands, NotImplemented}`): one compiled without
 /// `replay_bindings`, or under an input that reads the draw's own vertex or instance indices or
-/// draws it more than once (the primitive ID's varying or de-indexed form, the capture form,
-/// amplifications drawn apart, tessellation).
+/// draws it more than once (the primitive ID's varying or de-indexed form, the private list form,
+/// the capture form, amplifications drawn apart, tessellation).
 fn merged(cx: &mut SelectCx<'_>) -> Result<(), Error> {
     let i = cx.inputs;
     if !i.replay_bindings
         || i.primitive_id_varying
         || i.primitive_id_indices.is_some()
+        || i.private_list
         || i.captured_positions.is_some()
         || i.amplification_draws.is_some()
         || i.tessellation.is_some()
@@ -3171,10 +3201,12 @@ pub fn finish(cx: &mut SelectCx<'_>) -> Result<(), Error> {
     }
     // The primitive ID's de-indexed form runs the vertex function once per index of the draw,
     // where Metal shades each vertex the indices name as its GPU shades it: a function that
-    // writes memory would write once per index.
+    // writes memory would write once per index. The private list form runs it once per list
+    // position, as Metal runs its private types.
     let deindexed = cx.stage == Stage::Vertex
         && cx.inputs.captured_positions.is_none()
-        && captured_index_type(cx).is_some();
+        && captured_index_type(cx).is_some()
+        && !listed(cx);
     if deindexed && writes {
         return Err(Unsupported::not_implemented(Feature::PrimitiveId).into());
     }

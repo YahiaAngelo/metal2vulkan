@@ -74,7 +74,7 @@ use std::sync::Arc;
 
 use super::super::bound::{Bound, Recorded};
 use super::super::pass_start_reads::PassStartTables;
-use super::super::{Assembly, DrawBuffers, Recording, RenderLowering};
+use super::super::{Assembly, DrawBuffers, PrivateForm, Recording, RenderLowering};
 use super::{HostStepCause, PassStorage, RenderExecution, Rendered, CALL};
 use crate::binding::PushWrite;
 use crate::blit::{reads_by, writes_by};
@@ -715,7 +715,7 @@ impl RenderLowering {
         let mut live = lock(&live);
         let Settled { variant, plan, .. } = self.settle_draw(
             &mut live,
-            (state, &settings, None, false, false),
+            (state, &settings, None, PrivateForm::default(), false),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut None),
             (&function_tables, &mut None),

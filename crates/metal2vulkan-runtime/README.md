@@ -241,7 +241,9 @@ Calls Metal does not have, for a consumer that emulates a Metal device:
   `[[primitive_id]]` a quad, as Metal does, where the list draws two triangles. Its `Nine`, value
   9, draws nothing and fails the command buffer as Metal's GPU does: a hang
   (`CommandBufferError::GpuHang`), a page fault or a victim of the GPU's recovery
-  (`GpuRecoveryVictim`), by the draw's form (docs/API.md, "Accepted differences", for the timing).
+  (`GpuRecoveryVictim`), by the draw's form (docs/API.md, "Accepted differences", for the timing);
+  a queue's second hang or page fault revokes it, as Metal's does: its later command buffers fail
+  at their commit (`AccessRevoked`).
 - `TextureDescriptor::address_mode_map` presents a texture as sampling by other address modes than
   its sampler's.
 - Resource ID reservations, placements and counts (`Device::reserve_resource_ids`,

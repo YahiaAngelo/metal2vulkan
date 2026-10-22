@@ -28,6 +28,11 @@
 //! list's halved: the list draws two triangles a quad where Metal counts one, so the reference's
 //! primitive IDs are shifted right by one ([`Lane::reference`]).
 //!
+//! A vertex function that writes the primitive ID's varying (a device without geometry and
+//! tessellation shaders, whose fragment functions read `[[primitive_id]]` from it) draws each
+//! private type in the private list form, as does one that writes memory ([`writes`]); the other
+//! functions here draw the indexed list.
+//!
 //! Type 9's draws, which fail their command buffers as Metal's GPU does: [`type_nine`].
 
 use super::{buffer_with, validated_device, validated_device_with, Messages, ScratchCache, WAIT};
@@ -35,7 +40,9 @@ use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::VkFeature;
 use metal2vulkan::metal::{IndexType, PixelFormat, PrimitiveType, TextureUsage};
-use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
+use metal2vulkan::pipeline::{
+    ColorAttachmentDescriptor, RenderPipelineDescriptor, RuntimeFact, StageSource,
+};
 use metal2vulkan::vk;
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
@@ -46,6 +53,7 @@ use metal2vulkan_runtime::{
 };
 
 mod type_nine;
+mod writes;
 
 /// The target's side, in pixels.
 const SIDE: u64 = 32;
@@ -467,16 +475,15 @@ impl Lane {
 
     /// `case` drawn as its private type, in its form.
     fn private(&self, pipeline: &RenderPipelineState, case: &Case) -> Result<Texels, Error> {
-        Ok(self.private_executed(pipeline, case)?.0)
+        Ok(self.private_executed(pipeline, case)?.texels)
     }
 
-    /// [`private`](Self::private)'s texels, and how many geometry stages the pipeline its draw
-    /// executed carries (`None` for a draw that records nothing).
+    /// [`private`](Self::private)'s texels, with what its draw executed.
     fn private_executed(
         &self,
         pipeline: &RenderPipelineState,
         case: &Case,
-    ) -> Result<(Texels, Option<usize>), Error> {
+    ) -> Result<Drawn, Error> {
         let index_type = case.form.index_type().unwrap_or(IndexType::UInt32);
         let index_bytes = bytes_of(index_type, &case.indices);
         // A buffer of 4 bytes at least, for a draw without indices that names none.
@@ -566,21 +573,35 @@ impl Lane {
             None => {}
         }
         assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
-        let stages = command_buffer
+        let render = command_buffer
             .executions()
             .iter()
             .find_map(|e| match e.pipeline() {
-                ExecutedPipeline::Render(executed) => Some(
-                    executed
-                        .stages
-                        .iter()
-                        .filter(|s| s.stage == vk::ShaderStage::GEOMETRY)
-                        .count(),
-                ),
+                ExecutedPipeline::Render(executed) => Some(executed.clone()),
                 _ => None,
             });
-        Ok((texels, stages))
+        Ok(Drawn {
+            texels,
+            stages: render.as_ref().map(|executed| {
+                (executed.stages.iter())
+                    .filter(|s| s.stage == vk::ShaderStage::GEOMETRY)
+                    .count()
+            }),
+            listed: render.is_some_and(|executed| {
+                (executed.dependencies.iter()).any(|d| d.fact == RuntimeFact::PrivateList)
+            }),
+        })
     }
+}
+
+/// A private draw's texels, and what it executed.
+struct Drawn {
+    texels: Texels,
+    /// How many geometry stages the pipeline its draw executed carries (`None` for a draw that
+    /// records nothing).
+    stages: Option<usize>,
+    /// Its pipeline runs the private list form (`RuntimeFact::PrivateList`).
+    listed: bool,
 }
 
 /// Whether the case's texels cover a pixel.
@@ -710,7 +731,7 @@ fn draws_metal_s_lists(cases: &[Case], weights: Weights) {
         let (mut drawn, mut covered) = (0, 0);
         for case in cases {
             let expected = lane.reference(&pipeline, case);
-            let (texels, stages) = lane
+            let Drawn { texels, stages, .. } = lane
                 .private_executed(&pipeline, case)
                 .unwrap_or_else(|e| panic!("{case:?} on {name}: {e}"));
             if weights == Weights::Withheld {
@@ -784,8 +805,10 @@ fn through_a_geometry_stage_private_draws_are_metal_s_lists() {
 }
 
 /// Under fragment functions that read fewer of the inputs (the primitive ID without the weights,
-/// the weights without the primitive ID, or neither), a draw of each form draws Metal's list too; and the same indices drawn as the
-/// public strip of their class differ from Metal's list, so the comparison tells the forms apart.
+/// the weights without the primitive ID, or neither), a draw of each form draws Metal's list too;
+/// and the same indices drawn as the public strip of their class differ from Metal's list, so the
+/// comparison tells the forms apart. Where the fragment function reads no primitive ID, the
+/// vertex function, which writes no memory, draws the indexed list, not the private list form.
 #[test]
 fn other_fragments_draw_metal_s_lists_and_strips_differ() {
     let cache = ScratchCache::new().unwrap();
@@ -804,9 +827,13 @@ fn other_fragments_draw_metal_s_lists_and_strips_differ() {
                 ];
                 for case in &cases {
                     let expected = lane.reference(&pipeline, case);
-                    let texels = lane
-                        .private(&pipeline, case)
+                    let Drawn { texels, listed, .. } = lane
+                        .private_executed(&pipeline, case)
                         .unwrap_or_else(|e| panic!("{fragment} {case:?} on {name}: {e}"));
+                    assert!(
+                        fragment == "pt_primitive" || !listed,
+                        "{fragment} {case:?} on {name}: drawn in the private list form"
+                    );
                     assert!(
                         covers(&expected),
                         "{fragment} {case:?}: Metal's list covers nothing"
@@ -872,6 +899,73 @@ fn quads_count_one_primitive_id_a_quad() {
                 }
             }
         }
+    }
+    let reported = messages.take();
+    assert!(
+        reported.is_empty(),
+        "the validation layer reported: {reported:#?}"
+    );
+}
+
+/// With `geometryShader` and `tessellationShader` withheld, a fragment function reads
+/// `[[primitive_id]]` from a flat varying its pipeline's vertex function writes
+/// (`LoweringInputs::primitive_id_varying`): every direct, indexed and indirect private draw runs
+/// the private list form, whose positions count Metal's primitives (one a quad), and draws Metal's
+/// list at every texel.
+#[test]
+fn with_the_primitive_id_varying_private_draws_are_metal_s_lists() {
+    let cache = ScratchCache::new().unwrap();
+    let messages = Messages::default();
+    {
+        let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), |options| {
+            options.withheld_features.extend([
+                VkFeature::GeometryShader,
+                VkFeature::TessellationShader,
+                VkFeature::ShaderTessellationAndGeometryPointSize,
+                VkFeature::MultiviewGeometryShader,
+                VkFeature::MultiviewTessellationShader,
+            ]);
+        })
+        .unwrap();
+        let name = device.name().to_owned();
+        let lane = Lane::new(device);
+        let walk: Vec<u32> = (0..14).map(|i| (i * 5 + 1) % SCATTERED).collect();
+        let pipeline = lane.pipeline("pt_primitive");
+        let mut drawn = 0;
+        for p in PRIVATE {
+            let mut indirect =
+                Case::indexed(p, Form::IndexedIndirect(IndexType::UInt32), walk.clone());
+            indirect.instances = 2;
+            let mut vertices = Case::direct(p, 10);
+            vertices.form = Form::Indirect;
+            let cases = [
+                Case::direct(p, 10),
+                Case::direct(p, 11),
+                Case::indexed(p, Form::Indexed(IndexType::UInt16), walk.clone()),
+                Case::indexed(p, Form::Indexed(IndexType::UInt32), walk.clone()),
+                indirect,
+                vertices,
+            ];
+            for case in &cases {
+                let expected = lane.reference(&pipeline, case);
+                let Drawn { texels, listed, .. } = lane
+                    .private_executed(&pipeline, case)
+                    .unwrap_or_else(|e| panic!("{case:?} on {name}: {e}"));
+                assert!(
+                    listed,
+                    "{case:?} on {name}: not drawn in the private list form"
+                );
+                assert!(covers(&expected), "{case:?}: Metal's list covers nothing");
+                assert!(
+                    texels == expected,
+                    "{case:?} on {name}: differs from Metal's list"
+                );
+                drawn += 1;
+            }
+        }
+        eprintln!(
+            "{name}: {drawn} private draws through the primitive ID's varying equal Metal's lists"
+        );
     }
     let reported = messages.take();
     assert!(

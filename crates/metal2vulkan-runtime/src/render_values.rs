@@ -346,7 +346,7 @@ pub enum DrawPrimitiveType {
     /// 9, which Metal's GPU draws nothing of, failing the command buffer (measured on the M3
     /// Max, macOS 27.0.1, 18 draws): a direct draw of 3 vertices or more hangs it
     /// ([`CommandBufferError::GpuHang`](crate::CommandBufferError::GpuHang)), an indexed one of
-    /// any indices faults it
+    /// any indices, of none or of no instance too, faults it
     /// ([`CommandBufferError::PageFault`](crate::CommandBufferError::PageFault)), and an
     /// indirect one, whatever its arguments, fails it as a victim of the GPU's recovery
     /// ([`CommandBufferError::GpuRecoveryVictim`](crate::CommandBufferError::GpuRecoveryVictim));
@@ -358,6 +358,9 @@ pub enum DrawPrimitiveType {
     /// of its queue that reaches its submission meanwhile (committed during it, its event waits
     /// met) runs nothing and completes with no error, after it. A fault or a victim fails that
     /// encoder alone: the encoders after it run, and so do the queue's other command buffers.
+    /// A hang or a fault counts against its queue, a victim does not: from the completion of the
+    /// queue's second, its later command buffers fail at once
+    /// ([`CommandBufferError::AccessRevoked`](crate::CommandBufferError::AccessRevoked)).
     /// Metal's API validation stops the process at it.
     Nine,
 }

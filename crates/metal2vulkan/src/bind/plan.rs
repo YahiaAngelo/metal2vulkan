@@ -225,6 +225,11 @@ pub struct GraphicsTemplate {
     /// and run without indices, as the indexed capture form's do.
     #[cfg_attr(feature = "serde", serde(default))]
     pub(crate) deindexed: Option<crate::metal::IndexType>,
+    /// A pipeline compiled in the private list form (`VariantKey::private_list`): its draws are
+    /// the consumer's lists of Metal's private primitive types, run without indices, of any
+    /// draw call.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) private_list: bool,
     /// `PushField::StorageKeptChannels`: each storage-form color attachment's kept channels
     /// (`StorageAttachmentUse::kept`), bits `4c` to `4c + 3` for color `c`, which its draws
     /// write.

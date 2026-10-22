@@ -86,6 +86,8 @@ struct Draw {
     vertices: bool,
     /// The order each primitive is written in.
     order: RewriteOrder,
+    /// The list in the private list form (`IndexRewritePass::listed`).
+    listed: bool,
 }
 
 /// What a pass left: the words, the output's indices (from the pool's index region where
@@ -111,6 +113,7 @@ impl Draw {
             groups: None,
             vertices: false,
             order: RewriteOrder::First,
+            listed: false,
         }
     }
 
@@ -160,7 +163,7 @@ impl Draw {
                 arguments: IndirectRef::new(0, at),
             },
         };
-        let capacity = self.program.capacity(u64::from(count)) as u32;
+        let capacity = self.program.capacity(u64::from(count)) as u32 + u32::from(self.listed);
         let output = match self.counter {
             None => RewriteOutput::Owned { capacity },
             Some(_) => RewriteOutput::Pooled {
@@ -174,7 +177,10 @@ impl Draw {
         let pass = IndexRewritePass::new(source, self.restart, terms, output, ALIGNMENT, u32::MAX)
             .expect("pass")
             .with_order(self.order);
-        let mut pass = pass;
+        let mut pass = match self.listed {
+            true => pass.listed(),
+            false => pass,
+        };
         if let Some(groups) = self.groups {
             pass.groups = groups;
             pass.parameters[Parameter::Groups as usize] = groups;
@@ -925,6 +931,82 @@ fn the_pass_writes_each_order() {
                 program.sequential_list(130, order),
                 "{program:?} {order:?} without indices"
             );
+        }
+    }
+}
+
+/// In the private list form the pass writes the same list one word on, Metal's base vertex (a
+/// direct or indexed indirect draw's base vertex, an indirect draw's vertex start) in the word
+/// before it, and the draw as a `VkDrawIndirectCommand` of the list from its first index as
+/// first vertex, with Metal's instances and base instance; the reservation takes the word too,
+/// and a list the room holds but for the word draws nothing and says so.
+#[test]
+fn the_private_list_form_writes_the_base_vertex_before_its_list() {
+    let indices: Vec<u32> = vec![9, 9, 1, 2, 3, 0, 4, 5, 6, 7, 0, 8];
+    for program in RewriteProgram::ALL {
+        let direct = Draw {
+            arguments: [9, 2, 0, 0x8000_0005, 3],
+            ..Draw::strip(program, true, &indices, 0)
+        };
+        let indirect = Draw {
+            arguments: [8, 3, 2, 0xFFFF_FFFE, 4],
+            indirect: Some(36),
+            counter: Some(40),
+            ..Draw::strip(program, false, &indices, 0)
+        };
+        let vertices = Draw {
+            groups: Some(1),
+            ..Draw::vertices(program, [7, 2, 0x8000_0010, 5])
+        };
+        for (draw, base, instances, base_instance) in [
+            (direct, 0x8000_0005, 2, 3),
+            (indirect, 0xFFFF_FFFE, 3, 4),
+            (vertices, 0x8000_0010, 2, 5),
+        ] {
+            let (plain, _, _) = draw.drawn();
+            let listed = Draw {
+                listed: true,
+                ..draw.clone()
+            };
+            let (list, command, r) = listed.drawn();
+            assert_eq!(list, plain, "{program:?}");
+            let first = command[2] as usize;
+            let start = match draw.counter {
+                Some(counter) => (counter / 4) as usize + 1,
+                None => 1,
+            };
+            assert_eq!(first, start, "{program:?}: the list's first index");
+            assert_eq!(r.output[first - 1], base, "{program:?}: the base vertex");
+            assert_eq!(
+                command,
+                [
+                    plain.len() as u32,
+                    instances,
+                    first as u32,
+                    base_instance,
+                    0
+                ],
+                "{program:?}"
+            );
+            if let (Some(before), Some(after)) = (draw.counter, r.counter) {
+                assert_eq!(after, before + 4 * (plain.len() as u32 + 1), "{program:?}");
+            }
+            assert!(!r.report.index_pool_overflow);
+        }
+        // Room for the list but not its base vertex's word: nothing drawn, the bit set.
+        let needed = metal(program, &fetched(&indices, 2, 8), 0).len() as u32;
+        let tight = Draw {
+            arguments: [8, 3, 2, 7, 4],
+            indirect: Some(36),
+            counter: Some(POOL_BYTES - 4 * needed),
+            listed: true,
+            ..Draw::strip(program, false, &indices, 0)
+        };
+        let (list, command, r) = tight.drawn();
+        if needed > 0 {
+            assert!(list.is_empty(), "{program:?}");
+            assert_eq!(command[0], 0, "{program:?}");
+            assert!(r.report.index_pool_overflow, "{program:?}");
         }
     }
 }

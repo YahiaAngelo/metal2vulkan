@@ -804,6 +804,12 @@ pub enum RuntimeFact {
     /// listed as two triangles a quad. Its plans state the variant the shape asks for
     /// (`BindShape::quad_primitive_ids`).
     QuadPrimitiveIds,
+    /// The render pipeline was compiled under `VariantKey::private_list`, and its vertex function
+    /// runs the consumer's list of one of Metal's private primitive types in the pulled list form
+    /// (`LoweringInputs::private_list`): its index and Metal's base vertex read at
+    /// `PushHole::CaptureIndexAddress`, each list position run once. Its plans state the variant
+    /// the shape asks for (`BindShape::private_list`).
+    PrivateList,
 }
 
 /// What one compile made of a slot of a `RuntimeFact::UniformViewRange`.

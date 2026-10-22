@@ -1236,6 +1236,7 @@ codec_enum! {
         },
         MergedDraws,
         QuadPrimitiveIds,
+        PrivateList,
     }
     UniformViewChoice { Viewed, Spare, Kept }
     Mechanism {

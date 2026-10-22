@@ -6,6 +6,13 @@
 //! ([`WrittenList`]); and the lists of the index gather pass ([`GatherRuns`]). Each list is
 //! written in the draw's `RewriteOrder`.
 //!
+//! A private type's list drawn in the private list form (`VariantKey::private_list`, chosen in
+//! `render.rs`) is not drawn as indices: Metal's base vertex lies in the word before it, the
+//! draw is a draw of its positions from its first index as first vertex, and the vertex function
+//! reads its index and the base at the list's device address ([`RewritePass::address`],
+//! [`WrittenList::address`]), which the index pool's block has where the device has device
+//! addresses (`gpu_pools.rs`).
+//!
 //! **The gather pass** (`bind::index_gather_module`) writes the list of a direct indexed draw of
 //! a program that never restarts (`RewriteProgram::gathers`: line and triangle lists, Apple's
 //! triangle fan and quads) that reads its indices in place and that no earlier draw's write
@@ -112,12 +119,15 @@ pub(super) struct RewritePass {
     /// An indirect draw's Metal index offset and the buffer's length, where the offset lies at or
     /// past the length: every position draws index 0 there, where Metal reads memory.
     past_length: Option<(u64, u64)>,
+    /// The list is drawn in the private list form ([`IndexRewritePass::listed`]).
+    listed: bool,
 }
 
 impl RewritePass {
     /// The pass of `program` restarting at `restart` (`k'`) in `order` over the `index_size`-byte
     /// indices of `index` (`None` for a draw without indices), with `arguments`, in `core`'s
-    /// command buffer, whose reads of the Metal buffers are `uses` ([`reads`]). Refused
+    /// command buffer, whose reads of the Metal buffers are `uses` ([`reads`]), in the private
+    /// list form where `listed` (the module docs). Refused
     /// (`NotImplemented(gap)`: `RestartedStrip`, `PrivatePrimitives` for a private type's list,
     /// `ProvokingVertex` for a list of the last provoking vertex) where a direct draw's list is
     /// past what one storage range binds or a `u32` counts, or carries a base instance the
@@ -126,7 +136,11 @@ impl RewritePass {
     /// refused.
     pub(super) fn new(
         core: &mut EncoderCore,
-        ((program, restart, order), refused): ((RewriteProgram, u32, RewriteOrder), RuntimeGap),
+        ((program, restart, order), refused, listed): (
+            (RewriteProgram, u32, RewriteOrder),
+            RuntimeGap,
+            bool,
+        ),
         index: Option<&DrawSource<'_>>,
         arguments: &Arguments<'_>,
         index_size: u64,
@@ -150,7 +164,8 @@ impl RewritePass {
                 {
                     return Err(gap());
                 }
-                let capacity = program.capacity(u64::from(count));
+                // In the private list form, the base vertex's word before the list.
+                let capacity = program.capacity(u64::from(count)) + u64::from(listed);
                 let bytes = capacity * 4;
                 if bytes > u64::from(limits.max_storage_buffer_range) {
                     return Err(gap());
@@ -200,6 +215,7 @@ impl RewritePass {
         )
         .ok_or_else(gap)?
         .with_order(order);
+        let pass = if listed { pass.listed() } else { pass };
         let kernel = |phase| device.owned_kernel(OwnedModule::IndexRewrite(program, phase));
         let kernels = [
             kernel(RewritePhase::Count)?,
@@ -291,7 +307,20 @@ impl RewritePass {
             sets,
             uses,
             past_length,
+            listed,
         })
+    }
+
+    /// The device address of the list's region, where the device has device addresses: an owned
+    /// list's buffer's byte 0, a pooled one's first index's (past the pool's header), from which
+    /// the place dispatch's first index counts. The private list form reads its list there.
+    pub(super) fn address(&self) -> Option<u64> {
+        match &self.output {
+            Output::Owned(buffer) => buffer.device_address(),
+            Output::Pooled(pool) => pool
+                .address
+                .map(|address| address + IndexRewritePass::POOL_HEADER_BYTES),
+        }
     }
 
     /// The pass's reads of the Metal arguments and indices ([`reads`]).
@@ -300,7 +329,8 @@ impl RewritePass {
     }
 
     /// The draw of the pass: its index binding, the `VkBuffer` of its arguments, and its command,
-    /// with `sized` the device's index range binding.
+    /// with `sized` the device's index range binding. In the private list form, the draw of the
+    /// list's positions without indices (`VkDrawIndirectCommand`).
     pub(super) fn draw(
         &self,
         sized: Option<SizedIndexBind>,
@@ -309,7 +339,16 @@ impl RewritePass {
         Option<vk::Buffer>,
         metal2vulkan::vk::DrawCommand,
     ) {
-        let (buffer, offset, bytes) = match &self.output {
+        let offset = self.words.offset() + IndexRewritePass::DRAW_OFFSET;
+        if self.listed {
+            let draw = metal2vulkan::vk::DrawCommand::DrawIndirect {
+                offset,
+                draw_count: 1,
+                stride: 16,
+            };
+            return (None, Some(self.words.raw()), draw);
+        }
+        let (buffer, index_offset, bytes) = match &self.output {
             Output::Owned(buffer) => {
                 let (raw, at) = buffer.at(0);
                 (raw, at, buffer.length())
@@ -323,14 +362,14 @@ impl RewritePass {
         let index_type = metal2vulkan::vk::IndexType::UINT32;
         let draw = metal2vulkan::vk::DrawCommand::DrawIndexedIndirect {
             index_type,
-            index_buffer_offset: offset,
-            offset: self.words.offset() + IndexRewritePass::DRAW_OFFSET,
+            index_buffer_offset: index_offset,
+            offset,
             draw_count: 1,
             stride: 20,
         };
         let bind = IndexBind {
             buffer,
-            offset,
+            offset: index_offset,
             index_type: index_type.into(),
             sized: sized.map(|bind| (bind, bytes)),
         };
@@ -390,9 +429,10 @@ impl RewritePass {
 /// the last provoking vertex on a device without it, which the CPU writes into the command
 /// buffer's upload arena while the draw is encoded: its positions are its vertices, so the list
 /// follows from its count alone ([`RewriteProgram::sequential_list`] in the draw's order, relative
-/// to its first vertex), and the draw draws it from its vertex start as base vertex. The arena
-/// holds it until the command buffer completes, and the host writes it before the draw's batch is
-/// submitted (`upload.rs`).
+/// to its first vertex), and the draw draws it from its vertex start as base vertex; in the private
+/// list form, the vertex start lies in the word before it, and the draw is the binder's (the
+/// module docs). The arena holds it until the command buffer completes, and the host writes it
+/// before the draw's batch is submitted (`upload.rs`).
 pub(super) struct WrittenList {
     upload: Upload,
     indices: u32,
@@ -400,21 +440,26 @@ pub(super) struct WrittenList {
 
 impl WrittenList {
     /// The list of `program` in `order` for a draw of `count` vertices from `vertex_start`, in
-    /// `core`'s command buffer. Refused (`NotImplemented(gap)`: `PrivatePrimitives`, or
-    /// `ProvokingVertex`) from a vertex start past `i32::MAX`, which a list's base vertex cannot
-    /// carry, and for a list of more indices than a `u32` counts; and as uploads are refused.
+    /// `core`'s command buffer, in the private list form where `listed`. Refused
+    /// (`NotImplemented(gap)`: `PrivatePrimitives`, or `ProvokingVertex`) outside that form from
+    /// a vertex start past `i32::MAX`, which a list's base vertex cannot carry, and for a list of
+    /// more indices than a `u32` counts; and as uploads are refused.
     pub(super) fn new(
         core: &mut EncoderCore,
         ((program, order), refused): ((RewriteProgram, RewriteOrder), RuntimeGap),
         (vertex_start, count): (u32, u32),
+        listed: bool,
     ) -> Result<WrittenList, Error> {
         let gap = || Error::NotImplemented(refused.clone());
-        i32::try_from(vertex_start).map_err(|_| gap())?;
+        if !listed {
+            i32::try_from(vertex_start).map_err(|_| gap())?;
+        }
         let indices = u32::try_from(program.capacity(u64::from(count))).map_err(|_| gap())?;
         let device = core.device().clone();
-        let bytes: Vec<u8> = program
-            .sequential_list(count, order)
+        let bytes: Vec<u8> = listed
+            .then_some(vertex_start)
             .into_iter()
+            .chain(program.sequential_list(count, order))
             .flat_map(u32::to_le_bytes)
             .collect();
         let len = (bytes.len() as u64).max(4);
@@ -424,6 +469,12 @@ impl WrittenList {
             .uploads
             .upload(&device, &bytes, len)?;
         Ok(WrittenList { upload, indices })
+    }
+
+    /// The device address of the list's first word (the vertex start's in the private list
+    /// form), where the device has device addresses.
+    pub(super) fn address(&self) -> Option<u64> {
+        self.upload.device_address()
     }
 
     /// The draw of the list: its index binding, with `sized` the device's index range binding,
@@ -636,6 +687,15 @@ impl Listed {
         match self {
             Listed::Written(list) => list.draw(draw, sized),
             Listed::Gathered(list) => list.draw(draw, sized),
+        }
+    }
+
+    /// The device address of a list the CPU wrote, where the device has device addresses: the
+    /// private list form's (a gather run's list takes no part in it, `render.rs`).
+    pub(super) fn address(&self) -> Option<u64> {
+        match self {
+            Listed::Written(list) => list.address(),
+            Listed::Gathered(_) => None,
         }
     }
 }

@@ -42,6 +42,7 @@ pub(super) mod own;
 pub(super) mod rebound_use;
 mod reencode;
 pub(super) mod rerun;
+pub(super) mod revocation;
 mod storage_form;
 mod submit;
 
@@ -342,6 +343,17 @@ pub(super) enum FailedSignals {
 }
 
 impl Failure {
+    /// The failure of a command buffer committed on a queue Metal revoked (`revocation.rs`): no
+    /// encoder runs, no event signal fires, and it completes with
+    /// `CommandBufferError::AccessRevoked`.
+    pub(super) fn revoked() -> Failure {
+        Failure {
+            encoders: FailedEncoders::From(0),
+            signals: FailedSignals::Dropped,
+            error: Some(CommandBufferError::AccessRevoked),
+        }
+    }
+
     /// Whether ended encoder `encoder` runs under `failure`: every one does but those it fails.
     pub(super) fn runs(failure: Option<&Failure>, encoder: usize) -> bool {
         failure.is_none_or(|failure| !failure.encoders.fails(encoder))
@@ -2343,14 +2355,20 @@ impl CommandBuffer {
             // hang hangs where its encoder runs and its signals fire under what it was committed
             // as (`hang.rs`).
             // Either reads `Scheduled` early, from the hang's on, once its waits are met.
+            // One committed on a queue Metal revoked runs nothing and completes at once, its
+            // signals dropped (`revocation.rs`).
+            let revoked = run != CommitRun::Refused && self.0.queue.errors().revoked();
             let event_waits = state.batches.events().0;
             let discarded = match failure {
-                None if run != CommitRun::Refused => hang::discarded(&self.0.queue, event_waits),
+                None if run != CommitRun::Refused && !revoked => {
+                    hang::discarded(&self.0.queue, event_waits)
+                }
                 _ => None,
             };
             let joins = discarded.is_some();
             let failure = failure.or(discarded);
             let behind = run != CommitRun::Refused
+                && !revoked
                 && failure.is_none()
                 && event_waits > 0
                 && hang::in_flight(&self.0.queue);
@@ -2368,6 +2386,7 @@ impl CommandBuffer {
                 hang::join(&self.0, &mut state, waits);
             }
             let hangs = run != CommitRun::Refused
+                && !revoked
                 && matches!(state.fails_from, Some((at, CommandBufferError::GpuHang))
                     if failure.as_ref().is_none_or(|f| f.signals && !f.encoders.fails(at)));
             if let (true, Some(hang)) = (hangs, &state.hang) {
@@ -2376,6 +2395,10 @@ impl CommandBuffer {
             }
             let failure = Failure::of(failure, state.fails_from, ended);
             let failure = Failure::with_faults(failure, &state.faulted, ended);
+            let failure = match revoked {
+                true => Some(Failure::revoked()),
+                false => failure,
+            };
             // The encoders that run: all but those `failure` fails.
             let runs = |encoder: usize| Failure::runs(failure.as_ref(), encoder);
             state.committing = true;
@@ -4032,6 +4055,10 @@ impl CommandBufferShared {
                     state.error = Some(error);
                 }
             }
+            // A GPU error the command buffer caused counts against its queue, which Metal revokes
+            // at the second, from before its status reads final (`revocation.rs`); a relayed one
+            // is the driver's queue's.
+            self.queue.errors().completed(state.failure);
             // The final status, with its error, once: a read sees no `Completed` that a decoded
             // failure turns to `Error`.
             self.answer(&state);

@@ -523,3 +523,75 @@ fn a_memory_writing_vertex_function_is_refused_de_indexed() {
         other => panic!("{:?}", other.map(|_| ())),
     }
 }
+
+/// A private type's draw in the private list form (`BindState::private_list`) asks for the listed
+/// variant through the shape. It reads its list's address (`PushField::CaptureIndexAddress`, a
+/// push hole the consumer fills) and no capture layout, and draws the list's positions without
+/// indices from the call's first vertex, the list's first index, with its instances; its vertices
+/// per primitive are the list's, twice that for Metal's quads listed as two triangles a quad. A
+/// vertex function that writes memory, which the de-indexed form refuses, runs in it, on a device
+/// with both features too, where nothing reads the primitive ID's varying. Every module is valid.
+#[test]
+fn a_private_draw_in_the_list_form_runs_the_listed_variant() {
+    use crate::bind::{DrawCall, PushHole};
+    use crate::metal::PrimitiveType;
+    use crate::pipeline::RuntimeFact;
+    let Some(bc) = fixture() else { return };
+    let listed = |dev: &Device, vertex: &str| {
+        let d = pipeline(&bc, vertex, Some("pi_ids"), 1);
+        let base = compile(dev, &d).expect("base");
+        let mut state = bound();
+        state.primitive_type = Some(PrimitiveType::Triangle);
+        state.private_list = true;
+        let plan = base.plan(dev, &state.shape()).expect("base plan");
+        assert!(plan.variant.private_list, "{vertex}: the plan's variant");
+        let key = plan.variant.clone();
+        let p = dev
+            .compile_render_variant(&d, &key, &Budget::standard())
+            .unwrap_or_else(|e| panic!("{vertex}: the listed variant: {e}"));
+        validate(&p, dev);
+        assert!(p
+            .dependencies
+            .iter()
+            .any(|d| d.fact == RuntimeFact::PrivateList));
+        assert!(reads_field(&p, PushField::CaptureIndexAddress), "{vertex}");
+        assert!(!reads_field(&p, PushField::CaptureLayout), "{vertex}");
+        let plan = p.plan(dev, &state.shape()).expect("plan");
+        assert_eq!(plan.variant, key);
+        let draw = DrawCall::Primitives {
+            vertex_start: 1,
+            vertex_count: 12,
+            instance_count: 2,
+            base_instance: 1,
+        };
+        let commands = plan.instantiate_draw(&state, &draw).expect("draw");
+        assert_eq!(
+            commands.draw,
+            vk::DrawCommand::Draw {
+                vertex_count: 12,
+                instance_count: 2,
+                first_vertex: 1,
+                first_instance: 1,
+            }
+        );
+        assert!(commands
+            .push_holes
+            .iter()
+            .any(|h| matches!(h, PushHole::CaptureIndexAddress { .. })));
+        (plan, state, draw)
+    };
+    let (plan, mut state, draw) = listed(&withheld(8), "pi_place");
+    let commands = plan.instantiate_draw(&state, &draw).expect("draw");
+    assert_eq!(
+        pushed(&plan, &commands, PushField::VerticesPerPrimitive, 1),
+        [3]
+    );
+    state.quad_primitive_ids = true;
+    let commands = plan.instantiate_draw(&state, &draw).expect("quads");
+    assert_eq!(
+        pushed(&plan, &commands, PushField::VerticesPerPrimitive, 1),
+        [6]
+    );
+    listed(&withheld(8), "pi_counts");
+    listed(&device("lavapipe"), "pi_counts");
+}

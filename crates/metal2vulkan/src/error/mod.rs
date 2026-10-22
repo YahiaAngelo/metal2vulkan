@@ -1102,6 +1102,10 @@ pub enum Feature {
     /// strip, an indirect draw, indices past their buffer, and a vertex function that writes
     /// memory (`NotImplemented`).
     PrimitiveId,
+    /// One of Metal's private primitive types (a line loop, a triangle fan, quads, a quad strip)
+    /// drawn in the pulled list form (`VariantKey::private_list`), whose vertex function reads the
+    /// consumer's list at its device address: on a device without device addresses.
+    PrivatePrimitives,
     /// Vertex amplification.
     VertexAmplification,
     /// Layered rendering (`render_target_array_index`, `viewport_array_index`).
