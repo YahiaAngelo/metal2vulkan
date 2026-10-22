@@ -221,6 +221,27 @@ impl CommandBuffer {
         self.open_compute("compute_command_encoder_with_dispatch_type", dispatch_type)
     }
 
+    /// `computeCommandEncoderWithDispatchType:`, or `computeCommandEncoderWithDescriptor:` of a
+    /// pass descriptor's `dispatchType`, with the raw `MTLDispatchType` value `raw`, any of its 64
+    /// bits: Metal makes a concurrent encoder of 1 and a serial one of every other value (2, 7,
+    /// `u32::MAX`, `1 << 32`, `(1 << 32) | 1`, `u64::MAX`, ...), whose `dispatchType` answers
+    /// serial and which skips a nil resource of `useResources:count:usage:` as a serial encoder
+    /// does, where a concurrent one ends the process (the M3 Max under macOS 27.0.1); so does
+    /// the runtime. Refused as [`CommandBuffer::compute_command_encoder`] is.
+    pub fn compute_command_encoder_with_raw_dispatch_type(
+        &self,
+        raw: u64,
+    ) -> Result<ComputeCommandEncoder, Error> {
+        let dispatch_type = match raw == u64::from(DispatchType::Concurrent.as_raw()) {
+            true => DispatchType::Concurrent,
+            false => DispatchType::Serial,
+        };
+        self.open_compute(
+            "compute_command_encoder_with_raw_dispatch_type",
+            dispatch_type,
+        )
+    }
+
     fn open_compute(
         &self,
         call: &'static str,

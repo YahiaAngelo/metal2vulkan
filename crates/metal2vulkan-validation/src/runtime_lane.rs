@@ -657,6 +657,8 @@ mod rate_mapped_passes;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod rate_maps;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod raw_dispatch_types;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod read_through_views;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod rebind_reach;

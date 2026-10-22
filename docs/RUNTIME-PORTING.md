@@ -146,7 +146,7 @@ narrow refusal that the call's rustdoc describes.
 | `status` | `status` | `CommandBuffer::status` |
 | `wait_until_completed` | `waitUntilCompleted` | `CommandBuffer::wait_until_completed`, or `wait_until_completed_for` with a timeout |
 | `wait_until_scheduled` | `waitUntilScheduled` | `CommandBuffer::wait_until_scheduled` |
-| `compute_encoder_for_pass` | `computeCommandEncoderWithDescriptor:` | `CommandBuffer::compute_command_encoder_with_dispatch_type` |
+| `compute_encoder_for_pass` | `computeCommandEncoderWithDescriptor:` | `CommandBuffer::compute_command_encoder_with_dispatch_type`; `compute_command_encoder_with_raw_dispatch_type` for a raw `MTLDispatchType` (every value but 1 serial, as Metal's) |
 | `used_resources` | (none: a runtime extension) | `CommandBuffer::used_resources`: the buffers, textures and heaps its ended encoders' commands use, each as what owns its memory, until it completes; what `detach_backing` waits on |
 | `ended_encoders` | (none: a runtime extension) | `CommandBuffer::ended_encoders`: each ended encoder's kind, the event waits and signals before it, and what its own commands use; with `commit_failed`'s `FailedEncoders::Set`, what fails the one submission that uses a detached resource |
 | `add_submission_handler` | (none: a runtime extension) | `CommandBuffer::add_submission_handler`: a handler run once the command buffer's last batch reached its `VkQueue`, on the device's scheduler thread, which submitted it, before it is `Scheduled`; never for one that fails before |
