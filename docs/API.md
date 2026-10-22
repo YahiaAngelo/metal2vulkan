@@ -565,6 +565,16 @@ pipeline is an exact emulation: the object and mesh functions run as compute sta
 mesh's vertices and primitives as records into buffers, and a synthesized vertex stage draws those
 records; the plan says which dispatches and draw to record.
 
+A grid Metal draws nothing for (an axis past `bind::METAL_MESH_GRID_AXIS`, or more than
+`bind::METAL_MESH_GRID_TOTAL` threadgroups, measured on the M3 Max) draws nothing in every form:
+a direct draw's command is zeroed, an object function's wrapper launches nothing for such a grid,
+and an indirect draw reads its counts on the GPU. With the extension, an indirect draw's
+`DrawCommands::mesh_arguments` is a pass to record before the render pass
+(`bind::mesh_arguments_module`, one invocation): it writes the draw's counts into 12 bytes of the
+consumer's scratch, which the draw reads in place of Metal's arguments; an object grid past the
+device's task limits, which Metal draws, is zeroed there and sets
+`StatusBits::MESH_GRID_PAST_LIMITS` in the command buffer's `ExecutionStatus`.
+
 ### Tile pipelines
 
 `Device::compile_tile_pipeline` compiles a `TileRenderPipelineDescriptor` (the tile function and the
@@ -2875,6 +2885,11 @@ each item named states the rule in full.
   to 4 bytes, and every later position draws index 0 plus the base vertex.
 - **An indexed draw from an index offset at or past the length draws index 0** plus the base vertex
   at each position, where Metal reads whatever memory follows (`zeroed-index-fetch`).
+- **A mesh grid of 1,048,577 to 2,097,151 threadgroups draws nothing**, direct, indirect or set by
+  an object threadgroup. Metal on the M3 Max draws whole up to 1,048,575 and nothing at exactly
+  2^20 or from 2^21 on, and between them is erratic (17 by 61,681 and 65,535 by 24 drew, 1025 by
+  1025 and 33 by 32,768 did not); the runtime answers there as at 2^20
+  (`bind::METAL_MESH_GRID_TOTAL`).
 - **A draw's `VkPipeline` is made while the draw goes on.** A draw whose pipeline is not made yet
   returns once encoded; the pipeline is made on the device's pool of at most four threads, and the
   command buffer's work waits for it in queue order.

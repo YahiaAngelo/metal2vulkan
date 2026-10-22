@@ -1022,9 +1022,25 @@ fn without_the_extension_a_mesh_pipeline_draws_its_records() {
         assert_eq!(d.work[work::RECORDS_BASE as usize], 0, "{stem}");
         assert_eq!(&d.work[header..header + 4], &[2, 1, 1, 0], "{stem}");
         assert_eq!(&d.work[header + slot..], &[0, 2], "{stem}");
-        // Records past the device's storage buffer range.
+        // A grid Metal draws nothing for (65,535 by 65,535) draws nothing, with no records.
+        let none = plan
+            .instantiate_draw(&state, &groups([65535, 65535, 1]))
+            .unwrap_or_else(|e| panic!("{stem}: a grid past Metal's: {e}"));
+        assert!(
+            matches!(
+                none.draw,
+                vk::DrawCommand::Draw {
+                    vertex_count: 0,
+                    ..
+                }
+            ),
+            "{stem}: {:?}",
+            none.draw
+        );
+        // Records past the device's storage buffer range, of the largest grid Metal draws.
         let l = &dev.profile().fields().limits;
-        let [x, y] = [0, 1].map(|i| l.max_compute_work_group_count[i].min(u32::from(u16::MAX)));
+        let x = l.max_compute_work_group_count[0].min(crate::bind::METAL_MESH_GRID_AXIS);
+        let y = l.max_compute_work_group_count[1].min(crate::bind::METAL_MESH_GRID_TOTAL / x);
         let bytes = u64::from(x) * u64::from(y) * 4 * records.group_words();
         if bytes > u64::from(l.max_storage_buffer_range) {
             assert_eq!(

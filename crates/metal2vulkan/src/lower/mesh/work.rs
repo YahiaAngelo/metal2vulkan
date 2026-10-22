@@ -6,10 +6,6 @@
 //! The binder, the mesh scan (`bind::mesh_scan`) and the runtime read these words at run time,
 //! so this file is a runtime input (`validation/build.rs`); the lowering writes them.
 
-/// Metal's limit on the threadgroups of one mesh grid, 1048576, to which an emulated object
-/// function's grid is held: past it Metal defines no answer.
-pub const METAL_MESH_GRID_GROUPS: u32 = 1 << 20;
-
 /// `O`: the object threadgroups (1 for a pipeline without an object function).
 pub const OBJECT_GROUPS: u32 = 0;
 /// `T`: the mesh threadgroups the draw runs, which its records hold.

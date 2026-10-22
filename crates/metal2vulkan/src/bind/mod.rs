@@ -149,6 +149,7 @@ pub(crate) mod index_rewrite;
 pub(crate) mod indirect_clamp;
 pub mod indirect_commands;
 pub(crate) mod instantiate;
+pub(crate) mod mesh_arguments;
 pub(crate) mod mesh_scan;
 pub(crate) mod mipmap_filter;
 pub(crate) mod neutral;
@@ -239,6 +240,10 @@ pub use indirect_clamp::{indirect_clamp_module, IndirectClamp, IndirectClampModu
 pub use instantiate::{
     BufferExtent, BufferRange, DescriptorBytes, DescriptorRange, IndexBufferRef, IndirectRef,
     PushConstantWrite, PushHole, ResidentRange, ResidentSet, RootTable,
+};
+pub use mesh_arguments::{
+    mesh_arguments_module, MeshArguments, MeshArgumentsForm, MeshArgumentsModule, MeshGridLimits,
+    MeshGridRule, METAL_MESH_GRID_AXIS, METAL_MESH_GRID_TOTAL,
 };
 pub use mesh_scan::{mesh_scan_module, MeshScanModule};
 pub use mipmap_filter::{

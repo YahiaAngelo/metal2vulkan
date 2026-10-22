@@ -24,8 +24,9 @@ impl ExecutionStatus {
     }
 
     /// What the buffer's bytes report after the command buffer ran. The consumer maps `overflow`, a
-    /// replay fault, an index pool overflow, an absent argument read, a mesh records fault, and a
-    /// cubic argument sampler's sample to a command-buffer execution error, treats resident-set
+    /// replay fault, an index pool overflow, an absent argument read, a mesh records fault, a mesh
+    /// grid past the device's limits, and a cubic argument sampler's sample to a command-buffer
+    /// execution error, treats resident-set
     /// misses by its own policy, and announces a captured reach the rule does not answer as its
     /// pass's fallback to every tile.
     pub fn decode(bytes: &[u8; ExecutionStatus::BYTES]) -> StatusReport {
@@ -46,6 +47,7 @@ impl ExecutionStatus {
             absent_argument_read: bits.contains(StatusBits::ABSENT_ARGUMENT_READ),
             cubic_argument_sampler: bits.contains(StatusBits::CUBIC_ARGUMENT_SAMPLER),
             captured_reach_unmeasured: bits.contains(StatusBits::CAPTURED_REACH_UNMEASURED),
+            mesh_grid_past_limits: bits.contains(StatusBits::MESH_GRID_PAST_LIMITS),
             mesh_records_overflow: (bits.contains(StatusBits::MESH_RECORDS_OVERFLOW)).then(|| {
                 // The fault words are the first records fault's: a tessellation draw's when its
                 // object threadgroups word is 0 (a scanned mesh draw's is at least 1), which
@@ -115,6 +117,9 @@ pub struct StatusReport {
     /// capture settle took every tile of the pass's mask (`bind::CaptureSettleModule`): the
     /// pass's reach is the announced fallback, not its draws' tiles.
     pub captured_reach_unmeasured: bool,
+    /// An indirect mesh draw's arguments pass met a grid Metal draws past the device's limits
+    /// for the draw's first stage (`bind::MeshArguments`): that draw drew nothing.
+    pub mesh_grid_past_limits: bool,
 }
 
 /// The first emulated mesh draw of a command buffer that drew nothing because its records did
@@ -238,6 +243,9 @@ impl StatusBits {
     /// nothing (`bind::TessellationScanModule`); the fault words name the command buffer's first
     /// records fault of either kind.
     pub const TESSELLATION_RECORDS_OVERFLOW: StatusBits = StatusBits(1 << 8);
+    /// An indirect mesh draw's arguments pass met an object grid Metal draws past the device's
+    /// task limits, and the draw drew nothing (`bind::MeshArguments`).
+    pub const MESH_GRID_PAST_LIMITS: StatusBits = StatusBits(1 << 9);
     /// Either records fault: the command buffer's first one of either kind writes the fault
     /// words.
     pub const RECORDS_FAULTS: StatusBits = StatusBits(

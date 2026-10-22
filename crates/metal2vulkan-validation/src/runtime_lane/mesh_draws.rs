@@ -20,10 +20,15 @@
 //! an 8 by 2 grid); a grid with a zero axis draws nothing, and so do threads that fill no
 //! threadgroup; an object threadgroup that sets no grid launches nothing.
 //!
-//! On a device with `VK_EXT_mesh_shader` an indirect draw is refused
-//! (`NotImplemented(IndirectDrawArguments)`) until a GPU pass bounds its counts by the device's
-//! limits, and a `drawMeshThreads` that leaves a partial object threadgroup is refused
-//! (`NotImplemented(MeshShading)`); Metal's answers for them are printed (a partial object
+//! On a device with `VK_EXT_mesh_shader` an indirect draw reads the counts its arguments pass
+//! writes, which must draw Metal's words too; a grid Metal draws nothing for (an axis past 65,535,
+//! or more than 1,048,575 threadgroups: [`PAST_CASES`], measured on the M3 Max under macOS 27.0.1,
+//! direct and indirect alike) draws nothing, and an object threadgroup that sets one launches
+//! nothing ([`OBJECT_PAST_CASES`]); an object grid past the device's task limits, which
+//! Metal draws, fails the command buffer typed
+//! (`CommandBufferError::MeshGridPastLimits`, [`object_grids_past_the_task_limits_fail_typed`]).
+//! A `drawMeshThreads` that leaves a partial object threadgroup is refused
+//! (`NotImplemented(MeshShading)`); Metal's answers for it are printed (a partial object
 //! threadgroup runs the threads left). What Metal's validation
 //! stops draws as plain Metal does: a threadgroup of more than 1024 threads and a misaligned
 //! argument offset draw nothing, and a draw of the other kind, which stops plain Metal too, is
@@ -50,9 +55,9 @@ use metal2vulkan::metal::{PixelFormat, PrimitiveType};
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, MeshPipelineDescriptor, StageSource};
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
-    Buffer, ClearColor, CommandQueue, Degradation, Device, DrawProblem, Error, Invalid, Library,
-    LoadAction, PipelineOptions, Problem, RenderCommandEncoder, RenderPassDescriptor,
-    RenderPipelineState, RuntimeGap, Size, StoreAction,
+    Buffer, ClearColor, CommandBufferError, CommandQueue, Degradation, Device, DrawProblem, Error,
+    Invalid, Library, LoadAction, PipelineOptions, Problem, RenderCommandEncoder,
+    RenderPassDescriptor, RenderPipelineState, Size, StoreAction,
 };
 
 /// the Metal probe's group `g3` (`mesh_draws_grid` without an object function), as it printed it on
@@ -185,6 +190,45 @@ const GRID_CASES: [(&str, Draw); 7] = [
         Draw::Indirect([3, 1, 1], 8, [1; 3], [8, 1, 1]),
     ),
     ("grid-groups-0", Draw::Groups([0, 2, 1], [1; 3], [4, 1, 1])),
+];
+
+/// Grids of `mesh_draws_grid` Metal draws nothing for (the module docs), each `RESULT <case>
+/// drawn=0` on the M3 Max: a direct and an indirect grid with an axis past 65,535, and an
+/// indirect grid of 2^20 threadgroups.
+const PAST_CASES: [(&str, Draw); 4] = [
+    (
+        "grid-groups-65536",
+        Draw::Groups([65536, 1, 1], [1; 3], [1, 1, 1]),
+    ),
+    (
+        "grid-indirect-1x1x65536",
+        Draw::Indirect([1, 1, 65536], 0, [1; 3], [1, 1, 1]),
+    ),
+    (
+        "grid-indirect-1024x1024",
+        Draw::Indirect([1024, 1024, 1], 0, [1; 3], [1, 1, 1]),
+    ),
+    (
+        "grid-groups-1024x1024",
+        Draw::Groups([1024, 1024, 1], [1; 3], [1, 1, 1]),
+    ),
+];
+
+/// Object draws whose object threadgroups each set a mesh grid Metal launches nothing for (the
+/// module docs; `ctl.x + group.x` by `ctl.y`): 1024 by 1024 and 1025 by 1024, 65,536 and 65,537
+/// along `x`. The M3 Max (macOS 27.0.1) launches no mesh threadgroup from an object threadgroup
+/// that sets such a grid, whatever the others set.
+const OBJECT_PAST_CASES: [(&str, [u32; 4], Draw); 2] = [
+    (
+        "object-grid-1024x1024",
+        [1024, 1024, 0, 0],
+        Draw::Groups([2, 1, 1], [1; 3], [1, 1, 1]),
+    ),
+    (
+        "object-grid-65536",
+        [65536, 1, 0, 0],
+        Draw::Groups([2, 1, 1], [1; 3], [1, 1, 1]),
+    ),
 ];
 
 /// The probe's cases of `mesh_draws_object` and `mesh_draws_mesh`, each with the object
@@ -401,8 +445,8 @@ fn mesh_refused(refused: &Error, device: &str) -> bool {
     }
 }
 
-/// Each grid case draws the words Metal drew (the module docs), but the indirect one where the
-/// device has `VK_EXT_mesh_shader`, refused.
+/// Each grid case draws the words Metal drew (the module docs), and each of [`PAST_CASES`]
+/// nothing.
 #[test]
 fn mesh_draws_store_metals_words() {
     let cache = ScratchCache::new().unwrap();
@@ -424,16 +468,17 @@ fn mesh_draws_store_metals_words() {
         for (case, draw) in GRID_CASES {
             let mut held = Vec::new();
             let drawn = lane.run(case, &state, |e| encode(&lane.device, e, draw, &mut held));
-            match (draw, drawn) {
-                (
-                    Draw::Indirect(..),
-                    Err(Error::NotImplemented(RuntimeGap::IndirectDrawArguments)),
-                ) => {
-                    let metals = metals(GRID_ANSWERS, case);
-                    eprintln!("{case} on {name}: refused; Metal's: {metals:?}");
-                }
-                (_, Ok(lines)) => assert_eq!(lines, metals(GRID_ANSWERS, case), "{case} on {name}"),
-                (_, Err(error)) => panic!("{case} on {name}: {error}"),
+            match drawn {
+                Ok(lines) => assert_eq!(lines, metals(GRID_ANSWERS, case), "{case} on {name}"),
+                Err(error) => panic!("{case} on {name}: {error}"),
+            }
+        }
+        for (case, draw) in PAST_CASES {
+            let mut held = Vec::new();
+            let drawn = lane.run(case, &state, |e| encode(&lane.device, e, draw, &mut held));
+            match drawn {
+                Ok(lines) => assert_eq!(lines, [format!("RESULT {case} drawn=0")], "{case}"),
+                Err(error) => panic!("{case} on {name}: {error}"),
             }
         }
     }
@@ -445,8 +490,9 @@ fn mesh_draws_store_metals_words() {
 }
 
 /// Each object case draws the words Metal drew (the module docs), but the indirect one and those
-/// that leave a partial object threadgroup, refused; a device without `VK_EXT_mesh_shader`
-/// announces its emulated draws once ([`EMULATED_MESH`]), and another none.
+/// that leave a partial object threadgroup, refused, and each of [`OBJECT_PAST_CASES`] nothing; a
+/// device without `VK_EXT_mesh_shader` announces its emulated draws once ([`EMULATED_MESH`]), and
+/// another none.
 #[test]
 fn object_draws_store_metals_words() {
     let cache = ScratchCache::new().unwrap();
@@ -475,13 +521,11 @@ fn object_draws_store_metals_words() {
             });
             let metals = metals(OBJECT_ANSWERS, case);
             match (draw, drawn) {
-                (
-                    Draw::Indirect(..),
-                    Err(Error::NotImplemented(RuntimeGap::IndirectDrawArguments)),
-                ) => eprintln!("{case} on {name}: refused; Metal's: {metals:?}"),
                 // The emulation's indirect draw with an object function.
                 (Draw::Indirect(..), Err(Error::Bind(BindError::Unsupported(u))))
-                    if u.feature == Feature::MeshShading && u.needs == Needs::NotImplemented =>
+                    if u.feature == Feature::MeshShading
+                        && u.needs == Needs::NotImplemented
+                        && emulates(&lane.device) =>
                 {
                     eprintln!("{case} on {name}: refused, emulated; Metal's: {metals:?}")
                 }
@@ -495,6 +539,18 @@ fn object_draws_store_metals_words() {
                 }
                 (_, Ok(lines)) => assert_eq!(lines, metals, "{case} on {name}"),
                 (_, Err(error)) => panic!("{case} on {name}: {error}"),
+            }
+        }
+        for (case, ctl, draw) in OBJECT_PAST_CASES {
+            let mut held = Vec::new();
+            let bytes: Vec<u8> = ctl.iter().flat_map(|w| w.to_le_bytes()).collect();
+            let drawn = lane.run(case, &state, |e| {
+                e.set_object_bytes(&bytes, 0)?;
+                encode(&lane.device, e, draw, &mut held)
+            });
+            match drawn {
+                Ok(lines) => assert_eq!(lines, [format!("RESULT {case} drawn=0")], "{case}"),
+                Err(error) => panic!("{case} on {name}: {error}"),
             }
         }
         // Exactly the emulation's kind where it draws, beside what the state's making forces
@@ -511,6 +567,80 @@ fn object_draws_store_metals_words() {
             false => &[],
         };
         assert_made_once(&messages, emulated, &made);
+    }
+    let reported = messages.take();
+    assert!(
+        reported.is_empty(),
+        "the validation layer reported: {reported:#?}"
+    );
+}
+
+/// An indirect draw of 70,000 object threadgroups, each launching no mesh threadgroup (`ctl`
+/// zero), which Metal runs and draws nothing for: on a device whose task stage launches no more
+/// than 65,536 along `x` (RADV, lavapipe) the arguments pass draws nothing and the command buffer
+/// fails with `CommandBufferError::MeshGridPastLimits`; on one that launches them (NVIDIA's
+/// 4,194,304) it completes, drawing nothing; an emulated draw is refused as the object case's.
+#[test]
+fn object_grids_past_the_task_limits_fail_typed() {
+    let cache = ScratchCache::new().unwrap();
+    let messages = Messages::default();
+    {
+        let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
+        let name = device.name().to_owned();
+        let lane = Lane::new(device);
+        let state = match lane.pipeline(Some("mesh_draws_object"), "mesh_draws_mesh") {
+            Ok(state) => state,
+            Err(refused) if mesh_refused(&refused, &name) => return,
+            Err(error) => panic!("mesh_draws_object on {name}: {error}"),
+        };
+        let counts = [70_000u32, 1, 1];
+        let task = lane
+            .device
+            .compile_device()
+            .profile()
+            .fields()
+            .limits
+            .mesh
+            .max_task_work_group_count;
+        let targets = [0, 1].map(|_| texture(&lane.device, PixelFormat::RGBA32Uint, SIDE));
+        let mut pass = RenderPassDescriptor::new();
+        for (attachment, target) in pass.color_attachments.iter_mut().zip(&targets) {
+            attachment.texture = Some(target.clone());
+            attachment.load_action = LoadAction::Clear;
+            attachment.store_action = StoreAction::Store;
+        }
+        let ctl = buffer_with(&lane.device, &[0u8; 16]).unwrap();
+        let bytes: Vec<u8> = counts.iter().flat_map(|w| w.to_le_bytes()).collect();
+        let arguments = buffer_with(&lane.device, &bytes).unwrap();
+        let command_buffer = lane.queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.render_command_encoder(&pass).unwrap();
+        encoder.set_render_pipeline_state(&state).unwrap();
+        encoder.set_object_buffer(Some(&ctl), 0, 0).unwrap();
+        let one = Size::new(1, 1, 1);
+        let drawn = encoder.draw_mesh_threadgroups_indirect(&arguments, 0, one, Size::new(2, 1, 1));
+        encoder.end_encoding().unwrap();
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        match drawn {
+            Err(Error::Bind(BindError::Unsupported(u)))
+                if u.feature == Feature::MeshShading
+                    && u.needs == Needs::NotImplemented
+                    && emulates(&lane.device) =>
+            {
+                eprintln!("object grid past the task limits on {name}: refused, emulated");
+            }
+            Ok(()) => {
+                let past = counts[0] > task[0];
+                let want = past.then_some(CommandBufferError::MeshGridPastLimits);
+                assert_eq!(command_buffer.error(), want, "{name}: task limits {task:?}");
+                assert!(texels(&targets[0], 16).iter().all(|&b| b == 0), "{name}");
+                eprintln!(
+                    "object grid past the task limits on {name} (task limits {task:?}): {:?}",
+                    command_buffer.error()
+                );
+            }
+            Err(error) => panic!("object grid past the task limits on {name}: {error}"),
+        }
     }
     let reported = messages.take();
     assert!(

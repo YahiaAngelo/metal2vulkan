@@ -23,8 +23,9 @@
 //! On a device without `VK_EXT_mesh_shader` the reader's compute work (its object function, the
 //! scan, its mesh function) reads what the writer wrote behind the barrier, so it records before
 //! the reader's own render pass instance, which the barrier began, after the writer's. There the
-//! indirect draw of the object reader is refused (`NotImplemented(MeshShading)`); on a device with
-//! the extension every indirect draw is (`NotImplemented(IndirectDrawArguments)`).
+//! indirect draw of the object reader is refused (`NotImplemented(MeshShading)`). On a device with
+//! the extension an indirect draw's arguments pass reads the arguments where the emulation's scan
+//! does (`render/mesh_arguments.rs`).
 
 use super::render_state::{texels, texture};
 use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
@@ -36,7 +37,7 @@ use metal2vulkan::pipeline::{ColorAttachmentDescriptor, MeshPipelineDescriptor, 
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandQueue, Device, Error, Library, LoadAction, PipelineOptions,
-    RenderPassDescriptor, RenderPipelineState, ResourceRef, RuntimeGap, Size, StoreAction,
+    RenderPassDescriptor, RenderPipelineState, ResourceRef, Size, StoreAction,
 };
 
 /// the Metal probe's group `g2`, as an M4 printed it without API validation: `PX <case> <x> <y>
@@ -323,8 +324,8 @@ impl Lane {
 }
 
 /// Each case draws the pixels and leaves the control words Metal did, behind a barrier after the
-/// mesh stage and after the fragment stage (the module docs), but the indirect draws a device
-/// refuses, as the module docs say.
+/// mesh stage and after the fragment stage (the module docs), but the emulation's indirect draw
+/// of the object reader, refused, as the module docs say.
 #[test]
 fn readers_behind_a_barrier_read_the_writers_words() {
     let cache = ScratchCache::new().unwrap();
@@ -337,12 +338,10 @@ fn readers_behind_a_barrier_read_the_writers_words() {
             let metals = metals(case);
             match (reader, lane.run(case, (writer, barrier, reader))) {
                 (_, Ok(lines)) => assert_eq!(lines, metals, "{case} on {name}"),
-                (
-                    Reader::GridIndirect | Reader::ObjectIndirect,
-                    Err(Error::NotImplemented(RuntimeGap::IndirectDrawArguments)),
-                ) => eprintln!("{case} on {name}: refused; Metal's: {metals:?}"),
                 (Reader::ObjectIndirect, Err(Error::Bind(BindError::Unsupported(u))))
-                    if u.feature == Feature::MeshShading && u.needs == Needs::NotImplemented =>
+                    if u.feature == Feature::MeshShading
+                        && u.needs == Needs::NotImplemented
+                        && super::mesh_draws::emulates(&lane.device) =>
                 {
                     eprintln!("{case} on {name}: refused, emulated; Metal's: {metals:?}")
                 }

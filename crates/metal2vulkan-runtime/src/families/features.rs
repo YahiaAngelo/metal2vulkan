@@ -1379,25 +1379,15 @@ impl FeatureRow {
             }
             // Mesh pipelines (`new_mesh_render_pipeline_state`, the encoder's mesh draws):
             // `meshShader` and `taskShader`, then what the binder does not implement yet: a
-            // `drawMeshThreads` that leaves a partial object threadgroup, and an object
-            // function's threadgroup memory arguments. Indirect mesh draws wait for a GPU pass that bounds
-            // their counts by the device's limits; an indirect command buffer's mesh draws are
-            // render commands first.
-            F::MeshShading => first([
+            // `drawMeshThreads` that leaves a partial object threadgroup. Indirect mesh draws
+            // read the counts an arguments pass writes (`render/mesh_arguments.rs`); an indirect
+            // command buffer's mesh draws are render commands first.
+            F::MeshShading | F::IndirectMeshDrawArguments => first([
                 needs_features(
                     f,
                     Feature::MeshShading,
                     &[VkFeature::MeshShader, VkFeature::TaskShader],
                 ),
-                not_implemented(Feature::MeshShading),
-            ]),
-            F::IndirectMeshDrawArguments => first([
-                needs_features(
-                    f,
-                    Feature::MeshShading,
-                    &[VkFeature::MeshShader, VkFeature::TaskShader],
-                ),
-                gap(G::IndirectDrawArguments),
                 not_implemented(Feature::MeshShading),
             ]),
             F::IcbMeshDraws => first([

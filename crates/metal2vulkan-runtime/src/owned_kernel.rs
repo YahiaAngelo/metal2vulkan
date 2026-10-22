@@ -108,6 +108,9 @@ pub(super) enum OwnedModule {
     /// `bind::mesh_scan_module`: a scanned emulated mesh draw's mesh threadgroups, records and
     /// draw (`render/mesh.rs`).
     MeshScan,
+    /// `bind::mesh_arguments_module` of one form: an indirect mesh draw's group counts, as Metal
+    /// draws them within the device's limits (`render/mesh_arguments.rs`).
+    MeshArguments(metal2vulkan::bind::MeshArgumentsForm),
     /// `bind::plane_words_module`: a blit's color words of a two-plane extended-range texture
     /// moved between its texels and a buffer (`two_planes.rs`).
     PlaneWords,
@@ -337,6 +340,13 @@ impl OwnedModule {
                     .map_err(Error::Compile)?;
                 Ok((module.spirv.to_vec(), 3, 0))
             }
+            OwnedModule::MeshArguments(form) => {
+                let module =
+                    metal2vulkan::bind::mesh_arguments_module(device.compile_device(), form)
+                        .map_err(Error::Compile)?;
+                let push_bytes = metal2vulkan::bind::MeshArgumentsModule::PUSH_BYTES;
+                Ok((module.spirv.to_vec(), 3, push_bytes))
+            }
             OwnedModule::PlaneWords => {
                 let module = metal2vulkan::bind::plane_words_module(device.compile_device())
                     .map_err(Error::Compile)?;
@@ -502,6 +512,8 @@ pub(super) struct OwnedKernels {
     shadow_copy_ins: HashMap<ShadowTexelView, OwnedKernel>,
     mipmap_filters: HashMap<MipmapFilterKernel, OwnedKernel>,
     mesh_scan: Option<OwnedKernel>,
+    mesh_arguments_mesh: Option<OwnedKernel>,
+    mesh_arguments_object: Option<OwnedKernel>,
     plane_words: Option<OwnedKernel>,
     plane_copy: Option<OwnedKernel>,
     index_rewrites: HashMap<(RewriteProgram, RewritePhase), OwnedKernel>,
@@ -541,6 +553,8 @@ impl OwnedKernels {
             self.shadow_merge,
             self.depth_magnitude,
             self.mesh_scan,
+            self.mesh_arguments_mesh,
+            self.mesh_arguments_object,
             self.plane_words,
             self.plane_copy,
             self.rotate_texels,
@@ -681,6 +695,12 @@ impl OwnedKernels {
             | OwnedModule::TwinDecode(_)
             | OwnedModule::TessellationScan(_) => return None,
             OwnedModule::MeshScan => &mut self.mesh_scan,
+            OwnedModule::MeshArguments(metal2vulkan::bind::MeshArgumentsForm::Mesh) => {
+                &mut self.mesh_arguments_mesh
+            }
+            OwnedModule::MeshArguments(metal2vulkan::bind::MeshArgumentsForm::Object) => {
+                &mut self.mesh_arguments_object
+            }
             OwnedModule::PlaneWords => &mut self.plane_words,
             OwnedModule::PlaneCopy => &mut self.plane_copy,
             OwnedModule::RotateTexels => &mut self.rotate_texels,

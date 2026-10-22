@@ -11,9 +11,10 @@
 //! Metal's answers hold where one thread's store is the last: a grid never set, or set to zero
 //! along an axis, launches no mesh threadgroup; the last call of one thread holds. Two threads
 //! storing different grids race in Vulkan, where Metal's later call in program order holds
-//! (recorded, not emulated). A grid past the device's mesh limits launches none
-//! ([`bounded_grid`]: Vulkan requires every emitted grid within them; Metal's limit lies within
-//! them wherever the runtime grants the family's mesh grids).
+//! (recorded, not emulated). A grid past Metal's limits on a mesh grid launches none, as Metal's
+//! does, and so does one past the device's mesh limits, which Vulkan requires of every emitted
+//! grid ([`bounded_grid`]; every committed profile with the extension holds Metal's within its
+//! own).
 //!
 //! **The payload** (`object_data`, `air.payload`). An object function's payload is an arena
 //! (`memory::arena`, `Arena::Payload`): a `TaskPayloadWorkgroupEXT` array of whole words of its
@@ -114,6 +115,7 @@ use crate::air::abi::{
 use crate::air::intrinsics::{AirIntrinsic, Elem, MemFlags, Mesh as MeshOp, NumTy};
 use crate::air::ir::{Callee, Const, Inst, InstId, InstKind, Value};
 use crate::air::Entry;
+use crate::bind::mesh_arguments::{METAL_MESH_GRID_AXIS, METAL_MESH_GRID_TOTAL};
 use crate::device::profile::DriverWorkaround;
 use crate::device::requirements::{VkExtension, VkFeature, VkLimit};
 use crate::device::DeviceProfile;
@@ -234,8 +236,9 @@ pub struct MeshPlan {
     /// An object function that sets its mesh grid: it declares the grid and its wrapper emits
     /// the mesh tasks. An object function that never sets it emits none.
     pub object: bool,
-    /// The device's mesh grid limits an object function's wrapper bounds the grid it emits by
-    /// (`maxMeshWorkGroupCount` and `maxMeshWorkGroupTotalCount`, [`bounded_grid`]).
+    /// The limits an object function's wrapper bounds the grid it emits by, along each axis and
+    /// in all: Metal's, within the device's mesh limits where the stages are native
+    /// ([`bounded_grid`]).
     pub grid_limits: Option<([u32; 3], u32)>,
     /// A mesh function's output shape.
     pub mesh: Option<MeshShape>,
@@ -856,14 +859,18 @@ pub fn select(cx: &mut SelectCx<'_>, _at: InstId, inst: &Inst) -> Result<MeshStr
             return Err(cx.invariant("a mesh grid outside an object function"));
         }
         let limits = &cx.profile.fields().limits.mesh;
-        // An emulated object function's grid is held to Metal's own limit, which no device limit
-        // bounds there.
+        // Metal's own limits, within the device's mesh limits where the stages are native (an
+        // emulated grid has no device limit).
         cx.families.mesh.grid_limits = Some(if cx.families.mesh.emulated {
-            ([METAL_MESH_GRID_GROUPS; 3], METAL_MESH_GRID_GROUPS)
+            ([METAL_MESH_GRID_AXIS; 3], METAL_MESH_GRID_TOTAL)
         } else {
             (
-                limits.max_mesh_work_group_count,
-                limits.max_mesh_work_group_total_count,
+                limits
+                    .max_mesh_work_group_count
+                    .map(|axis| axis.min(METAL_MESH_GRID_AXIS)),
+                limits
+                    .max_mesh_work_group_total_count
+                    .min(METAL_MESH_GRID_TOTAL),
             )
         });
         cx.families.mesh.object = true;
@@ -1035,7 +1042,6 @@ pub const OBJECT_WORK_SLOT: ResourceSlot = ResourceSlot {
 };
 
 pub mod work;
-pub use work::METAL_MESH_GRID_GROUPS;
 
 /// An emulated mesh function's records ([`MeshRecords`]) with each output's word offset in its
 /// record, by [`MeshPlan::outputs`] index (`None` for an output not recorded).
@@ -1679,11 +1685,12 @@ fn barrier(cx: &EmitCx<'_>, fb: &mut FunctionBuilder<'_>) -> BResult<()> {
 }
 
 /// The mesh grid an object function launches for the grid `g` it set: `g` where it lies within
-/// the device's mesh limits ([`MeshPlan::grid_limits`]: `maxMeshWorkGroupCount` on each axis,
-/// `maxMeshWorkGroupTotalCount` in all), which Vulkan requires of every grid a task shader
-/// emits, and none past them. Metal's own limit on a mesh grid (1024 threadgroups on the Apple7
-/// family) lies within the limits of every device the runtime's families table grants the family's
-/// mesh grids; past it Metal defines no answer.
+/// [`MeshPlan::grid_limits`], and none past them. Those are Metal's limits on a mesh grid
+/// (`bind::METAL_MESH_GRID_AXIS` along an axis, `bind::METAL_MESH_GRID_TOTAL` in all: past them
+/// Metal launches no mesh threadgroup from the object threadgroup, measured on the M3 Max), held
+/// within the device's mesh limits where the stages are native (`maxMeshWorkGroupCount` on each
+/// axis, `maxMeshWorkGroupTotalCount` in all), which Vulkan requires of every grid a task shader
+/// emits.
 fn bounded_grid(
     cx: &mut EmitCx<'_>,
     fb: &mut FunctionBuilder<'_>,

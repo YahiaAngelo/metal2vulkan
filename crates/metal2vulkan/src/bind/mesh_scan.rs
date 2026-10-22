@@ -5,7 +5,7 @@
 //! One workgroup of [`MeshScanModule::LOCAL_SIZE`] invocations reads the draw's work buffer
 //! (`SyntheticBinding::MeshWork`, [`MeshDispatch::work`](crate::bind::MeshDispatch::work)): the
 //! grid each of its `O` object threadgroups set (slot 0's, of an indirect draw, from Metal's
-//! arguments, held to Metal's limit of 1048576 threadgroups as an object function's grid is), and
+//! arguments, held to Metal's limits on a mesh grid as an object function's grid is), and
 //! writes, after the slots:
 //!
 //! - each object threadgroup's first mesh threadgroup, in object threadgroup order, and `T`, the
@@ -40,12 +40,13 @@
 use std::sync::Arc;
 
 use crate::bind::index_bounds::finished;
+use crate::bind::mesh_arguments::{METAL_MESH_GRID_AXIS, METAL_MESH_GRID_TOTAL};
 use crate::bind::replay::checked_mul;
 use crate::bind::status::{StatusBits, StatusWord};
 use crate::device::requirements::Requirements;
 use crate::device::Device;
 use crate::error::Error;
-use crate::lower::mesh::work::{self, METAL_MESH_GRID_GROUPS};
+use crate::lower::mesh::work;
 use crate::pipeline::sym::{ResourceKind, ResourceSlot, Stage, Symbol, SyntheticBinding};
 use crate::spirv::builder::constructs::{ArmEnd, ArmFn, LoopFn, LoopSpec};
 use crate::spirv::builder::{FunctionBuilder, ModuleBuilder};
@@ -186,12 +187,13 @@ pub(crate) fn div_ceil(f: &mut FunctionBuilder<'_>, a: Value, b: Value) -> BResu
     f.binary(BinOp::IAdd, q, extra)
 }
 
-/// The threadgroups of grid `g`: `x · y · z` where the grid lies within Metal's limit of
-/// [`METAL_MESH_GRID_GROUPS`] threadgroups (as an emulated object function holds the grid it
-/// sets), else 0. The product compared wraps only where an earlier test fails.
+/// The threadgroups of grid `g`: `x · y · z` where the grid lies within Metal's limits on a mesh
+/// grid ([`METAL_MESH_GRID_AXIS`] along each axis, [`METAL_MESH_GRID_TOTAL`] in all, as an
+/// emulated object function holds the grid it sets), else 0. The product compared wraps only
+/// where an earlier test fails.
 fn bounded_groups(f: &mut FunctionBuilder<'_>, [x, y, z]: [Value; 3]) -> BResult<Value> {
     let one = k(f, 1)?;
-    let total = k(f, METAL_MESH_GRID_GROUPS)?;
+    let total = k(f, METAL_MESH_GRID_TOTAL)?;
     let ny = f.glsl(GlslOp::UMax, &[y, one])?;
     let room = f.binary(BinOp::UDiv, total, ny)?;
     let mut all = f.binary(BinOp::ULessThanEqual, x, room)?;
@@ -200,6 +202,11 @@ fn bounded_groups(f: &mut FunctionBuilder<'_>, [x, y, z]: [Value; 3]) -> BResult
     let room = f.binary(BinOp::UDiv, total, nz)?;
     let c = f.binary(BinOp::ULessThanEqual, xy, room)?;
     all = f.binary(BinOp::LogicalAnd, all, c)?;
+    let axis = k(f, METAL_MESH_GRID_AXIS)?;
+    for v in [x, y, z] {
+        let c = f.binary(BinOp::ULessThanEqual, v, axis)?;
+        all = f.binary(BinOp::LogicalAnd, all, c)?;
+    }
     let xyz = f.binary(BinOp::IMul, xy, z)?;
     let zero = k(f, 0)?;
     f.select(all, xyz, zero)

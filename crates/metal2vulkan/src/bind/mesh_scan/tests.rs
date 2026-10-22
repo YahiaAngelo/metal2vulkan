@@ -145,13 +145,21 @@ fn the_scan_is_valid_on_every_committed_profile() {
 
 /// Each object threadgroup's first mesh threadgroup in object order, and `T`; the records
 /// reserved after the cursor; `T` folded into rows of `ROW`; `T · NP · k` vertices. A grid with
-/// an axis of 0 launches none, and one past Metal's limit none (the object function holds it so;
-/// the scan holds it again).
+/// an axis of 0 launches none, and one past Metal's limits none (65,536 along an axis, or 2^20 in
+/// all: the object function holds it so; the scan holds it again).
 #[test]
 fn the_scan_places_each_object_threadgroups_mesh_threadgroups() {
-    let draw = Draw::of(&[[2, 1, 1], [0, 5, 1], [3, 2, 1], [1, 1, 1], [1 << 20, 2, 1]]);
+    let draw = Draw::of(&[
+        [2, 1, 1],
+        [0, 5, 1],
+        [3, 2, 1],
+        [1, 1, 1],
+        [1 << 20, 2, 1],
+        [1, 65536, 1],
+        [1024, 1024, 1],
+    ]);
     let s = scan(&draw, &[0], 40, 0);
-    assert_eq!(offsets(&draw, &s.work), vec![0, 2, 2, 8, 9, 9]);
+    assert_eq!(offsets(&draw, &s.work), vec![0, 2, 2, 8, 9, 9, 9, 9]);
     assert_eq!(s.work[work::MESH_GROUPS as usize], 9);
     assert_eq!(s.work[work::RECORDS_BASE as usize], 40);
     assert_eq!(s.cursor, 40 + 9 * 10);
@@ -194,10 +202,25 @@ fn an_indirect_scan_reads_metals_arguments() {
     assert_eq!(offsets(&draw, &s.work), vec![0, 12]);
     assert_eq!(s.work[work::MESH_GROUPS as usize], 12);
     assert_eq!(header(&s.work, work::DRAW, 4), vec![36, 1, 0, 0]);
-    let s = scan(&draw, &[9, 9, 1 << 20, 2, 1], 0, 0);
-    assert_eq!(&s.work[work::HEADER as usize..][..3], &[0, 0, 0]);
-    assert_eq!(s.work[work::MESH_GROUPS as usize], 0);
-    assert_eq!(header(&s.work, work::DISPATCH, 3), vec![0, 0, 1]);
+    for past in [
+        [1 << 20, 2, 1],
+        [65536, 1, 1],
+        [1, 1, 65536],
+        [1024, 1024, 1],
+    ] {
+        let s = scan(&draw, &[9, 9, past[0], past[1], past[2]], 0, 0);
+        assert_eq!(
+            &s.work[work::HEADER as usize..][..3],
+            &[0, 0, 0],
+            "{past:?}"
+        );
+        assert_eq!(s.work[work::MESH_GROUPS as usize], 0, "{past:?}");
+        assert_eq!(
+            header(&s.work, work::DISPATCH, 3),
+            vec![0, 0, 1],
+            "{past:?}"
+        );
+    }
     let s = scan(&draw, &[9, 9, 3, 2], 0, 0);
     assert_eq!(s.work[work::MESH_GROUPS as usize], 0);
 }
@@ -232,14 +255,14 @@ fn a_draw_the_pool_cannot_hold_draws_nothing_and_says_so() {
         Some(MeshRecordsFault::default())
     );
     // Vertices past a `u32` draw nothing either.
-    let mut wide = Draw::of(&[[1 << 10, 1 << 10, 1]]);
+    let mut wide = Draw::of(&[[1023, 1025, 1]]);
     wide.pool_words = u32::MAX;
     wide.group_words = 1;
-    wide.group_vertices = 1 << 12;
+    wide.group_vertices = 1 << 13;
     let s = scan(&wide, &[0], 0, 0);
     assert_eq!(s.work[work::MESH_GROUPS as usize], 0);
     assert_eq!(
         s.report.mesh_records_overflow.map(|f| f.mesh_threadgroups),
-        Some(1 << 20)
+        Some(1023 * 1025)
     );
 }

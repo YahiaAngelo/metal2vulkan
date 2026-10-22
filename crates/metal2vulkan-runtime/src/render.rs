@@ -395,6 +395,7 @@ mod inline_splits;
 mod late_resolve;
 mod lowering_worker;
 mod mesh;
+mod mesh_arguments;
 mod pass_start_reads;
 mod pass_steps;
 mod pending;
@@ -1138,6 +1139,8 @@ enum Before {
     Bounds(BoundsSteps),
     /// An emulated mesh draw's dispatch (`render/mesh.rs`).
     Mesh(mesh::MeshSteps),
+    /// An indirect mesh draw's arguments pass (`render/mesh_arguments.rs`).
+    MeshArguments(mesh_arguments::ArgumentsSteps),
     /// An emulated tessellation draw's scan (`render/tessellation_scan.rs`).
     Tessellation(tessellation_scan::TessellationSteps),
     /// An index rewrite pass (`index_rewrite.rs`).
@@ -1151,6 +1154,7 @@ impl Before {
             Before::Copy(copy) => copy.uses(),
             Before::Bounds(pass) => pass.uses(),
             Before::Mesh(steps) => steps.uses(),
+            Before::MeshArguments(steps) => steps.uses(),
             Before::Tessellation(steps) => steps.uses(),
             Before::Rewrite(pass) => pass.uses(),
         }
@@ -1170,6 +1174,7 @@ impl Before {
                 Before::Copy(copy) => copy.record_in(raw, command_buffer),
                 Before::Bounds(pass) => pass.record_in(raw, command_buffer),
                 Before::Mesh(steps) => steps.record_in(raw, command_buffer),
+                Before::MeshArguments(steps) => steps.record_in(raw, command_buffer),
                 Before::Tessellation(steps) => steps.record_in(raw, command_buffer),
                 Before::Rewrite(pass) => pass.record_in(raw, command_buffer),
             }
@@ -8436,6 +8441,19 @@ impl RenderLowering {
                 (self.core.set_zero(&objects, (&mut writes, offsets))?, &[])
             }
         };
+        // An indirect mesh draw's arguments pass, whose scratch its draw reads
+        // (`render/mesh_arguments.rs`).
+        let arguments = match (commands.mesh_arguments, indirect, empty || culled) {
+            (Some(form), Some(source), false) => Some(mesh_arguments::ArgumentsPass::new(
+                &mut self.core,
+                source,
+                form,
+            )?),
+            (Some(_), None, false) => {
+                return Err(internal("a mesh arguments pass without its arguments"))
+            }
+            _ => None,
+        };
         // The Vulkan draws: the binder's, the index bounds pass's two, or the index rewrite
         // pass's one.
         let sized = device.shared().sized_index_bind;
@@ -8456,6 +8474,30 @@ impl RenderLowering {
             }
             (Some(pass), ..) => one(pass.draw(sized)),
             (_, Some(pass), Some(source), _, _) => (pass.draws(source, commands.draw, sized)?, 2),
+            // An indirect mesh draw's counts are its arguments pass's.
+            (
+                _,
+                _,
+                _,
+                _,
+                metal2vulkan::vk::DrawCommand::DrawMeshTasksIndirect {
+                    draw_count, stride, ..
+                },
+            ) if arguments.is_some() => {
+                let (raw, at) = arguments
+                    .as_ref()
+                    .map(mesh_arguments::ArgumentsPass::scratch)
+                    .ok_or_else(|| internal("a mesh arguments pass gone"))?;
+                one((
+                    None,
+                    Some(raw),
+                    metal2vulkan::vk::DrawCommand::DrawMeshTasksIndirect {
+                        offset: at,
+                        draw_count,
+                        stride,
+                    },
+                ))
+            }
             // A scanned emulated mesh draw's arguments are its work buffer's.
             (
                 _,
@@ -8502,7 +8544,9 @@ impl RenderLowering {
         // An emulated mesh draw's dispatch, or an emulated tessellation draw's scan, which reads
         // what an earlier draw or tile dispatch of the encoder wrote behind a memory barrier, or
         // writes what one read or wrote, records before the draw's render pass instance too.
-        let scanned = commands.mesh_dispatch.is_some() || commands.tessellation_dispatch.is_some();
+        let scanned = commands.mesh_dispatch.is_some()
+            || commands.tessellation_dispatch.is_some()
+            || arguments.is_some();
         let mesh_uses: Vec<Use<ResourceKey>> = match scanned {
             true => uses
                 .iter()
@@ -8560,12 +8604,13 @@ impl RenderLowering {
         if writes_fragments || (after_geometry && (reads_fragments || !self.command_barrier)) {
             return Err(Error::NotImplemented(RuntimeGap::IndirectRenderCommands));
         }
-        // A scan reads Metal's arguments where the draw reads them, after their copy.
+        // A scan reads Metal's arguments where the draw reads them, after their copy. An arguments
+        // pass, which writes no Metal resource, waits only for what wrote them.
         let mesh_before = match self.replaying {
             true => after_geometry,
             false => {
                 (self.core.uses().written(&mesh_uses) && !self.unordered.written(&mesh_uses))
-                    || self.core.uses().accessed(&mesh_uses)
+                    || (arguments.is_none() && self.core.uses().accessed(&mesh_uses))
                     || before_instance
             }
         };
@@ -8944,6 +8989,13 @@ impl RenderLowering {
                 steps.retain(&mut self.core);
                 match mesh_before {
                     true => self.steps_before().push(Before::Mesh(steps)),
+                    false => steps.record(&mut self.core),
+                }
+            }
+            if let Some(pass) = arguments {
+                let steps = pass.into_steps(&mut self.core);
+                match mesh_before {
+                    true => self.steps_before().push(Before::MeshArguments(steps)),
                     false => steps.record(&mut self.core),
                 }
             }
