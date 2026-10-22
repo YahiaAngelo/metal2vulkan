@@ -127,8 +127,8 @@ pub enum Fields {
     Barrier { enabled: bool },
     /// A threadgroup length at `binding` (`i32` each).
     ThreadgroupLength { length: ValueId, binding: ValueId },
-    /// The primitive type, vertex start, vertex count, instance count, and base instance
-    /// (`i32` each), and the action.
+    /// The primitive type (written as Metal's encoding writes it: [`encoded_primitive_type`]),
+    /// vertex start, vertex count, instance count, and base instance (`i32` each), and the action.
     Draw { arguments: [ValueId; 5] },
     /// The stage-in region's origin and size (`<3 x i32>` each).
     StageInRegion { origin: ValueId, size: ValueId },
@@ -136,9 +136,9 @@ pub enum Fields {
     ImageblockSize { size: ValueId },
     /// The whole record, restored to its default.
     Reset,
-    /// An indexed draw's primitive type, index count, instance count, base vertex and base
-    /// instance (`i32` each), its `MTLIndexType` (0 for 16-bit indices, 1 for 32-bit ones), the
-    /// index buffer's guest address, and the action.
+    /// An indexed draw's primitive type (as [`Fields::Draw`]'s), index count, instance count,
+    /// base vertex and base instance (`i32` each), its `MTLIndexType` (0 for 16-bit indices, 1
+    /// for 32-bit ones), the index buffer's guest address, and the action.
     IndexedDraw {
         arguments: [ValueId; 5],
         index_type: u32,
@@ -673,6 +673,22 @@ fn k32(fb: &mut FunctionBuilder<'_>, v: u32) -> BResult<SValue> {
     crate::memory::leaf::k32(fb, v)
 }
 
+/// A draw's primitive type `operand` (a `u32`) as Metal's encoding writes it into the record: a
+/// value past Metal's five (`MTLPrimitiveType`, 0 to 4) as 0, which draws points, as Metal's GPU
+/// draws a kernel's draw of one (measured on the M3 Max, macOS 27.0.1: 5 to 12, 15, 16, 31, 63,
+/// 255 to 257 and 65535, both draws). Its private types 5 to 9 are the CPU's alone.
+fn encoded_primitive_type(
+    cx: &mut EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+    operand: ValueId,
+) -> BResult<SValue> {
+    let x = cx.operand(fb, operand)?;
+    let five = k32(fb, 5)?;
+    let known = fb.binary(BinOp::ULessThan, x, five)?;
+    let point = k32(fb, 0)?;
+    fb.select(known, x, point)
+}
+
 /// The guest address the records of the command buffer whose word (its resource ID, a `u64`) is
 /// `word` start at: `indirect_commands::records_address`, the ID shifted up
 /// `RECORDS_ADDRESS_SHIFT` bits past `RECORDS_ADDRESS_BASE`. No records start at the null ID's.
@@ -868,7 +884,10 @@ fn emit_command<'c>(cx: &mut EmitCx<'c>, fb: &mut FunctionBuilder<'_>, c: &Comma
         }
         Fields::Draw { arguments } => {
             for (i, a) in arguments.iter().enumerate() {
-                let x = cx.operand(fb, *a)?;
+                let x = match i {
+                    0 => encoded_primitive_type(cx, fb, *a)?,
+                    _ => cx.operand(fb, *a)?,
+                };
                 let to = fixed(fb, layout::ARGUMENTS + 4 * i as u64)?;
                 writes.push((to, x, WORD));
             }
@@ -1006,7 +1025,10 @@ fn emit_command<'c>(cx: &mut EmitCx<'c>, fb: &mut FunctionBuilder<'_>, c: &Comma
                 (7, *base_instance),
             ];
             for (word, operand) in operands {
-                let x = cx.operand(fb, operand)?;
+                let x = match word {
+                    0 => encoded_primitive_type(cx, fb, operand)?,
+                    _ => cx.operand(fb, operand)?,
+                };
                 let to = fixed(fb, layout::ARGUMENTS + 4 * word)?;
                 writes.push((to, x, WORD));
             }

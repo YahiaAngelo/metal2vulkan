@@ -255,14 +255,17 @@ fn draw_of(f: &mut FunctionBuilder<'_>, cmd: Value, primitive_type: Value) {
 }
 
 /// An entry that draws a constant primitive type writes that type's bit alone; one whose type
-/// is loaded writes every type's; a value past Metal's five is no type, so every type's too.
+/// is loaded writes every type's; a value past Metal's five (a private type's, or none) writes a
+/// point draw, as Metal's encoding does.
 #[test]
 fn a_draw_writes_its_constant_primitive_type() {
     for (raw, types) in [
         (0u64, 0b1),
         (3, 0b1000),
         (4, 0b1_0000),
-        (5, CommandWrites::ALL_PRIMITIVE_TYPES),
+        (5, 0b1),
+        (9, 0b1),
+        (255, 0b1),
     ] {
         let e = specialized(|f| {
             let i32t = f.module().int(32);
