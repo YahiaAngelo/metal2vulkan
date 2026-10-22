@@ -55,6 +55,7 @@ pub(crate) struct Counters {
     pipeline_layouts_shared: AtomicU64,
     variant_pipelines_made: AtomicU64,
     flights_followed: AtomicU64,
+    predicated_loop_runs_again: AtomicU64,
     variants_taken_back: AtomicU64,
     unlisted_argument_sampler_buffers: AtomicU64,
     host_step_sampler_sets_made: AtomicU64,
@@ -747,6 +748,12 @@ impl Counters {
     /// A variant's making waited for its twin's in the air before its own (`pipeline/flight.rs`).
     pub(crate) fn flight_followed(&self) {
         self.flights_followed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A predicated loop's check ran its laying again (`command_buffer/rerun.rs`).
+    pub(crate) fn predicated_loop_ran_again(&self) {
+        self.predicated_loop_runs_again
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// A graphics pipeline library of `part` was made (`pipeline/libraries.rs`).
@@ -2444,6 +2451,9 @@ pub struct WorkCounts {
     /// Of those, the makings that waited for a twin's making in the air, of the same functions
     /// and specialization, to land before their own (`pipeline/flight.rs`).
     pub flights_followed: u64,
+    /// The runs again of predicated loops' layings that a check submitted, the loop still running
+    /// past its copies (`command_buffer/rerun.rs`).
+    pub predicated_loop_runs_again: u64,
     /// Variants made again that took back a released variant's objects and `VkPipeline`s.
     pub variants_taken_back: u64,
     /// Command buffers committed whose commands' plans could not list every sampler state live
@@ -3898,6 +3908,7 @@ impl Device {
             pipeline_layouts_shared: counters.pipeline_layouts_shared.load(Ordering::Relaxed),
             variant_pipelines_made: counters.variant_pipelines_made.load(Ordering::Relaxed),
             flights_followed: counters.flights_followed.load(Ordering::Relaxed),
+            predicated_loop_runs_again: counters.predicated_loop_runs_again.load(Ordering::Relaxed),
             variants_taken_back: counters.variants_taken_back.load(Ordering::Relaxed),
             unlisted_argument_sampler_buffers: counters
                 .unlisted_argument_sampler_buffers

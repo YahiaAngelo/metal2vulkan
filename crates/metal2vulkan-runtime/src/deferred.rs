@@ -4,6 +4,7 @@
 //! the device announces for the step. The command buffer handles every kind alike
 //! (`command_buffer`).
 
+use super::command_buffer::rerun::LoopCheck;
 use super::command_buffer::CommandBuffer;
 use super::device::lock;
 use super::encoder::RecordedSegment;
@@ -37,6 +38,9 @@ pub(super) enum Deferred {
     RenderPass(Arc<DeferredPass>),
     /// A compute encoder's dispatch whose pipelines were being made (`pending_dispatch.rs`).
     Pending(Arc<PendingDispatch>),
+    /// The check after a predicated loop's laying, which runs it again while the loop would run
+    /// on (`command_buffer/rerun.rs`): it records nothing, and its batch waits for it.
+    Loop(Arc<LoopCheck>),
 }
 
 /// What `commit` left a segment for its host step.
@@ -56,6 +60,8 @@ pub(super) enum StepInputs {
     /// execution; its step names states among those alive then, and compiles only what `commit`
     /// could not settle (`DeferredPass::settle`).
     RenderPass,
+    /// A loop's check: nothing past the check itself.
+    Loop,
     /// An execution `commit` recorded on the GPU alone with no barrier between its commands, which
     /// its batch's submission records again with them where a route encoded since may set a
     /// barrier in a record (`gpu_execute::Rerecord`); no work on the GPU is waited for.
@@ -95,7 +101,10 @@ impl Deferred {
     /// at the dispatch, and its writes are its encoder's to copy back.
     pub(super) fn leaves_shadows(&self) -> bool {
         match self {
-            Deferred::Execute(_) | Deferred::Dispatch(_) | Deferred::SparseScrub(_) => true,
+            Deferred::Execute(_)
+            | Deferred::Dispatch(_)
+            | Deferred::SparseScrub(_)
+            | Deferred::Loop(_) => true,
             Deferred::RenderPass(_) | Deferred::Pending(_) => false,
         }
     }
@@ -113,7 +122,7 @@ impl Deferred {
             Deferred::Execute(execute) => {
                 execute.icb.gpu_written() || execute.indirect() || execute.predicated()
             }
-            Deferred::Dispatch(_) => true,
+            Deferred::Dispatch(_) | Deferred::Loop(_) => true,
             Deferred::SparseScrub(_) | Deferred::Pending(_) => false,
             Deferred::RenderPass(pass) => pass.gpu_written(),
         }
@@ -256,6 +265,14 @@ impl Deferred {
                     pipelines: false,
                 })
             }
+            // Its host step reads the unit's halt word once the laying completed.
+            Deferred::Loop(_) => Ok(Prepared {
+                recorded: None,
+                for_good: false,
+                inputs: StepInputs::Loop,
+                retained: None,
+                pipelines: false,
+            }),
             // Recorded now where its pipelines are made; else by a host step once they are,
             // which makes again one whose making failed.
             Deferred::Pending(dispatch) => {
@@ -304,7 +321,10 @@ impl Deferred {
             Deferred::RenderPass(pass) => Ok(pass
                 .record_on_gpu(command_buffer)?
                 .map(|recorded| (recorded, StepInputs::RenderPass))),
-            Deferred::Dispatch(_) | Deferred::SparseScrub(_) | Deferred::Pending(_) => Ok(None),
+            Deferred::Dispatch(_)
+            | Deferred::SparseScrub(_)
+            | Deferred::Pending(_)
+            | Deferred::Loop(_) => Ok(None),
         }
     }
 
@@ -335,7 +355,10 @@ impl Deferred {
                     StepInputs::Rerecord(rerecord) => {
                         return rerecord.record(command_buffer, execute);
                     }
-                    StepInputs::Dispatch | StepInputs::None | StepInputs::RenderPass => {
+                    StepInputs::Dispatch
+                    | StepInputs::None
+                    | StepInputs::RenderPass
+                    | StepInputs::Loop => {
                         return Err(internal("an execution's host step without its states"));
                     }
                 };
@@ -347,6 +370,7 @@ impl Deferred {
             Deferred::SparseScrub(_) => Err(internal("a sparse scrub's host step")),
             Deferred::RenderPass(pass) => pass.record(command_buffer, true),
             Deferred::Pending(dispatch) => dispatch.record(command_buffer),
+            Deferred::Loop(check) => check.step(command_buffer),
         }
     }
 
@@ -359,7 +383,10 @@ impl Deferred {
         match self {
             Deferred::RenderPass(pass) => pass.outgrown(),
             Deferred::Execute(execute) => execute.outgrown(),
-            Deferred::Dispatch(_) | Deferred::SparseScrub(_) | Deferred::Pending(_) => false,
+            Deferred::Dispatch(_)
+            | Deferred::SparseScrub(_)
+            | Deferred::Pending(_)
+            | Deferred::Loop(_) => false,
         }
     }
 
@@ -371,7 +398,23 @@ impl Deferred {
         match self {
             Deferred::Execute(execute) => execute.rewritten(),
             Deferred::RenderPass(pass) => pass.rewritten(),
-            Deferred::Dispatch(_) | Deferred::SparseScrub(_) | Deferred::Pending(_) => false,
+            Deferred::Dispatch(_)
+            | Deferred::SparseScrub(_)
+            | Deferred::Pending(_)
+            | Deferred::Loop(_) => false,
+        }
+    }
+
+    /// Whether its batch waits for it after its host step: a loop's check while it runs the
+    /// laying again (`command_buffer/rerun.rs`), which wakes the scheduler as it ends.
+    pub(super) fn holds(&self) -> bool {
+        match self {
+            Deferred::Loop(check) => check.running(),
+            Deferred::Execute(_)
+            | Deferred::Dispatch(_)
+            | Deferred::SparseScrub(_)
+            | Deferred::RenderPass(_)
+            | Deferred::Pending(_) => false,
         }
     }
 
@@ -380,19 +423,26 @@ impl Deferred {
         match self {
             Deferred::RenderPass(pass) => pass.making(),
             Deferred::Pending(dispatch) => dispatch.making(),
-            Deferred::Execute(_) | Deferred::Dispatch(_) | Deferred::SparseScrub(_) => false,
+            Deferred::Execute(_)
+            | Deferred::Dispatch(_)
+            | Deferred::SparseScrub(_)
+            | Deferred::Loop(_) => false,
         }
     }
 
     /// What its recording uses, on `device`, where that is known before it records
     /// (`DeferredPass::known_summary`): a render pass's that executes no render commands. `None`
     /// for the rest, whose uses their recording finds: an execution's or an indirect dispatch's
-    /// from the records and arguments it reads, a scrub's at its submission.
+    /// from the records and arguments it reads, a scrub's at its submission; a loop's check's are
+    /// its laying's (`CommandBufferShared::footprint`).
     pub(super) fn known_summary(&self, device: &Device) -> Option<Summary<ResourceKey>> {
         match self {
             Deferred::RenderPass(pass) => pass.known_summary(device),
             Deferred::Pending(dispatch) => Some(dispatch.known_summary()),
-            Deferred::Execute(_) | Deferred::Dispatch(_) | Deferred::SparseScrub(_) => None,
+            Deferred::Execute(_)
+            | Deferred::Dispatch(_)
+            | Deferred::SparseScrub(_)
+            | Deferred::Loop(_) => None,
         }
     }
 
@@ -401,7 +451,10 @@ impl Deferred {
         match self {
             Deferred::RenderPass(pass) => pass.when_made(waker),
             Deferred::Pending(dispatch) => dispatch.when_made(waker),
-            Deferred::Execute(_) | Deferred::Dispatch(_) | Deferred::SparseScrub(_) => {}
+            Deferred::Execute(_)
+            | Deferred::Dispatch(_)
+            | Deferred::SparseScrub(_)
+            | Deferred::Loop(_) => {}
         }
     }
 
@@ -411,7 +464,10 @@ impl Deferred {
         match self {
             Deferred::RenderPass(pass) => pass.hasten(urgency),
             Deferred::Pending(dispatch) => dispatch.hasten(urgency),
-            Deferred::Execute(_) | Deferred::Dispatch(_) | Deferred::SparseScrub(_) => {}
+            Deferred::Execute(_)
+            | Deferred::Dispatch(_)
+            | Deferred::SparseScrub(_)
+            | Deferred::Loop(_) => {}
         }
     }
 
@@ -420,7 +476,7 @@ impl Deferred {
         match self {
             Deferred::Execute(execute) => indirect_execute::degrade_host_replay(device, execute),
             Deferred::Dispatch(dispatch) => dispatch.degrade(device),
-            Deferred::SparseScrub(_) | Deferred::Pending(_) => {}
+            Deferred::SparseScrub(_) | Deferred::Pending(_) | Deferred::Loop(_) => {}
             Deferred::RenderPass(pass) => pass.degrade(device),
         }
     }

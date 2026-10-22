@@ -45,8 +45,27 @@ use std::time::Instant;
 const DEFAULT_MAX_COMMAND_BUFFER_COUNT: usize = 64;
 
 /// A Metal command queue (`MTLCommandQueue`). Cheap to clone (a retain); `Send + Sync`.
-#[derive(Clone)]
-pub struct CommandQueue(Arc<QueueShared>);
+pub struct CommandQueue(Arc<QueueShared>, Handle);
+
+/// Whether a [`CommandQueue`] is one of the program's handles, which its queue counts
+/// ([`QueueShared::handles`]): every one the queue's making or a clone hands out, but the one
+/// each of its command buffers keeps (`CommandQueue::kept`).
+struct Handle(bool);
+
+impl Clone for CommandQueue {
+    fn clone(&self) -> CommandQueue {
+        self.0.handles.fetch_add(1, Ordering::Relaxed);
+        CommandQueue(Arc::clone(&self.0), Handle(true))
+    }
+}
+
+impl Drop for CommandQueue {
+    fn drop(&mut self) {
+        if self.1 .0 {
+            self.0.handles.fetch_sub(1, Ordering::Release);
+        }
+    }
+}
 
 impl std::fmt::Debug for CommandQueue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -78,6 +97,9 @@ struct QueueShared {
     /// Its command buffers Metal's GPU hangs at that are in flight, and those committed with an
     /// event wait meanwhile (`command_buffer/hang.rs`).
     hangs: Arc<QueueHangs>,
+    /// The program's handles of it ([`Handle`]): a predicated loop that would run on without
+    /// bound stops once none is left (`command_buffer/rerun.rs`).
+    handles: AtomicUsize,
 }
 
 /// A queue's slots: one per uncompleted command buffer, at most `max`.
@@ -242,17 +264,21 @@ impl Device {
         self.take_device_sampler();
         self.make_texture_pool();
         self.keep_room();
-        CommandQueue(Arc::new(QueueShared {
-            device: self.clone(),
-            id,
-            vk_queue,
-            label: Mutex::new(None),
-            slots: Slots::new(count, Arc::clone(&self.shared().uncommitted)),
-            latest_gpu_end: Mutex::new(0),
-            memoryless_backings: Mutex::new(BackingPool::default()),
-            kept_images: KeptImages::default(),
-            hangs: Arc::default(),
-        }))
+        CommandQueue(
+            Arc::new(QueueShared {
+                device: self.clone(),
+                id,
+                vk_queue,
+                label: Mutex::new(None),
+                slots: Slots::new(count, Arc::clone(&self.shared().uncommitted)),
+                latest_gpu_end: Mutex::new(0),
+                memoryless_backings: Mutex::new(BackingPool::default()),
+                kept_images: KeptImages::default(),
+                hangs: Arc::default(),
+                handles: AtomicUsize::new(1),
+            }),
+            Handle(true),
+        )
     }
 }
 
@@ -265,6 +291,17 @@ impl Drop for QueueShared {
 }
 
 impl CommandQueue {
+    /// The queue a command buffer of it keeps: not one of the program's handles ([`Handle`]),
+    /// though a clone of it is.
+    pub(super) fn kept(&self) -> CommandQueue {
+        CommandQueue(Arc::clone(&self.0), Handle(false))
+    }
+
+    /// Whether the program holds no handle of the queue any more ([`Handle`]).
+    pub(super) fn let_go(&self) -> bool {
+        self.0.handles.load(Ordering::Acquire) == 0
+    }
+
     /// `device`.
     pub fn device(&self) -> &Device {
         &self.0.device
