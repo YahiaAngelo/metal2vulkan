@@ -480,13 +480,15 @@ impl BlitCommandEncoder {
         region: Region,
         pattern: &[u8],
     ) -> Result<(), Error> {
-        self.log(|log| {
-            BlitCall::FillTexture(
-                Box::new((texture.clone(), level, slice, region)),
-                log.byte_span(pattern),
-            )
-        })?;
-        self.fill("fill_texture", texture, (level, slice), region, pattern)
+        self.logged(
+            |log| {
+                BlitCall::FillTexture(
+                    Box::new((texture.clone(), level, slice, region)),
+                    log.byte_span(pattern),
+                )
+            },
+            |this| this.fill("fill_texture", texture, (level, slice), region, pattern),
+        )
     }
 
     /// `fillTexture:level:slice:region:color:` (`pixel_format` `None`) and
@@ -525,19 +527,21 @@ impl BlitCommandEncoder {
         let slot = self.core().command_buffer().fill_slot(texel.as_deref());
         let pattern = texel.clone().unwrap_or(slot.to_vec());
         // Logged as the bytes it fills, which a call encoded again fills again.
-        self.log(|log| {
-            BlitCall::FillTexture(
-                Box::new((texture.clone(), level, slice, region)),
-                log.byte_span(&pattern),
-            )
-        })?;
-        self.fill(CALL, texture, (level, slice), region, &pattern)?;
-        if texel.is_none() {
-            let format = texture.pixel_format();
-            self.core()
-                .device()
-                .degrade(Degradation::UnpackedFillColor, || {
-                    (
+        self.logged(
+            |log| {
+                BlitCall::FillTexture(
+                    Box::new((texture.clone(), level, slice, region)),
+                    log.byte_span(&pattern),
+                )
+            },
+            |this| {
+                this.fill(CALL, texture, (level, slice), region, &pattern)?;
+                if texel.is_none() {
+                    let format = texture.pixel_format();
+                    this.core()
+                        .device()
+                        .degrade(Degradation::UnpackedFillColor, || {
+                            (
                         format!("a color fill of a {format:?} texture, packed in {packed_in:?}"),
                         "Metal packs no color there and fills bytes of the calling thread's \
                          stack, which hold the last color fill's packed texel only where no \
@@ -545,9 +549,11 @@ impl BlitCommandEncoder {
                          color fill's packed texels, over zeros"
                             .to_owned(),
                     )
-                });
-        }
-        Ok(())
+                        });
+                }
+                Ok(())
+            },
+        )
     }
 
     /// `fillBuffer:range:pattern4:` (Apple SPI): the bytes of `range` take `pattern`'s 4 bytes,
@@ -563,60 +569,64 @@ impl BlitCommandEncoder {
         range: Range<u64>,
         pattern: u32,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::FillBufferPattern4(buffer.clone(), range.clone(), pattern))?;
-        const CALL: &str = "fill_buffer_pattern4";
-        self.core().check_device(CALL, buffer.device())?;
-        let size = range.end.saturating_sub(range.start);
-        if size == 0 {
-            return Ok(());
-        }
-        let range = bytes_in(CALL, range.start, size, buffer.length())?;
-        let pattern = pattern.to_le_bytes();
-        // The bytes before the first multiple of 16, the pattern from the range's start; then
-        // the pattern from that multiple, in copies of at most `STAGING_BYTES` (a multiple of 4,
-        // so each starts the pattern again).
-        let restart = range.start.next_multiple_of(16).min(range.end);
-        let head = restart - range.start;
-        let body = range.end - restart;
-        let chunk = body.min(STAGING_BYTES);
-        let bytes: Vec<u8> = (0..head)
-            .map(|k| pattern[(k % 4) as usize])
-            .chain(pattern.iter().copied().cycle().take(chunk as usize))
-            .collect();
-        let staging = self.staged(&bytes)?;
-        let (source, from) = staging.at(0);
-        // Read as a blit's (`host_residency.rs`): where the range starts in the `VkBuffer`, and
-        // each byte past it as far on.
-        let (destination, origin) = self.core().blit_at(buffer, range.start)?;
-        let mut regions = Vec::new();
-        if head > 0 {
-            regions.push(vk::BufferCopy {
-                src_offset: from,
-                dst_offset: origin,
-                size: head,
-            });
-        }
-        let mut at = restart;
-        while at < range.end {
-            let size = (range.end - at).min(chunk);
-            regions.push(vk::BufferCopy {
-                src_offset: from + head,
-                dst_offset: origin + (at - range.start),
-                size,
-            });
-            at += size;
-        }
-        let length = bytes.len() as u64;
-        let uses = [reads(&staging, 0..length), writes(buffer, range)];
-        self.command(&uses, |device, raw| {
-            // SAFETY: the encoder's command buffer is recording; the staging buffer and the
-            // buffer are live and retained until it completes; each region lies inside both,
-            // and the buffer's regions are disjoint.
-            unsafe { device.cmd_copy_buffer(raw, source, destination, &regions) };
-        })?;
-        self.core().retain(staging);
-        self.core().retain(buffer.clone());
-        Ok(())
+        self.logged(
+            |_| BlitCall::FillBufferPattern4(buffer.clone(), range.clone(), pattern),
+            |this| {
+                const CALL: &str = "fill_buffer_pattern4";
+                this.core().check_device(CALL, buffer.device())?;
+                let size = range.end.saturating_sub(range.start);
+                if size == 0 {
+                    return Ok(());
+                }
+                let range = bytes_in(CALL, range.start, size, buffer.length())?;
+                let pattern = pattern.to_le_bytes();
+                // The bytes before the first multiple of 16, the pattern from the range's start;
+                // then the pattern from that multiple, in copies of at most `STAGING_BYTES` (a
+                // multiple of 4, so each starts the pattern again).
+                let restart = range.start.next_multiple_of(16).min(range.end);
+                let head = restart - range.start;
+                let body = range.end - restart;
+                let chunk = body.min(STAGING_BYTES);
+                let bytes: Vec<u8> = (0..head)
+                    .map(|k| pattern[(k % 4) as usize])
+                    .chain(pattern.iter().copied().cycle().take(chunk as usize))
+                    .collect();
+                let staging = this.staged(&bytes)?;
+                let (source, from) = staging.at(0);
+                // Read as a blit's (`host_residency.rs`): where the range starts in the `VkBuffer`,
+                // and each byte past it as far on.
+                let (destination, origin) = this.core().blit_at(buffer, range.start)?;
+                let mut regions = Vec::new();
+                if head > 0 {
+                    regions.push(vk::BufferCopy {
+                        src_offset: from,
+                        dst_offset: origin,
+                        size: head,
+                    });
+                }
+                let mut at = restart;
+                while at < range.end {
+                    let size = (range.end - at).min(chunk);
+                    regions.push(vk::BufferCopy {
+                        src_offset: from + head,
+                        dst_offset: origin + (at - range.start),
+                        size,
+                    });
+                    at += size;
+                }
+                let length = bytes.len() as u64;
+                let uses = [reads(&staging, 0..length), writes(buffer, range)];
+                this.command(&uses, |device, raw| {
+                    // SAFETY: the encoder's command buffer is recording; the staging buffer and the
+                    // buffer are live and retained until it completes; each region lies inside
+                    // both, and the buffer's regions are disjoint.
+                    unsafe { device.cmd_copy_buffer(raw, source, destination, &regions) };
+                })?;
+                this.core().retain(staging);
+                this.core().retain(buffer.clone());
+                Ok(())
+            },
+        )
     }
 
     /// The fill of `pattern` into `region` of `texture`'s `level` and `slice` (the module docs).

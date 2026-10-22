@@ -215,21 +215,30 @@ impl BlitCommandEncoder {
         core.finish_replay()
     }
 
-    /// Log the call `call` makes of the log, before it runs, where the encoder logs
-    /// (`replay.rs`): each command's first step. Refused, for every command, where the encoder
-    /// was made under protection options that end Metal's process at its first command (`Invalid`,
-    /// `Problem::ProtectedEncoder`, `command_buffer/protection.rs`).
-    pub(super) fn log(
+    /// Run `run`, a command, logged first as `call` makes it of the log, where the encoder logs
+    /// (`replay.rs`): where it is refused, its log notes it so (`CallLog::refuse`), and an
+    /// encoding again refuses it again and goes on. Refused before it is logged, for every
+    /// command, where the encoder was made under protection options that end Metal's process at
+    /// its first command (`Invalid`, `Problem::ProtectedEncoder`, `command_buffer/protection.rs`).
+    pub(super) fn logged<T>(
         &mut self,
         call: impl FnOnce(&mut CallLog<BlitCall>) -> BlitCall,
-    ) -> Result<(), Error> {
+        run: impl FnOnce(&mut Self) -> Result<T, Error>,
+    ) -> Result<T, Error> {
         self.refuse_aborted()?;
-        if let Some(log) = self.log.as_mut().filter(|log| !log.muted()) {
-            let call = call(log);
-            let extra = call.extra();
-            log.push(call, extra);
+        let at = match self.log.as_mut().filter(|log| !log.muted()) {
+            Some(log) => {
+                let call = call(log);
+                let extra = call.extra();
+                Some(log.push(call, extra))
+            }
+            None => None,
+        };
+        let ran = run(self);
+        if let (Err(_), Some(at), Some(log)) = (&ran, at, &mut self.log) {
+            log.refuse(at);
         }
-        Ok(())
+        ran
     }
 
     /// Refuse a command where the encoder was made under protection options that end Metal's
@@ -360,104 +369,111 @@ impl BlitCommandEncoder {
         destination_offset: u64,
         size: u64,
     ) -> Result<(), Error> {
-        self.log(|_| {
-            BlitCall::CopyBufferToBuffer(
-                source_buffer.clone(),
-                source_offset,
-                destination_buffer.clone(),
-                destination_offset,
-                size,
-            )
-        })?;
-        const CALL: &str = "copy_from_buffer_to_buffer";
-        self.core.check_device(CALL, source_buffer.device())?;
-        self.core.check_device(CALL, destination_buffer.device())?;
-        if size == 0 {
-            return Ok(());
-        }
-        // A no-copy buffer's source reads its pages past its length.
-        let from = bytes_in(CALL, source_offset, size, source_buffer.copy_reach())
-            .map_err(|_| out_of_bounds(CALL, source_offset, size, source_buffer.length()))?;
-        let to = bytes_in(CALL, destination_offset, size, destination_buffer.length())?;
-        // Read as a blit's: a no-copy buffer's import released while idle is imported again
-        // (`host_residency.rs`).
-        let (source, source_at) = self.core.blit_at(source_buffer, source_offset)?;
-        let (destination, destination_at) =
-            self.core.blit_at(destination_buffer, destination_offset)?;
-        // One buffer's bytes, or two no-copy buffers' made over the same bytes, which lie in one
-        // import (`host_aliases.rs`): one `VkBuffer` from one byte 0.
-        let one_bytes = source == destination
-            && source_at - source_offset == destination_at - destination_offset;
-        let overlap = one_bytes && from.start < to.end && to.start < from.end;
-        if overlap {
-            let scratch = self
-                .core
-                .device()
-                .own_buffer(size, ResourceOptions::private())?;
-            let (through, through_at) = scratch.at(0);
-            self.command(
-                &[reads(source_buffer, from), writes(&scratch, 0..size)],
-                |device, raw| {
-                    // SAFETY: the encoder's command buffer is recording; the buffers are live
-                    // and retained until it completes, and the regions lie inside them.
-                    unsafe {
-                        device.cmd_copy_buffer(
-                            raw,
-                            source,
-                            through,
-                            &[region(source_at, through_at, size)],
-                        );
-                    }
-                },
-            )?;
-            self.command(
-                &[reads(&scratch, 0..size), writes(destination_buffer, to)],
-                |device, raw| {
-                    // SAFETY: as above.
-                    unsafe {
-                        device.cmd_copy_buffer(
-                            raw,
-                            through,
-                            destination,
-                            &[region(through_at, destination_at, size)],
-                        );
-                    }
-                },
-            )?;
-            self.core.retain(scratch);
-            self.core
-                .device()
-                .degrade(Degradation::OverlappingBufferCopy, || {
-                    let object = format!(
-                        "a copy of {size} bytes from offset {source_offset} to offset \
+        self.logged(
+            |_| {
+                BlitCall::CopyBufferToBuffer(
+                    source_buffer.clone(),
+                    source_offset,
+                    destination_buffer.clone(),
+                    destination_offset,
+                    size,
+                )
+            },
+            |this| {
+                const CALL: &str = "copy_from_buffer_to_buffer";
+                this.core.check_device(CALL, source_buffer.device())?;
+                this.core.check_device(CALL, destination_buffer.device())?;
+                if size == 0 {
+                    return Ok(());
+                }
+                // A no-copy buffer's source reads its pages past its length.
+                let from = bytes_in(CALL, source_offset, size, source_buffer.copy_reach())
+                    .map_err(|_| {
+                        out_of_bounds(CALL, source_offset, size, source_buffer.length())
+                    })?;
+                let to = bytes_in(CALL, destination_offset, size, destination_buffer.length())?;
+                // Read as a blit's: a no-copy buffer's import released while idle is imported again
+                // (`host_residency.rs`).
+                let (source, source_at) = this.core.blit_at(source_buffer, source_offset)?;
+                let (destination, destination_at) =
+                    this.core.blit_at(destination_buffer, destination_offset)?;
+                // One buffer's bytes, or two no-copy buffers' made over the same bytes, which lie
+                // in one import (`host_aliases.rs`): one `VkBuffer` from one byte 0.
+                let one_bytes = source == destination
+                    && source_at - source_offset == destination_at - destination_offset;
+                let overlap = one_bytes && from.start < to.end && to.start < from.end;
+                if overlap {
+                    let scratch = this
+                        .core
+                        .device()
+                        .own_buffer(size, ResourceOptions::private())?;
+                    let (through, through_at) = scratch.at(0);
+                    this.command(
+                        &[reads(source_buffer, from), writes(&scratch, 0..size)],
+                        |device, raw| {
+                            // SAFETY: the encoder's command buffer is recording; the buffers are
+                            // live and retained until it completes, and the regions lie inside
+                            // them.
+                            unsafe {
+                                device.cmd_copy_buffer(
+                                    raw,
+                                    source,
+                                    through,
+                                    &[region(source_at, through_at, size)],
+                                );
+                            }
+                        },
+                    )?;
+                    this.command(
+                        &[reads(&scratch, 0..size), writes(destination_buffer, to)],
+                        |device, raw| {
+                            // SAFETY: as above.
+                            unsafe {
+                                device.cmd_copy_buffer(
+                                    raw,
+                                    through,
+                                    destination,
+                                    &[region(through_at, destination_at, size)],
+                                );
+                            }
+                        },
+                    )?;
+                    this.core.retain(scratch);
+                    this.core
+                        .device()
+                        .degrade(Degradation::OverlappingBufferCopy, || {
+                            let object = format!(
+                                "a copy of {size} bytes from offset {source_offset} to offset \
                      {destination_offset} of one buffer"
-                    );
-                    (
-                        object,
-                        "the ranges overlap, which Vulkan's copy forbids".to_owned(),
-                    )
-                });
-        } else {
-            self.command(
-                &[reads(source_buffer, from), writes(destination_buffer, to)],
-                |device, raw| {
-                    // SAFETY: as above; the regions do not overlap.
-                    unsafe {
-                        device.cmd_copy_buffer(
-                            raw,
-                            source,
-                            destination,
-                            &[region(source_at, destination_at, size)],
-                        );
-                    }
-                },
-            )?;
-        }
-        self.core.retain(source_buffer.clone());
-        if source_buffer != destination_buffer {
-            self.core.retain(destination_buffer.clone());
-        }
-        Ok(())
+                            );
+                            (
+                                object,
+                                "the ranges overlap, which Vulkan's copy forbids".to_owned(),
+                            )
+                        });
+                } else {
+                    this.command(
+                        &[reads(source_buffer, from), writes(destination_buffer, to)],
+                        |device, raw| {
+                            // SAFETY: as above; the regions do not overlap.
+                            unsafe {
+                                device.cmd_copy_buffer(
+                                    raw,
+                                    source,
+                                    destination,
+                                    &[region(source_at, destination_at, size)],
+                                );
+                            }
+                        },
+                    )?;
+                }
+                this.core.retain(source_buffer.clone());
+                if source_buffer != destination_buffer {
+                    this.core.retain(destination_buffer.clone());
+                }
+                Ok(())
+            },
+        )
     }
 
     /// `fillBuffer:range:value:`: every byte of `range` becomes `value`, for any range, as on
@@ -477,68 +493,73 @@ impl BlitCommandEncoder {
         range: Range<u64>,
         value: u8,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::FillBuffer(buffer.clone(), range.clone(), value))?;
-        const CALL: &str = "fill_buffer";
-        self.core.check_device(CALL, buffer.device())?;
-        let size = range.end.saturating_sub(range.start);
-        if size == 0 {
-            return Ok(());
-        }
-        let range = bytes_in(CALL, range.start, size, buffer.length())?;
-        let metal = (range.start, range.end);
-        // The words and ends are the `VkBuffer`'s: a no-copy buffer's start in it need not be a
-        // multiple of 4 (`Buffer::base`). Read as a blit's (`host_residency.rs`).
-        let (destination, start) = self.core.blit_at(buffer, range.start)?;
-        let pieces = fill_pieces(start..start + size);
-        let mut uses = vec![writes(buffer, range)];
-        let pattern = if pieces.head.is_empty() && pieces.tail.is_empty() {
-            None
-        } else {
-            let pattern = self.pattern()?;
-            let at = 4 * u64::from(value);
-            uses.push(reads(&pattern, at..at + 4));
-            Some(pattern.at(at))
-        };
-        let split = pattern.is_some();
-        let owner = self.core.device().clone();
-        self.command(&uses, |device, raw| {
-            let ends = [&pieces.head, &pieces.tail];
-            let ends = ends.iter().filter(|end| !end.is_empty());
-            let from = pattern.map_or(0, |(_, at)| at);
-            let regions: Vec<vk::BufferCopy> = ends
-                .map(|end| region(from, end.start, end.end - end.start))
-                .collect();
-            // SAFETY: the encoder's command buffer is recording; the buffers are live and
-            // retained until it completes; the words start and end at multiples of 4 inside the
-            // buffer, and the ends' regions lie inside both buffers.
-            unsafe {
-                if let Some((pattern, _)) = pattern {
-                    device.cmd_copy_buffer(raw, pattern, destination, &regions);
+        self.logged(
+            |_| BlitCall::FillBuffer(buffer.clone(), range.clone(), value),
+            |this| {
+                const CALL: &str = "fill_buffer";
+                this.core.check_device(CALL, buffer.device())?;
+                let size = range.end.saturating_sub(range.start);
+                if size == 0 {
+                    return Ok(());
                 }
-                crate::word_fill::record(
-                    &owner,
-                    raw,
-                    destination,
-                    pieces.words.clone(),
-                    fill_word(value),
-                );
-            }
-        })?;
-        self.core.retain(buffer.clone());
-        if split {
-            self.core
-                .device()
-                .degrade(Degradation::SplitBufferFill, || {
-                    let object = format!("a fill of bytes {}..{} of a buffer", metal.0, metal.1);
-                    let reason = format!(
+                let range = bytes_in(CALL, range.start, size, buffer.length())?;
+                let metal = (range.start, range.end);
+                // The words and ends are the `VkBuffer`'s: a no-copy buffer's start in it need not
+                // be a multiple of 4 (`Buffer::base`). Read as a blit's (`host_residency.rs`).
+                let (destination, start) = this.core.blit_at(buffer, range.start)?;
+                let pieces = fill_pieces(start..start + size);
+                let mut uses = vec![writes(buffer, range)];
+                let pattern = if pieces.head.is_empty() && pieces.tail.is_empty() {
+                    None
+                } else {
+                    let pattern = this.pattern()?;
+                    let at = 4 * u64::from(value);
+                    uses.push(reads(&pattern, at..at + 4));
+                    Some(pattern.at(at))
+                };
+                let split = pattern.is_some();
+                let owner = this.core.device().clone();
+                this.command(&uses, |device, raw| {
+                    let ends = [&pieces.head, &pieces.tail];
+                    let ends = ends.iter().filter(|end| !end.is_empty());
+                    let from = pattern.map_or(0, |(_, at)| at);
+                    let regions: Vec<vk::BufferCopy> = ends
+                        .map(|end| region(from, end.start, end.end - end.start))
+                        .collect();
+                    // SAFETY: the encoder's command buffer is recording; the buffers are live and
+                    // retained until it completes; the words start and end at multiples of 4 inside
+                    // the buffer, and the ends' regions lie inside both buffers.
+                    unsafe {
+                        if let Some((pattern, _)) = pattern {
+                            device.cmd_copy_buffer(raw, pattern, destination, &regions);
+                        }
+                        crate::word_fill::record(
+                            &owner,
+                            raw,
+                            destination,
+                            pieces.words.clone(),
+                            fill_word(value),
+                        );
+                    }
+                })?;
+                this.core.retain(buffer.clone());
+                if split {
+                    this.core
+                        .device()
+                        .degrade(Degradation::SplitBufferFill, || {
+                            let object =
+                                format!("a fill of bytes {}..{} of a buffer", metal.0, metal.1);
+                            let reason = format!(
                     "they lie at bytes {start}..{} of the buffer's VkBuffer, and Vulkan fills only \
                      whole 4-byte words at multiples of 4",
                     start + size
                 );
-                    (object, reason)
-                });
-        }
-        Ok(())
+                            (object, reason)
+                        });
+                }
+                Ok(())
+            },
+        )
     }
 
     /// The encoder's pattern buffer, made on first use: 4 bytes of each byte value at offset
@@ -575,37 +596,42 @@ impl BlitCommandEncoder {
     ///
     /// Refused (`Invalid`): a resource of another device.
     pub fn synchronize_resource(&mut self, resource: ResourceRef<'_>) -> Result<(), Error> {
-        self.log(|_| BlitCall::SynchronizeResource(Resource::one(resource)))?;
-        const CALL: &str = "synchronize_resource";
-        self.core.check_device(CALL, resource.device())?;
-        if resource.storage_mode() != StorageMode::Managed {
-            return Ok(());
-        }
-        let (buffer, range) = match resource {
-            ResourceRef::Buffer(buffer) => (buffer, 0..buffer.length()),
-            ResourceRef::Texture(texture) => match texture.buffer_texels() {
-                // Where the GPU or the CPU finds the texels (an IOSurface plane's two layouts).
-                Some(texels) => (&texels.buffer, texels.span()),
-                None => return Ok(()),
+        self.logged(
+            |_| BlitCall::SynchronizeResource(Resource::one(resource)),
+            |this| {
+                const CALL: &str = "synchronize_resource";
+                this.core.check_device(CALL, resource.device())?;
+                if resource.storage_mode() != StorageMode::Managed {
+                    return Ok(());
+                }
+                let (buffer, range) = match resource {
+                    ResourceRef::Buffer(buffer) => (buffer, 0..buffer.length()),
+                    ResourceRef::Texture(texture) => match texture.buffer_texels() {
+                        // Where the GPU or the CPU finds the texels (an IOSurface plane's two
+                        // layouts).
+                        Some(texels) => (&texels.buffer, texels.span()),
+                        None => return Ok(()),
+                    },
+                    ResourceRef::IndirectCommandBuffer(_) => return Ok(()),
+                };
+                let Some(host) = buffer.host_copy() else {
+                    return Ok(());
+                };
+                if range.is_empty() {
+                    return Ok(());
+                }
+                let (own, start) = buffer.at(range.start);
+                let copy = region(start, range.start, range.end - range.start);
+                this.command(&[reads(buffer, range)], |device, raw| {
+                    // SAFETY: the encoder's command buffer is recording; the buffer and its host
+                    // copy are live and retained until it completes, and the range lies in both
+                    // (the host copy holds the buffer's bytes from its byte 0).
+                    unsafe { device.cmd_copy_buffer(raw, own, host, &[copy]) };
+                })?;
+                this.core.retain(buffer.clone());
+                Ok(())
             },
-            ResourceRef::IndirectCommandBuffer(_) => return Ok(()),
-        };
-        let Some(host) = buffer.host_copy() else {
-            return Ok(());
-        };
-        if range.is_empty() {
-            return Ok(());
-        }
-        let (own, start) = buffer.at(range.start);
-        let copy = region(start, range.start, range.end - range.start);
-        self.command(&[reads(buffer, range)], |device, raw| {
-            // SAFETY: the encoder's command buffer is recording; the buffer and its host copy are
-            // live and retained until it completes, and the range lies in both (the host copy
-            // holds the buffer's bytes from its byte 0).
-            unsafe { device.cmd_copy_buffer(raw, own, host, &[copy]) };
-        })?;
-        self.core.retain(buffer.clone());
-        Ok(())
+        )
     }
 
     /// `endEncoding`.

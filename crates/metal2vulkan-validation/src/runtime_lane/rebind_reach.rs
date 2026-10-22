@@ -13,12 +13,8 @@
 //!   the walk also reaches, case 2; a blit's operand, case 5) was resolved as it was encoded; the
 //!   rebind encodes its compute, blit or render encoder again from its log, so it reaches the new
 //!   pages, as Metal's does, and the command buffer completes: a draw reading a vertex buffer over
-//!   host pages draws the new pages' corners. Where the encoder cannot be encoded again (a call
-//!   refused at its encoding, and so again), each of Metal's submissions of the command buffer
-//!   holding such a command runs nothing and the command buffer fails
-//!   `CommandBufferError::EncodedUseRebound` (metal code 1). Its other submissions run, its event
-//!   signals fire, its handlers run, and the device announces that gap once
-//!   (`Degradation::EncodedUseRebound`).
+//!   host pages draws the new pages' corners. A call refused at its encoding is refused again and
+//!   the calls after it run.
 //! - **Submitted is kept.** A command buffer whose first batch was submitted before the rebind
 //!   keeps the table and the pages it took then for every later batch (the split: a wait for an
 //!   event after an encoder), named or resident (table 3: a running command buffer reads the old
@@ -153,6 +149,10 @@ pub(super) enum Uses<'a> {
     Output,
     /// A blit before the walker copies the member's node out: case 5.
     Blit,
+    /// As [`Uses::Output`], after a blit that copies the member's node out ([`Uses::Blit`]),
+    /// each encoder with a call refused at its encoding before those: a fill past the member, a
+    /// binding past the table.
+    Refused,
 }
 
 /// A walk's command buffer, once it completed, and what it left.
@@ -192,7 +192,7 @@ pub(super) fn walk(
         Uses::Steps(steps) => {
             buffers.insert(STEPS, steps.clone());
         }
-        Uses::Output => {
+        Uses::Output | Uses::Refused => {
             buffers.insert(binding, member.clone());
         }
         _ => {}
@@ -210,9 +210,13 @@ pub(super) fn walk(
             .unwrap();
     }
     let copied = match uses {
-        Uses::Blit => {
+        Uses::Blit | Uses::Refused => {
             let copied = device.new_buffer(16, ResourceOptions::shared()).unwrap();
             let mut blit = command_buffer.blit_command_encoder().unwrap();
+            if let Uses::Refused = uses {
+                let past = member.length() + 16;
+                assert!(blit.fill_buffer(member, 0..past, 0).is_err());
+            }
             blit.copy_from_buffer_to_buffer(member, 0, &copied, 0, 16)
                 .unwrap();
             blit.end_encoding().unwrap();
@@ -223,6 +227,9 @@ pub(super) fn walk(
     let mut encoder = command_buffer.compute_command_encoder().unwrap();
     if let Uses::Heap(heap) = uses {
         encoder.use_heap(heap).unwrap();
+    }
+    if let Uses::Refused = uses {
+        assert!(encoder.set_buffer(Some(member), 0, u32::MAX).is_err());
     }
     encode_case(&mut encoder, &state, &walker.compute, &buffers, &holding).unwrap();
     encoder.end_encoding().unwrap();
@@ -609,11 +616,64 @@ fn a_pending_command_buffer_naming_a_buffer_rebound_since_reaches_the_new_pages(
     });
 }
 
-/// What a rebind cannot encode again keeps the gap: a blit encoder one of whose calls was refused
-/// at its encoding (a fill past the buffer) is refused again as the rebind encodes it, so the
-/// encoder keeps its first recording, which named the old pages: its submission runs nothing,
-/// the command buffer fails `EncodedUseRebound`, announced once, and the device counts the
-/// refused encoding. Its signal fires and its handler runs.
+/// An encoder one of whose calls was refused at its encoding is encoded again at a rebind
+/// (`replay.rs`; it once kept its first recording and failed `EncodedUseRebound`): the call is
+/// refused again and the calls after it run, as they ran after its refusal. A blit encoder's fill
+/// past the member, refused, then its copy of the member, which copies the new pages' node; a
+/// compute encoder's binding past its table, refused, then the walk, whose output lands in the new
+/// pages. The command buffer completes, its signal fired and its handler run, nothing is
+/// announced, and the device counts both encoders encoded again and no encoding refused. The
+/// render encoder's case is [`a_render_pass_with_calls_refused_at_its_encoding_is_encoded_again`].
+#[test]
+fn an_encoder_with_a_call_refused_at_its_encoding_is_encoded_again_with_it_refused() {
+    on_device_noticed(|device, messages| {
+        let queue = device.new_command_queue().unwrap();
+        let walker = public_case(POINTER_WALKER).unwrap();
+        let outputs = Outputs::new(device, &queue, &walker);
+        let Some((member, _)) = member_over(device, A) else {
+            return;
+        };
+        let before = device.work_counts();
+        let walked = walk(
+            device,
+            &queue,
+            &walker,
+            &member,
+            Uses::Refused,
+            true,
+            || drop(rebind_to(&member, B)),
+        );
+        let command_buffer = &walked.command_buffer;
+        assert_eq!(command_buffer.error(), None);
+        assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+        assert_eq!(walked.signaled, 1, "its signal");
+        assert!(walked.handled, "its handler");
+        assert_eq!(
+            walked.copied.as_deref(),
+            Some(&node(B)[..]),
+            "the copy after the refused fill"
+        );
+        assert!(
+            walked.produced == outputs.b,
+            "the walk after the refused binding"
+        );
+        let notices = assert_made_once(messages, &[], &shared_kinds(device));
+        assert!(!notices.contains_key(&Degradation::EncodedUseRebound));
+        let after = device.work_counts();
+        assert_eq!(after.encoders_reencoded, before.encoders_reencoded + 2);
+        assert_eq!(after.reencodes_refused, before.reencodes_refused);
+        eprintln!(
+            "CBF-MARK {}: encoders with a call refused at their encoding were encoded again",
+            device.name()
+        );
+    });
+}
+
+/// What a rebind cannot encode again keeps the gap: an encoder of a command buffer that used
+/// command predication keeps no log (`replay.rs`), so a blit encoder's copy of the member, before a
+/// compute encoder's empty If block, keeps its first recording, which named the old pages: its
+/// submission runs nothing, the command buffer fails `EncodedUseRebound`, announced once, the
+/// notice naming why, and its signal fires.
 #[test]
 fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
     on_device_noticed(|device, messages| {
@@ -622,17 +682,24 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
             return;
         };
         let copied = buffer_with(device, &[0x5a; 16]).unwrap();
+        let word = buffer_with(device, &[0; 4]).unwrap();
         let event = device.new_shared_event().unwrap();
+        let done = device.new_shared_event().unwrap();
         let command_buffer = queue.command_buffer().unwrap();
         command_buffer
             .encode_wait_for_event(EventRef::from(&event), 1)
             .unwrap();
         let mut blit = command_buffer.blit_command_encoder().unwrap();
-        let past = member.length() + 16;
-        assert!(blit.fill_buffer(&member, 0..past, 0).is_err());
         blit.copy_from_buffer_to_buffer(&member, 0, &copied, 0, 16)
             .unwrap();
         blit.end_encoding().unwrap();
+        let mut compute = command_buffer.compute_command_encoder().unwrap();
+        compute.encode_start_if(Some(&word), 0, 0, 0).unwrap();
+        assert!(compute.encode_end_if().unwrap());
+        compute.end_encoding().unwrap();
+        command_buffer
+            .encode_signal_event(EventRef::from(&done), 1)
+            .unwrap();
         command_buffer.commit().unwrap();
         let before = device.work_counts();
         drop(rebind_to(&member, B));
@@ -648,6 +715,7 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
             [0x5a; 16],
             "ran nothing"
         );
+        assert_eq!(done.signaled_value(), 1, "its signal");
         let notices = made_once(messages, &REBOUND_USES, &shared_kinds(device));
         // The notice names where the first submission found the use, and why no rebind
         // encoded it again.
@@ -655,8 +723,8 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
             .filter_map(|message| message.degradation.as_ref())
             .find(|notice| notice.degradation == Degradation::EncodedUseRebound)
             .map(|notice| notice.reason.clone());
-        let found = "(found in its blit encoder 0: a command of its own named it, and its \
-                     encoding again was refused: ";
+        let found = "(found in its blit encoder 0: a command of its own named it, not encoded \
+                     again as its command buffer used command predication";
         assert!(
             reason
                 .as_deref()
@@ -664,9 +732,8 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
             "{reason:?}"
         );
         let after = device.work_counts();
-        assert_eq!(after.reencodes_refused, before.reencodes_refused + 1);
         assert_eq!(after.encoders_reencoded, before.encoders_reencoded);
-        eprintln!("REBIND-REACH refused again: EncodedUseRebound, announced once");
+        eprintln!("REBIND-REACH not encoded again: EncodedUseRebound, announced once");
     });
 }
 
@@ -967,6 +1034,45 @@ fn indexed_draws_setting_a_rebound_buffer_again_are_each_encoded_again() {
         assert!(
             rebound.chunks(4).all(|texel| texel == [1, 0, 0, 255]),
             "the draws did not both read the new pages at their offsets: {rebound:?}"
+        );
+    });
+}
+
+/// As [`a_render_pass_drawing_from_a_buffer_rebound_before_its_first_submission_reads_the_new_pages`],
+/// with calls refused at their encoding before the draw (a draw with no pipeline state set, a
+/// vertex buffer past the table): the rebind encodes the render encoder again, each refused call
+/// refused again and the calls after it run (`render/replay.rs`), so the draw reads the new pages
+/// and the command buffer completes.
+#[test]
+fn a_render_pass_with_calls_refused_at_its_encoding_is_encoded_again() {
+    on_device(|device| {
+        let pipeline = corner_pipeline(device);
+        let off = [(0, corners([4.0, 4.0, 5.0, 4.0, 4.0, 5.0]))];
+        let whole = [(0, corners([-1.0, -1.0, 3.0, -1.0, -1.0, 3.0]))];
+        let encode = |encoder: &mut RenderCommandEncoder, member: &Buffer| {
+            assert!(encoder
+                .draw_primitives(PrimitiveType::Triangle, 0, 3, 1, 0)
+                .is_err());
+            assert!(encoder
+                .set_vertex_buffer(Some(member), 0, u32::MAX)
+                .is_err());
+            encoder.set_render_pipeline_state(&pipeline).unwrap();
+            encoder.set_vertex_buffer(Some(member), 0, 0).unwrap();
+            encoder
+                .draw_primitives(PrimitiveType::Triangle, 0, 3, 1, 0)
+                .unwrap();
+        };
+        let Some(kept) = rebound_pass(device, (&off, &whole), false, &encode) else {
+            return;
+        };
+        assert!(
+            kept.chunks(4).all(|texel| texel == [0, 0, 255, 255]),
+            "the old pages' draw covered texels: {kept:?}"
+        );
+        let rebound = rebound_pass(device, (&off, &whole), true, &encode).unwrap();
+        assert!(
+            rebound.chunks(4).all(|texel| texel == [1, 0, 0, 255]),
+            "the draw did not read the new pages: {rebound:?}"
         );
     });
 }

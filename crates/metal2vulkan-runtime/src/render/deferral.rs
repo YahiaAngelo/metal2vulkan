@@ -690,12 +690,12 @@ impl RenderCommandEncoder {
     ) -> Result<T, Error> {
         self.next += 1;
         match (&mut self.own, &self.logged) {
-            (Some(lowering), _) => f(lowering),
+            (Some(lowering), _) => lowering.logged(f),
             (None, Some(logged)) => {
                 let mut lowerer = lock(&logged.slot.lowerer);
                 let lowering = (lowerer.lowering.as_mut())
                     .ok_or_else(|| internal("an ended encoder's call"))?;
-                f(lowering)
+                lowering.logged(f)
             }
             (None, None) => Err(internal("an encoder without its lowering")),
         }
@@ -810,7 +810,9 @@ impl RenderCommandEncoder {
                     Lowerer {
                         lowering: Some(lowering),
                         ..
-                    } => render(lowering, (&filling.calls, &filling.indexed), &call),
+                    } => lowering.logged(|lowering| {
+                        render(lowering, (&filling.calls, &filling.indexed), &call)
+                    }),
                     Lowerer { lowering: None, .. } => Err(internal("an ended encoder's call")),
                 })
             }

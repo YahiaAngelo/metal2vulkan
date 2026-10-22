@@ -1365,14 +1365,14 @@ degradations! {
         /// resolved buffer) that was rebound (`rebind_bytes_no_copy`) after the command was
         /// encoded and before the command buffer was first submitted
         /// (`CommandBufferError::EncodedUseRebound`, `command_buffer/first_submission.rs`), in an
-        /// encoder the rebind could not encode again (a command predication's command buffer; a render pass a host step records, or
-        /// whose end captured its draws' tile reach; work recorded on the GPU alone that no longer
-        /// runs there; a call refused again; `replay.rs`). Its reason names where the first such
-        /// submission found the use (the encoder, and its own commands or work it left for later)
-        /// and why no rebind encoded or recorded it again. Announced once, as
-        /// the first such submission is made, on the scheduler's thread, which makes it:
-        /// `DeviceOptions::announce_each` does not repeat it, as no program
-        /// call or host step meets it.
+        /// encoder the rebind could not encode again (a command predication's command buffer; a
+        /// render pass a host step records, or whose end captured its draws' tile reach; work
+        /// recorded on the GPU alone that no longer runs there; a call that answers otherwise than
+        /// at its encoding; `replay.rs`). Its reason names where the first such submission found
+        /// the use (the encoder, and its own commands or work it left for later) and why no rebind
+        /// encoded or recorded it again. Announced once, as the first such submission is made, on
+        /// the scheduler's thread, which makes it: `DeviceOptions::announce_each` does not repeat
+        /// it, as no program call or host step meets it.
         EncodedUseRebound = "encoded-use-rebound", Precision,
             "each of Metal's submissions of the command buffer holding such a command runs \
              nothing and the command buffer fails (EncodedUseRebound), where Metal resolves the \

@@ -1752,12 +1752,13 @@ pub enum CommandBufferError {
     /// then; the runtime resolved it as the command was encoded. The rebind encodes the command
     /// buffer's compute, blit and render encoders that named it again, from their calls, so they
     /// reach the new pages as Metal's do (a resource state encoder takes no pages: an indirect
-    /// mapping update reads its buffer as it runs); this fails only an encoder that cannot be
-    /// encoded again: one of a command buffer that used command predication; a render pass recorded later (an indirect command buffer's execution, a draw
-    /// whose pipeline was being made) or whose end captured its draws' tile reach; and one a call
-    /// of which was refused (at its encoding, and so again). Each of Metal's submissions holding
-    /// such an encoder ran nothing (the command buffer's split), every other ran, the event signals
-    /// fired and the handlers ran. What the command buffer's encoders made resident
+    /// mapping update reads its buffer as it runs; a call refused at its encoding is refused
+    /// again, and the calls after it run); this fails only an encoder that cannot be encoded
+    /// again: one of a command buffer that used command predication; a render pass recorded later
+    /// (an indirect command buffer's execution, a draw whose pipeline was being made) or whose end
+    /// captured its draws' tile reach. Each of Metal's submissions holding such an encoder ran
+    /// nothing (the command buffer's split), every other ran, the event signals fired and the
+    /// handlers ran. What the command buffer's encoders made resident
     /// (`use_resource`, `use_heap`) and what its commands reach unnamed follow the rebind as
     /// Metal's do. The device announces the first (`Degradation::EncodedUseRebound`). A command
     /// buffer submitted before the rebind keeps the old pages, as Metal's does.
