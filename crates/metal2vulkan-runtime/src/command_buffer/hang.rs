@@ -95,6 +95,10 @@
 //!   whose waits are not met by then, and every one after it, read `Scheduled` with their last
 //!   batch, after the hang's, as does every one where the hang's own came with its last batch, and
 //!   one with a switch of storage forms riding on its commit.
+//! - **The device's recovery.** As its wait goes, the hold raises the device's recovery from
+//!   what it holds for: a hang's, and a fault's that a hang follows, from a hang; else from a
+//!   fault. A fault's that later failures follow raised the fault's already, as it read
+//!   `Scheduled`. A predicated loop running meanwhile ends there (`recovery.rs`).
 //!
 //! [`Batches::hold`]: super::batches::Batches::hold
 
@@ -102,6 +106,7 @@ use super::super::event::{EventShared, SharedEvent};
 use super::super::exit_guard;
 use super::super::gpu_time;
 use super::super::{CommandQueue, Device, Error};
+use super::recovery::Recovery;
 use super::{lock, CommandBufferShared, CommitFailure, FailedEncoders, Item, State};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
@@ -293,6 +298,15 @@ impl Held {
         }
     }
 
+    /// What the GPU recovers from as the wait goes: a hang's, and a fault's that a hang follows,
+    /// from a hang; else from a fault (`recovery.rs`).
+    fn recovery(self) -> Recovery {
+        match self.discards() {
+            true => Recovery::Hang,
+            false => Recovery::Fault,
+        }
+    }
+
     /// A fault's that later failures follow: how long after it read `Scheduled`, once the GPU
     /// recovered from the fault, its wait goes: [`FAULT_FROM_REACHED`] for each later fault, then
     /// [`FROM_REACHED`] for a hang. `None` for a hang's, and a fault's alone.
@@ -405,6 +419,7 @@ impl Hang {
         let queue = &buffer.queue;
         let hangs = Arc::clone(queue.hangs());
         let trails = Arc::clone(&queue.device().shared().trails);
+        let recoveries = Arc::clone(&queue.device().shared().recoveries);
         let held = self.held;
         hangs.counter(held).fetch_add(1, Ordering::SeqCst);
         let hang = {
@@ -429,6 +444,7 @@ impl Hang {
                 Some(after) => {
                     event.wait_until_signaled_value(Hang::REACHED, SIGNAL_BOUND);
                     std::thread::sleep(FAULT_FROM_REACHED);
+                    recoveries.raise(Recovery::Fault);
                     (hang_scheduled(weak), Instant::now() + after)
                 }
                 None => {
@@ -445,6 +461,7 @@ impl Hang {
             if held.discards() {
                 hangs.decide();
             }
+            recoveries.raise(held.recovery());
             event.set_signaled_value(Hang::RELEASED);
             event.wait_until_signaled_value(Hang::DONE, SIGNAL_BOUND);
             lock(&hangs.early).joined.clear();

@@ -57,6 +57,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 mod in_turn;
+mod loops;
 
 /// The earliest Metal's command buffer its GPU hung at read `Scheduled` after its commit:
 /// 5.06 ms.

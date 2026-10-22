@@ -41,6 +41,7 @@ pub(super) mod kept_barriers;
 pub(super) mod own;
 mod protection;
 pub(super) mod rebound_use;
+pub(super) mod recovery;
 mod reencode;
 pub(super) mod rerun;
 pub(super) mod revocation;

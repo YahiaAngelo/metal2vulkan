@@ -3055,7 +3055,11 @@ each item named states the rule in full.
   host, holding the batches after it on its queue (and those on other queues that use what the
   loop uses), and nothing encoded before the loop runs again. A loop without bound runs on, as
   Metal's does, after the program let go of its queue and device too, until the process ends or
-  the device is lost. Work inside a loop the runtime records apart (an indirect dispatch or
+  the device is lost. A loop running again stops, as Metal's does, at the GPU's recovery from a
+  fault or a hang of another queue's command buffer (primitive type 9; one behind the loop on
+  its own queue waits for it, a known gap in docs/FAST-PATHS.md): a fault's fails its command
+  buffer as a victim (`GpuRecoveryVictim`), a hang's ends it with no error, and nothing after the
+  loop runs. Work inside a loop the runtime records apart (an indirect dispatch or
   an indirect command buffer's execution a host step records) is recorded again in each such
   run, after another round trip to the host where its first recording waited for the work
   before it. A condition word past its buffer reads

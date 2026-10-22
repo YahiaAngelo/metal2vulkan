@@ -305,6 +305,12 @@ driver's. Each is open work.
   then, fails the command buffer as the encoder's draw does (`render/executions.rs`); failing it
   from inside the host step that meets the record, its earlier encoders run, is not built.
 
+- **A command buffer committed behind a running predicated loop on the loop's own queue waits for
+  the loop to end**, as every batch of a queue waits for the ones before it, where Metal's GPU
+  runs it meanwhile: a fault or hang in it ends the loop there on Metal (`recovery.rs`), and in
+  the runtime it waits, for good behind a loop without bound. A fault or hang on another queue
+  ends the loop as Metal's does.
+
 - **A no-copy buffer imported by its pointer follows a remap of its pages** on a driver whose
   pointer imports follow their address (`DriverFact::PointerImportsFollowTheirAddress`: ANV on
   i915, RADV, lavapipe): pages mapped over the buffer's addresses after it was made (`mmap` with
