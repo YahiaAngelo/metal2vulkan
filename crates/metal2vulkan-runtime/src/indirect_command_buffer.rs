@@ -22,8 +22,10 @@
 //!   and tessellation factor buffers so; and (probes) an indexed patch draw, its control-point
 //!   index buffer so too; and (a Metal probe) its object and mesh buffers, a mesh draw of
 //!   threadgroups or threads, and its barrier. What Metal's validation stops, or ends the process
-//!   for, is refused `Invalid` ([`Problem::IndirectCommandBuffer`]). A command keeps the pipeline
-//!   state set on it alive while its record names it.
+//!   for, is refused `Invalid` ([`Problem::IndirectCommandBuffer`]). A command names the pipeline
+//!   state set on it without holding it, as Metal's keeps no reference: the program's last
+//!   release of the state gives its ID back while the record still names it. The command keeps
+//!   what the state runs, and runs that while its record names the ID, as Metal's does.
 //! - **Render states a command does not inherit** (an M4 with macOS 27.0.1, each case plain and
 //!   under Metal's validation). macOS 26 lets a descriptor leave a render command's depth/stencil
 //!   state, depth bias, depth clip mode, cull mode, front-facing winding and triangle fill mode to
