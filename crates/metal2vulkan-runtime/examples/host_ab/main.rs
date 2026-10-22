@@ -29,6 +29,18 @@
 //!   wall time after it and the process's CPU time.
 //! - `fixed`: a command buffer's creation, an encoder of one command each (render, compute,
 //!   blit), and the commit call of a command buffer of 30 such encoders.
+//! - `calls`: the frames of a guest as reims-vgpu's `frame_cost` measures them, call by call: one
+//!   command buffer of long encoders (`wide`: a render pass of 512 draws, two compute encoders of
+//!   64 dispatches, a blit encoder of 32 copies) and 64 command buffers of short ones (`many`:
+//!   16 draws, one dispatch each, one copy), each with a completed handler and committed, then
+//!   each handler awaited and the command buffer waited for. Each draw sets two vertex buffers,
+//!   the second's offset moving, then a fragment texture and sampler or a fragment buffer at a
+//!   moving offset, by the pipeline state, which changes every eighth draw; the second compute
+//!   encoder makes 16 buffers resident first. Per step (`command_buffer`, `render_encoder`,
+//!   `set_state`, ..., `draw`, `end_render`, ..., `handler_commit`): the mean a call of each of
+//!   `--timed` frames, in ns, after 5 frames not timed; `*_frame_calls`, the frame's timed calls
+//!   summed; and `*_allocs`, the heap allocations a call of the step made on the encoding thread
+//!   over one more frame (`allocs`). `--variants wide` or `many` runs one shape alone.
 //! - `latency`: commit to `waitUntilCompleted`'s return, and commit to the completed handler, of
 //!   a command buffer that is empty, one blit fill, one dispatch, or one draw; one in flight.
 //! - `gpu`: a full-screen heavy fragment (`heavy_fragment`, 2048x2048 `RGBA16Float`) and a heavy
@@ -171,6 +183,7 @@
 //! On a Mac, the runtime's device opens the Vulkan loader (`/opt/homebrew/lib` among the places
 //! it looks) and MoltenVK's `MVK_CONFIG_*` variables apply. Run timings on an otherwise idle GPU.
 
+mod allocs;
 mod gpu;
 #[cfg(target_os = "macos")]
 mod native;
@@ -187,6 +200,7 @@ use workloads::Sizes;
 const WORKLOADS: [&str; 16] = [
     "encode",
     "fixed",
+    "calls",
     "latency",
     "gpu",
     "pipeline",
@@ -448,6 +462,7 @@ fn run<G: Gpu>(g: &G, opened: Instant, metallib: &Path, options: &Options) {
         match workload {
             "encode" => workloads::encode(g, &scene, sizes, &options.variants),
             "fixed" => workloads::fixed(g, &scene, sizes),
+            "calls" => workloads::calls(g, &scene, &library, sizes, &options.variants),
             "latency" => workloads::latency(g, &scene, sizes),
             "gpu" => workloads::gpu(g, &scene, sizes, options.outputs.as_deref()),
             "memory" => workloads::memory(g, sizes, &options.variants),

@@ -30,6 +30,8 @@ pub trait Gpu {
     type IndirectCommands;
     type SharedEvent;
     type Listener;
+    type Pass;
+    type BlitEncoder;
 
     /// The side and the device's name.
     fn label(&self) -> String;
@@ -184,6 +186,15 @@ pub trait Gpu {
         target: &Self::Texture,
         depth: &Self::Texture,
     ) -> Self::RenderEncoder;
+    /// A `MTLRenderPassDescriptor` of one color attachment, cleared and stored, made once for
+    /// many encoders ([`Gpu::pass_encoder`]).
+    fn pass(&self, target: &Self::Texture) -> Self::Pass;
+    /// `renderCommandEncoderWithDescriptor:` of `pass`.
+    fn pass_encoder(
+        &self,
+        command_buffer: &Self::CommandBuffer,
+        pass: &Self::Pass,
+    ) -> Self::RenderEncoder;
     fn set_render_pipeline(&self, encoder: &mut Self::RenderEncoder, state: &Self::RenderPipeline);
     fn set_depth_stencil(&self, encoder: &mut Self::RenderEncoder, state: &Self::DepthStencil);
     /// `setCullMode:` of `Back`, or of `None`.
@@ -198,6 +209,14 @@ pub trait Gpu {
         buffer: &Self::Buffer,
         offset: usize,
         index: usize,
+    );
+    /// `setVertexBuffers:offsets:withRange:` of `buffers` from index `first`.
+    fn set_vertex_buffers(
+        &self,
+        encoder: &mut Self::RenderEncoder,
+        buffers: &[&Self::Buffer],
+        offsets: &[usize],
+        first: usize,
     );
     fn set_fragment_buffer(
         &self,
@@ -264,6 +283,8 @@ pub trait Gpu {
     /// `useResource:usage:` of `commands`, `MTLResourceUsageWrite`: the encoder's kernels write
     /// them.
     fn use_commands(&self, encoder: &mut Self::ComputeEncoder, commands: &Self::IndirectCommands);
+    /// `useResources:count:usage:` of `buffers`, `MTLResourceUsageRead`.
+    fn use_buffers_read(&self, encoder: &mut Self::ComputeEncoder, buffers: &[&Self::Buffer]);
     /// `useResource:usage:` of `buffer`, read and write: the executed commands bind it.
     fn use_buffer(&self, encoder: &mut Self::ComputeEncoder, buffer: &Self::Buffer);
     /// `useResources:count:usage:` of `buffers`, `MTLResourceUsageRead`.
@@ -284,6 +305,17 @@ pub trait Gpu {
         commands: &Self::IndirectCommands,
         count: usize,
     );
+    /// `blitCommandEncoder`.
+    fn blit_encoder(&self, command_buffer: &Self::CommandBuffer) -> Self::BlitEncoder;
+    /// `copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:`.
+    fn copy_buffer(
+        &self,
+        encoder: &mut Self::BlitEncoder,
+        from: (&Self::Buffer, usize),
+        to: (&Self::Buffer, usize),
+        size: usize,
+    );
+    fn end_blit(&self, encoder: Self::BlitEncoder);
     /// A blit encoder of one `fillBuffer:range:value:` over the buffer's first `length` bytes.
     fn fill(&self, command_buffer: &Self::CommandBuffer, buffer: &Self::Buffer, length: usize);
     /// A blit encoder of `copyFromBuffer:...toTexture:...` into each of `textures`, a

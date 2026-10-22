@@ -428,3 +428,31 @@ fragment float4 shadow_fragment(LayerOut in [[stage_in]]) {
     float a = 1.0 - smoothstep(-24.0, 24.0, d);
     return float4(0.0, 0.0, 0.0, 0.35 * a * in.shape.z + float(NONCE) * 1.0e-12);
 }
+
+// The calls workload's functions (workloads::calls), shaped as a guest's draws: positions from
+// vertex buffer 0 by vertex, a colour from buffer 1 at an offset that moves; a fragment that
+// samples texture 0 with sampler 0, or one that returns fragment buffer 0's first float4.
+struct CallsOut {
+    float4 position [[position]];
+    float4 color;
+};
+
+vertex CallsOut calls_vertex(uint vid [[vertex_id]],
+                             const device float4 *positions [[buffer(0)]],
+                             const device float4 *colours [[buffer(1)]]) {
+    CallsOut out;
+    out.position = positions[vid] + float4(0.0, 0.0, float(NONCE) * 1.0e-12, 0.0);
+    out.color = colours[0];
+    return out;
+}
+
+fragment float4 calls_texture_fragment(CallsOut in [[stage_in]],
+                                       texture2d<float> t [[texture(0)]],
+                                       sampler s [[sampler(0)]]) {
+    return t.sample(s, in.position.xy / 512.0) * in.color;
+}
+
+fragment float4 calls_buffer_fragment(CallsOut in [[stage_in]],
+                                      const device float4 *c [[buffer(0)]]) {
+    return c[0] * in.color;
+}

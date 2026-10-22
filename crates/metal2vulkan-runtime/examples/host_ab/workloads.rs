@@ -2613,3 +2613,260 @@ pub fn icb_draws<G: Gpu>(g: &G, library: &G::Library, sizes: &Sizes) {
         }
     }
 }
+
+/// A frame of the calls workload, as a guest cuts one (module docs of `main.rs`): command
+/// buffers, each of a render pass of `draws` draws, two compute encoders of `dispatches`
+/// dispatches and a blit encoder of `blits` copies.
+#[derive(Clone, Copy)]
+struct CallShape {
+    name: &'static str,
+    command_buffers: usize,
+    draws: usize,
+    dispatches: usize,
+    blits: usize,
+}
+
+/// One command buffer of long encoders, and many of short ones.
+const CALL_SHAPES: [CallShape; 2] = [
+    CallShape {
+        name: "wide",
+        command_buffers: 1,
+        draws: 512,
+        dispatches: 64,
+        blits: 32,
+    },
+    CallShape {
+        name: "many",
+        command_buffers: 64,
+        draws: 16,
+        dispatches: 1,
+        blits: 1,
+    },
+];
+
+/// The calls a frame of the calls workload times, each a step.
+const CALL_STEPS: [&str; 16] = [
+    "command_buffer",
+    "render_encoder",
+    "set_state",
+    "set_vertex_buffers",
+    "set_fragment_texture",
+    "set_fragment_sampler",
+    "set_fragment_buffer",
+    "draw",
+    "end_render",
+    "compute_encoder",
+    "dispatch",
+    "dispatch_resident",
+    "end_compute",
+    "blit_copy",
+    "end_blit",
+    "handler_commit",
+];
+
+/// The buffers the second compute encoder of each command buffer makes resident.
+const CALL_RESIDENT: usize = 16;
+
+/// Each step's total and count over a frame: nanoseconds, or with `allocs` the allocations
+/// (`crate::allocs`) on the encoding thread.
+#[derive(Clone, Copy, Default)]
+struct StepTally([(u64, u64); CALL_STEPS.len()]);
+
+impl StepTally {
+    fn time<T>(&mut self, step: usize, allocs: bool, call: impl FnOnce() -> T) -> T {
+        let (out, amount) = match allocs {
+            true => {
+                let before = crate::allocs::this_thread();
+                let out = call();
+                (out, crate::allocs::this_thread() - before)
+            }
+            false => {
+                let start = Instant::now();
+                let out = call();
+                (out, start.elapsed().as_nanos() as u64)
+            }
+        };
+        let (total, count) = &mut self.0[step];
+        *total += amount;
+        *count += 1;
+        out
+    }
+}
+
+/// The calls workload's objects.
+struct CallObjects<G: Gpu> {
+    pass: G::Pass,
+    positions: G::Buffer,
+    colours: G::Buffer,
+    uniforms: G::Buffer,
+    states: [G::RenderPipeline; 2],
+    input: G::Buffer,
+    output: G::Buffer,
+    resident: Vec<G::Buffer>,
+    from: G::Buffer,
+    to: G::Buffer,
+}
+
+impl<G: Gpu> CallObjects<G> {
+    /// One command buffer of `shape`, its calls timed (or their allocations counted) into `t`,
+    /// committed with a completed handler that sends on its channel.
+    fn command_buffer(
+        &self,
+        g: &G,
+        s: &Scene<G>,
+        shape: CallShape,
+        (t, allocs): (&mut StepTally, bool),
+    ) -> (G::CommandBuffer, mpsc::Receiver<()>) {
+        let cb = t.time(0, allocs, || g.command_buffer());
+        let mut e = t.time(1, allocs, || g.pass_encoder(&cb, &self.pass));
+        let vertex = [&self.positions, &self.colours];
+        for i in 0..shape.draws {
+            let textured = (i / 8) % 2 == 0;
+            if i % 8 == 0 {
+                let state = &self.states[usize::from(!textured)];
+                t.time(2, allocs, || g.set_render_pipeline(&mut e, state));
+            }
+            t.time(3, allocs, || {
+                g.set_vertex_buffers(&mut e, &vertex, &[0, (i % 64) * 16], 0)
+            });
+            if textured {
+                t.time(4, allocs, || {
+                    g.set_fragment_texture(&mut e, &s.textures[0], 0)
+                });
+                t.time(5, allocs, || g.set_fragment_sampler(&mut e, &s.sampler, 0));
+            } else {
+                t.time(6, allocs, || {
+                    g.set_fragment_buffer(&mut e, &self.uniforms, (i % 256) * 256, 0)
+                });
+            }
+            t.time(7, allocs, || g.draw_strip(&mut e, 4));
+        }
+        t.time(8, allocs, || g.end_render(e));
+        let resident: Vec<&G::Buffer> = self.resident.iter().collect();
+        for (step, used) in [(10, &resident[..0]), (11, &resident[..])] {
+            let mut e = t.time(9, allocs, || g.compute_encoder(&cb));
+            g.set_compute_pipeline(&mut e, &s.tiny[0]);
+            if !used.is_empty() {
+                g.use_buffers_read(&mut e, used);
+            }
+            for i in 0..shape.dispatches {
+                let at = i * 256;
+                t.time(step, allocs, || {
+                    g.set_buffer(&mut e, &self.output, at, 0);
+                    g.set_buffer(&mut e, &self.input, at, 1);
+                    g.dispatch(&mut e, 1, 64);
+                });
+            }
+            t.time(12, allocs, || g.end_compute(e));
+        }
+        let mut blit = g.blit_encoder(&cb);
+        for i in 0..shape.blits {
+            let at = i * 1024;
+            t.time(13, allocs, || {
+                g.copy_buffer(&mut blit, (&self.from, at), (&self.to, at), 1024)
+            });
+        }
+        t.time(14, allocs, || g.end_blit(blit));
+        let (tx, rx) = mpsc::channel();
+        t.time(15, allocs, || {
+            g.on_completed(&cb, Box::new(move || tx.send(()).unwrap()));
+            g.commit(&cb);
+        });
+        (cb, rx)
+    }
+
+    /// One frame of `shape`: its command buffers committed, then each one's handler and wait.
+    fn frame(&self, g: &G, s: &Scene<G>, shape: CallShape, allocs: bool) -> StepTally {
+        g.pool(|| {
+            let mut t = StepTally::default();
+            let committed: Vec<_> = (0..shape.command_buffers)
+                .map(|_| self.command_buffer(g, s, shape, (&mut t, allocs)))
+                .collect();
+            for (cb, rx) in committed {
+                rx.recv().unwrap();
+                g.wait(&cb);
+            }
+            t
+        })
+    }
+}
+
+/// The consumer's frames, call by call (module docs of `main.rs`): each step's mean a call over
+/// each timed frame, then its allocations a call on the encoding thread over one more frame.
+pub fn calls<G: Gpu>(
+    g: &G,
+    s: &Scene<G>,
+    library: &G::Library,
+    sizes: &Sizes,
+    variants: &[String],
+) {
+    let floats_of = |n: usize, f: &dyn Fn(usize) -> [f32; 4]| {
+        let values: Vec<f32> = (0..n).flat_map(f).collect();
+        g.buffer_with(&floats(&values))
+    };
+    let state =
+        |fragment| g.render_pipeline(library, "calls_vertex", fragment, Format::Bgra8, false);
+    let objects = CallObjects {
+        pass: g.pass(&s.target),
+        // A strip of four corners of a small square, then nothing.
+        positions: floats_of(256, &|v| match v {
+            0..4 => [
+                -0.1 + 0.2 * (v & 1) as f32,
+                -0.1 + 0.2 * (v >> 1) as f32,
+                0.0,
+                1.0,
+            ],
+            _ => [0.0; 4],
+        }),
+        colours: floats_of(256, &|v| [0.5, (v % 7) as f32 / 7.0, 0.25, 1.0]),
+        uniforms: floats_of(4096, &|v| [(v % 5) as f32 / 5.0, 0.5, 0.5, 1.0]),
+        states: [
+            state("calls_texture_fragment"),
+            state("calls_buffer_fragment"),
+        ],
+        input: g.buffer_with(&vec![1u8; 65536]),
+        output: g.buffer(65536),
+        resident: (0..CALL_RESIDENT).map(|_| g.buffer(4096)).collect(),
+        from: g.buffer_with(&vec![0x3cu8; 65536]),
+        to: g.buffer(65536),
+    };
+    const WARM: usize = 5;
+    let shapes = CALL_SHAPES
+        .into_iter()
+        .filter(|shape| variants.is_empty() || variants.iter().any(|v| v == shape.name));
+    for shape in shapes {
+        let mut means: [Vec<f64>; CALL_STEPS.len()] = Default::default();
+        let mut frames = vec![];
+        for frame in 0..WARM + sizes.timed {
+            let t = objects.frame(g, s, shape, false);
+            if frame >= WARM {
+                let mut sum = 0.0;
+                for (step, &(total, count)) in t.0.iter().enumerate() {
+                    if count > 0 {
+                        means[step].push(total as f64 / count as f64);
+                    }
+                    sum += total as f64;
+                }
+                frames.push(sum / 1e3);
+            }
+        }
+        let name = shape.name;
+        for (step, values) in CALL_STEPS.iter().zip(&mut means) {
+            if !values.is_empty() {
+                emit("calls", &format!("{name}_{step}"), "ns/call", values);
+            }
+        }
+        emit("calls", &format!("{name}_frame_calls"), "us", &mut frames);
+        let t = crate::allocs::counting(|| objects.frame(g, s, shape, true));
+        for (step, &(total, count)) in CALL_STEPS.iter().zip(&t.0) {
+            if count > 0 {
+                emit(
+                    "calls",
+                    &format!("{name}_{step}_allocs"),
+                    "allocs/call",
+                    &mut [total as f64 / count as f64],
+                );
+            }
+        }
+    }
+}

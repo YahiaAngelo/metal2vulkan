@@ -83,6 +83,8 @@ impl Gpu for Native {
     type IndirectCommands = Object<dyn MTLIndirectCommandBuffer>;
     type SharedEvent = Object<dyn MTLSharedEvent>;
     type Listener = Retained<MTLSharedEventListener>;
+    type Pass = Retained<MTLRenderPassDescriptor>;
+    type BlitEncoder = Object<dyn MTLBlitCommandEncoder>;
 
     fn label(&self) -> String {
         format!("native Metal on {}", self.device.name())
@@ -486,6 +488,32 @@ impl Gpu for Native {
             .expect("renderCommandEncoderWithDescriptor")
     }
 
+    fn pass(&self, target: &Self::Texture) -> Self::Pass {
+        let pass = MTLRenderPassDescriptor::renderPassDescriptor();
+        // SAFETY: attachment 0 exists.
+        let color = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
+        color.setTexture(Some(target));
+        color.setLoadAction(MTLLoadAction::Clear);
+        color.setStoreAction(MTLStoreAction::Store);
+        color.setClearColor(MTLClearColor {
+            red: 0.0,
+            green: 0.0,
+            blue: 0.0,
+            alpha: 1.0,
+        });
+        pass
+    }
+
+    fn pass_encoder(
+        &self,
+        command_buffer: &Self::CommandBuffer,
+        pass: &Self::Pass,
+    ) -> Self::RenderEncoder {
+        command_buffer
+            .renderCommandEncoderWithDescriptor(pass)
+            .expect("renderCommandEncoderWithDescriptor")
+    }
+
     fn depth_render_encoder(
         &self,
         command_buffer: &Self::CommandBuffer,
@@ -550,6 +578,30 @@ impl Gpu for Native {
     ) {
         // SAFETY: the offset lies in the buffer and the index is in Metal's range.
         unsafe { encoder.setVertexBuffer_offset_atIndex(Some(buffer), offset, index) };
+    }
+
+    fn set_vertex_buffers(
+        &self,
+        encoder: &mut Self::RenderEncoder,
+        buffers: &[&Self::Buffer],
+        offsets: &[usize],
+        first: usize,
+    ) {
+        let pointers: Vec<*const ProtocolObject<dyn MTLBuffer>> =
+            buffers.iter().map(|b| &***b as *const _).collect();
+        let range = objc2_foundation::NSRange {
+            location: first,
+            length: buffers.len(),
+        };
+        // SAFETY: as many buffers as offsets, each offset inside its buffer, the indices in
+        // Metal's range.
+        unsafe {
+            encoder.setVertexBuffers_offsets_withRange(
+                NonNull::new(pointers.as_ptr() as *mut _).expect("buffers"),
+                NonNull::new(offsets.as_ptr() as *mut usize).expect("offsets"),
+                range,
+            )
+        };
     }
 
     fn set_fragment_buffer(
@@ -699,6 +751,19 @@ impl Gpu for Native {
         );
     }
 
+    fn use_buffers_read(&self, encoder: &mut Self::ComputeEncoder, buffers: &[&Self::Buffer]) {
+        let resources: Vec<NonNull<ProtocolObject<dyn MTLResource>>> = buffers
+            .iter()
+            .map(|b| NonNull::from(ProtocolObject::<dyn MTLResource>::from_ref(&***b)))
+            .collect();
+        if let Some(first) = NonNull::new(resources.as_ptr() as *mut _) {
+            // SAFETY: `resources.len()` resources of this device.
+            unsafe {
+                encoder.useResources_count_usage(first, resources.len(), MTLResourceUsage::Read)
+            };
+        }
+    }
+
     fn use_buffer(&self, encoder: &mut Self::ComputeEncoder, buffer: &Self::Buffer) {
         encoder.useResource_usage(
             ProtocolObject::from_ref(&**buffer),
@@ -753,6 +818,35 @@ impl Gpu for Native {
         // SAFETY: the range lies within the buffer's commands.
         unsafe { blit.resetCommandsInBuffer_withRange(commands, range) };
         blit.endEncoding();
+    }
+
+    fn blit_encoder(&self, command_buffer: &Self::CommandBuffer) -> Self::BlitEncoder {
+        command_buffer
+            .blitCommandEncoder()
+            .expect("blitCommandEncoder")
+    }
+
+    fn copy_buffer(
+        &self,
+        encoder: &mut Self::BlitEncoder,
+        (from, from_offset): (&Self::Buffer, usize),
+        (to, to_offset): (&Self::Buffer, usize),
+        size: usize,
+    ) {
+        // SAFETY: both ranges lie in their buffers.
+        unsafe {
+            encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size(
+                from,
+                from_offset,
+                to,
+                to_offset,
+                size,
+            )
+        };
+    }
+
+    fn end_blit(&self, encoder: Self::BlitEncoder) {
+        encoder.endEncoding();
     }
 
     fn fill(&self, command_buffer: &Self::CommandBuffer, buffer: &Self::Buffer, length: usize) {
