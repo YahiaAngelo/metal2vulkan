@@ -228,6 +228,9 @@ impl UlpTable {
 /// - `BlendedWriteRounding`: unbounded: a blended half-float channel under
 ///   `textureWriteRoundingMode` 2 stores the device's rounding of the blend's result, which no
 ///   Vulkan blend states, where Metal rounds it to nearest even.
+/// - `CoverageReadsRoundedAlpha`: unbounded: a fragment whose alpha lies near a coverage
+///   threshold may cover one sample more or fewer than Metal's, which moves every channel a
+///   resolve or a later blend reads there.
 /// - `RotatedBlendRounding`: unbounded: an `ARGB8Unorm` attachment blended in none of the measured
 ///   forms may store a channel one code apart from Metal's, which moves every later word that reads
 ///   it.
@@ -314,6 +317,7 @@ pub fn allowance(note: PrecisionNote) -> Allowance {
         | N::VertexSimdgroupGrouping
         | N::FragmentSimdgroupGrouping
         | N::BlendedWriteRounding
+        | N::CoverageReadsRoundedAlpha
         | N::RotatedBlendRounding
         | N::HalfOutputPrecision
         | N::ExtendedRangeBlendSource

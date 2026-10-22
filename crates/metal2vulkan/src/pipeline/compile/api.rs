@@ -1508,8 +1508,13 @@ fn stage_module(a: &FunctionArtifact, linked: &Linked, i: usize) -> Result<Stage
         .graphics
         .as_ref()
         .map_or(&[][..], |g| &g.color_attachments[..]);
+    // Alpha to coverage reads the alpha the function rounds.
+    let coverage = linked
+        .graphics
+        .as_ref()
+        .is_some_and(|g| g.alpha_to_coverage);
     let Some((precision_notes, rounded_colors)) =
-        crate::pipeline::color_writes::pipeline_writes(a, rules, colors)
+        crate::pipeline::color_writes::pipeline_writes(a, rules, colors, coverage)
     else {
         return Err(invariant(
             "link gave no rule word to a selected color attachment",

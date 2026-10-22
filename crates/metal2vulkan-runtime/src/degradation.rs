@@ -2201,6 +2201,13 @@ degradations! {
         /// rounding of a level may read another level or filter than Metal's near a boundary, and
         /// the query answers the device's level.
         DeviceSampleLevel = "device-sample-level";
+        /// A render pipeline covers by alpha under `textureWriteRoundingMode` 2, and its fragment
+        /// function writes a `float` alpha to a half-float attachment 0 that stores it as written:
+        /// the function rounds the alpha to the nearest-even half Metal stores, and the coverage
+        /// reads the rounded alpha where Metal's reads the alpha before rounding, so a fragment
+        /// whose alpha lies within half a `half` step of a coverage threshold may cover one
+        /// sample more or fewer.
+        CoverageReadsRoundedAlpha = "coverage-reads-rounded-alpha";
     }
 }
 

@@ -21,9 +21,14 @@
 //! The rounding is exact only where nothing after the shader changes the value: an attachment
 //! that blends with factors other than one and zero keeps the device's conversion
 //! ([`ChannelWrite::Device`], recorded as `PrecisionNote::DeviceColorConversion`), and so does
-//! the alpha of attachment 0 under alpha-to-coverage, which the coverage reads as computed. A
-//! format whose conversion Metal was not measured with keeps the device's too, and so does a
-//! 32-bit float attachment that blends so, whose stored value is the device's blend arithmetic.
+//! the alpha of attachment 0 under alpha-to-coverage at the default rounding mode, which the
+//! coverage reads as computed. Under `NearestEven` that alpha rounds as the other channels do:
+//! Metal stores the nearest-even half and reads the coverage from the alpha before rounding
+//! (probe `a2c` on an Apple M3 Max, macOS 27.0.1: the coverage of 16,384 alphas is the same under
+//! either mode), which no device separates, so the coverage reads the rounded alpha
+//! (`PrecisionNote::CoverageReadsRoundedAlpha`, [`pipeline_writes`]). A format whose conversion
+//! Metal was not measured with keeps the device's conversion too, and so does a 32-bit float
+//! attachment that blends so, whose stored value is the device's blend arithmetic.
 //!
 //! `Device::compile_render_pipeline` derives the map for a `Function` fragment stage from every
 //! color attachment of the pipeline's descriptor ([`color_writes`]); the fragment function
@@ -112,9 +117,7 @@ pub(crate) fn exact_writes(
             false => attachment_write(&c, coverage_alpha),
         };
         let write = match rounding {
-            TextureWriteRoundingMode::NearestEven => {
-                write.map(|w| nearest_even(w, &c, coverage_alpha))
-            }
+            TextureWriteRoundingMode::NearestEven => write.map(|w| nearest_even(w, &c)),
             _ => write,
         };
         if let Some(write) = write {
@@ -211,12 +214,15 @@ pub(crate) fn selected_notes(sel: &SelectedWrite, word: u32) -> BTreeSet<Precisi
 /// ([`selected_notes`], [`selected_rounds`]), `PrecisionNote::HalfOutputPrecision` where an
 /// attachment of `StageIo::half_blend_colors` blends ([`blends_output`]), and
 /// `PrecisionNote::HalfOutputFastMathBlend` where one of `StageIo::half_fast_colors` stores some
-/// channel ([`stores_output`]). Each sorted, each entry once. `None` where such an attachment has
-/// no rule word.
+/// channel ([`stores_output`]), and `PrecisionNote::CoverageReadsRoundedAlpha` where the pipeline
+/// covers by alpha (`alpha_to_coverage`, `GraphicsState::alpha_to_coverage`) and the function
+/// rounds that alpha to nearest even ([`rounds_coverage_alpha`]). Each sorted, each entry once.
+/// `None` where such an attachment has no rule word.
 pub(crate) fn pipeline_writes(
     a: &FunctionArtifact,
     rules: &[(u32, u32)],
     colors: &[Option<ColorAttachmentState>],
+    alpha_to_coverage: bool,
 ) -> Option<(Vec<PrecisionNote>, Vec<u32>)> {
     let mut notes = a.precision.clone();
     let mut rounded = a.interface.io.rounded_colors.clone();
@@ -224,6 +230,9 @@ pub(crate) fn pipeline_writes(
         if let Err(at) = v.binary_search(&x) {
             v.insert(at, x);
         }
+    }
+    if alpha_to_coverage && rounds_coverage_alpha(a) {
+        insert(&mut notes, PrecisionNote::CoverageReadsRoundedAlpha);
     }
     let attachment = |c: &u32| {
         usize::try_from(*c)
@@ -284,6 +293,18 @@ pub(crate) fn rule_words(
         .collect()
 }
 
+/// Whether fragment function `a` rounds the alpha of its output to attachment 0 to nearest even in
+/// the shader ([`HALF_NEAREST`], the attachment listed in `StageIo::rounded_colors`), which
+/// alpha-to-coverage then reads where Metal's reads the alpha before rounding (the module docs).
+fn rounds_coverage_alpha(a: &FunctionArtifact) -> bool {
+    let io = &a.interface.io;
+    io.rounded_colors.contains(&0)
+        && io
+            .color_writes
+            .get(&0)
+            .is_some_and(|rules| rules[3] == Some(HALF_NEAREST))
+}
+
 /// A half-float channel's rule ([`ChannelWrite::FloatTowardZero`] of ten fraction bits, signed).
 pub(crate) const HALF: ChannelWrite = ChannelWrite::FloatTowardZero {
     mantissa: 10,
@@ -309,31 +330,27 @@ pub(crate) const HALF_BLENDED: ChannelWrite = ChannelWrite::BlendedNearestEven {
     signed: true,
 };
 
-/// The channels `rules` of attachment `c` (alpha-to-coverage reading its alpha where
-/// `coverage_alpha`) under `TextureWriteRoundingMode::NearestEven`: each channel the format
-/// rounds as a half ([`HALF`], whatever the default map made of it) rounded to nearest even
-/// ([`HALF_NEAREST`]) where it stores the output as written (no blend, or one of factors one and
-/// zero), Metal's rounding of the blend's result ([`HALF_BLENDED`], which the device's blend
-/// makes) after a blend of other factors, and the device's ([`ChannelWrite::Device`]) for the
-/// alpha alpha-to-coverage reads.
+/// The channels `rules` of attachment `c` under `TextureWriteRoundingMode::NearestEven`: each
+/// channel the format rounds as a half ([`HALF`], whatever the default map made of it) rounded to
+/// nearest even ([`HALF_NEAREST`]) where it stores the output as written (no blend, or one of
+/// factors one and zero), the alpha alpha-to-coverage reads included (the module docs), and
+/// Metal's rounding of the blend's result ([`HALF_BLENDED`], which the device's blend makes) after
+/// a blend of other factors.
 fn nearest_even(
     mut rules: [Option<ChannelWrite>; 4],
     c: &ColorAttachmentDescriptor,
-    coverage_alpha: bool,
 ) -> [Option<ChannelWrite>; 4] {
     let Some(WriteConversion::Rules(format)) = write_conversion(c.pixel_format) else {
         return rules;
     };
-    let replaced = !c.blending_enabled || replaces(c);
-    for (i, (rule, own)) in rules.iter_mut().zip(format).enumerate() {
-        if own != Some(HALF) || rule.is_none() {
-            continue;
+    let rounded = match !c.blending_enabled || replaces(c) {
+        true => HALF_NEAREST,
+        false => HALF_BLENDED,
+    };
+    for (rule, own) in rules.iter_mut().zip(format) {
+        if own == Some(HALF) && rule.is_some() {
+            *rule = Some(rounded);
         }
-        *rule = Some(match (coverage_alpha && i == 3, replaced) {
-            (true, _) => ChannelWrite::Device,
-            (false, true) => HALF_NEAREST,
-            (false, false) => HALF_BLENDED,
-        });
     }
     rules
 }

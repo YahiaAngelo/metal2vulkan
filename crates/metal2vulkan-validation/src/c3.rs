@@ -737,6 +737,11 @@ pub struct SlotRow {
 ///   other than one and zero (`BlendedWriteRounding`): the device's blend converts its result by
 ///   its own rounding where Metal rounds it to nearest even, and the stored half is ordinary data
 ///   later words use. Open until the function blends under the pixel interlock.
+/// - A pipeline that covers by alpha under `textureWriteRoundingMode` 2 whose function rounds
+///   attachment 0's alpha (`CoverageReadsRoundedAlpha`): the coverage reads the rounded alpha
+///   where Metal's reads it before rounding, so a fragment near a coverage threshold may cover
+///   another sample, and the stored samples are ordinary data later words use. Open until Metal's
+///   coverage pattern is computed in the function.
 /// - An `ARGB8Unorm` attachment blended in none of the measured forms
 ///   (`RotatedBlendRounding`): Apple's blend computes a factor pair apart in its color and alpha
 ///   arithmetic, which the rotation swaps for Metal's alpha and blue, and the stored code is
@@ -756,7 +761,7 @@ pub struct SlotRow {
 /// denormal, a `half` rounding) belongs in a per-word judgement of a reading's differing words,
 /// beside the check of each against Apple's bound, never in this list: a row-level match would
 /// reopen every signed-off reading whose row merely records the note.
-pub const DEFERRED_NEAR_EQUIVALENTS: [PrecisionNote; 12] = [
+pub const DEFERRED_NEAR_EQUIVALENTS: [PrecisionNote; 13] = [
     PrecisionNote::RasterizationRateMap,
     PrecisionNote::SparseResidency,
     PrecisionNote::CubeGradientFootprint,
@@ -767,6 +772,7 @@ pub const DEFERRED_NEAR_EQUIVALENTS: [PrecisionNote; 12] = [
     PrecisionNote::VertexSimdgroupGrouping,
     PrecisionNote::FragmentSimdgroupGrouping,
     PrecisionNote::BlendedWriteRounding,
+    PrecisionNote::CoverageReadsRoundedAlpha,
     PrecisionNote::RotatedBlendRounding,
     PrecisionNote::ComputedSampleDepth,
 ];
@@ -878,6 +884,13 @@ fn near_equivalent_bound(note: PrecisionNote) -> &'static str {
              Metal rounds it to nearest even (MoltenVK's toward zero; under a constant factor \
              Metal's result is neither rule's on 2,376 of 580,508 RGBA16Float channels); \
              exact path: the blend in the function under the pixel interlock"
+        }
+        PrecisionNote::CoverageReadsRoundedAlpha => {
+            "a pipeline covering by alpha under textureWriteRoundingMode 2 stores Metal's \
+             nearest-even half alpha, and its coverage reads that rounded alpha where Metal's \
+             reads the alpha before rounding: a fragment whose alpha lies within half a half step \
+             of a coverage threshold may cover one sample more or fewer (2 of 16,384 alphas on an \
+             Apple M3 Max); exact path: Metal's coverage pattern computed in the function"
         }
         PrecisionNote::RotatedBlendRounding => {
             "an ARGB8Unorm attachment blended in none of the measured forms may store a channel \

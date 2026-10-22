@@ -316,6 +316,8 @@ mod compressed_moves;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod compute_threadgroups;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod coverage_alpha_rounding;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod coverage_loop;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod creation_times;

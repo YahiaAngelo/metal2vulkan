@@ -1414,6 +1414,7 @@ codec_enum! {
         UnmeasuredGroupSpeculation,
         NotMipmappedAnisotropicFilter,
         DeviceSampleLevel,
+        CoverageReadsRoundedAlpha,
     }
     BindingSource {
         Buffer(f0), Texture(f0), Sampler(f0), CombinedTextureSampler { texture, sampler },

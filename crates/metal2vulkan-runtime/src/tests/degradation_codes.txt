@@ -17,6 +17,7 @@ metal2vulkan-degrade-combined-archive-stages
 metal2vulkan-degrade-compressed-texel-decode
 metal2vulkan-degrade-computed-sample-depth
 metal2vulkan-degrade-copied-draw-bytes
+metal2vulkan-degrade-coverage-reads-rounded-alpha
 metal2vulkan-degrade-cpu-block-decode
 metal2vulkan-degrade-cross-class-texture-neutral
 metal2vulkan-degrade-cube-face-reciprocal

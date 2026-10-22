@@ -642,6 +642,7 @@ fn half_float_writes_note_the_nan_encoding_where_the_device_rewrites_it() {
                     &f,
                     &g.color_write_rules,
                     &g.color_attachments,
+                    g.alpha_to_coverage,
                 )
                 .unwrap_or_else(|| panic!("{what}: no rule word"));
                 assert_eq!(notes.contains(&note), want, "{what}: {notes:?}");
@@ -735,9 +736,11 @@ fn half_float_attachments_take_the_halfs_bits_through_a_16_bit_output() {
 /// to nearest even in the function on every profile, MoltenVK's included (listed as rounded, no
 /// device conversion noted, the device's blend of one and zero dropped), and the pipeline links
 /// valid; a `half` output, already a half, rounds nothing (on MoltenVK it is written as a half's
-/// bits). After a blend of other factors the device rounds the blend's result, which Metal rounds
-/// to nearest even: the channels are written as computed and the module announces
-/// `PrecisionNote::BlendedWriteRounding` (no device conversion noted), MoltenVK's too.
+/// bits). Under alpha-to-coverage the alpha rounds too, and a pipeline whose function rounds it
+/// records `PrecisionNote::CoverageReadsRoundedAlpha`. After a blend of other factors the device
+/// rounds the blend's result, which Metal rounds to nearest even: the channels are written as
+/// computed and the module announces `PrecisionNote::BlendedWriteRounding` (no device conversion
+/// noted), MoltenVK's too.
 #[test]
 fn half_attachments_round_to_nearest_even_under_mode_two() {
     use crate::metal::{BlendFactor, TextureWriteRoundingMode};
@@ -758,9 +761,16 @@ fn half_attachments_round_to_nearest_even_under_mode_two() {
         let mut r = RenderLinkInputs::new();
         r.color_attachments[0] = Some(ColorAttachmentDescriptor::new(PixelFormat::RGBA16Float));
         r.texture_write_rounding_mode = TextureWriteRoundingMode::NearestEven;
-        for entry in ["rt6_fill_rgba32float", "rt6_fill_rgba16float"] {
-            let what = format!("{stem} {entry}");
-            let f = compile_with(&bc, entry, &p, &fragment_inputs(&r, &p))
+        let mut covered = r.clone();
+        covered.alpha_to_coverage = true;
+        for (entry, r) in [
+            ("rt6_fill_rgba32float", &r),
+            ("rt6_fill_rgba16float", &r),
+            ("rt6_fill_rgba32float", &covered),
+            ("rt6_fill_rgba16float", &covered),
+        ] {
+            let what = format!("{stem} {entry} coverage {}", r.alpha_to_coverage);
+            let f = compile_with(&bc, entry, &p, &fragment_inputs(r, &p))
                 .unwrap_or_else(|e| panic!("{what}: {e}"));
             assert_eq!(
                 f.interface.io.color_writes.get(&0),
@@ -774,8 +784,21 @@ fn half_attachments_round_to_nearest_even_under_mode_two() {
                 "{what}: {:?}",
                 f.precision
             );
-            let l = link(&[&v, &f], &render(&r), &p).unwrap_or_else(|e| panic!("{what}: {e}"));
+            let l = link(&[&v, &f], &render(r), &p).unwrap_or_else(|e| panic!("{what}: {e}"));
             validate_all(&l, &[&v, &f], &p);
+            let g = l.graphics.as_ref().expect("graphics");
+            let (notes, _) = crate::pipeline::color_writes::pipeline_writes(
+                &f,
+                &g.color_write_rules,
+                &g.color_attachments,
+                g.alpha_to_coverage,
+            )
+            .unwrap_or_else(|| panic!("{what}: no rule word"));
+            assert_eq!(
+                notes.contains(&PrecisionNote::CoverageReadsRoundedAlpha),
+                float && r.alpha_to_coverage,
+                "{what}: {notes:?}"
+            );
         }
         let mut blended = r.clone();
         if let Some(a) = blended.color_attachments[0].as_mut() {
@@ -1071,6 +1094,7 @@ fn measured_color_conversions_are_left_to_the_device() {
                         &s,
                         &g.color_write_rules,
                         &g.color_attachments,
+                        g.alpha_to_coverage,
                     )
                     .unwrap_or_else(|| panic!("{what}: no rule word"));
                     assert_eq!(rounded.contains(&0), listed, "{what} selected");
