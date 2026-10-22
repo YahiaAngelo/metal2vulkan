@@ -621,6 +621,8 @@ mod primitive_ids;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod private_memory;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod private_primitives;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod property_reads;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod pvrtc_textures;
