@@ -21,7 +21,9 @@
 //! ([`WRAPPED`]), the shader-side stencil ([`SHADOW`]), tile dispatches ([`TILE_DISPATCHES`]),
 //! fragment imageblocks ([`FRAGMENT_IMAGEBLOCKS`]), command buffers' GPU times ([`GPU_TIMES`],
 //! [`UNTIMED`], [`FROM_HOST`]), color fills packed where fills ignore the color
-//! ([`UNPACKED_FILL`]), draws of points no state sizes in `topology_classes` ([`UNSIZED_POINTS`]),
+//! ([`UNPACKED_FILL`]), texture buffers' fills reading bytes past their pattern's copies in
+//! `texture_buffer_fills` ([`TEXTURE_BUFFER_FILL`]), draws of points no state sizes in
+//! `topology_classes` ([`UNSIZED_POINTS`]),
 //! resource IDs ([`RESOURCE_IDS`], [`UNLISTED`]),
 //! indirect command buffers' commands naming a released state ([`RELEASED_STATES`]) and their host
 //! steps ([`HOST_STEPS`]), indirect dispatches' host reads ([`INDIRECT_DISPATCHES`]), indexed draws
@@ -321,6 +323,10 @@ pub(super) const UNTIMED: [Degradation; 1] = [Degradation::UntimedCommandBuffer]
 /// The kind `color_fills` takes on every venue, with a color packed in a padded 10-bit format.
 pub(super) const UNPACKED_FILL: [Degradation; 1] = [Degradation::UnpackedFillColor];
 
+/// The kind `texture_buffer_fills` takes on every venue, with fills whose chunks read bytes past
+/// their pattern's whole copies.
+pub(super) const TEXTURE_BUFFER_FILL: [Degradation; 1] = [Degradation::TextureBufferFillLeftover];
+
 /// The kind `gpu_times` takes on every venue, on a device made with `gpu_times_from_host`, and
 /// `first_use`'s busy work where the driver answers GPU times from the host
 /// (`gpu_times::read_kinds`).
@@ -462,6 +468,7 @@ fn every_kind_has_a_site_a_lane_test_takes() {
         &GPU_TIMES,
         &UNTIMED,
         &UNPACKED_FILL,
+        &TEXTURE_BUFFER_FILL,
         &FROM_HOST,
         &RESOURCE_IDS,
         &UNLISTED,

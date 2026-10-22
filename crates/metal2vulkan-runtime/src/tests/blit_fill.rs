@@ -1,9 +1,10 @@
 //! The bytes Metal's private texture fills write (`blit_fill.rs`): each multisampled sample's,
-//! from our probe `ms.m`'s read-backs (the M3 Max under macOS 27.0.1), and the formats a fill
-//! has a unit for.
+//! from our probe `ms.m`'s read-backs, and a texture buffer's, from our probe `tb.m`'s (the M3
+//! Max under macOS 27.0.1), and the formats a fill has a unit for.
 
-use crate::blit_fill::{fill_unit, sample_units, words};
+use crate::blit_fill::{fill_unit, sample_units, words, StreamFill};
 use metal2vulkan::metal::PixelFormat;
+use std::ops::Range;
 
 /// Bytes from hex.
 fn hex(text: &str) -> Vec<u8> {
@@ -104,4 +105,108 @@ fn every_texture_format_has_a_fill_unit() {
         [P::Depth24UnormStencil8, P::X24Stencil8],
         "formats without a fill unit"
     );
+}
+
+/// The pattern of `n` bytes `a1 a2 ..`, the probe's.
+fn counting(n: usize, from: u8) -> Vec<u8> {
+    (0..n).map(|i| from.wrapping_add(i as u8)).collect()
+}
+
+/// The bytes `bytes` of a texture buffer's buffer a fill of `pattern` writes, as hex.
+fn streamed(pattern: &[u8], bytes: Range<u64>) -> String {
+    let stream = StreamFill::new(pattern);
+    bytes
+        .clone()
+        .map(|at| format!("{:02x}", stream.byte(&bytes, at)))
+        .collect()
+}
+
+/// A texture buffer's fill writes the bytes Metal's writes: the pattern by the masked index of the
+/// region's byte, but in each 16-byte chunk of the buffer the region covers whole, 16 bytes of the
+/// block of the pattern's whole copies, zeros past them (`tb.m`'s cases, the region's bytes from
+/// the texture's offset plus `x` texels).
+#[test]
+fn texture_buffer_fills_write_metal_s_bytes() {
+    // 8 bytes into 5 `R8Unorm` texels from byte 7, and 8 `RGBA8Unorm` texels from byte 80.
+    assert_eq!(streamed(&counting(8, 0xa1), 7..12), "a1a2a3a4a5");
+    assert_eq!(
+        streamed(&counting(8, 0xa1), 80..112),
+        "a1a2a3a4a5a6a7a8a1a2a3a4a5a6a7a8a1a2a3a4a5a6a7a8a1a2a3a4a5a6a7a8"
+    );
+    // 3 bytes, 12 `RGBA8Unorm` texels from 0: 5 copies a chunk, a zero past them.
+    assert_eq!(
+        streamed(&counting(3, 0xa1), 0..48),
+        "a1a2a3a1a2a3a1a2a3a1a2a3a1a2a300a1a2a3a1a2a3a1a2a3a1a2a3a1a2a300a1a2a3a1a2a3a1a2a3a1a2a3a1a2a300"
+    );
+    // 3 bytes, 30 `R8Unorm` texels from 5: `p0 p0 p2 p2` outside the chunk.
+    assert_eq!(
+        streamed(&counting(3, 0xa1), 5..35),
+        "a1a1a3a3a1a1a3a3a1a1a3a1a2a3a1a2a3a1a2a3a1a2a3a1a2a300a3a1a1"
+    );
+    // 12 bytes from byte 8: the chunks read from the block's byte 8, past the one copy.
+    assert_eq!(
+        streamed(&counting(12, 0xa1), 8..48),
+        "a1a2a3a4a1a2a3a4a9aaabac000000000000000000000000a9aaabac000000000000000000000000"
+    );
+    // 5 bytes into 40 `RG8Unorm` texels from byte 12.
+    assert_eq!(
+        streamed(&counting(5, 0xa1), 12..92),
+        "a1a1a1a1a5a1a2a3a4a5a1a2a3a4a50000000000a5a1a2a3a4a5a1a2a3a4a50000000000\
+         a5a1a2a3a4a5a1a2a3a4a50000000000a5a1a2a3a4a5a1a2a3a4a50000000000a5a5a5a5a1a1a1a1a5a5a5a5"
+    );
+    // 17 bytes into 12 `RGBA32Float` texels: a 32-byte block of one copy.
+    let seventeen = "a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1000000000000000000000000000000";
+    assert_eq!(streamed(&counting(17, 0xa1), 0..192), seventeen.repeat(6));
+    // 24 bytes into 30 `RGBA16Float` texels from byte 88.
+    let copy = "a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b80000000000000000";
+    assert_eq!(
+        streamed(&counting(24, 0xa1), 88..328),
+        format!("a1a2a3a4a5a6a7a8{}a1a2a3a4a5a6a7a8", copy.repeat(7))
+    );
+    // 100 bytes into 40 `RGBA8Unorm` texels from byte 4: a 128-byte block.
+    assert_eq!(
+        streamed(&counting(100, 0x10), 4..164),
+        "101112131011121310111213101112131415161718191a1b1c1d1e1f101112131415161718191a1b1c1d1e1f\
+         303132333435363738393a3b3c3d3e3f303132333435363738393a3b3c3d3e3f505152535455565758595a5b\
+         5c5d5e5f505152535455565758595a5b5c5d5e5f707172730000000000000000000000007071727300000000\
+         0000000000000000101112131415161718191a1b1c1d1e1f10111213"
+    );
+}
+
+/// A texture buffer's fill as its spans (each its unit repeated from the span's first byte)
+/// writes every byte the fill does, and announces the bytes past the pattern's copies where a
+/// chunk reads one: patterns of 1 to 70 bytes over regions of 0 to 200 bytes from 0 to 47.
+#[test]
+fn texture_buffer_fill_spans_are_its_bytes() {
+    for n in 1..=70 {
+        let pattern = counting(n, 0x01);
+        let stream = StreamFill::new(&pattern);
+        let copies = (16.max(n.next_power_of_two()) / n * n) as u64;
+        for start in 0..48u64 {
+            for length in 0..200u64 {
+                let bytes = start..start + length;
+                let mut written = vec![None; (start + length) as usize];
+                for (span, unit) in stream.spans(bytes.clone()) {
+                    for (k, at) in span.enumerate() {
+                        assert!(written[at as usize].is_none(), "{n} {bytes:?}: twice");
+                        written[at as usize] = Some(unit[k % unit.len()]);
+                    }
+                }
+                let want: Vec<Option<u8>> = (0..start + length)
+                    .map(|at| bytes.contains(&at).then(|| stream.byte(&bytes, at)))
+                    .collect();
+                assert_eq!(written, want, "{n} {bytes:?}");
+                // Brute force: a whole chunk's byte read from the block's copies or past them.
+                let leftover = (start.next_multiple_of(16)..(start + length) / 16 * 16).any(|at| {
+                    let chunk = at / 16 * 16;
+                    ((chunk - start) & (n as u64 - 1) & !3) + at % 16 >= copies
+                });
+                assert_eq!(
+                    stream.reads_leftover(bytes.clone()),
+                    leftover,
+                    "{n} {bytes:?}"
+                );
+            }
+        }
+    }
 }

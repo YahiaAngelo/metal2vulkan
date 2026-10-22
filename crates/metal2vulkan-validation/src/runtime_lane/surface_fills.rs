@@ -13,9 +13,6 @@
 //!   level's own top bits) by `replace_region`, one fill of `a1 a2 a3 a4`, and the texels whose
 //!   word `get_bytes` reads changed: Metal fills level 0 of the slice at Metal's fill rows,
 //!   whatever the level, so a width off a multiple of 4 moves the fill between the texels' rows.
-//! - **Texture buffers.** A fill of `RGBA8Unorm` texels 2 to 4 of a texture buffer at 64 or 68
-//!   bytes into its buffer, at level and slice 0 or 1 and row 0 or 1: Metal writes the texels at
-//!   the offset whatever the level, slice and row.
 //! - **A color with nothing to pack.** Fills packed in `Depth32Float`, `BC1_RGBA` and
 //!   `RGBA8Unorm` after one packed in `RGBA32Uint`, in one encoder with fills alone between, as
 //!   Metal's warm runs write them (its 16-byte texel, cut and overwritten as the runtime's slot
@@ -469,43 +466,6 @@ fn two_plane_fills_write_metal_s_texels() {
             }
         }
         assert!(wrong.is_empty(), "fills unlike Metal's: {wrong:?}");
-    });
-}
-
-/// A fill of a texture buffer writes its texels at its offset in its buffer whatever the level,
-/// slice and row, as Metal's does.
-#[test]
-fn texture_buffer_fills_write_at_the_offset() {
-    on_device(|device, _messages| {
-        let queue = device.new_command_queue().unwrap();
-        for (offset, at) in [(64, 0), (68, 0), (68, 1)] {
-            let buffer = buffer_with(device, &[0xee; 256]).unwrap();
-            let d = TextureDescriptor::texture_buffer(
-                PixelFormat::RGBA8Unorm,
-                16,
-                ResourceOptions::shared(),
-                TextureUsage::SHADER_READ,
-            );
-            let texture = buffer.new_texture(&d, offset, 64).unwrap();
-            let command_buffer = queue.command_buffer().unwrap();
-            let mut blit = command_buffer.blit_command_encoder().unwrap();
-            let mut region = Region::new_1d(2, 3);
-            region.origin.y = at;
-            blit.fill_texture(&texture, at, at, region, &[0x11, 0x22, 0x33, 0x44])
-                .unwrap();
-            blit.end_encoding().unwrap();
-            command_buffer.commit().unwrap();
-            command_buffer.wait_until_completed_for(WAIT).unwrap();
-            let mut want = vec![0xee; 256];
-            for k in 0..12 {
-                want[(offset + 8 + k) as usize] = [0x11, 0x22, 0x33, 0x44][k as usize % 4];
-            }
-            assert_eq!(
-                read_buffer(&buffer, 0, 256).unwrap(),
-                want,
-                "offset {offset}, level, slice and row {at}"
-            );
-        }
     });
 }
 

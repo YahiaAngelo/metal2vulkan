@@ -34,7 +34,7 @@ fn the_kinds_metal_answers_otherwise_are_named() {
         .copied()
         .filter(|k| k.exactness() == Exactness::OneOfMetals)
         .collect();
-    assert_eq!(one_of_metals.len(), 9, "{one_of_metals:?}");
+    assert_eq!(one_of_metals.len(), 10, "{one_of_metals:?}");
     for kind in [
         D::ZeroedIndexFetch,
         D::DontCareStore,
@@ -48,6 +48,9 @@ fn the_kinds_metal_answers_otherwise_are_named() {
         // Metal writes one constant of its process's for a color packed where fills ignore the
         // color, which differs between processes and machines: the runtime's zero bytes are one.
         D::UnpackedFillColor,
+        // A texture buffer fill's bytes past its pattern's whole copies Metal reads from its
+        // stack, zeros in our probes: the runtime's zeros are those.
+        D::TextureBufferFillLeftover,
         // Metal sizes no point outside the point class without a point size, and draws mostly
         // nothing there, sometimes a few points or a box: the runtime's nothing is one.
         D::UnsizedPoints,

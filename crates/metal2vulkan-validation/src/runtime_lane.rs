@@ -755,6 +755,8 @@ mod texture_accesses;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod texture_blits;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod texture_buffer_fills;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod texture_creators;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod texture_fills;

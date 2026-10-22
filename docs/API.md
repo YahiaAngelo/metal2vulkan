@@ -2241,6 +2241,14 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   packed texel only where no other call used them since. Cost: every unit of the region holds the
   command buffer's last packed texel over zeros, whatever the color, where Metal's bytes are its
   stack's.
+- `metal2vulkan-degrade-texture-buffer-fill-leftover` (precision). `TextureBufferFillLeftover`: A
+  fill of a texture buffer (`BlitCommandEncoder::fill_texture`,
+  `BlitCommandEncoder::fill_texture_color`) whose 16-byte chunks read bytes of its block past the
+  pattern's whole copies, or past the block: most patterns whose length is not a power of two, and
+  most regions whose first byte is not at a multiple of 16 of the buffer. Metal reads bytes of the
+  calling thread's stack there: zeros in our probes, an earlier fill's bytes in the consumer's
+  process. The runtime writes zeros there. Cost: those bytes of each chunk are zeros, where Metal's
+  are its stack's.
 - `metal2vulkan-degrade-unsized-points` (precision). `UnsizedPoints`: A draw of points that
   rasterizes, of some vertices and instances, under a render pipeline state whose vertex function
   writes no `[[point_size]]` and whose input primitive topology class is not the point class: a
