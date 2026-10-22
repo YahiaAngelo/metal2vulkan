@@ -1806,7 +1806,13 @@ impl RenderLowering {
         let sampler_maps = self.sampler_maps(state, &pass_start)?;
         let settled = self.settle_draw(
             &mut lock(&live),
-            (state, &settings, None, PrivateForm::default(), ProvokingForms::default()),
+            (
+                state,
+                &settings,
+                None,
+                PrivateForm::default(),
+                ProvokingForms::default(),
+            ),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut None),
             (&function_tables, &mut None),

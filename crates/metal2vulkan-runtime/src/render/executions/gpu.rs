@@ -716,7 +716,13 @@ impl RenderLowering {
         let mut live = lock(&live);
         let Settled { variant, plan, .. } = self.settle_draw(
             &mut live,
-            (state, &settings, None, PrivateForm::default(), ProvokingForms::default()),
+            (
+                state,
+                &settings,
+                None,
+                PrivateForm::default(),
+                ProvokingForms::default(),
+            ),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut None),
             (&function_tables, &mut None),
