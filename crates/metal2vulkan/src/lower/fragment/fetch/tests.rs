@@ -153,11 +153,10 @@ fn a_clean_state_takes_the_storage_form() {
 }
 
 /// What the form does not model is `NotImplemented`: an amplified pipeline, a one- or two-channel
-/// sRGB format, and, for a written attachment only, an sRGB format's blend (but one and zero,
-/// added), a signed normalized format under a write mask that keeps some of its channels, alpha to
-/// coverage, a returned sample mask at one sample, and a depth or stencil attachment without early
-/// fragment tests, but where each draw's plan checks its tests. Another format's blend is the
-/// generic one ([`StorageView::generic_blend`]).
+/// sRGB format, and, for a written attachment only, a signed normalized format under a write mask
+/// that keeps some of its channels, alpha to coverage, a returned sample mask at one sample, and a
+/// depth or stencil attachment without early fragment tests, but where each draw's plan checks its
+/// tests. Another format's blend is the generic one ([`StorageView::generic_blend`]).
 #[test]
 fn unmodelled_states_are_not_implemented() {
     let p = profile("moltenvk-m3", &[]);
@@ -170,10 +169,6 @@ fn unmodelled_states_are_not_implemented() {
         let srgb = state(pf, |_| {});
         assert_eq!(form(&srgb, false, READS, &p), ni, "{pf:?}");
     }
-    let blended = state(PixelFormat::RGBA8UnormSRGB, |c| {
-        c.blending_enabled = true;
-        c.destination_rgb_blend_factor = crate::metal::BlendFactor::One;
-    });
     let generic = state(PixelFormat::R32Float, |c| {
         c.blending_enabled = true;
         c.destination_rgb_blend_factor = crate::metal::BlendFactor::One;
@@ -196,7 +191,6 @@ fn unmodelled_states_are_not_implemented() {
         ..WRITES
     };
     for (what, inputs, use_) in [
-        ("blending", &blended, WRITES),
         ("signed normalized write mask", &rg, WRITES),
         ("alpha to coverage", &coverage, WRITES),
         ("depth without early tests", &depth, late),
@@ -220,12 +214,11 @@ fn unmodelled_states_are_not_implemented() {
 
 /// An 8-bit four-channel sRGB attachment takes the storage form through a view in `R32_UINT`,
 /// declared `R32ui` (without a format where the device grants that) with `uint` texels, which the
-/// function reads and writes as floats it decodes and encodes itself; a blend into one, a replacing
-/// blend too, is not measured, so a written attachment under it is `NotImplemented`, a read-only
-/// one is not.
+/// function reads and writes as floats it decodes and encodes itself; a blend into one is Metal's,
+/// which the function computes ([`extended_range::Blend::srgb8`]), its second source's too, and a
+/// replacing one stores the source as an unblended write does.
 #[test]
 fn a_four_channel_srgb_attachment_takes_a_uint_view() {
-    let ni = Err(Unsupported::not_implemented(Feature::FramebufferFetch));
     for stem in [
         "moltenvk-m3",
         "amd-rdna3-radv",
@@ -259,15 +252,24 @@ fn a_four_channel_srgb_attachment_takes_a_uint_view() {
             // A mask that keeps channels merges their bytes.
             let masked = state(pf, |c| c.write_mask = ColorWriteMask::RED);
             assert!(form(&masked, false, WRITES, &p).is_ok(), "{stem} {pf:?}");
-            for replaces in [false, true] {
+            for (destination, blends) in [
+                (crate::metal::BlendFactor::One, true),
+                (crate::metal::BlendFactor::OneMinusSource1Color, true),
+                (crate::metal::BlendFactor::Zero, false),
+            ] {
                 let blended = state(pf, |c| {
                     c.blending_enabled = true;
-                    if !replaces {
-                        c.destination_rgb_blend_factor = crate::metal::BlendFactor::One;
-                    }
+                    c.destination_rgb_blend_factor = destination;
+                    c.destination_alpha_blend_factor = destination;
                 });
-                assert_eq!(form(&blended, false, WRITES, &p), ni, "{stem} {pf:?}");
-                assert!(form(&blended, false, READS, &p).is_ok(), "{stem} {pf:?}");
+                let view = form(&blended, false, WRITES, &p).expect("the sRGB blend");
+                assert_eq!(
+                    view.blend.is_some(),
+                    blends,
+                    "{stem} {pf:?} {destination:?}"
+                );
+                let read = form(&blended, false, READS, &p).expect("a read");
+                assert_eq!(read.blend, None, "{stem} {pf:?} {destination:?}");
             }
         }
     }

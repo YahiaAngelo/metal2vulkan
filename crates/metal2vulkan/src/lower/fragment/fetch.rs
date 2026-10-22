@@ -77,8 +77,13 @@
 //!   byte over 255, a write encodes by Metal's thresholds (`math::unpack` and `math::pack` of
 //!   `unorm4x8_srgb`; on the M4: every byte read, a texel an earlier draw of the
 //!   pass wrote read as the decode of its stored byte, every encode threshold, 4, 194, 304 floats
-//!   and every half written). The one- and two-channel sRGB formats are not measured, and stay
-//!   refused; a packed 16-bit format the device samples but does not render
+//!   and every half written); a blended write encodes Metal's blend, its 8-bit unorm blend of the
+//!   format's unorm twin over the texel as a fetch decodes it (`extended_range::Blend::srgb8`,
+//!   [`srgb_texel`]: on the M3 Max under macOS 27.0.1 every channel of the blends measured, both
+//!   maths, `half4` and `float4`), and a blend of the second source the rounded forms, Metal's
+//!   without fast math, under it a near-equivalent the function notes
+//!   (`PrecisionNote::UnmeasuredFetchBlend`). The one- and two-channel sRGB formats are not built,
+//!   and stay refused; a packed 16-bit format the device samples but does not render
 //!   (`metal::format::WordAttachment`: `A1BGR5Unorm`, `ABGR4Unorm` on the RTX 5080) through a view
 //!   of the attachment in its word's unsigned integer format (`R16_UINT`, `StorageView::word`): a
 //!   write stores Metal's word of the output (`stage_io::word_color::encode`), the fields of the
@@ -341,6 +346,16 @@ pub(crate) fn unorm8_format(pf: crate::metal::PixelFormat) -> bool {
     matches!(pf, P::R8Unorm | P::RG8Unorm | P::RGBA8Unorm | P::BGRA8Unorm)
 }
 
+/// Whether `pf` is an 8-bit sRGB color format, whose blend Metal computes as its unorm twin's over
+/// the decoded texel, encoded ([`extended_range::Blend::srgb8`]).
+pub(crate) fn srgb8_format(pf: crate::metal::PixelFormat) -> bool {
+    use crate::metal::PixelFormat as P;
+    matches!(
+        pf,
+        P::R8UnormSRGB | P::RG8UnormSRGB | P::RGBA8UnormSRGB | P::BGRA8UnormSRGB
+    )
+}
+
 /// Whether `pf` is a packed 16-bit unorm format (`metal::format::WordAttachment::Packed16`), whose
 /// blend Metal computes in `half` over its decoded codes ([`extended_range::Blend::packed16`]).
 pub(crate) fn packed16_format(pf: crate::metal::PixelFormat) -> bool {
@@ -352,7 +367,8 @@ pub(crate) fn packed16_format(pf: crate::metal::PixelFormat) -> bool {
 
 /// Metal's blend `eq` of a format held directly, which the shader computes in the storage form,
 /// storing the channels `written` of four under math `math`: an 8-bit unorm attachment's in
-/// `arith` ([`extended_range::Blend::unorm8`]), a packed 16-bit one's
+/// `arith` ([`extended_range::Blend::unorm8`]), an 8-bit sRGB one's in `arith`
+/// ([`extended_range::Blend::srgb8`], whether Metal's or not), a packed 16-bit one's
 /// ([`extended_range::Blend::packed16`], in `half` whatever the output), else a 16-bit float one's
 /// ([`extended_range::Blend::half_float`], which takes its arithmetic when it computes). The
 /// planning callers pass `BlendArith::Half`: what is refused, what reads the blend color, and the
@@ -369,10 +385,26 @@ fn direct_blend(
     if packed16_format(pf) {
         return extended_range::Blend::packed16(eq, written, math);
     }
+    if srgb8_format(pf) {
+        return extended_range::Blend::srgb8(eq, pf, written, (math, arith)).map(|(b, _)| b);
+    }
     match unorm8_format(pf) {
         true => extended_range::Blend::unorm8(eq, pf, written, (math, arith)),
         false => extended_range::Blend::half_float(eq, pf, written, math),
     }
+}
+
+/// Whether Metal's blend `eq` into the 8-bit sRGB attachment of `pf` storing the channels `written`
+/// of four under math `math` is its 8-bit unorm blend's, or its rounded forms without fast math
+/// ([`extended_range::Blend::srgb8`]'s flag): elsewhere the shader computes a near-equivalent.
+fn srgb8_exact(
+    eq: &BlendEquation,
+    pf: crate::metal::PixelFormat,
+    written: ColorWriteMask,
+    math: extended_range::blend::BlendMath,
+) -> bool {
+    let half = extended_range::blend::BlendArith::Half;
+    extended_range::Blend::srgb8(eq, pf, written, (math, half)).is_ok_and(|(_, exact)| exact)
 }
 
 /// The generic float blend `eq` into an attachment of `pf` storing the channels `written` of four
@@ -935,8 +967,8 @@ pub(crate) fn storage_form(
     // An 8-bit four-channel sRGB attachment is viewed in `R32_UINT`, whose bytes the function
     // decodes and encodes by Metal's measured conversions (a fetch reads Metal's
     // twelve-bit decode of the stored byte, `math::unpack`'s, even after an earlier draw of the
-    // pass wrote it, and a write stores `math::pack`'s encode). The one- and two-channel sRGB
-    // formats are not measured, nor is a blend into one.
+    // pass wrote it, and a write stores `math::pack`'s encode, of Metal's blend where it blends).
+    // The one- and two-channel sRGB formats are not built.
     // A BGRA-order attachment on a device that accesses its format without one in neither
     // direction (SPIR-V names no image format for it) is viewed in its RGBA-order twin, whose red
     // and blue the function exchanges on every read and write: the device converts each channel
@@ -1007,6 +1039,16 @@ pub(crate) fn storage_form(
         && attachment.equation.is_some_and(|eq| {
             extended_range::Blend::packed16(&eq, written_of_four, use_.math).is_ok()
         });
+    // And the blend of an 8-bit sRGB attachment viewed in its unsigned integer format, which no
+    // device blends: the shader computes Metal's, the 8-bit unorm blend over the decoded texel,
+    // encoded (`extended_range::Blend::srgb8`: its rounded forms where the 8-bit unorm blend is
+    // not built, a near-equivalent [`plan`] notes under fast math).
+    let srgb_blend = uint_view.is_some()
+        && attachment.blending_enabled
+        && !attachment.replaces
+        && attachment.equation.is_some_and(|eq| {
+            extended_range::Blend::srgb8(&eq, pf, written_of_four, (use_.math, half)).is_ok()
+        });
     // And any other blend of a float-class format held directly (not an sRGB or a word one),
     // whose Metal arithmetic is not built: the shader computes the generic float blend
     // (`extended_range::Blend::generic`), a near-equivalent [`plan`] takes only where the function
@@ -1025,6 +1067,7 @@ pub(crate) fn storage_form(
             || half_blend
             || unorm8_blend
             || word_blend
+            || srgb_blend
             || generic_blend)
             && stores
     });
@@ -1063,8 +1106,6 @@ pub(crate) fn storage_form(
         || (srgb && uint_view.is_none())
         // An `RGB9E5Float` word's mantissas share its exponent: no field is kept apart.
         || (word == Some(WordAttachment::Rgb9e5) && stores && merged)
-        // Metal's blend into an sRGB attachment, a replacing one too, is not measured.
-        || (uint_view.is_some() && stores && attachment.blending_enabled)
         || (writes
             && attachment
                 .write_mask
@@ -1617,7 +1658,28 @@ pub(super) fn plan(cx: &mut SelectCx<'_>) -> Result<(), Error> {
                     direct_blend(&eq, view.pixel_format, written, (math, half))
                 });
                 let unorm8 = unorm8_format(view.pixel_format);
+                let srgb = view.uint_view.is_some();
                 match (planned, blended_output(cx.entry, color)) {
+                    // An 8-bit sRGB blend (`extended_range::Blend::srgb8`), whose second source,
+                    // where it reads one, is the function's second output: Metal's where its 8-bit
+                    // unorm blend is built and the module states its math (Metal clamps the output
+                    // first, so none of the output's arithmetic folds into it), else a
+                    // near-equivalent the function notes, taken only where the function reads the
+                    // attachment.
+                    (Some(Ok(b)), _) if srgb => {
+                        let stated = cx.entry.compile.fast_math.is_some();
+                        let exact = view.blend.is_some_and(|eq| {
+                            srgb8_exact(&eq, view.pixel_format, written(view.kept), math)
+                        });
+                        sixteen_exact = stated && exact;
+                        match (b.reads_second(), second) {
+                            (true, Some(None)) => Err(Unsupported::not_implemented(
+                                Feature::ExtendedRangeBlend(ExtendedRangeBlend::Output),
+                            )),
+                            _ if sixteen_exact || fetched.contains(&color) => Ok((view, None)),
+                            _ => Err(not_implemented()),
+                        }
+                    }
                     // An 8-bit unorm blend of fewer lanes is not measured: the generic blend.
                     (Some(Ok(_)), Some((_, lanes))) if unorm8 && lanes < 4 => {
                         generic_of(view, &mut sixteen_exact)
@@ -1718,7 +1780,9 @@ pub(super) fn plan(cx: &mut SelectCx<'_>) -> Result<(), Error> {
                     if half.is_ok_and(|h| h.reads_constant()) {
                         cx.push.insert(PushField::HalfBlendColor);
                     }
-                    if view.generic_blend {
+                    let srgb_unmeasured =
+                        view.uint_view.is_some() && !srgb8_exact(&eq, pf, written, blend_math(cx));
+                    if view.generic_blend || srgb_unmeasured {
                         cx.precision.insert(PrecisionNote::UnmeasuredFetchBlend);
                     } else if view.word.is_some() {
                         cx.precision.insert(PrecisionNote::DeviceColorConversion);
@@ -1935,7 +1999,8 @@ pub(super) fn second_output4(
 /// ([`select_second_output`]), which no interface variable holds.
 pub(crate) fn blends_second(cx: &SelectCx<'_>, color: u32) -> bool {
     cx.families.fragment.fetch.get(&color).is_some_and(|sc| {
-        sc.view.blend.is_some() && (sc.view.extended.is_some() || sc.view.generic_blend)
+        sc.view.blend.is_some()
+            && (sc.view.extended.is_some() || sc.view.generic_blend || sc.view.uint_view.is_some())
     })
 }
 
@@ -2554,7 +2619,9 @@ pub(super) fn emit_return(
                 let table = crate::lower::texture::extended_table(cx, range)?;
                 extended_range::encode(fb, range, v, table)?
             }
-            (None, _) if sc.view.uint_view.is_some() => srgb_texel(cx, fb, color, &sc, form, part)?,
+            (None, _) if sc.view.uint_view.is_some() => {
+                srgb_texel(cx, fb, color, &sc, (form, part), second)?
+            }
             (None, _) if sc.view.word.is_some() => word_texel(cx, fb, color, &sc, form, part)?,
             (None, _) => {
                 // Metal's 16-bit float blend of an output of one to four lanes, its 8-bit unorm
@@ -2828,10 +2895,10 @@ fn output_lanes(fb: &mut FunctionBuilder<'_>, form: Form, v: SValue) -> BResult<
 }
 
 /// Whether the function writes color attachment `color` through the storage form under a blend
-/// the shader computes of a format held directly, Metal's 16-bit float or 8-bit unorm blend, so
-/// that the write stores the value the blend gives, whatever the output and the device's
-/// conversion (`exact`: and that blend is Metal's exactly, [`StorageColor::exact_blend`]). Not
-/// the generic blend ([`StorageView::generic_blend`]), whose result the device's conversion
+/// the shader computes of a format held directly, Metal's 16-bit float, 8-bit unorm or 8-bit sRGB
+/// blend, so that the write stores the value the blend gives, whatever the output and the
+/// device's conversion (`exact`: and that blend is Metal's exactly, [`StorageColor::exact_blend`]).
+/// Not the generic blend ([`StorageView::generic_blend`]), whose result the device's conversion
 /// stores as it stores an output.
 pub(super) fn blends_in_shader(cx: &SelectCx<'_>, color: u32, exact: bool) -> bool {
     cx.families.fragment.fetch.get(&color).is_some_and(|sc| {
@@ -3088,14 +3155,18 @@ fn srgb_decode(
 /// with 255; our probe checked every threshold, 4, 194, 304 floats and every half), its
 /// bytes in `format`'s order; a write that keeps channels takes their bytes from the texel read
 /// first at the invocation's pixel (and sample), inside the interlock, so they stay as they were,
-/// bit for bit.
+/// bit for bit. Under a blend (`StorageView::blend`) the encode is of Metal's blend of the output
+/// over that texel, decoded as a fetch reads it ([`srgb_decode`]), in the output's type, the second
+/// source `second` (the function's second output) where the blend reads one, and the blend color
+/// from `PushField::HalfBlendColor` where it reads that (`extended_range::Blend::srgb8`,
+/// `extended_range::blend::blend_srgb8`).
 fn srgb_texel(
     cx: &mut EmitCx<'_>,
     fb: &mut FunctionBuilder<'_>,
     color: u32,
     sc: &StorageColor,
-    form: Form,
-    part: SValue,
+    (form, part): (Form, SValue),
+    second: Option<(Form, SValue)>,
 ) -> BResult<SValue> {
     let Some(table) = cx.decl.families.arith.srgb else {
         return Err(cx.fail("an sRGB storage write without Metal's table"));
@@ -3108,6 +3179,49 @@ fn srgb_texel(
     {
         return Err(cx.fail("an sRGB storage write of another output than four float lanes"));
     }
+    // The texel the write reads first: the blend's destination, and the bytes a mask keeps.
+    let old = match sc.view.blend.is_some() || sc.view.merges() {
+        true => {
+            let texel = read_texel(cx, fb, color, sc)?;
+            Some(fb.composite_extract(texel, &[0])?)
+        }
+        false => None,
+    };
+    let part = match (sc.view.blend, old) {
+        (Some(eq), Some(old)) => {
+            let arith = match form.float_fmt() {
+                Some(FloatFmt::Half) => extended_range::blend::BlendArith::Half,
+                _ => extended_range::blend::BlendArith::Float,
+            };
+            let math = extended_range::blend::BlendMath::of(cx.entry.compile.fast_math);
+            let (pf, written) = (sc.view.pixel_format, written(sc.view.kept));
+            let Ok((b, _)) = extended_range::Blend::srgb8(&eq, pf, written, (math, arith)) else {
+                return Err(cx.fail("an sRGB blend outside its forms"));
+            };
+            let s1 = match (b.reads_second(), second) {
+                (true, Some((form, s1)))
+                    if form.lanes == 4
+                        && matches!(form.float_fmt(), Some(FloatFmt::Half | FloatFmt::F32)) =>
+                {
+                    Some(s1)
+                }
+                (true, _) => return Err(cx.fail("a blend of the second source without its output")),
+                (false, _) => None,
+            };
+            let decoded = srgb_decode(fb, sc.view.format, old, table)?;
+            let constant = match b.reads_constant() {
+                true => {
+                    let field = cx.push_field(fb, PushField::HalfBlendColor)?;
+                    Some(fb.composite_extract(field, &[0])?)
+                }
+                false => None,
+            };
+            let parts = (part, s1, decoded);
+            extended_range::blend::blend_srgb8(fb, &b, arith, parts, constant)?
+        }
+        (Some(_), None) => return Err(cx.fail("an sRGB blend without its texel")),
+        (None, _) => part,
+    };
     let f4 = form.with(Held::Float(crate::lower::arith::FloatFmt::F32));
     let test = crate::lower::arith::nan::NanTest::for_modes(&cx.plan.families.arith.modes);
     let rgba = math::pack(fb, PackFormat::Unorm4x8Srgb, f4, part, Some(table), test)?;
@@ -3129,8 +3243,9 @@ fn srgb_texel(
             .zip(bytes)
             .filter(|(c, _)| sc.view.kept.contains(**c))
             .fold(0u32, |m, (_, at)| m | 0xff << at);
-        let old = read_texel(cx, fb, color, sc)?;
-        let old = fb.composite_extract(old, &[0])?;
+        let Some(old) = old else {
+            return Err(cx.fail("an sRGB merge without its texel"));
+        };
         let keep = fb.u32_const(mask)?;
         let keep = fb.module().const_value(keep)?;
         let write = fb.u32_const(!mask)?;

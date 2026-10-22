@@ -611,8 +611,8 @@ pub fn writes_through_storage(cx: &SelectCx<'_>, color: u32) -> bool {
 }
 
 /// Whether the function writes color attachment `color` in the storage form under Metal's
-/// 16-bit float or 8-bit unorm blend, which the shader computes, and that blend is Metal's
-/// exactly: the attachment stores Metal's value.
+/// 16-bit float, 8-bit unorm or 8-bit sRGB blend, which the shader computes, and that blend is
+/// Metal's exactly: the attachment stores Metal's value.
 pub fn blends_half_in_storage(cx: &SelectCx<'_>, color: u32) -> bool {
     fetch::blends_in_shader(cx, color, true)
 }
@@ -631,9 +631,10 @@ pub fn blends_sixteen_in_storage(cx: &SelectCx<'_>, color: u32) -> bool {
 }
 
 /// Whether the function writes color attachment `color` in the storage form under a blend the
-/// shader computes of a format held directly (Metal's 16-bit float or 8-bit unorm blend), exactly
-/// or not: the write stores the value the blend gives, which no conversion of the device's
-/// changes (an 8-bit unorm channel's code is rounded by Metal's rule in the shader).
+/// shader computes of a format held directly (Metal's 16-bit float, 8-bit unorm or 8-bit sRGB
+/// blend), exactly or not: the write stores the value the blend gives, which no conversion of the
+/// device's changes (an 8-bit unorm channel's code is rounded by Metal's rule in the shader, an
+/// sRGB one's encoded by Metal's table).
 pub fn blends_in_storage(cx: &SelectCx<'_>, color: u32) -> bool {
     fetch::blends_in_shader(cx, color, false)
 }

@@ -247,6 +247,89 @@ fn a_blended_eight_bit_unorm_fetch_computes_metals_blend() {
     assert!(anv, "no ANV profile compiled the guest's shape");
 }
 
+/// A blended 8-bit four-channel sRGB attachment (`RGBA8Unorm_sRGB`, `BGRA8Unorm_sRGB`): on every
+/// committed profile that orders fetch through the pixel interlock alone, each function compiles
+/// in the storage form through the format's `R32_UINT` view with the blend it computes (Metal's
+/// 8-bit unorm blend over the decoded texel, encoded: `extended_range::Blend::srgb8`), rounded
+/// without fast math, and announces nothing, a write mask that keeps channels and the blend color
+/// too; and its module passes L3. Before, each was refused `NotImplemented(FramebufferFetch)`.
+/// The second source's blend (the owned fixture `engine/fbl_fetch_dual`, fast math), which Metal's
+/// 8-bit unorm blend does not build, takes its rounded forms, noted `UnmeasuredFetchBlend`.
+#[test]
+fn a_blended_four_channel_srgb_fetch_computes_metals_blend() {
+    let (Some(fast), Some(safe), Some(dual)) = (
+        assembled("fbl_fetch_blend8"),
+        assembled("fbl_fetch_blend8_safe"),
+        assembled("fbl_fetch_dual"),
+    ) else {
+        return;
+    };
+    use BlendFactor as F;
+    let entries = [
+        (&fast, "fbl8_over_loaded", false),
+        (&fast, "fbl8_over_loaded_float", false),
+        (&safe, "fbl8_safe_loaded", true),
+        (&safe, "fbl8_safe_loaded_float", true),
+    ];
+    let lerp = BlendEquation {
+        source_rgb: F::BlendColor,
+        destination_rgb: F::OneMinusBlendColor,
+        ..OVER
+    };
+    let states = [
+        (OVER, ColorWriteMask::ALL),
+        (OVER, ColorWriteMask::RED.union(ColorWriteMask::ALPHA)),
+        (lerp, ColorWriteMask::ALL),
+    ];
+    let second = BlendEquation {
+        source_rgb: F::Source1Color,
+        destination_rgb: F::OneMinusSource1Color,
+        source_alpha: F::Source1Alpha,
+        destination_alpha: F::OneMinusSource1Alpha,
+        ..OVER
+    };
+    let mut checked = 0;
+    for (stem, p) in committed_profiles().expect("profiles") {
+        if !crate::lower::fragment::interlock_orders(&p) {
+            continue;
+        }
+        for pf in [PixelFormat::RGBA8UnormSRGB, PixelFormat::BGRA8UnormSRGB] {
+            for (eq, mask) in states {
+                let inputs = state(&p, pf, eq, mask);
+                for &(bc, entry, rounded) in &entries {
+                    let what = format!("{stem} {pf:?} {eq:?} {mask:?} {entry}");
+                    let a = compile_with(bc, entry, &p, &inputs)
+                        .unwrap_or_else(|e| panic!("{what}: {e}"));
+                    assert_eq!(fetched(&a), Some((true, Some(eq), rounded)), "{what}");
+                    for note in NOTES
+                        .into_iter()
+                        .chain([PrecisionNote::UnmeasuredFetchBlend])
+                    {
+                        assert!(!a.precision.contains(&note), "{what}: {:?}", a.precision);
+                    }
+                    link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{what}: L3: {e}"));
+                    checked += 1;
+                }
+            }
+            let inputs = state(&p, pf, second, ColorWriteMask::ALL);
+            for entry in ["fbd_dual_half", "fbd_dual_float"] {
+                let what = format!("{stem} {pf:?} {entry}");
+                let a = compile_with(&dual, entry, &p, &inputs)
+                    .unwrap_or_else(|e| panic!("{what}: {e}"));
+                assert_eq!(fetched(&a), Some((true, Some(second), false)), "{what}");
+                assert!(
+                    a.precision.contains(&PrecisionNote::UnmeasuredFetchBlend),
+                    "{what}: {:?}",
+                    a.precision
+                );
+                link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{what}: L3: {e}"));
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 0, "no interlock profile took the storage form");
+}
+
 /// Other blends and write masks of an 8-bit unorm attachment: on every committed profile that
 /// orders fetch through the pixel interlock alone, each compiles in the storage form with the
 /// blend it computes, rounded without fast math, and announces nothing; one reading the blend
