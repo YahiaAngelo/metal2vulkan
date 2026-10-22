@@ -102,7 +102,7 @@ fn metal_list(primitive: DrawPrimitiveType, values: &[u32], restart: u32) -> Vec
             }
         }
         DrawPrimitiveType::Quads => {
-            for q in values.chunks_exact(4) {
+            for q in values.as_chunks::<4>().0 {
                 out.extend([q[0], q[1], q[3], q[1], q[2], q[3]]);
             }
         }

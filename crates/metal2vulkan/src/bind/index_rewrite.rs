@@ -231,11 +231,11 @@ impl RewriteProgram {
                 RewriteProgram::TriangleFan if n >= 3 => {
                     out.extend([piece[0], piece[n - 2], piece[n - 1]]);
                 }
-                RewriteProgram::Quads if n % 4 == 0 => {
+                RewriteProgram::Quads if n.is_multiple_of(4) => {
                     let (a, b, c, d) = (piece[n - 4], piece[n - 3], piece[n - 2], piece[n - 1]);
                     out.extend([a, b, d, b, c, d]);
                 }
-                RewriteProgram::QuadStrip if n >= 4 && n % 2 == 0 => {
+                RewriteProgram::QuadStrip if n >= 4 && n.is_multiple_of(2) => {
                     let (a, b, c, d) = (piece[n - 4], piece[n - 3], piece[n - 2], piece[n - 1]);
                     out.extend([a, b, d, c, a, d]);
                 }
