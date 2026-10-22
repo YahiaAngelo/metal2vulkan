@@ -223,9 +223,19 @@
 //!   host step records the pass from the copy once the work before it completed. A draw of the same
 //!   pass that writes the range before the execution is read by Metal's; the copy would not see it,
 //!   so a range a draw of the encoder before the call may write is refused.
+//! - **Metal's private primitive types** (`DrawPrimitiveType`, which the CPU's draws take; a
+//!   kernel writes points for them, as Metal's encoding does). A command's draw of types 5 to 8
+//!   draws as the encoder's draw of the type does, the list its program writes. One of type 9
+//!   among a range given at the call, as the records stand then, fails the command buffer there
+//!   as the encoder's draw does, the encoder running nothing (`IndirectCommandBuffer::nine_among`;
+//!   the M3 Max, macOS 27.0.1: a direct one of 3 vertices or more hung, an indexed one of any
+//!   count faulted, as the encoder's); one the step meets, written after the call or among a
+//!   range read from a buffer, runs nothing (`RECORD`), where Metal's GPU fails the command buffer
+//!   (`docs/FAST-PATHS.md`, known gaps).
 //! - **Faults** (`bind::ReplayFaults`, the execution report's). A header holding a producer's
 //!   sticky encoding fault runs no command (`ENCODING`); a record that does not decode, sets what
-//!   the descriptor does not allow, names a primitive or index type Metal has no value for, sets
+//!   the descriptor does not allow, names a primitive or index type Metal has no value for (or
+//!   type 9, above), sets
 //!   a barrier, which Metal enables only for mesh draws, has no index or factor buffer (which
 //!   ends Metal's process), a buffer offset Metal's validation stops and plain Metal's answer to
 //!   is not measured (an odd factor buffer offset or factor instance stride; one 2 past a
@@ -244,10 +254,10 @@
 //!   from a buffer that a draw of the encoder before the call may write, are
 //!   `NotImplemented(IndirectRenderCommands)`. What a command's draw refuses (a pipeline of
 //!   other formats than the pass's, among others) is refused so: it either refuses the commit,
-//!   or fails
-//!   the command buffer where the step records it, `CommandBufferError::Refused` with the same
-//!   refusal typed (`CommandBuffer::refusal`). The call checks no record: Metal lets a program
-//!   write the records until it commits. A command's vertex buffer set without an
+//!   or fails the command buffer where the step records it, `CommandBufferError::Refused` with
+//!   the same refusal typed (`CommandBuffer::refusal`). The call checks no record but for type 9
+//!   (above): Metal lets a program write the records until it commits. A command's vertex buffer
+//!   set without an
 //!   attribute stride, where its pipeline state's layout of `MTLBufferLayoutStrideDynamic` reads
 //!   the stride, is refused so too (`Invalid`, `IndirectCommandBufferProblem::UnstridedBuffer`):
 //!   Metal reads it at stride 2^32 - 1 with no bounds check, so past vertex 0 its answer is
@@ -285,7 +295,7 @@ use crate::executed_commands::{ExecutedCommand, RecordsRead};
 use crate::fragment_imageblock::PassImageblock;
 use crate::indirect_command_buffer::{
     IndirectCommandBuffer, IndirectCommandBufferProblem, IndirectCommandCheck,
-    IndirectCommandCheckNeeds, Reader,
+    IndirectCommandCheckNeeds, NineDraw, Reader,
 };
 use crate::indirect_dispatch;
 use crate::indirect_execute::{self, ExecutionRange};
@@ -297,6 +307,7 @@ use crate::rate_mapped_pass::RateMappedPass;
 use crate::render_pass::{ColorTarget, PassLayout, Target};
 use crate::render_state::EncoderState;
 use crate::render_target::{self, Feedback, PassShape, Position, RenderPassObject};
+use crate::render_values::DrawPrimitiveType;
 use crate::residency::{every_render_stage, Residency};
 use crate::resource::ResourceKey;
 use crate::sample_planes::{PlanesCommands, PlanesStep};
@@ -397,6 +408,15 @@ impl RenderLowering {
             Inherited::Commands => None,
             Inherited::Encoder(state) => Some(state),
         };
+        // A draw of primitive type 9 among the commands as their records stand fails the command
+        // buffer as Metal's GPU fails it there, the encoder running nothing.
+        if let Some(nine) = icb.nine_among(range.clone())? {
+            match nine {
+                NineDraw::Hangs => self.core.hang(),
+                NineDraw::Faults => self.core.fault(CommandBufferError::PageFault),
+            }
+            return Ok(());
+        }
         self.degrade_repeated_start(icb, &range);
         self.defer_execution(icb, ExecutionRange::Fixed(range), pipeline, check)
     }
@@ -1371,7 +1391,8 @@ enum Asked {
 /// A command's draw, its buffers as `B`: the addresses the record holds, or the resident buffers
 /// and offsets they resolve to.
 enum Draw<B> {
-    Primitives(PrimitiveType, DrawCall),
+    /// A draw without indices of a type other than 9 (`Assembly::of`).
+    Primitives(Assembly, DrawCall),
     /// A mesh draw's grid, and its object and mesh threadgroups' threads.
     Mesh(MeshGrid, [u32; 3], [u32; 3]),
     Indexed(IndexedDraw, B),
@@ -1426,7 +1447,11 @@ impl Asked {
                 instance_count,
                 base_instance,
             } => {
-                let Ok(primitive_type) = PrimitiveType::try_from(primitive_type) else {
+                // Type 9 the call did not find (`RenderLowering::execute_range`) runs nothing.
+                let Some(assembly) = DrawPrimitiveType::from_raw(primitive_type.into())
+                    .ok()
+                    .and_then(Assembly::of)
+                else {
                     return Asked::Fault;
                 };
                 if vertex_count == 0 || instance_count == 0 {
@@ -1438,7 +1463,7 @@ impl Asked {
                     instance_count,
                     base_instance,
                 };
-                Asked::Draw(Draw::Primitives(primitive_type, draw))
+                Asked::Draw(Draw::Primitives(assembly, draw))
             }
             Action::DrawIndexedPrimitives {
                 primitive_type,
@@ -1449,12 +1474,16 @@ impl Asked {
                 base_vertex,
                 base_instance,
             } => {
+                // Type 9 the call did not find (`RenderLowering::execute_range`) runs nothing.
                 let (Ok(primitive_type), Ok(index_type)) = (
-                    PrimitiveType::try_from(primitive_type),
+                    DrawPrimitiveType::from_raw(primitive_type.into()),
                     IndexType::try_from(index_type),
                 ) else {
                     return Asked::Fault;
                 };
+                if primitive_type == DrawPrimitiveType::Nine {
+                    return Asked::Fault;
+                }
                 // Metal ends the process for no index buffer.
                 if index_buffer == 0 {
                     return Asked::Fault;
@@ -1463,7 +1492,7 @@ impl Asked {
                     return Asked::Nothing;
                 }
                 let draw = IndexedDraw {
-                    primitive_type: primitive_type.into(),
+                    primitive_type,
                     index_count,
                     index_type,
                     instance_count,
@@ -1632,7 +1661,7 @@ impl Draw<u64> {
             resolve(address, 1).map(|(b, offset)| (b, offset - offset % multiple))
         };
         let resolved = match self {
-            Draw::Primitives(primitive_type, draw) => Ok(Draw::Primitives(primitive_type, draw)),
+            Draw::Primitives(assembly, draw) => Ok(Draw::Primitives(assembly, draw)),
             Draw::Mesh(grid, object, mesh) => Ok(Draw::Mesh(grid, object, mesh)),
             Draw::Indexed(draw, address) => rounded(address, index_size(draw.index_type))
                 .map(|index| Draw::Indexed(draw, index)),
@@ -2100,13 +2129,9 @@ impl RenderExecution {
                 }
             }
             match draw {
-                Draw::Primitives(primitive_type, draw) => encoder.draw(
-                    CALL,
-                    Assembly::Primitives(primitive_type),
-                    draw,
-                    DrawBuffers::default(),
-                    false,
-                )?,
+                Draw::Primitives(assembly, draw) => {
+                    encoder.draw(CALL, assembly, draw, DrawBuffers::default(), false)?
+                }
                 Draw::Indexed(draw, (buffer, offset)) => {
                     encoder.draw_indexed(CALL, draw, &buffer, offset)?;
                 }

@@ -296,6 +296,13 @@ driver's. Each is open work.
   takes the index rewrite pass's three dispatches between barriers per draw before its render pass:
   there 78 us per draw against 1.7. That form is not batched.
 
+- **An indirect render command's draw of primitive type 9 that its execution's call cannot see**:
+  one the CPU wrote after the call, or among a range the execution reads from a buffer. It runs
+  nothing, counted as a record fault in the execution report (`RECORD`), where Metal's GPU hangs
+  or faults the command buffer at it. One among a range given at the call, as the records stand
+  then, fails the command buffer as the encoder's draw does (`render/executions.rs`); failing it
+  from inside the host step that meets the record, its earlier encoders run, is not built.
+
 - **A no-copy buffer imported by its pointer follows a remap of its pages** on a driver whose
   pointer imports follow their address (`DriverFact::PointerImportsFollowTheirAddress`: ANV on
   i915, RADV, lavapipe): pages mapped over the buffer's addresses after it was made (`mmap` with

@@ -226,6 +226,48 @@ fn for_triangles(device: &Device, setup: &Setup) -> IndirectCommandBuffer {
     icb
 }
 
+/// A kernel's draw of a primitive type past Metal's five draws points, as Metal's encoding
+/// writes it (the M3 Max, macOS 27.0.1: a kernel's draws of values 5 to 12 and past drew what
+/// value 0 draws, direct and indexed): the owned `icb_render_typed_encode`'s draws of quads (7),
+/// of type 9 and of 300 each draw all six vertices, direct (window 0) and over six indices that
+/// permute them (window 1), where quads would draw four and type 9 fail the command buffer.
+#[test]
+fn a_kernel_s_draw_of_a_type_past_metal_s_five_draws_points() {
+    on_device(|device, _| {
+        let writer = indirect_host_steps::state(device, "icb_render_typed_encode", false);
+        let mut descriptor = inheriting(1);
+        descriptor.command_types =
+            IndirectCommandType::DRAW.union(IndirectCommandType::DRAW_INDEXED);
+        for value in [7u32, 9, 300] {
+            let setup = Setup::new(device);
+            let icb = icb(device, &descriptor, 2);
+            for index in 0..2 {
+                buffers(&setup, &icb, index, index as usize);
+            }
+            let indices: [u16; 6] = [5, 3, 0, 1, 4, 2];
+            let mut typed: Vec<u8> = [value, 0, 0, 0]
+                .iter()
+                .flat_map(|w| w.to_le_bytes())
+                .collect();
+            typed.extend(indices.iter().flat_map(|h| h.to_le_bytes()));
+            let typed = buffer_with(device, &typed).unwrap();
+            let writing = Writing {
+                setup: &setup,
+                writer: &writer,
+                out: &typed,
+            };
+            let command_buffer = encode(device, &writing, (&icb, 2), (&[(0, 2)], &Call::Plain));
+            complete(&command_buffer);
+            assert_eq!(
+                setup.output(),
+                expected(&[drawn(0, 0, 6), drawn(1, 0, 6)]),
+                "{value} on {}",
+                device.name()
+            );
+        }
+    });
+}
+
 /// The reason the host-step notice delivered so far gives (the rule that kept the pass from the
 /// GPU alone), the notices put back for [`assert_made_once`]; empty where none was delivered.
 fn host_step_reason(messages: &Messages) -> String {
