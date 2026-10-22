@@ -4,7 +4,7 @@
 //! `buffer_texture_copies`).
 
 use super::super::blit_plan::{
-    block_order_position, plan_block_order_copy, plan_buffer_copy, plan_levels_copy,
+    block_order_position, copied_rows, plan_block_order_copy, plan_buffer_copy, plan_levels_copy,
     plan_region_copy, plan_rows_copy, plan_whole_copy, texel_layout, texel_rows, BufferCopyPlan,
     BufferLayout, BufferRange, CopyPair, ImageCopyRegion, RowsCopy,
 };
@@ -1369,6 +1369,147 @@ fn four_two_two_texture_copies_take_metals_verdicts() {
         let rgba = t(P::RGBA8Unorm);
         for r in [copy(&pairs, &rgba), copy(&rgba, &pairs)] {
             assert_eq!(r, Err(CopyRefusal::Invalid(CopyProblem::Format)), "{a:?}");
+        }
+    }
+}
+
+/// A `bytesPerRow` whose span of 4 rows wraps to `0x30` bytes past `u64::MAX`: 3 rows of it are
+/// `2^64 + 0x20`.
+const WRAPS: u64 = 0x5555_5555_5555_5560;
+
+/// A guest's layout values reach the plans as they are, any `u64`. A layout whose rows pass
+/// `u64::MAX` lies past every buffer, so it is refused (`BufferRange`) in both directions and on
+/// every path: Metal's rules, the rows plain Metal places off them, the aligned path, and many
+/// images; never a wrapped offset inside the buffer (the reims-vgpu consumer's report: a 4 KiB
+/// buffer, a 16 x 16 `BGRA8Unorm` texture, 4 x 4 texels from the origin).
+#[test]
+fn layouts_past_u64_max_lie_past_every_buffer() {
+    assert_eq!(3u64.wrapping_mul(WRAPS).wrapping_add(16), 0x30);
+    let flat = tex(PixelFormat::BGRA8Unorm, TextureType::Type2D, [16, 16, 1]);
+    let u = unit(&flat, BlitOption::None).unwrap();
+    let r = region([0, 0, 0], [4, 4, 1]);
+    for l in [
+        // The report's: an offset off the unit (placed rows), a pitch off the unit (placed
+        // rows), and a pitch on it whose span passes `u64::MAX`.
+        layout(u64::MAX, 64, 0),
+        layout(0, u64::MAX, 0),
+        layout(0, 1 << 63, 0),
+        // The span that wraps into the buffer, on Metal's rules and off them.
+        layout(0, WRAPS, 0),
+        layout(2, WRAPS, 0),
+        layout(0, WRAPS + 1, 0),
+        // An offset on the unit whose first row passes `u64::MAX`.
+        layout(u64::MAX - 3, 64, 0),
+        // Into the texture, the aligned path's pitch of 2^63 (rounded down from 2^63 + 2).
+        layout(0, (1 << 63) + 2, 0),
+    ] {
+        for into_texture in [true, false] {
+            assert_eq!(
+                plan_buffer_copy(&flat.record, &r, &u, &l, 4096, 0, into_texture),
+                Err(CopyProblem::BufferRange),
+                "{l:?} into the texture: {into_texture}"
+            );
+            assert_eq!(
+                copied_rows(&flat.record, &r, &u, &l, into_texture),
+                Err(CopyProblem::BufferRange),
+                "{l:?} into the texture: {into_texture}"
+            );
+        }
+    }
+    // Images of a 3D texture whose offsets pass `u64::MAX`: on Metal's rules (a span that
+    // wraps, and one that passes it) and off them (`bytesPerImage` off the unit, and a
+    // `bytesPerRow` whose image of rows passes `u64::MAX`).
+    let volume = tex(PixelFormat::BGRA8Unorm, TextureType::Type3D, [16, 16, 4]);
+    let r = region([0, 0, 0], [4, 4, 4]);
+    for l in [
+        layout(0, 16, WRAPS),
+        layout(0, 16, 1 << 63),
+        layout(0, 16, u64::MAX),
+        layout(0, 1 << 62, 1 << 63),
+    ] {
+        for into_texture in [true, false] {
+            assert_eq!(
+                plan_buffer_copy(&volume.record, &r, &u, &l, 4096, 0, into_texture),
+                Err(CopyProblem::BufferRange),
+                "{l:?} into the texture: {into_texture}"
+            );
+        }
+    }
+    // A depth format that keeps Metal's validation's refusals off its rules.
+    let depth = tex(PixelFormat::Depth16Unorm, TextureType::Type2D, [16, 16, 1]);
+    let du = unit(&depth, BlitOption::None).unwrap();
+    let r = region([0, 0, 0], [4, 4, 1]);
+    for l in [
+        layout(0, 1 << 63, 0),
+        layout(0, WRAPS, 0),
+        layout(u64::MAX - 1, 8, 0),
+    ] {
+        for into_texture in [true, false] {
+            assert_eq!(
+                plan_buffer_copy(&depth.record, &r, &du, &l, 4096, 0, into_texture),
+                Err(CopyProblem::BufferRange),
+                "{l:?}"
+            );
+        }
+    }
+    // A texture over a buffer.
+    let (over, texels) = over_buffer(1);
+    let ou = unit(&over, BlitOption::None).unwrap();
+    let r = region([0, 0, 0], [4, 4, 1]);
+    for l in [
+        layout(0, 1 << 63, 0),
+        layout(0, WRAPS, 0),
+        layout(u64::MAX - 3, 16, 0),
+    ] {
+        assert_eq!(
+            plan_rows_copy(&over.record, &r, &ou, &l, 4096, &texels),
+            Err(CopyProblem::BufferRange),
+            "{l:?}"
+        );
+    }
+    // A PVRTC texture's blocks in Metal's block order, from an offset on the block.
+    let pvrtc = tex(PixelFormat::PVRTCRGBA4BPP, TextureType::Type2D, [32, 32, 1]);
+    let pu = unit(&pvrtc, BlitOption::None).unwrap();
+    let r = region([0, 0, 0], [16, 16, 1]);
+    assert_eq!(
+        plan_block_order_copy(&pvrtc.record, &r, &pu, &layout(u64::MAX - 7, 0, 0), 4096, 0),
+        Err(CopyProblem::BufferRange)
+    );
+}
+
+/// A copy whose last byte is the buffer's last byte is planned, on Metal's rules and off them,
+/// and one a byte further is refused (`BufferRange`); the rows a planned copy moves
+/// ([`copied_rows`], which a texture Metal keeps compressed rewrites) are the plan's, inside its
+/// span: an offset off the unit's rows rounded down as plain Metal places them.
+#[test]
+fn copies_reach_the_buffer_s_last_byte_and_no_further() {
+    let t = tex(PixelFormat::BGRA8Unorm, TextureType::Type2D, [16, 16, 1]);
+    let u = unit(&t, BlitOption::None).unwrap();
+    let r = region([0, 0, 0], [4, 4, 1]);
+    // 3 rows of 64 bytes and one of 16.
+    let last = 4096 - (3 * 64 + 16);
+    for into_texture in [true, false] {
+        for offset in [last, last + 1, last + 3] {
+            let l = layout(offset, 64, 0);
+            let plan = plan_buffer_copy(&t.record, &r, &u, &l, 4096, 0, into_texture).unwrap();
+            let start = offset - offset % 4;
+            assert_eq!(plan.span, start..4096, "{offset}");
+            let rows = copied_rows(&t.record, &r, &u, &l, into_texture).unwrap();
+            let placed: Vec<_> = (0..4)
+                .map(|y| start + y * 64..start + y * 64 + 16)
+                .collect();
+            assert_eq!(rows, placed, "{offset}");
+            assert!(rows
+                .iter()
+                .all(|row| plan.span.start <= row.start && row.end <= 4096));
+        }
+        for offset in [last + 4, last + 5] {
+            let l = layout(offset, 64, 0);
+            assert_eq!(
+                plan_buffer_copy(&t.record, &r, &u, &l, 4096, 0, into_texture),
+                Err(CopyProblem::BufferRange),
+                "{offset}"
+            );
         }
     }
 }

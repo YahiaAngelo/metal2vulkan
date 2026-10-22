@@ -42,6 +42,24 @@ pub(super) struct BufferLayout {
     pub(super) bytes_per_image: u64,
 }
 
+impl BufferLayout {
+    /// The offset of row `y` of image `z`, `offset + z * bytesPerImage + y * bytesPerRow`; `None`
+    /// past `u64::MAX`, where no buffer's byte lies. The layout's values are the caller's, so
+    /// every row the runtime places is found through this.
+    pub(super) fn row_at(&self, z: u64, y: u64) -> Option<u64> {
+        let image = z.checked_mul(self.bytes_per_image)?;
+        let row = y.checked_mul(self.bytes_per_row)?;
+        self.offset.checked_add(image)?.checked_add(row)
+    }
+
+    /// The end of the last row of a region of shape `s`, one past its last byte; `None` past
+    /// `u64::MAX`. Rows lie in order, so every row of the region ends there or before.
+    fn end(&self, s: &Shape) -> Option<u64> {
+        let last = self.row_at(s.images.saturating_sub(1), s.rows.saturating_sub(1))?;
+        last.checked_add(s.row_bytes)
+    }
+}
+
 /// Metal's checks of a buffer layout for a region of `size` in units of `unit`, in a buffer of
 /// `buffer_length` bytes; the bytes it spans from its offset. A layout of more than one image
 /// reaches it within Metal's `bytesPerImage` rule ([`plan_buffer_copy`] places one off it first;
@@ -65,10 +83,9 @@ fn check_layout(
     if s.row_bytes == 0 || s.rows == 0 || s.images == 0 {
         return Ok(0);
     }
-    let span =
-        (s.images - 1) * layout.bytes_per_image + (s.rows - 1) * layout.bytes_per_row + s.row_bytes;
-    match layout.offset.checked_add(span) {
-        Some(end) if end <= buffer_length => Ok(span),
+    // A layout whose last row ends past `u64::MAX` runs past every buffer.
+    match layout.end(&s) {
+        Some(end) if end <= buffer_length => Ok(end - layout.offset),
         _ => Err(CopyProblem::BufferRange),
     }
 }
@@ -119,9 +136,10 @@ pub(super) struct BufferCopyPlan {
 /// image, a `bytesPerImage` off the copy unit or below the region's rows.
 fn off_rules(layout: &BufferLayout, s: &Shape, unit: &CopyUnit) -> bool {
     let bytes = u64::from(unit.bytes);
-    let images_off = s.images > 1
-        && (!layout.bytes_per_image.is_multiple_of(bytes)
-            || layout.bytes_per_image < layout.bytes_per_row * s.rows);
+    // Images below the region's rows: an image of rows past `u64::MAX` is above any.
+    let below_rows =
+        (layout.bytes_per_row.checked_mul(s.rows)).is_none_or(|rows| layout.bytes_per_image < rows);
+    let images_off = s.images > 1 && (!layout.bytes_per_image.is_multiple_of(bytes) || below_rows);
     !layout.offset.is_multiple_of(bytes)
         || !layout.bytes_per_row.is_multiple_of(bytes)
         || (s.rows > 1 && layout.bytes_per_row < s.row_bytes)
@@ -141,7 +159,8 @@ fn off_rules(layout: &BufferLayout, s: &Shape, unit: &CopyUnit) -> bool {
 ///
 /// Refused (`BytesPerRow`): a copy out of a texture whose rows overlap (its writes race on
 /// Metal); on the aligned path, a pitch below a row (Metal reads garbage at pitch 0, and smaller
-/// pitches are not measured), and an offset of 16 or more (not measured).
+/// pitches are not measured), and an offset of 16 or more (not measured). Refused
+/// (`BufferRange`): a row past `u64::MAX`, which lies past every buffer.
 fn placed_rows(
     layout: &BufferLayout,
     s: &Shape,
@@ -160,16 +179,60 @@ fn placed_rows(
         if layout.offset != 0 || pitch < s.row_bytes {
             return Err(CopyProblem::BytesPerRow);
         }
-        return Ok((0..s.rows).map(|y| y * pitch).collect());
+        return (0..s.rows)
+            .map(|y| y.checked_mul(pitch).ok_or(CopyProblem::BufferRange))
+            .collect();
     }
     let mut rows = Vec::with_capacity((s.images * s.rows) as usize);
     for z in 0..s.images {
         for y in 0..s.rows {
-            let at = layout.offset + z * layout.bytes_per_image + y * bpr;
+            let at = layout.row_at(z, y).ok_or(CopyProblem::BufferRange)?;
             rows.push(at - at % word);
         }
     }
     Ok(rows)
+}
+
+/// Whether a layout off Metal's rules copies `pf` where plain Metal places its rows
+/// ([`placed_rows`]): a colour format or `Depth32Float` (other depth and stencil formats are not
+/// measured, and keep Metal's validation's refusal).
+fn placed(pf: PixelFormat) -> bool {
+    !is_depth_stencil(pf) || pf == PixelFormat::Depth32Float
+}
+
+/// The rows of a region of shape `s` laid out as `layout`, image by image and row by row, each
+/// `s.row_bytes` long; `None` where one ends past `u64::MAX`.
+fn layout_rows(layout: &BufferLayout, s: &Shape) -> Option<Vec<Range<u64>>> {
+    let mut rows = Vec::with_capacity((s.images * s.rows) as usize);
+    for z in 0..s.images {
+        for y in 0..s.rows {
+            let start = layout.row_at(z, y)?;
+            rows.push(start..start.checked_add(s.row_bytes)?);
+        }
+    }
+    Some(rows)
+}
+
+/// The rows of the buffer that a copy [`plan_buffer_copy`] planned (of `region` of a texture
+/// presenting `record`, in `unit`s, laid out as `layout`) reads or writes, in the order it moves
+/// them: where plain Metal places them for a layout off Metal's rules ([`placed_rows`]), else the
+/// layout's own. Of a planned copy every row lies in the buffer.
+pub(super) fn copied_rows(
+    record: &ViewRecord,
+    region: &TextureRegion,
+    unit: &CopyUnit,
+    layout: &BufferLayout,
+    into_texture: bool,
+) -> Result<Vec<Range<u64>>, CopyProblem> {
+    let s = shape(region.size, unit);
+    if placed(record.pixel_format) && off_rules(layout, &s, unit) {
+        let starts = placed_rows(layout, &s, unit, into_texture)?;
+        return (starts.into_iter())
+            .map(|start| Some(start..start.checked_add(s.row_bytes)?))
+            .collect::<Option<_>>()
+            .ok_or(CopyProblem::BufferRange);
+    }
+    layout_rows(layout, &s).ok_or(CopyProblem::BufferRange)
 }
 
 /// Whether Vulkan takes `offset` as a buffer-image copy's buffer offset for `unit` (a multiple of
@@ -202,16 +265,14 @@ pub(super) fn plan_buffer_copy(
     into_texture: bool,
 ) -> Result<BufferCopyPlan, CopyProblem> {
     let image = check_region(record, region, unit)?;
-    let pf = record.pixel_format;
-    let measured = !is_depth_stencil(pf) || pf == PixelFormat::Depth32Float;
     let s = shape(region.size, unit);
-    if measured && off_rules(layout, &s, unit) {
+    if placed(record.pixel_format) && off_rules(layout, &s, unit) {
         return plan_placed_copy(layout, &s, unit, image, buffer_length, base, into_texture);
     }
+    // Every row ends within the buffer (`check_layout`), so no offset below passes `u64::MAX`.
     let span = check_layout(layout, region.size, unit, buffer_length)?;
     let span = layout.offset..layout.offset + span;
     let start = base + layout.offset;
-    let s = shape(region.size, unit);
     if s.row_bytes == 0 || s.rows == 0 || s.images == 0 {
         return Ok(BufferCopyPlan {
             regions: Vec::new(),
@@ -220,7 +281,8 @@ pub(super) fn plan_buffer_copy(
         });
     }
     let texels_per_row = |bytes_per_row: u64| {
-        u32::try_from(bytes_per_row / u64::from(unit.bytes) * u64::from(unit.extent[0])).ok()
+        let texels = (bytes_per_row / u64::from(unit.bytes)).checked_mul(u64::from(unit.extent[0]));
+        texels.and_then(|texels| u32::try_from(texels).ok())
     };
     // Rows: the pitch in texels, or tight when there is one row.
     let row_length = if s.rows == 1 {
@@ -234,8 +296,8 @@ pub(super) fn plan_buffer_copy(
     let image_height = if s.images == 1 {
         Some(0)
     } else if images_fit {
-        u32::try_from(layout.bytes_per_image / layout.bytes_per_row * u64::from(unit.extent[1]))
-            .ok()
+        let rows = layout.bytes_per_image / layout.bytes_per_row;
+        (rows.checked_mul(u64::from(unit.extent[1]))).and_then(|rows| u32::try_from(rows).ok())
     } else {
         None
     };
@@ -330,10 +392,9 @@ fn plan_placed_copy(
             span: layout.offset..layout.offset,
         });
     };
-    let end = last + s.row_bytes;
-    if end > buffer_length {
-        return Err(CopyProblem::BufferRange);
-    }
+    let end = (last.checked_add(s.row_bytes))
+        .filter(|&end| end <= buffer_length)
+        .ok_or(CopyProblem::BufferRange)?;
     let rows: Vec<BufferRange> = starts
         .iter()
         .enumerate()
@@ -863,14 +924,10 @@ pub(super) fn plan_rows_copy(
     let image = check_region(record, region, unit)?;
     check_layout(layout, region.size, unit, buffer_length)?;
     let s = shape(region.size, unit);
-    let mut buffer_rows = Vec::with_capacity((s.images * s.rows) as usize);
-    for z in 0..s.images {
-        for y in 0..s.rows {
-            let start = layout.offset + z * layout.bytes_per_image + y * layout.bytes_per_row;
-            buffer_rows.push(start..start + s.row_bytes);
-        }
-    }
-    Ok((buffer_rows, texel_rows(texels, unit, &image)))
+    Ok((
+        layout_rows(layout, &s).ok_or(CopyProblem::BufferRange)?,
+        texel_rows(texels, unit, &image),
+    ))
 }
 
 /// The position, in blocks from the layout's offset, at which plain Metal lays block (`x`, `y`)

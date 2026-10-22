@@ -127,8 +127,11 @@ pub(super) fn measured_layout(
     offset: u64,
 ) -> bool {
     let rows_ok = rows <= 1 || (bytes_per_row >= row_bytes && bytes_per_row.is_multiple_of(4));
-    let image = (rows.max(1) - 1) * bytes_per_row + row_bytes;
-    let images_ok = images <= 1 || (bytes_per_image >= image && bytes_per_image.is_multiple_of(4));
+    // An image of more bytes than `u64::MAX` is longer than any `bytes_per_image`.
+    let image =
+        ((rows.max(1) - 1).checked_mul(bytes_per_row)).and_then(|rows| rows.checked_add(row_bytes));
+    let images_ok = images <= 1
+        || image.is_some_and(|image| bytes_per_image >= image && bytes_per_image.is_multiple_of(4));
     rows_ok && images_ok && offset.is_multiple_of(4)
 }
 
@@ -845,6 +848,20 @@ mod tests {
             bytes_per_row,
             bytes_per_image,
         }
+    }
+
+    /// A guest's pitches reach the measured-layout check as they are: an image of rows past
+    /// `u64::MAX` is longer than any `bytesPerImage`, and one image ignores it.
+    #[test]
+    fn layouts_past_u64_max_are_checked_without_wrapping() {
+        let wraps = 0x5555_5555_5555_5560;
+        for bpr in [1 << 63, wraps, u64::MAX - 3] {
+            assert!(measured_layout(16, 4, 1, bpr, 0, 0), "{bpr}");
+            for bpi in [0, 64, u64::MAX - 3, 0x30] {
+                assert!(!measured_layout(16, 4, 2, bpr, bpi, 0), "{bpr} {bpi}");
+            }
+        }
+        assert!(measured_layout(16, 4, 2, 16, 64, 0));
     }
 
     /// The color words move out and in alone: a texel's second word is never read into the

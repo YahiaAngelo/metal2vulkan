@@ -1439,16 +1439,25 @@ impl Texels {
         )
     }
 
-    /// The buffer's bytes `start..start + len`, which lie in it; refused for a buffer the CPU
-    /// does not reach (`Private`).
-    fn bytes(&self, call: &'static str, start: u64, len: u64) -> Result<*mut u8, Error> {
+    /// The buffer's bytes `start..start + len` (`None` for more than `u64::MAX`), which lie in it:
+    /// their first byte and their end. Refused for a buffer the CPU does not reach (`Private`).
+    fn bytes(
+        &self,
+        call: &'static str,
+        start: u64,
+        len: Option<u64>,
+    ) -> Result<(*mut u8, u64), Error> {
         let contents = self
             .buffer
             .contents()
             .ok_or_else(|| invalid(call, Problem::Copy(CopyProblem::CpuAccessPrivate)))?;
-        debug_assert!(start + len <= self.buffer.length());
-        // SAFETY: `start` lies in the buffer's mapped bytes (the texture lies in the buffer).
-        Ok(unsafe { contents.as_ptr().add(start as usize) })
+        // The texture lies in the buffer, and so do the rows of a region checked in its level.
+        let end = len.and_then(|len| start.checked_add(len));
+        let Some(end) = end.filter(|&end| end <= self.buffer.length()) else {
+            return Err(internal("a texture's rows past its buffer"));
+        };
+        // SAFETY: `start` lies in the buffer's mapped bytes (checked above).
+        Ok((unsafe { contents.as_ptr().add(start as usize) }, end))
     }
 
     /// `replaceRegion` of `region` from `bytes` laid out as `host` (checked by the texture): into
@@ -1465,14 +1474,14 @@ impl Texels {
         let mut packed = vec![0u8; host.packed_len() as usize];
         host.pack(bytes, &mut packed);
         let (start, inside) = self.region_layout(region, host);
-        let target = self.bytes(call, start, inside.host_len())?;
+        let (target, end) = self.bytes(call, start, inside.host_len())?;
         let n = host.row_bytes as usize;
         for (at, from) in inside.rows() {
-            // SAFETY: every row lies in the buffer's mapped bytes from `start`; a write racing
-            // the GPU's use of them is the program's, as through `contents`.
+            // SAFETY: every row lies in the buffer's mapped bytes from `start` (`bytes`); a write
+            // racing the GPU's use of them is the program's, as through `contents`.
             unsafe { std::ptr::copy_nonoverlapping(packed[from..].as_ptr(), target.add(at), n) };
         }
-        self.buffer.upload(start..start + inside.host_len())
+        self.buffer.upload(start..end)
     }
 
     /// `getBytes` of `region` into `bytes` laid out as `host` (checked by the texture): from the
@@ -1487,7 +1496,7 @@ impl Texels {
     ) -> Result<(), Error> {
         let mut packed = vec![0u8; host.packed_len() as usize];
         let (start, inside) = self.region_layout(region, host);
-        let source = self.bytes(call, start, inside.host_len())?;
+        let (source, _) = self.bytes(call, start, inside.host_len())?;
         let n = host.row_bytes as usize;
         for (at, to) in inside.rows() {
             // SAFETY: as in `write`.

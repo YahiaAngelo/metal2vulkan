@@ -56,9 +56,9 @@
 
 use super::blit::{reads, reads_by, writes, writes_by, BlitCommandEncoder, TRANSFER};
 use super::blit_plan::{
-    plan_block_order_copy, plan_buffer_copy, plan_levels_copy, plan_region_copy, plan_rows_copy,
-    plan_whole_copy, texel_layout, texel_rows, BufferCopyPlan, BufferImageRegion, BufferLayout,
-    BufferRange, CopyPair, ImageCopyRegion, RowsCopy,
+    copied_rows, plan_block_order_copy, plan_buffer_copy, plan_levels_copy, plan_region_copy,
+    plan_rows_copy, plan_whole_copy, texel_layout, texel_rows, BufferCopyPlan, BufferImageRegion,
+    BufferLayout, BufferRange, CopyPair, ImageCopyRegion, RowsCopy,
 };
 use super::compressed_blit::{rule_of, rules_of};
 use super::copy_plan::{
@@ -454,9 +454,11 @@ impl BlitCommandEncoder {
             let (raw_buffer, base) = self.core().blit_at(source_buffer, 0)?;
             let aspect = multisampled_aspect(CALL, destination_texture, options)?;
             let planned = sample_interleave::InterleaveCopy::plan(
+                CALL,
                 self.core().command_buffer(),
                 raw_buffer,
                 base,
+                source_buffer.copy_reach(),
                 &layout,
                 destination_texture,
                 &region,
@@ -601,8 +603,10 @@ impl BlitCommandEncoder {
                     false => Some(unit(CALL, source_texture, options)?.bytes),
                 };
                 if let Some(bpp) = bpp {
-                    let row_bytes = size.width * u64::from(samples) * u64::from(bpp);
-                    if layout.bytes_per_row < row_bytes {
+                    // A row of more bytes than `u64::MAX` is longer than any pitch.
+                    let row_bytes = (size.width.checked_mul(u64::from(samples)))
+                        .and_then(|samples| samples.checked_mul(u64::from(bpp)));
+                    if row_bytes.is_none_or(|row_bytes| layout.bytes_per_row < row_bytes) {
                         return Err(invalid(CALL, Problem::Copy(CopyProblem::BytesPerRow)));
                     }
                 }
@@ -611,9 +615,11 @@ impl BlitCommandEncoder {
             let region = multisampled_region(CALL, source_texture, region)?;
             let (raw_buffer, base) = self.core().blit_at(destination_buffer, 0)?;
             let planned = sample_interleave::InterleaveCopy::plan(
+                CALL,
                 self.core().command_buffer(),
                 raw_buffer,
                 base,
+                destination_buffer.length(),
                 &layout,
                 source_texture,
                 &region,
@@ -679,17 +685,10 @@ impl BlitCommandEncoder {
         )?;
         self.buffer_texture_copy(destination_buffer, source_texture, plan, false)?;
         // Out of a texture Metal keeps compressed: the texels its blit writes, at the buffer's
-        // rows, image after image.
+        // rows the copy wrote, image after image.
         if let Some(rule) = rule_of(source_texture) {
-            let s = shape(region.size, &unit);
-            let mut rows = Vec::with_capacity((s.images * s.rows) as usize);
-            for z in 0..s.images {
-                for y in 0..s.rows {
-                    let start =
-                        layout.offset + z * layout.bytes_per_image + y * layout.bytes_per_row;
-                    rows.push(start..start + s.row_bytes);
-                }
-            }
+            let rows = copied_rows(source_texture.record(), &region, &unit, &layout, false)
+                .map_err(|problem| invalid(CALL, Problem::Copy(problem)))?;
             self.compressed_rows(destination_buffer, &rows, &[rule])?;
         }
         Ok(())

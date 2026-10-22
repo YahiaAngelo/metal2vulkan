@@ -466,17 +466,20 @@ impl HostLayout {
         self.row_bytes * self.rows * self.images
     }
 
-    /// The bytes of the host buffer the layout reads or writes.
-    pub(super) fn host_len(&self) -> u64 {
+    /// The bytes of the host buffer the layout reads or writes; `None` past `u64::MAX`, more
+    /// than any buffer holds. Rows lie in order, so the last ends past every other: a host buffer
+    /// of these bytes holds every row [`rows`](Self::rows) gives.
+    pub(super) fn host_len(&self) -> Option<u64> {
         if self.row_bytes == 0 || self.rows == 0 || self.images == 0 {
-            return 0;
+            return Some(0);
         }
-        (self.images - 1) * self.bytes_per_image
-            + (self.rows - 1) * self.bytes_per_row
-            + self.row_bytes
+        let images = (self.images - 1).checked_mul(self.bytes_per_image)?;
+        let rows = (self.rows - 1).checked_mul(self.bytes_per_row)?;
+        images.checked_add(rows)?.checked_add(self.row_bytes)
     }
 
-    /// Each row: its offset in the host buffer and in the packed layout.
+    /// Each row: its offset in the host buffer and in the packed layout, of a layout whose
+    /// [`host_len`](Self::host_len) a host buffer holds.
     pub(super) fn rows(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         (0..self.images).flat_map(move |z| {
             (0..self.rows).map(move |y| {

@@ -146,6 +146,7 @@ mod replays;
 mod resource;
 mod resource_ids;
 mod rotated;
+mod sample_interleave;
 mod sample_planes;
 mod sampler;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]

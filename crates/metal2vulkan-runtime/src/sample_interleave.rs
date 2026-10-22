@@ -53,9 +53,9 @@
 use super::binding_view::VkView;
 use super::blit_plan::BufferLayout;
 use super::command_buffer::CommandBuffer;
-use super::copy_plan::{depth_bytes, ImageRegion, TextureRegion};
+use super::copy_plan::{depth_bytes, CopyProblem, ImageRegion, TextureRegion};
 use super::device::{device_error, lock};
-use super::error::{internal, vulkan, Error};
+use super::error::{internal, invalid, vulkan, Error, Problem};
 use super::exit_guard;
 use super::image_plan::{sample_count, ImagePlan};
 use super::release;
@@ -753,6 +753,26 @@ fn bands(width: u32, height: u32, samples: u32, bpp: u64, limit: u32) -> Vec<(u3
     tiles
 }
 
+/// Whether the buffer's rows of a copy of `size` texels at `samples`, `bpp` bytes a sample, laid
+/// out as `layout` ([`buffer_rows`]: row `y` of `width * samples` samples at
+/// `offset + y * bytesPerRow`), lie within its first `length` bytes. Rows lie in order, so the
+/// last ends past every other; one past `u64::MAX` lies past every buffer.
+pub(super) fn rows_within(
+    layout: &BufferLayout,
+    size: [u32; 3],
+    samples: u32,
+    bpp: u64,
+    length: u64,
+) -> bool {
+    let [width, height, _] = size.map(u64::from);
+    if width == 0 || height == 0 {
+        return true;
+    }
+    let row = (width * u64::from(samples)).checked_mul(bpp);
+    let end = (layout.row_at(0, height - 1)).and_then(|last| last.checked_add(row?));
+    end.is_some_and(|end| end <= length)
+}
+
 /// The buffer-image copy regions for a band of `bw` by `bh` texels at `samples`, the band's
 /// column base `bx` texels and row base `by`, reading or writing the buffer at `base + offset`
 /// with `bytes_per_row`, each row at `by + ry`: one region per row (so any `bytesPerRow`,
@@ -851,15 +871,19 @@ fn scratch_copy(
 
 impl InterleaveCopy {
     /// Plan the copy of `region` of `texture` (at `samples`) in `aspect` (Metal's copy unit's)
-    /// and the buffer `buffer` laid out as `layout` (its bytes `base` into its `VkBuffer`),
-    /// `into_texture` from the buffer. `None` where the device cannot run it (the caller refuses
-    /// typed). The texture's Vulkan format and the aspect decide the copy format
-    /// ([`copy_format`]); a format of no copy (not a single-texel color format of 1, 2, 4, 8 or
-    /// 16 bytes, nor a 16- or 32-bit depth or a stencil) gives `None`.
+    /// and the buffer `buffer` laid out as `layout` (its bytes `base` into its `VkBuffer`, `length`
+    /// of them the copy may reach), `into_texture` from the buffer, for `call`. `None` where the
+    /// device cannot run it (the caller refuses typed). The texture's Vulkan format and the aspect
+    /// decide the copy format ([`copy_format`]); a format of no copy (not a single-texel color
+    /// format of 1, 2, 4, 8 or 16 bytes, nor a 16- or 32-bit depth or a stencil) gives `None`.
+    /// Refused (`Invalid`, [`CopyProblem::BufferRange`]): a row's samples past `length`, as a
+    /// single-sample copy's layout past its buffer is.
     pub(super) fn plan(
+        call: &'static str,
         maker: &CommandBuffer,
         buffer: vk::Buffer,
         base: u64,
+        length: u64,
         layout: &BufferLayout,
         texture: &Texture,
         region: &TextureRegion,
@@ -884,6 +908,9 @@ impl InterleaveCopy {
         }
         let bpp = texel_bytes(copy);
         let samples = samples.max(1);
+        if !rows_within(layout, region.size, samples, bpp, length) {
+            return Err(invalid(call, Problem::Copy(CopyProblem::BufferRange)));
+        }
         // The device's modules and pipelines; `Unsupported` means the device cannot run them.
         let made = if into_texture {
             device.interleave_merge(copy, samples).map(|_| ())
