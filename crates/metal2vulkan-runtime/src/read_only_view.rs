@@ -14,6 +14,9 @@
 //!   (`Device::buffer_over_host_memory`), while the CPU reads and writes the caller's own
 //!   (`Buffer::contents`). The view shares the pages, so the GPU reads what the CPU
 //!   writes at the pointer.
+//! - **Cost.** Mapping and protecting a view of touched pages took at most 7 us, and unmapping
+//!   it at most 17 us, for 16 KiB to 1 GiB (best of 20, the M3 Max under macOS 27.0.1), beside
+//!   the import's 11 to 20 ms per GiB.
 //! - **Freed.** The view is unmapped once the memory imported from it is freed (`memory.rs`'s
 //!   `Block`), as the import requires it mapped for its whole life.
 //! - **Elsewhere** the import is of the caller's pages: Linux drivers pin imported pages for
