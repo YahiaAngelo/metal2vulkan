@@ -56,7 +56,7 @@ use metal2vulkan_runtime::{
     Error, EventRef, ExecutedCommands, ExecutedCommandsHandler, ExecutedPipeline, Execution,
     IdPlacement, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor,
     IndirectCommandBufferProblem, IndirectCommandCheckNeeds, Invalid, PipelineOptions, Problem,
-    RecordsRead, ResourceId, ResourceIdKind, ResourceOptions, Size,
+    RecordsRead, ResourceId, ResourceIdKind, ResourceOptions, RuntimeGap, Size,
 };
 use std::ptr::NonNull;
 use std::sync::{mpsc, Arc, Mutex};
@@ -271,14 +271,21 @@ fn commands_buffer(device: &Device, bind_count: u32) -> IndirectCommandBuffer {
 
 /// [`commands_buffer`] of `count` commands.
 fn commands_buffer_of(device: &Device, bind_count: u32, count: u64) -> IndirectCommandBuffer {
+    try_commands_buffer_of(device, bind_count, count).unwrap()
+}
+
+/// [`commands_buffer_of`], or the device's refusal.
+fn try_commands_buffer_of(
+    device: &Device,
+    bind_count: u32,
+    count: u64,
+) -> Result<IndirectCommandBuffer, Error> {
     let mut descriptor = IndirectCommandBufferDescriptor::new();
     descriptor.command_types = IndirectCommandType::CONCURRENT_DISPATCH
         .union(IndirectCommandType::CONCURRENT_DISPATCH_THREADS);
     descriptor.max_kernel_buffer_bind_count = bind_count;
     descriptor.max_kernel_threadgroup_memory_bind_count = 1;
-    device
-        .new_indirect_command_buffer(&descriptor, count, ResourceOptions::shared())
-        .unwrap()
+    device.new_indirect_command_buffer(&descriptor, count, ResourceOptions::shared())
 }
 
 /// Word `word` of command `command`'s window of `params`.
@@ -788,7 +795,8 @@ fn a_kernel_reaches_the_records_of_a_buffer_past_a_reservation() {
 /// 2^26 + 6): the records of ID r + 1, 955,300 commands (past 2^31 bytes), run past ID r + 2's
 /// start. Through r + 2 the kernel writes r + 2's commands, which run, and r + 1's stay fresh;
 /// with r + 2's buffer not resident, its writes miss, which the execution report counts, and
-/// reach none of r + 1's records where r + 2's would start.
+/// reach none of r + 1's records where r + 2's would start. A device whose buffers stop at 2 GiB
+/// refuses the long buffer (`RuntimeGap::IndirectCommandBufferPastMaxBufferLength`).
 #[test]
 fn a_kernel_reaches_an_id_s_records_where_an_earlier_id_s_run_past_them() {
     on_device(|device| {
@@ -800,11 +808,26 @@ fn a_kernel_reaches_an_id_s_records_where_an_earlier_id_s_run_past_them() {
             )
             .unwrap();
         let count = 955_300;
-        let long = commands_buffer_of(device, 2, count);
+        let queue = device.new_command_queue().unwrap();
+        let long = match try_commands_buffer_of(device, 2, count) {
+            Ok(long) => long,
+            // A device whose buffers stop at 2 GiB (lavapipe) holds no records past 2^31 bytes,
+            // which an ID's run past the next ID's start needs: refused, typed. The kernel
+            // still writes the next ID's commands, which run.
+            Err(Error::NotImplemented(RuntimeGap::IndirectCommandBufferPastMaxBufferLength {
+                max_buffer_length,
+                ..
+            })) if max_buffer_length <= 1 << 31 => {
+                let setup = Setup::new(device, 2);
+                assert_eq!(setup.icb.gpu_resource_id(), ResourceId(reserved + 1));
+                run_written(&queue, &setup);
+                return;
+            }
+            Err(error) => panic!("{error:?}"),
+        };
         assert_eq!(long.gpu_resource_id(), ResourceId(reserved + 1));
         let setup = Setup::new(device, 2);
         assert_eq!(setup.icb.gpu_resource_id(), ResourceId(reserved + 2));
-        let queue = device.new_command_queue().unwrap();
         let command_buffer = queue.command_buffer().unwrap();
         let mut encoder = command_buffer.compute_command_encoder().unwrap();
         encoder

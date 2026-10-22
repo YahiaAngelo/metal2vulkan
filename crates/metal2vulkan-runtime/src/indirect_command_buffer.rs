@@ -2230,7 +2230,7 @@ impl IndirectCommandBuffer {
     }
 
     /// How many programs of released states the buffer keeps (`released_programs.rs`).
-    #[cfg(test)]
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
     pub(super) fn kept_count(&self) -> usize {
         lock(&self.0.kept).count()
     }
