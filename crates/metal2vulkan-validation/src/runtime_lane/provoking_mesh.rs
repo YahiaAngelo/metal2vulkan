@@ -326,10 +326,14 @@ fn run(withheld: bool, emulated: bool) {
                     .withheld_features
                     .insert(VkFeature::ProvokingVertexLast);
             }
+            // The extension's features go with it.
             if emulated {
                 options
                     .withheld_extensions
                     .insert(VkExtension::ExtMeshShader);
+                options
+                    .withheld_features
+                    .extend([VkFeature::TaskShader, VkFeature::MeshShader]);
             }
         })
         .unwrap();
