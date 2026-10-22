@@ -7045,6 +7045,7 @@ impl RenderLowering {
         // A draw under the last provoking vertex is drawn as a list on a device without it
         // (`render/provoking.rs`).
         let provoking = self.provoking(call, &pipeline, assembly);
+        let rotated_weights = provoking.rotates_weights(assembly, &pipeline);
         let restarted = self.restarted(assembly, &draw, provoking);
         let quad_primitive_ids = match assembly {
             Assembly::Private(program) => private_primitive_ids(&pipeline, program)?,
@@ -7126,6 +7127,7 @@ impl RenderLowering {
                 &settings,
                 primitive_id_indices,
                 quad_primitive_ids,
+                rotated_weights,
             ),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut unlisted),
@@ -9320,6 +9322,8 @@ impl RenderLowering {
     /// `settings` binds in, reading its indices as `primitive_id_indices` says (`BindState::
     /// primitive_id_indices`, [`primitive_id_indices`]), its quads' primitive IDs as
     /// `quad_primitive_ids` says (`BindState::quad_primitive_ids`, [`private_primitive_ids`]),
+    /// its triangles' barycentric weights as `rotated_weights` says (`BindState::rotated_weights`,
+    /// `render/provoking.rs`),
     /// its vertex, object and mesh tables
     /// `pass_start`'s or the encoder's
     /// ([`refresh_bind_state`](Self::refresh_bind_state)), its runtime samplers' address modes
@@ -9332,10 +9336,11 @@ impl RenderLowering {
     fn settle_draw(
         &self,
         live: &mut LiveBind,
-        (pipeline, settings, primitive_id_indices, quad_primitive_ids): (
+        (pipeline, settings, primitive_id_indices, quad_primitive_ids, rotated_weights): (
             &DrawingState,
             &DrawSettings,
             Option<IndexType>,
+            bool,
             bool,
         ),
         (pass_start, sampler_maps): (&PassStartTables, &SamplerMaps),
@@ -9379,6 +9384,7 @@ impl RenderLowering {
             reshape.field(&mut state.depth16_bias_raises, settings.depth16_bias_raises);
             reshape.field(&mut state.primitive_id_indices, primitive_id_indices);
             reshape.field(&mut state.quad_primitive_ids, quad_primitive_ids);
+            reshape.field(&mut state.rotated_weights, rotated_weights);
             reshape.field_from(&mut state.dropped_colors, &colors.dropped);
             reshape.field_from(&mut state.extended_shadows, shadows);
             let snapshots = snapshot.as_ref().map_or(&NO_INDICES, |w| &w.slots);

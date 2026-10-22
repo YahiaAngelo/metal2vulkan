@@ -53,10 +53,15 @@
 //!   values of 200 lines on the M3 Max), announced (`Degradation::ProvokingVertexLines`). A strip
 //!   whose fragment function reads barycentrics and no flat input is listed in Metal's mode-1
 //!   order instead ([`RewriteOrder::Last`]), exact; a list, a line or a private type of such a
-//!   pipeline draws as it is, its order mode 0's. What the list cannot draw as Metal does is
-//!   announced (`Degradation::ProvokingVertexUnmatched`): a triangle whose fragment function reads
-//!   flat inputs and barycentrics (its weights in the rotated order), and patches and mesh draws,
-//!   whose primitives no list holds (their flat inputs from the first vertex).
+//!   pipeline draws as it is, its order mode 0's. A triangle drawn with its last vertex first
+//!   whose fragment function reads barycentrics runs the variant that takes Metal's weights back
+//!   from the drawn triangle's (`BindState::rotated_weights`): Metal's first weight bit for bit,
+//!   since Metal interpolates the rotated triangle alike, and its other two Metal's but for
+//!   rounding (Metal probes on the M3 Max, 200 triangles: 9,150 of 67,821 pixels' first two
+//!   weights bit for bit, the rest within `2^-15`). What the list cannot draw as Metal does is
+//!   announced (`Degradation::ProvokingVertexUnmatched`): those two weights of a triangle whose
+//!   fragment function reads flat inputs and barycentrics, and patches and mesh draws, whose
+//!   primitives no list holds (their flat inputs from the first vertex).
 //!
 //! An execution's commands take the first vertex: its snapshot of the encoder's state does
 //! (`render/executions.rs`).
@@ -90,6 +95,15 @@ impl Provoking {
             Provoking::Native => RewriteOrder::Last,
             Provoking::Listed(order) => order,
         }
+    }
+
+    /// Whether a draw of `pipeline` as `assembly` taken so draws triangles with Metal's last
+    /// vertex first, and its fragment function reads `[[barycentric_coord]]`: it runs the variant
+    /// that takes Metal's weights back from the drawn triangle's (`BindState::rotated_weights`).
+    pub(super) fn rotates_weights(self, assembly: Assembly, pipeline: &DrawingState) -> bool {
+        self == Provoking::Listed(RewriteOrder::LastFirst)
+            && matches!(Class::of(assembly), Class::Triangles { .. })
+            && reads(pipeline).1
     }
 }
 
@@ -293,7 +307,9 @@ impl RenderLowering {
                                  [[barycentric_coord]]"
                             ),
                             "the device has no last provoking vertex, so each triangle is \
-                             drawn from its last vertex, and its weights are in that order"
+                             drawn from its last vertex, and its second and third weights are \
+                             computed from that triangle's, Metal's but for rounding (within \
+                             2^-15)"
                                 .to_owned(),
                         )
                     });

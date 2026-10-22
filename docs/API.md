@@ -2238,8 +2238,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   Metal. On a device without `VK_EXT_provoking_vertex`'s last vertex (or whose pipelines of one
   render pass instance share one mode), what no list the runtime draws holds as Metal draws it: a
   draw of triangles whose fragment function reads flat inputs and `[[barycentric_coord]]`, each
-  drawn from its last vertex, its weights in that order; patches and mesh draws, whose flat inputs
-  read the first vertex. On a device with it, a strip whose vertex function computes
+  drawn from its last vertex, its second and third weights taken back to Metal's order from the
+  drawn triangle's, Metal's but for rounding; patches and mesh draws, whose flat inputs read the
+  first vertex. On a device with it, a strip whose vertex function computes
   `[[primitive_id]]` into its varying (a device without `geometryShader` and `tessellationShader`),
   whose IDs read each primitive's last vertex; and a slice or viewport a vertex function selects
   where the pipeline selects it in a synthesized geometry stage (a device without
@@ -2248,7 +2249,7 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   a mode from 2 to `2^63 - 1`, which Metal draws a third way that differs between pipeline states
   (every line's flat inputs and `[[primitive_id]]` 0) and the runtime as mode 1: announced at the
   call. Cost: flat inputs or a computed primitive ID read another vertex than Metal's, or
-  barycentric weights come in another order than Metal's.
+  barycentric weights come in another order than Metal's or round otherwise.
 - `metal2vulkan-degrade-visibility-count-per-color` (precision). `VisibilityCountPerColor`: A
   draw counted by a `Counting` visibility result whose fragment function writes more than one color
   attachment, on ANV (`RuntimeDriverDefect::OcclusionCountPerColorOutput`). Cost: the result is

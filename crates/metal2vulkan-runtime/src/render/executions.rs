@@ -1790,7 +1790,7 @@ impl RenderLowering {
         let sampler_maps = self.sampler_maps(state, &pass_start)?;
         let settled = self.settle_draw(
             &mut lock(&live),
-            (state, &settings, None, false),
+            (state, &settings, None, false, false),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut None),
             (&function_tables, &mut None),

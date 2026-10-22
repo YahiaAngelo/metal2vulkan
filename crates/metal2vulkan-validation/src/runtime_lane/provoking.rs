@@ -23,9 +23,10 @@
 //! same primitive IDs (but for lines the device without the last vertex draws from their last
 //! vertex, which it announces), and a pipeline that reads neither flat inputs nor weights draws
 //! alike, bit for bit, at both modes. The mode-0 draw fails the mode-1 checks at some pixels: the
-//! checks tell the modes apart. On the device without the last vertex, what the runtime
-//! announces it draws otherwise (a line's direction; the weights of a triangle that reads flat
-//! inputs too) is announced and left unchecked. The work counts show which path ran.
+//! checks tell the modes apart. On the device without the last vertex, a line's direction, which
+//! the runtime announces it draws otherwise, is left unchecked; the weights of a triangle that
+//! reads flat inputs too, which the rotated-weights variant takes back to Metal's order but for
+//! rounding, are checked. The work counts show which path ran.
 
 use super::{buffer_with, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
@@ -661,6 +662,8 @@ struct Found {
     told_apart: usize,
     /// Pixels a listed line covers otherwise at mode 1 than at mode 0.
     lines_moved: usize,
+    /// Cases of listed triangles whose weights the rotated-weights variant takes back.
+    rotated_weights: usize,
 }
 
 /// Every case of every type under every fragment function, at modes 0 and 1, on `device`, whose
@@ -704,11 +707,14 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
                     continue;
                 }
                 // The listed form of a device without the last vertex draws a line from its last
-                // vertex, and a triangle's weights, of one that reads flat inputs too, in that
-                // order: both announced, the weights left unchecked.
+                // vertex, announced, its weights left unchecked; a triangle, of a pipeline that
+                // reads flat inputs too, from its last vertex, its weights taken back to Metal's
+                // order by the rotated-weights variant (but for rounding, announced).
                 let listed_line = !native && fragment.flat && lines(primitive);
-                let rotated_weights = !native && fragment.flat;
-                let checks = (fragment.flat, fragment.weights && !rotated_weights);
+                let checks = (fragment.flat, fragment.weights && !listed_line);
+                if !native && fragment.flat && fragment.weights && !listed_line {
+                    found.rotated_weights += 1;
+                }
                 let (covered, failed, example) = failing(&case, fragment, &last, checks);
                 assert_eq!(
                     failed, 0,
@@ -772,9 +778,11 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
         "{name} (native {native}, weights {weights:?}): {} cases, {} covered pixels at mode 1 \
          all Metal's; {} pixels of the mode-0 draws not; draws {natively} through last-vertex \
          pipelines, {listed} listed ({gathered} by the gather pass); {} pixels of listed lines \
-         covered otherwise",
-        found.cases, found.covered, found.told_apart, found.lines_moved
+         covered otherwise; {} cases of rotated weights checked",
+        found.cases, found.covered, found.told_apart, found.lines_moved, found.rotated_weights
     );
+    // The listed path checks rotated triangles' weights; the native one lists none.
+    assert_eq!(found.rotated_weights > 0, !native, "{name}");
     found
 }
 

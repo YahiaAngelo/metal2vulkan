@@ -1887,7 +1887,8 @@ degradations! {
         /// `VK_EXT_provoking_vertex`'s last vertex (or whose pipelines of one render pass
         /// instance share one mode), what no list the runtime draws holds as Metal draws it: a
         /// draw of triangles whose fragment function reads flat inputs and
-        /// `[[barycentric_coord]]`, each drawn from its last vertex, its weights in that order;
+        /// `[[barycentric_coord]]`, each drawn from its last vertex, its second and third weights
+        /// taken back to Metal's order from the drawn triangle's, Metal's but for rounding;
         /// patches and mesh draws, whose flat inputs read the first vertex. On a device with it,
         /// a strip whose vertex function computes `[[primitive_id]]` into its varying (a device
         /// without `geometryShader` and `tessellationShader`), whose IDs read each primitive's
@@ -1900,7 +1901,7 @@ degradations! {
         /// mode 1: announced at the call.
         ProvokingVertexUnmatched = "provoking-vertex-unmatched", Precision,
             "flat inputs or a computed primitive ID read another vertex than Metal's, or \
-             barycentric weights come in another order than Metal's";
+             barycentric weights come in another order than Metal's or round otherwise";
         /// A draw counted by a `Counting` visibility result whose fragment variant writes more
         /// than one color attachment, on a device whose driver counts each sample once per color
         /// output ([`metal2vulkan::error::RuntimeDriverDefect::OcclusionCountPerColorOutput`]:
