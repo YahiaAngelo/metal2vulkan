@@ -44,7 +44,9 @@
 //! indexed draw whose primitives Vulkan's input assembly does not form as Metal does (a strip
 //! restarting at another index than all-ones) can draw them as a list instead: an
 //! [`IndexRewritePass`] of three [`index_rewrite_module`] dispatches ([`RewritePhase`]) before the
-//! render pass instance, and one indirect draw. A pass's `Boolean` visibility results are query
+//! render pass instance, and one indirect draw; a run of direct draws of a program that never
+//! restarts ([`RewriteProgram::gathers`]) over one index buffer can take one [`IndexGather`]
+//! dispatch of [`index_gather_module`] for all of them instead, and one indexed draw each. A pass's `Boolean` visibility results are query
 //! counts copied to their offsets and made Metal's 1 or 0 in place by a [`VisibilityResolve`]
 //! dispatch of [`visibility_resolve_module`]; where a split pass continues a result's query in a
 //! later render pass instance, a [`VisibilityCombine`] dispatch of [`visibility_combine_module`]
@@ -229,8 +231,9 @@ pub use index_bounds::{
     IndexBoundsPlanModule,
 };
 pub use index_rewrite::{
-    index_rewrite_module, IndexRewriteModule, IndexRewritePass, RewriteOrder, RewriteOutput,
-    RewritePhase, RewriteProgram, RewriteSource,
+    index_gather_module, index_rewrite_module, GatherDraw, IndexGather, IndexGatherModule,
+    IndexRewriteModule, IndexRewritePass, RewriteOrder, RewriteOutput, RewritePhase,
+    RewriteProgram, RewriteSource,
 };
 pub use indirect_clamp::{indirect_clamp_module, IndirectClamp, IndirectClampModule};
 pub use instantiate::{

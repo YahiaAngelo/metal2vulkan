@@ -1870,5 +1870,8 @@ pub fn index_rewrite_module(
     })
 }
 
+mod gather;
+pub use gather::{index_gather_module, GatherDraw, IndexGather, IndexGatherModule};
+
 #[cfg(test)]
 mod tests;
