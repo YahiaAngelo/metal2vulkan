@@ -92,8 +92,11 @@
 //!   textures, sampler states, pipeline states and indirect command buffers, Metal's types 0, 1,
 //!   4 and 5) keep IDs from plain allocation for good, whether a resource placed at one lives or
 //!   not. Only a space's first call with an ID counts: one once the space handed out an ID,
-//!   placed or plain, or took a reservation is ignored, with a diagnostic line, as Metal's is
-//!   (its pool logs "reserve() must be called before any allocation takes place" for both). A
+//!   placed or plain, or took a reservation is ignored whatever it holds, with a diagnostic
+//!   line, as Metal's is (its pool logs "reserve() must be called before any allocation takes
+//!   place" for both; an M3 Max, macOS 27.0.1, so ignored IDs of 2^31, 2^32 - 1, 2^32 + 5 and
+//!   0 alone of indirect command buffers, and 2^28 + 5 of textures, each refused or dropped in
+//!   a first call). A
 //!   call of no ID changes nothing, and 0 beside other IDs is no ID (0 and 5 reserve 5). A call
 //!   of 0 alone reserves nothing, but leaves the pool made, as a texture pool is by the device's
 //!   first queue ([`Pool::make`]): a later reservation keeps the pool's first range beside the
@@ -393,6 +396,11 @@ impl ResourceIds {
         self.space(space).reserve(ids)
     }
 
+    /// Whether `space`'s pool handed out an ID or took a reservation ([`Pool::started`]).
+    pub(super) fn started(&mut self, space: IdSpace) -> bool {
+        self.space(space).plain.started()
+    }
+
     /// Take the sampler ID Metal's device keeps for itself as it makes its first object of a
     /// kind that keeps one (the module docs): the ID a live pipeline state's numbered device
     /// sampler has, kept now for good (a queue or a texture made after a render
@@ -586,6 +594,11 @@ impl Pool {
         };
         pool.add(1, size);
         pool
+    }
+
+    /// Whether the pool handed out an ID or took a reservation: a reservation is ignored then.
+    pub(super) fn started(&self) -> bool {
+        self.started
     }
 
     /// Count a resource of the space as an allocation, as Metal counts one placed at an ID:
@@ -947,16 +960,18 @@ impl Device {
     /// runtime extension): keep `ids` of `kind` from plain allocation for the device's life,
     /// plain IDs then numbered as Metal numbers them (the module docs). Only the device's first
     /// call of `kind` with an ID counts: a later one, or one once the device handed out an ID of
-    /// `kind`, is ignored, as Metal's is, and the device says so in one diagnostic line (through
-    /// its message sink, else on stderr). A call of no ID changes nothing.
+    /// `kind`, is ignored whatever it holds (an ID of 2^32 or more, 0 alone, or one refused
+    /// below), as Metal's is, and the device says so in one diagnostic line (through its message
+    /// sink, else on stderr), as Metal logs it. A call of no ID changes nothing.
     ///
-    /// A call holding an ID of 2^32 or more is dropped whole, silently, and leaves the kind's
-    /// reservation to a later call, as Metal's is; 0, the null handle, reserves nothing. A call
+    /// Before that, a call holding an ID of 2^32 or more is dropped whole, silently, and leaves
+    /// the kind's reservation to a later call, as Metal's is; 0, the null handle, reserves nothing. A call
     /// of 0 alone, before any ID of `kind`, leaves `kind`'s pool to keep its first range beside a
     /// later reservation's ranges, so plain allocation hands that range's IDs out twice, as
     /// Metal's does (the module docs).
     ///
-    /// Refused, reserving nothing: a texture or sampler state ID of 2^28 or more, which ends
+    /// Refused, reserving nothing, where the call is not ignored: a texture or sampler state ID
+    /// of 2^28 or more, which ends
     /// Metal's process (`Invalid`, `Problem::ResourceId`); an indirect command buffer ID of 2^31
     /// or more, at which Metal's reservation never returns (`Invalid`,
     /// `Problem::ReservationHangs`); and a texture ID no set-1 array of the device can hold
@@ -968,6 +983,14 @@ impl Device {
         ids: &[ResourceId],
     ) -> Result<(), Error> {
         const CALL: &str = "reserve_resource_ids";
+        // Metal ignores a late call before it looks at what the call holds (an M3 Max, macOS
+        // 27.0.1: after a buffer or a reservation, 2^31, 2^31 + 5, 2^32 - 1, 2^32 + 5 and 0 alone
+        // of indirect command buffers, and 2^28 + 5 and 2^31 + 5 of textures, each logged and
+        // ignored, plain IDs going on as before).
+        if !ids.is_empty() && self.reservation_closed(kind) {
+            self.ignore_late_reservation(kind, ids.len());
+            return Ok(());
+        }
         if ids.iter().any(|id| id.0 > u64::from(u32::MAX)) {
             return Ok(());
         }
@@ -1003,17 +1026,37 @@ impl Device {
                 lock(&self.shared().addresses).reserve_records(&ids)
             }
         };
+        // Another thread's allocation may have come between: the call is late then too.
         if !taken {
-            self.diagnose(
-                "metal2vulkan-late-reservation",
-                format!(
-                    "metal2vulkan: {CALL}: reserve() must be called before any allocation takes \
-                     place; the reservation of {} {kind:?} IDs is ignored, as Metal ignores it",
-                    ids.len()
-                ),
-            );
+            self.ignore_late_reservation(kind, ids.len());
         }
         Ok(())
+    }
+
+    /// Whether `kind`'s pool handed out an ID or took a reservation, so a reservation call is
+    /// ignored ([`Pool::started`]).
+    fn reservation_closed(&self, kind: ResourceIdKind) -> bool {
+        let space = |space| lock(&self.shared().resource_ids).started(space);
+        match kind {
+            ResourceIdKind::Texture => space(IdSpace::Texture),
+            ResourceIdKind::SamplerState => space(IdSpace::Sampler),
+            ResourceIdKind::PipelineState => space(IdSpace::Pipeline),
+            ResourceIdKind::IndirectCommandBuffer => {
+                lock(&self.shared().addresses).records_started()
+            }
+        }
+    }
+
+    /// Say that a late reservation call of `count` IDs of `kind` is ignored, as Metal logs it.
+    fn ignore_late_reservation(&self, kind: ResourceIdKind, count: usize) {
+        const CALL: &str = "reserve_resource_ids";
+        self.diagnose(
+            "metal2vulkan-late-reservation",
+            format!(
+                "metal2vulkan: {CALL}: reserve() must be called before any allocation takes \
+                 place; the reservation of {count} {kind:?} IDs is ignored, as Metal ignores it"
+            ),
+        );
     }
 
     /// How many sampler IDs the device holds now: one for each holder of one (the module docs'

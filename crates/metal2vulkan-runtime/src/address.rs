@@ -476,6 +476,12 @@ impl AddressSpace {
         self.records.pool.reserve(ids.iter().copied())
     }
 
+    /// Whether the records' pool handed out an ID or took a reservation: a reservation is
+    /// ignored then (`Pool::started`).
+    pub(super) fn records_started(&self) -> bool {
+        self.records.pool.started()
+    }
+
     /// A new indirect command buffer's records ID, now held and its slot's (module docs):
     /// `placed`, or the one Metal hands out next; `None` when that is [`RECORDS_ID_LIMIT`] or
     /// more. The buffer gives it back with [`give_records_id`](Self::give_records_id).

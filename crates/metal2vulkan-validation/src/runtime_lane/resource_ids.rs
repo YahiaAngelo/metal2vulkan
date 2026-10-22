@@ -2473,6 +2473,73 @@ fn plain_ids_after_a_reservation_are_metal_s() {
             assert_eq!(got, ids, "{reserved}");
         });
     }
+    // A late call (after a buffer, or after a reservation) is ignored whatever it holds, as
+    // Metal ignores and logs it (an M3 Max, macOS 27.0.1): IDs of 2^31 and up, refused in a first
+    // call, 2^32 + 5, dropped in a first call, and 0 alone; textures' 2^28 + 5 too.
+    let late = [
+        (
+            ResourceIdKind::IndirectCommandBuffer,
+            None,
+            RECORDS_ID_LIMIT + 5,
+            [2, 3],
+        ),
+        (
+            ResourceIdKind::IndirectCommandBuffer,
+            None,
+            (1 << 32) - 1,
+            [2, 3],
+        ),
+        (
+            ResourceIdKind::IndirectCommandBuffer,
+            Some(5),
+            RECORDS_ID_LIMIT,
+            [1, 2],
+        ),
+        (
+            ResourceIdKind::IndirectCommandBuffer,
+            None,
+            (1 << 32) + 5,
+            [2, 3],
+        ),
+        (ResourceIdKind::IndirectCommandBuffer, None, 0, [2, 3]),
+        (ResourceIdKind::Texture, None, (1 << 28) + 5, [2, 3]),
+        (ResourceIdKind::Texture, Some(10), (1 << 28) + 5, [11, 12]),
+    ];
+    for (kind, first, held, next) in late {
+        on_device(|device, _| {
+            // Each kept alive, so its ID stays held.
+            let (mut textures, mut buffers) = (Vec::new(), Vec::new());
+            let mut make = || match kind {
+                ResourceIdKind::Texture => {
+                    let texture = device.new_texture(&plain).unwrap();
+                    let id = texture.gpu_resource_id().0;
+                    textures.push(texture);
+                    id
+                }
+                _ => {
+                    let buffer = device
+                        .new_indirect_command_buffer(&icb, 1, ResourceOptions::shared())
+                        .unwrap();
+                    let id = buffer.gpu_resource_id().0;
+                    buffers.push(buffer);
+                    id
+                }
+            };
+            match first {
+                Some(id) => device
+                    .reserve_resource_ids(kind, &[ResourceId(id)])
+                    .unwrap(),
+                None => assert_eq!(make(), 1),
+            }
+            assert_eq!(
+                device.reserve_resource_ids(kind, &[ResourceId(held)]),
+                Ok(()),
+                "{kind:?}: {held} after {first:?}"
+            );
+            let got = [make(), make()];
+            assert_eq!(got, next, "{kind:?}: {held} after {first:?}");
+        });
+    }
     // After a call of 0 alone, a reservation keeps the pool's first range beside its own, whose
     // IDs Metal hands out twice (an M3 Max, macOS 27.0.1): 0 then 10 gives 1 to 9, 11 to 31,
     // then 1 to 15; 0 then 20, 21 to 31, 1 to 19, then 1 to 10.
