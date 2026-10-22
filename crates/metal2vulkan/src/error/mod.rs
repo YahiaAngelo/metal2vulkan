@@ -1453,6 +1453,9 @@ pub enum PrivateRenderField {
     LogicOperation,
     /// `pointSmoothEnabled`.
     PointSmooth,
+    /// `explicitVisibilityGroupID` other than the default in a pipeline whose
+    /// `maxVertexAmplificationCount` is past 1.
+    ExplicitVisibilityGroup,
     /// `fragmentDepthCompareClampMask` other than 0 in a pipeline whose fragment function makes a
     /// depth comparison through an argument buffer's sampler, which no bit of the mask names
     /// (Metal's answer unmeasured).

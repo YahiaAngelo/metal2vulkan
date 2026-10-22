@@ -402,6 +402,15 @@ pub struct PrivateRenderState {
     /// `needsCustomBorderColorSamplers` (default off): changes nothing Metal draws; a sampler's
     /// private custom border color samples transparent black with it or without.
     pub needs_custom_border_color_samplers: bool,
+    /// `vertexAmplificationMode` (default 0): 0 and 1 draw alike, the amplification count and view
+    /// mappings the encoder sets; Metal's descriptor asserts at 2 or more, which is refused as an
+    /// unknown value.
+    pub vertex_amplification_mode: u64,
+    /// `explicitVisibilityGroupID` (default `u32::MAX`, none): changes nothing Metal draws in a
+    /// pipeline whose `maxVertexAmplificationCount` is 1; any other group is refused where the
+    /// pipeline amplifies (Metal there draws one copy's color and counts every copy's samples,
+    /// a rule not built).
+    pub explicit_visibility_group_id: u32,
 }
 
 impl PrivateRenderState {
@@ -424,11 +433,13 @@ impl PrivateRenderState {
             fragment_depth_compare_clamp_mask: 0,
             depth_stencil_write_disabled: false,
             needs_custom_border_color_samplers: false,
+            vertex_amplification_mode: 0,
+            explicit_visibility_group_id: u32::MAX,
         }
     }
 
     /// The fields as plain bits, the coverage by its `f32` bits: what equality compares.
-    fn bits(&self) -> (u64, u32, [bool; 9], [u64; 2], u8, [u32; 2]) {
+    fn bits(&self) -> (u64, u32, [bool; 9], [u64; 3], u8, [u32; 3]) {
         (
             self.sample_mask,
             self.sample_coverage.to_bits(),
@@ -443,11 +454,16 @@ impl PrivateRenderState {
                 self.depth_stencil_write_disabled,
                 self.needs_custom_border_color_samplers,
             ],
-            [self.alpha_test_function, self.logic_operation],
+            [
+                self.alpha_test_function,
+                self.logic_operation,
+                self.vertex_amplification_mode,
+            ],
             self.clip_distance_enable_mask,
             [
                 self.vertex_depth_compare_clamp_mask,
                 self.fragment_depth_compare_clamp_mask,
+                self.explicit_visibility_group_id,
             ],
         )
     }

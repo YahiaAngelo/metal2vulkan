@@ -40,6 +40,13 @@
 //!   them itself (`LoweringInputs::depth_compare_clamp_mask`, [`depth_compares_clamped`]); a
 //!   comparison through an argument buffer's sampler, which no bit names, is refused under a mask
 //!   other than 0.
+//! - `vertexAmplificationMode` 0 and 1 draw alike, as the encoder's amplification count and view
+//!   mappings say, at counts 1 and 2 (probes on an Apple M3 Max); Metal's descriptor asserts at 2
+//!   or more (`vertexAmplificationMode value 2 is invalid`), refused as an unknown value.
+//!   `explicitVisibilityGroupID` changes nothing in a pipeline whose `maxVertexAmplificationCount`
+//!   is 1; where the pipeline amplifies, a group other than the default draws one copy's color and
+//!   counts every copy's samples on Metal, a rule not built: refused
+//!   (`PrivateRenderField::ExplicitVisibilityGroup`).
 //! - `sampleCoverage`, `logicOperationEnabled` and `pointSmoothEnabled` change what Metal draws;
 //!   until the translation builds one, a value other than Metal's default refuses the pipeline
 //!   `NotImplemented` ([`Feature::PrivateRenderState`]) naming it.
@@ -51,7 +58,9 @@
 //!
 //! [`GraphicsState::sample_mask`]: crate::pipeline::GraphicsState::sample_mask
 
-use crate::error::{Error, Feature, PrivateRenderField, RuntimeInput, Unsupported};
+use crate::error::{
+    DescriptorError, Error, Feature, PrivateRenderField, RuntimeInput, Unsupported,
+};
 use crate::library::FunctionArtifact;
 use crate::metal::CompareFunction;
 use crate::pipeline::descriptor::{PrivateRenderState, RenderPipelineDescriptor};
@@ -65,11 +74,24 @@ fn refused(field: PrivateRenderField) -> Error {
     )))
 }
 
-/// `Ok` where every property of `s` is Metal's default or built (the module docs), else the
-/// refusal naming the first that is not.
-pub(crate) fn check_render(s: &PrivateRenderState) -> Result<(), Error> {
+/// `Ok` where every property of the private state of `d` is Metal's default or built (the module
+/// docs), else the refusal naming the first that is not.
+pub(crate) fn check_render(d: &RenderPipelineDescriptor) -> Result<(), Error> {
     use PrivateRenderField as F;
+    let s = &d.private;
     alpha_test(s)?;
+    // Metal's descriptor asserts at a mode of 2 or more.
+    if s.vertex_amplification_mode > 1 {
+        return Err(Error::InvalidDescriptor(
+            DescriptorError::UnknownEnumValue {
+                ty: "vertexAmplificationMode",
+                value: u32::try_from(s.vertex_amplification_mode).unwrap_or(u32::MAX),
+            },
+        ));
+    }
+    if s.explicit_visibility_group_id != u32::MAX && d.max_vertex_amplification_count > 1 {
+        return Err(refused(F::ExplicitVisibilityGroup));
+    }
     let unbuilt = [
         (s.sample_coverage != 1.0, F::SampleCoverage),
         (s.logic_operation_enabled, F::LogicOperation),

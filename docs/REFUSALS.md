@@ -14,7 +14,7 @@ Columns:
   - `none`: no public API path: malformed or non-Metal input, Apple-private calls, or a cap no valid program of ordinary size meets;
   - `?`: not assessed yet.
 
-Generated at `0c4299ff3`.
+Generated at `cc80c4db4`.
 
 ## Totals
 
@@ -415,7 +415,7 @@ Each refusal's sites, with the function that builds it.
 - `feature::RenderTargetSize`: `crates/metal2vulkan-runtime/src/render_pass.rs:1271 (framebuffer_fits)`
 - `feature::IndirectRenderState`: `crates/metal2vulkan/src/lower/access/encode.rs:567 (select_command)`
 - `feature::GlobalBuiltinInFragment`: `crates/metal2vulkan/src/lower/select.rs:912 (route_air)`
-- `feature::PrivateRenderState`: `crates/metal2vulkan/src/bind/heap.rs:1300 (array)`; `crates/metal2vulkan/src/bind/plan/resources.rs:887 (write_rounding)`; `crates/metal2vulkan/src/lower/sampler/select.rs:2707 (clamps_reference)`; `crates/metal2vulkan/src/lower/stage_io/plan.rs:3358 (alpha_test_refused)`; `crates/metal2vulkan/src/lower/texture/mod.rs:2902 (mode_rounded_write)`; `crates/metal2vulkan/src/pipeline/private_state.rs:63 (refused)`
+- `feature::PrivateRenderState`: `crates/metal2vulkan/src/bind/heap.rs:1300 (array)`; `crates/metal2vulkan/src/bind/plan/resources.rs:887 (write_rounding)`; `crates/metal2vulkan/src/lower/sampler/select.rs:2707 (clamps_reference)`; `crates/metal2vulkan/src/lower/stage_io/plan.rs:3358 (alpha_test_refused)`; `crates/metal2vulkan/src/lower/texture/mod.rs:2902 (mode_rounded_write)`; `crates/metal2vulkan/src/pipeline/private_state.rs:72 (refused)`
 - `feature::ExtendedRangeBlend`: `crates/metal2vulkan/src/lower/arith/extended_range/blend.rs:305 (refused)`; `crates/metal2vulkan/src/lower/fragment/fetch.rs:1553 (plan)`; `crates/metal2vulkan/src/lower/fragment/fetch.rs:1556 (plan)`; `crates/metal2vulkan/src/lower/fragment/input_blend.rs:153 (plan)`
 - `feature::TileReach`: `crates/metal2vulkan/src/bind/tile_reach.rs:270 (tile_reach_module)`; `crates/metal2vulkan/src/lower/stage_io/plan.rs:2469 (capture)`; `crates/metal2vulkan/src/lower/stage_io/plan.rs:2495 (capture)`
 - `feature::CommandPredication`: `crates/metal2vulkan/src/bind/replay/predication.rs:414 (predication_step_module)`

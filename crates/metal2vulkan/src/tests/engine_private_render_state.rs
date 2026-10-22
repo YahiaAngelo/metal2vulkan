@@ -118,6 +118,10 @@ fn defaults_and_properties_that_change_nothing_keep_the_pipeline() {
         s.needs_custom_border_color_samplers,
     ]
     .contains(&true));
+    assert_eq!(
+        (s.vertex_amplification_mode, s.explicit_visibility_group_id),
+        (0, u32::MAX)
+    );
     assert_eq!(PrivateRenderState::default(), s);
     let Some(lib) = fixture("rt6_render_state") else {
         return;
@@ -139,6 +143,9 @@ fn defaults_and_properties_that_change_nothing_keep_the_pipeline() {
             p.vertex_depth_compare_clamp_mask = u32::MAX;
             p.depth_stencil_write_disabled = true;
             p.needs_custom_border_color_samplers = true;
+            p.vertex_amplification_mode = 1;
+            // A pipeline that does not amplify.
+            p.explicit_visibility_group_id = 3;
             // Every sample's bit set, and bits past the sample count cleared or set.
             p.sample_mask = ((1 << samples) - 1) | 0xf0_0000_0000;
             let kept = compile(&dev, &d, &what);
@@ -337,6 +344,21 @@ fn each_property_not_built_refuses_a_value_other_than_metals_default() {
                 Err(e) => assert_eq!(e, refused(field), "{stem} {field:?}"),
                 Ok(_) => panic!("{stem} {field:?}: compiled"),
             }
+        }
+        // A visibility group where the pipeline amplifies.
+        let mut d = render(&lib, 1);
+        d.max_vertex_amplification_count = 2;
+        d.private.explicit_visibility_group_id = 0;
+        match dev.compile_render_pipeline(&d, &Budget::standard()) {
+            Err(e) => assert_eq!(e, refused(F::ExplicitVisibilityGroup), "{stem}"),
+            Ok(_) => panic!("{stem}: an amplified visibility group compiled"),
+        }
+        // A mode Metal's descriptor asserts at.
+        let mut d = render(&lib, 1);
+        d.private.vertex_amplification_mode = 2;
+        match dev.compile_render_pipeline(&d, &Budget::standard()) {
+            Err(Error::InvalidDescriptor(_)) => {}
+            other => panic!("{stem}: vertexAmplificationMode 2: {other:?}"),
         }
     }
 }

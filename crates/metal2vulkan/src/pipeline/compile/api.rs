@@ -297,7 +297,7 @@ impl Device {
         entries: &StageEntries,
     ) -> Result<RenderPipelineKeys, Error> {
         guarded(|| {
-            crate::pipeline::private_state::check_render(&d.private)?;
+            crate::pipeline::private_state::check_render(d)?;
             let p = self.profile();
             // A color group's variant is the pipeline of its group's attachments
             // (`render_pipeline`).
@@ -733,7 +733,7 @@ impl Device {
         v: &VariantKey,
         m: &mut Meter,
     ) -> Result<RenderPipeline, Error> {
-        crate::pipeline::private_state::check_render(&d.private)?;
+        crate::pipeline::private_state::check_render(d)?;
         let p = self.profile();
         let group = color_group::group(d, v, p)?;
         let grouped = group.as_ref().map(|g| color_group::descriptor(d, g));
