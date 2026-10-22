@@ -21,7 +21,6 @@ use crate::tracker::Summary;
 use crate::used_resources::EncoderKind;
 use crate::values::{Origin, Region, Size};
 use metal2vulkan::bind::TileMapping;
-use metal2vulkan::error::{Feature, Unsupported};
 use std::marker::PhantomData;
 
 /// One update a resource state encoder recorded, which the scheduler applies in order. The
@@ -131,11 +130,8 @@ impl ResourceStateCommandEncoder {
     /// validation stops it).
     ///
     /// Refused, recording nothing: a texture of another device, a level or slice past the
-    /// texture's, or a tiled level's region past its tiles (`Invalid`); an update of a texture
-    /// whose texels no copy writes (a multisampled texture) that would bind
-    /// part of one of the device's sparse units (`Unsupported(Feature::SparseMapping)`); a view
-    /// of a pixel format whose tile is not its texture's (`NotImplemented(SparseHeaps)`: not
-    /// measured).
+    /// texture's, or a tiled level's region past its tiles (`Invalid`); a view of a pixel format
+    /// whose tile is not its texture's (`NotImplemented(SparseHeaps)`: not measured).
     pub fn update_texture_mapping(
         &mut self,
         texture: &Texture,
@@ -148,9 +144,7 @@ impl ResourceStateCommandEncoder {
     }
 
     /// `updateTextureMappings:mode:regions:mipLevels:slices:numRegions:`: each region in order, as
-    /// [`update_texture_mapping`](Self::update_texture_mapping) maps it; where the device units
-    /// must be whole, they are checked over all of them, so the regions together may cover a unit
-    /// none covers alone.
+    /// [`update_texture_mapping`](Self::update_texture_mapping) maps it.
     ///
     /// Refused, recording nothing, as one region is, for any of them, and for lists of unequal
     /// lengths (`Invalid`).
@@ -179,9 +173,6 @@ impl ResourceStateCommandEncoder {
                 .map_err(|problem| invalid(CALL, Problem::Sparse(problem)))?;
             units.extend(checked);
         }
-        if !sparse.zeroed && !sparse.grid.check_exact(&units) {
-            return Err(splits_a_unit());
-        }
         if !units.is_empty() {
             self.updates.push(SparseUpdate::Units {
                 texture: texture.clone(),
@@ -206,9 +197,7 @@ impl ResourceStateCommandEncoder {
     /// of no size on an axis, or of a level or slice past the texture's, maps nothing; and the
     /// regions the count names past the buffer map nothing. Differs: Metal's `usedSize` over a
     /// region of a slice past the texture's varies (a tile more beside other regions, none
-    /// alone, and an unmap of it can take the count below zero); the runtime counts none. A
-    /// region that binds part of one of the device's sparse units of a texture whose texels no
-    /// copy writes fails the command buffer (`CommandBufferError::SparseMappingSplit`).
+    /// alone, and an unmap of it can take the count below zero); the runtime counts none.
     ///
     /// A texture that is not sparse records nothing, the buffer unread, as plain Metal maps
     /// nothing in it (as [`update_texture_mapping`](Self::update_texture_mapping)'s). Through a
@@ -274,22 +263,17 @@ impl ResourceStateCommandEncoder {
     /// included (its validation stops different formats); so does the runtime, tile for tile. The
     /// destination heap does not count the tiles it gains, as Metal's does not. Each moved tile's
     /// texels go with it, as Metal's (a Metal sparse probe on the M3 Max and an M4): the runtime
-    /// copies them between textures it zeroes, so the device's sparse units need not move whole,
-    /// and a multisampled texture's whole units take their memory with them; between formats of
-    /// different texels, and between a tail and a tile, the destination reads zero, as its bytes
-    /// would be another layout's (a near-equivalent: Metal's read those bytes).
+    /// copies them, so the device's sparse units need not move whole; between formats of different
+    /// texels, and between a tail and a tile, the destination reads zero, as its bytes would be
+    /// another layout's (a near-equivalent: Metal's read those bytes).
     ///
     /// Between two textures that are not sparse it records nothing, as plain Metal moves nothing
     /// (an M4: both textures' texels kept).
     ///
     /// Refused, recording nothing: a texture of another device, a move between a sparse texture
     /// and one that is not (`NotSparse`, not measured), a level or slice past a texture's, or a
-    /// region past a level's tiles (`Invalid`); where either
-    /// texture's texels no copy writes (a multisampled texture), a move that would bind or unbind
-    /// part of one of the device's sparse units, or whose units do not move whole onto whole
-    /// units, a tail among them moved to a tiled level or back (`Unsupported(Feature::
-    /// SparseMapping)`); a view of a pixel format whose tile is not its texture's
-    /// (`NotImplemented(SparseHeaps)`: not measured).
+    /// region past a level's tiles (`Invalid`); a view of a pixel format whose tile is not its
+    /// texture's (`NotImplemented(SparseHeaps)`: not measured).
     pub fn move_texture_mappings(
         &mut self,
         source: &Texture,
@@ -327,15 +311,6 @@ impl ResourceStateCommandEncoder {
         let sources = checked(from, source_level, source_slice, &from_region)?;
         let destinations = checked(to, destination_level, destination_slice, &to_region)?;
         let pairs: Vec<(MetalUnit, MetalUnit)> = sources.into_iter().zip(destinations).collect();
-        let whole = !(from.zeroed && to.zeroed);
-        // Whole units moving their memory with them cannot change between a tail and a tile:
-        // the device's units of the two hold different bytes.
-        let reshaped = pairs
-            .iter()
-            .any(|(source, destination)| source.is_tail() != destination.is_tail());
-        if whole && (reshaped || !from.grid.check_move(&to.grid, &pairs)) {
-            return Err(splits_a_unit());
-        }
         if !pairs.is_empty() {
             self.updates.push(SparseUpdate::Move {
                 source: source.clone(),
@@ -465,10 +440,4 @@ fn first_slice(texture: &Texture, sparse: &SparseImage) -> Result<u64, Error> {
         return Err(Error::NotImplemented(RuntimeGap::SparseHeaps));
     }
     Ok(u64::from(record.base_layer))
-}
-
-/// The refusal of an update that would bind or unbind part of one of the device's sparse units of
-/// a texture whose texels no copy writes.
-fn splits_a_unit() -> Error {
-    Error::Unsupported(Unsupported::not_representable(Feature::SparseMapping))
 }

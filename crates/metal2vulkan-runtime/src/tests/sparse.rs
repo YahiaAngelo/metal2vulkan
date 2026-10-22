@@ -523,10 +523,6 @@ fn a_block_is_bound_while_any_of_its_tiles_is_mapped() {
     assert!(grid.wanted(block(0, 0, [0, 0]), &mapped));
     mapped.clear();
     assert!(!grid.wanted(block(0, 0, [0, 0]), &mapped));
-    // A tile alone does not cover its block: exact only for all four, for a texture the runtime
-    // cannot zero.
-    assert!(!grid.check_exact(&[tile(0, 0, [0, 0])]));
-    assert!(grid.check_exact(&quad));
 }
 
 /// A block bound to new memory is zeroed whole; an unmapped tile is zeroed inside the blocks

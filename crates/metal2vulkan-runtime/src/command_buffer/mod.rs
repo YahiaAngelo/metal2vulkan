@@ -90,7 +90,7 @@ use super::resource::{ObjectId, ResourceKey};
 use super::scheduler::{BatchSync, StepWaits};
 use super::spares::CommandPool;
 use super::sparse::encoder::SparseUpdate;
-use super::sparse::indirect::{self, ReadFailure};
+use super::sparse::indirect;
 use super::texture::storage_form::Riding;
 use super::texture::Texture;
 use super::tracker::Footprint;
@@ -3411,11 +3411,8 @@ impl CommandBufferShared {
                         .retained
                         .extend(read.into_iter().map(|update| Box::new(update) as Box<_>));
                 }
-                Err(failure) => {
-                    state.step_failure = Some(match failure {
-                        ReadFailure::Arguments(error) => error,
-                        ReadFailure::Read(error) => recording_error(device, error),
-                    });
+                Err(error) => {
+                    state.step_failure = Some(recording_error(device, error));
                     break;
                 }
             }

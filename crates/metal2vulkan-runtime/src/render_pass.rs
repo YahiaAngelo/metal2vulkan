@@ -1260,7 +1260,11 @@ pub(super) fn area(
 
 /// Whether a framebuffer of `extent` and `layers` fits `max`, the device's `maxFramebufferWidth`,
 /// `maxFramebufferHeight` and `maxFramebufferLayers`: `Unsupported` naming the first it passes.
-fn framebuffer_fits(extent: [u32; 2], layers: u64, max: [u32; 3]) -> Result<(), Unsupported> {
+pub(super) fn framebuffer_fits(
+    extent: [u32; 2],
+    layers: u64,
+    max: [u32; 3],
+) -> Result<(), Unsupported> {
     let needs = [
         (VkLimit::MaxFramebufferWidth, u64::from(extent[0])),
         (VkLimit::MaxFramebufferHeight, u64::from(extent[1])),

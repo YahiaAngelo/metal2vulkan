@@ -31,14 +31,11 @@ use crate::texture::Texture;
 use crate::Device;
 use ash::vk;
 use metal2vulkan::bind::TileMapping;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 /// Why a batch's binding failed; nothing of it applied.
 #[derive(Debug)]
 pub(crate) enum BindFailure {
-    /// A heap filled inside a device unit of several tiles of a texture the runtime does not
-    /// zero.
-    Split,
     /// The memory of a unit could not be placed.
     Memory(Error),
     /// `vkQueueBindSparse` failed.
@@ -111,21 +108,8 @@ pub(crate) struct Moved {
 enum UnitMemory {
     /// Unbound.
     None,
-    /// A new placement, its texels zeroed by the batch where the runtime zeroes the texture.
+    /// A new placement, its texels zeroed by the batch.
     Fresh(Placement),
-    /// The placement of a unit a move vacates, its texels with it (a texture the runtime does not
-    /// zero moves whole units).
-    Donated(Donor),
-}
-
-/// A bound device unit a move vacates whose memory another unit takes: unit `unit` of the
-/// batch's image `image`, bound to `memory` at `offset`.
-#[derive(Clone, Copy)]
-struct Donor {
-    image: usize,
-    unit: VkUnit,
-    memory: vk::DeviceMemory,
-    offset: u64,
 }
 
 /// One device unit's change: bound to memory, or unbound.
@@ -141,7 +125,6 @@ impl UnitChange {
         match &self.memory {
             UnitMemory::None => (vk::DeviceMemory::null(), 0),
             UnitMemory::Fresh(placement) => (placement.memory, placement.offset),
-            UnitMemory::Donated(donor) => (donor.memory, donor.offset),
         }
     }
 }
@@ -231,12 +214,9 @@ pub(crate) fn bind_batch(
         });
     }
     let Images { textures, images } = known;
-    let (changed, moved) = apply(&ops, &images).map_err(|changed| {
-        undo(&images, &changed);
-        BindFailure::Split
-    })?;
+    let (changed, moved) = apply(&ops, &images);
     let kept = kept_units(&images, &moved);
-    let mut changes = match plan(device, &images, (&changed, &moved), &kept) {
+    let mut changes = match plan(device, &images, &changed, &kept) {
         Ok(changes) => changes,
         Err(failure) => {
             undo(&images, &changed);
@@ -367,9 +347,6 @@ pub(crate) fn bind_batch(
         undo(&images, &changed);
         return Err(BindFailure::Vulkan(error));
     }
-    // A moved unit's placement goes to its destination first; its source's unbind then finds
-    // nothing to release.
-    changes.sort_by_key(|change| matches!(change.memory, UnitMemory::None));
     let mut unbound = Vec::new();
     for change in changes.drain(..) {
         match change.memory {
@@ -377,14 +354,6 @@ pub(crate) fn bind_batch(
                 lock(&images[change.image].state)
                     .bound
                     .insert(change.unit, placement);
-            }
-            UnitMemory::Donated(donor) => {
-                let placement = lock(&images[donor.image].state).bound.remove(&donor.unit);
-                if let Some(placement) = placement {
-                    lock(&images[change.image].state)
-                        .bound
-                        .insert(change.unit, placement);
-                }
             }
             UnitMemory::None => {
                 unbound.extend(lock(&images[change.image].state).bound.remove(&change.unit));
@@ -416,12 +385,8 @@ fn free_fresh(device: &Device, changes: &[UnitChange]) {
 /// that fills leaves the rest of that update unmapped), an unmap gives it back, and a move takes
 /// each source unit's mapping to its destination unit where that one is unmapped as it moves,
 /// one unit at a time in the move's order, leaving the heaps' counts as they are (as Metal's).
-/// What changed, and what moved in order; on a split device unit of a texture the runtime does
-/// not zero, `Err` with what changed, for the caller to undo.
-fn apply(
-    ops: &[Op<'_>],
-    images: &[&SparseImage],
-) -> Result<(Vec<Changed>, Vec<Moved>), Vec<Changed>> {
+/// What changed, and what moved in order.
+fn apply(ops: &[Op<'_>], images: &[&SparseImage]) -> (Vec<Changed>, Vec<Moved>) {
     let mut changed = Vec::new();
     let mut moved = Vec::new();
     for op in ops {
@@ -492,27 +457,7 @@ fn apply(
             }
         }
     }
-    // Every device unit touched of a texture the runtime does not zero is wholly mapped or
-    // wholly unmapped, but where a heap filled inside one.
-    for (index, image) in images.iter().enumerate() {
-        if image.zeroed {
-            continue;
-        }
-        let state = lock(&image.state);
-        let split = touched(image, index, &changed).into_iter().any(|unit| {
-            let units = image.grid.metal_units_of(unit);
-            let mapped = units
-                .iter()
-                .filter(|unit| state.mapped.contains(unit))
-                .count();
-            mapped != 0 && mapped != units.len()
-        });
-        if split {
-            drop(state);
-            return Err(changed);
-        }
-    }
-    Ok((changed, moved))
+    (changed, moved)
 }
 
 /// The device units of `image`, the batch's image `index`, that `changed` touched.
@@ -524,15 +469,14 @@ fn touched(image: &SparseImage, index: usize, changed: &[Changed]) -> BTreeSet<V
         .collect()
 }
 
-/// The bound device units a move's source unit lies in, of a sparse image moving to a texture,
-/// both of which the runtime zeroes: they stay bound through the batch, whose work copies the
-/// moved texels out of them and then zeroes them; the next batch that changes the texture's
-/// mappings unbinds them where no mapped tile holds them.
+/// The bound device units a move's source unit lies in, of a sparse image: they stay bound through
+/// the batch, whose work copies the moved texels out of them and then zeroes them; the next batch
+/// that changes the texture's mappings unbinds them where no mapped tile holds them.
 fn kept_units(images: &[&SparseImage], moved: &[Moved]) -> BTreeSet<(usize, VkUnit)> {
     let mut kept = BTreeSet::new();
     for step in moved {
         let image = images[step.from];
-        if !(image.zeroed && images[step.to].zeroed) || image.emulated() {
+        if image.emulated() {
             continue;
         }
         let state = lock(&image.state);
@@ -573,64 +517,6 @@ fn undo(images: &[&SparseImage], changed: &[Changed]) {
     }
 }
 
-/// The bound device units whose memory a move takes to another unit, by the unit that takes it:
-/// a texture the runtime does not zero moves whole device units (`UnitGrid::check_move`), each
-/// destination unit of a step filled from the source unit at its place, through a chain of
-/// steps from the unit first moved. A unit's memory goes once, to its first destination, where
-/// it is bound, no mapped tile holds it after the batch, and its placement meets the
-/// destination's needs; another destination takes a new placement.
-fn donors(
-    images: &[&SparseImage],
-    moved: &[Moved],
-    granularity: u64,
-) -> HashMap<(usize, VkUnit), Donor> {
-    let mut origins: BTreeMap<(usize, VkUnit), (usize, VkUnit)> = BTreeMap::new();
-    let mut claimed = BTreeSet::new();
-    for step in moved {
-        let (from, to) = (images[step.from], images[step.to]);
-        if (from.zeroed && to.zeroed) || from.emulated() || to.emulated() {
-            continue;
-        }
-        let sources = from.grid.vk_units_of(step.source);
-        let targets = to.grid.vk_units_of(step.destination);
-        if sources.len() != targets.len() {
-            continue;
-        }
-        for (source, target) in sources.into_iter().zip(targets) {
-            if let Some(origin) = origins.remove(&(step.from, source)) {
-                origins.insert((step.to, target), origin);
-            } else if claimed.insert((step.from, source)) {
-                origins.insert((step.to, target), (step.from, source));
-            }
-        }
-    }
-    let mut donors = HashMap::new();
-    for (target, (image, unit)) in origins {
-        let source = images[image];
-        let state = lock(&source.state);
-        if source.grid.wanted(unit, &state.mapped) {
-            continue;
-        }
-        let Some(placement) = state.bound.get(&unit) else {
-            continue;
-        };
-        let needs = unit_requirements(images[target.0], target.1, granularity);
-        let fits = placement.size() >= needs.size
-            && placement.offset.is_multiple_of(needs.alignment.max(1))
-            && needs.memory_type_bits & (1 << placement.type_index()) != 0;
-        if fits {
-            let donor = Donor {
-                image,
-                unit,
-                memory: placement.memory,
-                offset: placement.offset,
-            };
-            donors.insert(target, donor);
-        }
-    }
-    donors
-}
-
 /// What the memory of device unit `unit` of `image` needs, with the device's sparse address
 /// space granularity `granularity`.
 fn unit_requirements(
@@ -648,18 +534,16 @@ fn unit_requirements(
 /// The device units whose binding changes: each touched unit bound where some Metal unit it holds
 /// texels of is now mapped and it is not bound, and unbound where none is and it is, but a unit
 /// `kept` stays bound through the batch; and each unit a move vacated in an earlier batch (bound,
-/// with no mapped tile) unbound. A bound unit takes a new placement, made now, or, filled by a move
-/// of a texture the runtime does not zero, the memory of the source unit it moved from, its texels
-/// with it. On failure no new placement is kept.
+/// with no mapped tile) unbound. A bound unit takes a new placement, made now. On failure no new
+/// placement is kept.
 fn plan(
     device: &Device,
     images: &[&SparseImage],
-    (changed, moved): (&[Changed], &[Moved]),
+    changed: &[Changed],
     kept: &BTreeSet<(usize, VkUnit)>,
 ) -> Result<Vec<UnitChange>, BindFailure> {
     let shared = device.shared();
     let granularity = shared.textures.granularity();
-    let donors = donors(images, moved, granularity);
     let mut changes: Vec<UnitChange> = Vec::new();
     let mut failure = None;
     'images: for (index, image) in images.iter().enumerate() {
@@ -683,8 +567,6 @@ fn plan(
             }
             let memory = if !wanted {
                 UnitMemory::None
-            } else if let Some(&donor) = donors.get(&(index, unit)) {
-                UnitMemory::Donated(donor)
             } else {
                 let requirements = unit_requirements(image, unit, granularity);
                 let placed = crate::memory::allocate_image(

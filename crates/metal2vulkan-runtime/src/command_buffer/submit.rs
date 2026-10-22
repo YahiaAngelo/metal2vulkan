@@ -433,7 +433,11 @@ impl CommandBufferShared {
                     // SAFETY: the command buffer is recording; the textures are live (the
                     // command buffer holds them), in `GENERAL`; the work waits for the bind, or
                     // for every queue's last value.
-                    unsafe { mappings.record(device, &mut state.uploads, buffer) }
+                    let held = unsafe { mappings.record(device, &mut state.uploads, buffer) }?;
+                    if !held.is_empty() {
+                        state.retained.push(Box::new(held));
+                    }
+                    Ok(())
                 })?;
                 let first = &mut state.recorded[range.start];
                 first.raws.push(raw);
@@ -1161,10 +1165,14 @@ impl CommandBufferShared {
         }
         let device = &self.device;
         for (encoder, at, scrub) in scrubs {
-            let raw = self.record_raw(state, |_, buffer| {
+            let raw = self.record_raw(state, |state, buffer| {
                 // SAFETY: the command buffer is recording; the texture is live (its encoder's
                 // command buffer holds it), in `GENERAL`, and its batch's updates applied.
-                unsafe { scrub.record(device.shared().vk(), buffer) }
+                let held = unsafe { scrub.record(device, buffer) }?;
+                if !held.is_empty() {
+                    state.retained.push(Box::new(held));
+                }
+                Ok(())
             })?;
             state.recorded[encoder].segments[at].recorded = Some(RecordedSegment {
                 raws: vec![raw],
@@ -1360,11 +1368,10 @@ impl CommandBufferShared {
     }
 }
 
-/// The command buffer's failure for a batch's sparse binding that failed: a heap filled inside a
-/// device unit, the device's memory, or the bind itself.
+/// The command buffer's failure for a batch's sparse binding that failed: the device's memory, or
+/// the bind itself.
 fn bind_error(device: &crate::Device, failure: BindFailure) -> CommandBufferError {
     match failure {
-        BindFailure::Split => CommandBufferError::SparseHeapSplit,
         BindFailure::Memory(error) => recording_error(device, error),
         BindFailure::Vulkan(error) => submission_error(device, error),
     }

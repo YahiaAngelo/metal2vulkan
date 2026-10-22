@@ -79,13 +79,23 @@ pub(crate) struct SparseImage {
     pub(crate) backing: Backing,
     /// Zeros its unmapped texels are copied from: its heap's, more than any tile's bytes.
     pub(crate) zeros: crate::buffer::Buffer,
-    /// Whether a copy writes its image (a single-sampled image that takes transfers), so the
-    /// runtime zeroes its unmapped texels and a device unit binds while any of its Metal units
-    /// is mapped; else every update maps whole device units.
-    pub(crate) zeroed: bool,
+    /// How the runtime zeroes its unmapped texels, so a device unit binds while any of its Metal
+    /// units is mapped.
+    pub(crate) zeroing: Zeroing,
     /// The buffer a function reads its residency from, where its type has a tile map: every
     /// single-sampled 2D, 2D array and 3D texture.
     pub(crate) tile_map: Option<TileMapBuffer>,
+}
+
+/// How the runtime writes zero into a sparse texture's texels where it keeps them at zero
+/// (`emulated.rs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Zeroing {
+    /// Copies of zeros, into a single-sampled image that takes transfers.
+    Copies,
+    /// Clears (`vkCmdClearAttachments`) in a render pass of the image's level and layer, of a
+    /// multisampled image, which no copy writes, made an attachment of its format.
+    Clears,
 }
 
 /// The Metal shape of a sparse texture: its type, format, sample count, level 0's extent and
@@ -202,11 +212,11 @@ pub(crate) unsafe fn sparse_layout(
     })
 }
 
-/// What a sparse texture's image holds beside its texels: its heap's zeros, whether a copy
-/// writes the image, and its tile map where its type has one.
+/// What a sparse texture's image holds beside its texels: its heap's zeros, how the runtime
+/// zeroes its texels, and its tile map where its type has one.
 pub(crate) struct SparseExtras {
     pub(crate) zeros: crate::buffer::Buffer,
-    pub(crate) zeroed: bool,
+    pub(crate) zeroing: Zeroing,
     pub(crate) tile_map: Option<TileMapBuffer>,
 }
 
@@ -297,7 +307,7 @@ impl SparseImage {
         );
         let SparseExtras {
             zeros,
-            zeroed,
+            zeroing,
             tile_map,
         } = extras;
         Ok(SparseImage {
@@ -315,7 +325,7 @@ impl SparseImage {
             state: Mutex::new(SparseState::default()),
             backing,
             zeros,
-            zeroed,
+            zeroing,
             tile_map,
         })
     }

@@ -7,8 +7,7 @@
 //! (`CaseError::Case`), as every executor refuses one of its own tiles. A slice's mip tail is its
 //! level from Metal's `firstMipmapInTail`: the tail where Metal keeps the case's one level in
 //! one, and that level's tiles where it does not. A tile maps alone on every device that makes
-//! the texture, whatever its blocks; a multisampled texture's mapping that would bind part of one
-//! of the device's sparse blocks is refused, typed (`Unsupported(SparseMapping)`).
+//! the texture, whatever its blocks.
 
 use super::{texture_descriptor, CaseError};
 use crate::case::sparse::{SparseMapping, SparseTextureResource};
