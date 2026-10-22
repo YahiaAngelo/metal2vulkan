@@ -294,6 +294,7 @@ exposures! {
     Extension(&[E::ExtPrimitiveTopologyListRestart]) => [
         PrimitiveTopologyListRestart, PrimitiveTopologyPatchListRestart,
     ];
+    Extension(&[E::ExtProvokingVertex]) => [ProvokingVertexLast];
     Extension(&[E::KhrRayQuery]) => [RayQuery];
     Extension(&[E::ExtMeshShader]) => [TaskShader, MeshShader];
     Extension(&[E::KhrAccelerationStructure]) => [AccelerationStructure];
@@ -350,6 +351,7 @@ fn facts(ext: VkExtension) -> ExtensionFacts {
         | E::ExtDepthClampControl
         | E::ExtSampleLocations
         | E::ExtPrimitiveTopologyListRestart
+        | E::ExtProvokingVertex
         | E::ExtAttachmentFeedbackLoopLayout
         | E::ExtExtendedDynamicState3
         | E::ImgFormatPvrtc

@@ -369,6 +369,8 @@ pub(super) enum Structure {
     DepthClampControl,
     /// `VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT`.
     ListRestart,
+    /// `VkPhysicalDeviceProvokingVertexFeaturesEXT`.
+    ProvokingVertex,
     RayQuery,
     Acceleration,
     /// `VkPhysicalDeviceMeshShaderFeaturesEXT`.
@@ -464,6 +466,7 @@ impl Structure {
             | Structure::DepthClipEnable
             | Structure::DepthClampControl
             | Structure::ListRestart
+            | Structure::ProvokingVertex
             | Structure::RayQuery
             | Structure::Acceleration
             | Structure::MeshShader
@@ -516,6 +519,7 @@ impl Structure {
             Structure::DepthClipEnable => &[X::ExtDepthClipEnable],
             Structure::DepthClampControl => &[X::ExtDepthClampControl],
             Structure::ListRestart => &[X::ExtPrimitiveTopologyListRestart],
+            Structure::ProvokingVertex => &[X::ExtProvokingVertex],
             Structure::RayQuery => &[X::KhrRayQuery],
             Structure::Acceleration => &[X::KhrAccelerationStructure],
             Structure::MeshShader => &[X::ExtMeshShader],
@@ -576,6 +580,7 @@ struct FeatureChain {
     depth_clip_enable: vk::PhysicalDeviceDepthClipEnableFeaturesEXT<'static>,
     depth_clamp_control: DepthClampControlFeatures,
     list_restart: vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT<'static>,
+    provoking_vertex: vk::PhysicalDeviceProvokingVertexFeaturesEXT<'static>,
     ray_query: vk::PhysicalDeviceRayQueryFeaturesKHR<'static>,
     acceleration_structure: vk::PhysicalDeviceAccelerationStructureFeaturesKHR<'static>,
     mesh_shader: vk::PhysicalDeviceMeshShaderFeaturesEXT<'static>,
@@ -763,6 +768,7 @@ members! {
     DepthClampControl.depth_clamp_control.depth_clamp_control => DepthClampControl;
     ListRestart.list_restart.primitive_topology_list_restart => PrimitiveTopologyListRestart;
     ListRestart.list_restart.primitive_topology_patch_list_restart => PrimitiveTopologyPatchListRestart;
+    ProvokingVertex.provoking_vertex.provoking_vertex_last => ProvokingVertexLast;
     RayQuery.ray_query.ray_query => RayQuery;
     Acceleration.acceleration_structure.acceleration_structure => AccelerationStructure;
     MeshShader.mesh_shader.task_shader => TaskShader;
@@ -893,6 +899,7 @@ const EXTENSIONS: &[(VkExtension, &CStr)] = {
             X::ExtPrimitiveTopologyListRestart,
             c"VK_EXT_primitive_topology_list_restart",
         ),
+        (X::ExtProvokingVertex, c"VK_EXT_provoking_vertex"),
         (X::KhrRayQuery, c"VK_KHR_ray_query"),
         (
             X::KhrAccelerationStructure,
@@ -1084,6 +1091,7 @@ macro_rules! link_extensions {
             DepthClipEnable => depth_clip_enable,
             DepthClampControl => depth_clamp_control,
             ListRestart => list_restart,
+            ProvokingVertex => provoking_vertex,
             RayQuery => ray_query,
             Acceleration => acceleration_structure,
             MeshShader => mesh_shader,

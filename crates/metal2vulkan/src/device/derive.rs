@@ -986,6 +986,13 @@ fn enabled_caps(
     if l.independent_resolve {
         properties.insert(VkProperty::IndependentResolve);
     }
+    // The provoking-vertex property holds only where the extension is listed (after
+    // `with_enabled`, enabled).
+    if desc.extensions.contains(&VkExtension::ExtProvokingVertex)
+        && l.provoking_vertex_mode_per_pipeline
+    {
+        properties.insert(VkProperty::ProvokingVertexModePerPipeline);
+    }
     // The sample-location properties hold only where the extension is listed (after
     // `with_enabled`, enabled): a device that has not enabled it sets no locations.
     if desc.extensions.contains(&VkExtension::ExtSampleLocations) {

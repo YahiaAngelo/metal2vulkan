@@ -223,6 +223,8 @@ pub(super) enum Structure {
     DepthClampControl,
     /// `VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT`.
     ListRestart,
+    /// `VkPhysicalDeviceProvokingVertexFeaturesEXT`.
+    ProvokingVertex,
     /// `VkPhysicalDeviceMeshShaderFeaturesEXT`.
     MeshShader,
     AstcHdr,
@@ -279,6 +281,7 @@ impl Structure {
         Structure::DepthClipEnable,
         Structure::DepthClampControl,
         Structure::ListRestart,
+        Structure::ProvokingVertex,
         Structure::MeshShader,
         Structure::AstcHdr,
         Structure::RayQuery,
@@ -337,6 +340,7 @@ impl Structure {
             Structure::DepthClipEnable => &[c"VK_EXT_depth_clip_enable"],
             Structure::DepthClampControl => &[c"VK_EXT_depth_clamp_control"],
             Structure::ListRestart => &[c"VK_EXT_primitive_topology_list_restart"],
+            Structure::ProvokingVertex => &[c"VK_EXT_provoking_vertex"],
             // `VK_KHR_spirv_1_4`, which it requires, is core at the 1.2 floor.
             Structure::MeshShader => &[c"VK_EXT_mesh_shader"],
             Structure::AstcHdr => &[c"VK_EXT_texture_compression_astc_hdr"],
@@ -576,6 +580,7 @@ pub(super) struct FeatureChain {
     pub(super) depth_clip_enable: vk::PhysicalDeviceDepthClipEnableFeaturesEXT<'static>,
     pub(super) depth_clamp_control: DepthClampControlFeatures,
     pub(super) list_restart: vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT<'static>,
+    pub(super) provoking_vertex: vk::PhysicalDeviceProvokingVertexFeaturesEXT<'static>,
     pub(super) mesh_shader: vk::PhysicalDeviceMeshShaderFeaturesEXT<'static>,
     pub(super) astc_hdr: vk::PhysicalDeviceTextureCompressionASTCHDRFeatures<'static>,
     pub(super) ray_query: vk::PhysicalDeviceRayQueryFeaturesKHR<'static>,
@@ -627,6 +632,7 @@ macro_rules! link_extensions {
             DepthClipEnable => depth_clip_enable,
             DepthClampControl => depth_clamp_control,
             ListRestart => list_restart,
+            ProvokingVertex => provoking_vertex,
             MeshShader => mesh_shader,
             AstcHdr => astc_hdr,
             RayQuery => ray_query,
@@ -690,6 +696,7 @@ impl FeatureChain {
             depth_clip_enable,
             depth_clamp_control,
             list_restart,
+            provoking_vertex,
             mesh_shader,
             astc_hdr,
             ray_query,
@@ -1118,6 +1125,8 @@ members! {
         Some(F::PrimitiveTopologyListRestart);
     ListRestart.list_restart.primitive_topology_patch_list_restart =>
         Some(F::PrimitiveTopologyPatchListRestart);
+    ProvokingVertex.provoking_vertex.provoking_vertex_last => Some(F::ProvokingVertexLast);
+    ProvokingVertex.provoking_vertex.transform_feedback_preserves_provoking_vertex => None;
     MeshShader.mesh_shader.task_shader => Some(F::TaskShader);
     MeshShader.mesh_shader.mesh_shader => Some(F::MeshShader);
     AstcHdr.astc_hdr.texture_compression_astc_hdr => None;
@@ -1322,6 +1331,7 @@ const EXTENSIONS: &[ExtensionName] = {
             c"VK_EXT_primitive_topology_list_restart",
             Some(X::ExtPrimitiveTopologyListRestart),
         ),
+        e(c"VK_EXT_provoking_vertex", Some(X::ExtProvokingVertex)),
         e(c"VK_EXT_mesh_shader", Some(X::ExtMeshShader)),
         e(c"VK_KHR_shader_float_controls2", None),
         e(c"VK_KHR_maintenance5", Some(X::KhrMaintenance5)),
