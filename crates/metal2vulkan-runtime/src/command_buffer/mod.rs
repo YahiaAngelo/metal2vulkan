@@ -80,7 +80,7 @@ use super::recorder::{self, Replays};
 use super::render::EndInFlight;
 use super::replay::Replay;
 use super::residency::Residency;
-use super::resource::ResourceKey;
+use super::resource::{ObjectId, ResourceKey};
 use super::sampler_listing::SamplerListing;
 use super::scheduler::{BatchSync, StepWaits};
 use super::spares::CommandPool;
@@ -90,7 +90,7 @@ use super::texture::storage_form::Riding;
 use super::texture::Texture;
 use super::tracker::Footprint;
 use super::upload::{Upload, Uploads};
-use super::used_resources::{EncoderKind, EncoderRecord, Reached, ReadRecord};
+use super::used_resources::{names_any, EncoderKind, EncoderRecord, Reached, ReadRecord};
 use super::values::CommandBufferStatus;
 use super::{Buffer, CommandQueue, Device};
 use crate::release;
@@ -821,6 +821,35 @@ impl State {
             }
         }
         read
+    }
+
+    /// Whether what its ended encoders `encoders` (all of them where `None`) use, as
+    /// [`read_ended`](Self::read_ended) reads it, has an owner among `objects`, as
+    /// `used_resources.rs` would list it: read in place, under this lock, with no handle cloned
+    /// or held (`used_resources::names_any`). False for a range past its ended encoders, as
+    /// `read_ended` reads none there.
+    pub(super) fn uses(
+        &self,
+        shared: &super::device::DeviceShared,
+        encoders: Option<Range<usize>>,
+        objects: &[ObjectId],
+    ) -> bool {
+        let range = encoders.unwrap_or(0..self.ended.len());
+        let Some(records) = self.ended.get(range.clone()) else {
+            return false;
+        };
+        let ended = records
+            .iter()
+            .any(|record| names_any(shared, &record.keys, record.residency.as_ref(), objects));
+        ended
+            || (self.recorded.iter())
+                .filter(|part| range.contains(&part.encoder))
+                .any(|part| {
+                    let keys = (part.segments.iter())
+                        .filter_map(|segment| segment.recorded.as_ref())
+                        .flat_map(|done| done.keys.iter());
+                    names_any(shared, keys, None, objects)
+                })
     }
 
     /// What the commands of its ended encoders that `runs` (by their place among them) use and a

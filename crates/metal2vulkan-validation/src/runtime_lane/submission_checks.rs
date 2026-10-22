@@ -79,13 +79,15 @@ impl Detach {
             .unwrap()
             .push((submission.kind(), submission.encoders()));
         let used = submission.used_resources();
-        let detached = self.detached.lock().unwrap();
+        let detached: Vec<_> = self.detached.lock().unwrap().iter().copied().collect();
         let hit = used
             .buffers
             .iter()
             .map(Buffer::object_id)
             .chain(used.heaps.iter().map(|heap| heap.object_id()))
             .any(|id| detached.contains(&id));
+        // The identity answer, with no listing, is the listing's.
+        assert_eq!(submission.uses(&detached), hit, "{detached:?}");
         hit.then(|| NonZeroU64::new(DETACHED).unwrap())
     }
 
