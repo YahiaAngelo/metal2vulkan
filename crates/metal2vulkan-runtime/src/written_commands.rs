@@ -18,7 +18,6 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use metal2vulkan::bind::indirect_commands::CommandRecord;
 use metal2vulkan::pipeline::CommandWrites;
 
 use super::device::lock;
@@ -62,6 +61,21 @@ struct Held {
     copies: Vec<Weak<WrittenCommands>>,
 }
 
+impl Held {
+    /// Add `writes` and `named`; where that changed what it holds, the buffers a blit copied its
+    /// records into, which gain them too.
+    fn grow(&mut self, writes: CommandWrites, named: Named) -> Option<Vec<Arc<WrittenCommands>>> {
+        let (grown, grown_named) = (self.writes.union(writes), self.named.union(named));
+        if grown == self.writes && grown_named == self.named {
+            return None;
+        }
+        self.writes = grown;
+        self.named = grown_named;
+        self.copies.retain(|copy| copy.strong_count() > 0);
+        Some(self.copies.iter().filter_map(Weak::upgrade).collect())
+    }
+}
+
 impl WrittenCommands {
     /// The operations and primitive types the records may hold.
     pub(crate) fn writes(&self) -> CommandWrites {
@@ -74,30 +88,30 @@ impl WrittenCommands {
     }
 
     /// Add `writes` and `named` to the buffer's, and to every buffer a blit copied its records
-    /// into, at any remove.
+    /// into, at any remove. What adds nothing to the buffer's adds nothing to its copies', which
+    /// hold the buffer's: it is looked at under the buffer's lock alone, as most setters' calls
+    /// add nothing new.
     pub(crate) fn add(self: &Arc<Self>, writes: CommandWrites, named: Named) {
-        let mut seen: Vec<*const WrittenCommands> = Vec::new();
-        let mut next = vec![Arc::clone(self)];
+        let copies = match lock(&self.held).grow(writes, named) {
+            Some(copies) => copies,
+            None => return,
+        };
+        let mut seen: Vec<*const WrittenCommands> = vec![Arc::as_ptr(self)];
+        let mut next = copies;
         while let Some(buffer) = next.pop() {
             if seen.contains(&Arc::as_ptr(&buffer)) {
                 continue;
             }
             seen.push(Arc::as_ptr(&buffer));
-            let mut held = lock(&buffer.held);
-            let (was, was_named) = (held.writes, held.named);
-            held.writes = held.writes.union(writes);
-            held.named = held.named.union(named);
-            if held.writes == was && held.named == was_named {
-                continue;
+            if let Some(copies) = lock(&buffer.held).grow(writes, named) {
+                next.extend(copies);
             }
-            held.copies.retain(|copy| copy.strong_count() > 0);
-            next.extend(held.copies.iter().filter_map(Weak::upgrade));
         }
     }
 
-    /// What the CPU's edit left in a record: its action, its barrier, and the state it names.
-    pub(crate) fn add_record(self: &Arc<Self>, record: &CommandRecord, named: Option<Named>) {
-        let mut writes = record.writes();
+    /// What the CPU's edit left in a record (`CommandRecord::writes`: its action and its
+    /// barrier), and the state it names.
+    pub(crate) fn add_record(self: &Arc<Self>, mut writes: CommandWrites, named: Option<Named>) {
         if named.is_some() {
             writes.operations |= CommandWrites::PIPELINE;
         }
@@ -105,12 +119,16 @@ impl WrittenCommands {
     }
 
     /// What a state that may write the records adds: its functions' writes, and where they may
-    /// set a pipeline or copy a command (whose pipeline comes along), any state named.
+    /// set a pipeline or copy a command (whose pipeline comes along), any state named. A copy
+    /// brings whatever the source command held, which its writer's own operations do not state:
+    /// a function that may copy a command may write anything.
     pub(crate) fn add_writer(self: &Arc<Self>, writes: CommandWrites) {
-        let named = if writes.may(CommandWrites::PIPELINE | CommandWrites::COPY) {
-            Named::ANY
+        let (writes, named) = if writes.may(CommandWrites::COPY) {
+            (CommandWrites::ANY, Named::ANY)
+        } else if writes.may(CommandWrites::PIPELINE) {
+            (writes, Named::ANY)
         } else {
-            Named::default()
+            (writes, Named::default())
         };
         self.add(writes, named);
     }

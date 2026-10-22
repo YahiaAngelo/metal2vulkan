@@ -20,7 +20,7 @@ fn draws(primitive_types: u8) -> W {
 #[test]
 fn a_record_adds_what_it_holds() {
     let written = Arc::new(WrittenCommands::default());
-    written.add_record(&CommandRecord::default(), None);
+    written.add_record(CommandRecord::default().writes(), None);
     assert!(written.writes().is_empty());
     let mut record = CommandRecord {
         action: Action::DrawPrimitives {
@@ -32,14 +32,14 @@ fn a_record_adds_what_it_holds() {
         },
         ..CommandRecord::default()
     };
-    written.add_record(&record, None);
+    written.add_record(record.writes(), None);
     assert_eq!(written.writes(), draws(0b1000));
     record.barrier = true;
     let named = Named {
         encodes: true,
         writes: W::NONE,
     };
-    written.add_record(&record, Some(named));
+    written.add_record(record.writes(), Some(named));
     assert_eq!(
         written.writes().operations,
         W::DRAW | W::BARRIER | W::PIPELINE
@@ -54,12 +54,13 @@ fn a_record_adds_what_it_holds() {
         base_vertex: 0,
         base_instance: 0,
     };
-    written.add_record(&record, None);
+    written.add_record(record.writes(), None);
     assert_eq!(written.writes().primitive_types, W::ALL_PRIMITIVE_TYPES);
 }
 
 /// A writer that may set a pipeline or copy a command may name any state; one that only draws
-/// names none.
+/// names none. One that may copy a command may write anything: the copied command holds what
+/// its source held (a dispatch, a barrier), which the copier's own operations do not state.
 #[test]
 fn a_writer_that_sets_pipelines_names_any_state() {
     let drawing = Arc::new(WrittenCommands::default());
@@ -67,12 +68,18 @@ fn a_writer_that_sets_pipelines_names_any_state() {
     assert_eq!(drawing.named(), Named::default());
     for bit in [W::PIPELINE, W::COPY] {
         let setting = Arc::new(WrittenCommands::default());
-        setting.add_writer(W {
+        let writes = W {
             operations: bit,
             primitive_types: 0,
-        });
+        };
+        setting.add_writer(writes);
         assert!(setting.named().encodes);
         assert_eq!(setting.named().writes, W::ANY);
+        let held = match bit {
+            W::COPY => W::ANY,
+            _ => writes,
+        };
+        assert_eq!(setting.writes(), held, "{bit:#x}");
     }
 }
 

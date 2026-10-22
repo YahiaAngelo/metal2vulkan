@@ -312,8 +312,8 @@ narrow refusal that the call's rustdoc describes.
 | Item | Metal | Runtime |
 |---|---|---|
 | `encode` |  | one `IndirectRenderCommand` method per `IcbRenderCmd` (above) |
-| `command_type`, `fragment_buffer_address`, `vertex_attribute_stride`, `vertex_buffer_address`, `has_barrier`, `draw_args`, `draw_indexed_args`, `draw_patches_args`, `draw_indexed_patches_args`, `tessellation_factor_args` | the getters (SPI) | `IndirectCommandBuffer::commands`: each render command decoded as an `EncodedRenderCommand` |
-| `pipeline_state_unique_identifier` | `getPipelineStateUniqueIdentifier` (SPI) | `pipeline_unique_identifier` of the command read back (`IndirectCommandBuffer::commands`) *(partial)* |
+| `command_type`, `fragment_buffer_address`, `vertex_attribute_stride`, `vertex_buffer_address`, `has_barrier`, `draw_args`, `draw_indexed_args`, `draw_patches_args`, `draw_indexed_patches_args`, `tessellation_factor_args` | the getters (SPI) | `IndirectRenderCommand::command_type`, `vertex_buffer`, `fragment_buffer`, `has_barrier`, `draw`: each reads its field of the record alone; or `IndirectCommandBuffer::commands`, each render command decoded as an `EncodedRenderCommand` |
+| `pipeline_state_unique_identifier` | `getPipelineStateUniqueIdentifier` (SPI) | `IndirectRenderCommand::pipeline_unique_identifier` (with `pipeline_state` and `pipeline_id`), or that of the command read back (`IndirectCommandBuffer::commands`) *(partial)* |
 
 ### `IcbComputeCmd`: `MTLIndirectComputeCommand` commands
 
@@ -336,8 +336,8 @@ narrow refusal that the call's rustdoc describes.
 | Item | Metal | Runtime |
 |---|---|---|
 | `encode` |  | one `IndirectComputeCommand` method per `IcbComputeCmd` (above) |
-| `command_type`, `kernel_attribute_stride`, `kernel_buffer_address`, `stage_in_region`, `threadgroup_memory_length`, `has_barrier`, `dispatch_threadgroups_args`, `dispatch_threads_args`, `image_block_args` | the getters (SPI) | `IndirectCommandBuffer::commands`: each compute command decoded as an `EncodedComputeCommand` |
-| `pipeline_state_unique_identifier` | `getPipelineStateUniqueIdentifier` (SPI) | `pipeline_unique_identifier` of the command read back (`IndirectCommandBuffer::commands`) *(partial)* |
+| `command_type`, `kernel_attribute_stride`, `kernel_buffer_address`, `stage_in_region`, `threadgroup_memory_length`, `has_barrier`, `dispatch_threadgroups_args`, `dispatch_threads_args`, `image_block_args` | the getters (SPI) | `IndirectComputeCommand::command_type`, `kernel_buffer`, `stage_in_region`, `threadgroup_memory_length`, `has_barrier`, `dispatch`, `imageblock_size`: each reads its field of the record alone; or `IndirectCommandBuffer::commands`, each compute command decoded as an `EncodedComputeCommand` |
+| `pipeline_state_unique_identifier` | `getPipelineStateUniqueIdentifier` (SPI) | `IndirectComputeCommand::pipeline_unique_identifier` (with `pipeline_state` and `pipeline_id`), or that of the command read back (`IndirectCommandBuffer::commands`) *(partial)* |
 
 ### `RateMap`: `MTLRasterizationRateMap`
 

@@ -2842,7 +2842,10 @@ each item named states the rule in full.
 **Indirect command buffers**
 
 - **A command's read-back answers Metal's private getters**: `command_type`, the buffer addresses
-  and attribute strides, as Metal's `get*` getters answer them.
+  and attribute strides, as Metal's `get*` getters answer them. `IndirectComputeCommand` and
+  `IndirectRenderCommand` read one field of their record alone (`command_type`, `has_barrier`,
+  `dispatch` or `draw`, one buffer slot, `pipeline_unique_identifier`, and the rest), as
+  `IndirectCommandBuffer::commands` reads it, without decoding the whole command.
 - **Whether the GPU may have written the records** (`IndirectCommandBuffer::gpu_written`, no Metal
   counterpart) turns true at the first call that lets GPU work write them; from then on an
   execution runs the records as they stand once the work before it completed.

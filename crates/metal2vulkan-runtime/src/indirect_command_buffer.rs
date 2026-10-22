@@ -84,8 +84,9 @@ use super::{
 };
 use metal2vulkan::bind::indirect_commands::{
     Action, BufferBinding, BufferStage, CommandBuffer, CommandBufferError, CommandDescriptor,
-    CommandRecord, ComputeDispatch, Inheritance, RenderDraws, StateSource, BINDING_COUNT,
-    COMMAND_BUFFER_HEADER_BYTES, COMMAND_BYTES, THREADGROUP_BUFFER_ARGUMENT_COUNT,
+    CommandRecord, ComputeDispatch, Inheritance, RecordError, RecordField, RecordView, RenderDraws,
+    StateSource, BINDING_COUNT, COMMAND_BUFFER_HEADER_BYTES, COMMAND_BYTES,
+    THREADGROUP_BUFFER_ARGUMENT_COUNT,
 };
 use metal2vulkan::bind::ReplayFaults;
 use metal2vulkan::metal::{
@@ -93,7 +94,6 @@ use metal2vulkan::metal::{
     Winding,
 };
 use metal2vulkan::pipeline::CommandWrites;
-use std::collections::BTreeSet;
 use std::num::NonZeroU64;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -601,11 +601,12 @@ impl Device {
 /// no reference: the program's last release of the state gives its ID back while the command
 /// still names it (the consumer's G323). It holds what the state runs, its program: while the
 /// record names the ID the command runs that program, whoever holds the ID since, as Metal's
-/// command the CPU encoded runs the released state's.
+/// command the CPU encoded runs the released state's. With it, what the state may do to indirect
+/// command buffers (`Named`), read as it was set.
 #[derive(Clone)]
 enum CommandState {
-    Compute(WeakComputePipelineState, ComputeProgram, IdStamp),
-    Render(WeakRenderPipelineState, RenderProgram, IdStamp),
+    Compute(WeakComputePipelineState, ComputeProgram, IdStamp, Named),
+    Render(WeakRenderPipelineState, RenderProgram, IdStamp, Named),
 }
 
 /// The ID a state had when the CPU set it on a command, and the serial of its hold of the ID,
@@ -622,7 +623,7 @@ impl CommandState {
     /// A compute command's state: the state while it lives, and its stamp.
     fn compute(&self) -> Option<(Option<ComputePipelineState>, IdStamp)> {
         match self {
-            CommandState::Compute(named, _, stamp) => Some((named.upgrade(), *stamp)),
+            CommandState::Compute(named, _, stamp, _) => Some((named.upgrade(), *stamp)),
             CommandState::Render(..) => None,
         }
     }
@@ -630,7 +631,7 @@ impl CommandState {
     /// A render command's state, as `compute` a compute command's.
     fn render(&self) -> Option<(Option<RenderPipelineState>, IdStamp)> {
         match self {
-            CommandState::Render(named, _, stamp) => Some((named.upgrade(), *stamp)),
+            CommandState::Render(named, _, stamp, _) => Some((named.upgrade(), *stamp)),
             CommandState::Compute(..) => None,
         }
     }
@@ -638,20 +639,7 @@ impl CommandState {
     /// What the state may do to indirect command buffers, of the program it runs.
     fn named(&self) -> Named {
         match self {
-            CommandState::Compute(_, program, _) => {
-                let state = program.state();
-                Named {
-                    encodes: state.can_encode_indirect_commands(),
-                    writes: state.indirect_command_writes(),
-                }
-            }
-            CommandState::Render(_, program, _) => {
-                let state = program.state();
-                Named {
-                    encodes: state.can_encode_indirect_commands(),
-                    writes: state.indirect_command_writes(),
-                }
-            }
+            CommandState::Compute(.., named) | CommandState::Render(.., named) => *named,
         }
     }
 
@@ -667,7 +655,7 @@ impl CommandState {
     /// A compute command's state's program, as a state of no ID (`ComputeProgram::state`).
     fn compute_program(&self) -> Option<ComputePipelineState> {
         match self {
-            CommandState::Compute(_, program, _) => Some(program.state()),
+            CommandState::Compute(_, program, ..) => Some(program.state()),
             CommandState::Render(..) => None,
         }
     }
@@ -675,7 +663,7 @@ impl CommandState {
     /// A render command's state's program, as a state of no ID (`RenderProgram::state`).
     fn render_program(&self) -> Option<RenderPipelineState> {
         match self {
-            CommandState::Render(_, program, _) => Some(program.state()),
+            CommandState::Render(_, program, ..) => Some(program.state()),
             CommandState::Compute(..) => None,
         }
     }
@@ -1100,8 +1088,8 @@ impl IndirectCommandBuffer {
             .map_err(|_| internal("an indirect command buffer's header was refused"))
     }
 
-    /// The record of command `index` (below the size).
-    fn record(&self, index: u32) -> Result<CommandRecord, Error> {
+    /// The bytes of command `index`'s record (below the size), as they are now.
+    fn record_now(&self, index: u32) -> Result<[u8; COMMAND_BYTES], Error> {
         let mut bytes = [0; COMMAND_BYTES];
         // SAFETY: the record of a command below the size lies inside the mapped storage. A GPU
         // write to it meanwhile is the program's race, as on Metal.
@@ -1112,8 +1100,26 @@ impl IndirectCommandBuffer {
                 COMMAND_BYTES,
             );
         }
-        CommandRecord::decode(&bytes)
-            .map_err(|_| internal("an indirect command's record does not decode"))
+        Ok(bytes)
+    }
+
+    /// The record of command `index` (below the size).
+    fn record(&self, index: u32) -> Result<CommandRecord, Error> {
+        CommandRecord::decode(&self.record_now(index)?).map_err(|_| undecodable())
+    }
+
+    /// `read` of command `index`'s record (below the size) as it is now, field by field
+    /// (`RecordView`), as [`commands`](Self::commands) decodes it: one getter's read, counted
+    /// as a record read.
+    fn read_record<T>(
+        &self,
+        index: u32,
+        read: impl FnOnce(&RecordView<'_>) -> T,
+    ) -> Result<T, Error> {
+        self.device().shared().counts.indirect_records_read(1);
+        let bytes = self.record_now(index)?;
+        let view = RecordView::new(&bytes).map_err(|_| undecodable())?;
+        Ok(read(&view))
     }
 
     /// Write `record` as command `index` (below the size). The caller holds `pipelines`.
@@ -1304,32 +1310,51 @@ impl IndirectCommandBuffer {
                 && types.intersects(COMPUTE_TYPES))
     }
 
-    /// Change command `index`'s record (below the size) by `edit`, which may refuse, with the
-    /// pipeline state the CPU set on it.
-    fn edit(
-        &self,
-        index: u32,
-        edit: impl FnOnce(&mut CommandRecord, &mut Option<CommandState>) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+    /// Write `field` into command `index`'s record (below the size), and where the field names a
+    /// pipeline state, `set` as the state the CPU set on it: the field's words alone, as Metal's
+    /// setter writes its field, the rest of the record as the GPU and the CPU left it
+    /// (`CommandRecord::write_field`); then what the record holds joins what its records may.
+    fn edit(&self, index: u32, field: RecordField, set: Option<CommandState>) -> Result<(), Error> {
         let mut pipelines = lock(&self.0.pipelines);
-        let mut record = self.record(index)?;
-        edit(&mut record, &mut pipelines[index as usize])?;
-        self.write(index, &record)?;
-        let named = pipelines[index as usize].as_ref().map(CommandState::named);
-        self.0.written.add_record(&record, named);
+        let mut bytes = self.record_now(index)?;
+        let written =
+            CommandRecord::write_field(&mut bytes, field).map_err(|error| match error {
+                RecordError::Length { .. }
+                | RecordError::Action { .. }
+                | RecordError::Barrier { .. }
+                | RecordError::PipelineState => undecodable(),
+                _ => internal("an indirect command's record does not take a setter's field"),
+            })?;
+        // SAFETY: as `record_now`'s; `written` lies inside the record, and writes are one at a
+        // time (`pipelines`).
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes[written.clone()].as_ptr(),
+                self.bytes()?.add(record_offset(index) + written.start),
+                written.len(),
+            );
+        }
+        let pipeline = &mut pipelines[index as usize];
+        if let Some(set) = set {
+            *pipeline = Some(set);
+        }
+        let named = pipeline.as_ref().map(CommandState::named);
+        let writes = RecordView::new(&bytes).map_err(|_| undecodable())?.writes();
+        self.0.written.add_record(writes, named);
         Ok(())
     }
 
-    /// Reset command `index` (below the size) by `edit`, as [`edit`](Self::edit) changes it,
-    /// and clear its slots past the record's, as Metal's reset clears every slot.
+    /// Reset command `index` (below the size) by `reset`, which changes its whole record and the
+    /// pipeline state the CPU set on it, and clear its slots past the record's, as Metal's reset
+    /// clears every slot.
     fn reset_command(
         &self,
         index: u32,
-        edit: impl FnOnce(&mut CommandRecord, &mut Option<CommandState>) -> Result<(), Error>,
+        reset: impl FnOnce(&mut CommandRecord, &mut Option<CommandState>),
     ) -> Result<(), Error> {
         let mut pipelines = lock(&self.0.pipelines);
         let mut record = self.record(index)?;
-        edit(&mut record, &mut pipelines[index as usize])?;
+        reset(&mut record, &mut pipelines[index as usize]);
         self.write(index, &record)?;
         self.clear_overflow(index..index + 1)
     }
@@ -1378,10 +1403,12 @@ impl IndirectCommandBuffer {
             let _writing = lock(&self.0.pipelines);
             return self.write_overflow(index, stage, slot, Some(binding));
         }
-        self.edit(index, |record, _| {
-            record.bindings.buffers_mut(stage)[slot as usize] = Some(binding);
-            Ok(())
-        })
+        let field = RecordField::Buffer {
+            stage,
+            slot: slot as usize,
+            binding: Some(binding),
+        };
+        self.edit(index, field, None)
     }
 
     /// Announce `Degradation::IndirectValuePastRecord` for `call`'s threadgroup length at `slot`
@@ -1451,32 +1478,34 @@ impl IndirectCommandBuffer {
         let Some(overflow) = self.0.overflow.as_ref() else {
             return Vec::new();
         };
-        let Some(contents) = overflow.storage.contents() else {
-            return Vec::new();
-        };
         (RECORD_BUFFERS..count)
-            .map_while(|slot| overflow.at(index, stage, slot))
-            .map(|at| {
-                let mut bytes = [0u8; SLOT_BYTES as usize];
-                // SAFETY: as `write_overflow`'s; a write meanwhile is the program's race.
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        contents.as_ptr().add(at as usize),
-                        bytes.as_mut_ptr(),
-                        bytes.len(),
-                    );
-                }
-                let word = |at: usize| {
-                    u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap_or_default())
-                };
-                let (address, stride) = (word(0), word(8));
-                // Both 0 is a slot no setter set, as a record's (`CommandRecord::decode`).
-                (address != 0 || stride != 0).then_some(BufferBinding {
-                    address,
-                    attribute_stride: (stride != u64::MAX).then_some(stride),
-                })
-            })
+            .take_while(|&slot| overflow.at(index, stage, slot).is_some())
+            .map(|slot| self.overflow_slot(index, stage, slot))
             .collect()
+    }
+
+    /// Slot `slot` of `stage` of command `index`, past the record's, as set: none where no setter
+    /// set it, a reset cleared it, or the descriptor counts none there.
+    fn overflow_slot(&self, index: u32, stage: BufferStage, slot: u32) -> Option<BufferBinding> {
+        let overflow = self.0.overflow.as_ref()?;
+        let contents = overflow.storage.contents()?;
+        let at = overflow.at(index, stage, slot)?;
+        let mut bytes = [0u8; SLOT_BYTES as usize];
+        // SAFETY: as `write_overflow`'s; a write meanwhile is the program's race.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                contents.as_ptr().add(at as usize),
+                bytes.as_mut_ptr(),
+                bytes.len(),
+            );
+        }
+        let word = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap_or_default());
+        let (address, stride) = (word(0), word(8));
+        // Both 0 is a slot no setter set, as a record's (`CommandRecord::decode`).
+        (address != 0 || stride != 0).then_some(BufferBinding {
+            address,
+            attribute_stride: (stride != u64::MAX).then_some(stride),
+        })
     }
 
     /// Clear the slots past the record's of commands `range`, as a reset does. The caller holds
@@ -1572,9 +1601,8 @@ impl IndirectCommandBuffer {
             let (named, _) = self.name_records(read.clone(), Reader::Getter, &RENDER, live);
             read.zip(named)
                 .map(|((index, record, set), pipeline)| {
-                    let named = record.bindings.pipeline.or(record.retained_pipeline);
-                    let identifier =
-                        self.pipeline_identifier(named, set, &RENDER, pipeline.as_ref());
+                    let runs = record.bindings.pipeline.or(record.retained_pipeline);
+                    let (pipeline, identifier) = self.render_reading(runs, set, pipeline);
                     IndirectCommand::Render(self.render_command(
                         (index, record),
                         pipeline,
@@ -1587,15 +1615,11 @@ impl IndirectCommandBuffer {
             let (named, _) = self.name_records(read.clone(), Reader::Getter, &COMPUTE, live);
             read.zip(named)
                 .map(|((index, record, set), pipeline)| {
-                    // A pipeline a reset retained runs but reads as none, as Metal's getter
-                    // reports it.
-                    let reported = pipeline.filter(|_| record.bindings.pipeline.is_some());
-                    let named = record.bindings.pipeline;
-                    let identifier =
-                        self.pipeline_identifier(named, set, &COMPUTE, reported.as_ref());
+                    let reported = record.bindings.pipeline;
+                    let (pipeline, identifier) = self.compute_reading(reported, set, pipeline);
                     IndirectCommand::Compute(self.compute_command(
                         (index, record),
-                        reported,
+                        pipeline,
                         identifier,
                     ))
                 })
@@ -1643,19 +1667,127 @@ impl IndirectCommandBuffer {
 
     /// Announce the kinds of the states' identifiers `commands` answer, none of which is measured
     /// to be Metal's number (`unique_identifier.rs`); a command that names no state answers 0, as
-    /// Metal's does.
+    /// Metal's does. Each kind once a call, in the order the commands first answer it.
     fn announce_identifiers(&self, commands: &[IndirectCommand]) {
-        let kinds: BTreeSet<Degradation> = commands
-            .iter()
-            .filter_map(|command| match command {
-                IndirectCommand::Compute(command) => command.pipeline_unique_identifier,
-                IndirectCommand::Render(command) => command.pipeline_unique_identifier,
-            })
-            .filter_map(state_value_degradation)
-            .collect();
-        for kind in kinds {
+        let mut kinds: [Option<Degradation>; 2] = [None; 2];
+        let answered = commands.iter().map(|command| match command {
+            IndirectCommand::Compute(command) => command.pipeline_unique_identifier,
+            IndirectCommand::Render(command) => command.pipeline_unique_identifier,
+        });
+        for kind in answered.filter_map(|answer| answer.and_then(state_value_degradation)) {
+            if let Some(free) = kinds
+                .iter_mut()
+                .find(|held| held.is_none_or(|held| held == kind))
+            {
+                *free = Some(kind);
+            }
+        }
+        for kind in kinds.into_iter().flatten() {
             degrade_identifier(self.device(), kind, "an indirect command's pipeline state");
         }
+    }
+
+    /// What the getter reads of a compute command's pipeline state, where its record reports
+    /// `reported` (`bindings.pipeline`), the CPU set `set` on it and the getter names `state`
+    /// for the pipeline it executes with (`name_state`): the state, which a pipeline a reset
+    /// retained runs but reads as none, as Metal's getter reports it; and its identifier
+    /// (`pipeline_identifier`).
+    fn compute_reading(
+        &self,
+        reported: Option<NonZeroU64>,
+        set: Option<&CommandState>,
+        state: Option<ComputePipelineState>,
+    ) -> (Option<ComputePipelineState>, Option<u64>) {
+        let state = state.filter(|_| reported.is_some());
+        let identifier = self.pipeline_identifier(reported, set, &COMPUTE, state.as_ref());
+        (state, identifier)
+    }
+
+    /// What the getter reads of a render command's pipeline state, as `compute_reading` a compute
+    /// one's, where its record executes with `runs`, which it reports, a retained one too.
+    fn render_reading(
+        &self,
+        runs: Option<NonZeroU64>,
+        set: Option<&CommandState>,
+        state: Option<RenderPipelineState>,
+    ) -> (Option<RenderPipelineState>, Option<u64>) {
+        let identifier = self.pipeline_identifier(runs, set, &RENDER, state.as_ref());
+        (state, identifier)
+    }
+
+    /// Command `index`'s (below the size) pipeline words as its record holds them now, the
+    /// pipeline it reports (`bindings.pipeline`) and the one it executes with (a retained one
+    /// too), and the state the CPU set on it, read together: one getter's read.
+    fn read_pipeline(
+        &self,
+        index: u32,
+    ) -> Result<(Option<NonZeroU64>, Option<NonZeroU64>, Option<CommandState>), Error> {
+        let pipelines = lock(&self.0.pipelines);
+        let (reported, runs) = self.read_record(index, |view| {
+            (
+                view.pipeline(),
+                view.pipeline().or(view.retained_pipeline()),
+            )
+        })?;
+        Ok((reported, runs, pipelines[index as usize].clone()))
+    }
+
+    /// What [`commands`](Self::commands) reads of compute command `index`'s pipeline state
+    /// (`compute_reading`), read alone.
+    fn compute_pipeline_now(
+        &self,
+        index: u32,
+    ) -> Result<(Option<ComputePipelineState>, Option<u64>), Error> {
+        let (reported, runs, set) = self.read_pipeline(index)?;
+        let live = || ComputePipelineState::indirect_states(self.device());
+        let read = std::iter::once((index, runs, set.as_ref()));
+        let (mut named, _) = self.name_pipelines(read, Reader::Getter, &COMPUTE, live);
+        Ok(self.compute_reading(reported, set.as_ref(), named.pop().flatten()))
+    }
+
+    /// What [`commands`](Self::commands) reads of render command `index`'s pipeline state
+    /// (`render_reading`), read alone.
+    fn render_pipeline_now(
+        &self,
+        index: u32,
+    ) -> Result<(Option<RenderPipelineState>, Option<u64>), Error> {
+        let (_, runs, set) = self.read_pipeline(index)?;
+        let live = || RenderPipelineState::indirect_states(self.device());
+        let read = std::iter::once((index, runs, set.as_ref()));
+        let (mut named, _) = self.name_pipelines(read, Reader::Getter, &RENDER, live);
+        Ok(self.render_reading(runs, set.as_ref(), named.pop().flatten()))
+    }
+
+    /// Announce the kind of a state's identifier a getter answered, as
+    /// [`announce_identifiers`](Self::announce_identifiers) does.
+    fn announce_identifier(&self, identifier: Option<u64>) {
+        if let Some(kind) = identifier.and_then(state_value_degradation) {
+            degrade_identifier(self.device(), kind, "an indirect command's pipeline state");
+        }
+    }
+
+    /// The buffer slot `slot` of `stage` of command `index` (below the size), below `count`, as
+    /// [`commands`](Self::commands) reads it: the record's, or past the slots it holds, the
+    /// overflow's ([`Overflow`]); none at or past `count`, and where no setter set it or a reset
+    /// cleared it. One getter's read.
+    fn read_buffer(
+        &self,
+        index: u32,
+        stage: BufferStage,
+        count: u32,
+        slot: u64,
+    ) -> Result<Option<IndirectBufferBinding>, Error> {
+        let Some(slot) = u32::try_from(slot).ok().filter(|&slot| slot < count) else {
+            return Ok(None);
+        };
+        let held = self.read_record(index, |view| view.buffer(stage, slot as usize))?;
+        let binding = match slot < RECORD_BUFFERS {
+            true => held,
+            false => self.overflow_slot(index, stage, slot),
+        };
+        Ok(binding.map(|binding| {
+            IndirectBufferBinding::new(GpuAddress(binding.address), binding.attribute_stride)
+        }))
     }
 
     /// `getPipelineStateUniqueIdentifier` of a command whose record names pipeline state ID
@@ -1988,13 +2120,32 @@ impl IndirectCommandBuffer {
         of: &Of<S>,
         live: impl Fn() -> Vec<S>,
     ) -> (Vec<Option<S>>, Released) {
+        // The pipeline each command executes with: a retained one too.
+        let runs = read.map(|(index, record, set)| {
+            (
+                index,
+                record.bindings.pipeline.or(record.retained_pipeline),
+                set,
+            )
+        });
+        self.name_pipelines(runs, reader, of, live)
+    }
+
+    /// [`name_records`](Self::name_records) of each command's index, the pipeline ID its
+    /// record executes with, and the state the CPU set on it.
+    fn name_pipelines<'r, S: Clone>(
+        &self,
+        read: impl Iterator<Item = (u32, Option<NonZeroU64>, Option<&'r CommandState>)>,
+        reader: Reader,
+        of: &Of<S>,
+        live: impl Fn() -> Vec<S>,
+    ) -> (Vec<Option<S>>, Released) {
         // The live states are listed with no lock of the buffer held, once.
         let mut listed: Option<Vec<S>> = None;
         let mut unmatched = Vec::new();
         let named = read
-            .map(|(index, record, set)| {
-                // The pipeline the command executes with: a retained one too.
-                let named = record.bindings.pipeline.or(record.retained_pipeline)?;
+            .map(|(index, runs, set)| {
+                let named = runs?;
                 let holder = || {
                     listed
                         .get_or_insert_with(&live)
@@ -2197,21 +2348,7 @@ impl IndirectCommandBuffer {
         pipeline: Option<ComputePipelineState>,
         pipeline_unique_identifier: Option<u64>,
     ) -> EncodedComputeCommand {
-        let size =
-            |[width, height, depth]: [u32; 3]| Size::new(width.into(), height.into(), depth.into());
-        let dispatch = match record.action {
-            Action::DispatchThreadgroups { grid, local_size } => {
-                Some(IndirectDispatch::Threadgroups {
-                    threadgroups_per_grid: size(grid),
-                    threads_per_threadgroup: size(local_size),
-                })
-            }
-            Action::DispatchThreads { grid, local_size } => Some(IndirectDispatch::Threads {
-                threads_per_grid: size(grid),
-                threads_per_threadgroup: size(local_size),
-            }),
-            _ => None,
-        };
+        let dispatch = dispatch_of(&record.action);
         let descriptor = &self.0.descriptor;
         let [x, y, z, width, height, depth] = record.stage_in_region.map(u64::from);
         EncodedComputeCommand {
@@ -2250,113 +2387,7 @@ impl IndirectCommandBuffer {
         pipeline: Option<RenderPipelineState>,
         pipeline_unique_identifier: Option<u64>,
     ) -> EncodedRenderCommand {
-        let size =
-            |[width, height, depth]: [u32; 3]| Size::new(width.into(), height.into(), depth.into());
-        let draw = match record.action {
-            Action::DrawPrimitives {
-                primitive_type,
-                vertex_start,
-                vertex_count,
-                instance_count,
-                base_instance,
-            } => PrimitiveType::try_from(primitive_type)
-                .ok()
-                .map(|primitive_type| IndirectDraw::Primitives {
-                    primitive_type,
-                    vertex_start: vertex_start.into(),
-                    vertex_count: vertex_count.into(),
-                    instance_count: instance_count.into(),
-                    base_instance: base_instance.into(),
-                }),
-            Action::DrawIndexedPrimitives {
-                primitive_type,
-                index_count,
-                index_type,
-                index_buffer,
-                instance_count,
-                base_vertex,
-                base_instance,
-            } => PrimitiveType::try_from(primitive_type)
-                .ok()
-                .zip(IndexType::try_from(index_type).ok())
-                .map(
-                    |(primitive_type, index_type)| IndirectDraw::IndexedPrimitives {
-                        primitive_type,
-                        index_count: index_count.into(),
-                        index_type,
-                        index_buffer: GpuAddress(index_buffer),
-                        instance_count: instance_count.into(),
-                        base_vertex: base_vertex.into(),
-                        base_instance: base_instance.into(),
-                    },
-                ),
-            Action::DrawPatches {
-                control_points,
-                patch_start,
-                patch_count,
-                patch_index_buffer,
-                instance_count,
-                base_instance,
-                factor_buffer,
-                factor_instance_stride,
-                factor_scale: _,
-            } => Some(IndirectDraw::Patches {
-                control_points: control_points.into(),
-                patch_start: patch_start.into(),
-                patch_count: patch_count.into(),
-                patch_index_buffer: (patch_index_buffer != 0)
-                    .then_some(GpuAddress(patch_index_buffer)),
-                instance_count: instance_count.into(),
-                base_instance: base_instance.into(),
-                factor_buffer: GpuAddress(factor_buffer),
-                factor_instance_stride: factor_instance_stride.into(),
-            }),
-            Action::DrawIndexedPatches {
-                control_points,
-                patch_start,
-                patch_count,
-                patch_index_buffer,
-                control_point_index_buffer,
-                instance_count,
-                base_instance,
-                factor_buffer,
-                factor_instance_stride,
-                factor_scale: _,
-            } => Some(IndirectDraw::IndexedPatches {
-                control_points: control_points.into(),
-                patch_start: patch_start.into(),
-                patch_count: patch_count.into(),
-                patch_index_buffer: (patch_index_buffer != 0)
-                    .then_some(GpuAddress(patch_index_buffer)),
-                control_point_index_buffer: (control_point_index_buffer != 0)
-                    .then_some(GpuAddress(control_point_index_buffer)),
-                instance_count: instance_count.into(),
-                base_instance: base_instance.into(),
-                factor_buffer: GpuAddress(factor_buffer),
-                factor_instance_stride: factor_instance_stride.into(),
-            }),
-            Action::DrawMeshThreadgroups {
-                threadgroups,
-                object_threads,
-                mesh_threads,
-            } => Some(IndirectDraw::MeshThreadgroups {
-                threadgroups_per_grid: size(threadgroups),
-                threads_per_object_threadgroup: size(object_threads),
-                threads_per_mesh_threadgroup: size(mesh_threads),
-            }),
-            Action::DrawMeshThreads {
-                threads,
-                object_threads,
-                mesh_threads,
-            } => Some(IndirectDraw::MeshThreads {
-                threads_per_grid: size(threads),
-                threads_per_object_threadgroup: size(object_threads),
-                threads_per_mesh_threadgroup: size(mesh_threads),
-            }),
-            Action::Empty
-            | Action::DispatchThreadgroups { .. }
-            | Action::DispatchThreads { .. } => None,
-        };
+        let draw = draw_of(&record.action);
         let descriptor = &self.0.descriptor;
         EncodedRenderCommand {
             draw,
@@ -2533,9 +2564,141 @@ fn command_type(action: &Action) -> IndirectCommandType {
     }
 }
 
+/// A record's dispatch, of `action`; none for an action that dispatches nothing.
+fn dispatch_of(action: &Action) -> Option<IndirectDispatch> {
+    let size =
+        |[width, height, depth]: [u32; 3]| Size::new(width.into(), height.into(), depth.into());
+    match *action {
+        Action::DispatchThreadgroups { grid, local_size } => Some(IndirectDispatch::Threadgroups {
+            threadgroups_per_grid: size(grid),
+            threads_per_threadgroup: size(local_size),
+        }),
+        Action::DispatchThreads { grid, local_size } => Some(IndirectDispatch::Threads {
+            threads_per_grid: size(grid),
+            threads_per_threadgroup: size(local_size),
+        }),
+        _ => None,
+    }
+}
+
+/// A record's draw, of `action`: none for an action that draws nothing, and for a draw of a
+/// primitive type or an index type Metal has no value for (a kernel's write), which runs nothing.
+fn draw_of(action: &Action) -> Option<IndirectDraw> {
+    let size =
+        |[width, height, depth]: [u32; 3]| Size::new(width.into(), height.into(), depth.into());
+    match *action {
+        Action::DrawPrimitives {
+            primitive_type,
+            vertex_start,
+            vertex_count,
+            instance_count,
+            base_instance,
+        } => PrimitiveType::try_from(primitive_type)
+            .ok()
+            .map(|primitive_type| IndirectDraw::Primitives {
+                primitive_type,
+                vertex_start: vertex_start.into(),
+                vertex_count: vertex_count.into(),
+                instance_count: instance_count.into(),
+                base_instance: base_instance.into(),
+            }),
+        Action::DrawIndexedPrimitives {
+            primitive_type,
+            index_count,
+            index_type,
+            index_buffer,
+            instance_count,
+            base_vertex,
+            base_instance,
+        } => PrimitiveType::try_from(primitive_type)
+            .ok()
+            .zip(IndexType::try_from(index_type).ok())
+            .map(
+                |(primitive_type, index_type)| IndirectDraw::IndexedPrimitives {
+                    primitive_type,
+                    index_count: index_count.into(),
+                    index_type,
+                    index_buffer: GpuAddress(index_buffer),
+                    instance_count: instance_count.into(),
+                    base_vertex: base_vertex.into(),
+                    base_instance: base_instance.into(),
+                },
+            ),
+        Action::DrawPatches {
+            control_points,
+            patch_start,
+            patch_count,
+            patch_index_buffer,
+            instance_count,
+            base_instance,
+            factor_buffer,
+            factor_instance_stride,
+            factor_scale: _,
+        } => Some(IndirectDraw::Patches {
+            control_points: control_points.into(),
+            patch_start: patch_start.into(),
+            patch_count: patch_count.into(),
+            patch_index_buffer: (patch_index_buffer != 0).then_some(GpuAddress(patch_index_buffer)),
+            instance_count: instance_count.into(),
+            base_instance: base_instance.into(),
+            factor_buffer: GpuAddress(factor_buffer),
+            factor_instance_stride: factor_instance_stride.into(),
+        }),
+        Action::DrawIndexedPatches {
+            control_points,
+            patch_start,
+            patch_count,
+            patch_index_buffer,
+            control_point_index_buffer,
+            instance_count,
+            base_instance,
+            factor_buffer,
+            factor_instance_stride,
+            factor_scale: _,
+        } => Some(IndirectDraw::IndexedPatches {
+            control_points: control_points.into(),
+            patch_start: patch_start.into(),
+            patch_count: patch_count.into(),
+            patch_index_buffer: (patch_index_buffer != 0).then_some(GpuAddress(patch_index_buffer)),
+            control_point_index_buffer: (control_point_index_buffer != 0)
+                .then_some(GpuAddress(control_point_index_buffer)),
+            instance_count: instance_count.into(),
+            base_instance: base_instance.into(),
+            factor_buffer: GpuAddress(factor_buffer),
+            factor_instance_stride: factor_instance_stride.into(),
+        }),
+        Action::DrawMeshThreadgroups {
+            threadgroups,
+            object_threads,
+            mesh_threads,
+        } => Some(IndirectDraw::MeshThreadgroups {
+            threadgroups_per_grid: size(threadgroups),
+            threads_per_object_threadgroup: size(object_threads),
+            threads_per_mesh_threadgroup: size(mesh_threads),
+        }),
+        Action::DrawMeshThreads {
+            threads,
+            object_threads,
+            mesh_threads,
+        } => Some(IndirectDraw::MeshThreads {
+            threads_per_grid: size(threads),
+            threads_per_object_threadgroup: size(object_threads),
+            threads_per_mesh_threadgroup: size(mesh_threads),
+        }),
+        Action::Empty | Action::DispatchThreadgroups { .. } | Action::DispatchThreads { .. } => {
+            None
+        }
+    }
+}
+
 /// The byte offset of command `index`'s record in the storage.
 fn record_offset(index: u32) -> usize {
     COMMAND_BUFFER_HEADER_BYTES + index as usize * COMMAND_BYTES
+}
+
+/// The runtime's error for a record that does not decode (a GPU write, the program's race).
+fn undecodable() -> Error {
+    internal("an indirect command's record does not decode")
 }
 
 fn problem(call: &'static str, problem: IndirectCommandBufferProblem) -> Error {
@@ -2552,12 +2715,10 @@ pub struct IndirectComputeCommand {
 }
 
 impl IndirectComputeCommand {
-    /// Change the record by `edit`, which may refuse.
-    fn edit(
-        &self,
-        edit: impl FnOnce(&mut CommandRecord, &mut Option<CommandState>) -> Result<(), Error>,
-    ) -> Result<(), Error> {
-        self.icb.edit(self.index, edit)
+    /// Write `field` into the record, with `set` as the state the CPU set where it names one
+    /// (`IndirectCommandBuffer::edit`).
+    fn edit(&self, field: RecordField, set: Option<CommandState>) -> Result<(), Error> {
+        self.icb.edit(self.index, field, set)
     }
 
     fn descriptor(&self) -> &IndirectCommandBufferDescriptor {
@@ -2587,21 +2748,17 @@ impl IndirectComputeCommand {
                 IndirectCommandBufferProblem::PipelineWithoutSupport,
             ));
         };
-        self.edit(|record, pipeline| {
-            record.bindings.pipeline = Some(id);
-            record.retained_pipeline = None;
-            let stamp = IdStamp {
-                id: id.get(),
-                serial,
-                identifier: state.identifier_value(),
-            };
-            *pipeline = Some(CommandState::Compute(
-                state.downgrade(),
-                state.program(),
-                stamp,
-            ));
-            Ok(())
-        })
+        let stamp = IdStamp {
+            id: id.get(),
+            serial,
+            identifier: state.identifier_value(),
+        };
+        let named = Named {
+            encodes: state.can_encode_indirect_commands(),
+            writes: state.indirect_command_writes(),
+        };
+        let set = CommandState::Compute(state.downgrade(), state.program(), stamp, named);
+        self.edit(RecordField::Pipeline(id), Some(set))
     }
 
     /// `setKernelBuffer:offset:atIndex:`: buffer `index` at `buffer`'s address plus `offset`'s
@@ -2670,7 +2827,7 @@ impl IndirectComputeCommand {
         threadgroups: Size,
         threads_per_threadgroup: Size,
     ) -> Result<(), Error> {
-        self.dispatch(Action::DispatchThreadgroups {
+        self.set_dispatch(Action::DispatchThreadgroups {
             grid: low_bits(threadgroups),
             local_size: low_bits(threads_per_threadgroup),
         })
@@ -2685,7 +2842,7 @@ impl IndirectComputeCommand {
         threads: Size,
         threads_per_threadgroup: Size,
     ) -> Result<(), Error> {
-        self.dispatch(Action::DispatchThreads {
+        self.set_dispatch(Action::DispatchThreads {
             grid: low_bits(threads),
             local_size: low_bits(threads_per_threadgroup),
         })
@@ -2693,27 +2850,18 @@ impl IndirectComputeCommand {
 
     /// Set the record's dispatch `action`, which every compute buffer's records hold
     /// (`CommandDescriptor::holds`).
-    fn dispatch(&self, action: Action) -> Result<(), Error> {
-        self.edit(|record, _| {
-            record.action = action;
-            Ok(())
-        })
+    fn set_dispatch(&self, action: Action) -> Result<(), Error> {
+        self.edit(RecordField::Action(action), None)
     }
 
     /// `setBarrier`: the command waits for the commands before it.
     pub fn set_barrier(&self) -> Result<(), Error> {
-        self.edit(|record, _| {
-            record.barrier = true;
-            Ok(())
-        })
+        self.edit(RecordField::Barrier(true), None)
     }
 
     /// `clearBarrier`.
     pub fn clear_barrier(&self) -> Result<(), Error> {
-        self.edit(|record, _| {
-            record.barrier = false;
-            Ok(())
-        })
+        self.edit(RecordField::Barrier(false), None)
     }
 
     /// `setThreadgroupMemoryLength:atIndex:`: as set, a multiple of 16 or not and past the
@@ -2734,10 +2882,11 @@ impl IndirectComputeCommand {
                 .degrade_past_record("set_threadgroup_memory_length", self.index, index);
             return Ok(());
         }
-        self.edit(|record, _| {
-            record.threadgroup_memory_lengths[index as usize] = length;
-            Ok(())
-        })
+        let field = RecordField::ThreadgroupMemoryLength {
+            index: index as usize,
+            length,
+        };
+        self.edit(field, None)
     }
 
     /// `setStageInRegion:`: each origin and size value's low 32 bits, as Metal keeps them.
@@ -2751,10 +2900,8 @@ impl IndirectComputeCommand {
             size.height,
             size.depth,
         ];
-        self.edit(|record, _| {
-            record.stage_in_region = values.map(|value| value as u32);
-            Ok(())
-        })
+        let region = values.map(|value| value as u32);
+        self.edit(RecordField::StageInRegion(region), None)
     }
 
     /// `setImageblockWidth:height:`: as set. A side past 65535, which Metal keeps, is refused
@@ -2767,10 +2914,7 @@ impl IndirectComputeCommand {
                 height,
             }));
         };
-        self.edit(|record, _| {
-            record.imageblock_size = [w, h];
-            Ok(())
-        })
+        self.edit(RecordField::ImageblockSize([w, h]), None)
     }
 
     /// `reset`: the command as a fresh buffer's, but for the pipeline state it executes with,
@@ -2787,8 +2931,108 @@ impl IndirectComputeCommand {
                 imageblock_size: record.imageblock_size,
                 ..CommandRecord::default()
             };
-            Ok(())
         })
+    }
+    /// `getCommandType`, Apple's private getter: the command's
+    /// [`command_type`](EncodedComputeCommand::command_type) as
+    /// [`IndirectCommandBuffer::commands`] reads it now, its record's action alone read. Each of
+    /// the command's getters reads its field of the record as it is at the call (a runtime
+    /// extension standing for Metal's private getters, as `commands` is), so a field read after
+    /// the GPU may have written the records may not be what an execution committed earlier
+    /// runs ([`IndirectCommandBuffer::gpu_written`]).
+    pub fn command_type(&self) -> Result<IndirectCommandType, Error> {
+        self.icb
+            .read_record(self.index, |view| command_type(&view.action()))
+    }
+
+    /// `hasBarrier`, Apple's private getter: the command's
+    /// [`barrier`](EncodedComputeCommand::barrier), read alone.
+    pub fn has_barrier(&self) -> Result<bool, Error> {
+        self.icb.read_record(self.index, |view| view.barrier())
+    }
+
+    /// `dispatchThreadgroupsArguments` and `dispatchThreadsArguments`, Apple's private getters:
+    /// the command's [`dispatch`](EncodedComputeCommand::dispatch), read alone.
+    pub fn dispatch(&self) -> Result<Option<IndirectDispatch>, Error> {
+        self.icb
+            .read_record(self.index, |view| dispatch_of(&view.action()))
+    }
+
+    /// The kernel buffer set at `index`: the command's
+    /// [`kernel_buffers`](EncodedComputeCommand::kernel_buffers)`[index]`, read alone, none at or
+    /// past the descriptor's `max_kernel_buffer_bind_count`. Metal's private getters of the slot
+    /// (`getKernelBufferAddressAtIndex:`, `getKernelAttributeStrideAtIndex:`) answer it as
+    /// [`EncodedComputeCommand::kernel_buffer_address`] and
+    /// [`EncodedComputeCommand::kernel_attribute_stride`] do.
+    pub fn kernel_buffer(&self, index: u64) -> Result<Option<IndirectBufferBinding>, Error> {
+        let count = self.descriptor().max_kernel_buffer_bind_count;
+        self.icb
+            .read_buffer(self.index, BufferStage::Kernel, count, index)
+    }
+
+    /// `getThreadgroupMemoryLengthAtIndex:`, Apple's private getter: the command's
+    /// [`threadgroup_memory_lengths`](EncodedComputeCommand::threadgroup_memory_lengths)`[index]`,
+    /// read alone; none past what the record holds of the descriptor's
+    /// `max_kernel_threadgroup_memory_bind_count` (31 lengths).
+    pub fn threadgroup_memory_length(&self, index: u64) -> Result<Option<u32>, Error> {
+        let held = held(
+            self.descriptor().max_kernel_threadgroup_memory_bind_count,
+            THREADGROUP_BUFFER_ARGUMENT_COUNT,
+        );
+        let Some(index) = usize::try_from(index)
+            .ok()
+            .filter(|&index| index < held as usize)
+        else {
+            return Ok(None);
+        };
+        self.icb
+            .read_record(self.index, |view| view.threadgroup_memory_length(index))
+    }
+
+    /// `getStageInRegion`, Apple's private getter: the command's
+    /// [`stage_in_region`](EncodedComputeCommand::stage_in_region), read alone.
+    pub fn stage_in_region(&self) -> Result<Region, Error> {
+        let [x, y, z, width, height, depth] = self
+            .icb
+            .read_record(self.index, |view| view.stage_in_region())?
+            .map(u64::from);
+        Ok(Region {
+            origin: Origin::new(x, y, z),
+            size: Size::new(width, height, depth),
+        })
+    }
+
+    /// The imageblock size Apple's private getter answers: the command's
+    /// [`imageblock_width`](EncodedComputeCommand::imageblock_width) and
+    /// [`imageblock_height`](EncodedComputeCommand::imageblock_height), read alone.
+    pub fn imageblock_size(&self) -> Result<(u64, u64), Error> {
+        let [width, height] = self
+            .icb
+            .read_record(self.index, |view| view.imageblock_size())?;
+        Ok((width.into(), height.into()))
+    }
+
+    /// The command's [`pipeline`](EncodedComputeCommand::pipeline), read alone: the state set on
+    /// it, none when unset, reset, or when no state of the ID it names lives.
+    pub fn pipeline_state(&self) -> Result<Option<ComputePipelineState>, Error> {
+        Ok(self.icb.compute_pipeline_now(self.index)?.0)
+    }
+
+    /// The command's [`pipeline_id`](EncodedComputeCommand::pipeline_id), read alone: the ID of
+    /// the state its record names, none where it names none.
+    pub fn pipeline_id(&self) -> Result<Option<ResourceId>, Error> {
+        self.icb.read_record(self.index, |view| {
+            view.pipeline().map(|id| ResourceId(id.get()))
+        })
+    }
+
+    /// `getPipelineStateUniqueIdentifier`, Apple's private getter: the command's
+    /// [`pipeline_unique_identifier`](EncodedComputeCommand::pipeline_unique_identifier), read
+    /// alone, whose kind the device announces as `commands` announces it.
+    pub fn pipeline_unique_identifier(&self) -> Result<Option<u64>, Error> {
+        let (_, identifier) = self.icb.compute_pipeline_now(self.index)?;
+        self.icb.announce_identifier(identifier);
+        Ok(identifier)
     }
 }
 
@@ -3012,17 +3256,19 @@ impl IndirectRenderCommand {
         !self.icb.is_render()
     }
 
-    /// Change the record by `edit`, for `call`: refused (`CommandKind`) for a command of a buffer
-    /// of dispatches (`of_compute`).
+    /// Write `field` into the record, with `set` as the state the CPU set where it names one
+    /// (`IndirectCommandBuffer::edit`), for `call`: refused (`CommandKind`) for a command of a
+    /// buffer of dispatches (`of_compute`).
     fn edit(
         &self,
         call: &'static str,
-        edit: impl FnOnce(&mut CommandRecord, &mut Option<CommandState>) -> Result<(), Error>,
+        field: RecordField,
+        set: Option<CommandState>,
     ) -> Result<(), Error> {
         if self.of_compute() {
             return Err(problem(call, IndirectCommandBufferProblem::CommandKind));
         }
-        self.icb.edit(self.index, edit)
+        self.icb.edit(self.index, field, set)
     }
 
     /// `setRenderPipelineState:`. Refused (`Invalid`): a buffer that inherits its pipeline
@@ -3068,17 +3314,17 @@ impl IndirectRenderCommand {
                 IndirectCommandBufferProblem::PipelineWithoutSupport,
             ));
         };
-        self.edit(CALL, |record, pipeline| {
-            record.bindings.pipeline = Some(id);
-            record.retained_pipeline = None;
-            let stamp = IdStamp {
-                id: id.get(),
-                serial,
-                identifier: state.identifier_value(),
-            };
-            *pipeline = Some(CommandState::Render(named, program, stamp));
-            Ok(())
-        })
+        let stamp = IdStamp {
+            id: id.get(),
+            serial,
+            identifier: state.identifier_value(),
+        };
+        let can = Named {
+            encodes: state.can_encode_indirect_commands(),
+            writes: state.indirect_command_writes(),
+        };
+        let set = CommandState::Render(named, program, stamp, can);
+        self.edit(CALL, RecordField::Pipeline(id), Some(set))
     }
 
     /// `setVertexBuffer:offset:atIndex:`: vertex buffer `index` at `buffer`'s address plus
@@ -3232,10 +3478,7 @@ impl IndirectRenderCommand {
             base_instance: base_instance as u32,
         };
         self.check_draw(CALL, IndirectCommandType::DRAW, &action)?;
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:
@@ -3298,10 +3541,7 @@ impl IndirectRenderCommand {
                 }),
             ));
         }
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// `drawPatches:patchStart:patchCount:patchIndexBuffer:patchIndexBufferOffset:instanceCount:
@@ -3370,10 +3610,7 @@ impl IndirectRenderCommand {
             None,
             tessellation_factor_buffer,
         )?;
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// `drawIndexedPatches:patchStart:patchCount:patchIndexBuffer:patchIndexBufferOffset:
@@ -3459,10 +3696,7 @@ impl IndirectRenderCommand {
             control_point_index_buffer,
             tessellation_factor_buffer,
         )?;
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// Refuse a patch draw's values for `call` as [`draw_patches`](Self::draw_patches) states:
@@ -3561,10 +3795,7 @@ impl IndirectRenderCommand {
             mesh_threads: low_bits(threads_per_mesh_threadgroup),
         };
         self.check_draw(CALL, IndirectCommandType::DRAW_MESH_THREADGROUPS, &action)?;
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// `drawMeshThreads:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`: the command
@@ -3584,10 +3815,7 @@ impl IndirectRenderCommand {
             mesh_threads: low_bits(threads_per_mesh_threadgroup),
         };
         self.check_draw(CALL, IndirectCommandType::DRAW_MESH_THREADS, &action)?;
-        self.edit(CALL, |record, _| {
-            record.action = action;
-            Ok(())
-        })
+        self.edit(CALL, RecordField::Action(action), None)
     }
 
     /// `setBarrier`: the command's draw runs after the earlier draws of its execution and of the
@@ -3604,10 +3832,7 @@ impl IndirectRenderCommand {
         if self.of_compute() {
             return Ok(());
         }
-        self.edit("set_barrier", |record, _| {
-            record.barrier = true;
-            Ok(())
-        })?;
+        self.edit("set_barrier", RecordField::Barrier(true), None)?;
         self.icb.0.barriers.store(true, Ordering::Release);
         Ok(())
     }
@@ -3619,10 +3844,7 @@ impl IndirectRenderCommand {
         if self.of_compute() {
             return Ok(());
         }
-        self.edit("clear_barrier", |record, _| {
-            record.barrier = false;
-            Ok(())
-        })
+        self.edit("clear_barrier", RecordField::Barrier(false), None)
     }
 
     /// `reset`: the command as a fresh buffer's.
@@ -3633,7 +3855,6 @@ impl IndirectRenderCommand {
         self.icb.reset_command(self.index, |record, pipeline| {
             *record = CommandRecord::default();
             *pipeline = None;
-            Ok(())
         })
     }
 
@@ -3713,6 +3934,110 @@ impl IndirectRenderCommand {
             ));
         }
         Ok(())
+    }
+
+    /// Refuse, for `call`, a getter of a command of a buffer of dispatches (`CommandKind`,
+    /// `of_compute`), whose answers were not measured.
+    fn check_getter(&self, call: &'static str) -> Result<(), Error> {
+        match self.of_compute() {
+            true => Err(problem(call, IndirectCommandBufferProblem::CommandKind)),
+            false => Ok(()),
+        }
+    }
+
+    /// `getCommandType`, Apple's private getter: the command's
+    /// [`command_type`](EncodedRenderCommand::command_type) as
+    /// [`IndirectCommandBuffer::commands`] reads it now, its record's action alone read, as a
+    /// compute command's getters read theirs ([`IndirectComputeCommand::command_type`]). Each
+    /// getter is refused (`Invalid`, `CommandKind`) for a command of a buffer of dispatches,
+    /// where Metal's answer was not measured.
+    pub fn command_type(&self) -> Result<IndirectCommandType, Error> {
+        self.check_getter("command_type")?;
+        self.icb
+            .read_record(self.index, |view| command_type(&view.action()))
+    }
+
+    /// `hasBarrier`, Apple's private getter: the command's
+    /// [`barrier`](EncodedRenderCommand::barrier), read alone.
+    pub fn has_barrier(&self) -> Result<bool, Error> {
+        self.check_getter("has_barrier")?;
+        self.icb.read_record(self.index, |view| view.barrier())
+    }
+
+    /// `drawArguments`, `drawIndexedArguments`, `drawPatchesArguments`,
+    /// `drawIndexedPatchesArguments` and `getTessellationFactorArguments`, Apple's private
+    /// getters: the command's [`draw`](EncodedRenderCommand::draw), read alone.
+    pub fn draw(&self) -> Result<Option<IndirectDraw>, Error> {
+        self.check_getter("draw")?;
+        self.icb
+            .read_record(self.index, |view| draw_of(&view.action()))
+    }
+
+    /// The vertex buffer set at `index`: the command's
+    /// [`vertex_buffers`](EncodedRenderCommand::vertex_buffers)`[index]`, read alone, none at or
+    /// past the descriptor's `max_vertex_buffer_bind_count`, which Metal's private getters of the
+    /// slot answer as [`EncodedRenderCommand::vertex_buffer_address`] and
+    /// [`EncodedRenderCommand::vertex_attribute_stride`] do.
+    pub fn vertex_buffer(&self, index: u64) -> Result<Option<IndirectBufferBinding>, Error> {
+        self.check_getter("vertex_buffer")?;
+        let count = self.descriptor().max_vertex_buffer_bind_count;
+        self.icb
+            .read_buffer(self.index, BufferStage::Vertex, count, index)
+    }
+
+    /// The fragment buffer set at `index`, as [`vertex_buffer`](Self::vertex_buffer) reads a
+    /// vertex buffer, below the descriptor's `max_fragment_buffer_bind_count`
+    /// ([`EncodedRenderCommand::fragment_buffers`]).
+    pub fn fragment_buffer(&self, index: u64) -> Result<Option<IndirectBufferBinding>, Error> {
+        self.check_getter("fragment_buffer")?;
+        let count = self.descriptor().max_fragment_buffer_bind_count;
+        self.icb
+            .read_buffer(self.index, BufferStage::Fragment, count, index)
+    }
+
+    /// The object buffer set at `index`, as [`vertex_buffer`](Self::vertex_buffer) reads a
+    /// vertex buffer, below the descriptor's `max_object_buffer_bind_count`
+    /// ([`EncodedRenderCommand::object_buffers`]).
+    pub fn object_buffer(&self, index: u64) -> Result<Option<IndirectBufferBinding>, Error> {
+        self.check_getter("object_buffer")?;
+        let count = self.descriptor().max_object_buffer_bind_count;
+        self.icb
+            .read_buffer(self.index, BufferStage::Object, count, index)
+    }
+
+    /// The mesh buffer set at `index`, as [`vertex_buffer`](Self::vertex_buffer) reads a vertex
+    /// buffer, below the descriptor's `max_mesh_buffer_bind_count`
+    /// ([`EncodedRenderCommand::mesh_buffers`]).
+    pub fn mesh_buffer(&self, index: u64) -> Result<Option<IndirectBufferBinding>, Error> {
+        self.check_getter("mesh_buffer")?;
+        let count = self.descriptor().max_mesh_buffer_bind_count;
+        self.icb
+            .read_buffer(self.index, BufferStage::Mesh, count, index)
+    }
+
+    /// The command's [`pipeline`](EncodedRenderCommand::pipeline), read alone.
+    pub fn pipeline_state(&self) -> Result<Option<RenderPipelineState>, Error> {
+        self.check_getter("pipeline_state")?;
+        Ok(self.icb.render_pipeline_now(self.index)?.0)
+    }
+
+    /// The command's [`pipeline_id`](EncodedRenderCommand::pipeline_id), read alone.
+    pub fn pipeline_id(&self) -> Result<Option<ResourceId>, Error> {
+        self.check_getter("pipeline_id")?;
+        self.icb.read_record(self.index, |view| {
+            let runs = view.pipeline().or(view.retained_pipeline());
+            runs.map(|id| ResourceId(id.get()))
+        })
+    }
+
+    /// `getPipelineStateUniqueIdentifier`, Apple's private getter: the command's
+    /// [`pipeline_unique_identifier`](EncodedRenderCommand::pipeline_unique_identifier), read
+    /// alone, whose kind the device announces as `commands` announces it.
+    pub fn pipeline_unique_identifier(&self) -> Result<Option<u64>, Error> {
+        self.check_getter("pipeline_unique_identifier")?;
+        let (_, identifier) = self.icb.render_pipeline_now(self.index)?;
+        self.icb.announce_identifier(identifier);
+        Ok(identifier)
     }
 }
 

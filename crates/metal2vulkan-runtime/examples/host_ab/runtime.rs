@@ -330,21 +330,18 @@ impl Gpu for Runtime {
         commands: &rt::IndirectCommandBuffer,
         index: usize,
     ) -> u64 {
-        let index = index as u64;
-        match commands.commands(index..index + 1).expect("commands").pop() {
-            Some(rt::IndirectCommand::Compute(command)) => {
-                command.kernel_buffer_address(0).expect("a kernel buffer")
-            }
-            _ => panic!("a compute command"),
-        }
+        compute_command(commands, index)
+            .kernel_buffer(0)
+            .expect("kernel_buffer")
+            .expect("a kernel buffer")
+            .address
+            .0
     }
 
     fn command_has_barrier(&self, commands: &rt::IndirectCommandBuffer, index: usize) -> bool {
-        let index = index as u64;
-        match commands.commands(index..index + 1).expect("commands").pop() {
-            Some(rt::IndirectCommand::Compute(command)) => command.barrier,
-            _ => panic!("a compute command"),
-        }
+        compute_command(commands, index)
+            .has_barrier()
+            .expect("has_barrier")
     }
 
     fn draw_command_pipeline(
@@ -381,13 +378,12 @@ impl Gpu for Runtime {
         commands: &rt::IndirectCommandBuffer,
         index: usize,
     ) -> u64 {
-        let index = index as u64;
-        match commands.commands(index..index + 1).expect("commands").pop() {
-            Some(rt::IndirectCommand::Render(command)) => {
-                command.vertex_buffer_address(0).expect("a vertex buffer")
-            }
-            _ => panic!("a render command"),
-        }
+        render_command(commands, index)
+            .vertex_buffer(0)
+            .expect("vertex_buffer")
+            .expect("a vertex buffer")
+            .address
+            .0
     }
 
     fn buffer(&self, length: usize) -> rt::Buffer {
