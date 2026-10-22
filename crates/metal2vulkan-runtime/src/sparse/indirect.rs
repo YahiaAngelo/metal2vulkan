@@ -12,7 +12,6 @@
 
 use super::encoder::SparseUpdate;
 use super::mapping::UnitUpdate;
-use super::SparseProblem;
 use crate::buffer::Buffer;
 use crate::degradation::Degradation;
 use crate::error::{internal, CommandBufferError, Error};
@@ -42,10 +41,10 @@ impl From<Error> for ReadFailure {
 
 /// The updates an indirect update of `texture` states now: its arguments at `offset` of
 /// `buffer`, a count and that many regions, mapped or unmapped by `mode` as one update of them
-/// all, through a view naming its texture's own tiles. Arguments the encoder would refuse in a
-/// direct update fail the command buffer typed: what Metal's validation stops, and regions past the
-/// buffer (`CommandBufferError::SparseMappingArguments`), and regions that bind part of a device
-/// unit of a texture whose texels no copy writes (`SparseMappingSplit`).
+/// all, through a view naming its texture's own tiles. Arguments Metal's validation stops map as
+/// plain Metal maps them (`UnitGrid::clipped_region`), and the regions the count names past the
+/// buffer map nothing (the M3 Max). Regions that bind part of a device unit of a texture whose
+/// texels no copy writes fail the command buffer typed (`SparseMappingSplit`).
 pub(crate) fn resolve(
     device: &Device,
     texture: &Texture,
@@ -61,20 +60,9 @@ pub(crate) fn resolve(
         .first()
         .copied()
         .map_or(0, u64::from);
-    let bytes = count
-        .checked_mul(4 * ARGUMENT_WORDS)
-        .and_then(|bytes| bytes.checked_add(4));
-    if bytes
-        .and_then(|bytes| offset.checked_add(bytes))
-        .is_none_or(|end| end > length)
-    {
-        let problem = SparseProblem::IndirectArguments {
-            offset,
-            bytes: bytes.unwrap_or(u64::MAX),
-            length,
-        };
-        return Err(refused(problem));
-    }
+    // The regions inside the buffer (the encoder refused a count word past it).
+    let room = length.saturating_sub(offset + 4) / (4 * ARGUMENT_WORDS);
+    let count = count.min(room);
     let words = read_words(device, buffer, offset + 4, count * ARGUMENT_WORDS)?;
     // Through a view, the slices are the view's and the levels its texture's, as a direct
     // update's (the encoder refused a view whose tiles are not its texture's).
@@ -83,11 +71,11 @@ pub(crate) fn resolve(
     for arguments in words.as_chunks::<{ ARGUMENT_WORDS as usize }>().0.iter() {
         let word = |i: usize| u64::from(arguments[i]);
         let region = Region::new_3d(word(0), word(1), word(2), word(3), word(4), word(5));
-        let checked = sparse
-            .grid
-            .checked_region(word(6), word(7) + first, &region)
-            .map_err(refused)?;
-        units.extend(checked);
+        units.extend(
+            sparse
+                .grid
+                .clipped_region(word(6), word(7) + first, &region),
+        );
     }
     if !sparse.zeroed && !sparse.grid.check_exact(&units) {
         return Err(ReadFailure::Arguments(
@@ -101,10 +89,6 @@ pub(crate) fn resolve(
         texture: texture.clone(),
         update: UnitUpdate { mode, units },
     }])
-}
-
-fn refused(problem: SparseProblem) -> ReadFailure {
-    ReadFailure::Arguments(CommandBufferError::SparseMappingArguments(problem))
 }
 
 /// Announce on `device`, once, that the host reads mapping arguments.

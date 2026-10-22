@@ -1611,11 +1611,6 @@ pub enum CommandBufferError {
     /// tiles that fit; the runtime binds such a texture's whole units, so it applied none of the
     /// batch's mappings and ran nothing of the command buffer from there.
     SparseHeapSplit,
-    /// An indirect sparse mapping update's arguments, as the host read them, are what Metal's
-    /// validation stops: a level, slice or region past the texture's, or regions past the buffer.
-    /// What Metal maps without validation is not measured, so the runtime applied none of the
-    /// batch's mappings and ran nothing of the command buffer from there.
-    SparseMappingArguments(SparseProblem),
     /// An indirect sparse mapping update's regions, as the host read them, would bind or unbind
     /// part of one of the device's sparse units of a texture whose texels no copy writes
     /// (`Feature::SparseMapping`, refused where a direct update is encoded): nothing of the batch
@@ -1886,8 +1881,7 @@ pub enum FailureOrigin {
     /// The runtime's own: Metal runs the work and fails no command buffer so, where the runtime
     /// failed it rather than run it short or wrong (a fixed pool's overflow, a pipeline made at
     /// the draw, a read or sampler the runtime does not emulate there, a host step's refusal), or
-    /// Metal's answer is unmeasured ([`CommandBufferError::SparseMappingArguments`]), or Vulkan
-    /// failed the submission in a way Metal has no counterpart of
+    /// Vulkan failed the submission in a way Metal has no counterpart of
     /// ([`CommandBufferError::Internal`]). Its [`CommandBufferError::metal_code`] is the nearest of
     /// Metal's codes, not Metal's answer.
     Runtime,
@@ -2019,7 +2013,6 @@ impl CommandBufferError {
             CommandBufferError::Internal(_)
             | CommandBufferError::MeshGridPastLimits
             | CommandBufferError::SparseHeapSplit
-            | CommandBufferError::SparseMappingArguments(_)
             | CommandBufferError::SparseMappingSplit
             | CommandBufferError::Refused
             | CommandBufferError::RenderTargetSize
@@ -2070,7 +2063,6 @@ impl CommandBufferError {
             CommandBufferError::Internal(_)
             | CommandBufferError::IndexPoolOverflow
             | CommandBufferError::SparseHeapSplit
-            | CommandBufferError::SparseMappingArguments(_)
             | CommandBufferError::SparseMappingSplit
             | CommandBufferError::CubicArgumentSampler
             | CommandBufferError::MeshRecordsOverflow(_)

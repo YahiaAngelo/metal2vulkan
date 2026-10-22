@@ -458,6 +458,38 @@ impl UnitGrid {
         units
     }
 
+    /// Metal's units an indirect update's `region` (in tiles) of `level` and `slice` touches, as
+    /// plain Metal maps arguments its validation stops (the M3 Max under macOS 27.0.1): none at a
+    /// level or slice past the texture's, nor for a tiled level's region whose origin is past its
+    /// tiles or whose size is 0 on an axis; else the region's tiles inside the level, the rest of
+    /// it dropped. A level past `firstMipmapInTail` touches its slice's tail, as
+    /// [`checked_region`](Self::checked_region)'s. Differs: Metal's `usedSize` over a region of a
+    /// slice past the texture's varies (a tile more beside other regions, none alone, and an
+    /// unmap of it can take the count below zero); the runtime counts none.
+    pub(crate) fn clipped_region(&self, level: u64, slice: u64, region: &Region) -> Vec<MetalUnit> {
+        if level >= self.shape.levels || slice >= u64::from(self.slices()) {
+            return Vec::new();
+        }
+        let (level32, slice32) = (level as u32, slice as u32);
+        if level32 >= self.first_tail() {
+            return self.update_units(level32, slice32, [0; 3], [0; 3]);
+        }
+        let tiles = self.tiles(level32).map(u64::from);
+        let origin = [region.origin.x, region.origin.y, region.origin.z];
+        let size = [region.size.width, region.size.height, region.size.depth];
+        if (0..3).any(|axis| origin[axis] >= tiles[axis] || size[axis] == 0) {
+            return Vec::new();
+        }
+        let clipped: [u64; 3] =
+            std::array::from_fn(|axis| size[axis].min(tiles[axis] - origin[axis]));
+        self.update_units(
+            level32,
+            slice32,
+            origin.map(|axis| axis as u32),
+            clipped.map(|axis| axis as u32),
+        )
+    }
+
     /// Metal's units an update of `region` (in tiles) of `level` and `slice` touches
     /// ([`update_units`](Self::update_units)), refused where Metal's validation stops it: a level
     /// or slice past the texture's, or a tiled level's region past its tiles. A level past
