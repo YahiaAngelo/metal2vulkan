@@ -925,15 +925,22 @@ fn a_gpu_under_another_of_its_device_ids_takes_its_measured_rows() {
 }
 
 /// The identities measured whose venue has no committed profile: the RTX 3090 (gem10) at NVIDIA's
-/// 615.71.09, lavapipe at Mesa 26.2.4 (the Linux venues' own lavapipe), the M3 Max under macOS
-/// 26.7 at MoltenVK 1.4.1 (its venue's capture is now macOS 27's, the M4's identity), and the M3
-/// Max under macOS 27.0.1 at MoltenVK 1.4.2 (its venue's capture is 1.4.1's).
-const MEASURED_WITHOUT_PROFILE: [(DriverId, u32, u32, u32); 4] = [
+/// 615.71.09, the RX 7900 XTX (gem10) at RADV's Mesa 26.2.4, lavapipe at Mesa 26.2.4 (the Linux
+/// venues' own lavapipe), the M3 Max under macOS 26.7 at MoltenVK 1.4.1 (its venue's capture is now
+/// macOS 27's, the M4's identity), and the M3 Max under macOS 27.0.1 at MoltenVK 1.4.2 (its venue's
+/// capture is 1.4.1's).
+const MEASURED_WITHOUT_PROFILE: [(DriverId, u32, u32, u32); 5] = [
     (
         DriverId::NVIDIA_PROPRIETARY,
         0x10de,
         NVIDIA_RTX_3090,
         nvidia(615, 71, 9),
+    ),
+    (
+        DriverId::MESA_RADV,
+        0x1002,
+        crate::device::driver_facts::AMD_RX_7900_XTX,
+        mesa(26, 2, 4),
     ),
     (DriverId::MESA_LLVMPIPE, 0x10005, 0, mesa(26, 2, 4)),
     (
@@ -1003,6 +1010,31 @@ fn nvidia_s_semaphore_stall_holds_on_the_gpus_measured() {
         .map(|row| row.driver)
         .collect();
     assert_eq!(drivers, [DriverId::NVIDIA_PROPRIETARY; 2]);
+}
+
+/// RADV's Mesa 26.2.4 on the RX 7900 XTX is a measured identity: its pointer imports follow their
+/// address, as the 780M's do, and it reads zero past a bound index range, RADV's at that release
+/// on every GPU; no answer measured on the 780M alone (its block decodes, `DONT_CARE` stores,
+/// interlocked split, sampled fetch) is taken, and none is withheld. At another release (26.2.3,
+/// 26.0.8) it is unmeasured and takes none.
+#[test]
+fn the_rx_7900_xtx_at_mesa_26_2_4_takes_the_facts_measured_on_it() {
+    use crate::device::driver_facts::AMD_RX_7900_XTX;
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../metal2vulkan-validation/profiles");
+    let text = std::fs::read_to_string(dir.join("amd-780m-radv.json")).expect("amd-780m-radv");
+    let mut navi31 = DeviceDescription::from_khronos_json(&text, None).expect("profile parses");
+    navi31.device_id = AMD_RX_7900_XTX;
+    assert!(navi31.measured_identity());
+    let measured =
+        std::collections::BTreeSet::from([FOLLOWS, DriverFact::RobustIndexFetchReadsZero]);
+    assert_eq!(navi31.driver_facts(), measured);
+    assert!(navi31.driver_facts_withheld().is_empty());
+    for release in [mesa(26, 2, 3), mesa(26, 0, 8)] {
+        let mut other = navi31.clone();
+        other.driver_version = release;
+        assert!(!other.measured_identity(), "{release:#x}");
+        assert!(other.driver_facts().is_empty(), "{release:#x}");
+    }
 }
 
 /// MoltenVK's warning of a pipeline whose restart may be disabled (`MVKPipeline.mm` lines 881-893

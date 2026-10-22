@@ -289,9 +289,9 @@ driver's. Each is open work.
   (the RX 7900 XTX under Linux 7.0.0: the scheduler thread's CPU per command buffer of a
   guest-shaped frame 18 us with none, 328 us with 275 imports of 512 KiB, 1144 us with 275 of
   2 MiB). An idle one is released where `DriverFact::PointerImportsFollowTheirAddress` holds (the
-  780M under Mesa 26.2.4), but one whose Metal address was handed out, or any on a device not
-  measured with the fact, stays live. 275 kept dma-buf imports of 512 KiB each cost 54-56 us per
-  command buffer there (no other size measured).
+  780M and the RX 7900 XTX under Mesa 26.2.4), but one whose Metal address was handed out, or any
+  on a device not measured with the fact, stays live. 275 kept dma-buf imports of 512 KiB each
+  cost 54-56 us per command buffer there (no other size measured).
 - **A runtime sampler's nearest sample of an 8-bit sRGB texture under native sampling.** On a
   device that samples the format, the sample keeps the device's sRGB decode (announced as
   `SrgbTexelDecode`), where the table's exact decode of the one texel it reads would cost little:

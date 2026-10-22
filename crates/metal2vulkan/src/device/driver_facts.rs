@@ -879,6 +879,9 @@ const AMD_VENDOR_ID: u32 = 0x1002;
 /// ([`DeviceDescription::canonical_device_id`]).
 pub(crate) const AMD_RADEON_780M: u32 = 0x15bf;
 
+/// The `deviceID` of the Radeon RX 7900 XTX (Navi 31) its rows were measured under.
+pub(crate) const AMD_RX_7900_XTX: u32 = 0x744c;
+
 /// The `deviceID` of the Intel UHD Graphics 770 of Raptor Lake-S (the committed capture
 /// `intel-uhd770-rpls-anv`).
 pub(crate) const INTEL_UHD_770_RPL_S: u32 = 0xa780;
@@ -1767,7 +1770,8 @@ const DYNAMIC_RESTART_WARNING: DriverDiagnostic = DriverDiagnostic {
 /// a heap and from one of its own, drew Metal's vertices under a range of a size
 /// (`vkCmdBindIndexBuffer2`) and past the end of a copy's `VkBuffer` (`maintenance5` withheld):
 /// - RADV (`MESA_RADV`) from Mesa 26.2.4: the AMD Radeon 780M (RADV PHOENIX), Mesa
-///   26.2.4-arch3.1.
+///   26.2.4-arch3.1; and the AMD Radeon RX 7900 XTX (RADV NAVI31), Mesa 26.2.4-arch3.1, by the
+///   same lane with the fact taken (2026-10-22, its identity measured).
 /// - ANV (`INTEL_OPEN_SOURCE_MESA`) from Mesa 26.2.4: Intel Graphics (RPL-S), Mesa
 ///   26.2.4-arch3.1.
 /// - NVIDIA's (`NVIDIA_PROPRIETARY`) from 615.71.09: the GeForce RTX 5080 Laptop GPU, 615.71.09,.
@@ -2103,8 +2107,12 @@ const DYNAMIC_RESTART_WARNING: DriverDiagnostic = DriverDiagnostic {
 /// pages, read by a blit; fresh anonymous pages mapped over the address with `MAP_FIXED` and
 /// `Device::host_range_remapped` told, the next blit read the new pages, and the newer ones after a
 /// second remap; remapped between the buffer's making and its first submission, the first blit
-/// read the new pages. Not listed: RADV, Mesa 26.0.8 on the RX 7900 XTX and the Radeon 780M under
-/// Linux 7.0.0, which answered the same, but are unmeasured identities (`MEASURED_DEVICES`).
+/// read the new pages. RADV, Mesa 26.2.4 on the RX 7900 XTX under the same kernel, measured through
+/// the runtime (2026-10-22, `tests::pointer_residency` before its row): a no-copy buffer over two
+/// fresh anonymous private pages, read by a blit; fresh anonymous pages mapped over the address
+/// with `MAP_FIXED` and `Device::host_range_remapped` told, the next blit of the import kept all
+/// along read the new pages. Not listed: RADV, Mesa 26.0.8 on the RX 7900 XTX and the Radeon 780M
+/// under Linux 7.0.0, which answered the same, but are unmeasured identities (`MEASURED_DEVICES`).
 /// `tests::pointer_residency` in the runtime checks it on a device with it. Every other driver is
 /// unmeasured, and keeps its pointer imports.
 ///
@@ -2703,6 +2711,14 @@ pub(crate) const MEASURED: &[Measured<DriverFact>] = &[
     },
     Measured {
         fact: DriverFact::PointerImportsFollowTheirAddress,
+        driver: DriverId::MESA_RADV,
+        vendor: Some(AMD_VENDOR_ID),
+        device: Some(AMD_RX_7900_XTX),
+        first: mesa(26, 2, 4),
+        last: mesa(26, 2, 4),
+    },
+    Measured {
+        fact: DriverFact::PointerImportsFollowTheirAddress,
         driver: DriverId::MESA_LLVMPIPE,
         vendor: None,
         device: None,
@@ -2762,8 +2778,9 @@ pub(crate) struct MeasuredDevice {
 
 /// Every device identity the runtime lanes measure the driver facts on: the C3 venues' devices
 /// (`validation/cutover/c3-venues.json`), the M3 Max under macOS 26.7 (the MoltenVK venue's device
-/// before its macOS 27 capture, which is the M4's identity), the RTX 3090 development venue, and
-/// lavapipe at Mesa 26.2.4 (the Linux hosts' own, beside the gate container's 26.0.8). A fact
+/// before its macOS 27 capture, which is the M4's identity), the RTX 3090 development venue, the
+/// RX 7900 XTX beside the 780M venue's GPU (RADV, Mesa 26.2.4, the same host), and lavapipe at
+/// Mesa 26.2.4 (the Linux hosts' own, beside the gate container's 26.0.8). A fact
 /// measured nowhere else is taken nowhere else. lavapipe's identity is Mesa's release alone: its
 /// LLVM and CPU are in no field of it.
 pub(crate) const MEASURED_DEVICES: &[MeasuredDevice] = &[
@@ -2801,6 +2818,12 @@ pub(crate) const MEASURED_DEVICES: &[MeasuredDevice] = &[
         driver: DriverId::MESA_RADV,
         vendor: AMD_VENDOR_ID,
         device: AMD_RADEON_780M,
+        release: mesa(26, 2, 4),
+    },
+    MeasuredDevice {
+        driver: DriverId::MESA_RADV,
+        vendor: AMD_VENDOR_ID,
+        device: AMD_RX_7900_XTX,
         release: mesa(26, 2, 4),
     },
     MeasuredDevice {
