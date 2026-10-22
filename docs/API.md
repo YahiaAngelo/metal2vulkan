@@ -3066,16 +3066,25 @@ each item named states the rule in full.
 
 **GPU hangs and faults** (a draw of private primitive type 9, `DrawPrimitiveType::Nine`)
 
-- **A hang reads `Scheduled` 5.06 ms after its commit and completes no sooner than 32.7 ms after
-  it**, and its queue runs nothing of what it schedules meanwhile: one of Metal's two outcomes. On
-  an M3 Max (macOS 27.0.1, 33 hangs) Metal's hang read `Scheduled` 0.68 to 13.2 ms in and
-  completed about 27.6 ms after; the queue's later command buffers' work mostly ran on the GPU
-  during the hang where it read `Scheduled` within 2 ms (17 of 18), and mostly did not where later
-  (56 of 62 ran nothing or in part). Either way they read `Scheduled` from the hang's on, as they
-  are committed or their event waits are met, and complete with the hang, its signals firing, as
-  the runtime's do (0.04 to 1.5 ms after it on MoltenVK, Metal's 0.01 to 0.03 ms).
-- **A page fault or a victim of the GPU's recovery completes as its work does** (about 1 ms on
-  MoltenVK), where Metal completed it 16.8 to 30.0 ms after its commit.
+- **A hang reads `Scheduled` 5.06 ms after its commit and completes no sooner than 27.5 ms after
+  that and the GPU reached it**, and its queue runs nothing of what it schedules meanwhile: one of
+  Metal's two outcomes. On an M3 Max (macOS 27.0.1, 33 hangs) Metal's hang read `Scheduled` 0.68
+  to 13.2 ms in and completed about 27.6 ms after; the queue's later command buffers' work mostly
+  ran on the GPU during the hang where it read `Scheduled` within 2 ms (17 of 18), and mostly did
+  not where later (56 of 62 ran nothing or in part). Either way they read `Scheduled` from the
+  hang's on, as they are committed or their event waits are met, and complete with the hang, its
+  signals firing, as the runtime's do (0.04 to 1.5 ms after it on MoltenVK, Metal's 0.01 to
+  0.03 ms).
+- **A page fault or a victim of the GPU's recovery runs nothing from its encoder on, and
+  completes no sooner than 6.86 ms after it read `Scheduled` and the GPU reached the encoder**, its
+  event signals firing, the encoders before it run, and its queue's command buffers committed
+  meanwhile reading `Scheduled` as they are committed, and running: Metal's steady state. On an M3
+  Max (macOS 27.0.1, 164 command buffers: type-9 draws and executions of indirect commands under a
+  state that cannot inherit) Metal completed it 6.86 to 10.3 ms after `Scheduled`, and whether the
+  encoders after the faulted one ran was a race the GPU's state decides: lost to its recovery
+  where the GPU ran just before (127 of 142), run where it was idle before (the first fault after
+  3 s idle), and run in part in some shapes (an encoder after an event signal, a command buffer
+  committed right after). The runtime does not model the GPU's idle state.
 - **A queue's second caused GPU error revokes it, as Metal's does**, and only an event wait held
   across the revocation is answered unmeasured. Measured on the M3 Max (macOS 27.0.1, about sixty
   command buffers): page faults and hangs (`CommandBufferError::PageFault`, `GpuHang`) count

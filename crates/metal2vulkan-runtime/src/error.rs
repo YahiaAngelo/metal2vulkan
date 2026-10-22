@@ -1668,19 +1668,22 @@ pub enum CommandBufferError {
     /// store actions: a render encoder's execution of an indirect command buffer that inherits
     /// its pipeline state, under the encoder's state made without
     /// `supportIndirectCommandBuffers` (a range of commands that runs, or any range read from a
-    /// buffer, `{0, 0}` included). Metal completes the command buffer with
-    /// `MTLCommandBufferErrorPageFault` ("Caused GPU Address Fault Error
-    /// (0000000b:kIOGPUCommandBufferCallbackErrorPageFault)" on an M4), the encoder's state
-    /// `Faulted`; the encoders before it run, every event signal fires, and the queue runs on
-    /// (two such passes both fault). The encoders after it ran in 6 of 7 runs of one such pass, and
-    /// Metal named the next one `Affected` and ran none of it in the 7th and in both runs of two
-    /// passes: the runtime runs them.
-    ///
-    /// Also an indexed draw of primitive type 9
+    /// buffer, `{0, 0}` included), or an indexed draw of primitive type 9
     /// ([`DrawPrimitiveType::Nine`](crate::DrawPrimitiveType::Nine)), of any index count, of no
-    /// index or instance too, on the M3 Max (macOS 27.0.1): its render encoder runs nothing, the
-    /// encoders after it run, every event signal fires, and the queue runs on; Metal completed it
-    /// 16.8 to 19.5 ms after its commit, the runtime as its work completes.
+    /// index or instance too. Metal completes the command buffer with
+    /// `MTLCommandBufferErrorPageFault` ("Caused GPU Address Fault Error
+    /// (0000000b:kIOGPUCommandBufferCallbackErrorPageFault)" on an M4); the encoders before the
+    /// faulted one run, every event signal fires, and the queue runs on. On the M3 Max (macOS
+    /// 27.0.1; 120 command buffers of type-9 draws, this error's and
+    /// [`GpuRecoveryVictim`](Self::GpuRecoveryVictim)'s, and 44 of such executions) it completed
+    /// 6.86 to 10.3 ms after it read `Scheduled`, and the encoders after the faulted one were
+    /// lost to the GPU's recovery where the GPU ran just before (127 of 142), ran where it was
+    /// idle before (the first fault after 3 s idle), and in some shapes ran in part (an encoder
+    /// after an event signal, a command buffer committed right after). The runtime answers the
+    /// steady state: the faulted encoder and every one after it run nothing, and the command
+    /// buffer completes no sooner than 6.86 ms after it read `Scheduled` and the work before the
+    /// encoder ran, its queue's command buffers committed meanwhile reading `Scheduled` as they
+    /// are committed, and running (`command_buffer/hang.rs`).
     ///
     /// Such a fault, as the runtime makes it, counts against the command buffer's queue, as a
     /// [`GpuHang`](Self::GpuHang) does: from the completion of the queue's second, its later
@@ -1704,8 +1707,8 @@ pub enum CommandBufferError {
     /// read `Scheduled` within 2 ms, mostly not where later). One whose event wait was met only
     /// after it completed, one of another queue and one committed later ran. The runtime's hang
     /// reads `Scheduled` 5.06 ms after its commit (later where the work before the draw is
-    /// submitted later), completes no sooner than 32.7 ms after its commit and 27.5 ms after the
-    /// work before the draw ran, and runs nothing of its queue's others: the outcome of Metal's
+    /// submitted later), completes no sooner than 27.5 ms after it read `Scheduled` and the work
+    /// before the draw ran, and runs nothing of its queue's others: the outcome of Metal's
     /// slower submission (`command_buffer/hang.rs`). It counts against its queue as a
     /// [`PageFault`](Self::PageFault) does.
     GpuHang,
@@ -1715,8 +1718,9 @@ pub enum CommandBufferError {
     /// `MTLCommandBufferErrorInternal` (1, "Discarded (victim of GPU error/recovery)
     /// (00000005:kIOGPUCommandBufferCallbackErrorInnocentVictim)", its `GPUStartTime` 0), 16.9 to
     /// 30.0 ms after its commit (the M3 Max, macOS 27.0.1, 5 draws): its render encoder ran
-    /// nothing, the encoders after it ran, every event signal fired, and the queue ran on. The
-    /// runtime completes it as its work completes. It does not count against its queue.
+    /// nothing, every event signal fired, and the queue ran on. The encoders after it, its
+    /// completion and the runtime's answer are a [`PageFault`](Self::PageFault)'s. It does not
+    /// count against its queue.
     GpuRecoveryVictim,
     /// Metal ignored the command buffer, committed on a queue whose second command buffer with a
     /// GPU error it caused ([`PageFault`](Self::PageFault), [`GpuHang`](Self::GpuHang); not a

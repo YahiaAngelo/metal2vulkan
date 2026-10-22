@@ -1831,7 +1831,7 @@ impl EncoderCore {
             None => {}
         }
         if let Some(error) = faults {
-            state.fault(encoder, error);
+            state.fault(encoder, error, open.command_buffer.device())?;
         }
         let base = state.executions.len();
         // One part, its executions these: a log not kept comes back, to go without the lock.

@@ -106,7 +106,7 @@ use checks::{Checks, SubmissionCheck};
 use completion::Submitted;
 use first_submission::{Listing, Live};
 use gate::{Gate, Hold};
-use hang::Hang;
+use hang::{Hang, Held};
 use metal2vulkan::bind::{
     ExecutionStatus, IndexBoundsPass, ReplayFaults, ResidentRange, ResidentSet, RootTable,
     StatusReport,
@@ -406,43 +406,35 @@ impl Failure {
     }
 
     /// `failure` (`Failure::of`'s) with the encoders Metal's GPU faults, `faulted`, each with
-    /// its error, of a command buffer of `ended` ended encoders: they run nothing too, and, where
-    /// nothing else fails it, the command buffer completes with the first faulted encoder's error
-    /// (`CommandBufferError::PageFault`, or `GpuRecoveryVictim`) and every event signal fires, as
-    /// Metal's does. Where something else fails it too, its error and its signals stand (Metal's
-    /// error there is not measured).
+    /// its error, of a command buffer of `ended` ended encoders: from the first faulted encoder on
+    /// they run nothing too, as Metal's GPU's recovery loses them on a GPU that ran just before
+    /// (`hang.rs`, the fault's hold), and, where nothing else fails it, the command buffer
+    /// completes with that encoder's error (`CommandBufferError::PageFault`, or
+    /// `GpuRecoveryVictim`) and every event signal fires, as Metal's does. Where something else
+    /// fails it too, its error and its signals stand (Metal's error there is not measured).
     pub(super) fn with_faults(
         failure: Option<Failure>,
         faulted: &BTreeMap<usize, CommandBufferError>,
         ended: usize,
     ) -> Option<Failure> {
-        let Some(&faulted_error) = faulted.values().next() else {
+        let Some((&first, &faulted_error)) = faulted.iter().next() else {
             return failure;
         };
-        let faulted: BTreeSet<usize> = faulted.keys().copied().collect();
         Some(match failure {
             None => Failure {
-                encoders: FailedEncoders::Set(faulted),
+                encoders: FailedEncoders::From(first),
                 signals: FailedSignals::Every,
                 error: Some(faulted_error),
             },
             Some(failure) => Failure {
                 // Under a failure of no error, a faulted encoder it lets run faults it.
-                error: failure.error.or_else(|| {
-                    faulted
-                        .iter()
-                        .any(|&encoder| !failure.encoders.fails(encoder))
-                        .then_some(faulted_error)
-                }),
+                error: failure
+                    .error
+                    .or_else(|| (!failure.encoders.fails(first)).then_some(faulted_error)),
                 encoders: match failure.encoders {
-                    FailedEncoders::From(first) if faulted.iter().all(|&e| e >= first) => {
-                        FailedEncoders::From(first)
-                    }
-                    FailedEncoders::From(first) => {
-                        FailedEncoders::Set(faulted.iter().copied().chain(first..ended).collect())
-                    }
+                    FailedEncoders::From(from) => FailedEncoders::From(from.min(first)),
                     FailedEncoders::Set(mut set) => {
-                        set.extend(faulted);
+                        set.extend(first..ended);
                         FailedEncoders::Set(set)
                     }
                 },
@@ -1220,25 +1212,47 @@ impl State {
         again
     }
 
-    /// Metal's GPU faults ended encoder `encoder`, failing the command buffer with `error`
-    /// (`faulted`).
-    pub(super) fn fault(&mut self, encoder: usize, error: CommandBufferError) {
+    /// Metal's GPU faults ended encoder `encoder`, failing the command buffer with `error` from
+    /// it on (`faulted`, `Failure::with_faults`); where nothing failed it from an earlier encoder
+    /// and no earlier encoder faulted, the work before the encoder signals the fault's hold and
+    /// what follows waits for it (`hang.rs`), so the command buffer completes when Metal's does.
+    pub(super) fn fault(
+        &mut self,
+        encoder: usize,
+        error: CommandBufferError,
+        device: &Device,
+    ) -> Result<(), Error> {
+        if self.fails_from.is_none() && self.hang.is_none() {
+            self.hold(device, encoder, Held::Fault)?;
+        }
         self.faulted.entry(encoder).or_insert(error);
+        Ok(())
     }
 
     /// Ended encoder `encoder` drew primitive type 9 directly, at which Metal's GPU hangs
     /// (`hang.rs`): the command buffer fails from it on with `CommandBufferError::GpuHang`, and,
     /// where nothing failed it from an earlier encoder, the work before the encoder signals the
-    /// hang's event and what follows waits for the hang's hold.
+    /// hang's event and what follows waits for the hang's hold. Where an earlier encoder faulted,
+    /// the GPU never reaches it: it fails from the fault (`State::fault`).
     pub(super) fn hang_from(&mut self, encoder: usize, device: &Device) -> Result<(), Error> {
+        if !self.faulted.is_empty() {
+            return Ok(());
+        }
         if self.fails_from.is_none() && self.hang.is_none() {
-            let hang = Hang::new(device, self.batches.all().len() - 1)?;
-            let event = || Arc::clone(EventRef::Shared(hang.event()).shared());
-            self.batches.hold_signal(event(), Hang::REACHED);
-            self.batches.hold(event(), Hang::RELEASED);
-            self.hang = Some(hang);
+            self.hold(device, encoder, Held::Hang)?;
         }
         self.fail_from(encoder, CommandBufferError::GpuHang);
+        Ok(())
+    }
+
+    /// Hold what follows ended encoder `encoder`, the last, of the hold `held`: its batch signals
+    /// the hold's event, and the next batch waits for its release (`hang.rs`).
+    fn hold(&mut self, device: &Device, encoder: usize, held: Held) -> Result<(), Error> {
+        let hang = Hang::new(device, (self.batches.all().len() - 1, encoder), held)?;
+        let event = || Arc::clone(EventRef::Shared(hang.event()).shared());
+        self.batches.hold_signal(event(), Hang::REACHED);
+        self.batches.hold(event(), Hang::RELEASED);
+        self.hang = Some(hang);
         Ok(())
     }
 
@@ -2401,13 +2415,30 @@ impl CommandBuffer {
                 true => hang::behind(&self.0.queue, &waits),
                 false => None,
             };
-            if joins || state.behind_hang.is_some() {
+            // One committed while a fault's hold of the queue is in flight runs, and reads
+            // `Scheduled` early, from the fault's on, once its waits are met.
+            let joins_hold = !joins
+                && !behind
+                && run != CommitRun::Refused
+                && !revoked
+                && hang::holding(&self.0.queue);
+            let waits = match joins_hold {
+                true => (state.batches.all().iter())
+                    .flat_map(|batch| batch.waits.iter().cloned())
+                    .collect(),
+                false => waits,
+            };
+            if joins || joins_hold || state.behind_hang.is_some() {
                 hang::join(&self.0, &mut state, waits);
             }
+            // Its hold runs where its encoder runs and its signals fire under what it was
+            // committed as.
             let hangs = run != CommitRun::Refused
                 && !revoked
-                && matches!(state.fails_from, Some((at, CommandBufferError::GpuHang))
-                    if failure.as_ref().is_none_or(|f| f.signals && !f.encoders.fails(at)));
+                && state.hang.as_ref().is_some_and(|hang| {
+                    (failure.as_ref())
+                        .is_none_or(|f| f.signals && !f.encoders.fails(hang.encoder()))
+                });
             if let (true, Some(hang)) = (hangs, &state.hang) {
                 let event = Arc::clone(EventRef::Shared(hang.event()).shared());
                 state.batches.hold_signal(event, Hang::DONE);
@@ -3831,7 +3862,18 @@ impl CommandBufferShared {
     /// it behind its GPU hang (`hang.rs`), which then fails from `Scheduled`.
     pub(crate) fn failed(self: &Arc<Self>, error: CommandBufferError, values: &[u64]) {
         let vk_queue = self.queue.vk_queue();
-        lock(&self.state).failure = Some(error);
+        {
+            let mut state = lock(&self.state);
+            state.failure = Some(error);
+            // Its hold's batch before the wait, not taken yet, never is (`hang.rs`).
+            if matches!(
+                state.hang_scheduling,
+                Some(hang::Scheduling::Hang { taken: false, .. })
+            ) {
+                state.hang_scheduling = None;
+                self.changed.notify_all();
+            }
+        }
         let fence = fences::ends_at_fence(&self.device, vk_queue)
             .then(|| self.fence_after_submitted(vk_queue))
             .flatten();

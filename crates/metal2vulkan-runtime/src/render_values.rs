@@ -351,13 +351,16 @@ pub enum DrawPrimitiveType {
     /// indirect one, whatever its arguments, fails it as a victim of the GPU's recovery
     /// ([`CommandBufferError::GpuRecoveryVictim`](crate::CommandBufferError::GpuRecoveryVictim));
     /// a direct draw of 1 or 2 vertices draws nothing and fails nothing, as an empty draw does.
-    /// Its render encoder runs nothing, not even its pass's load, clear or store actions, and the
-    /// command buffer's event signals fire. A hang also runs nothing of the encoders after it,
-    /// and holds its command buffer until 32.7 ms after its commit and 27.5 ms after the work
-    /// before the draw ran (Metal failed it 32.7 to 42.7 ms after its commit); a command buffer
-    /// of its queue that reaches its submission meanwhile (committed during it, its event waits
-    /// met) runs nothing and completes with no error, after it. A fault or a victim fails that
-    /// encoder alone: the encoders after it run, and so do the queue's other command buffers.
+    /// Its render encoder runs nothing, not even its pass's load, clear or store actions, nor do
+    /// the encoders after it, and the command buffer's event signals fire. A hang holds its
+    /// command buffer until 27.5 ms after it read `Scheduled` and the work before the draw ran
+    /// (Metal failed it 27.5 to 28.9 ms after `Scheduled`, mostly); a command buffer of its
+    /// queue that reaches its submission meanwhile (committed during it, its event waits met)
+    /// runs nothing and completes with no error, after it. A fault or a victim holds its command
+    /// buffer until 6.86 ms after the same (Metal: 6.86 to 10.3 ms), and the queue's other
+    /// command buffers run. Metal's GPU ran the encoders after a fault or a victim where it was
+    /// idle before, and loses them where it ran just before, which the runtime answers
+    /// ([`CommandBufferError::PageFault`](crate::CommandBufferError::PageFault)).
     /// A hang or a fault counts against its queue, a victim does not: from the completion of the
     /// queue's second, its later command buffers fail at once
     /// ([`CommandBufferError::AccessRevoked`](crate::CommandBufferError::AccessRevoked)).

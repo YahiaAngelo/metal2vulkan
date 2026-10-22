@@ -423,15 +423,17 @@ fn inheriting_commands_draw_with_the_encoder_s_state_at_the_call() {
 }
 
 /// An execution of commands that inherit the encoder's pipeline state, made without
-/// `supportIndirectCommandBuffers`, faults its encoder, as Metal's GPU faults it (an M4): the call
-/// is taken, for a range given and for one read from a buffer, `{0, 0}` included; the encoder runs
-/// nothing, its own draw before the call either; the encoders before and after it run and both
-/// event signals fire; the command buffer completes with status `Error` and
-/// `CommandBufferError::PageFault`, Metal's code 3; and the next command buffer of the queue
-/// completes, its work landed. The next one is committed while the faulting one is in flight: Metal
-/// runs such a command buffer as it would, committed at any point from the faulting one's commit to
-/// its completion, and on another queue (an M4). Window 0 is the pass's before, window 1 the
-/// faulting passes' draws, windows 2 and 3 the pass's after and the next command buffer's.
+/// `supportIndirectCommandBuffers`, faults its encoder, as Metal's GPU faults it (an M4, the M3
+/// Max): the call is taken, for a range given and for one read from a buffer, `{0, 0}` included;
+/// the encoder runs nothing, its own draw before the call either, and nor do the encoders after
+/// it, as Metal's GPU loses them where it ran just before (`CommandBufferError::PageFault`); the
+/// encoder before it runs and both event signals fire; the command buffer completes with status
+/// `Error` and `CommandBufferError::PageFault`, Metal's code 3; and the next command buffer of the
+/// queue completes, its work landed. The next one is committed while the faulting one is in
+/// flight: Metal runs such a command buffer as it would, committed at any point from the faulting
+/// one's commit to its completion, and on another queue (an M4). Window 0 is the pass's before,
+/// window 1 the faulting passes' draws, windows 2 and 3 the pass's after and the next command
+/// buffer's.
 #[test]
 fn an_execution_under_a_state_without_support_faults_its_encoder() {
     on_device(|device, _| {
@@ -500,7 +502,7 @@ fn an_execution_under_a_state_without_support_faults_its_encoder() {
         };
         assert_eq!(
             setup.output(),
-            expected(&[drawn(0), drawn(2), drawn(3)]),
+            expected(&[drawn(0), drawn(3)]),
             "on {}",
             device.name()
         );
