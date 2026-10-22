@@ -848,6 +848,68 @@ fn a_merged_replay_past_its_draws_draws_nothing_and_says_why() {
     }
 }
 
+/// The most whole chunks the merged draw's first draw holds, `2^32 - 1`, draw, the second draw
+/// drawing the corners left; a total of `2^32` chunks draws nothing and says why. With chunks
+/// of 6, a command of `2^32 - 1` triangle vertices in 6 instances and one of 3 or 6 more corners:
+/// `6 · 2^32 - 3` and `6 · 2^32` corners.
+#[test]
+fn a_merged_replay_of_the_most_chunks_its_first_draw_holds_draws_them() {
+    for (more, fits) in [(3u32, true), (6, false)] {
+        let mut replay = DrawReplay::new(2, 0, 2, vec![3]);
+        replay.merged = true;
+        replay.fragment_slots = 0;
+        let records = [
+            record(draw(3, 0, u32::MAX, [6, 0]), &[], &[]),
+            record(draw(3, 0, more, [1, 0]), &[], &[]),
+        ];
+        let ran = preprocess(&replay, &records, clean(2));
+        assert!(!ran.status.replay_fault);
+        let (scratch, status) = merge(&ran, 6);
+        let m = ran.pre.layout.merged.expect("merged");
+        let draws = [0, 1].map(|i| {
+            let at = m.draw_offset(i) as usize;
+            [0, 4, 8, 12].map(|k| word(&scratch, at + k))
+        });
+        match fits {
+            true => {
+                assert!(!status.replay_fault, "{status:?}");
+                assert_eq!(draws, [[6, u32::MAX, 0, 0], [3, 1, MERGED_REST_FIRST, 0]]);
+            }
+            false => {
+                assert_eq!(status.replay_faults, ReplayFaults::VERTICES);
+                assert_eq!(draws, [[0; 4]; 2]);
+            }
+        }
+    }
+}
+
+/// The merge passes divide no `u64`: the last pass divides the total by a chunk in `u32` words
+/// (`merged::divide_words`), where NVIDIA's compiler (615.71.09) ran its `u64` division wrong.
+#[test]
+fn the_merge_passes_divide_no_u64() {
+    const TYPE_INT: u32 = 21;
+    const UDIV: u32 = 134;
+    const UMOD: u32 = 137;
+    let dev = device();
+    for phase in [MergePhase::Blocks, MergePhase::Starts] {
+        let words = draw_merge_module(&dev, phase).expect("module").spirv;
+        let mut wide = std::collections::BTreeSet::new();
+        let mut divided = 0;
+        let mut i = 5;
+        while let Some(&w) = words.get(i) {
+            let (len, op) = ((w >> 16) as usize, w & 0xFFFF);
+            if op == TYPE_INT && words[i + 2] == 64 {
+                wide.insert(words[i + 1]);
+            }
+            if (op == UDIV || op == UMOD) && wide.contains(&words[i + 1]) {
+                divided += 1;
+            }
+            i += len.max(1);
+        }
+        assert_eq!(divided, 0, "{phase:?}: u64 divisions");
+    }
+}
+
 /// The merge passes are valid where device addresses are; a merged replay refuses strips,
 /// two types and fragment slots; its header and sections follow the arguments.
 #[test]
