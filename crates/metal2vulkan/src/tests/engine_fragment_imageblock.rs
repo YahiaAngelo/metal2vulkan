@@ -18,10 +18,17 @@
 //!   layouts of its module name.
 //! - A discarded fragment writes nothing: a demoted one is a helper, whose stores have no effect,
 //!   and a predicated one skips the stores.
+//! - A function whose only effects are its outputs and its imageblock write declares early tests
+//!   (a fragment its tests fail drops its write, Metal's answer); one that discards states
+//!   `RuntimeFact::TestedStorageWrites`, whose draws' plans choose its variant.
+//! - Compiled for a multisampled pipeline, a function runs once per sample (`SampleId`) and reaches
+//!   its sample's cell at layers `sample * words` on; on a driver that drops an early-tests
+//!   shader's image writes at more than one sample, none declares early tests, and one whose Metal
+//!   function does is refused as that defect.
 //! - A render pipeline's `GraphicsState::fragment_imageblock` records the storage and its master's
-//!   fingerprint (equal for views of one master, different for another); link refuses a
-//!   multisampled pipeline and a write the fixed function can drop after the function made it
-//!   (alpha to coverage; a depth or stencil attachment without the early fragment tests).
+//!   fingerprint (equal for views of one master, different for another); link refuses a write
+//!   alpha to coverage can drop after the function made it, and links beside a depth or stencil
+//!   attachment and at four samples.
 //! - The binder writes the storage to the fragment's synthetic binding and refuses a layered or
 //!   amplified pass.
 //!
@@ -69,14 +76,45 @@ fn views() -> Option<Vec<u8>> {
     assemble(&engine_dir().join("fragment_imageblock_views.ll"))
 }
 
-/// One fragment function's imageblock: whether it writes it, whether it runs after the early
-/// fragment tests, its cell's words and bytes, its views' alignment, and the cell words it
-/// reads and writes (the layers of its image reads and writes; a write of part of a word reads
-/// that word first).
+/// How the depth and stencil tests bear on a function's imageblock write.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tests {
+    /// It writes none.
+    None,
+    /// The module declares early fragment tests.
+    Early,
+    /// It writes before Vulkan's tests and states `RuntimeFact::TestedStorageWrites`.
+    Tested { early_variant: bool },
+}
+
+/// The tests of compiled function `a` whose typed module is `m`.
+fn tests(a: &crate::library::FunctionArtifact, m: &TypedModule) -> Tests {
+    let tested = a.facts.iter().find_map(|f| match *f {
+        RuntimeFact::TestedStorageWrites {
+            early_tests: false,
+            early_variant,
+        } => Some(early_variant),
+        _ => None,
+    });
+    match (
+        m.entry().modes.contains(&ExecMode::EarlyFragmentTests),
+        tested,
+    ) {
+        (true, None) => Tests::Early,
+        (false, Some(early_variant)) => Tests::Tested { early_variant },
+        (false, None) => Tests::None,
+        (true, Some(_)) => panic!("early tests beside a tested write"),
+    }
+}
+
+/// One fragment function's imageblock: whether it writes it, how the tests bear on the write at
+/// one sample, its cell's words and bytes, its views' alignment, and the cell words it reads and
+/// writes (the layers of its image reads and writes; a write of part of a word reads that word
+/// first).
 struct Expect {
     entry: &'static str,
     writes: bool,
-    early_tests: bool,
+    tests: Tests,
     words: u32,
     data_size: u32,
     alignment: u32,
@@ -93,7 +131,7 @@ const VIEWS: [Expect; 4] = [
     Expect {
         entry: "imageblock_transition",
         writes: true,
-        early_tests: false,
+        tests: Tests::Early,
         words: 4,
         data_size: 16,
         alignment: 4,
@@ -103,7 +141,7 @@ const VIEWS: [Expect; 4] = [
     Expect {
         entry: "imageblock_accumulate",
         writes: true,
-        early_tests: true,
+        tests: Tests::Early,
         words: 4,
         data_size: 16,
         alignment: 8,
@@ -113,7 +151,9 @@ const VIEWS: [Expect; 4] = [
     Expect {
         entry: "imageblock_clear_odd",
         writes: true,
-        early_tests: false,
+        tests: Tests::Tested {
+            early_variant: true,
+        },
         words: 4,
         data_size: 16,
         alignment: 8,
@@ -123,7 +163,7 @@ const VIEWS: [Expect; 4] = [
     Expect {
         entry: "imageblock_resolve",
         writes: false,
-        early_tests: false,
+        tests: Tests::None,
         words: 4,
         data_size: 16,
         alignment: 8,
@@ -157,18 +197,16 @@ fn moltenvk_without(features: &[VkFeature]) -> DeviceProfile {
 }
 
 /// The `FragmentImageblock` fact of an artifact's facts: its words, whether the function writes
-/// the imageblock, whether it declares `[[early_fragment_tests]]`, its cell's bytes, and its
-/// views' alignment.
-fn fact(facts: &[RuntimeFact]) -> Option<(u32, bool, bool, u32, u32)> {
+/// the imageblock, its cell's bytes, and its views' alignment.
+fn fact(facts: &[RuntimeFact]) -> Option<(u32, bool, u32, u32)> {
     facts.iter().find_map(|f| match *f {
         RuntimeFact::FragmentImageblock {
             words,
             writes,
-            early_tests,
             data_size,
             alignment,
             ..
-        } => Some((words, writes, early_tests, data_size, alignment)),
+        } => Some((words, writes, data_size, alignment)),
         _ => None,
     })
 }
@@ -282,9 +320,10 @@ fn each_view_reaches_its_master_words_inside_the_interlock() {
             let a = compile(&bc, e.entry, &p).unwrap_or_else(|e| panic!("{what}: {e}"));
             assert_eq!(
                 fact(&a.facts),
-                Some((e.words, e.writes, e.early_tests, e.data_size, e.alignment)),
+                Some((e.words, e.writes, e.data_size, e.alignment)),
                 "{what}"
             );
+            assert_eq!(tests(&a, &m), e.tests, "{what}");
             let (_, words) = link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{what}: {e}"));
             if stem == "moltenvk-m3" {
                 let (reads, writes) = cell_words(&spirv_dis(&words));
@@ -354,7 +393,14 @@ fn a_write_beside_a_sample_mask_is_kept_where_the_mask_covers_the_sample() {
     };
     assert!(writing.iter().all(guarded), "{writing:?}");
     let a = compile(&bc, entry, &p).expect("compile");
-    assert_eq!(fact(&a.facts), Some((4, true, false, 16, 8)));
+    assert_eq!(fact(&a.facts), Some((4, true, 16, 8)));
+    // A returned mask keeps the write from early tests.
+    assert_eq!(
+        tests(&a, &m),
+        Tests::Tested {
+            early_variant: false
+        }
+    );
     link_and_validate(&a, &p).expect("L3");
     let dev = device("moltenvk-m3");
     dev.compile_render_pipeline(&render(&bc, entry), &Budget::standard())
@@ -403,7 +449,7 @@ fn views_of_two_masters_reach_each_masters_bytes() {
     let output: Vec<u32> = output.members.iter().map(|m| m.offset).collect();
     assert_eq!((input, output), (vec![0], vec![2]));
     let a = compile(&bc, entry, &p).expect("compile");
-    assert_eq!(fact(&a.facts), Some((4, true, false, 16, 4)));
+    assert_eq!(fact(&a.facts), Some((4, true, 16, 4)));
     let (_, words) = link_and_validate(&a, &p).expect("L3");
     let (reads, writes) = cell_words(&spirv_dis(&words));
     assert_eq!((reads, writes), ([0].into(), [0].into()));
@@ -654,10 +700,9 @@ fn refused_not_implemented(r: Result<RenderPipeline, Error>, what: &str) {
     }
 }
 
-/// Link records the pass's imageblock storage in the graphics state and refuses what the one plane
-/// does not model: a multisampled pipeline, and a write the fixed function can drop after the
-/// function made it (alpha to coverage; a depth or stencil attachment without the early tests). A
-/// function after the early tests, or one that only reads, links beside the attachment.
+/// Link records the pass's imageblock storage in the graphics state, links beside a depth or
+/// stencil attachment (the tests run before each write: early, or as each draw's plan chooses),
+/// and refuses a write alpha to coverage can drop after the function made it.
 #[test]
 fn link_records_the_imageblock_and_refuses_what_it_does_not_model() {
     let Some(bc) = views() else {
@@ -684,12 +729,8 @@ fn link_records_the_imageblock_and_refuses_what_it_does_not_model() {
         ] {
             let mut d = render(&bc, e.entry);
             (d.depth_format, d.stencil_format) = depth;
-            let r = dev.compile_render_pipeline(&d, &budget);
-            if e.writes && !e.early_tests {
-                refused_not_implemented(r, &format!("{} with {depth:?}", e.entry));
-            } else {
-                r.unwrap_or_else(|err| panic!("{} with {depth:?}: {err}", e.entry));
-            }
+            dev.compile_render_pipeline(&d, &budget)
+                .unwrap_or_else(|err| panic!("{} with {depth:?}: {err}", e.entry));
         }
         let mut d = render(&bc, e.entry);
         d.alpha_to_coverage = true;
@@ -699,12 +740,6 @@ fn link_records_the_imageblock_and_refuses_what_it_does_not_model() {
         } else {
             r.unwrap_or_else(|err| panic!("{} alpha to coverage: {err}", e.entry));
         }
-        let mut d = render(&bc, e.entry);
-        d.raster_sample_count = 4;
-        refused_not_implemented(
-            dev.compile_render_pipeline(&d, &budget),
-            &format!("{} multisampled", e.entry),
-        );
     }
     // The `Cell` functions view one layout (no master); `imageblock_transition` views `Master`.
     let cell = masters["imageblock_accumulate"];
@@ -775,6 +810,93 @@ fn the_binder_writes_the_storage_and_refuses_layered_passes() {
                 "{what}"
             ),
             other => panic!("{what}: {:?}", other.map(|_| ())),
+        }
+    }
+}
+
+/// At four samples each function runs once per sample (`SampleId`) and reaches its sample's cell,
+/// layers `sample * words + w`; the pipeline links, and the graphics state records the storage. On
+/// a device without the early-tests defect a function whose only effects are its outputs and its
+/// write declares early tests as at one sample. On the M3 Max's MoltenVK, which drops every image
+/// write of an early-tests shader at more than one sample, none declares them, a function whose
+/// Metal form declares them (`imageblock_accumulate`) included: such a function states
+/// `TestedStorageWrites` without the early-tests variant, so a draw whose depth test acts runs the
+/// variant that tests depth in the shader, before the write.
+#[test]
+fn a_multisampled_pipeline_reaches_each_sample_s_cell() {
+    use crate::bind::FragmentTests;
+    use crate::device::DriverWorkaround;
+    let Some(bc) = views() else {
+        return;
+    };
+    let budget = Budget::standard();
+    let defect = DriverWorkaround::EarlyTestsDropMultisampledImageWrites;
+    for stem in ["moltenvk-m3", "amd-780m-radv"] {
+        let dev = device(stem);
+        let drops = dev.profile().fields().workarounds.contains(&defect);
+        assert_eq!(drops, stem == "moltenvk-m3", "{stem}");
+        for e in &VIEWS {
+            let what = format!("{} on {stem}", e.entry);
+            let mut d = render(&bc, e.entry);
+            d.raster_sample_count = 4;
+            d.depth_format = Some(PixelFormat::Depth32Float);
+            let p = dev
+                .compile_render_pipeline(&d, &budget)
+                .unwrap_or_else(|err| panic!("{what}: {err}"));
+            let fi = p.graphics.fragment_imageblock.expect("imageblock");
+            assert_eq!(fi.words, e.words, "{what}");
+            let fragment = (p.stages.iter())
+                .find(|s| s.stage == vk::ShaderStage::FRAGMENT)
+                .expect("a fragment stage");
+            let dis = spirv_dis(&fragment.spirv);
+            assert!(dis.contains("BuiltIn SampleId"), "{what}");
+            assert!(dis.contains("OpIMul"), "{what}");
+            let early = dis.contains("EarlyFragmentTests");
+            let tested = p.dependencies.iter().find_map(|x| match x.fact {
+                RuntimeFact::TestedStorageWrites {
+                    early_tests: false,
+                    early_variant,
+                } => Some(early_variant),
+                _ => None,
+            });
+            let want = match (e.tests, drops) {
+                (Tests::Early, true) => Tests::Tested {
+                    early_variant: false,
+                },
+                (Tests::Tested { .. }, true) => Tests::Tested {
+                    early_variant: false,
+                },
+                (t, _) => t,
+            };
+            let got = match (early, tested) {
+                (true, None) => Tests::Early,
+                (false, Some(early_variant)) => Tests::Tested { early_variant },
+                (false, None) => Tests::None,
+                (true, Some(_)) => panic!("{what}: early tests beside a tested write"),
+            };
+            assert_eq!(got, want, "{what}");
+            // A draw whose depth test acts runs the in-shader test before the write.
+            if let Tests::Tested { .. } = got {
+                let shape = BindState {
+                    fragment_tests: FragmentTests::Depth { writes: true },
+                    ..Default::default()
+                }
+                .shape();
+                let plan = p
+                    .plan(&dev, &shape)
+                    .unwrap_or_else(|err| panic!("{what}: {err}"));
+                assert!(plan.variant.shader_tests, "{what}");
+                let variant = dev
+                    .compile_render_variant(&d, &plan.variant, &budget)
+                    .unwrap_or_else(|err| panic!("{what}: the variant: {err}"));
+                assert!(
+                    variant
+                        .dependencies
+                        .iter()
+                        .any(|x| matches!(x.fact, RuntimeFact::ShaderTests { .. })),
+                    "{what}"
+                );
+            }
         }
     }
 }

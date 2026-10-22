@@ -1344,8 +1344,15 @@ impl FeatureRow {
             // sharing the pass's storage with its tile functions' explicit imageblocks. The runtime
             // refuses a pass whose draws view imageblocks of different masters or sizes
             // (`ImageblockMasters`), and one with a tile function's explicit imageblock aliased
-            // onto the attachments beside them (`TileAndFragmentImageblocks`); the compile layer
-            // refuses a multisampled pass's, and one a test may drop after it wrote.
+            // onto the attachments beside them (`TileAndFragmentImageblocks`). A multisampled
+            // pass's function reaches each sample's block, once per sample, and a write the tests
+            // may drop runs the tests first, early or in the shader (`TestedStorageWrites`); the
+            // compile layer and the binder refuse, as not implemented, a writing function under
+            // alpha to coverage, and where its tests act in a counted draw, over a depth format
+            // other than 32-bit float or a stencil attachment alone; and, on MoltenVK at more
+            // than one sample, whose early tests drop image writes
+            // (`EarlyTestsDropMultisampledImageWrites`), one declaring early tests that discards,
+            // returns depth, stencil or a mask, or writes other memory.
             F::Imageblocks => first([
                 needs_features(
                     f,

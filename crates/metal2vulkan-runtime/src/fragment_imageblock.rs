@@ -7,7 +7,12 @@
 //!   the whole pass: an `R32_UINT` 2D-array storage image of every pixel of every tile over the
 //!   render area (from the origin; the render area itself in a pass of no tile size) and one
 //!   layer per word of the cell (`FragmentImageblock::words`), whose layer `w` holds word `w` of
-//!   pixel `(x, y)`'s cell at texel `(x, y)`. Made at the pass's first draw or tile dispatch that
+//!   pixel `(x, y)`'s cell at texel `(x, y)`. A pass of more than one sample keeps a cell per
+//!   sample, as Metal does (measured on the M3 Max at four samples): layer `s * words + w` holds
+//!   word `w` of sample `s`'s cell, which a function compiled for the pass's pipelines reaches at
+//!   its `SampleId` (`lower::fragment::imageblock`); only draws make such a storage (a tile
+//!   function in a multisampled pass is refused), so every draw's cell is its words. Made at the
+//!   pass's first draw or tile dispatch that
 //!   reaches it, it rests in `GENERAL` like every runtime image, and is bound to each such draw
 //!   and dispatch as a storage view of every layer where the plan writes
 //!   `WriteSource::Imageblock`.
@@ -97,8 +102,10 @@ use metal2vulkan::vk::{
 #[derive(Clone)]
 pub(super) struct PassImageblock {
     texture: Texture,
-    /// One layer per word of the cell.
+    /// The words of a cell.
     words: u32,
+    /// One layer per word of each sample's cell.
+    layers: u32,
     /// The bytes of a cell: the fragment functions' `air.imageblock_data_size`, or the tile
     /// function's cell.
     bytes: u32,
@@ -154,12 +161,15 @@ impl PassImageblock {
             ));
         }
         let [width, height] = covered(layout);
+        let layers = words
+            .checked_mul(layout.samples.max(1))
+            .ok_or_else(|| internal("an imageblock storage of too many layers"))?;
         let descriptor = TextureDescriptor {
             texture_type: TextureType::Type2DArray,
             pixel_format: PixelFormat::R32Uint,
             width: width.into(),
             height: height.into(),
-            array_length: words.into(),
+            array_length: layers.into(),
             usage: TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE,
             resource_options: ResourceOptions::private(),
             ..TextureDescriptor::default()
@@ -171,7 +181,7 @@ impl PassImageblock {
             format: Format::R32_UINT,
             extent: [width, height, 1],
             levels: 1,
-            layers: words,
+            layers,
             samples: sample_count(1).ok_or_else(|| internal("one sample"))?,
             usage: ImageUsageFlags::STORAGE | ImageUsageFlags::TRANSFER_DST,
             view_formats: Vec::new(),
@@ -184,6 +194,7 @@ impl PassImageblock {
         Ok(PassImageblock {
             texture,
             words,
+            layers,
             bytes,
             alignment,
             extent: layout.extent,
@@ -222,7 +233,7 @@ impl PassImageblock {
             base_level: 0,
             level_count: 1,
             base_layer: 0,
-            layer_count: self.words,
+            layer_count: self.layers,
             usage: ImageUsageFlags::STORAGE,
         })
     }
@@ -240,7 +251,7 @@ impl PassImageblock {
     fn uses(&self, stage: vk::PipelineStageFlags2) -> Result<Vec<Use<ResourceKey>>, Error> {
         let read = Access::new(stage, vk::AccessFlags2::SHADER_STORAGE_READ);
         let write = Access::new(stage, vk::AccessFlags2::SHADER_STORAGE_WRITE);
-        let layers = 0..self.words;
+        let layers = 0..self.layers;
         Ok(vec![
             self.texture.image_use(0..1, layers.clone(), read, false)?,
             self.texture.image_use(0..1, layers, write, true)?,
@@ -252,8 +263,8 @@ impl PassImageblock {
         let write = Access::new(TRANSFER, vk::AccessFlags2::TRANSFER_WRITE);
         Ok(ImageblockClear {
             image: self.texture.raw_image()?,
-            layers: self.words,
-            uses: [self.texture.image_use(0..1, 0..self.words, write, true)?],
+            layers: self.layers,
+            uses: [self.texture.image_use(0..1, 0..self.layers, write, true)?],
         })
     }
 

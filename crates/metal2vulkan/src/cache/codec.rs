@@ -1165,7 +1165,7 @@ codec_enum! {
         RenderTargetArrayLength { layer_dropped }, StageInRegion,
         StageInStride { layout },
         UniformViewRange { slot, choice }, UniformViewAliasing { slot },
-        FragmentImageblock { words, writes, early_tests, master, data_size, alignment },
+        FragmentImageblock { words, writes, master, data_size, alignment },
         TileFunction, TileAttachmentFormat { color, format },
         StorageTextureNumericType { slot },
         OutOfBoundsAlpha { slot },

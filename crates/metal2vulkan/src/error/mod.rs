@@ -1135,12 +1135,12 @@ pub enum Feature {
     Tessellation,
     MeshShading,
     TileShading,
-    /// An imageblock outside the single-sample forms implemented: a multisample imageblock's
-    /// operation (its sample count, the colors a pixel holds, a color's coverage mask, or a store
-    /// to the samples a coverage mask selects); a fragment imageblock on a multisample, layered or
-    /// amplified pass, or whose write a later test or alpha to coverage may drop; or an explicit
-    /// layout, imageblock data operand or slice write of a shape not modelled. Tile functions and
-    /// fragment imageblocks run on single-sample passes.
+    /// An imageblock outside the forms implemented: a multisample imageblock's operation (its
+    /// sample count, the colors a pixel holds, a color's coverage mask, or a store to the samples
+    /// a coverage mask selects); a fragment imageblock on a layered or amplified pass, written
+    /// under alpha to coverage, or whose write a test may drop where no form runs the test first;
+    /// or an explicit layout, imageblock data operand or slice write of a shape not modelled. Tile
+    /// functions run on single-sample passes; fragment imageblocks hold a block per sample.
     Imageblocks,
     RayTracing,
     Tensors,
