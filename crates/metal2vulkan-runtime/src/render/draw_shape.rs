@@ -20,8 +20,13 @@
 //!   piece derived without a refusal is kept, and each is taken at the step of the draw that
 //!   derives it, so a refused draw is refused by the same step as before.
 //! - **Notices.** A derivation announces its notices once per device (`Device::degrade`): a
-//!   reused piece's were announced as it was derived. A device that announces some kind at every
-//!   occurrence (`DeviceOptions::announce_each`) reuses nothing.
+//!   reused piece's were announced as it was derived. A piece whose derivation met a notice the
+//!   device announces at every occurrence (`DeviceOptions::announce_each`), or refuses at every
+//!   occurrence while it lowers the call (`DeviceOptions::lowering_refuses`), is not kept, so
+//!   each draw derives it anew and meets it again (`degradation::EachWatch`, which watches the
+//!   derivation itself, not a list of the kinds it may announce). A device that announces at
+//!   every occurrence only kinds a draw's shape does not meet reuses shapes as one that announces
+//!   each kind once.
 //! - **What is not kept.** The pass's hidden depth and stencil a draw gives it, made for that
 //!   draw before its settings are looked up (`RenderCommandEncoder::needed_hidden`): the settings
 //!   take only whether it gives them. Nor a pipeline still being made, nor a residual form a draw

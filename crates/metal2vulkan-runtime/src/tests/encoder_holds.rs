@@ -174,7 +174,7 @@ pub(super) fn words_of(buffer: &Buffer) -> Vec<u32> {
 }
 
 /// The library of the fixture at `path` under `validation/fixtures/public/`.
-fn library(device: &Device, path: &str) -> Library {
+pub(super) fn library(device: &Device, path: &str) -> Library {
     let ll = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../metal2vulkan-validation/fixtures/public")
         .join(path);
