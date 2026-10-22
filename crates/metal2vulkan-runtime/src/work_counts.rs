@@ -801,8 +801,8 @@ impl Counters {
         self.variants_taken_back.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// A command buffer committed whose commands' plans could not list every sampler state live
-    /// then (`sampler_listing.rs`), or whose host step's command left a live state out.
+    /// A command buffer a command of which left a live sampler state out of its sampler arrays
+    /// (`heap_sets::fit_samplers`).
     pub(crate) fn unlisted_argument_sampler_buffer(&self) {
         self.unlisted_argument_sampler_buffers
             .fetch_add(1, Ordering::Relaxed);
@@ -2456,12 +2456,10 @@ pub struct WorkCounts {
     pub predicated_loop_runs_again: u64,
     /// Variants made again that took back a released variant's objects and `VkPipeline`s.
     pub variants_taken_back: u64,
-    /// Command buffers committed whose commands' plans could not list every sampler state live
-    /// as they committed or as their batches were submitted (`sampler_listing.rs`): a state past
-    /// the sampler arrays, more states than the plan's tables hold, or a shape its checks refuse;
-    /// or one of whose commands a host step recorded after the commit left a live state out, past
-    /// the sampler arrays. Each runs, a function reading a state left out reading the neutral
-    /// sampler (`Degradation::UnlistedArgumentSampler`), and is counted once whether or not its
+    /// Command buffers a command of which left a live sampler state out of its argument
+    /// samplers as it was encoded: more states lived than its pipeline's set-1 sampler arrays
+    /// hold. Each runs, a function reading a state left out reading the neutral sampler
+    /// (`Degradation::UnlistedArgumentSampler`), and is counted once whether or not its
     /// functions reach the state left out.
     pub unlisted_argument_sampler_buffers: u64,
     /// Immutable sampler sets a command buffer's host step made, counting samplers on the

@@ -120,7 +120,6 @@ use crate::render_pass::{PassLayout, Target};
 use crate::render_values::LoadAction;
 use crate::resource::ResourceKey;
 use crate::sampler::SamplerState;
-use crate::sampler_listing::SamplerListing;
 use crate::shadow;
 use crate::texture::Texture;
 use crate::texture_descriptor::TextureDescriptor;
@@ -950,6 +949,11 @@ impl RenderLowering {
         let heap = heap_sets::heap_elements(&variant.pipeline().layout, &plan, &bind)?;
         let device = self.core.device().clone();
         let texture_table = heap_sets::texture_table(&device, &variant.pipeline().layout)?;
+        let sampler_table = heap_sets::sampler_table(
+            &device,
+            &variant.pipeline().layout,
+            &variant.pipeline().dependencies,
+        )?;
         if commands.regions.is_empty() {
             self.core.executed(|| {
                 Execution::new(
@@ -1044,6 +1048,7 @@ impl RenderLowering {
             .with_tile_scratch(&staged)
             .with_residency(&self.residency)
             .with_texture_table(texture_table.as_ref())
+            .with_sampler_table(sampler_table.as_ref())
             .with_sampler_maps(sampler_maps);
         // The listed function tables: set 1's elements, or the snapshot a variant without the
         // function-table array reads in set 0, which has no heap of its own.
@@ -1180,21 +1185,10 @@ impl RenderLowering {
                 &objects,
                 &mut self.core.command_buffer().state().heaps,
                 heap_writes,
-                Some(&*uses),
+                &uses,
             )?),
             None => None,
         };
-        // Its sampler tables, which the command buffer lists again as it commits.
-        let listing = SamplerListing::of(
-            (&plan, &objects),
-            variant.pipeline().layout.sets.get(1),
-            (&bind.argument_samplers, bind.heap_placement),
-            bound.sampler_tables,
-            || "a tile pipeline state's dispatches".to_owned(),
-        );
-        if let Some(listing) = listing {
-            self.core.command_buffer().state().list_samplers(listing);
-        }
         // Recording starts here: nothing below can be refused.
         self.scratch.extend(made);
         self.tile_imageblock |= aliased_past;
@@ -1281,6 +1275,9 @@ impl RenderLowering {
         }
         if let Some(unlisted) = unlisted {
             heap_sets::degrade_unlisted(&device, unlisted, "a tile pipeline state's dispatches");
+            // It runs with the states its sampler arrays hold.
+            let mut held = self.core.command_buffer().state();
+            held.unlisted_argument_sampler(&device);
         }
         Ok(())
     }

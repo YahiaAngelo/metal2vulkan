@@ -794,22 +794,22 @@ degradations! {
         ImplementationDefinedReconvergence = "implementation-defined-reconvergence", Precision,
             "simdgroup operations after divergent control flow can see other lanes active than \
              Metal's";
-        /// A sampler state whose element no set-1 sampler array can hold, as more states live
-        /// than it holds (each takes the lowest element no live state holds, `resource_ids.rs`):
-        /// the device's, as the state is made, or a pipeline's, as a command lists the argument
-        /// samplers or its command buffer lists them again as it commits or as the command's batch
-        /// is submitted (`sampler.rs`, `compute.rs`, `sampler_listing.rs`). Or, as a command
-        /// buffer commits or the batch is submitted, more states live than a command's plan's
-        /// sampler tables hold, or one of a shape its checks refuse (`sampler_listing.rs`): at the
-        /// submission, announced on the device's scheduler thread, outside any program call. The
-        /// command runs with the states it lists: those that fit its sampler arrays, where its
-        /// tables hold them, else those it listed before. Each command buffer that left a state
-        /// out is counted once, whether or not its functions reach the state
-        /// (`WorkCounts::unlisted_argument_sampler_buffers`). Where it happens: a command misses a
-        /// state where more states live than its sampler arrays hold (at most the device's
-        /// update-after-bind sampler limit), or than its plan's tables hold, twice the capacity
-        /// class of the states live as it was encoded, so where the live states more than doubled
-        /// between its encoding and its batch's submission.
+        /// A live sampler state the device's sampler tables do not map to it for some commands
+        /// (`heap_sets.rs`), which reach every other live state by its ID as they run: one whose
+        /// element no set-1 sampler array can hold, as more states live than it holds (each
+        /// takes the lowest element no live state holds, `resource_ids.rs`), the device's as the
+        /// state is made, or a pipeline's as a command is encoded or the state made
+        /// (`sampler.rs`, `compute.rs`, `heap_sets.rs`), each such command buffer counted once
+        /// (`WorkCounts::unlisted_argument_sampler_buffers`); one at an ID neither window of the
+        /// tables reaches (IDs 0 to 32767, and 32768 from the first ID past them, a
+        /// reservation's); one whose Vulkan sampler for an array's use the device cannot make or
+        /// the use refuses (a feature the device lacks), that array holding the neutral at its
+        /// element; a cubic state, for a command whose stage does not test the states it reaches
+        /// for a cubic filter (a fragment stage never does); and one whose elements could not be
+        /// written. Where it happens: past the device's update-after-bind sampler limit or the
+        /// heap capacity of a pipeline (65536 on the M3 Max under MoltenVK), past 32768 live
+        /// states above a reservation, a cubic state live while a render pipeline samples
+        /// argument samplers, or a device's sampler limit (`maxSamplerAllocationCount`).
         UnlistedArgumentSampler = "unlisted-argument-sampler", Precision,
             "a function reading the state through its ID in an argument buffer reads the \
              neutral sampler, where Metal's reads the state";
@@ -1106,11 +1106,12 @@ degradations! {
         /// own, written as it first binds the set and until it commits (`heap_sets.rs`).
         HeapSetCopied = "heap-set-copied", Precision,
             "each command buffer's first command that binds the set writes a copy of it (every \
-             element a texture's ID may name, per array); a function reading a texture through \
-             its ID reads the texture that held the ID as its command buffer committed (the \
-             neutral texture where none did, or where it was released before the command \
-             buffer's first submission), where Metal's reads the one holding it as the \
-             function runs";
+             element a texture's ID may name, and every sampler array's, per array); a function \
+             reading a texture through its ID reads the texture that held the ID as its command \
+             buffer committed, and one reading a sampler state the state that held it as the \
+             command buffer's first batch was submitted (the neutral where none did, or where it \
+             was released before that submission), where Metal's reads the one holding it as \
+             the function runs";
         /// A draw of a render pipeline state in a pass with a color at no place of the state's
         /// per-sample record, under a state color that blends through a destination factor of
         /// the fragment's output (`SourceAlpha`, `OneMinusSourceAlpha`, `SourceColor`, ...) and

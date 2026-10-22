@@ -2576,10 +2576,10 @@ fn a_host_step_s_draw_of_a_state_made_after_the_commit_binds_a_neutral_made_befo
 /// makes to crowd its variant's set-1 sampler arrays (`resource_ids`' crowd).
 const HOST_CROWD: u64 = 2048;
 
-/// A command a host step records after its command buffer's commit is listed again by no commit
-/// (`sampler_listing.rs`), so one that leaves a live sampler state out of its argument samplers,
-/// more states living than its variant's set-1 sampler arrays hold (`heap_sets::fit_samplers`),
-/// runs with the states it lists, announced once (`UNLISTED`) and counted once
+/// A command a host step records after its command buffer's commit that leaves a live sampler
+/// state out of its argument samplers, more states living than its variant's set-1 sampler arrays
+/// hold (`heap_sets::fit_samplers`), runs with the states it lists, announced once (`UNLISTED`)
+/// and counted once
 /// (`WorkCounts::unlisted_argument_sampler_buffers`): the command buffer completes, and a function
 /// reading a state left out would read the neutral sampler. The host step draws, as in
 /// [`a_host_step_s_draw_of_a_state_made_after_the_commit_binds_a_neutral_made_before_it`], a state

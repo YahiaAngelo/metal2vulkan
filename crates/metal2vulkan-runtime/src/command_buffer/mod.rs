@@ -71,7 +71,7 @@ use super::function_table::TableSnapshot;
 use super::gpu_pools::{IndexPool, PoolKind, PoolLease};
 use super::gpu_time::{self, KernelTimes, Life, Placement, Stamped, Times};
 use super::heap::Heap;
-use super::heap_sets::{self, HeapUse};
+use super::heap_sets::HeapUse;
 use super::live_buffers::LiveTable;
 use super::pipeline::budget::Urgency;
 use super::pipeline::kept::StepNumbers;
@@ -84,7 +84,6 @@ use super::render::EndInFlight;
 use super::replay::Replay;
 use super::residency::Residency;
 use super::resource::{ObjectId, ResourceKey};
-use super::sampler_listing::SamplerListing;
 use super::scheduler::{BatchSync, StepWaits};
 use super::spares::CommandPool;
 use super::sparse::encoder::SparseUpdate;
@@ -558,17 +557,12 @@ pub(super) struct State {
     pub(super) executions: Vec<Execution>,
     /// The commands' own data, released when the command buffer completes.
     pub(super) uploads: Uploads,
-    /// The device's heap sets its commands bound, and its listing of the argument samplers
-    /// (`heap_sets.rs`), released with the uploads.
+    /// The device's heap sets its commands bound (`heap_sets.rs`), released with the uploads.
     pub(super) heaps: HeapUse,
     /// Its commands' function-table snapshots, written again as it commits.
     table_snapshots: Vec<TableSnapshot>,
-    /// Its commands' sampler tables, listed again as it commits and as the batch holding each
-    /// command's encoder is submitted, until then (`sampler_listing.rs`).
-    sampler_listings: Vec<SamplerListing>,
-    /// As it committed, some command's plan could not list the sampler states live then
-    /// (`sampler_listing.rs`), or a command a host step recorded after the commit left a live
-    /// state out of its argument samplers (`State::unlisted_argument_sampler`): counted once
+    /// A command left a live sampler state out of its argument samplers
+    /// (`State::unlisted_argument_sampler`): counted once
     /// (`WorkCounts::unlisted_argument_sampler_buffers`).
     unlisted_argument_samplers: bool,
     /// The first ended encoder Metal fails the command buffer from, with the error (a render
@@ -1110,78 +1104,12 @@ impl State {
         }
     }
 
-    /// Keep a command's sampler tables, of the open encoder's command, to list the argument
-    /// samplers again as the command buffer commits and as the batch holding the encoder is
-    /// submitted (`sampler_listing.rs`). A command a host step records after the commit lists the
-    /// states as they stand then (`State::unlisted_argument_sampler`).
-    pub(super) fn list_samplers(&mut self, mut listing: SamplerListing) {
-        if self.status == CommandBufferStatus::NotEnqueued {
-            listing.at_encoder(self.open_encoder_place());
-            self.sampler_listings.push(listing);
-        }
-    }
-
-    /// The sampler tables kept from the `from`th on are of commands of the ended encoder at place
-    /// `encoder`: a segment recorded at the commit, from its encoder's logged work.
-    fn place_listings(&mut self, from: usize, encoder: usize) {
-        for listing in self.sampler_listings.iter_mut().skip(from) {
-            listing.at_encoder(encoder);
-        }
-    }
-
-    /// As the batch holding parts `range` of the ended encoders is submitted, before its
-    /// `vkQueueSubmit`: its commands' argument samplers listed again where a state was made or
-    /// went since they were (`sampler_listing.rs`), on a device whose heap sets take writes while
-    /// command buffers that bind them are pending; a command whose plan cannot list them all runs
-    /// with those it can, and the first such command's `unlisted-argument-sampler` notice comes
-    /// back, for the caller to announce once with no lock of the command buffer's held.
-    pub(super) fn list_samplers_at_submission(
-        &mut self,
-        device: &Device,
-        range: Range<usize>,
-    ) -> Result<Option<(String, String)>, Error> {
-        if self.sampler_listings.is_empty() {
-            return Ok(None);
-        }
-        let Some(last) = range.end.checked_sub(1).map(|at| self.recorded[at].encoder) else {
-            return Ok(None);
-        };
-        let due: Vec<SamplerListing> = self
-            .sampler_listings
-            .extract_if(.., |listing| listing.encoder() <= last)
-            .collect();
-        if !heap_sets::unused_while_pending(device) {
-            return Ok(None);
-        }
-        let changed = device.sampler_slots_changed();
-        let mut live = None;
-        let mut notice = None;
-        for mut listing in due.into_iter().filter(|listing| listing.stale(changed)) {
-            let live = live.get_or_insert_with(|| device.argument_samplers_at());
-            let at = (live.0, &live.1[..]);
-            let relisted = listing.relist(device, at, &mut self.heaps)?;
-            if !relisted.samplers.is_empty() {
-                self.retained.push(Box::new(relisted.samplers));
-            }
-            if let Some(unlisted) = relisted.unlisted {
-                notice.get_or_insert(unlisted);
-            }
-        }
-        if notice.is_some() {
-            self.unlisted_argument_sampler(device);
-        }
-        Ok(notice)
-    }
-
-    /// A command left a live sampler state out of its argument samplers (`sampler_listing.rs`):
-    /// its variant's set-1 sampler arrays hold fewer elements than the live states
-    /// (`heap_sets::fit_samplers`), or its plan's tables fewer entries. Before the commit nothing
-    /// follows here: the commit lists the command's samplers again (`sampler_listing.rs`). After
-    /// it, as it commits, as a batch is submitted or as a host step records a command no commit
-    /// lists, its function reads the neutral sampler where Metal's reaches the state by its ID: the
+    /// A command left a live sampler state out of its argument samplers: its variant's set-1
+    /// sampler arrays hold fewer elements than the live states (`heap_sets::fit_samplers`), so
+    /// its function reads the neutral sampler where Metal's reaches the state by its ID. The
     /// command buffer is counted once (`WorkCounts::unlisted_argument_sampler_buffers`).
     pub(super) fn unlisted_argument_sampler(&mut self, device: &Device) {
-        if self.status != CommandBufferStatus::NotEnqueued && !self.unlisted_argument_samplers {
+        if !self.unlisted_argument_samplers {
             self.unlisted_argument_samplers = true;
             device.shared().counts.unlisted_argument_sampler_buffer();
         }
@@ -1716,7 +1644,6 @@ impl CommandBuffer {
                 uploads: Uploads::new(),
                 heaps: HeapUse::default(),
                 table_snapshots: Vec::new(),
-                sampler_listings: Vec::new(),
                 unlisted_argument_samplers: false,
                 fails_from: None,
                 faulted: BTreeMap::new(),
@@ -2485,13 +2412,7 @@ impl CommandBuffer {
         let prepared: Result<Vec<_>, Error> = segments
             .iter()
             .zip(&places)
-            .map(|((work, host), &encoder)| {
-                // The sampler tables its commands keep are its encoder's (`sampler_listing.rs`).
-                let before = self.state().sampler_listings.len();
-                let prepared = work.prepare(self, *host);
-                self.state().place_listings(before, encoder);
-                prepared
-            })
+            .map(|((work, host), _)| work.prepare(self, *host))
             .collect();
         let prepared = match prepared {
             Ok(prepared) => prepared,
@@ -2530,7 +2451,6 @@ impl CommandBuffer {
             // A refused commit's commands run nothing: none of what follows is made for them.
             if run == CommitRun::Refused {
                 state.table_snapshots.clear();
-                state.sampler_listings.clear();
             }
             #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
             if run != CommitRun::Refused && state.failures_injected > 0 {
@@ -2547,29 +2467,6 @@ impl CommandBuffer {
                 snapshot.refresh()?;
             }
             state.table_snapshots.clear();
-            // Its commands' argument samplers, the states live now, before its heap sets stop
-            // taking its writes; each batch's submission lists them again where a state was made
-            // or went since (`sampler_listing.rs`).
-            if !state.sampler_listings.is_empty() {
-                let (changed, live) = device.argument_samplers_at();
-                let held = &mut *state;
-                let mut left_out = false;
-                for listing in &mut held.sampler_listings {
-                    let relisted = listing.relist(device, (changed, &live), &mut held.heaps)?;
-                    if !relisted.samplers.is_empty() {
-                        held.retained.push(Box::new(relisted.samplers));
-                    }
-                    // Its plan cannot list them all: it runs with those it lists.
-                    if let Some(unlisted) = relisted.unlisted {
-                        device.degrade(Degradation::UnlistedArgumentSampler, || unlisted);
-                        left_out = true;
-                    }
-                }
-                if left_out && !held.unlisted_argument_samplers {
-                    held.unlisted_argument_samplers = true;
-                    device.shared().counts.unlisted_argument_sampler_buffer();
-                }
-            }
             // Until it completes, an image retired from the device's heap waits for it, where
             // its commands, or its host steps', may read the heap (`heap_sets.rs`). The ticket
             // taken here holds what a rebind or a detach replaces; its first submission takes the

@@ -1,7 +1,7 @@
-//! Set 1, the heap, and the texture table, device-wide (residency part C): every live texture is at
-//! its resource ID for every command, as Metal's textures are (the M4 probe: a texture
-//! read through its ID in an argument buffer is reached with no encoder naming it, and through a
-//! later encoder's `use_resource`).
+//! Set 1, the heap, and the texture and sampler tables, device-wide (residency part C): every live
+//! texture and sampler state is at its resource ID for every command, as Metal's are (the M4
+//! probe: a texture read through its ID in an argument buffer is reached with no encoder naming
+//! it, and through a later encoder's `use_resource`).
 //!
 //! - **The texture table.** One buffer per device of [`TABLE_ENTRIES`] handle-table entries
 //!   (`bind::handle_entry`), entry `i` for resource ID `i`: `{i, i, flags}` while a live texture
@@ -34,9 +34,8 @@
 //!   copied in ([`Degradation::UnnamedShadowedTexture`], announced at the first command that
 //!   binds a set holding it while neither naming it nor making it resident, [`bind`]: one that
 //!   does has its shadow copied in). An element whose ID no texture holds
-//!   is never read: the table maps the ID to element 0. The argument samplers' and function
-//!   tables' elements are the commands' writes ([`bind`]), each written where the set held
-//!   another there.
+//!   is never read: the table maps the ID to element 0. The function tables' elements are the
+//!   commands' writes ([`bind`]), each written where the set held another there.
 //! - **Who reads an element while it changes.** The arrays are `UPDATE_AFTER_BIND` and, where
 //!   the device has `descriptorBindingUpdateUnusedWhilePending`, `UPDATE_UNUSED_WHILE_PENDING`
 //!   (`pipeline::link`): every command binds the set's one version ([`SetVersion`]), and a
@@ -63,12 +62,37 @@
 //!   instead for the command buffers that committed before it, each holding a second ticket from
 //!   its commit: one committed before it keeps the elements that name it until it completes (a
 //!   placement's or a rebind's writes go only to versions not committed).
-//! - **Samplers.** A sampler state is at its element of the sampler arrays (`resource_ids.rs`),
-//!   which its command's sampler table maps its ID to: the device's live states as the command was
-//!   encoded, listed again as its command buffer commits and as the command's batch is submitted
-//!   (`sampler_listing.rs`).
+//! - **Samplers.** Every live sampler state is at its element of every set's sampler arrays
+//!   (`resource_ids.rs`: the lowest no live state holds), each holding the Vulkan sampler made for
+//!   the array's use, as a bound argument sampler's is (`bind::sampler_desc`), written as the
+//!   state takes its ID's slot ([`place_sampler`]), for each set that lives then (its one version,
+//!   or each command buffer's own that no submission took yet, committed or not: a sampler holds
+//!   no layout a batch's first moves order), and by a set made later for each state that lives
+//!   then. One the array's use refuses (a device feature it lacks) or whose sampler the device
+//!   cannot make is the neutral there, announced ([`Degradation::UnlistedArgumentSampler`]). As the state goes ([`sampler_gone`]) its
+//!   samplers wait for the command buffers submitted before (the **Retirement** above), and its
+//!   element turns neutral in every version no submission took yet, as a gone texture's does.
+//! - **Sampler tables.** One buffer per kind of [`TABLE_ENTRIES`] handle-table entries, which each
+//!   command binds at its layout's sampler tables (`Synthetic(SamplerTable)`, [`sampler_table`]),
+//!   whole: so a function reaches every live state by its ID as it runs, as Metal's does (the M3
+//!   Max under macOS 27.0.1: a state made after the commit, its ID written into the argument
+//!   buffer before the event the command buffer waits for was signalled, was the one sampled),
+//!   whatever states lived as the command was encoded. Entry `i` of the low window, below 32768,
+//!   is sampler ID `i`; entry `32768 + i`, the high window's, is ID `base + i`, its base taken as
+//!   the first state past the low window takes its slot ([`high_window_base`]: a reservation's
+//!   plain IDs, which Metal reads through an argument buffer as any other, 100001 to 100003 on the
+//!   M3 Max), the window's entries rewritten from the highest down so the table stays sorted for
+//!   a command searching it meanwhile; before that it is IDs 32768 to 65535. Each entry is
+//!   `{id, element, word}` while a placed state holds the ID's slot, its word its
+//!   [`SamplerWord`], else `{id, 0, 0}`, the neutral. A kind ([`SamplerTableKind`]) maps only the
+//!   states whose elements its layouts' sampler arrays hold, and cubic states only where each of
+//!   the command's stages with a sampler table tests the states it reaches for a cubic filter
+//!   (`RuntimeFact::CubicArgumentSampler`): another is the neutral there, announced. So is a
+//!   state at an ID in neither window. An entry is written after the state's elements, and
+//!   cleared before they go, so a command reading it meanwhile reads the state or the neutral.
 //! - **Release.** A heap set goes with the last variant of its layout and the last command buffer
-//!   that bound it; the table with the device.
+//!   that bound it, what its elements name (the sampler states' samplers, which no command holds)
+//!   retired as a gone texture's image is; the texture and sampler tables with the device.
 
 use super::binding::{write_sets, Info, Write};
 use super::degradation::Degradation;
@@ -80,7 +104,7 @@ use super::memory::{Memory, MemoryClass, Placement};
 use super::pipeline::{set_needs, VariantObjects};
 use super::release;
 use super::resource::ResourceKey;
-use super::sampler::SamplerState;
+use super::sampler::{SamplerShared, SamplerState};
 use super::texture::{Texture, TextureShared};
 use super::tracker::{Access, Use};
 use ash::vk;
@@ -90,9 +114,10 @@ use metal2vulkan::bind::{
     HANDLE_TABLE_CAPACITY,
 };
 use metal2vulkan::error::BindError;
+use metal2vulkan::metal::sampler::{OpaqueBlackBorder, SamplerUse, SamplerWord};
 use metal2vulkan::pipeline::{
     BindingSource, DescriptorSetLayout, HandleClass, ImageHandleClass, PipelineLayout,
-    SyntheticBinding,
+    RuntimeDependency, RuntimeFact, Stage, SyntheticBinding,
 };
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -108,6 +133,14 @@ pub(super) const TABLE_ENTRIES: u32 = HANDLE_TABLE_CAPACITY;
 
 /// The bytes of the texture table: past them, the null function table's words.
 const TABLE_BYTES: u64 = TABLE_ENTRIES as u64 * HANDLE_ENTRY_BYTES as u64;
+
+/// The sampler IDs of each window of a sampler table (the module docs): the low window holds IDs
+/// 0 to 32767, each at its own entry, and the high window as many IDs from its base.
+const SAMPLER_WINDOW: u64 = TABLE_ENTRIES as u64 / 2;
+
+/// How far below the first sampler ID past the low window the high window starts (the module
+/// docs), rounded down to a multiple of it.
+const HIGH_WINDOW_SLACK: u64 = 1024;
 
 /// What keeps a resource apart from it: a texture's image, a sampler, a table's words.
 pub(super) type Keeper = Box<dyn Any + Send + Sync>;
@@ -135,6 +168,60 @@ pub(super) struct DeviceHeaps {
     holds: usize,
     /// The slot writes asked while a batch held them, in order, made as the last hold ends.
     deferred: VecDeque<Slots>,
+    /// By element of the sampler arrays, the sampler states placed: each live state, which every
+    /// heap set holds at its element.
+    sampler_states: BTreeMap<u64, PlacedSampler>,
+    /// By resource ID, what the sampler tables map each sampler ID to: its slot's holder.
+    sampler_slots: BTreeMap<u64, SamplerSlot>,
+    /// The base of the sampler tables' high window, once a state took an ID past the low one.
+    high_window: Option<u64>,
+    /// The sampler tables, by what they map ([`SamplerTableKind`]), each made at the first
+    /// command that binds one of its kind.
+    sampler_tables: BTreeMap<SamplerTableKind, Table>,
+}
+
+/// A sampler state every heap set holds at its element: its hold serial and the state (not
+/// held: upgraded only where the caller drops it once the lock is free).
+struct PlacedSampler {
+    serial: u64,
+    state: Weak<SamplerShared>,
+}
+
+/// What the sampler tables map a sampler ID to: its slot's holder, by its hold serial, its
+/// element, its word ([`SamplerWord`]) and whether it filters bicubically.
+#[derive(Clone, Copy)]
+struct SamplerSlot {
+    serial: u64,
+    element: u64,
+    word: u32,
+    cubic: bool,
+}
+
+/// What a sampler table maps (the module docs): the IDs of the states whose elements are below
+/// `capacity`, the element count of the sampler arrays of the layouts that bind it, each to its
+/// state; those of cubic states only where `cubic`, its commands' stages testing the states they
+/// reach for a cubic filter (`RuntimeFact::CubicArgumentSampler`). Every other ID it maps to
+/// the neutral.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SamplerTableKind {
+    capacity: u32,
+    cubic: bool,
+}
+
+impl SamplerTableKind {
+    /// Where the table maps a sampler ID whose slot `slot` holds: its holder's element and word,
+    /// or the neutral's.
+    fn entry(self, slot: Option<&SamplerSlot>) -> (u32, u32) {
+        match slot {
+            Some(slot) if self.holds(slot) => (slot.element as u32, slot.word),
+            _ => (0, 0),
+        }
+    }
+
+    /// Whether the table maps a sampler ID to `slot`'s holder.
+    fn holds(self, slot: &SamplerSlot) -> bool {
+        slot.element < u64::from(self.capacity) && (self.cubic || !slot.cubic)
+    }
 }
 
 /// A texture the table and the heap sets hold: its slot's generation and hold serial when it
@@ -262,8 +349,9 @@ struct Table {
 }
 
 impl Table {
-    /// A new table of `device`, every entry the neutral's, and the null table's words zero.
-    fn make(device: &Device) -> Result<Table, Error> {
+    /// A new table of `device`, entry `i` the neutral's at ID `id_at(i)`, and the null table's
+    /// words zero.
+    fn make(device: &Device, id_at: impl Fn(u64) -> u64) -> Result<Table, Error> {
         let shared = device.shared();
         let raw = shared.vk();
         let null = FunctionTableWords::byte_len(0).next_multiple_of(16);
@@ -298,8 +386,8 @@ impl Table {
             table.destroy(raw, &mut lock(&shared.memory));
             return Err(error);
         }
-        for id in 0..u64::from(TABLE_ENTRIES) {
-            table.put(id, 0, 0);
+        for at in 0..u64::from(TABLE_ENTRIES) {
+            table.put(at, id_at(at), 0, 0);
         }
         let start = table.start()?;
         // SAFETY: the null table's words lie inside the placement, which nothing reads yet.
@@ -312,17 +400,20 @@ impl Table {
         self.placement
             .mapped
             .map(|mapped| mapped.as_ptr())
-            .ok_or_else(|| internal("a texture table in memory the host does not see"))
+            .ok_or_else(|| internal("a handle table in memory the host does not see"))
     }
 
-    /// Write entry `id`: element `element`, flags `flags`.
-    fn put(&self, id: u64, element: u32, flags: u32) {
+    /// Write entry `at`: ID `id`, element `element`, flags `flags`.
+    fn put(&self, at: u64, id: u64, element: u32, flags: u32) {
+        if at >= u64::from(TABLE_ENTRIES) {
+            return;
+        }
         let Ok(start) = self.start() else {
             return;
         };
         let entry = handle_entry(id, element, flags);
-        let at = id as usize * entry.len();
-        // SAFETY: `id` is below `TABLE_ENTRIES`, so the entry lies inside the mapped placement;
+        let at = at as usize * entry.len();
+        // SAFETY: `at` is below `TABLE_ENTRIES`, so the entry lies inside the mapped placement;
         // a command reading it meanwhile reads the old entry or the new one (the module docs).
         unsafe { std::ptr::copy_nonoverlapping(entry.as_ptr(), start.add(at), entry.len()) };
     }
@@ -352,9 +443,10 @@ impl Table {
 }
 
 impl DeviceHeaps {
-    /// Destroy the texture table, freeing its memory into `memory`: the device is idle.
+    /// Destroy the texture and sampler tables, freeing their memory into `memory`: the device is
+    /// idle.
     pub(super) fn destroy(&self, raw: &ash::Device, memory: &mut Memory) {
-        if let Some(table) = &self.table {
+        for table in self.table.iter().chain(self.sampler_tables.values()) {
             table.destroy(raw, memory);
         }
     }
@@ -362,9 +454,9 @@ impl DeviceHeaps {
     /// The texture table of `device`, made at its first use.
     fn table(&mut self, device: &Device) -> Result<&Table, Error> {
         if self.table.is_none() {
-            let table = Table::make(device)?;
+            let table = Table::make(device, |at| at)?;
             for (&id, placed) in &self.textures {
-                table.put(id, id as u32, placed.flags);
+                table.put(id, id, id as u32, placed.flags);
             }
             self.table = Some(table);
         }
@@ -440,7 +532,7 @@ impl DeviceHeaps {
         let bytes = texture.bytes_key();
         // The neutral's entry until every set holds the texture.
         if let Some(table) = &self.table {
-            table.put(id, 0, 0);
+            table.put(id, id, 0, 0);
         }
         self.unplace(device, id);
         for entry in self.sets.values_mut() {
@@ -449,7 +541,7 @@ impl DeviceHeaps {
             entry.shadow(id, &texture, shadow);
         }
         if let Some(table) = &self.table {
-            table.put(id, id as u32, flags);
+            table.put(id, id, id as u32, flags);
         }
         device.shared().heap_nan_residue.add(residue);
         self.textures.insert(
@@ -482,7 +574,7 @@ impl DeviceHeaps {
             entry.shadows.remove(&id);
         }
         if let Some(table) = &self.table {
-            table.put(id, 0, 0);
+            table.put(id, id, 0, 0);
         }
         let Ok(element) = u32::try_from(id) else {
             return Ok(());
@@ -512,12 +604,13 @@ impl DeviceHeaps {
         Ok(())
     }
 
-    /// A new heap set of `layout`, holding every live texture.
+    /// A new heap set of `layout`, holding every live texture and sampler state. The states it
+    /// upgrades go to `held_samplers`, to drop once the lock is free.
     fn made_set(
         &mut self,
         device: &Device,
         layout: &DescriptorSetLayout,
-        held: &mut Vec<Texture>,
+        (held, held_samplers): (&mut Vec<Texture>, &mut Vec<SamplerState>),
         notes: &mut Notes,
     ) -> Result<Arc<HeapSet>, Error> {
         let needs = set_needs(layout)?;
@@ -536,6 +629,7 @@ impl DeviceHeaps {
         };
         let null_words = self.table(device)?.null_words();
         let mut images = Vec::new();
+        let mut samplers = Vec::new();
         let mut neutrals = Vec::new();
         for binding in &layout.bindings {
             let ty: vk::DescriptorType = binding.ty.into();
@@ -553,9 +647,19 @@ impl DeviceHeaps {
                     });
                     image_info(neutral)
                 }
-                BindingSource::Heap(HandleClass::Sampler { compare, .. }) => Info::Image(
-                    vk::DescriptorImageInfo::default().sampler(device.neutral_sampler(compare)?),
-                ),
+                BindingSource::Heap(class @ HandleClass::Sampler { compare, .. }) => {
+                    let neutral = device.neutral_sampler(compare)?;
+                    let use_ = class
+                        .sampler_use()
+                        .ok_or_else(|| internal("a sampler class without a use"))?;
+                    samplers.push(SamplerArray {
+                        binding: binding.binding,
+                        use_,
+                        count: binding.count,
+                        neutral,
+                    });
+                    sampler_info(neutral)
+                }
                 BindingSource::Heap(HandleClass::FunctionTable) => Info::Buffer(null_words),
                 _ => return Err(internal("a heap set binding of no heap array")),
             };
@@ -573,6 +677,7 @@ impl DeviceHeaps {
             raw_layout,
             needs,
             images,
+            samplers,
             shared,
             open: Vec::new(),
             written: BTreeMap::new(),
@@ -589,6 +694,12 @@ impl DeviceHeaps {
                 notes.placed(&texture, true);
             }
         }
+        for placed in self.sampler_states.values() {
+            if let Some(state) = SamplerState::upgrade(&placed.state) {
+                writes.extend(sampler_writes(device, &entry.samplers, &state, notes));
+                held_samplers.push(state);
+            }
+        }
         entry.write(device, writes)?;
         self.next_set += 1;
         let set = Arc::new(HeapSet {
@@ -599,6 +710,271 @@ impl DeviceHeaps {
         self.by_layout
             .insert(layout.clone(), (key, Arc::downgrade(&set)));
         Ok(set)
+    }
+}
+
+impl DeviceHeaps {
+    /// Place sampler state `state`, which just took its ID's slot: its elements into every heap
+    /// set, then its ID's entry into every sampler table where it still holds the slot (the
+    /// module docs). The states upgraded go to `held`, to drop once the lock is free.
+    fn place_sampler(
+        &mut self,
+        device: &Device,
+        state: &SamplerState,
+        held: &mut Vec<SamplerState>,
+        notes: &mut Notes,
+    ) -> Result<(), Error> {
+        for entry in self.sets.values_mut() {
+            let writes = sampler_writes(device, &entry.samplers, state, notes);
+            entry.write_sampler(device, writes)?;
+        }
+        self.sampler_states.insert(
+            state.heap_element(),
+            PlacedSampler {
+                serial: state.id_serial(),
+                state: state.downgrade(),
+            },
+        );
+        self.sync_sampler_slot(device, state.gpu_resource_id().0, held, notes);
+        Ok(())
+    }
+
+    /// Write sampler ID `id`'s entry into every sampler table: its slot's holder where that is a
+    /// placed state, else the neutral.
+    fn sync_sampler_slot(
+        &mut self,
+        device: &Device,
+        id: u64,
+        held: &mut Vec<SamplerState>,
+        notes: &mut Notes,
+    ) {
+        let holder = lock(&device.shared().resource_ids).sampler(id);
+        let slot = holder
+            .and_then(|(serial, weak)| {
+                let state = SamplerState::upgrade(&weak)?;
+                held.push(state.clone());
+                Some((serial, state))
+            })
+            .filter(|(serial, state)| {
+                self.sampler_states
+                    .get(&state.heap_element())
+                    .is_some_and(|placed| placed.serial == *serial)
+            })
+            .map(|(serial, state)| SamplerSlot {
+                serial,
+                element: state.heap_element(),
+                word: SamplerWord::of(state.descriptor()).0,
+                cubic: SamplerWord::of(state.descriptor()).0 & SamplerWord::CUBIC != 0,
+            });
+        match slot {
+            Some(slot) => {
+                self.put_sampler(id, Some(&slot), notes);
+                self.sampler_slots.insert(id, slot);
+            }
+            None => {
+                if self.sampler_slots.remove(&id).is_some() {
+                    self.put_sampler(id, None, notes);
+                }
+            }
+        }
+    }
+
+    /// Write sampler ID `id`'s entry into every sampler table: `slot`'s holder where the table
+    /// holds it, else the neutral. An ID past the low window takes the high window's base where
+    /// it has none yet (`slot` given).
+    fn put_sampler(&mut self, id: u64, slot: Option<&SamplerSlot>, notes: &mut Notes) {
+        if id >= SAMPLER_WINDOW && self.high_window.is_none() && slot.is_some() {
+            self.open_high_window(high_window_base(id));
+        }
+        let Some(at) = sampler_entry(id, self.high_window) else {
+            if slot.is_some() {
+                let base = self.high_window.unwrap_or(SAMPLER_WINDOW);
+                notes.sampler_outside(id, base);
+            }
+            return;
+        };
+        for (kind, table) in &self.sampler_tables {
+            let (element, word) = kind.entry(slot);
+            table.put(at, id, element, word);
+            if let Some(slot) = slot.filter(|slot| !kind.holds(slot)) {
+                match slot.element < u64::from(kind.capacity) {
+                    true => notes.sampler_cubic(id),
+                    false => notes.sampler_past(id, u64::from(kind.capacity)),
+                }
+            }
+        }
+    }
+
+    /// Start the sampler tables' high window at `base`: each table's entries of it are rewritten
+    /// from the highest down, the neutral's at the window's IDs, so every table stays sorted
+    /// while a command searches it. No state holds an ID of the window yet.
+    fn open_high_window(&mut self, base: u64) {
+        self.high_window = Some(base);
+        for table in self.sampler_tables.values() {
+            for i in (0..SAMPLER_WINDOW).rev() {
+                table.put(SAMPLER_WINDOW + i, base + i, 0, 0);
+            }
+        }
+    }
+
+    /// Sampler state `state`'s placement and slot go, where they are its hold `serial`'s: its
+    /// ID's entry the neutral's, and its elements' samplers into `kept`, to retire, the neutral
+    /// at its element in each set's version no submission took yet (the module docs).
+    fn sampler_gone(
+        &mut self,
+        device: &Device,
+        (id, serial, element): (u64, u64, u64),
+        kept: &mut Vec<Keeper>,
+        notes: &mut Notes,
+    ) -> Result<(), Error> {
+        if self
+            .sampler_slots
+            .get(&id)
+            .is_some_and(|slot| slot.serial == serial)
+        {
+            self.sampler_slots.remove(&id);
+            self.put_sampler(id, None, notes);
+        }
+        let placed = self
+            .sampler_states
+            .get(&element)
+            .is_some_and(|placed| placed.serial == serial);
+        if !placed {
+            return Ok(());
+        }
+        self.sampler_states.remove(&element);
+        let Ok(element) = u32::try_from(element) else {
+            return Ok(());
+        };
+        for entry in self.sets.values_mut() {
+            let mut neutrals = Vec::new();
+            for array in &entry.samplers {
+                if let Some(written) = entry.written.remove(&(array.binding, element)) {
+                    kept.extend(written.keeper);
+                }
+                if element < array.count {
+                    let info = sampler_info(array.neutral);
+                    neutrals.push(raw_write(
+                        array.binding,
+                        element,
+                        vk::DescriptorType::SAMPLER,
+                        info,
+                    ));
+                }
+            }
+            if neutrals.is_empty() {
+                continue;
+            }
+            for version in &entry.unsubmitted() {
+                // SAFETY: as `DeviceHeaps::clear`'s: nothing pending binds the version, its set
+                // is `UPDATE_AFTER_BIND`, and the neutral samplers live with the device.
+                unsafe { write_sets(device, &[version.set], &neutrals) }?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The sampler table of `kind`, made at its first use with every placed state's entry.
+    fn sampler_table(&mut self, device: &Device, kind: SamplerTableKind) -> Result<&Table, Error> {
+        if !self.sampler_tables.contains_key(&kind) {
+            let high = self.high_window.unwrap_or(SAMPLER_WINDOW);
+            let table = Table::make(device, |at| match at < SAMPLER_WINDOW {
+                true => at,
+                false => high + (at - SAMPLER_WINDOW),
+            })?;
+            for (&id, slot) in &self.sampler_slots {
+                if let Some(at) = sampler_entry(id, self.high_window) {
+                    let (element, word) = kind.entry(Some(slot));
+                    table.put(at, id, element, word);
+                }
+            }
+            self.sampler_tables.insert(kind, table);
+        }
+        self.sampler_tables
+            .get(&kind)
+            .ok_or_else(|| internal("a sampler table not made"))
+    }
+}
+
+/// The entry of sampler ID `id` in a sampler table whose high window starts at `high` (the
+/// module docs): `None` where it is in neither window.
+pub(super) fn sampler_entry(id: u64, high: Option<u64>) -> Option<u64> {
+    if id < SAMPLER_WINDOW {
+        return Some(id);
+    }
+    let base = high.unwrap_or(SAMPLER_WINDOW);
+    let offset = id.checked_sub(base)?;
+    (offset < SAMPLER_WINDOW).then_some(SAMPLER_WINDOW + offset)
+}
+
+/// The base of the high window the first sampler ID past the low window, `id`, opens: the low
+/// window's end where `id` lies within one window of it, else [`HIGH_WINDOW_SLACK`] below `id`,
+/// rounded down to a multiple of it, so states that take IDs just below it (a reservation's plain
+/// IDs, which other holders of sampler IDs took first and gave back) lie in it too.
+pub(super) fn high_window_base(id: u64) -> u64 {
+    if id < 2 * SAMPLER_WINDOW {
+        return SAMPLER_WINDOW;
+    }
+    let below = id.saturating_sub(HIGH_WINDOW_SLACK);
+    (below - below % HIGH_WINDOW_SLACK).max(SAMPLER_WINDOW)
+}
+
+/// Place `state`, a sampler state that just took its ID's slot, into every heap set and sampler
+/// table (the module docs). A failure to write its elements leaves its ID's entries the
+/// neutral's, announced.
+pub(super) fn place_sampler(device: &Device, state: &SamplerState) {
+    let mut held = Vec::new();
+    let mut notes = Notes::default();
+    let placed = {
+        let mut heaps = lock(&device.shared().heaps);
+        let placed = heaps.place_sampler(device, state, &mut held, &mut notes);
+        if placed.is_err() {
+            heaps.sampler_slots.remove(&state.gpu_resource_id().0);
+            heaps.put_sampler(state.gpu_resource_id().0, None, &mut notes);
+        }
+        placed
+    };
+    drop(held);
+    notes.announce(device);
+    if let Err(error) = placed {
+        device.degrade(Degradation::UnlistedArgumentSampler, || {
+            (
+                format!("sampler state at resource ID {}", state.gpu_resource_id().0),
+                format!(
+                    "writing its elements of the set-1 sampler arrays failed ({error}), so a \
+                     function reading it through an argument buffer reads the neutral sampler"
+                ),
+            )
+        });
+    }
+}
+
+/// A sampler state at ID `id`, of hold serial `serial` and element `element`, is going: the
+/// sampler tables map its ID to the neutral where it held the slot, and the Vulkan samplers the
+/// heap sets held at its element wait for the command buffers that may read them (the module
+/// docs). Before its element is given back.
+pub(super) fn sampler_gone(device: &Device, id: u64, serial: u64, element: u64) {
+    let mut notes = Notes::default();
+    let mut kept = Vec::new();
+    let (freed, gone) = {
+        let mut heaps = lock(&device.shared().heaps);
+        let gone = heaps.sampler_gone(device, (id, serial, element), &mut kept, &mut notes);
+        let freed = match kept.is_empty() {
+            true => None,
+            false => heaps.retirement.retire(Box::new(kept) as Keeper),
+        };
+        (freed, gone)
+    };
+    // The samplers go with no lock held.
+    drop(freed);
+    notes.announce(device);
+    if let Err(error) = gone {
+        device.degrade(Degradation::UnlistedArgumentSampler, || {
+            (
+                format!("sampler state at resource ID {id}"),
+                format!("writing the neutral at its elements failed: {error}"),
+            )
+        });
     }
 }
 
@@ -616,6 +992,15 @@ struct ImageArray {
     ty: vk::DescriptorType,
     count: u32,
     neutral: vk::ImageView,
+}
+
+/// One sampler array of a heap set: its binding, the use its class makes a state's Vulkan sampler
+/// for, its element count, and its neutral sampler (the device's).
+struct SamplerArray {
+    binding: u32,
+    use_: SamplerUse,
+    count: u32,
+    neutral: vk::Sampler,
 }
 
 /// One element a heap set holds: the descriptor and what keeps what it names (a sampler, a
@@ -636,6 +1021,7 @@ struct SetEntry {
     raw_layout: Arc<RawLayout>,
     needs: SetNeeds,
     images: Vec<ImageArray>,
+    samplers: Vec<SamplerArray>,
     /// The one version every command binds, where the device has
     /// `descriptorBindingUpdateUnusedWhilePending`.
     shared: Option<Arc<SetVersion>>,
@@ -657,8 +1043,9 @@ struct Written {
     ty: vk::DescriptorType,
     info: Info,
     /// Held while the set holds the element; dropped once another takes its place, the
-    /// command buffers that bound it holding their own.
-    _keeper: Option<Keeper>,
+    /// command buffers that bound it holding their own, or, a sampler state's, retired as the
+    /// state goes ([`sampler_gone`]).
+    keeper: Option<Keeper>,
 }
 
 impl SetEntry {
@@ -710,6 +1097,26 @@ impl SetEntry {
     /// Write `writes` into every version writes go to ([`SetEntry::targets`]), and keep them
     /// for a version made later.
     fn write(&mut self, device: &Device, writes: Vec<HeapWrite>) -> Result<(), Error> {
+        let targets = self.targets();
+        self.write_into(device, writes, targets)
+    }
+
+    /// Write a sampler state's `writes` into the shared version and every own version no
+    /// submission took yet, committed or not (the module docs' **Samplers**), and keep them for a
+    /// version made later.
+    fn write_sampler(&mut self, device: &Device, writes: Vec<HeapWrite>) -> Result<(), Error> {
+        let mut targets: Vec<Arc<SetVersion>> = self.shared.iter().cloned().collect();
+        targets.extend(self.unsubmitted());
+        self.write_into(device, writes, targets)
+    }
+
+    /// Write `writes` into `targets`, and keep them for a version made later.
+    fn write_into(
+        &mut self,
+        device: &Device,
+        writes: Vec<HeapWrite>,
+        targets: Vec<Arc<SetVersion>>,
+    ) -> Result<(), Error> {
         if writes.is_empty() {
             return Ok(());
         }
@@ -717,11 +1124,13 @@ impl SetEntry {
             .iter()
             .map(|write| raw_write(write.binding, write.element, write.ty, write.info))
             .collect();
-        for version in self.targets() {
+        for version in targets {
             // SAFETY: the shared version's arrays are `UPDATE_UNUSED_WHILE_PENDING`, and no
             // pending command buffer reads the elements written (the module docs); a command
-            // buffer's own version is written only until it commits. Every view, sampler and
-            // buffer written is held while the set holds it.
+            // buffer's own version is written only until it commits, or, a sampler state's
+            // elements, until a submission takes it (under this lock, before the submission), and
+            // its set is `UPDATE_AFTER_BIND`. Every view, sampler and buffer written is held while
+            // the set holds it.
             unsafe { write_sets(device, &[version.set], &raw) }?;
         }
         for write in writes {
@@ -730,7 +1139,7 @@ impl SetEntry {
                 Written {
                     ty: write.ty,
                     info: write.info,
-                    _keeper: write.keeper,
+                    keeper: write.keeper,
                 },
             );
         }
@@ -738,8 +1147,8 @@ impl SetEntry {
     }
 
     /// A command buffer's own version of the set (the module docs): every image array's
-    /// elements a texture's ID may name the neutral, then every element `written`. `notes`
-    /// takes the count written.
+    /// elements a texture's ID may name, and every sampler array's elements, the neutral, then
+    /// every element `written`. `notes` takes the count written.
     fn own_version(
         &mut self,
         device: &Device,
@@ -751,6 +1160,12 @@ impl SetEntry {
             let reach = array.count.min(TABLE_ENTRIES);
             all.extend((0..reach).map(|element| {
                 raw_write(array.binding, element, array.ty, image_info(array.neutral))
+            }));
+        }
+        for array in &self.samplers {
+            all.extend((0..array.count).map(|element| {
+                let info = sampler_info(array.neutral);
+                raw_write(array.binding, element, vk::DescriptorType::SAMPLER, info)
             }));
         }
         all.extend(self.written.iter().map(|(&(binding, element), written)| {
@@ -785,6 +1200,64 @@ fn image_info(view: vk::ImageView) -> Info {
             .image_view(view)
             .image_layout(vk::ImageLayout::GENERAL),
     )
+}
+
+/// A sampler's descriptor info.
+fn sampler_info(sampler: vk::Sampler) -> Info {
+    Info::Image(vk::DescriptorImageInfo::default().sampler(sampler))
+}
+
+/// The writes of sampler state `state` into `arrays`: its element of each, which holds the Vulkan
+/// sampler made for the array's use (`bind::sampler_desc`, as a command's argument sampler is
+/// made). An element past an array's count is left out, noted (no table of its arrays maps the
+/// state's ID there, [`SamplerTableKind`]); where its use refuses the state or the sampler is
+/// not made (the device's samplers at their limit), the element holds the neutral sampler,
+/// noted.
+fn sampler_writes(
+    device: &Device,
+    arrays: &[SamplerArray],
+    state: &SamplerState,
+    notes: &mut Notes,
+) -> Vec<HeapWrite> {
+    let id = state.gpu_resource_id().0;
+    let element = state.heap_element();
+    let mut writes = Vec::with_capacity(arrays.len());
+    for array in arrays {
+        let element = match u32::try_from(element) {
+            Ok(element) if element < array.count => element,
+            _ => {
+                notes.sampler_past(id, u64::from(array.count));
+                continue;
+            }
+        };
+        let made = metal2vulkan::bind::sampler_desc(
+            device.compile_device(),
+            state.descriptor(),
+            array.use_,
+            OpaqueBlackBorder::Stated,
+            None,
+        )
+        .map_err(Error::Bind)
+        .and_then(|desc| state.vk_sampler(&desc));
+        let (info, keeper) = match made {
+            Ok(sampler) => (
+                sampler_info(sampler.raw()),
+                Some(Box::new(sampler) as Keeper),
+            ),
+            Err(error) => {
+                notes.sampler_unmade(id, &error);
+                (sampler_info(array.neutral), None)
+            }
+        };
+        writes.push(HeapWrite {
+            binding: array.binding,
+            element,
+            ty: vk::DescriptorType::SAMPLER,
+            info,
+            keeper,
+        });
+    }
+    writes
 }
 
 /// The writes of texture `texture`, at ID `id`, into `arrays`: element `id` of each, which it
@@ -872,6 +1345,9 @@ struct Notes {
     copied: Option<usize>,
     /// A texture a set holds whose blocks a carrier holds for copies (`pvrtc.rs`).
     unreadable: Option<Texture>,
+    /// A sampler state a sampler table or a set's sampler array cannot hold: the first one's
+    /// notice (`Degradation::UnlistedArgumentSampler`).
+    unlisted: Option<(String, String)>,
 }
 
 impl Notes {
@@ -879,6 +1355,58 @@ impl Notes {
         if self.unviewable.is_none() {
             self.unviewable = Some(texture.clone());
         }
+    }
+
+    /// The sampler state at ID `id` is past a set's sampler arrays of `count` elements.
+    fn sampler_past(&mut self, id: u64, count: u64) {
+        self.unlisted
+            .get_or_insert_with(|| unlisted_notice((id, count), "a layout's commands"));
+    }
+
+    /// The Vulkan sampler of the sampler state at ID `id` for a set's sampler array was not
+    /// made: `error`.
+    fn sampler_unmade(&mut self, id: u64, error: &Error) {
+        self.unlisted.get_or_insert_with(|| {
+            (
+                format!("sampler state at resource ID {id}"),
+                format!(
+                    "its sampler for a set-1 sampler array was not made ({error}), so the array \
+                     holds the neutral sampler at its element, which a function reading the \
+                     state through an argument buffer samples through"
+                ),
+            )
+        });
+    }
+
+    /// The sampler state at ID `id` lies in neither window of the sampler tables, whose high one
+    /// starts at `base`.
+    fn sampler_outside(&mut self, id: u64, base: u64) {
+        self.unlisted.get_or_insert_with(|| {
+            (
+                format!("sampler state at resource ID {id}"),
+                format!(
+                    "the device's sampler tables map sampler IDs 0 to {} and {base} to {}, \
+                     which the ID is outside, so a function reading it through an argument \
+                     buffer reads the neutral sampler",
+                    SAMPLER_WINDOW - 1,
+                    base + SAMPLER_WINDOW - 1
+                ),
+            )
+        });
+    }
+
+    /// The cubic sampler state at ID `id` is live where a command's stage does not test the
+    /// states it reaches for a cubic filter.
+    fn sampler_cubic(&mut self, id: u64) {
+        self.unlisted.get_or_insert_with(|| {
+            (
+                format!("sampler state at resource ID {id}"),
+                "a cubic state, whose bicubic filter a command's stage that does not test for \
+                 it (a fragment stage never does) cannot sample through, so a function of that \
+                 stage reading it through an argument buffer reads the neutral sampler"
+                    .to_owned(),
+            )
+        });
     }
 
     /// `texture` placed, into a set where `in_set`.
@@ -940,6 +1468,9 @@ impl Notes {
         }
         if let Some(texture) = &self.unreadable {
             super::pvrtc::degrade_unreadable(device, [texture], "a heap set");
+        }
+        if let Some(unlisted) = self.unlisted {
+            device.degrade(Degradation::UnlistedArgumentSampler, || unlisted);
         }
     }
 }
@@ -1062,23 +1593,28 @@ pub(crate) struct HeapSet {
 }
 
 impl Drop for HeapSet {
+    /// The last variant of its layout went: what its elements name (the sampler states' Vulkan
+    /// samplers among them, which no command holds) waits for the command buffers that may read
+    /// it (the module docs' **Retirement**).
     fn drop(&mut self) {
-        let entry = {
+        let freed = {
             let mut heaps = lock(&self.device.shared().heaps);
-            let entry = heaps.sets.remove(&self.key);
-            if let Some(entry) = &entry {
-                let ours = heaps
-                    .by_layout
-                    .get(&entry.layout)
-                    .is_some_and(|(key, _)| *key == self.key);
-                if ours {
-                    heaps.by_layout.remove(&entry.layout);
+            match heaps.sets.remove(&self.key) {
+                Some(entry) => {
+                    let ours = heaps
+                        .by_layout
+                        .get(&entry.layout)
+                        .is_some_and(|(key, _)| *key == self.key);
+                    if ours {
+                        heaps.by_layout.remove(&entry.layout);
+                    }
+                    heaps.retirement.retire(Box::new(entry) as Keeper)
                 }
+                None => None,
             }
-            entry
         };
         // What the set held goes with no lock held.
-        drop(entry);
+        drop(freed);
     }
 }
 
@@ -1089,6 +1625,7 @@ pub(crate) fn heap_set(
     layout: &DescriptorSetLayout,
 ) -> Result<Arc<HeapSet>, Error> {
     let mut held = Vec::new();
+    let mut held_samplers = Vec::new();
     let mut notes = Notes::default();
     let set = {
         let mut heaps = lock(&device.shared().heaps);
@@ -1098,10 +1635,10 @@ pub(crate) fn heap_set(
             .and_then(|(_, set)| set.upgrade())
         {
             Some(set) => Ok(set),
-            None => heaps.made_set(device, layout, &mut held, &mut notes),
+            None => heaps.made_set(device, layout, (&mut held, &mut held_samplers), &mut notes),
         }
     };
-    drop(held);
+    drop((held, held_samplers));
     notes.announce(device);
     set
 }
@@ -1280,11 +1817,11 @@ impl HeapUse {
         !self.versions.is_empty()
     }
 
-    /// As the command buffer commits, before it is submitted, once its commands listed the
-    /// argument samplers again (`sampler_listing.rs`), where its commands or its host steps may
-    /// read the heap: its ticket for what a rebind or a detach replaces, which it holds until it
-    /// completes; its first submission takes its ticket for gone textures ([`submit`]). Nothing
-    /// writes its own versions from now on but a gone texture's neutrals (the module docs).
+    /// As the command buffer commits, before it is submitted, where its commands or its host
+    /// steps may read the heap: its ticket for what a rebind or a detach replaces, which it holds
+    /// until it completes; its first submission takes its ticket for gone textures and sampler
+    /// states ([`submit`]). Nothing writes its own versions from now on but a gone texture's or
+    /// sampler state's neutrals (the module docs).
     ///
     /// [`submit`]: HeapUse::submit
     pub(super) fn commit(&mut self, device: &Device) -> Ticket {
@@ -1427,22 +1964,81 @@ pub(super) fn texture_table(
     Ok(Some(TextureTable { info, at }))
 }
 
+/// Where a command binds a device sampler table: its layout's sampler tables, and the entries of
+/// the table of the kind they read ([`sampler_table`]).
+pub(super) struct SamplerTable {
+    pub(super) info: vk::DescriptorBufferInfo,
+    /// The `(set, binding)` of each sampler table.
+    pub(super) at: Vec<(u32, u32)>,
+}
+
+/// The sampler table a command of `layout`, of a pipeline stating `dependencies`, binds at its
+/// sampler tables, every entry of it: the table of the element count of its set-1 sampler arrays
+/// (every element where it has none), mapping cubic states where each stage with a sampler table
+/// tests the states it reaches for a cubic filter (`RuntimeFact::CubicArgumentSampler`). `None`
+/// for a layout without one.
+pub(super) fn sampler_table(
+    device: &Device,
+    layout: &PipelineLayout,
+    dependencies: &[RuntimeDependency],
+) -> Result<Option<SamplerTable>, Error> {
+    let tables: Vec<(Stage, u32, u32)> = layout
+        .sets
+        .iter()
+        .flat_map(|set| set.bindings.iter().map(move |b| (set.set, b)))
+        .filter_map(|(set, b)| match b.source {
+            BindingSource::Synthetic {
+                stage,
+                binding: SyntheticBinding::SamplerTable,
+            } => Some((stage, set, b.binding)),
+            _ => None,
+        })
+        .collect();
+    if tables.is_empty() {
+        return Ok(None);
+    }
+    let capacity = layout
+        .sets
+        .get(HEAP_SET as usize)
+        .and_then(|set| {
+            set.bindings
+                .iter()
+                .filter(|b| matches!(b.source, BindingSource::Heap(HandleClass::Sampler { .. })))
+                .map(|b| b.count)
+                .min()
+        })
+        .unwrap_or(TABLE_ENTRIES);
+    let cubic = tables.iter().all(|&(stage, ..)| {
+        dependencies
+            .iter()
+            .any(|d| d.fact == RuntimeFact::CubicArgumentSampler { stage })
+    });
+    let kind = SamplerTableKind { capacity, cubic };
+    let info = lock(&device.shared().heaps)
+        .sampler_table(device, kind)?
+        .entries(TABLE_ENTRIES);
+    let at = tables
+        .into_iter()
+        .map(|(_, set, binding)| (set, binding))
+        .collect();
+    Ok(Some(SamplerTable { info, at }))
+}
+
 /// The heap set a command of `objects` (a layout of two sets) binds, with `writes` (its set-1
 /// writes) at their elements: the device's set of its layout, where every live texture is at its
-/// ID (the module docs). Of `writes`, the argument samplers' and function tables' are written
-/// where the set held another there; the textures' and the neutrals' the set holds already. The
+/// ID (the module docs). Of `writes`, the function tables' are written where the set held
+/// another there; the textures', the sampler states' and the neutrals' the set holds already. The
 /// command buffer's `heap` holds the set's version until it completes. `uses` are the command's
 /// (`binding::command_uses`): a shadowed texture the set holds a view of that they neither name nor
 /// make resident is announced (`Degradation::UnnamedShadowedTexture`): the command's function may
 /// read its shadow through its ID, which the command's copies do not bring up to date, where a
-/// texture they name or make resident has its shadow copied in. `None` for a command buffer listing
-/// its argument samplers again as it commits, which reads nothing new.
+/// texture they name or make resident has its shadow copied in.
 pub(super) fn bind(
     device: &Device,
     objects: &VariantObjects,
     heap: &mut HeapUse,
     writes: Vec<Write>,
-    uses: Option<&[Use<ResourceKey>]>,
+    uses: &[Use<ResourceKey>],
 ) -> Result<vk::DescriptorSet, Error> {
     if objects.set_count() != HEAP_SET as usize + 1 {
         return Err(internal("a heap in a layout of other than two sets"));
@@ -1463,13 +2059,11 @@ pub(super) fn bind(
         // shadow through the ID, which the command's copies leave as the last encoder that named
         // it copied it (Metal's own non-resident read is undefined). One its uses name has its
         // shadow copied in (`shadow::shadow_uses`, compute's and render's alike).
-        notes.shadowed = uses.and_then(|uses| {
-            entry
-                .shadows
-                .iter()
-                .find(|(_, key)| !uses.iter().any(|used| used.key == **key))
-                .map(|(&id, _)| id)
-        });
+        notes.shadowed = entry
+            .shadows
+            .iter()
+            .find(|(_, key)| !uses.iter().any(|used| used.key == **key))
+            .map(|(&id, _)| id);
         // The shared version, or the command buffer's own, made as it first binds the set.
         let own = heap.versions.iter().find(|v| v.key == set.key).cloned();
         let version = match (&entry.shared, own) {
@@ -1600,8 +2194,7 @@ pub(super) fn fit_samplers(
 /// Announce that `commands` (the commands of a function, named) leave the sampler state at
 /// resource ID `id` out of their argument samplers, their variant's set-1 sampler arrays holding
 /// `capacity` elements ([`fit_samplers`]): a function of theirs reading it reads the neutral
-/// sampler, where the state still lives as their command buffer commits (`sampler_listing.rs`),
-/// or where a host step recorded them after the commit.
+/// sampler (their sampler table maps its ID there, [`SamplerTableKind`]).
 pub(super) fn degrade_unlisted(device: &Device, unlisted: (u64, u64), commands: &str) {
     device.degrade(Degradation::UnlistedArgumentSampler, || {
         unlisted_notice(unlisted, commands)

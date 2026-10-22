@@ -327,7 +327,6 @@ use super::sample_planes::{self, Planes, PlanesCommands};
 use super::sample_positions;
 use super::sampler::OwnedSampler;
 use super::sampler::{ArgumentSamplers, SamplerState};
-use super::sampler_listing::SamplerListing;
 use super::shadow::{self, ShadowCopy};
 use super::shadow_stencil::ShadowStencil;
 use super::sparse::emulated::Scrub;
@@ -7330,10 +7329,12 @@ impl RenderLowering {
                 matches!(dispatch.mesh, MeshGroups::Direct(groups) if groups.contains(&0))
             });
         // Set 1, the heap: its writes at the elements of their resource IDs, and the device's
-        // texture table at the texture handle tables.
-        let heap = heap_sets::heap_elements(&variant.pipeline().layout, &plan, &live.state)?;
-        let texture_table =
-            heap_sets::texture_table(self.core.device(), &variant.pipeline().layout)?;
+        // texture and sampler tables at the handle tables.
+        let compiled = variant.pipeline();
+        let heap = heap_sets::heap_elements(&compiled.layout, &plan, &live.state)?;
+        let texture_table = heap_sets::texture_table(self.core.device(), &compiled.layout)?;
+        let sampler_table =
+            heap_sets::sampler_table(self.core.device(), &compiled.layout, &compiled.dependencies)?;
         // The arguments are GPU memory an earlier command may write; the exact paths are GPU
         // passes over them. The index bounds pass is one (`index_bounds.rs`). An indexed indirect
         // draw takes it where the binder asks for its arguments on the CPU only for its index
@@ -7832,6 +7833,7 @@ impl RenderLowering {
             .with_pass(layout, views)
             .with_residency(&self.residency)
             .with_texture_table(texture_table.as_ref())
+            .with_sampler_table(sampler_table.as_ref())
             .with_sampler_maps(sampler_maps);
         // The listed function tables: set 1's elements, or the snapshot a variant without the
         // function-table array reads in set 0, which has no heap of its own.
@@ -8512,21 +8514,10 @@ impl RenderLowering {
                 &objects,
                 &mut self.core.command_buffer().state().heaps,
                 heap_writes,
-                Some(&**uses),
+                uses,
             )?),
             None => None,
         };
-        // Its sampler tables, which the command buffer lists again as it commits.
-        let listing = SamplerListing::of(
-            (&plan, &objects),
-            variant.pipeline().layout.sets.get(1),
-            (&live.state.argument_samplers, live.state.heap_placement),
-            bound.sampler_tables,
-            || "a render pipeline state's draws".to_owned(),
-        );
-        if let Some(listing) = listing {
-            self.core.command_buffer().state().list_samplers(listing);
-        }
         // The query that resumes the active one after a draw whose fragments Vulkan would count
         // and Metal does not.
         let counts_none = matches!(failing, Some(FailingDraw::Runs(_)));
@@ -9249,7 +9240,7 @@ impl RenderLowering {
             .retain_samplers(&mut self.core, &mut samplers);
         if let Some(unlisted) = unlisted {
             heap_sets::degrade_unlisted(&device, unlisted, "a render pipeline state's draws");
-            // A host step's draw, which no commit lists again, runs with the states it listed.
+            // It runs with the states its sampler arrays hold.
             let mut held = self.core.command_buffer().state();
             held.unlisted_argument_sampler(&device);
         }

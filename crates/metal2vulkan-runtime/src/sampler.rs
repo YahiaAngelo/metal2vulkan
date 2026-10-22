@@ -91,7 +91,7 @@ use metal2vulkan::metal::{
 };
 use std::any::Any;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 /// How a sampler state is made beyond its descriptor: the rest of `MTLSamplerDescriptor`.
 #[non_exhaustive]
@@ -326,6 +326,24 @@ pub(super) struct SamplerShared {
     held_by: HeldBy,
 }
 
+impl Drop for SamplerShared {
+    /// A sampler state going: the device's sampler tables no longer map its ID to it where it
+    /// held the ID's slot, and its elements of the heap sets' sampler arrays wait for the command
+    /// buffers that may still read them (`heap_sets::sampler_gone`), before its element is given
+    /// back.
+    fn drop(&mut self) {
+        let id = self.id.id().0;
+        if id != 0 {
+            super::heap_sets::sampler_gone(
+                &self.device,
+                id,
+                self.id.serial(),
+                self.element.element(),
+            );
+        }
+    }
+}
+
 impl std::fmt::Debug for SamplerState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SamplerState")
@@ -373,9 +391,11 @@ impl Device {
 
     /// `newSamplerStateWithDescriptor:` with the rest of Metal's descriptor in `options`. Every
     /// state has a [`gpu_resource_id`](SamplerState::gpu_resource_id), which an argument buffer
-    /// holds to name it, and every function an encoder runs can name it so while it lives. A
-    /// state at an ID no set-1 sampler array of the device can hold is made, and announced:
-    /// a function reading its ID reads the neutral sampler (`resource_ids.rs`). Refused as
+    /// holds to name it, and every function an encoder runs can name it so while it lives,
+    /// whenever the state was made (`heap_sets.rs`). A state no set-1 sampler array of the device
+    /// can hold (more states live than it holds), or at an ID neither window of the device's
+    /// sampler tables reaches, is made, and announced: a function reading its ID reads the
+    /// neutral sampler (`resource_ids.rs`). Refused as
     /// [`new_sampler_state`](Self::new_sampler_state) is, and a placement at an ID of 16381 or
     /// more (`Invalid`, `Problem::ResourceId`), which Metal ends the process for.
     pub fn new_sampler_state_with_options(
@@ -473,6 +493,8 @@ impl Device {
         // Sampler slots have no readers: the device counts the command buffers that list them.
         hold.hold(Holder::Sampler(Arc::downgrade(&state.0)));
         drop(live);
+        // Every heap set holds it, and the sampler tables map its ID to it (`heap_sets.rs`).
+        super::heap_sets::place_sampler(self, &state);
         let id = hold.id().0;
         let element = state.heap_element();
         let (available, limit) = self.sampler_array();
@@ -616,6 +638,22 @@ impl SamplerState {
     /// (`resource_ids.rs`).
     pub(super) fn heap_element(&self) -> u64 {
         self.0.element.element()
+    }
+
+    /// The serial of its hold of its ID (`IdHold::serial`): what the ID's slot names it by while
+    /// it holds it.
+    pub(super) fn id_serial(&self) -> u64 {
+        self.0.id.serial()
+    }
+
+    /// The state, held weakly.
+    pub(super) fn downgrade(&self) -> Weak<SamplerShared> {
+        Arc::downgrade(&self.0)
+    }
+
+    /// The state `weak` holds, where it lives.
+    pub(super) fn upgrade(weak: &Weak<SamplerShared>) -> Option<SamplerState> {
+        weak.upgrade().map(SamplerState)
     }
 
     /// The descriptor the state samples with: its request's as plain Metal takes it

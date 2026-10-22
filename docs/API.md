@@ -1507,19 +1507,18 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   implementation-defined on the device, where Metal's is maximal
   (`Reconvergence::ImplementationDefined`). Cost: simdgroup operations after divergent control flow
   can see other lanes active than Metal's.
-- `metal2vulkan-degrade-unlisted-argument-sampler` (precision). `UnlistedArgumentSampler`: A sampler
-  state whose element no set-1 sampler array can hold, as more states live than it holds: the
-  device's, as the state is made, or a pipeline's, as a command lists the argument samplers or its
-  command buffer lists them again as it commits or as the command's batch is submitted. Or, as a
-  command buffer commits or the batch is submitted, more states live than a command's plan's
-  sampler tables hold, or one of a shape its checks refuse. The command runs with the states it
-  lists: those that fit its sampler arrays, where its tables hold them, else those it listed
-  before; each such command buffer is counted once (`WorkCounts::unlisted_argument_sampler_buffers`).
-  A command misses a state where more states live than its sampler arrays hold (at most the device's
-  update-after-bind sampler limit), or than its plan's tables hold, twice the capacity class of the
-  states live as it was encoded. Cost: a function reading the
-  state through its ID in an argument buffer reads the neutral sampler, where Metal's reads the
-  state.
+- `metal2vulkan-degrade-unlisted-argument-sampler` (precision). `UnlistedArgumentSampler`: A live
+  sampler state the device's sampler tables do not map to it for some commands, which reach every
+  other live state by its ID as they run, whenever it was made: one whose element no set-1 sampler
+  array can hold, as more states live than it holds (the device's, as the state is made, or a
+  pipeline's, as a command is encoded or the state made), each such command buffer counted once
+  (`WorkCounts::unlisted_argument_sampler_buffers`); one at an ID neither window of the tables
+  reaches (IDs 0 to 32767, and 32768 from the first ID past them, a reservation's); one whose
+  Vulkan sampler for an array's use the device cannot make or the use refuses, that array holding
+  the neutral at its element; a cubic state, for a command whose stage does not test the states it
+  reaches for a cubic filter (a fragment stage never does); and one whose elements could not be
+  written. Cost: a function reading the state through its ID in an argument buffer reads the
+  neutral sampler, where Metal's reads the state.
 - `metal2vulkan-degrade-depth-twin` (performance). `DepthTwin`: A `Depth32Float` texture the program
   only reads or samples, on a device whose driver is not measured to keep every `float` in a depth
   image, is held in an `R32_SFLOAT` image with a `D32_SFLOAT` twin for the comparisons the device
@@ -1741,10 +1740,11 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   without `descriptorBindingUpdateUnusedWhilePending`, which writes no set a pending command buffer
   binds: each command buffer binds a copy of its own, written as it first binds the set and until it
   commits. Cost: each command buffer's first command that binds the set writes a copy of it (every
-  element a texture's ID may name, per array); a function reading a texture through its ID reads the
-  texture that held the ID as its command buffer committed (the neutral texture where none did, or
-  where it was released before the command buffer's first submission), where Metal's reads the one
-  holding it as the function runs.
+  element a texture's ID may name, and every sampler array's, per array); a function reading a
+  texture through its ID reads the texture that held the ID as its command buffer committed, and one
+  reading a sampler state the state that held it as the command buffer's first batch was submitted
+  (the neutral where none did, or where it was released before that submission), where Metal's
+  reads the one holding it as the function runs.
 - `metal2vulkan-degrade-uncovered-color-kept` (precision). `UncoveredColorKept`: A draw of a render
   pipeline state in a pass with a color at no place of the state's per-sample record, under a state
   color that blends through a destination factor of the fragment's output (`SourceAlpha`,

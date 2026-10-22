@@ -1741,13 +1741,126 @@ fn a_device_without_pending_writes_binds_a_copy_per_command_buffer() {
     );
 }
 
+/// On a device without `descriptorBindingUpdateUnusedWhilePending` (withheld here; every venue
+/// has it), whose command buffers bind copies of the heap set of their own (`OWN_COPIES`,
+/// announced once), a function reaching a sampler state by its ID reads the state that held it as
+/// its command buffer's first batch was submitted, the copy taking a state's elements until then:
+/// in [`LINEAR_SAMPLER`], a state of the case's descriptor made at the ID the dispatch's argument
+/// buffer names after the dispatch was encoded, the case's gone, reads the case's answer, and so
+/// does one made there after the commit, while the command buffer waits to run, the earlier one
+/// released.
+#[test]
+fn a_device_without_pending_writes_reads_the_sampler_states_of_its_submission() {
+    let feature = VkFeature::DescriptorBindingUpdateUnusedWhilePending;
+    on_device_with(
+        |options| {
+            options.withheld_features.insert(feature);
+        },
+        |device, messages| {
+            assert!(!device.enabled().features.contains(&feature));
+            let mut sampling = Sampling::of(device, LINEAR_SAMPLER);
+            let key = sampling.sampler_key();
+            let texture = sampling.texture().clone();
+            let metal = sampling.case.metal_output.clone();
+            // Made after encoding, before the commit.
+            let (command_buffer, buffers) = sampling.encode(device, &texture, Some(&texture), None);
+            let (id, descriptor) = sampling.drop_case_state();
+            let before = distinct_state_at(device, id, &descriptor, 1);
+            command_buffer.commit().unwrap();
+            assert_eq!(
+                sampling.output(&command_buffer, &buffers),
+                metal,
+                "made before the commit"
+            );
+            sampling.announced(device, messages, &OWN_COPIES);
+            // Made after the commit, while the command buffer waits to run.
+            sampling.base.argument_samplers.insert(key, before);
+            let event = device.new_shared_event().unwrap();
+            let wait = EventRef::from(&event);
+            let (command_buffer, buffers) =
+                sampling.encode(device, &texture, Some(&texture), Some(wait));
+            command_buffer.commit().unwrap();
+            drop(sampling.base.argument_samplers.remove(&key));
+            let after = distinct_state_at(device, id, &descriptor, 2);
+            event.set_signaled_value(1);
+            assert_eq!(
+                sampling.output(&command_buffer, &buffers),
+                metal,
+                "made after the commit"
+            );
+            sampling.announced(device, messages, &[]);
+            drop(after);
+        },
+    );
+}
+
+/// A sampler state of `descriptor` but for its upper LOD clamp, `n` levels (which a texture of one
+/// level never reaches), with argument-buffer support, placed at `id`: another state than any of
+/// `descriptor` alone, which a command buffer may hold still.
+fn distinct_state_at(
+    device: &Device,
+    id: ResourceId,
+    descriptor: &SamplerDescriptor,
+    n: u32,
+) -> SamplerState {
+    let mut distinct = *descriptor;
+    distinct.lod_max_clamp = n as f32;
+    pixel_state_at(device, id, &distinct)
+}
+
+/// A sampler state made at the ID a dispatch's argument buffer names after the dispatch was
+/// encoded samples through its own Vulkan sampler, whatever the states live as the dispatch was
+/// encoded: in [`LINEAR_SAMPLER`], the case's linear state gone, a nearest state at its ID
+/// reads the nearest texels, and a linear one made there next the case's answer, each in a
+/// command buffer of its own encoded before it was made. Nothing is announced.
+#[test]
+fn a_sampler_state_made_after_encoding_samples_through_its_own_sampler() {
+    on_device(|device, messages| {
+        let mut sampling = Sampling::of(device, LINEAR_SAMPLER);
+        let key = sampling.sampler_key();
+        let texture = sampling.texture().clone();
+        let metal = sampling.case.metal_output.clone();
+        let (command_buffer, buffers) = sampling.encode(device, &texture, Some(&texture), None);
+        let (id, descriptor) = sampling.drop_case_state();
+        assert_eq!(descriptor.min_filter, SamplerMinMagFilter::Linear);
+        let mut nearest = descriptor;
+        nearest.min_filter = SamplerMinMagFilter::Nearest;
+        nearest.mag_filter = SamplerMinMagFilter::Nearest;
+        let state = pixel_state_at(device, id, &nearest);
+        command_buffer.commit().unwrap();
+        let read = sampling.output(&command_buffer, &buffers);
+        assert_ne!(
+            read, metal,
+            "a nearest state reads other texels than the case's linear one"
+        );
+        sampling.base.argument_samplers.insert(key, state);
+        assert_eq!(
+            sampling.run(device, &texture, Some(&texture)),
+            read,
+            "the nearest state, live as the dispatch was encoded"
+        );
+        let (command_buffer, buffers) = sampling.encode(device, &texture, Some(&texture), None);
+        drop(sampling.base.argument_samplers.remove(&key));
+        let linear = distinct_state_at(device, id, &descriptor, 1);
+        command_buffer.commit().unwrap();
+        assert_eq!(
+            sampling.output(&command_buffer, &buffers),
+            metal,
+            "a linear state made after encoding"
+        );
+        sampling.announced(device, messages, &[]);
+        drop(linear);
+    });
+}
+
 /// A sampler state that takes the ID a dispatch's argument buffer names, made after its command
 /// buffer committed and before the event it waits for is signalled, is reached through that ID, as
 /// Metal's function reaches it (the M3 Max under macOS 27.0.1: a state made after the commit,
-/// its ID written into the argument buffer before the signal, is the one sampled): the batch's
-/// submission lists the states live then. Nothing is announced. (On a device without
-/// `descriptorBindingUpdateUnusedWhilePending`, which no venue is, the commit's listing stands:
-/// `sampler_listing.rs`.)
+/// its ID written into the argument buffer before the signal, is the one sampled): the device's
+/// sampler table maps the ID to it as it takes the ID's slot. Nothing is announced. (On a device
+/// without `descriptorBindingUpdateUnusedWhilePending`, which no venue is, the command buffer's
+/// copy of the heap set holds the states of its commit:
+/// [`a_device_without_pending_writes_reads_the_sampler_states_of_its_submission`].)
 #[test]
 fn a_sampler_state_made_after_the_commit_before_its_wait_is_reached_by_its_id() {
     on_device(|device, messages| {
@@ -1793,33 +1906,86 @@ fn a_sampler_state_made_after_the_commit_before_its_wait_is_reached_by_its_id() 
 
 /// Sampler states made after a dispatch's command buffer committed and before the event it waits
 /// for is signalled, 64 more than the case's (past twice the capacity class of the states live as
-/// the dispatch was encoded), are more than the command's plan's tables hold as its batch is
-/// submitted: the command keeps the states its commit listed, the case's among them, so the
-/// command buffer completes with the case's output, announced once (`UNLISTED`, on the scheduler's
-/// thread) and counted once (`WorkCounts::unlisted_argument_sampler_buffers`).
+/// the dispatch was encoded, the most a table of the command's own held), and then a state in
+/// pixel coordinates at the ID the dispatch's argument buffer names: the kernel reads texel (0, 0)
+/// through it, as Metal's reaches the state holding the ID as it runs. Nothing is announced or
+/// counted (`WorkCounts::unlisted_argument_sampler_buffers`).
 #[test]
-fn sampler_states_made_after_the_commit_past_the_class_keep_the_commit_s_listing() {
+fn sampler_states_made_after_the_commit_past_the_class_are_reached_by_their_ids() {
     on_device(|device, messages| {
-        let sampling = Sampling::new(device);
-        let texture = sampling.texture();
+        let mut sampling = Sampling::new(device);
+        let texture = sampling.texture().clone();
         let unlisted = || device.work_counts().unlisted_argument_sampler_buffers;
         let before = unlisted();
         let event = device.new_shared_event().unwrap();
         let wait = EventRef::from(&event);
-        let (command_buffer, buffers) = sampling.encode(device, texture, Some(texture), Some(wait));
+        let (command_buffer, buffers) =
+            sampling.encode(device, &texture, Some(&texture), Some(wait));
         command_buffer.commit().unwrap();
+        let (id, descriptor) = sampling.drop_case_sampler();
         let past = distinct_sampler_states(device, 64);
+        let state = pixel_state_at(device, id, &descriptor);
         event.set_signaled_value(1);
         assert_eq!(
             sampling.output(&command_buffer, &buffers),
-            sampling.case.metal_output,
-            "64 more states"
+            corner(),
+            "64 more states, then ID {}",
+            id.0
         );
         assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
-        assert_eq!(unlisted(), before + 1);
-        sampling.announced(device, messages, &UNLISTED);
-        drop(past);
+        assert_eq!(unlisted(), before);
+        sampling.announced(device, messages, &[]);
+        drop((past, state));
     });
+}
+
+impl Sampling {
+    /// Drop the case's argument-buffer sampler state: its ID, which the dispatches encoded
+    /// before still name, and its descriptor in pixel coordinates, through which
+    /// [`HANDLE_SAMPLER`]'s kernel reads texel (0, 0) at each of its coordinates ([`corner`]).
+    fn drop_case_sampler(&mut self) -> (ResourceId, SamplerDescriptor) {
+        let (id, mut descriptor) = self.drop_case_state();
+        assert!(descriptor.normalized_coordinates, "the case's state");
+        descriptor.normalized_coordinates = false;
+        assert_ne!(
+            corner(),
+            self.case.metal_output,
+            "the case's state's answer differs"
+        );
+        (id, descriptor)
+    }
+
+    /// Drop the case's argument-buffer sampler state: its ID and its descriptor.
+    fn drop_case_state(&mut self) -> (ResourceId, SamplerDescriptor) {
+        let key = self.sampler_key();
+        let descriptor =
+            argument_sampler_descriptor(&self.case.compute.argument_buffer_samplers[&key]);
+        let own = self.base.argument_samplers.remove(&key).unwrap();
+        (own.gpu_resource_id(), descriptor)
+    }
+
+    /// The key of the case's argument-buffer sampler state.
+    fn sampler_key(&self) -> (u32, u32) {
+        *self
+            .case
+            .compute
+            .argument_buffer_samplers
+            .keys()
+            .next()
+            .unwrap()
+    }
+}
+
+/// A sampler state of `descriptor` with argument-buffer support, placed at `id`.
+fn pixel_state_at(device: &Device, id: ResourceId, descriptor: &SamplerDescriptor) -> SamplerState {
+    let mut options = SamplerStateOptions::default();
+    options.support_argument_buffers = true;
+    options.placement = IdPlacement::At(id);
+    let state = device
+        .new_sampler_state_with_options(descriptor, options)
+        .unwrap();
+    assert_eq!(state.gpu_resource_id(), id);
+    state
 }
 
 /// Texel (0, 0) of [`HANDLE_SAMPLER`]'s texture, (x + 2y, 10 + x, 20 + y, 7), at each of its four
@@ -1840,8 +2006,8 @@ fn corner() -> Vec<u8> {
 /// named goes after encoding, one in pixel coordinates made before the commit takes its ID 2, and
 /// the kernel reads texel (0, 0) through it): the case's state goes once the dispatch is encoded,
 /// and one of its descriptor in pixel coordinates takes its ID, so the kernel reads texel (0, 0) at
-/// each of its coordinates. The command buffer lists the argument samplers again as it commits:
-/// nothing is announced.
+/// each of its coordinates. The device's sampler table maps the ID to the new state as it takes
+/// the ID's slot: nothing is announced.
 #[test]
 fn a_sampler_state_made_before_the_commit_is_reached_by_its_id() {
     on_device(|device, messages| {
@@ -1887,9 +2053,9 @@ fn a_sampler_state_made_before_the_commit_is_reached_by_its_id() {
 }
 
 /// A sampler state of a shape a dispatch's plan was not made for (a comparison), made after the
-/// dispatch is encoded and before its command buffer commits, is listed as it commits, the
-/// plan's checks of a listed shape passing for it: nothing is announced, and the kernel reads the
-/// case's state as Metal's does.
+/// dispatch is encoded and before its command buffer commits, is in the device's heap sets and
+/// sampler tables as any state is: nothing is announced, and the kernel reads the case's state as
+/// Metal's does.
 #[test]
 fn a_sampler_state_of_a_new_shape_made_before_the_commit_is_listed() {
     on_device(|device, messages| {
@@ -1923,55 +2089,90 @@ pub(super) fn distinct_sampler_states(device: &Device, count: u64) -> Vec<Sample
 }
 
 /// Sampler states made after a dispatch is encoded and before its command buffer commits are
-/// listed as it commits up to twice the capacity class of the states live as it was encoded. With
-/// the case's states alone live at encoding (at most 11: class 0, 16 entries), 20 more are past the
-/// class and within twice it: the kernel reads the case's state through its ID, nothing is
-/// announced, and nothing is counted. 64 more are past twice the class: the command keeps the
-/// states it listed as it was encoded, the case's among them, so the command buffer completes with
-/// the case's output, announced once (`UNLISTED`) and counted once
-/// (`WorkCounts::unlisted_argument_sampler_buffers`). Once they go, the next command buffer
-/// completes with the case's output, announcing nothing.
+/// reached by their IDs however many: with the case's states alone live at encoding (at most 11:
+/// class 0, 16 entries), 20 more (past the class, within twice it) and 64 more (past twice it, the
+/// most a table of the command's own held), each time followed by a state in pixel coordinates at
+/// the ID the dispatch's argument buffer names, through which the kernel reads texel (0, 0).
+/// Nothing is announced or counted (`WorkCounts::unlisted_argument_sampler_buffers`).
 #[test]
-fn late_sampler_states_list_within_twice_the_class_and_run_listed_past_it() {
+fn late_sampler_states_past_twice_the_class_are_reached_by_their_ids() {
     on_device(|device, messages| {
-        let sampling = Sampling::new(device);
-        let live = sampling.base.argument_samplers.len() + sampling.base.samplers.len();
-        assert!(
-            live <= 11,
-            "{live} states of the case: with 20 more, past class 0's 16 entries and within its 32"
-        );
-        let texture = sampling.texture();
         let unlisted = || device.work_counts().unlisted_argument_sampler_buffers;
         let before = unlisted();
-        let (command_buffer, buffers) = sampling.encode(device, texture, Some(texture), None);
-        let within = distinct_sampler_states(device, 20);
-        command_buffer.commit().unwrap();
-        assert_eq!(
-            sampling.output(&command_buffer, &buffers),
-            sampling.case.metal_output,
-            "20 more states"
-        );
+        for more in [20, 64] {
+            let mut sampling = Sampling::new(device);
+            let live = sampling.base.argument_samplers.len() + sampling.base.samplers.len();
+            assert!(
+                live <= 11,
+                "{live} states of the case: with 20 more, past class 0's 16 entries and within \
+                 its 32"
+            );
+            let texture = sampling.texture().clone();
+            let (command_buffer, buffers) = sampling.encode(device, &texture, Some(&texture), None);
+            let (id, descriptor) = sampling.drop_case_sampler();
+            let late = distinct_sampler_states(device, more);
+            let state = pixel_state_at(device, id, &descriptor);
+            command_buffer.commit().unwrap();
+            assert_eq!(
+                sampling.output(&command_buffer, &buffers),
+                corner(),
+                "{more} more states, then ID {}",
+                id.0
+            );
+            assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+            sampling.announced(device, messages, &[]);
+            drop((late, state));
+        }
         assert_eq!(unlisted(), before);
-        sampling.announced(device, messages, &[]);
-        drop(within);
-        let (command_buffer, buffers) = sampling.encode(device, texture, Some(texture), None);
-        let past = distinct_sampler_states(device, 64);
-        command_buffer.commit().unwrap();
-        assert_eq!(
-            sampling.output(&command_buffer, &buffers),
-            sampling.case.metal_output,
-            "64 more states"
+    });
+}
+
+/// Sampler states at IDs past the sampler tables' low window are reached by their IDs, as Metal's
+/// are (the M3 Max under macOS 27.0.1: with sampler ID 100000 reserved, states took 100001 to
+/// 100003 and sampled through an argument buffer as their address modes say). With 100000
+/// reserved before anything takes a sampler ID, the case's states take IDs past it, and a state
+/// in pixel coordinates standing in the argument buffer for the case's, at the next plain ID,
+/// reads texel (0, 0), where the neutral sampler reads the case's own answer. Nothing is
+/// announced.
+#[test]
+fn sampler_states_past_the_low_window_are_reached_by_their_ids() {
+    on_device(|device, messages| {
+        device
+            .reserve_resource_ids(ResourceIdKind::SamplerState, &[ResourceId(100_000)])
+            .unwrap();
+        let mut sampling = Sampling::new(device);
+        let ids: Vec<u64> = sampling
+            .base
+            .argument_samplers
+            .values()
+            .map(|state| state.gpu_resource_id().0)
+            .collect();
+        assert!(
+            ids.iter().all(|&id| id > 100_000),
+            "the case's states past the reservation: {ids:?}"
         );
-        assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
-        assert_eq!(unlisted(), before + 1);
-        sampling.announced(device, messages, &UNLISTED);
-        drop(past);
+        let key = *sampling
+            .case
+            .compute
+            .argument_buffer_samplers
+            .keys()
+            .next()
+            .unwrap();
+        let (_, descriptor) = sampling.drop_case_sampler();
+        let mut options = SamplerStateOptions::default();
+        options.support_argument_buffers = true;
+        let state = device
+            .new_sampler_state_with_options(&descriptor, options)
+            .unwrap();
+        let id = state.gpu_resource_id().0;
+        assert!(id > 100_000, "a plain ID past the reservation: {id}");
+        sampling.base.argument_samplers.insert(key, state);
+        let texture = sampling.texture().clone();
         assert_eq!(
-            sampling.run(device, texture, Some(texture)),
-            sampling.case.metal_output,
-            "once they went"
+            sampling.run(device, &texture, Some(&texture)),
+            corner(),
+            "through ID {id}"
         );
-        assert_eq!(unlisted(), before + 1);
         sampling.announced(device, messages, &[]);
     });
 }

@@ -187,7 +187,6 @@ mod sample_interleave;
 mod sample_planes;
 mod sample_positions;
 mod sampler;
-mod sampler_listing;
 mod scheduler;
 mod shader_cache;
 mod shadow;
