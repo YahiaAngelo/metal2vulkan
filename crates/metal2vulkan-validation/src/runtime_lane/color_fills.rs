@@ -18,9 +18,10 @@
 //!   `0x04030201`: the SHA-256 of each range's `[start, length]` words and the buffer's bytes.
 //!
 //! - **Packed in another format** (our probe `fil5.m` on an Apple M3 Max under macOS 26.7 and an M4
-//!   under macOS 27.0.1): 8 colors packed by `pixelFormat:` in each extended-range `_sRGB` format
-//!   into `RGBA32` textures first set to `0x5a`, every fill in one encoder, against Metal's texels;
-//!   a padded 10-bit packing is refused.
+//!   under macOS 27.0.1; `twins.m` on an M3 Max under macOS 27.0.1): 8 colors packed by
+//!   `pixelFormat:` in each extended-range `_sRGB` format into `RGBA32` textures first set to
+//!   `0x5a`, every fill in one encoder, against Metal's texels (alike one fill an encoder and one
+//!   a process); then one packed in each padded 10-bit format, in which Metal packs no color.
 //!
 //! The packing is the runtime's (`fill_value.rs`), checked against every measured texel without a
 //! device (`tests::fill_value`); this lane checks that each format's texture stores it as Metal's
@@ -986,11 +987,12 @@ const PACKED_INTO_RGBA32: [(PixelFormat, [&str; 8]); 2] = [
 
 /// A color packed by `pixelFormat:` in an extended-range `_sRGB` format into an `RGBA32`
 /// texture repeats the packed texel, as Metal's fills write it, every fill in one encoder; one
-/// packed in a padded 10-bit format, whose texel Metal leaves one constant of its process's, fills
-/// zero bytes, one constant for every color, and the device announces `unpacked-fill-color` once
-/// (Refused `FillColorUnpacked` before).
+/// packed in a padded 10-bit format, in which Metal packs no color, fills the 16 bytes the last
+/// fills packed over zeros (the last `BGR10_XR_sRGB` texel over the last `BGRA10_XR_sRGB` one),
+/// as Metal's consecutive fills find their packing's bytes, and the device announces
+/// `unpacked-fill-color` once.
 #[test]
-fn packings_in_another_format_repeat_and_padded_ones_fill_zero() {
+fn packings_in_another_format_repeat_and_padded_ones_fill_the_last_packing() {
     let (messages, _cache, lane) = lane();
     let name = lane.device.name().to_owned();
     let mut wrong = Vec::new();
@@ -1057,12 +1059,11 @@ fn packings_in_another_format_repeat_and_padded_ones_fill_zero() {
                 }
             }
         }
-        // The padded packings' fills wrote zero bytes into the texel past the packed ones.
-        let zeroed = hex(texel.next().unwrap());
-        if zeroed != "00".repeat(16) {
-            wrong.push(format!(
-                "{target:?}: a padded packing's fill wrote {zeroed}"
-            ));
+        // The padded packings' fills wrote the last packings' bytes into the texel past the
+        // packed ones.
+        let slot = hex(texel.next().unwrap());
+        if slot != "f7de7b2fc0bdc09f0000000000000000" {
+            wrong.push(format!("{target:?}: a padded packing's fill wrote {slot}"));
         }
     }
     // The `Shared` pattern buffers lie in system memory on a device without unified memory.

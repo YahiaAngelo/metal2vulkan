@@ -2,11 +2,11 @@
 //!
 //! A render pass on an Apple GPU stores its attachments a 32 x 32 tile at a time. A pass that
 //! loads a color attachment of an extended-range format (`BGR10_XR`, `BGRA10_XR`,
-//! `RGB10A8_2P_XR10`, their `_sRGB` twins) or a padded 10-bit one (`R10Unorm_X6`,
-//! `RG10Unorm_X12`, their `_sRGB` twins) and records a draw writes every texel of each tile it
-//! stores back, where a channel a fragment writes takes the write; every other texel keeps its
-//! codes, the bits they leave unused made canonical (on an Apple M4 and the consumer's Apple M3
-//! Max):
+//! `RGB10A8_2P_XR10`, their `_sRGB` twins), a padded 10-bit one (`R10Unorm_X6`,
+//! `RG10Unorm_X12`, their `_sRGB` twins) or `RGB10A2Unorm_sRGB` and records a draw writes every
+//! texel of each tile it stores back, where a channel a fragment writes takes the write; every
+//! other texel keeps its codes, the bits they leave unused made canonical (on an Apple M4 and the
+//! consumer's Apple M3 Max):
 //!
 //! - `BGR10_XR`'s word: bits 30 and 31 set;
 //! - `BGRA10_XR`'s four 16-bit fields: each field's low six bits cleared, and the alpha field's
@@ -15,6 +15,8 @@
 //! - a padded 16-bit word: its low six bits cleared, an `_sRGB` twin's code through Metal's table
 //!   (`ExtendedRange::load_code`: 23 codes of `R10Unorm_X6_sRGB` move, 1021 of
 //!   `RG10Unorm_X12_sRGB`);
+//! - `RGB10A2Unorm_sRGB`'s word: each color field's code through `R10Unorm_X6_sRGB`'s table, alpha's
+//!   kept (an Apple M3 Max under macOS 27.0.1: 260 of 4096 words move);
 //! - a bfloat format's 16-bit code (`R16Bfloat`, `RG16Bfloat`, `RGBA16Bfloat`): its value through
 //!   `half` to nearest even and back to the nearest bfloat code, ties to even, a NaN `0x7fc0`
 //!   (`ExtendedRange::load_code`; on an Apple M4 under macOS 27.0.1: 56,829 of the
@@ -170,6 +172,9 @@ enum Rule {
     /// A padded form's two 16-bit words: each one's low six bits cleared, or each one's code
     /// replaced by the table's word for it (an `_sRGB` twin's, [`rewritten_words`]).
     Padded(Option<Vec<u32>>),
+    /// `RGB10A2Unorm_sRGB`'s word: each color field's code replaced by the table's code for it
+    /// (`ExtendedRange::load_code`), alpha's kept.
+    SrgbFields(Vec<u32>),
     /// A bfloat form's two 16-bit codes: each one's value through `half` and back
     /// (`ExtendedRange::load_code`, [`bfloat_load`]).
     Bfloat,
@@ -207,6 +212,11 @@ fn extended_rule(form: ExtendedRange, words: TexelWords) -> Option<Rule> {
         (ExtendedRange::Planes { .. }, TexelWords::Raw) => Rule::PlaneTexel,
         (ExtendedRange::Planes { .. }, TexelWords::ColorPlane) => Rule::ZerosOnTop,
         (_, TexelWords::ColorPlane) => return None,
+        (ExtendedRange::Rgb10A2Srgb, TexelWords::Raw) => Rule::SrgbFields(
+            (0..1024u32)
+                .map(|c| form.load_code(c))
+                .collect::<Option<_>>()?,
+        ),
         _ if form.padded() => Rule::Padded(rewritten_words(form)),
         _ if form.bfloat() => Rule::Bfloat,
         _ => return None,
@@ -336,6 +346,26 @@ fn rewritten(
             let hi = f.load(hi, MemAccess::default())?;
             let hi = f.binary(BinOp::ShiftLeftLogical, hi, k16)?;
             f.binary(BinOp::BitwiseOr, lo, hi)?
+        }
+        Rule::SrgbFields(_) => {
+            let table = table.ok_or(crate::spirv::error::BuildError::Operand {
+                op: crate::spv::Op::AccessChain,
+                rule: crate::spirv::error::OperandRule::NotPointer,
+            })?;
+            let table = f.module().global_value(table)?;
+            let field = u32_value(f, 0x3ff)?;
+            let alpha = u32_value(f, !CODES)?;
+            let mut out = f.binary(BinOp::BitwiseAnd, word, alpha)?;
+            for shift in [0u32, 10, 20] {
+                let k = u32_value(f, shift)?;
+                let c = f.binary(BinOp::ShiftRightLogical, word, k)?;
+                let c = f.binary(BinOp::BitwiseAnd, c, field)?;
+                let c = f.access_chain(table, &[c])?;
+                let c = f.load(c, MemAccess::default())?;
+                let c = f.binary(BinOp::ShiftLeftLogical, c, k)?;
+                out = f.binary(BinOp::BitwiseOr, out, c)?;
+            }
+            out
         }
         Rule::Bfloat => {
             let (k16, low) = (u32_value(f, 16)?, u32_value(f, 0xffff)?);
@@ -547,7 +577,7 @@ fn typed_module(rule: &Rule, texel_bytes: u32) -> BResult<TypedModule> {
     let tiles = words_buffer(&mut b, TILES, u32_)?;
     let shape = words_buffer(&mut b, SHAPE, u32_)?;
     let table = match rule {
-        Rule::Padded(Some(t)) => Some(words_table(&mut b, u32_, t)?),
+        Rule::Padded(Some(t)) | Rule::SrgbFields(t) => Some(words_table(&mut b, u32_, t)?),
         _ => None,
     };
     let invocation = b.builtin(crate::spv::BuiltIn::GlobalInvocationId, IoDir::Input, uvec3)?;

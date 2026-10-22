@@ -479,7 +479,7 @@ fn a_packed_texel_converts_from_its_codes() {
                 (HalfForm::Sample, TexelLanes::Filtered),
                 (HalfForm::Read, TexelLanes::Gathered(1)),
             ] {
-                let away = p.ycbcr() && lanes != TexelLanes::Filtered;
+                let away = p.ties_away() && lanes != TexelLanes::Filtered;
                 let mode = match away {
                     true => HalfRounding::NearestAway,
                     false => HalfRounding::NearestEven,

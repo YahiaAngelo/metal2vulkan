@@ -124,6 +124,16 @@ fn codes(fb: &mut FunctionBuilder<'_>, form: ExtendedRange, raw: Value) -> BResu
             let fill = per_lane(fb, [0, 0, 0, 1023])?;
             fb.vector_shuffle(c, fill, padded_lanes(form))
         }
+        // `RGB10A2Unorm_sRGB`'s word: red, green and blue in 10-bit fields from bit 0, alpha's
+        // 2-bit code in bits 30 and 31.
+        ExtendedRange::Rgb10A2Srgb => {
+            let w = fb.composite_extract(raw, &[0])?;
+            let w = fb.composite_construct(ut, &[w, w, w, w])?;
+            let shifts = per_lane(fb, [0, 10, 20, 30])?;
+            let c = fb.binary(BinOp::ShiftRightLogical, w, shifts)?;
+            let m = per_lane(fb, [0x3FF, 0x3FF, 0x3FF, 0x3])?;
+            fb.binary(BinOp::BitwiseAnd, c, m)
+        }
         // A bfloat form has no codes of this kind: its texels convert by [`bfloat_value`] and
         // [`bfloat_texel`], and no attachment of one is held.
         ExtendedRange::R16Bfloat | ExtendedRange::Rg16Bfloat | ExtendedRange::Rgba16Bfloat => Err(
@@ -343,19 +353,28 @@ fn value_of_codes(
     // A padded format's lane reads `c / 1023` correctly rounded, its `half` to nearest even
     // (every code; `c / 1023` is never a `half` tie), `RG10Unorm_X12_sRGB`'s too.
     // `R10Unorm_X6_sRGB`'s red reads its code's decode step `s / 8192` (every code), its `half`
-    // with ties away from zero (every code).
+    // with ties away from zero (every code); so do `RGB10A2Unorm_sRGB`'s red, green and blue,
+    // and its alpha `a / 3` correctly rounded, never a `half` tie (an Apple M3 Max, every code).
     if form.padded() {
-        let d = splat(fb, u, 1023)?;
+        let d = match form {
+            ExtendedRange::Rgb10A2Srgb => per_lane(fb, [1023, 1023, 1023, 3])?,
+            _ => splat(fb, u, 1023)?,
+        };
         let v = ratio_to_f32(fb, u, c, d)?;
         let (v, rounding) = match form {
-            ExtendedRange::R10X6Srgb => {
+            ExtendedRange::R10X6Srgb | ExtendedRange::Rgb10A2Srgb => {
                 let table = table.ok_or_else(missing_table)?;
-                let c0 = fb.composite_extract(c, &[0])?;
-                let red = table_step(fb, table, c0)?;
+                let colors = srgb_channels(form);
                 let ft = crate::lower::arith::ops::ty(fb, f)?;
-                let mut lanes = vec![red];
-                for lane in 1..4u32 {
-                    lanes.push(fb.composite_extract(v, &[lane])?);
+                let mut lanes = Vec::with_capacity(4);
+                for lane in 0..4u32 {
+                    lanes.push(match lane < colors {
+                        true => {
+                            let code = fb.composite_extract(c, &[lane])?;
+                            table_step(fb, table, code)?
+                        }
+                        false => fb.composite_extract(v, &[lane])?,
+                    });
                 }
                 let v = fb.composite_construct(ft, &lanes)?;
                 (v, HalfRounding::NearestAway)
@@ -443,14 +462,32 @@ pub fn encode(
         let v = fb.select(nan, zero, v)?;
         let one = fsplat(fb, f, 1.0)?;
         let v = fb.glsl(GlslOp::FClamp, &[v, zero, one])?;
-        let k = round_exact_product_lanes(fb, f, v, &[1023], false)?;
+        let scales: &[u32] = match form {
+            ExtendedRange::Rgb10A2Srgb => &[1023, 1023, 1023, 3],
+            _ => &[1023],
+        };
+        let k = round_exact_product_lanes(fb, f, v, scales, false)?;
         let k = match form {
-            ExtendedRange::R10X6Srgb | ExtendedRange::Rg10X12Srgb => {
+            ExtendedRange::R10X6Srgb | ExtendedRange::Rg10X12Srgb | ExtendedRange::Rgb10A2Srgb => {
                 let table = table.ok_or_else(missing_table)?;
                 padded_srgb_codes(fb, form, table, v, k)?
             }
             _ => k,
         };
+        // `RGB10A2Unorm_sRGB`'s fields from bit 0, alpha in bits 30 and 31.
+        if form == ExtendedRange::Rgb10A2Srgb {
+            let shifts = per_lane(fb, [0, 10, 20, 30])?;
+            let k = fb.binary(BinOp::ShiftLeftLogical, k, shifts)?;
+            let mut w = fb.composite_extract(k, &[0])?;
+            for lane in 1..4u32 {
+                let x = fb.composite_extract(k, &[lane])?;
+                w = fb.binary(BinOp::BitwiseOr, w, x)?;
+            }
+            let z = fb.u32_const(0)?;
+            let z = fb.module().const_value(z)?;
+            let ut = crate::lower::arith::ops::ty(fb, u)?;
+            return fb.composite_construct(ut, &[w, z, z, z]);
+        }
         let six = splat(fb, u, 6)?;
         let w = fb.binary(BinOp::ShiftLeftLogical, k, six)?;
         let z = splat(fb, u, 0)?;
@@ -721,6 +758,7 @@ fn pack(fb: &mut FunctionBuilder<'_>, form: ExtendedRange, code: Value) -> BResu
         | ExtendedRange::Rg10X12
         | ExtendedRange::R10X6Srgb
         | ExtendedRange::Rg10X12Srgb
+        | ExtendedRange::Rgb10A2Srgb
         | ExtendedRange::R16Bfloat
         | ExtendedRange::Rg16Bfloat
         | ExtendedRange::Rgba16Bfloat => Err(crate::spirv::error::BuildError::Type(
@@ -735,7 +773,8 @@ fn pack(fb: &mut FunctionBuilder<'_>, form: ExtendedRange, code: Value) -> BResu
 /// and a grid). `R10Unorm_X6_sRGB`'s red is the largest code whose first encode index is at most
 /// `RoundEven(v · 8192)` (exact: `v` below 1 times `2^13`), as an extended-range `_sRGB` channel's
 /// offset is ([`search`]); `RG10Unorm_X12_sRGB`'s red and green are the table's code of each linear
-/// code. The other lanes stay `k`'s.
+/// code. `RGB10A2Unorm_sRGB`'s red, green and blue are `R10Unorm_X6_sRGB`'s red's (an Apple M3
+/// Max, 16,385 values). The other lanes stay `k`'s.
 fn padded_srgb_codes(
     fb: &mut FunctionBuilder<'_>,
     form: ExtendedRange,
@@ -749,12 +788,12 @@ fn padded_srgb_codes(
         signed: false,
     })?;
     let f1 = fb.module().ty(Type::Float { width: 32 })?;
-    let channels = form.raw_components();
+    let channels = srgb_channels(form);
     let mut lanes = Vec::with_capacity(4);
     for lane in 0..4u32 {
         let code = match (lane < channels, form) {
             (false, _) => fb.composite_extract(k, &[lane])?,
-            (true, ExtendedRange::R10X6Srgb) => {
+            (true, ExtendedRange::R10X6Srgb | ExtendedRange::Rgb10A2Srgb) => {
                 let grid = fb.module().constant(Constant::Scalar {
                     ty: f1,
                     bits: ConstBits(u64::from(8192.0f32.to_bits())),
@@ -774,6 +813,14 @@ fn padded_srgb_codes(
         lanes.push(code);
     }
     fb.composite_construct(ut, &lanes)
+}
+
+/// The lanes, from red, a padded `_sRGB` form's table converts: its color channels.
+fn srgb_channels(form: ExtendedRange) -> u32 {
+    match form {
+        ExtendedRange::Rgb10A2Srgb => 3,
+        _ => form.raw_components(),
+    }
 }
 
 /// A `vec4` constant of the four `f32` lanes `v`.

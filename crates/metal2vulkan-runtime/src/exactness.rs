@@ -62,7 +62,9 @@ impl Degradation {
                 // near-equivalent, not one of Metal's. A removed argument's read: Metal gives it no
                 // one value (its compiler drops or folds it, and its debug layer reads zero), and
                 // the runtime gives zero. A color fill packed where fills ignore the color: Metal
-                // writes a constant of its process's, and the runtime one constant, zero.
+                // writes a constant of its process's, and the runtime one constant, zero. A texture
+                // buffer fill's bytes past its pattern's copies: Metal's stack's, zeros in our
+                // probes, and the runtime's zeros.
                 D::ZeroedIndexFetch
                 | D::DontCareStore
                 | D::NarrowSurfaceRows
@@ -71,6 +73,11 @@ impl Degradation {
                 | D::PlainStateUniqueIdentifier
                 | D::AbsentArgumentRead
                 | D::UnpackedFillColor
+                | D::TextureBufferFillLeftover
+                // Rows of a two-plane buffer blit meeting between Metal's groups of 32 rows: Metal
+                // leaves either row's bytes from run to run, the runtime its most frequent whole
+                // outcome.
+                | D::TwoPlaneBufferBlitOrder
                 // Points Metal sizes none of: what it draws is undefined, mostly nothing, and the
                 // runtime draws nothing.
                 | D::UnsizedPoints => Exactness::OneOfMetals,

@@ -9,17 +9,18 @@
 //! set to `0xEE` through a buffer over it and the heap's changed bytes read back. Metal's answer
 //! per format: the first 16 hex digits of the SHA-256 of its cases' lines, `<case> <answer>`, each
 //! answer the first 16 hex digits of the SHA-256 of the case's read-back lines as the probe printed
-//! them, `unpacked` where Metal's bytes do not follow the color (one constant of its process's for
-//! every color; the runtime's fill there must write what the bytes form writes for one zero byte,
-//! its one constant, and the device announce `unpacked-fill-color` once: changed), or the refusal
-//! the runtime gives where it has no measured layout (`unmeasured`: a heap's two-plane texture of
-//! more than one level or slice, which Metal fills). A format the device holds no texture of is
+//! them, `unpacked` where Metal's bytes do not follow the color (bytes of its stack's; the
+//! runtime's fill there, in a command buffer of no earlier color fill, must write what the bytes
+//! form writes for one zero byte, and the device announce `unpacked-fill-color` once: changed),
+//! or `held-apart` for a heap's two-plane texture of more than one level or slice, which the
+//! runtime holds apart from the heap's bytes Metal's fill writes (its fills are checked through
+//! `get_bytes` in `surface_fills.rs`). A format the device holds no texture of is
 //! skipped, with an `XR-TEXTURE-FILLS-SKIPPED` line, and so is `Depth32Float_Stencil8` where its
 //! uploads announce that the device may store depth outside `[0, 1]` clamped
 //! (`restricted-depth-upload`, checked to fire exactly where the runtime plans a depth image that
 //! may clamp); a differing format prints its cases on one `XR-TEXTURE-FILLS-DIFFERS` line. The
-//! two-plane formats in private textures of their own memory replay `tfl4.swift` the same way, 5
-//! and 8 texels wide.
+//! two-plane formats in private textures of their own memory replay `tfl4.swift` the same way, 8
+//! texels wide (`OWN_TWO_PLANES`).
 
 use super::degrade_notices::{assert_made_once, forced, loses_depth_denormals, on_device};
 use super::degrade_notices::{
@@ -32,8 +33,8 @@ use super::{buffer_with, read_buffer};
 use metal2vulkan::metal::format::{is_depth_stencil, padded_only_over_memory, ExtendedRange};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
-    AppleOnly, BlitOption, ClearColor, CommandBufferStatus, CommandQueue, Degradation, Device,
-    Error, HeapDescriptor, HeapType, Origin, Region, ResourceOptions, Size, TextureDescriptor,
+    BlitOption, ClearColor, CommandBufferStatus, CommandQueue, Degradation, Device, Error,
+    HeapDescriptor, HeapType, Origin, Region, ResourceOptions, Size, TextureDescriptor,
 };
 use sha2::{Digest, Sha256};
 use std::time::Duration;
@@ -92,8 +93,8 @@ const FORMATS: [(u32, u64, &str); 50] = [
     (253, 0, "3e98e4db29723b7e"),
     (260, 0, "6bad089e9ea96a78"),
     (261, 0, "dbb9a8f56e387de0"),
-    (550, 180224, "d9a9085f09b969dd"),
-    (551, 180224, "d9a9085f09b969dd"),
+    (550, 180224, "dadda8e50239e9ba"),
+    (551, 180224, "dadda8e50239e9ba"),
 ];
 
 /// A format's unit as the probes count it: its block's bytes, width and height (a texel's for an
@@ -226,14 +227,12 @@ fn case(raw: u32, name: &str, wide: bool) -> Case {
     }
 }
 
-/// Metal's answers for two-plane textures of their own memory (`tfl4.swift`):
-/// each format's raw value, whether 8 texels wide (else 5), and the digest of its cases' lines.
-const OWN_TWO_PLANES: [(u32, bool, &str); 4] = [
-    (550, false, "6254dd68bd6a8801"),
-    (550, true, "3abe0fd65c9b2fc9"),
-    (551, false, "6254dd68bd6a8801"),
-    (551, true, "3abe0fd65c9b2fc9"),
-];
+/// Metal's answers for two-plane textures of their own memory, 8 texels wide (`tfl4.swift`):
+/// each format's raw value and the digest of its cases' lines, a case of more than one level
+/// `many-levels` (Metal's blits read such a texture back in bytes that vary from run to run; its
+/// fills are checked through `get_bytes` in `surface_fills.rs`, as are fills 5 texels wide, whose
+/// blits move texels between rows).
+const OWN_TWO_PLANES: [(u32, &str); 2] = [(550, "81c7070a27e42420"), (551, "81c7070a27e42420")];
 
 /// The cases `tfl4.swift` ran.
 const OWN_CASES: [&str; 15] = [
@@ -300,8 +299,7 @@ fn unpacked(raw: u32, case: &Case) -> bool {
 /// Case `name` of format `raw` (of a heap of `heap` bytes where a two-plane format's, else
 /// `wide` as [`case`] takes it): [`two_plane_case`]'s or [`texture_case`]'s answer, and whether
 /// the case is [`unpacked`]. Such a case's answer is `unpacked`, as Metal's table records it,
-/// where its fill wrote what the same case's fill of one zero byte writes, else both answers (or
-/// the refusal, where the fill was refused).
+/// where its fill wrote what the same case's fill of one zero byte writes, else both answers.
 fn case_answer(
     device: &Device,
     queue: &CommandQueue,
@@ -322,21 +320,11 @@ fn case_answer(
     }
     let zeros = run(true);
     let answer = match (answer, zeros) {
-        // A refusal stays the answer: the fill wrote nothing.
-        (Some(answer), _) if answer == "unmeasured" => Some(answer),
         (Some(answer), Some(zeros)) if answer == zeros => Some("unpacked".to_owned()),
         (Some(answer), Some(zeros)) => Some(format!("unpacked-differs:{answer}/{zeros}")),
         (answer, _) => answer,
     };
     (answer, true)
-}
-
-/// The answer a refused fill gives.
-fn refusal(error: Error) -> String {
-    match error {
-        Error::AppleOnly(AppleOnly::FillUnmeasured) => "unmeasured".to_owned(),
-        other => panic!("a fill refused: {other}"),
-    }
 }
 
 /// The descriptor of `case`'s texture of `raw`.
@@ -386,7 +374,12 @@ fn two_plane_case(
     command_buffer.commit().unwrap();
     command_buffer.wait_until_completed_for(WAIT).unwrap();
     if let Err(error) = filled {
-        return refusal(error);
+        panic!("{raw} {name}: a fill refused: {error}");
+    }
+    // A texture of more levels or slices is held apart from the heap's bytes, which Metal's fill
+    // writes (`heap-two-plane-texture`).
+    if case.levels > 1 || case.slices > 1 {
+        return "held-apart".to_owned();
     }
     let got = get(device, queue, &bytes, heap);
     let mut runs = Vec::new();
@@ -522,7 +515,7 @@ fn texture_case(
         "{raw} {name}"
     );
     if let Err(error) = filled {
-        return Some(refusal(error));
+        panic!("{raw} {name}: a fill refused: {error}");
     }
     let got = read_buffer(&readback, 0, total).unwrap();
     let lines: Vec<String> = parts
@@ -554,7 +547,7 @@ fn texture_fills_write_metal_s_bytes() {
             for name in CASES {
                 let (answer, unpacked) = case_answer(device, &queue, (raw, name), heap, false);
                 // A color fill packed where fills ignore the color, which the runtime ran.
-                unpacked_here |= unpacked && answer.as_deref().is_some_and(|a| a != "unmeasured");
+                unpacked_here |= unpacked && answer.is_some();
                 match answer {
                     Some(answer) => answers.push(format!("{name} {answer}")),
                     // A 4:2:2 texture Metal makes none of; another skip is the device's.
@@ -646,17 +639,21 @@ fn texture_fills_write_metal_s_bytes() {
     });
 }
 
-/// Every case of a two-plane texture of its own memory writes Metal's bytes, or is refused where
-/// the runtime refuses it (5 texels wide, or of more than one level).
+/// Every case of a two-plane texture of its own memory, 8 texels wide, writes Metal's bytes as
+/// Metal's blits read them back (a case of more than one level `many-levels`, `OWN_TWO_PLANES`).
 #[test]
 fn own_two_plane_fills_write_metal_s_bytes() {
     on_device(|device, _messages| {
         let queue = device.new_command_queue().unwrap();
         let mut wrong = Vec::new();
-        for &(raw, wide, metal) in &OWN_TWO_PLANES {
+        for &(raw, metal) in &OWN_TWO_PLANES {
             let mut answers = Vec::new();
             for name in OWN_CASES {
-                let answer = case_answer(device, &queue, (raw, name), 0, wide)
+                if case(raw, name, true).levels > 1 {
+                    answers.push(format!("{name} many-levels"));
+                    continue;
+                }
+                let answer = case_answer(device, &queue, (raw, name), 0, true)
                     .0
                     .unwrap_or_else(|| panic!("no {raw} texture of its own"));
                 answers.push(format!("{name} {answer}"));
@@ -664,10 +661,10 @@ fn own_two_plane_fills_write_metal_s_bytes() {
             let ours = digest(&answers.join("\n"));
             if ours != metal {
                 println!(
-                    "XR-TEXTURE-FILLS-DIFFERS {raw} wide {wide} {ours} (Metal's {metal}): {}",
+                    "XR-TEXTURE-FILLS-DIFFERS {raw} {ours} (Metal's {metal}): {}",
                     answers.join("; ")
                 );
-                wrong.push((raw, wide));
+                wrong.push(raw);
             }
         }
         assert!(wrong.is_empty(), "fills unlike Metal's: {wrong:?}");

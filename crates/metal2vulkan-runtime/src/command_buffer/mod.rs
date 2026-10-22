@@ -219,6 +219,10 @@ pub(super) struct CommandBufferShared {
     /// from `UNDEFINED` to `GENERAL` (`texture/first_move.rs`). Apart from the state, so a texture
     /// is made under no lock of the command buffer's.
     own_textures: Mutex<Vec<Texture>>,
+    /// The bytes a color fill of a color Metal packs no color in writes (`blit_fill.rs`): the
+    /// last color fill's packed texel over the ones before, from zeros. Apart from the state,
+    /// as `own_textures`.
+    fill_slot: Mutex<[u8; 16]>,
     /// Rebinds since its commit, of buffers its replayable encoders named, whose encoders are
     /// not yet encoded again (`reencode.rs`): its first submission waits until none is. Raised
     /// under the device's lock of its buffers over host pages (`Rebinds::replace`), which its
@@ -1677,6 +1681,7 @@ impl CommandBuffer {
             relayed: Arc::default(),
             step_numbers: OnceLock::new(),
             own_textures: Mutex::new(Vec::new()),
+            fill_slot: Mutex::new([0; 16]),
             reencode: AtomicU64::new(0),
             reencoding: Mutex::new(()),
             raws_ended: AtomicU64::new(0),
@@ -1690,6 +1695,17 @@ impl CommandBuffer {
     /// `device`.
     pub fn device(&self) -> &Device {
         &self.0.device
+    }
+
+    /// The color fill slot (`fill_slot`), after a color fill packed `packed` (`None` for one
+    /// that packs nothing): its first bytes become the texel's.
+    pub(super) fn fill_slot(&self, packed: Option<&[u8]>) -> [u8; 16] {
+        let mut slot = lock(&self.0.fill_slot);
+        if let Some(texel) = packed {
+            let n = texel.len().min(slot.len());
+            slot[..n].copy_from_slice(&texel[..n]);
+        }
+        *slot
     }
 
     /// Hold `texture`, which one of its encoders made for its own commands, as its

@@ -57,7 +57,10 @@
 //!
 //! The same two copies move a blit copy's samples between two multisampled color images where the
 //! device's own copy converts float NaNs ([`BitsCopy`]): the split out of the source's level and
-//! layer, the merge into the destination's over the region, through planes of their own.
+//! layer, the merge into the destination's over the region, through planes of their own. And
+//! the merge alone writes a multisampled fill's samples (`blit_fill.rs`, [`BitsCopy::fill`]):
+//! planes of the unsigned-integer format of the texel's size, each layer cleared to its sample's
+//! bits, merged over the region into a multisampled image of that format.
 
 use super::binding_view::VkView;
 use super::command_buffer::CommandBuffer;
@@ -88,11 +91,12 @@ use metal2vulkan::cache::Hash256;
 use metal2vulkan::device::{FormatUsage, VkProperty};
 use metal2vulkan::error::{Capability, Feature, Unsupported};
 use metal2vulkan::metal::format::FormatMapping;
-use metal2vulkan::metal::{TextureType, TextureUsage};
+use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::vk::{
     ComponentMapping, Format, FormatFeatureFlags2, ImageAspectFlags, ImageCreateFlags, ImageType,
     ImageUsageFlags, ImageViewType,
 };
+use std::ops::Range;
 
 /// One fetched attachment's sample planes for a pass (the module docs).
 #[derive(Clone, Debug)]
@@ -897,7 +901,7 @@ enum Recorded {
     Clear {
         image: vk::Image,
         value: vk::ClearColorValue,
-        layers: u32,
+        layers: Range<u32>,
     },
 }
 
@@ -1075,7 +1079,7 @@ impl PlanesCommands {
                         recorded.push(Recorded::Clear {
                             image: planes.texture.raw_image()?,
                             value: color.clear,
-                            layers: planes.layers,
+                            layers: 0..planes.layers,
                         });
                     }
                 }
@@ -1114,8 +1118,9 @@ impl PlanesCommands {
 /// Copies of regions between two multisampled color images by the sample planes' two copies,
 /// the split out of the source and the merge into the destination, through the unsigned-integer
 /// view of the texel size of both, so every sample's bits cross unchanged: where the device's own
-/// multisampled copy converts float NaNs (`nan_clear::converting_copy`). Held until the command
-/// buffer completes: the planes, the steps, their uses, and the objects the steps hold.
+/// multisampled copy converts float NaNs (`nan_clear::converting_copy`); or the merge alone, a
+/// multisampled fill's ([`BitsCopy::fill`]). Held until the command buffer completes: the
+/// planes, the steps, their uses, and the objects the steps hold.
 pub(super) struct BitsCopy {
     _planes: Vec<Planes>,
     steps: Vec<Recorded>,
@@ -1123,9 +1128,11 @@ pub(super) struct BitsCopy {
     _objects: PassObjects,
 }
 
-/// The stages a [`BitsCopy`] runs in: the split's compute, and the merge's draw.
+/// The stages a [`BitsCopy`] runs in: a fill's clears, the split's compute, and the merge's
+/// draw.
 pub(super) const BITS_COPY_STAGES: vk::PipelineStageFlags2 = vk::PipelineStageFlags2::from_raw(
-    vk::PipelineStageFlags2::COMPUTE_SHADER.as_raw()
+    vk::PipelineStageFlags2::ALL_TRANSFER.as_raw()
+        | vk::PipelineStageFlags2::COMPUTE_SHADER.as_raw()
         | vk::PipelineStageFlags2::FRAGMENT_SHADER.as_raw()
         | vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT.as_raw(),
 );
@@ -1204,6 +1211,113 @@ impl BitsCopy {
             uses,
             _objects: objects,
         }))
+    }
+
+    /// A fill of the region `origin` by `size` of a new multisampled image of `copy`'s format
+    /// (an unsigned-integer one) over the region's far corner, whose sample `s` of each texel there
+    /// takes the bits `values[s]` (the format's words): the image, a texture the command buffer
+    /// holds, and the steps that fill it, the sample planes each cleared to its sample's value
+    /// (`vkCmdClearColorImage` in the format itself, which takes the value's bits) and merged
+    /// into the image over the region. Refused, `Unsupported`, where the device cannot run the
+    /// merge (`Planes::new`) or make the image.
+    pub(super) fn fill(
+        maker: &CommandBuffer,
+        copy: PlanesCopy,
+        values: &[[u32; 4]],
+        [x, y]: [u32; 2],
+        [width, height]: [u32; 2],
+    ) -> Result<(Texture, BitsCopy), Error> {
+        let pixel_format = match copy {
+            PlanesCopy::R8 => PixelFormat::R8Uint,
+            PlanesCopy::R16 => PixelFormat::R16Uint,
+            PlanesCopy::R32 => PixelFormat::R32Uint,
+            PlanesCopy::Rg32 => PixelFormat::RG32Uint,
+            PlanesCopy::Rgba32 => PixelFormat::RGBA32Uint,
+            _ => return Err(internal("a multisampled fill of no unsigned format")),
+        };
+        let samples = u32::try_from(values.len()).map_err(|_| internal("a sample count"))?;
+        let format = copy.format();
+        let extent = [x + width, y + height];
+        let descriptor = TextureDescriptor {
+            texture_type: TextureType::Type2DMultisample,
+            pixel_format,
+            width: extent[0].into(),
+            height: extent[1].into(),
+            sample_count: samples.into(),
+            usage: TextureUsage::RENDER_TARGET
+                | TextureUsage::SHADER_READ
+                | TextureUsage::PIXEL_FORMAT_VIEW,
+            resource_options: ResourceOptions::private(),
+            ..TextureDescriptor::default()
+        };
+        // Mutable, as the merge's views and the copies out of it (into another format of the
+        // size, `blit_texture.rs`) view it.
+        let plan = ImagePlan {
+            pixel_format,
+            flags: ImageCreateFlags::MUTABLE_FORMAT,
+            image_type: ImageType::TYPE_2D,
+            format,
+            extent: [extent[0], extent[1], 1],
+            levels: 1,
+            layers: 1,
+            samples: sample_count(samples)
+                .ok_or_else(|| internal("a fill of a sample count Vulkan lacks"))?,
+            usage: ImageUsageFlags::COLOR_ATTACHMENT
+                | ImageUsageFlags::SAMPLED
+                | ImageUsageFlags::TRANSFER_SRC
+                | ImageUsageFlags::TRANSFER_DST,
+            view_formats: Vec::new(),
+            mapping: FormatMapping::direct(format, ImageAspectFlags::COLOR),
+            unavailable: TextureUsage::SHADER_WRITE | TextureUsage::SHADER_ATOMIC,
+        };
+        let texture = Device::new_planned_texture(maker, &descriptor, plan)?;
+        let target = Target {
+            texture: texture.clone(),
+            level: 0,
+            layer: 0,
+            layers: 1,
+            format,
+            samples,
+            extent,
+        };
+        let planes = Planes::new(maker, &target, samples, extent)?;
+        if !planes.clearable {
+            return Err(internal(
+                "planes of an unsigned format without transfer writes",
+            ));
+        }
+        let mut objects = PassObjects::new(maker.device(), 0, 1)?;
+        let write = Access::new(
+            vk::PipelineStageFlags2::ALL_TRANSFER,
+            vk::AccessFlags2::TRANSFER_WRITE,
+        );
+        let mut uses = vec![planes.image_use(write, true)?];
+        let image = planes.texture.raw_image()?;
+        let mut steps: Vec<Recorded> = (0..samples)
+            .zip(values)
+            .map(|(layer, &uint32)| Recorded::Clear {
+                image,
+                value: vk::ClearColorValue { uint32 },
+                layers: layer..layer + 1,
+            })
+            .collect();
+        let area = vk::Rect2D {
+            offset: vk::Offset2D {
+                x: x as i32,
+                y: y as i32,
+            },
+            extent: vk::Extent2D { width, height },
+        };
+        steps.push(objects.merge(&planes, &target, area, &mut uses)?);
+        Ok((
+            texture,
+            BitsCopy {
+                _planes: vec![planes],
+                steps,
+                uses,
+                _objects: objects,
+            },
+        ))
     }
 
     /// Record the copies into `command_buffer`, each step between barriers from everything
@@ -1312,8 +1426,8 @@ unsafe fn record_steps(raw: &Vk, command_buffer: vk::CommandBuffer, steps: &[Rec
                         aspect_mask: vk::ImageAspectFlags::COLOR,
                         base_mip_level: 0,
                         level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: *layers,
+                        base_array_layer: layers.start,
+                        layer_count: layers.end - layers.start,
                     };
                     raw.cmd_clear_color_image(
                         command_buffer,

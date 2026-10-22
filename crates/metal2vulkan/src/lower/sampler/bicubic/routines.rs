@@ -136,18 +136,18 @@ pub enum Routine {
 impl Routine {
     /// An upper estimate of the routines' SPIR-V words, counted once per module. Measured 9062
     /// words for [`Routine::Plane`] and 3663 for [`Routine::Line`] since the extended-range grids,
-    /// and 4954 for [`Routine::Quad`], 3750 for [`Routine::Span`], and 7839 for [`Routine::Block`]
-    /// since YCbCr's grid and truncation (`bicubic_routines_words_bound_their_emission`).
+    /// and 5218 for [`Routine::Quad`], 4014 for [`Routine::Span`], and 8103 for [`Routine::Block`]
+    /// since `RGB10A2Unorm_sRGB`'s field (`bicubic_routines_words_bound_their_emission`).
     pub fn words(self) -> u32 {
         match self {
             Routine::Plane => 9216,
             Routine::Line => 3712,
-            Routine::Quad => 5184,
-            Routine::Span => 3968,
+            Routine::Quad => 5440,
+            Routine::Span => 4224,
             Routine::Block => BLOCK_WORDS,
             Routine::Cube => CUBE_WORDS,
             Routine::Levels => LEVELS_WORDS,
-            Routine::QuadSteps => 5184,
+            Routine::QuadSteps => 5440,
         }
     }
 
@@ -504,7 +504,7 @@ pub fn define_block(mb: &mut ModuleBuilder) -> BResult<Block> {
 }
 
 /// [`Routine::words`] of [`Routine::Block`].
-const BLOCK_WORDS: u32 = 8064;
+const BLOCK_WORDS: u32 = 8320;
 
 /// A linear cube sample's routines, beside [`Quad`]'s sums of the four taps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1409,7 +1409,7 @@ fn packed_grids(
         let these_d = lanes(fb, grids)?;
         let these_s = lanes(fb, scales)?;
         let these_per = lanes(fb, steps)?;
-        let these_cut = lanes(fb, [cut; 4])?;
+        let these_cut = lanes(fb, cut)?;
         d = fb.select(is, these_d, d)?;
         s = fb.select(is, these_s, s)?;
         per = fb.select(is, these_per, per)?;
@@ -1418,7 +1418,7 @@ fn packed_grids(
         if p.filter_extended() {
             wide = bin(fb, BinOp::LogicalOr, wide, is)?;
         }
-        if p.ycbcr() {
+        if p.ties_away() {
             away = bin(fb, BinOp::LogicalOr, away, is)?;
         }
     }

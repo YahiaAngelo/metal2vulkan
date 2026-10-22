@@ -30,11 +30,12 @@
 //!   Metal is not measured;
 //! - a texture over an IOSurface made with `kIOSurfaceClientDirection`, a key in no header of the
 //!   public macOS SDK, refused by the IOSurface plane's stand-in
-//!   (`Buffer::new_texture_with_iosurface_plane`), which is no call of the table;
-//! - the texture fills' cases whose answer is unmeasured (`blit_fill.rs`): a fill of a texture
-//!   type, region, pattern or two-plane level the probes did not cover. A color fill packed in a
-//!   format with no color packing, where Metal's bytes differ between processes, is built: one of
-//!   Metal's answers, announced as `unpacked-fill-color`.
+//!   (`Buffer::new_texture_with_iosurface_plane`), which is no call of the table.
+//!
+//! Texture fills (`blit_fill.rs`) refuse nothing here: a multisample texture's samples, a texture
+//! buffer's bytes and a color packed in a format Metal packs no color in (the command buffer's
+//! last packed texel, announced as `unpacked-fill-color`) are built. A multisample fill a device
+//! cannot copy into the texture is refused there, `Unsupported`, as the device's gap.
 //!
 //! [`AppleOnlyCall`] is the table, and every call of it is here: the command buffer's, the
 //! compute, render and blit encoders', and the texture's protection options. A texture's
@@ -76,16 +77,6 @@ pub enum AppleOnly {
     /// a surface made with value 2 (read-only), without a fault; the runtime does not model the
     /// key's values.
     SurfaceClientDirection,
-    /// A texture fill (`fillTexture:level:slice:region:bytes:length:` or a color form) whose
-    /// answer on Apple's GPU is unmeasured: a multisample texture or a texture buffer, an empty
-    /// pattern, a format outside the measured families (a color packed in a format the probes
-    /// did not fill, such as the private 10-bit, PQ and HLG formats), and a two-plane
-    /// extended-range texture whose fill Metal writes where the runtime holds no bytes (one of its
-    /// own memory at a width that is not a multiple of 4, where Metal's blit rows move texels
-    /// between rows; a heap's texture other than a one-level 2D one) or whose bytes Metal's blits
-    /// read back no rule fits (one of its own of more than one level).
-    /// 1D, 3D, cube and array textures and regions of several depth images are measured and built.
-    FillUnmeasured,
 }
 
 /// Why the runtime refuses an [`AppleOnly`] feature. None is a device's gap: no measured Vulkan
@@ -110,8 +101,7 @@ impl AppleOnly {
             | Self::VertexAmplificationMode
             | Self::DepthCleared
             | Self::StencilCleared
-            | Self::SurfaceClientDirection
-            | Self::FillUnmeasured => AppleOnlyGap::Unmeasured,
+            | Self::SurfaceClientDirection => AppleOnlyGap::Unmeasured,
         }
     }
 }

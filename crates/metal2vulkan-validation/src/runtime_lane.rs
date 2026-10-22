@@ -677,6 +677,8 @@ mod resource_ids;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod restart;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod rgb10a2_srgb;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod rgbx_textures;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod rotated_targets;
@@ -692,6 +694,8 @@ mod runtime_levels;
 mod same_texture_strips;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod sample_copies;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod sample_fills;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod sample_positions;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
@@ -732,6 +736,8 @@ mod submit_per_import;
 mod sum_regroup;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod surface_aliases;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod surface_fills;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd), target_os = "linux"))]
 mod surface_texture_costs;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
@@ -748,6 +754,8 @@ mod texel_swizzles;
 mod texture_accesses;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod texture_blits;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod texture_buffer_fills;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod texture_creators;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]

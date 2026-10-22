@@ -556,7 +556,8 @@ pub(crate) fn tile_model(form: ExtendedRange, rgba: [u32; 4]) -> [f32; 4] {
         ExtendedRange::R10X6
         | ExtendedRange::Rg10X12
         | ExtendedRange::R10X6Srgb
-        | ExtendedRange::Rg10X12Srgb => {
+        | ExtendedRange::Rg10X12Srgb
+        | ExtendedRange::Rgb10A2Srgb => {
             panic!("{form:?}: a padded form's tile value is not measured")
         }
         ExtendedRange::R16Bfloat | ExtendedRange::Rg16Bfloat | ExtendedRange::Rgba16Bfloat => {
@@ -1991,6 +1992,118 @@ fn padded_srgb_forms_read_and_write_metals_codes() {
             Some(code),
             "code {c}"
         );
+    }
+}
+
+/// `a / 3` correctly rounded to `f32` (`a` below 4): the `f64` quotient's neighbours compared
+/// exactly (each `f32` times 3 is exact in `f64`).
+fn third(a: u32) -> f32 {
+    let q = f64::from(a) / 3.0;
+    let y = q as f32;
+    [
+        y,
+        f32::from_bits(y.to_bits().wrapping_sub(1)),
+        f32::from_bits(y.to_bits() + 1),
+    ]
+    .into_iter()
+    .min_by(|x, z| {
+        let d = |v: &f32| (f64::from(*v) * 3.0 - f64::from(a)).abs();
+        d(x).total_cmp(&d(z))
+    })
+    .expect("a candidate")
+}
+
+/// `RGB10A2Unorm_sRGB` (an Apple M3 Max under macOS 27.0.1, our probe: every code of each
+/// channel read, 16,385 values and the specials written in each) reads each color field's code as
+/// `R10Unorm_X6_sRGB`'s red (its decode step over 8192, a `half` with ties away from zero) and
+/// alpha's 2-bit code `a` as `a / 3`, and writes each color channel as `R10Unorm_X6_sRGB`'s red
+/// and alpha as the exact product with 3 of the value clamped to `[0, 1]` (a NaN 0), rounded to
+/// nearest, into one word: red from bit 0, green 10, blue 20, alpha 30. Its clear texels and load
+/// codes follow the same rules.
+#[test]
+fn rgb10a2_srgb_reads_and_writes_metals_codes() {
+    let form = ExtendedRange::Rgb10A2Srgb;
+    let step = |c: u32| f32::from(R10X6_SRGB_DECODE_STEPS[c as usize]) / 8192.0;
+    // The probe's words: red c, green 1023 - c, blue 7c mod 1024, alpha c mod 4.
+    let lanes: Vec<[u32; 4]> = (0..1024u32)
+        .map(|c| {
+            [
+                c | (1023 - c) << 10 | (7 * c % 1024) << 20 | (c % 4) << 30,
+                0,
+                0,
+                0,
+            ]
+        })
+        .collect();
+    let got = run(form, Op::Decode, &lanes);
+    let halves = run(form, Op::DecodeHalf, &lanes);
+    for ((l, g), h) in lanes.iter().zip(&got).zip(&halves) {
+        let w = l[0];
+        let want = [
+            step(w & 1023),
+            step(w >> 10 & 1023),
+            step(w >> 20 & 1023),
+            third(w >> 30),
+        ];
+        assert_eq!(*g, want.map(f32::to_bits), "word {w:08x}");
+        let want = want.map(|v| to_half(f64::from(v), true));
+        assert_eq!(*h, want.map(f32::to_bits), "half, word {w:08x}");
+    }
+    let mut values: Vec<f32> = (0..=16384u32).map(|k| k as f32 / 16384.0).collect();
+    for &first in &R10X6_SRGB_ENCODE_FIRST {
+        let first = f64::from(first);
+        if first > 0.0 {
+            let edge = ((first - 0.5) / 8192.0) as f32;
+            values.extend((0..5).map(|d| f32::from_bits(edge.to_bits() + d - 2)));
+        }
+    }
+    for a in [1.0f64, 2.0] {
+        let mid = ((a - 0.5) / 3.0) as f32;
+        values.extend((0..5).map(|d| f32::from_bits(mid.to_bits() + d - 2)));
+    }
+    values.extend([
+        f32::NAN,
+        -f32::NAN,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        -0.0,
+        -1.0,
+        1.5,
+        f32::from_bits(1),
+    ]);
+    let alpha_code = |v: f32| match v.is_nan() {
+        true => 0,
+        false => (f64::from(v.clamp(0.0, 1.0)) * 3.0).round_ties_even() as u32,
+    };
+    let lanes: Vec<[u32; 4]> = (0..values.len())
+        .map(|i| {
+            let v = |k: usize| values[(i * k) % values.len()].to_bits();
+            [v(1), v(7919), v(104_729), v(31)]
+        })
+        .collect();
+    let got = run(form, Op::Encode, &lanes);
+    for (l, g) in lanes.iter().zip(&got) {
+        let v = l.map(f32::from_bits);
+        let code = |c: usize| padded_srgb_code(ExtendedRange::R10X6Srgb, v[c]);
+        let word = code(0) | code(1) << 10 | code(2) << 20 | alpha_code(v[3]) << 30;
+        assert_eq!(*g, [word, 0, 0, 0], "values {v:?}");
+    }
+    // The crate's clear texels and load codes agree with the rules (the runtime's clear writes
+    // `clear_texel`, its load pass `load_code`, alpha kept).
+    for c in 0..1024u32 {
+        let code = padded_srgb_code(ExtendedRange::R10X6Srgb, step(c));
+        assert_eq!(form.load_code(c), Some(code), "code {c}");
+    }
+    let half = |v: f64| crate::float16::f16_bits_to_f32(crate::float16::f32_to_f16_bits(v as f32));
+    for color in [
+        [0.25, 0.5, 0.75, 0.4],
+        [1.0, 0.0, 0.1, 1.0],
+        [-1.0, 2.0, f64::NAN, 0.2],
+    ] {
+        let route = crate::metal::format::ClearRoute::ThroughHalf;
+        let code = |c: usize| padded_srgb_code(ExtendedRange::R10X6Srgb, half(color[c]));
+        let word = code(0) | code(1) << 10 | code(2) << 20 | alpha_code(half(color[3])) << 30;
+        assert_eq!(form.clear_texel(color, route), [word, 0, 0, 0], "{color:?}");
     }
 }
 

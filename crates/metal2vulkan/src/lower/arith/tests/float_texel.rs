@@ -217,7 +217,8 @@ fn a_packed_texel_is_its_codes_value() {
             | PackedTexels::Argb8
             | PackedTexels::YCbCr2048
             | PackedTexels::YCbCr8192
-            | PackedTexels::YCbCrExtended8192 => continue,
+            | PackedTexels::YCbCrExtended8192
+            | PackedTexels::Rgb10A2Srgb => continue,
         };
         let full = texel_format(full);
         assert!(full.packed_exact(), "{p:?}");

@@ -766,3 +766,35 @@ fn a_ycbcr_texture_retyped_is_refused_typed() {
         }
     }
 }
+
+/// Plain Metal views an `RGB10A2Unorm_sRGB` texture as `RGB10A2Unorm` and the other order (an
+/// Apple M3 Max under macOS 27.0.1); their reads are not measured, so each is refused typed
+/// (`NotImplemented(Format)`, naming the view's format), not as a pair Metal stops. A view in its
+/// own format is made.
+#[test]
+fn an_rgb10a2_srgb_view_in_another_format_is_the_runtimes_gap() {
+    let (_, device) = lavapipe();
+    let usage = TextureUsage::SHADER_READ | TextureUsage::PIXEL_FORMAT_VIEW;
+    for (pf, view) in [
+        (PixelFormat::RGB10A2UnormSRGB, PixelFormat::RGB10A2Unorm),
+        (PixelFormat::RGB10A2Unorm, PixelFormat::RGB10A2UnormSRGB),
+    ] {
+        let source = texture(pf, usage);
+        let own = ViewRequest::of_format(&source, pf);
+        assert!(
+            check_view(&source, &own, device.profile()).is_ok(),
+            "{pf:?}"
+        );
+        match check_view(
+            &source,
+            &ViewRequest::of_format(&source, view),
+            device.profile(),
+        ) {
+            Err(ViewRefusal::Unsupported(u)) => {
+                assert_eq!(u.feature, Feature::Format, "{pf:?} as {view:?}");
+                assert_eq!(u.needs, Needs::NotImplemented, "{pf:?} as {view:?}");
+            }
+            other => panic!("{pf:?} as {view:?}: {:?}", other.map(|_| ())),
+        }
+    }
+}

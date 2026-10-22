@@ -414,20 +414,6 @@ fn shared_exponents_round_half_up() {
     assert_eq!(texel(-1.0), 0);
 }
 
-/// A padded 10-bit format's fills have no defined result (one texel for every color, of bytes that
-/// differ between machines and runs): no packing.
-#[test]
-fn padded_formats_have_no_fill_packing() {
-    for pf in [
-        P::R10UnormX6,
-        P::R10UnormX6SRGB,
-        P::RG10UnormX12,
-        P::RG10UnormX12SRGB,
-    ] {
-        assert_eq!(fill_texel(pf, [0.5; 4]), None, "{pf:?}");
-    }
-}
-
 /// The texel a color fill without a pixel format wrote into a texture of each format on an M4
 /// under macOS 27.0.1 (our probe `tfl3`): the colors (0.25, 0.5, 0.75, 1),
 /// (2, -1, 0.5, 0.3) and (0, 0, 0, 0). The fill with the texture's own format wrote the same.
@@ -758,4 +744,274 @@ fn a_color_packed_in_another_format_repeats_its_texel() {
         }
     }
     assert!(wrong.is_empty(), "packings unlike Metal's: {wrong:?}");
+}
+
+/// The special values of our probe `pack.m`: color `i` of its first colors is
+/// `(s[i], s[i + 1], s[i + 2], s[i + 3])`, indices modulo the count.
+const PACK_SPECIALS: [f64; 88] = [
+    0.0,
+    -0.0,
+    1.0,
+    -1.0,
+    0.5,
+    -0.5,
+    2.0,
+    -2.0,
+    0.25,
+    0.75,
+    1.0 / 3.0,
+    1e-3,
+    -1e-3,
+    f64::INFINITY,
+    f64::NEG_INFINITY,
+    5e-324,
+    -5e-324,
+    1e-310,
+    1.401298464324817e-45,
+    1.1754943508222875e-38,
+    5.960464477539063e-08,
+    2.9802322387695312e-08,
+    4.470348358154297e-08,
+    6.103515625e-05,
+    65504.0,
+    65519.99999999999,
+    65520.0,
+    65536.0,
+    1e10,
+    -1e10,
+    3.4028234663852886e38,
+    3.4028235677973366e38,
+    1e39,
+    -1e39,
+    2147483647.0,
+    2147483648.0,
+    -2147483648.0,
+    -2147483649.0,
+    4294967295.0,
+    4294967295.5,
+    4294967296.0,
+    255.5,
+    127.5,
+    -128.5,
+    32767.5,
+    65535.5,
+    0.5 / 255.0,
+    1.5 / 255.0,
+    1.0 / 510.0,
+    384.0 / 510.0,
+    894.0 / 510.0,
+    -384.0 / 510.0,
+    1.2529411764705882,
+    -0.7529411764705882,
+    0.5 / 1023.0,
+    1.5 / 1023.0,
+    0.5 / 65535.0,
+    64512.0,
+    0.04045,
+    0.0031308,
+    1e-300,
+    1e300,
+    65408.0,
+    65409.0,
+    65472.0,
+    4.0,
+    15.5,
+    31.5,
+    0.5 / 15.0,
+    1.5 / 15.0,
+    0.5 / 31.0,
+    0.5 / 63.0,
+    7.5,
+    127.0,
+    128.0,
+    255.0,
+    256.0,
+    -127.0,
+    -129.0,
+    32767.0,
+    32768.0,
+    -32768.0,
+    -32769.0,
+    65535.0,
+    65536.5,
+    1023.0,
+    1024.0,
+    3.0,
+];
+
+/// Metal's packed texels on the M3 Max: per raw format, FNV-1a 64 of each color's 16 bytes.
+const M3_PACKED: [(u32, u64); 88] = [
+    (1, 0x09edfec5ceb46c15),
+    (10, 0xc9c13c3903ee05c5),
+    (11, 0x91840698df2fb605),
+    (12, 0x8c34d3a3b420f295),
+    (13, 0xa30563d1b5860fc5),
+    (14, 0x7a06935f97b26a95),
+    (20, 0xc68135c31da61975),
+    (22, 0xd52cb0e596e5e745),
+    (23, 0x49edaec300395f25),
+    (24, 0xf4f5acc15bc1c8a5),
+    (25, 0x55724d4ab40b2ff5),
+    (30, 0xa8c53744806ef6a5),
+    (31, 0x11b930bc12d532f5),
+    (32, 0x13106c5643ad0915),
+    (33, 0xb7a7b47ede539845),
+    (34, 0x7adcca3460058905),
+    (40, 0x3fc0aabdf07ed805),
+    (41, 0x7fac691931059b95),
+    (42, 0x786ebc82b38e2f25),
+    (43, 0x93dffcdb93bdb775),
+    (45, 0xff23f3bfc14a8de9),
+    (46, 0x819c9cc67ae4c0f1),
+    (47, 0xdb9aae03dd1048af),
+    (48, 0x0096ddf59054447f),
+    (53, 0xd9b569bf0bbab065),
+    (54, 0xa60a7baf26ce086d),
+    (55, 0x94f4d16646f6d9a5),
+    (60, 0xc77a5424bbb783e5),
+    (62, 0xdde97108d590f225),
+    (63, 0xbcf717c6a1a4ff6d),
+    (64, 0x9f6f4a4e74ed7705),
+    (65, 0x2199e75fae189785),
+    (70, 0xe53edf01bb6f303d),
+    (71, 0xbc2b181e0d9a0d75),
+    (72, 0xf251a7f2f355f4cd),
+    (73, 0xdade99c5318f42cd),
+    (74, 0xebd7b4edfa7fc595),
+    (80, 0xd251a65f568ed3dd),
+    (81, 0x062e31c5a7c12b85),
+    (90, 0xbcd8486fe7fb2fcd),
+    (91, 0xe88d71af8a76776d),
+    (92, 0x197e32a73afd2edd),
+    (93, 0xbf905eba1ea91305),
+    (94, 0xa8e269919fa4af4d),
+    (554, 0x1a355cbcdf254f85),
+    (555, 0xa3e7e7627a037ea5),
+    (95, 0x6e5a585f02d9d6f6),
+    (96, 0x162c1d4e842c288d),
+    (97, 0x0053089b91be3522),
+    (98, 0xc919f9f873a5096f),
+    (99, 0xd93a5277330f8870),
+    (103, 0xd1eb13b2e48809dd),
+    (104, 0xe383cd9bd4cd3715),
+    (105, 0x66524edfb6e70455),
+    (110, 0xa7bb1705af705785),
+    (112, 0x5cbe5bff4a89d42d),
+    (113, 0xbcacf412ae240b25),
+    (114, 0x331d1a1c86612dc1),
+    (115, 0xafcf19bb02807b41),
+    (552, 0x2c686bb72df7ed55),
+    (553, 0x00aa8ffa43139175),
+    (120, 0xab081fb39e2d9619),
+    (121, 0x30e12dd8a6191db4),
+    (122, 0x6f446a2ed5ecf115),
+    (123, 0xd188239b19020738),
+    (124, 0x82f23e151c22d281),
+    (125, 0x9665315fcfe99c0d),
+    (84, 0x153cbd6614195e0d),
+    (556, 0xe0eae52c31abe409),
+    (26, 0x67e399d5c9c84ea5),
+    (44, 0x1a0f09262b647425),
+    (66, 0x87e99425fb7ee38d),
+    (85, 0xd39dcc42959a4285),
+    (100, 0xe6d2826c04edd16d),
+    (116, 0xb19bd6f18907e405),
+    (300, 0x3227de0cfe6987d5),
+    (301, 0x6fd02644396c579d),
+    (302, 0x73da0649d9d0ec65),
+    (303, 0xe9be188576515e65),
+    (304, 0xde7a0a42b5222c25),
+    (313, 0x5ce2bd9ecff9ac71),
+    (314, 0xff1039e411496579),
+    (315, 0xafcf19bb02807b41),
+    (323, 0x034d7a4213b5384d),
+    (324, 0x7475d06a8616a702),
+    (325, 0x9665315fcfe99c0d),
+    (637, 0xd973f20b29bc22f5),
+    (638, 0x522fb7d7164e51e5),
+];
+
+/// The raw formats a color fill packs no color in on the M3 Max: its bytes are the calling
+/// thread's stack.
+const M3_UNPACKED: [u32; 213] = [
+    0, 130, 131, 132, 133, 134, 135, 140, 141, 142, 143, 150, 151, 152, 153, 160, 161, 162, 163,
+    164, 165, 166, 167, 170, 172, 174, 176, 178, 179, 180, 181, 182, 183, 186, 187, 188, 189, 190,
+    192, 193, 194, 195, 196, 197, 198, 199, 200, 204, 205, 206, 207, 208, 210, 211, 212, 213, 214,
+    215, 216, 217, 218, 222, 223, 224, 225, 226, 228, 229, 230, 231, 232, 233, 234, 235, 236, 240,
+    241, 250, 252, 253, 255, 260, 261, 262, 263, 550, 551, 500, 502, 503, 505, 506, 507, 508, 509,
+    510, 520, 522, 523, 525, 526, 527, 528, 529, 530, 540, 541, 542, 543, 544, 545, 546, 547, 548,
+    564, 565, 566, 567, 568, 569, 570, 571, 572, 573, 574, 575, 580, 581, 582, 583, 584, 585, 591,
+    592, 593, 594, 595, 596, 597, 598, 599, 600, 601, 602, 608, 609, 610, 611, 612, 613, 615, 616,
+    617, 618, 619, 620, 651, 652, 185, 191, 203, 209, 221, 227, 501, 504, 521, 524, 560, 562, 563,
+    576, 577, 578, 579, 586, 587, 588, 589, 590, 603, 604, 605, 606, 607, 621, 622, 623, 624, 625,
+    626, 627, 628, 629, 630, 631, 632, 633, 634, 635, 636, 639, 640, 641, 642, 643, 644, 645, 646,
+    647, 648, 649, 650,
+];
+
+/// The NaNs of our probe `pack.m`, by their bits: each in turn in every channel of a color whose
+/// other channels are 0.5.
+const PACK_NANS: [u64; 8] = [
+    0x7ff8_0000_0000_0000,
+    0xfff8_0000_0000_0000,
+    0x7ff0_0000_0000_0001,
+    0xfff0_0000_0000_0001,
+    0x7ffc_0000_0000_0000,
+    0x7ff4_0000_0000_0000,
+    0x7fff_ffff_ffff_ffff,
+    0x7ff8_0000_0012_3456,
+];
+
+/// The colors of our probe `pack.m`, in its order: the specials' colors, 1024 colors of four
+/// doubles from its xorshift (the top 53 bits of a step as a fraction of `2^53`, times 6, less
+/// 3), then the NaNs'.
+fn pack_colors() -> Vec<[f64; 4]> {
+    let n = PACK_SPECIALS.len();
+    let mut colors: Vec<[f64; 4]> = (0..n)
+        .map(|i| [0, 1, 2, 3].map(|c| PACK_SPECIALS[(i + c) % n]))
+        .collect();
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    for _ in 0..1024 {
+        colors.push([0; 4].map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / 9_007_199_254_740_992.0 * 6.0 - 3.0
+        }));
+    }
+    for bits in PACK_NANS {
+        for channel in 0..4 {
+            let mut color = [0.5; 4];
+            color[channel] = f64::from_bits(bits);
+            colors.push(color);
+        }
+    }
+    colors
+}
+
+/// Every pixel format on an Apple M3 Max under macOS 27.0.1 (our probes `classify.m` and
+/// `pack.m`): a color fill packed in one of 88 formats writes its texel, which the runtime packs
+/// byte for byte for each of the probe's 1,144 colors (each texel repeated or cut to the 16 bytes
+/// of an `RGBA32Uint` texel); in each of the other 213 it writes bytes of the calling thread's
+/// stack (a probe that set the stack below its call to one byte read that byte back), and the
+/// runtime packs nothing.
+#[test]
+fn the_m3_packs_these_formats_and_no_other() {
+    let colors = pack_colors();
+    assert_eq!(colors.len(), 1144);
+    let mut wrong = Vec::new();
+    for (raw, metal) in M3_PACKED {
+        let pf = PixelFormat::try_from(raw).unwrap();
+        let ours = colors.iter().flat_map(|&c| {
+            let texel = bytes(pf, c);
+            texel.iter().copied().cycle().take(16).collect::<Vec<_>>()
+        });
+        if fnv(ours) != metal {
+            wrong.push(pf);
+        }
+    }
+    assert!(wrong.is_empty(), "packings unlike Metal's: {wrong:?}");
+    for raw in M3_UNPACKED {
+        let pf = PixelFormat::try_from(raw).unwrap();
+        assert_eq!(fill_texel(pf, [0.5; 4]), None, "{pf:?}");
+    }
 }

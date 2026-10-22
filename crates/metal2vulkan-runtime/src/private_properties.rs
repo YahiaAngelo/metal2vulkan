@@ -276,8 +276,9 @@ pub enum PrivateFlag {
     /// `isLargeMRTSupported`: Metal's.
     IsLargeMrtSupported,
     /// `isRGB10A2GammaSupported`: the device's: whether the runtime filters a texture of
-    /// `RGB10A2Unorm_sRGB` on it ([`Device::pixel_format_capabilities`]): no on every device
-    /// while the runtime holds no texture of that format.
+    /// `RGB10A2Unorm_sRGB` on it ([`Device::pixel_format_capabilities`]): yes on every device,
+    /// whose function filters the texture's held words as Metal does (Metal's answer on an Apple
+    /// M3 Max under macOS 27.0.1: yes).
     IsRgb10a2GammaSupported,
     /// `supportsBufferWithAddressRanges`: the device's, no (the runtime makes no buffer over
     /// address ranges).

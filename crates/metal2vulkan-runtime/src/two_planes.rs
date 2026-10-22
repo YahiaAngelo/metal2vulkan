@@ -19,8 +19,9 @@
 //!   0's texels are lost or moved too. It is Metal's defect, which depends on the planes' layout in
 //!   memory. A copy into the other format of the pair copies the same way.
 //! - At widths that are not a multiple of 4, blits between a buffer and the texture address its
-//!   rows the same way, so they move texels between rows too (into the texture, overlapping rows
-//!   in an order that varies); `getBytes` and `replaceRegion` move the texels at every width.
+//!   rows the same way, so they move texels between rows and the bytes between them too
+//!   (`two_planes/buffer_rows.rs` states the rows, measured on an Apple M3 Max under macOS
+//!   27.0.1); `getBytes` and `replaceRegion` move the texels at every width.
 //!
 //! **Held** as one `R32G32_UINT` image (`metal::format::ExtendedRange::Planes`): each texel's
 //! color word, then its alpha byte in the second word.
@@ -33,10 +34,12 @@
 //!   bands of rows ([`bands`]), one blit command: per band, one copy of its texels out of the
 //!   image, one dispatch of `bind::plane_words_module` moving each texel's first word into the
 //!   buffer's bytes or out of them, and, into the texture, one copy of the texels back.
-//! - **Blits between a buffer and the texture** at a width that is not a multiple of 4 move the
-//!   texels at the texture's rows, a near-equivalent announced once per device
-//!   (`two-plane-buffer-blit`, precision): Metal's answer out of the texture is the model's
-//!   reads, but into it its rows overlap in an order that varies.
+//! - **Blits between a buffer and the texture** at a width that is not a multiple of 4: a 2D
+//!   texture or array of one level is blitted at Metal's rows through a scratch buffer laid out
+//!   as plane 0 (`buffer_rows.rs`), announced (`two-plane-buffer-blit`, precision) where rows meet
+//!   in a blit into it and where a blit out of a texture of the device's memory reads bytes
+//!   between its rows that a fill or a blit wrote; any other such texture moves the texels at the
+//!   texture's rows, announced the same way.
 //! - **Blits between two such textures** of one level and one slice, 2D, each level within a
 //!   storage buffer, move both planes' bytes as Metal's blit does (`modelled_plane_copies`):
 //!   one command of the encoder, both levels copied into a scratch buffer, the kernel
@@ -82,7 +85,12 @@ use metal2vulkan::metal::{PixelFormat, TextureType};
 use metal2vulkan::vk::ImageAspectFlags;
 use std::ops::Range;
 
+mod buffer_rows;
 mod heap_bytes;
+
+#[cfg(test)]
+pub(super) use buffer_rows::later_row_stands;
+pub(super) use buffer_rows::{between_rows, buffer_blit_rows, row_spans, rows_held};
 
 use heap_bytes::{stage_planes, BytePlanes, Staged};
 
@@ -530,7 +538,7 @@ impl BlitCommandEncoder {
             if let Some(planes) = BytePlanes::of(destination, to) {
                 if self.plane_bytes_copy(source, destination, &planes, from, copy)? {
                     if outside_texels(from, [sx, sy], size)
-                        && source.kept_outside()
+                        && source.outside_written()
                         && BytePlanes::of(source, from).is_none()
                     {
                         announce_texture_copy(
@@ -557,7 +565,7 @@ impl BlitCommandEncoder {
             // A source over a surface's planes is read as its bytes lie (`plane_texture_copy`).
             if !surfaces[0]
                 && outside_texels(from, [sx, sy], size)
-                && (source.kept_outside() || source.heap().is_some())
+                && (source.outside_written() || source.heap().is_some())
             {
                 announce_texture_copy(
                     &device,

@@ -23,6 +23,7 @@ mod binding_view;
 mod blit;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod blit_cover;
+mod blit_fill;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod blit_holds;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
@@ -203,6 +204,7 @@ mod tracker;
 mod trails;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod twin_flights;
+mod two_plane_rows;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod uniform_bind_offsets;
 mod unique_identifier;

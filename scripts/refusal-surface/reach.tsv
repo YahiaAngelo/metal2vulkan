@@ -184,7 +184,6 @@ apple	VertexAmplificationMode	none	Apple-private (no public header)
 apple	DepthCleared	none	Apple-private (no public header)
 apple	StencilCleared	none	Apple-private (no public header)
 apple	SurfaceClientDirection	none	an IOSurface key in no public header
-apple	FillUnmeasured	system	Apple-private texture fills, which macOS system software encodes
 bind	DescriptorRangeExceeded	app	a buffer window past a device's descriptor range
 bind	TexelBufferTooLarge	rare	a texture buffer past maxTexelBufferElements
 bind	HeapTooLarge	rare	more resident textures than the pipeline's heap holds (bindless at scale)

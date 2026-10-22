@@ -159,7 +159,6 @@ fn each_apple_only_refusal_names_its_gap() {
         (AppleOnly::DepthCleared, Unmeasured),
         (AppleOnly::StencilCleared, Unmeasured),
         (AppleOnly::SurfaceClientDirection, Unmeasured),
-        (AppleOnly::FillUnmeasured, Unmeasured),
     ];
     for (feature, gap) in table {
         assert_eq!(feature.gap(), gap, "{feature:?}");

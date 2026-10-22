@@ -1625,6 +1625,10 @@ pub(super) fn flags(form: ExtendedRange) -> u32 {
     // linear filter of it (an Apple M4 and an Apple M3 Max, byte-identical); `RG10Unorm_X12_sRGB`'s
     // reads and filter are `RG10Unorm_X12`'s.
     let padded_srgb = BicubicTexels::UNORM | PackedTexels::YCbCr8192.class().0;
+    // `RGB10A2Unorm_sRGB`'s color channels sum as `R10Unorm_X6_sRGB`'s red, its alpha on the grid
+    // `16 · 255` ([`PackedTexels::Rgb10A2Srgb`]; an Apple M3 Max, every channel of 4,096 2D
+    // samples, `float` and `half` results).
+    let rgb10a2_srgb = BicubicTexels::UNORM | PackedTexels::Rgb10A2Srgb.class().0;
     let (pf, channels, family) = match form {
         ExtendedRange::Bgr10 { srgb: false } => (PixelFormat::BGR10XR, 0b0111, extended),
         ExtendedRange::Bgr10 { srgb: true } => (PixelFormat::BGR10XRSRGB, 0b0111, extended),
@@ -1636,6 +1640,7 @@ pub(super) fn flags(form: ExtendedRange) -> u32 {
         ExtendedRange::Rg10X12 => (PixelFormat::RG10UnormX12, 0b0011, padded),
         ExtendedRange::R10X6Srgb => (PixelFormat::R10UnormX6SRGB, 0b0001, padded_srgb),
         ExtendedRange::Rg10X12Srgb => (PixelFormat::RG10UnormX12SRGB, 0b0011, padded),
+        ExtendedRange::Rgb10A2Srgb => (PixelFormat::RGB10A2UnormSRGB, 0b1111, rgb10a2_srgb),
         // A bfloat form's samples and gathers read its texels unfiltered: its bits name its
         // channels and border texels alone.
         ExtendedRange::R16Bfloat => (PixelFormat::R16Bfloat, 0b0001, 0),
@@ -1670,5 +1675,15 @@ mod tests {
             assert_ne!(f & BicubicTexels::EXTENDED, 0);
             assert_eq!(f & BicubicTexels::SRGB != 0, srgb);
         }
+        // `RGB10A2Unorm_sRGB` has four channels, and its own packed field.
+        assert_eq!(border(ExtendedRange::Rgb10A2Srgb), four);
+        let field = flags(ExtendedRange::Rgb10A2Srgb)
+            & crate::metal::texel_format::TexelFormat::PACKED_MASK;
+        assert_eq!(
+            field,
+            crate::metal::texel_format::PackedTexels::Rgb10A2Srgb
+                .class()
+                .0
+        );
     }
 }

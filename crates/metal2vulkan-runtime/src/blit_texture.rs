@@ -218,7 +218,11 @@ fn multisampled_texels(region: &TextureRegion) -> Written {
 }
 
 /// The copy unit of `texture` copied with `option`.
-fn unit(call: &'static str, texture: &Texture, option: BlitOption) -> Result<CopyUnit, Error> {
+pub(super) fn unit(
+    call: &'static str,
+    texture: &Texture,
+    option: BlitOption,
+) -> Result<CopyUnit, Error> {
     // A texture over a buffer holds a colour format (`linear_plan.rs`): its copy unit is its
     // texel, whatever holds it.
     if texture.over_buffer() {
@@ -714,9 +718,13 @@ impl BlitCommandEncoder {
             )));
         }
         // At a width that is not a multiple of 4 Metal's blit addresses the level's rows short of
-        // where they lie, moving texels between rows: announced, the texels moved as `getBytes`
-        // and `replaceRegion` move them.
+        // where they lie, moving texels between rows: at those rows for a 2D texture or array of
+        // one level (`two_planes/buffer_rows.rs`); for another (more levels, a view, 1D, 3D, a
+        // surface's), announced, the texels moved as `getBytes` and `replaceRegion` move them.
         let width = level_extent(texture.record(), region.level)[0];
+        if !width.is_multiple_of(4) && two_planes::rows_held(texture) {
+            return self.plane_rows_copy(buffer, texture, &image, layout, into_texture);
+        }
         if !width.is_multiple_of(4) {
             let pf = texture.pixel_format();
             self.core()
@@ -726,7 +734,8 @@ impl BlitCommandEncoder {
                         "`{call}` between a buffer and a {} texture level {width} texels wide",
                         pf.name()
                     );
-                    let reason = "the texels move at the rows the texture holds them in, where \
+                    let reason = "a texture of more than one level, a view, a 1D or 3D texture or a surface's: \
+                                  the texels move at the rows the texture holds them in, where \
                                   Metal's blit addresses its rows floor(4w/16)*16 bytes apart, \
                                   short of them, and so moves texels between rows"
                         .to_owned();
@@ -1145,7 +1154,7 @@ impl BlitCommandEncoder {
     /// buffer of the encoder out of the image the source's texels are read from. So out of a
     /// texture with a twin into a depth texture without one they read its twin, and into it from a
     /// depth texture they write its twin directly and its image through the buffer.
-    fn texture_copies(
+    pub(super) fn texture_copies(
         &mut self,
         call: &'static str,
         source: &Texture,
