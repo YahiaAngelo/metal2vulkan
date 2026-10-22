@@ -1684,17 +1684,20 @@ pub enum CommandBufferError {
     /// Metal's GPU hung at a direct draw of primitive type 9 of 3 vertices or more
     /// ([`DrawPrimitiveType::Nine`](crate::DrawPrimitiveType::Nine)) and failed the command buffer
     /// with `MTLCommandBufferErrorTimeout` (2, "Caused GPU Hang Error
-    /// (00000003:kIOGPUCommandBufferCallbackErrorHang)", its `GPUStartTime` 0), 32.7 to 42.7 ms
-    /// after its commit and 27.5 to 29.5 ms after it read `Scheduled` (the M3 Max, macOS 27.0.1,
-    /// 7 hangs): the encoders before the draw's ran; its render encoder, not even its pass's load,
-    /// clear or store actions, and every encoder after it ran nothing; its event signals fired.
-    /// Every command buffer of its queue scheduled while it was in flight ran nothing and
-    /// completed with no error together with it: committed at once, after it read `Scheduled`, or
-    /// 20 ms on, and with an event wait met during the hang, by the host or another queue's
-    /// command buffer. One whose event wait was met only after it completed, one of another queue
-    /// and one committed later ran. The runtime completes it no sooner than 32.7 ms after its
-    /// commit and 27.5 ms after the work before the draw ran, and answers its queue's others so
-    /// (`command_buffer/hang.rs`).
+    /// (00000003:kIOGPUCommandBufferCallbackErrorHang)"). On the M3 Max (macOS 27.0.1, 33 hangs)
+    /// it read `Scheduled` 0.68 to 13.2 ms after its commit and failed 28.3 to 46.2 ms after it,
+    /// mostly 27.5 to 28.9 ms after `Scheduled`: the encoders before the draw's ran; its render
+    /// encoder, not even its pass's load, clear or store actions, and every encoder after it ran
+    /// nothing; its event signals fired. Every command buffer of its queue scheduled while it was
+    /// in flight completed with no error together with it, committed at once, after it read
+    /// `Scheduled`, or 20 ms on, and with an event wait met during the hang, by the host or
+    /// another queue's command buffer; their work ran or not by a race (mostly ran where the hang
+    /// read `Scheduled` within 2 ms, mostly not where later). One whose event wait was met only
+    /// after it completed, one of another queue and one committed later ran. The runtime's hang
+    /// reads `Scheduled` 5.06 ms after its commit (later where the work before the draw is
+    /// submitted later), completes no sooner than 32.7 ms after its commit and 27.5 ms after the
+    /// work before the draw ran, and runs nothing of its queue's others: the outcome of Metal's
+    /// slower submission (`command_buffer/hang.rs`).
     GpuHang,
     /// Metal failed the command buffer as a victim of its GPU's recovery, at an indirect draw of
     /// primitive type 9, indexed or not, whatever its arguments

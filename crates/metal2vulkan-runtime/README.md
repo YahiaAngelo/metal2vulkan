@@ -238,9 +238,10 @@ Calls Metal does not have, for a consumer that emulates a Metal device:
   whose `LineLoop`, `TriangleFan`, `Quads` and `QuadStrip` are the values 5 to 8 Metal's draws take
   besides its header's (`DrawPrimitiveType::from_raw`): each draws as the list plain Metal draws,
   in Metal's vertex order, direct, indexed and indirect, and quads and a quad strip count one
-  `[[primitive_id]]` a quad, as Metal does, where the list draws two triangles. Its `Nine`, value 9, draws nothing and
-  fails the command buffer as Metal's GPU does: a hang (`CommandBufferError::GpuHang`), a page
-  fault or a victim of the GPU's recovery (`GpuRecoveryVictim`), by the draw's form.
+  `[[primitive_id]]` a quad, as Metal does, where the list draws two triangles. Its `Nine`, value
+  9, draws nothing and fails the command buffer as Metal's GPU does: a hang
+  (`CommandBufferError::GpuHang`), a page fault or a victim of the GPU's recovery
+  (`GpuRecoveryVictim`), by the draw's form (docs/API.md, "Accepted differences", for the timing).
 - `TextureDescriptor::address_mode_map` presents a texture as sampling by other address modes than
   its sampler's.
 - Resource ID reservations, placements and counts (`Device::reserve_resource_ids`,

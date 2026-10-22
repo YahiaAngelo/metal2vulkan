@@ -175,6 +175,7 @@
 use super::completion::Submitted;
 use super::gate::Hold;
 use super::group::{self, After, GroupEnd, InfoParts};
+use super::hang;
 use super::kept_barriers::{KeptBarriers, SlotStamps};
 use super::{lock, recording_error, submission_error, CommandBufferShared, State};
 use crate::deferred::Deferred;
@@ -237,6 +238,10 @@ pub(crate) struct Submission {
     /// It ends a command buffer with a switch of storage forms riding on it, which settles by its
     /// submission's outcome ([`Submission::rides_forms`]).
     forms: bool,
+    /// It makes its command buffer `Scheduled`: it ends it, or, behind its GPU hang, it is the
+    /// batch before the hang's wait and the hang's time to read `Scheduled` came
+    /// (`hang::schedules`).
+    schedules: bool,
     /// Its command buffer became `Scheduled` as it was held in a group
     /// ([`schedule_held`](Submission::schedule_held)).
     scheduled: bool,
@@ -264,9 +269,9 @@ impl Submission {
         self.batch.value
     }
 
-    /// Whether it ends its command buffer.
-    pub(super) fn ends(&self) -> bool {
-        self.batch.last
+    /// Whether it makes its command buffer `Scheduled` ([`Submission::schedules`]).
+    pub(super) fn schedules(&self) -> bool {
+        self.schedules
     }
 
     /// Its command buffer.
@@ -303,7 +308,7 @@ impl Submission {
     /// taken as it was held, so nothing committed later on its queue goes before it; only its
     /// kernel submission and its queue waiter's watch wait for the group.
     pub(super) fn schedule_held(&mut self) -> bool {
-        if !self.batch.last || self.forms || self.scheduled {
+        if !self.schedules || self.forms || self.scheduled {
             return false;
         }
         self.scheduled = true;
@@ -973,8 +978,12 @@ impl CommandBufferShared {
                 return Err(error);
             }
         }
-        // A held batch's kernel end is its group's (`Group::submit`).
-        if last && !grouped {
+        // It makes its command buffer `Scheduled` where it ends it, or, behind the command
+        // buffer's GPU hang, where it is the batch before the hang's wait and the hang's time to
+        // read `Scheduled` came (`hang.rs`). A held batch's kernel end is its group's
+        // (`Group::submit`).
+        let schedules = hang::schedules(&mut state.hang_scheduling, index, last);
+        if schedules && !grouped {
             self.kernel.end_at(gpu_time::host_nanos());
         }
         if !single {
@@ -997,7 +1006,7 @@ impl CommandBufferShared {
         // switch of storage forms riding on it ends there first (`scheduler/mod.rs`); its
         // transition to `Scheduled`, posted as it is published or held, waits for them.
         let forms = last && state.storage_form.is_some();
-        let handlers = last && (!state.submission.is_empty() || forms);
+        let handlers = (schedules && !state.submission.is_empty()) || forms;
         state.submitting = handlers;
         scheduler.tracker.apply(plan);
         held_moves.submitted();
@@ -1042,6 +1051,7 @@ impl CommandBufferShared {
             },
             handlers,
             forms,
+            schedules,
             scheduled: false,
         };
         if !grouped {
@@ -1078,10 +1088,11 @@ impl CommandBufferShared {
         let Submission {
             queue,
             batch,
+            schedules,
             scheduled,
             ..
         } = submission;
-        if batch.last && !scheduled {
+        if schedules && !scheduled {
             // Before a completion turn can see it finish, so the queue's context runs its
             // transition to `Scheduled` first.
             self.schedule();

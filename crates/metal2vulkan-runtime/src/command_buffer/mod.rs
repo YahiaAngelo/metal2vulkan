@@ -567,6 +567,9 @@ pub(super) struct State {
     fails_from: Option<(usize, CommandBufferError)>,
     /// The hold of the encoder Metal's GPU hangs at, where one does (`hang.rs`).
     hang: Option<Hang>,
+    /// Its transition to `Scheduled` behind its own GPU hang, from its commit on (`hang.rs`):
+    /// made as the batch before the hang's wait is taken, or later, once its time came.
+    hang_scheduling: Option<hang::Scheduling>,
     /// It was committed with an event wait while a hang of its queue was in flight: the verdict
     /// its first batch's submission applies (`hang.rs`, `checks.rs`).
     behind_hang: Option<hang::Verdict>,
@@ -1206,7 +1209,7 @@ impl State {
     /// hang's event and what follows waits for the hang's hold.
     pub(super) fn hang_from(&mut self, encoder: usize, device: &Device) -> Result<(), Error> {
         if self.fails_from.is_none() && self.hang.is_none() {
-            let hang = Hang::new(device)?;
+            let hang = Hang::new(device, self.batches.all().len() - 1)?;
             let event = || Arc::clone(EventRef::Shared(hang.event()).shared());
             self.batches.hold_signal(event(), Hang::REACHED);
             self.batches.hold(event(), Hang::RELEASED);
@@ -1615,6 +1618,7 @@ impl CommandBuffer {
                 fails_from: None,
                 faulted: BTreeMap::new(),
                 hang: None,
+                hang_scheduling: None,
                 behind_hang: None,
                 shadow_attachments: Vec::new(),
                 shadows_copied_in: Vec::new(),
@@ -1881,11 +1885,14 @@ impl CommandBuffer {
     /// commands and its place in its queue's order are fixed then, so nothing committed later on
     /// the queue runs before it. Metal submits on its own thread and tells a program of it only
     /// through `Scheduled`; a program that models what Metal does as it
-    /// submits takes that point here.
+    /// submits takes that point here. A command buffer whose GPU hangs (a draw of primitive type
+    /// 9, `hang.rs`) runs them as it becomes `Scheduled` before its last batch, which the hang
+    /// holds: once the batch before the hang is taken and Metal's time to read `Scheduled` came.
     ///
     /// - **The thread.** The device's scheduler thread, which makes every submission: `commit`
     ///   returns at once, as Metal's does, and submits nothing itself. It runs with no lock of the
-    ///   runtime's held, after the submission's call returned.
+    ///   runtime's held, after the submission's call returned. Behind a GPU hang, the hang's own
+    ///   thread where the time came after the batch was taken.
     /// - **Before.** Its handlers run, in the order added, before the status reads `Scheduled`,
     ///   before [`wait_until_scheduled`](Self::wait_until_scheduled) returns, before its
     ///   scheduled handlers run, and before it can complete. The GPU may run the work meanwhile:
@@ -2423,7 +2430,7 @@ impl CommandBuffer {
             state.queued_commit = false;
             if let Some(hang) = state.hang.take() {
                 match hangs {
-                    true => hang.start(&self.0.queue, committed),
+                    true => hang.start(&self.0, &mut state, committed),
                     false => hang.release(),
                 }
             }
@@ -3687,8 +3694,8 @@ impl CommandBufferShared {
     /// ([`fences::ends_at_fence`]), at one submitted after it, as a command buffer whose last
     /// batch was submitted finishes; at the value alone when the queue takes no such fence (a
     /// lost device). Its submission and scheduled handlers never run; they are dropped with it,
-    /// unless it became `Scheduled` as its last batch was held in a group (`group.rs`), which
-    /// then fails from `Scheduled`.
+    /// unless it became `Scheduled` as its last batch was held in a group (`group.rs`), or before
+    /// it behind its GPU hang (`hang.rs`), which then fails from `Scheduled`.
     pub(crate) fn failed(self: &Arc<Self>, error: CommandBufferError, values: &[u64]) {
         let vk_queue = self.queue.vk_queue();
         lock(&self.state).failure = Some(error);

@@ -2892,6 +2892,21 @@ each item named states the rule in full.
   which decides it. A pass that renders such a texture in place otherwise announces
   `dont-care-store`.
 
+**GPU hangs and faults** (a draw of private primitive type 9, `DrawPrimitiveType::Nine`)
+
+- **A hang reads `Scheduled` 5.06 ms after its commit and completes no sooner than 32.7 ms after
+  it**, and its queue runs nothing of what it schedules meanwhile: one of Metal's two outcomes. On
+  an M3 Max (macOS 27.0.1, 33 hangs) Metal's hang read `Scheduled` 0.68 to 13.2 ms in and
+  completed about 27.6 ms after; the queue's later command buffers' work mostly ran on the GPU
+  during the hang where it read `Scheduled` within 2 ms (17 of 18), and mostly did not where later
+  (56 of 62 ran nothing or in part). Their completion and signals come with the hang's either way,
+  as the runtime's do (0.04 to 1.5 ms after it on MoltenVK, Metal's 0.01 to 0.03 ms).
+- **The queue's command buffers committed during a hang read `Scheduled` behind its last batch**,
+  once its hold lets go (0 to 1.6 ms before it completes on MoltenVK), where Metal's read it from
+  the hang's `Scheduled` on, as they are committed.
+- **A page fault or a victim of the GPU's recovery completes as its work does** (about 1 ms on
+  MoltenVK), where Metal completed it 16.8 to 30.0 ms after its commit.
+
 **Heaps and memory**
 
 - **A heap's size and alignment answers are the device's own**

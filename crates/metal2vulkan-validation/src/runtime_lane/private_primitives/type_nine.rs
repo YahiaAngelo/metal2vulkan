@@ -6,8 +6,9 @@
 //! one that also commits after the hang read `Scheduled` and 20 ms on):
 //!
 //! - **A direct draw of 3 vertices or more** (1 or 2 instances) hangs Metal's GPU: the command
-//!   buffer fails with `MTLCommandBufferErrorTimeout` ([`CommandBufferError::GpuHang`]) 32.7 to
-//!   42.7 ms after its commit. Its encoders before the pass run; the pass (its clear too) and every
+//!   buffer reads `Scheduled` 5.06 to 13.2 ms after its commit and fails with
+//!   `MTLCommandBufferErrorTimeout` ([`CommandBufferError::GpuHang`]) 32.7 to 42.7 ms after it.
+//!   Its encoders before the pass run; the pass (its clear too) and every
 //!   encoder after it run nothing; its event signal fires. Every command buffer of its queue
 //!   scheduled meanwhile runs nothing and completes with no error together with it, its event
 //!   signals firing: committed at once or 10 ms on, or with an event wait met during the hang by
@@ -42,6 +43,10 @@ use metal2vulkan_runtime::{
 };
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
+
+/// The earliest Metal's command buffer its GPU hung at read `Scheduled` after its commit:
+/// 5.06 ms.
+const SCHEDULED: Duration = Duration::from_micros(5_060);
 
 /// The earliest Metal failed a command buffer its GPU hung at after its commit: 32.7 ms.
 const HANG: Duration = Duration::from_micros(32_700);
@@ -106,6 +111,8 @@ struct Answer {
     error: Option<CommandBufferError>,
     /// Its commit's instant.
     committed: Instant,
+    /// When its scheduled handler ran.
+    scheduled: Instant,
     /// When its completed handler ran.
     completed: Instant,
 }
@@ -116,23 +123,35 @@ impl Answer {
         self.completed - self.committed
     }
 
+    /// From its commit to its scheduled handler.
+    fn to_scheduled(&self) -> Duration {
+        self.scheduled - self.committed
+    }
+
     /// It completed with no error.
     fn completed_cleanly(&self) -> bool {
         self.status == CommandBufferStatus::Completed && self.error.is_none()
     }
 }
 
-/// A committed command buffer and the instant its completed handler ran.
+/// A committed command buffer and the instants its scheduled and completed handlers ran.
 struct Tracked {
     command_buffer: CommandBuffer,
     committed: Option<Instant>,
+    scheduled: Arc<OnceLock<Instant>>,
     completed: Arc<OnceLock<Instant>>,
 }
 
 impl Tracked {
     fn new(queue: &CommandQueue) -> Tracked {
         let command_buffer = queue.command_buffer().unwrap();
-        let completed = Arc::new(OnceLock::new());
+        let (scheduled, completed) = (Arc::new(OnceLock::new()), Arc::new(OnceLock::new()));
+        let set = Arc::clone(&scheduled);
+        command_buffer
+            .add_scheduled_handler(Box::new(move |_: &CommandBuffer| {
+                let _ = set.set(Instant::now());
+            }))
+            .unwrap();
         let set = Arc::clone(&completed);
         command_buffer
             .add_completed_handler(Box::new(move |_: &CommandBuffer| {
@@ -142,6 +161,7 @@ impl Tracked {
         Tracked {
             command_buffer,
             committed: None,
+            scheduled,
             completed,
         }
     }
@@ -168,6 +188,7 @@ impl Tracked {
             status: self.command_buffer.status(),
             error: self.command_buffer.error(),
             committed: self.committed.unwrap(),
+            scheduled: *self.scheduled.get().expect("its scheduled handler ran"),
             completed: *self.completed.get().expect("its completed handler ran"),
         }
     }
@@ -354,13 +375,25 @@ fn answers_as_metal_does(draws: &[Draw], expected: Expected) {
             let rest: Vec<String> = rest
                 .iter()
                 .zip(OTHERS)
-                .map(|(answer, slot)| format!("{} {:.1} ms", MARKS[slot].0, ms(answer)))
+                .map(|(answer, slot)| {
+                    let apart = match answer.completed.checked_duration_since(drawn.completed) {
+                        Some(after) => after.as_secs_f64() * 1e3,
+                        None => -(drawn.completed - answer.completed).as_secs_f64() * 1e3,
+                    };
+                    format!(
+                        "{} {:.1} ms ({apart:+.2} ms from the draw's, Scheduled at {:.1} ms)",
+                        MARKS[slot].0,
+                        ms(answer),
+                        answer.to_scheduled().as_secs_f64() * 1e3,
+                    )
+                })
                 .collect();
             println!(
-                "{name}: {draw:?}: {:?} {:?} in {:.1} ms; {}",
+                "{name}: {draw:?}: {:?} {:?} in {:.1} ms, Scheduled at {:.1} ms; {}",
                 drawn.status,
                 drawn.error,
                 ms(drawn),
+                drawn.to_scheduled().as_secs_f64() * 1e3,
                 rest.join("; "),
             );
         }
@@ -413,6 +446,11 @@ fn check(outcome: &Outcome, expected: Expected, label: &str) {
                 "{label}: failed in {:?}",
                 drawn.took()
             );
+            let scheduled = drawn.to_scheduled();
+            assert!(
+                (SCHEDULED..HANG).contains(&scheduled),
+                "{label}: read Scheduled {scheduled:?} after its commit"
+            );
             assert!(!outcome.cleared, "{label}: the pass ran nothing");
             assert_eq!(outcome.marks, marked(&[0, 7, 8, 9]), "{label}");
             for (answer, which) in discarded {
@@ -439,8 +477,9 @@ fn check(outcome: &Outcome, expected: Expected, label: &str) {
     }
 }
 
-/// A direct draw of type 9 of 3 vertices or more hangs Metal's GPU: its command buffer fails
-/// with `GpuHang` no sooner than Metal's did, running nothing from the pass on but its event
+/// A direct draw of type 9 of 3 vertices or more hangs Metal's GPU: its command buffer reads
+/// `Scheduled` no sooner than Metal's did, long before it fails with `GpuHang` no sooner than
+/// Metal's did, running nothing from the pass on but its event
 /// signal, and the queue's command buffers committed meanwhile run nothing and complete cleanly
 /// after it, those whose event waits were met during the hang too, while one whose wait is met
 /// after it, another queue's and a later one run.
