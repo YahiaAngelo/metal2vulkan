@@ -1543,6 +1543,49 @@ fn a_read_only_page_is_refused_on_linux_and_read_elsewhere() {
     });
 }
 
+/// Pages whose write permission the caller vouches for (`HostMemory::assume_writable`): a buffer
+/// over them asks the kernel about none of their mappings (`WorkCounts::host_mappings_queried`),
+/// where a buffer over the same kind of pages without the vouching asks about each on Linux (one
+/// mapping here) and nothing elsewhere; both are made, and the GPU reads and writes their bytes.
+#[test]
+fn vouched_pages_are_imported_with_no_mapping_asked() {
+    on_device(|device| {
+        let queue = device.new_command_queue().unwrap();
+        let queried = || device.work_counts().host_mappings_queried;
+        for vouched in [false, true] {
+            let memory = Mapping::anonymous(GUEST_PAGE);
+            let bytes = counting(GUEST_PAGE, if vouched { 7 } else { 8 });
+            memory.write(0, &bytes);
+            let before = queried();
+            // SAFETY: the mapping outlives the buffer, writable while it lives.
+            let buffer = unsafe {
+                let host = HostMemory::new(memory.pointer());
+                let host = if vouched {
+                    host.assume_writable()
+                } else {
+                    host
+                };
+                device.new_buffer_with_bytes_no_copy(
+                    host,
+                    GUEST_PAGE as u64,
+                    ResourceOptions::default(),
+                    None,
+                )
+            }
+            .unwrap();
+            let asked = queried() - before;
+            let expected = u64::from(cfg!(target_os = "linux") && !vouched);
+            assert_eq!(asked, expected, "vouched {vouched}: mappings asked");
+            assert_eq!(gpu_read(&queue, &buffer, 0..GUEST_PAGE as u64), bytes);
+            gpu_fill(&queue, &buffer, 0..64, 0x6b);
+            // SAFETY: the mapping lives, and no command writes it now.
+            let written = unsafe { std::slice::from_raw_parts(memory.pointer().as_ptr(), 64) };
+            assert_eq!(written, [0x6b; 64], "vouched {vouched}: the GPU's write");
+            eprintln!("runtime vouched {vouched}: {asked} mappings asked");
+        }
+    });
+}
+
 /// Under the program's own MoltenVK setting that loses the device after a GPU failure
 /// (`MVK_CONFIG_RESUME_LOST_DEVICE` off, which wins over the runtime's), a command buffer that
 /// fills a buffer and then writes into read-only host pages, and command buffers of fills

@@ -441,7 +441,7 @@ impl Device {
             .host_import
             .as_ref()
             .map_err(|unsupported| Error::Unsupported(unsupported.clone()))?;
-        let (pointer, source) = memory.into_parts();
+        let (pointer, source, writable) = memory.into_parts();
         let host = host_window(call, importer, pointer, length, source)?;
         let window = host.window;
         if of_heap && window.offset != 0 {
@@ -473,7 +473,9 @@ impl Device {
         // Only a buffer that imports its pages pins them, and so has their writability asked: one
         // that lies in a live import pins none, that import's making asked for the same window,
         // and the pages stay writable while imported (`HostMemory::new`).
-        refuse_unwritable(&window, &shared.counts)?;
+        if !writable {
+            refuse_unwritable(&window, &shared.counts)?;
+        }
         // SAFETY: the window lies in the pages of the caller's bytes, which stay mapped
         // (`HostMemory::new`), and the source's pieces hold them (`HostMemory::with_dma_buf`). No
         // lock of the runtime's is held.
@@ -585,7 +587,7 @@ impl Device {
             .host_import
             .as_ref()
             .map_err(|unsupported| Error::Unsupported(unsupported.clone()))?;
-        let (pointer, source) = memory.into_parts();
+        let (pointer, source, writable) = memory.into_parts();
         let host = host_window(call, importer, pointer, length, source)?;
         let window = host.window;
         if heap.is_some() && window.offset != 0 {
@@ -621,7 +623,9 @@ impl Device {
             Some(import) => (self.pages_in_import(import), Remade::default()),
             None => {
                 // Only pages imported here are pinned, and so have their writability asked.
-                refuse_unwritable(&window, &shared.counts)?;
+                if !writable {
+                    refuse_unwritable(&window, &shared.counts)?;
+                }
                 // Whether an import alive now holds every page of them: counted once the import
                 // is made (`WorkCounts::host_rebind_imports_covered`).
                 let unit = importer.page.max(importer.alignment);

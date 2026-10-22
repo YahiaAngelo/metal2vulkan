@@ -28,10 +28,12 @@
 //!   `WorkCounts::host_mappings_queried`). A buffer that lies in a live
 //!   import of the same bytes (`host_aliases.rs`) asks nothing: it pins no page, that import's
 //!   making asked for the same window, and [`HostMemory::new`]'s contract keeps imported pages
-//!   writable. Linux drivers pin user pages for writing: NVIDIA failed a read-only page as out of
-//!   device memory, RADV refused it, and ANV imported it and lost the device at the GPU's first
-//!   read. lavapipe read one, so there the rule refuses a little more than the driver would. On
-//!   macOS, MoltenVK hands the range to Metal, which reads read-only pages, so there is no check.
+//!   writable. Nor does one over pages whose write permission the caller vouched for
+//!   ([`HostMemory::assume_writable`]). Linux drivers pin user pages for writing: NVIDIA failed
+//!   a read-only page as out of device memory, RADV refused it, and ANV imported it and lost the
+//!   device at the GPU's first read. lavapipe read one, so there the rule refuses a little more
+//!   than the driver would. On macOS, MoltenVK hands the range to Metal, which reads read-only
+//!   pages, so there is no check.
 //! - **What drivers answered**. Private anonymous memory was imported on every venue measured. RADV
 //!   refused shared memory typed: anonymous shared memory, and any mapping of a file, a shared
 //!   memory object or a `memfd` among them (QEMU's `memory-backend-memfd,share=on` guest RAM). It
@@ -117,6 +119,9 @@ use std::sync::Mutex;
 pub struct HostMemory {
     pointer: NonNull<u8>,
     source: Option<Source>,
+    /// The caller vouched that the process maps every page writable
+    /// ([`HostMemory::assume_writable`]), so the runtime asks the kernel nothing of them.
+    writable: bool,
 }
 
 /// What a [`HostMemory`] may carry besides its pointer: a [`DmaBufSource`] where the system has
@@ -141,6 +146,7 @@ impl std::fmt::Debug for HostMemory {
         f.debug_struct("HostMemory")
             .field("pointer", &self.pointer)
             .field("dma_buf", &self.source.is_some())
+            .field("writable", &self.writable)
             .finish()
     }
 }
@@ -176,6 +182,7 @@ impl HostMemory {
         HostMemory {
             pointer,
             source: None,
+            writable: false,
         }
     }
 
@@ -220,6 +227,29 @@ impl HostMemory {
         HostMemory {
             pointer,
             source: Some(source),
+            writable: false,
+        }
+    }
+
+    /// This memory, its write permission vouched for by the caller: a runtime extension, for a
+    /// caller that knows how its pages are mapped. On Linux the runtime then asks the kernel
+    /// nothing of the pages before it imports their pointer, where it otherwise asks about every
+    /// mapping over them (`PROCMAP_QUERY`, one call per mapping per import, each taking the
+    /// process's memory-map lock; `WorkCounts::host_mappings_queried` counts none of them). Off
+    /// Linux nothing is asked either way, and this changes nothing.
+    ///
+    /// # Safety
+    ///
+    /// As well as [`HostMemory::new`]'s contract (or [`HostMemory::with_dma_buf`]'s): every host
+    /// page the buffer's bytes touch is mapped by this process with write permission when the
+    /// buffer (or heap, or rebind) is made over them, and stays so while they are imported. The
+    /// Vulkan import of a page the process cannot write is undefined on drivers that pin pages
+    /// for writing (one lost its device at the GPU's first read of such a page), which the
+    /// runtime's own check would have refused.
+    pub unsafe fn assume_writable(self) -> HostMemory {
+        HostMemory {
+            writable: true,
+            ..self
         }
     }
 
@@ -228,9 +258,10 @@ impl HostMemory {
         self.pointer
     }
 
-    /// The pointer, and the dma-buf source where the caller gave one.
-    pub(super) fn into_parts(self) -> (NonNull<u8>, Option<Source>) {
-        (self.pointer, self.source)
+    /// The pointer, the dma-buf source where the caller gave one, and whether the caller vouched
+    /// for the pages' write permission ([`HostMemory::assume_writable`]).
+    pub(super) fn into_parts(self) -> (NonNull<u8>, Option<Source>, bool) {
+        (self.pointer, self.source, self.writable)
     }
 }
 
