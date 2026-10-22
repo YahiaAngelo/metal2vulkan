@@ -21,7 +21,10 @@
 //!   alignment above the host page whose rounding would take pages the range does not touch, an
 //!   offset in the pages that misses the buffer's memory alignment, no memory type both allow, or
 //!   a driver that refuses the pointer.
-//! - **Pages the process cannot write** are refused typed on Linux, before the buffer's own import
+//! - **Pages the process cannot write** are refused typed on Linux, before the buffer's own import,
+//!   unless the caller gave a dma-buf source the device can use: then they are imported from it
+//!   alone, never by their pointer, and the device announces `read-only-pages-written`, as the
+//!   GPU's writes reach them where Metal's leave the CPU's view of them as it was
 //!   ([`refuse_unwritable`] asks the kernel for the process's own mappings over the window, with
 //!   `PROCMAP_QUERY` on `/proc/self/maps`, a file kept open for them (`kept_maps`), or reads
 //!   that file's lines where the kernel predates the query, Linux 6.11;
@@ -174,10 +177,12 @@ impl HostMemory {
     /// pages for writing, and one (ANV) imported a read-only page and then lost the device at the
     /// GPU's first read. So on Linux the pages also stay writable while they are imported: RADV
     /// failed every command buffer submitted after a page of an import was made read-only
-    /// (`mprotect`). Some drivers also refuse shared memory (RADV refused anonymous shared
-    /// memory and mappings of shared memory objects, `memfd` mappings among them); private memory
-    /// imports everywhere measured. [`HostMemory::with_dma_buf`] imports such memory where the
-    /// device imports dma-bufs.
+    /// (`mprotect`). With a dma-buf source ([`HostMemory::with_dma_buf`]) pages the process maps
+    /// read-only are instead imported from the source alone, announced
+    /// (`read-only-pages-written`). Some drivers also refuse shared memory (RADV refused anonymous
+    /// shared memory and mappings of shared memory objects, `memfd` mappings among them); private
+    /// memory imports everywhere measured. [`HostMemory::with_dma_buf`] imports such memory where
+    /// the device imports dma-bufs.
     pub unsafe fn new(pointer: NonNull<u8>) -> HostMemory {
         HostMemory {
             pointer,

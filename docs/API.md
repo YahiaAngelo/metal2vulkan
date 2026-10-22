@@ -2128,6 +2128,13 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   it is freed: not announced.
   Cost: the deallocator runs once every such command buffer lets go of the pages, or those batches
   complete, where Metal's runs at the release; the pages stay mapped until then.
+- `metal2vulkan-degrade-read-only-pages-written` (precision). `ReadOnlyPagesWritten`: A no-copy
+  buffer, heap or rebind was made over host pages the process maps read-only, from the caller's
+  dma-buf source (`HostMemory::with_dma_buf`): on Linux, where drivers pin a pointer's imported
+  pages for writing, such pages are imported only as dma-bufs of their pages, whose memory the GPU
+  writes. Cost: the GPU's writes through it reach the pages, and the CPU then reads them there,
+  where after Metal's GPU writes into pages the process maps read-only the CPU reads them as they
+  were (an M3 Max under macOS 27.0.1, private and shared memory alike).
 - `metal2vulkan-degrade-grouped-completion` (precision). `GroupedCompletion`: Batches of command
   buffers committed on one queue that the scheduler found ready together, or held while two or more
   earlier submissions of their queue ran, went to the driver in one `vkQueueSubmit`, only the last

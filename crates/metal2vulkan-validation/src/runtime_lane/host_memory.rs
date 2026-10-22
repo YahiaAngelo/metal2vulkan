@@ -21,7 +21,7 @@ use metal2vulkan::vk::DriverId;
 use metal2vulkan_runtime::{
     BlitOption, Buffer, BufferContents, BufferDescriptor, CommandBuffer, CommandBufferError,
     CommandBufferStatus, CommandQueue, CopyProblem, CpuCacheMode, Deallocator, DebugMessage,
-    Device, Error, EventRef, HazardTrackingMode, HostMemory, Invalid, LayerSetting,
+    Degradation, Device, Error, EventRef, HazardTrackingMode, HostMemory, Invalid, LayerSetting,
     LayerSettingValue, Nil, Origin, Problem, PurgeableState, Region, ResourceOptions, Size,
     StorageMode, TextureDescriptor,
 };
@@ -405,6 +405,10 @@ pub(super) fn gpu_fill(
     blit.end_encoding().unwrap();
     run(&command_buffer);
 }
+
+/// The kind a no-copy buffer over pages the process maps read-only, made from its dma-buf source,
+/// announces once (`dma_buf_imports`'s `read_only_pages_are_made_from_the_source`, on Linux).
+pub(super) const READ_ONLY_PAGES: [Degradation; 1] = [Degradation::ReadOnlyPagesWritten];
 
 /// Bytes `i % 251` from `start`.
 pub(super) fn counting(len: usize, start: usize) -> Vec<u8> {

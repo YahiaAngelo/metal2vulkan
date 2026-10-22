@@ -293,6 +293,9 @@ pub(super) struct DeviceShared {
     pub(super) shader_cache: ShaderCache,
     /// How no-copy buffers import host memory, or why they are refused.
     pub(super) host_import: Result<Importer, metal2vulkan::error::Unsupported>,
+    /// Whether the device imports a pointer to shared memory, once asked
+    /// (`Device::imports_shared_host_pointers`).
+    pub(super) shared_pointer_imports: OnceLock<bool>,
     /// The commands of a render pipeline's extended dynamic states, where the device has them
     /// (`dynamic_state.rs`).
     pub(super) extended_dynamic_state: Option<ExtendedDynamicState>,
@@ -1655,6 +1658,7 @@ impl Device {
             textures,
             shader_cache,
             host_import,
+            shared_pointer_imports: OnceLock::new(),
             extended_dynamic_state,
             sized_index_bind,
             depth_bias_command,
