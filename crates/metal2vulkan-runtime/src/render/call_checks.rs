@@ -46,6 +46,7 @@ use crate::render_state::{depth_ranges_refused, EncoderState};
 use crate::render_values::{StoreAction, StoreActionOptions};
 use crate::replay::CallLog;
 use crate::versioned::Versioned;
+use metal2vulkan::metal::PrimitiveType;
 
 /// What the program's encoder does with a call its checks passed (the module docs).
 pub(super) enum Checked {
@@ -481,9 +482,16 @@ impl CallChecks {
         &mut self,
         device: &Device,
         call: &'static str,
-        assembly: Assembly,
+        assembly: Option<Assembly>,
         empty: bool,
     ) -> Result<Checked, Error> {
+        // Primitive type 9 draws nothing, checked as a draw of a public type is
+        // (`RenderLowering::draw_nine`).
+        let Some(assembly) = assembly else {
+            let stand_in = Assembly::Primitives(PrimitiveType::Point);
+            drawn_by(call, self.pipeline.as_ref(), stand_in, empty)?;
+            return Ok(Checked::Logged);
+        };
         let Some(pipeline) = drawn_by(call, self.pipeline.as_ref(), assembly, empty)? else {
             return Ok(Checked::Logged);
         };

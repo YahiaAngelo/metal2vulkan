@@ -627,16 +627,26 @@ enum Assembly {
 }
 
 impl Assembly {
-    /// What a draw of primitive type `primitive` assembles.
-    fn of(primitive: DrawPrimitiveType) -> Assembly {
-        match primitive {
+    /// What a draw of primitive type `primitive` assembles; `None` for type 9, which draws
+    /// nothing ([`RenderLowering::draw_nine`]).
+    fn of(primitive: DrawPrimitiveType) -> Option<Assembly> {
+        Some(match primitive {
             DrawPrimitiveType::Public(p) => Assembly::Primitives(p),
             DrawPrimitiveType::LineLoop => Assembly::Private(RewriteProgram::LineLoop),
             DrawPrimitiveType::TriangleFan => Assembly::Private(RewriteProgram::TriangleFan),
             DrawPrimitiveType::Quads => Assembly::Private(RewriteProgram::Quads),
             DrawPrimitiveType::QuadStrip => Assembly::Private(RewriteProgram::QuadStrip),
-        }
+            DrawPrimitiveType::Nine => return None,
+        })
     }
+}
+
+/// How a draw of primitive type 9 fails its command buffer, as Metal's GPU fails it
+/// (`DrawPrimitiveType::Nine`): it hangs, or faults the encoder with the error.
+#[derive(Clone, Copy)]
+enum NineFailure {
+    Hang,
+    Fault(CommandBufferError),
 }
 
 /// The index type of `draw` where it is a direct indexed draw of `pipeline` whose vertex function
@@ -3012,8 +3022,12 @@ impl RenderLowering {
             base_instance,
         };
         let buffers = DrawBuffers::default();
-        let assembly = Assembly::of(primitive_type);
         let empty = vertex_count == 0 || instance_count == 0;
+        let Some(assembly) = Assembly::of(primitive_type) else {
+            // Metal's GPU hangs at 3 vertices or more, and draws 1 or 2 as nothing.
+            let hangs = vertex_count >= 3 && !empty;
+            return self.draw_nine(CALL, empty, hangs.then_some(NineFailure::Hang));
+        };
         self.draw(CALL, assembly, draw, buffers, empty)
     }
 
@@ -3098,8 +3112,12 @@ impl RenderLowering {
             index: Some(index),
             ..DrawBuffers::default()
         };
-        let assembly = Assembly::of(primitive_type);
         let empty = index_count == 0 || instance_count == 0;
+        let Some(assembly) = Assembly::of(primitive_type) else {
+            // Metal's GPU faults at any indices.
+            let fault = NineFailure::Fault(CommandBufferError::PageFault);
+            return self.draw_nine(call, empty, (!empty).then_some(fault));
+        };
         self.draw(call, assembly, draw, buffers, empty)
     }
 
@@ -3131,7 +3149,11 @@ impl RenderLowering {
             indirect: Some(indirect),
             ..DrawBuffers::default()
         };
-        let assembly = Assembly::of(primitive_type);
+        let Some(assembly) = Assembly::of(primitive_type) else {
+            // Metal fails it as a victim of the GPU's recovery, whatever its arguments.
+            let victim = NineFailure::Fault(CommandBufferError::GpuRecoveryVictim);
+            return self.draw_nine(CALL, false, Some(victim));
+        };
         self.draw(CALL, assembly, draw, buffers, false)
     }
 
@@ -3224,7 +3246,11 @@ impl RenderLowering {
             indirect: Some(indirect),
             ..DrawBuffers::default()
         };
-        let assembly = Assembly::of(primitive_type);
+        let Some(assembly) = Assembly::of(primitive_type) else {
+            // Metal fails it as a victim of the GPU's recovery, whatever its arguments.
+            let victim = NineFailure::Fault(CommandBufferError::GpuRecoveryVictim);
+            return self.draw_nine(CALL, false, Some(victim));
+        };
         self.draw(CALL, assembly, draw, buffers, false)
     }
 
@@ -6815,6 +6841,30 @@ impl RenderLowering {
         let kept = pass.saturating_sub(at).min(u64::from(data_size));
         // Below `data_size`, so a `u32`.
         Ok(u32::try_from(kept).ok().filter(|&kept| kept < data_size))
+    }
+
+    /// A draw of primitive type 9 (`DrawPrimitiveType::Nine`), by `call`, `empty` where it has
+    /// no vertices, indices or instances: it records nothing, and fails the command buffer as
+    /// `failure` says, as Metal's GPU does: a hang fails it from the encoder on and holds it
+    /// (`command_buffer/hang.rs`), a fault fails the encoder alone. Checked as a draw of a public
+    /// type is (a pipeline state set, a draw kind it takes); under a tessellation pipeline it
+    /// draws nothing, as a public type's draw does there.
+    fn draw_nine(
+        &mut self,
+        call: &'static str,
+        empty: bool,
+        failure: Option<NineFailure>,
+    ) -> Result<(), Error> {
+        let stand_in = Assembly::Primitives(PrimitiveType::Point);
+        let drawn = drawn_by(call, self.pipeline.as_ref(), stand_in, empty)?;
+        match (drawn, failure) {
+            (Some(_), Some(NineFailure::Hang)) => self.core.hang(),
+            (Some(_), Some(NineFailure::Fault(error))) => self.core.fault(error),
+            _ => {}
+        }
+        self.draw_calls += 1;
+        self.called = true;
+        Ok(())
     }
 
     /// Plan, bind, and record `draw` of `assembly` (the module's steps), with its index and

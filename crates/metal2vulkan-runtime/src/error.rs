@@ -1674,9 +1674,37 @@ pub enum CommandBufferError {
     /// Metal named the next one `Affected` and ran none of it in the 7th and in both runs of two
     /// passes: the runtime runs them.
     ///
+    /// Also an indexed draw of primitive type 9
+    /// ([`DrawPrimitiveType::Nine`](crate::DrawPrimitiveType::Nine)), of 1 to 3 indices on the M3
+    /// Max (macOS 27.0.1): its render encoder runs nothing, the encoders after it run, every
+    /// event signal fires, and the queue runs on; Metal completed it 16.8 to 19.5 ms after its
+    /// commit, the runtime as its work completes.
+    ///
     /// Also a page fault Metal answers for the command buffer's work under MoltenVK, which the
     /// runtime relays (`CommandBufferError::Execution`).
     PageFault,
+    /// Metal's GPU hung at a direct draw of primitive type 9 of 3 vertices or more
+    /// ([`DrawPrimitiveType::Nine`](crate::DrawPrimitiveType::Nine)) and failed the command buffer
+    /// with `MTLCommandBufferErrorTimeout` (2, "Caused GPU Hang Error
+    /// (00000003:kIOGPUCommandBufferCallbackErrorHang)", its `GPUStartTime` 0), 37.7 to 42.7 ms
+    /// after its commit (the M3 Max, macOS 27.0.1, 4 hangs): the encoders before the draw's ran;
+    /// its render encoder, not even its pass's load, clear or store actions, and every encoder
+    /// after it ran nothing; its event signals fired. Command buffers of its queue committed while
+    /// it was in flight ran nothing and completed with no error after it; one whose event wait
+    /// held it until then, one of another queue and one committed later ran. The runtime holds the
+    /// command buffer until 37 ms after its commit (and after the work before the draw ran) and
+    /// answers the queue's so: one committed meanwhile with no event wait runs nothing and
+    /// completes with no error, after it.
+    GpuHang,
+    /// Metal failed the command buffer as a victim of its GPU's recovery, at an indirect draw of
+    /// primitive type 9, indexed or not, whatever its arguments
+    /// ([`DrawPrimitiveType::Nine`](crate::DrawPrimitiveType::Nine)), with
+    /// `MTLCommandBufferErrorInternal` (1, "Discarded (victim of GPU error/recovery)
+    /// (00000005:kIOGPUCommandBufferCallbackErrorInnocentVictim)", its `GPUStartTime` 0), 16.9 to
+    /// 30.0 ms after its commit (the M3 Max, macOS 27.0.1, 5 draws): its render encoder ran
+    /// nothing, the encoders after it ran, every event signal fired, and the queue ran on. The
+    /// runtime completes it as its work completes.
+    GpuRecoveryVictim,
     /// Metal failed the command buffer's work with this `MTLCommandBufferError` code, which the
     /// driver relayed: MoltenVK, which runs each batch as a Metal command buffer, reports a
     /// failed one, and the runtime gives its code to the command buffer whose batch it was
@@ -1961,6 +1989,8 @@ impl CommandBufferError {
             | CommandBufferError::DefaultRasterSampleCount
             | CommandBufferError::CallRefused(_) => 1,
             CommandBufferError::PageFault => 3,
+            CommandBufferError::GpuHang => 2,
+            CommandBufferError::GpuRecoveryVictim => 1,
             CommandBufferError::PipelineCreation(cause) => match cause {
                 PipelineCreationCause::OutOfMemory(_) => 8,
                 PipelineCreationCause::DeviceLost => 11,
@@ -1981,6 +2011,8 @@ impl CommandBufferError {
             | CommandBufferError::DeviceLost
             | CommandBufferError::OutOfMemory
             | CommandBufferError::PageFault
+            | CommandBufferError::GpuHang
+            | CommandBufferError::GpuRecoveryVictim
             | CommandBufferError::Execution(_)
             | CommandBufferError::RenderTargetSize
             | CommandBufferError::DetachedBacking

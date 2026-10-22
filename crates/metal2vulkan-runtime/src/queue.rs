@@ -74,6 +74,8 @@ struct QueueShared {
     /// The kept images its merges' keeps made, kept for its later keeps
     /// (`texture/kept_image.rs`).
     kept_images: KeptImages,
+    /// Its command buffers Metal's GPU hangs at that are in flight (`command_buffer/hang.rs`).
+    hangs: Arc<AtomicUsize>,
 }
 
 /// A queue's slots: one per uncompleted command buffer, at most `max`.
@@ -247,6 +249,7 @@ impl Device {
             latest_gpu_end: Mutex::new(0),
             memoryless_backings: Mutex::new(BackingPool::default()),
             kept_images: KeptImages::default(),
+            hangs: Arc::default(),
         }))
     }
 }
@@ -356,6 +359,12 @@ impl CommandQueue {
     /// The kept images the queue keeps for its merges' keeps (`texture/kept_image.rs`).
     pub(super) fn kept_images(&self) -> &KeptImages {
         &self.0.kept_images
+    }
+
+    /// How many of the queue's command buffers Metal's GPU hangs at are in flight
+    /// (`command_buffer/hang.rs`).
+    pub(super) fn hangs(&self) -> &Arc<AtomicUsize> {
+        &self.0.hangs
     }
 
     /// Place a command buffer of the queue that completed after every one placed before: `place`

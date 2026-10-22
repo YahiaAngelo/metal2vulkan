@@ -321,8 +321,8 @@ impl ScissorRect {
 /// barycentric order is the list's, its flat inputs come from its first vertex under provoking
 /// vertex mode 0 and its last under the last-vertex mode, and `[[vertex_id]]`,
 /// `[[base_vertex]]`, `[[instance_id]]` and `[[base_instance]]` are those of the public draw
-/// of the same arguments. Value 9, at which Metal's GPU hangs, and the values past it are
-/// undefined.
+/// of the same arguments. Value 9 ([`DrawPrimitiveType::Nine`]) draws nothing and fails its
+/// command buffer as Metal's GPU does; the values past it are undefined.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DrawPrimitiveType {
@@ -343,6 +343,22 @@ pub enum DrawPrimitiveType {
     /// `RenderCommandEncoder::set_primitive_restart_enabled` set), each piece pairing from its
     /// own start, and `[[primitive_id]]` counts on across the restart.
     QuadStrip,
+    /// 9, which Metal's GPU draws nothing of, failing the command buffer (measured on the M3
+    /// Max, macOS 27.0.1, 18 draws): a direct draw of 3 vertices or more hangs it
+    /// ([`CommandBufferError::GpuHang`](crate::CommandBufferError::GpuHang)), an indexed one of
+    /// any indices faults it
+    /// ([`CommandBufferError::PageFault`](crate::CommandBufferError::PageFault)), and an
+    /// indirect one, whatever its arguments, fails it as a victim of the GPU's recovery
+    /// ([`CommandBufferError::GpuRecoveryVictim`](crate::CommandBufferError::GpuRecoveryVictim));
+    /// a direct draw of 1 or 2 vertices draws nothing and fails nothing, as an empty draw does.
+    /// Its render encoder runs nothing, not even its pass's load, clear or store actions, and the
+    /// command buffer's event signals fire. A hang also runs nothing of the encoders after it,
+    /// and holds its command buffer until 37 ms after its commit (Metal failed it 37.7 to
+    /// 42.7 ms after its commit); a command buffer committed on its queue meanwhile, with no
+    /// event wait, runs nothing and completes with no error, after it. A fault or a victim
+    /// fails that encoder alone: the encoders after it run, and so do the queue's other command
+    /// buffers. Metal's API validation stops the process at it.
+    Nine,
 }
 
 impl DrawPrimitiveType {
@@ -354,16 +370,18 @@ impl DrawPrimitiveType {
             DrawPrimitiveType::TriangleFan => 6,
             DrawPrimitiveType::Quads => 7,
             DrawPrimitiveType::QuadStrip => 8,
+            DrawPrimitiveType::Nine => 9,
         }
     }
 
-    /// The type of Metal's raw value `raw`, 0 to 8.
+    /// The type of Metal's raw value `raw`, 0 to 9.
     pub fn from_raw(raw: u64) -> Result<DrawPrimitiveType, Error> {
         Ok(match raw {
             5 => DrawPrimitiveType::LineLoop,
             6 => DrawPrimitiveType::TriangleFan,
             7 => DrawPrimitiveType::Quads,
             8 => DrawPrimitiveType::QuadStrip,
+            9 => DrawPrimitiveType::Nine,
             raw => match u32::try_from(raw).ok().map(PrimitiveType::try_from) {
                 Some(Ok(p)) => DrawPrimitiveType::Public(p),
                 _ => return Err(undefined("MTLPrimitiveType", raw)),
@@ -413,14 +431,14 @@ mod tests {
         assert!(StoreActionOptions::from_raw(2).is_err());
         assert!(MultisampleDepthResolveFilter::from_raw(3).is_err());
         assert!(MultisampleStencilResolveFilter::from_raw(2).is_err());
-        for raw in 0..9 {
+        for raw in 0..10 {
             assert_eq!(DrawPrimitiveType::from_raw(raw).unwrap().raw(), raw);
         }
         assert_eq!(
             DrawPrimitiveType::from_raw(3).unwrap(),
             DrawPrimitiveType::Public(PrimitiveType::Triangle)
         );
-        assert!(DrawPrimitiveType::from_raw(9).is_err());
+        assert!(DrawPrimitiveType::from_raw(10).is_err());
         assert!(DrawPrimitiveType::from_raw(1 << 32).is_err());
     }
 

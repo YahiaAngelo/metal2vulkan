@@ -27,6 +27,8 @@
 //! earlier in the command buffer. Quads and a quad strip under a fragment function that reads
 //! `[[primitive_id]]` are refused (`NotImplemented(PrivatePrimitives)`): the list's triangles
 //! count two IDs where Metal counts one.
+//!
+//! Type 9's draws, which fail their command buffers as Metal's GPU does: [`type_nine`].
 
 use super::{buffer_with, validated_device, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
@@ -42,6 +44,8 @@ use metal2vulkan_runtime::{
     Region, RenderCommandEncoder, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
     RuntimeGap, StoreAction, TextureDescriptor,
 };
+
+mod type_nine;
 
 /// The target's side, in pixels.
 const SIDE: u64 = 32;

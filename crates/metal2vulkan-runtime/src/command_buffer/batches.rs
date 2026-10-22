@@ -155,6 +155,14 @@ impl<E: PartialEq, S: PartialEq> Batches<E, S> {
         add_max(&mut self.current().waits, event, value);
     }
 
+    /// The runtime's own wait for `event` to reach `value`, which no `encodeWaitForEvent:value:`
+    /// made: it splits the batches as one does, and is not counted among the event waits
+    /// ([`events`](Self::events)).
+    pub(crate) fn hold(&mut self, event: E, value: u64) {
+        self.before_wait();
+        add_max(&mut self.current().waits, event, value);
+    }
+
     /// `encodeSignalEvent:value:`.
     pub(crate) fn signal(&mut self, event: E, value: u64) {
         self.event_signals += 1;
