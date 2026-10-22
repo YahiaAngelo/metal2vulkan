@@ -5422,11 +5422,15 @@ impl Texture {
         if host.host_len().is_none_or(|len| (bytes.len() as u64) < len) {
             return Err(invalid(CALL, Problem::Copy(CopyProblem::BufferRange)));
         }
-        // A two-plane texture's color words, each texel's first word; a heap shadow's are the
-        // heap's bytes, which `read_region` reads (as `replace_region` writes them).
+        // A two-plane texture's color words, each texel's first word; those a heap shadow holds
+        // are the heap's bytes, which `read_region` reads (as `replace_region` writes them), and
+        // a level it does not hold (a mipmapped texture's later one) lies in the image alone.
         let heap_shadow = matches!(
             &self.0.storage,
-            Storage::Image(image) if matches!(image.owner, Owner::HeapShadow(_))
+            Storage::Image(image) if matches!(
+                &image.owner,
+                Owner::HeapShadow(shadow) if shadow.holds(image.plan(), &image_region)
+            )
         );
         if planes && !heap_shadow {
             let mut words = vec![0; host.packed_len() as usize];
