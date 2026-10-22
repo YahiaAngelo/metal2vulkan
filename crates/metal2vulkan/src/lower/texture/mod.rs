@@ -595,6 +595,9 @@ pub struct QueryOp {
     /// numeric class through the group's array of that class (`HeapPlan::cross`) where the
     /// handle's class index names one.
     pub heap_cross: bool,
+    /// The query is of a slot whose variant binds a two-plane extended-range 3D texture, whose
+    /// depth and level count Metal answers otherwise (`emit::planes_volume`).
+    pub volume: bool,
 }
 
 /// The texture strategies.
@@ -900,6 +903,15 @@ impl TextureStrategy {
                     } else {
                         0
                     }
+                    // A two-plane 3D texture's first-slice coordinate and its test.
+                    + if matches!(
+                        w.extended,
+                        Some(crate::metal::format::ExtendedRange::Planes { .. })
+                    ) {
+                        64
+                    } else {
+                        0
+                    }
                     + emit::class_write_words(w.class)
                     + w.heap_half.map_or(0, heap_half_write_words)
                     + match w.heap_small_floats {
@@ -924,6 +936,7 @@ impl TextureStrategy {
             TextureStrategy::Atomic(a) => a.words(),
             TextureStrategy::Query(q) => {
                 24 + if q.image.heap() { 32 } else { 0 }
+                    + if q.volume { 72 } else { 0 }
                     + if q.clamp { 16 } else { 0 }
                     + if q.heap_raw { heap_raw::QUERY_WORDS } else { 0 }
                     + if q.heap_cross {
@@ -3885,6 +3898,12 @@ fn select_query(
         }
         _ => false,
     };
+    let volume = shape.dim == ImageDim::D3
+        && !shape.array
+        && matches!(
+            extended_range(cx, image)?,
+            Some(crate::metal::format::ExtendedRange::Planes { .. })
+        );
     mark(cx, image, |u| u.query = true);
     Ok(TextureStrategy::Query(QueryOp {
         image,
@@ -3893,5 +3912,6 @@ fn select_query(
         clamp,
         heap_raw,
         heap_cross,
+        volume,
     }))
 }

@@ -395,6 +395,25 @@ fn decl_of(cx: &EmitCx<'_>, image: &ImageRef) -> Option<ImageDecl> {
     }
 }
 
+/// Whether `decl` is a slot's 3D texture whose variant binds a two-plane extended-range format
+/// (`ExtendedRange::Planes`). Metal addresses such a texture's texels as one 2D slice's: every
+/// read and sample of it, at every coordinate and level, in bounds or not, takes its first
+/// texel; a write at `(x, y, z)` of level 0 stores texel `(x, y)` of its first slice whatever
+/// `z`, and one past the level's width or height or of another level stores nothing; its depth
+/// query answers `max(1, ⌈w / 4⌉ >> l)` of its first level's width `w`, and a one-level texture's
+/// level count `1 - ⌊(w - 1) / 16⌋` (as a `uint`). Measured on an Apple M3 Max under macOS 27.0.1
+/// (`Shared` and `Private`, in a heap and of its own memory; depths 1 to 64; every width from 1
+/// to 130 at heights 1, 5, 64 and 300 for the queries). A mipmapped one's reads take bytes that
+/// vary from run to run there; they read here as a one-level texture's.
+fn planes_volume(decl: &ImageDecl) -> bool {
+    decl.dim == Dim::D3
+        && !decl.arrayed
+        && matches!(
+            decl.extended,
+            Some(crate::metal::format::ExtendedRange::Planes { .. })
+        )
+}
+
 /// The loaded image of `image`: for a slot's level views, the element of level `level` (`None`: the
 /// constant 0, the only level of every other storage access).
 fn image(
@@ -3121,9 +3140,11 @@ pub(crate) fn with_word(
 }
 
 fn read(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, r: &Read) -> BResult<SValue> {
+    // A two-plane 3D texture's read takes its first texel ([`planes_volume`]).
+    let volume = decl_of(cx, &r.image).is_some_and(|d| planes_volume(&d));
     // A storage read's level is its level views'; a sampled read's, its `Lod`.
     let (view, lod) = if r.level_views {
-        (r.level, None)
+        (r.level.filter(|_| !volume), None)
     } else {
         (None, r.level)
     };
@@ -3149,13 +3170,15 @@ fn read(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, r: &Read) -> BResult<
         }
         None => img,
     };
-    let plain = match r.edge {
-        None => Some(coordinate(cx, fb, &decl, &r.at)?),
-        Some(_) => None,
+    let plain = match (volume, r.edge) {
+        (true, _) => Some(u32s(fb, coord_len(&decl), 0)?),
+        (false, None) => Some(coordinate(cx, fb, &decl, &r.at)?),
+        (false, Some(_)) => None,
     };
-    let mut level = match lod {
-        Some(l) => Some(cx.operand(fb, l)?),
-        None => None,
+    let mut level = match (lod, volume) {
+        (Some(_), true) => Some(u32s(fb, 1, 0)?),
+        (Some(l), false) => Some(cx.operand(fb, l)?),
+        (None, _) => None,
     };
     let mut sample = match r.sample {
         Some(s) => Some(cx.operand(fb, s)?),
@@ -3181,7 +3204,7 @@ fn read(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, r: &Read) -> BResult<
     // clamp-to-edge read is tested as it accesses, with its clamped coordinate against the size it
     // clamped into, so only its level, layer, or sample index can fail.
     let mut in_range = None;
-    if r.checked() || spec.is_some() {
+    if (r.checked() || spec.is_some()) && !volume {
         let size = match (edge, level) {
             // The clamp-to-edge size query's, at the level it clamped.
             (Some(at), l) => {
@@ -3767,6 +3790,13 @@ fn write(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, w: &Write) -> BResul
         ..
     } = image(cx, fb, &w.image, w.level)?;
     let coord = coordinate(cx, fb, &decl, &w.at)?;
+    // A two-plane 3D texture's write stores level 0's texel `(x, y)` of its first slice, and
+    // nothing past the level's width or height or at another level ([`planes_volume`]).
+    let volume = match planes_volume(&decl) {
+        true => Some(volume_write(cx, fb, img, coord, w.level)?),
+        false => None,
+    };
+    let coord = volume.map_or(coord, |(at, _)| at);
     let v = cx.operand(fb, w.value)?;
     // A texture of another numeric class: the declared lanes as its own class's texel.
     let v = match w.cross {
@@ -3846,6 +3876,18 @@ fn write(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, w: &Write) -> BResul
     // A write to a sparse texture is dropped.
     let kept = sparse_writes_kept(cx, fb, &w.image)?;
     let within = and_kept(fb, within, kept)?;
+    if let Some((_, stored)) = volume {
+        let mut cond = stored;
+        for c in [live, within].into_iter().flatten() {
+            cond = fb.binary(BinOp::LogicalAnd, cond, c)?;
+        }
+        let then: ArmFn<'_, ()> = Box::new(move |fb, _| {
+            store(fb, (img, coord, texel), mem, twin)?;
+            Ok(ArmEnd::FallThrough(Vec::new()))
+        });
+        fb.if_(&mut (), cond, then, None)?;
+        return Ok(());
+    }
     if !w.guard {
         // A write through the null heap element, or at a level the texture lacks, is dropped.
         let cond = match (live, within) {
@@ -3876,6 +3918,32 @@ fn write(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, w: &Write) -> BResul
     });
     fb.if_(&mut (), inb, then, None)?;
     Ok(())
+}
+
+/// A two-plane 3D texture's write at `coord` of level `level` ([`planes_volume`]): the coordinate
+/// of texel `(x, y)` of its first slice, and whether Metal stores it there (`x` and `y` within the
+/// level, which `img` is, and the level 0).
+fn volume_write(
+    cx: &mut EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+    img: SValue,
+    coord: SValue,
+    level: Option<ValueId>,
+) -> BResult<(SValue, SValue)> {
+    let size = fb.query(ImageQuery::Size, img)?;
+    let lt = fb.binary(BinOp::ULessThan, coord, size)?;
+    let in_x = fb.composite_extract(lt, &[0])?;
+    let in_y = fb.composite_extract(lt, &[1])?;
+    let mut stored = fb.binary(BinOp::LogicalAnd, in_x, in_y)?;
+    if let Some(l) = level {
+        let l = cx.operand(fb, l)?;
+        let zero = u32s(fb, 1, 0)?;
+        let first = fb.binary(BinOp::IEqual, l, zero)?;
+        stored = fb.binary(BinOp::LogicalAnd, stored, first)?;
+    }
+    let zeros = u32s(fb, 3, 0)?;
+    let at = fb.vector_shuffle(coord, zeros, &[0, 1, 5])?;
+    Ok((at, stored))
 }
 
 /// The texel operands of a storage-image read or write of `image`: the function's coherence
@@ -4253,7 +4321,25 @@ fn query_value(
             fb.composite_extract(v, &[u32::from(i)])
         }
     };
+    let volume = q.volume && planes_volume(decl);
     Ok(match q.kind {
+        // A two-plane 3D texture's depth: `max(1, ⌈w / 4⌉ >> l)` ([`planes_volume`]).
+        QueryKind::Size { component: 2 } if volume => {
+            let w = volume_width(cx, fb, q, decl, img)?;
+            let three = u32s(fb, 1, 3)?;
+            let w = fb.binary(BinOp::IAdd, w, three)?;
+            let two = u32s(fb, 1, 2)?;
+            let quarter = fb.binary(BinOp::ShiftRightLogical, w, two)?;
+            let l = match q.level {
+                Some(l) => cx.operand(fb, l)?,
+                None => u32s(fb, 1, 0)?,
+            };
+            let last = u32s(fb, 1, 31)?;
+            let l = umin(fb, l, last)?;
+            let d = fb.binary(BinOp::ShiftRightLogical, quarter, l)?;
+            let one = u32s(fb, 1, 1)?;
+            fb.glsl(GlslOp::UMax, &[d, one])?
+        }
         QueryKind::Size { component: c } => {
             let s = size(cx, fb)?;
             component(fb, s, c)?
@@ -4268,21 +4354,64 @@ fn query_value(
                 layers
             }
         }
-        // A storage image's level count is the binder's.
-        QueryKind::Levels if storage => {
-            let ImageRef::Slot(index) = q.image else {
-                return Err(cx.fail("a heap storage image's level count"));
+        QueryKind::Levels => {
+            // A storage image's level count is the binder's.
+            let n = match storage {
+                true => {
+                    let ImageRef::Slot(index) = q.image else {
+                        return Err(cx.fail("a heap storage image's level count"));
+                    };
+                    let Some(slot) = cx.plan.families.texture.slots.get(&index).map(|s| s.slot)
+                    else {
+                        return Err(cx.fail(format!("texture slot {index} is not planned")));
+                    };
+                    cx.push_field(fb, crate::pipeline::sym::PushField::TextureLevels(slot))?
+                }
+                false => fb.query(ImageQuery::Levels, img)?,
             };
-            let Some(slot) = cx.plan.families.texture.slots.get(&index).map(|s| s.slot) else {
-                return Err(cx.fail(format!("texture slot {index} is not planned")));
-            };
-            cx.push_field(fb, crate::pipeline::sym::PushField::TextureLevels(slot))?
+            match volume {
+                // A two-plane 3D texture of one level: `1 - ⌊(w - 1) / 16⌋`
+                // ([`planes_volume`]).
+                true => {
+                    let w = volume_width(cx, fb, q, decl, img)?;
+                    let one = u32s(fb, 1, 1)?;
+                    let below = fb.binary(BinOp::ISub, w, one)?;
+                    let four = u32s(fb, 1, 4)?;
+                    let sixteenths = fb.binary(BinOp::ShiftRightLogical, below, four)?;
+                    let answer = fb.binary(BinOp::ISub, one, sixteenths)?;
+                    let single = fb.binary(BinOp::IEqual, n, one)?;
+                    fb.select(single, answer, n)?
+                }
+                false => n,
+            }
         }
-        QueryKind::Levels => fb.query(ImageQuery::Levels, img)?,
         // A 1D texture has no mipmaps in Metal: always 0.
         QueryKind::NoLevels => u32s(fb, 1, 0)?,
         QueryKind::Samples => fb.query(ImageQuery::Samples, img)?,
     })
+}
+
+/// The width of the first level of `q`'s two-plane 3D texture ([`planes_volume`]), a sampled
+/// slot's image `img`: its level 0's size; a storage slot's, its first level view's.
+fn volume_width(
+    cx: &mut EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+    q: &QueryOp,
+    decl: &ImageDecl,
+    img: SValue,
+) -> BResult<SValue> {
+    let size = match (decl.usage, decl.level_views) {
+        (ImageUsage::Sampled, _) => {
+            let zero = u32s(fb, 1, 0)?;
+            fb.query(ImageQuery::SizeLod(zero), img)?
+        }
+        (_, Some(_)) => {
+            let Loaded { img, .. } = image(cx, fb, &q.image, None)?;
+            fb.query(ImageQuery::Size, img)?
+        }
+        (_, None) => fb.query(ImageQuery::Size, img)?,
+    };
+    fb.composite_extract(size, &[0])
 }
 
 /// `fence`: the thread's texture writes become visible to its later reads.

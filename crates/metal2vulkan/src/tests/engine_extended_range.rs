@@ -16,6 +16,8 @@
 //!   variant's plan states the same key, and it views the image in the raw format.
 //! - Samples of such a texture are Metal's (`samples`), at Metal's level and through a linear
 //!   mip filter's trilinear sum (`levels`), and a 3D texture's (`volumes`).
+//! - A two-plane 3D texture reads its first texel, writes its first slice and answers Metal's
+//!   depth and level count (`planes_volumes`).
 //!
 //! `llvm-as` assembles the kernels; without it the tests skip visibly.
 
@@ -47,6 +49,7 @@ use crate::spirv::ir::TypedModule;
 mod bicubic;
 mod heap;
 mod levels;
+mod planes_volumes;
 mod samples;
 mod targets;
 mod volumes;
