@@ -18,8 +18,9 @@
 //! store action where that is known (one that resolves needs a target, and a target one that
 //! resolves); a late store action that resolves needs the target set when it is, and one that does
 //! not drops the attachment's resolve, as plain Metal leaves a resolve texture under such an action
-//! untouched. Each refusal is the descriptor's, typed, and leaves the target set
-//! before.
+//! untouched, as is a target of a pixel format Metal does not store the attachment into
+//! (`resolve::untouched_across_formats`). Each refusal is the descriptor's, typed, and leaves the
+//! target set before.
 //!
 //! **The mechanism.** The encoder begins the pass at `end_encoding` (the deferred pass begin,
 //! `render.rs`), so a target only replaces the attachment's resolve in the pass's layout, and
@@ -135,14 +136,18 @@ impl RenderLowering {
             }
             _ => {}
         }
+        let wanted = wanted(target.as_ref(), color.store);
         let resolve = resolve::color(
             CALL,
             &maker,
             which,
             &color.target,
-            &wanted(target.as_ref(), color.store),
+            &wanted,
             (color.load, color.clear),
         )?;
+        // A target Metal leaves untouched across formats, as the descriptor's.
+        color.unresolved_across =
+            resolve.is_none() && resolve::unresolved_across(&color.target, &wanted);
         color.resolve = resolve;
         // A single-sampled attachment's copied resolve is replaced too (a late target of one is
         // refused, `ResolveSourceSamples`: plain Metal's answer is unmeasured).

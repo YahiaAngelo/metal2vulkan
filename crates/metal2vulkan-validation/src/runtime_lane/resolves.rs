@@ -1103,14 +1103,15 @@ fn resolves_are_refused_as_metal_refuses_them() {
             (0, 0),
         )
     };
-    // Plain Metal's answer depends on the pair: into `BGRA8Unorm` the
-    // values in its channel order (not built), into `R32Uint` or `RGBA16Float` nothing; the sRGB
-    // twin resolves (`a_resolve_into_the_srgb_twin_keeps_the_attachment_s_encoding`).
+    // Plain Metal's answer depends on the pair: into `BGRA8Unorm` the values in its channel order
+    // (not built), into `RGBA8Snorm` and `R8Unorm` its codes (not built); into `R32Uint` or
+    // `RGBA16Float` nothing (`a_resolve_metal_does_not_store_leaves_its_texture_untouched`); the
+    // sRGB twin resolves (`a_resolve_into_the_srgb_twin_keeps_the_attachment_s_encoding`).
     assert_eq!(
         open(&other(&lane.single(PixelFormat::BGRA8Unorm))),
         Err(Error::NotImplemented(RuntimeGap::Render))
     );
-    for pf in [PixelFormat::R32Uint, PixelFormat::RGBA16Float] {
+    for pf in [PixelFormat::RGBA8Snorm, PixelFormat::R8Unorm] {
         assert_eq!(
             open(&other(&lane.single(pf))),
             refused(call, RenderPassProblem::ResolveFormat(c0)),
@@ -1497,6 +1498,137 @@ fn a_resolve_into_the_srgb_twin_keeps_the_attachment_s_encoding() {
             repeat(&texel, (SIZE * SIZE) as usize),
             "{attachment:?} into {into:?} through a view of {view:?}"
         );
+    }
+    quiet(lane, &messages);
+}
+
+/// A multisampled color attachment's resolve into a texture of a pixel format Metal does not store
+/// its tile into, which Metal's validation stops, as plain Metal runs it (our probe `xres`, the M3
+/// Max under macOS 27.0.1, 2 and 4 samples): the resolve texture keeps its texels (each byte 0x5a
+/// before the pass), and the attachment holds what its store action leaves without the resolve:
+/// after `StoreAndMultisampleResolve` the pass's clear and draw, as `Store` leaves them; after
+/// `MultisampleResolve` its texels from before the pass, cleared and stored by a pass before it to
+/// (0.75, 0.25, 0.5, 1), as Metal's tile store leaves them in every pass measured (on a device
+/// that stores a `DontCare` attachment, `DontCare::Stored`, the pass's texels, Metal's answer
+/// where its tiler overflows). Read through a resolve of the attachment into its own format by a
+/// pass that loads it. Each pass clears to (0.25, 0.5, 0.75, 1) and draws white or nothing. The
+/// pairs: `BGRA8Unorm_sRGB` and `BGRA8Unorm` into `RGBA16Float` (the formats macOS 26.6.2's Maps
+/// resolves across), `RGBA8Unorm` into `R32Float` and `RGBA8Uint`, `RG16Unorm` into
+/// `RGBA8Unorm`, and `RGBA16Snorm` into `RG32Float`.
+#[test]
+fn a_resolve_metal_does_not_store_leaves_its_texture_untouched() {
+    let (messages, _cache, lane) = lane();
+    let facts = &lane.device.properties().driver_facts;
+    // A device that stores `DONT_CARE` as Metal's own keeps Metal's answer; one that keeps one of
+    // Metal's two either; every other one is handed `STORE` (`render_target::DontCare`).
+    let metals = facts.contains(&DriverFact::DontCareStoreIsMetals);
+    let one_of = facts.contains(&DriverFact::DontCareStoreIsOneOfMetals);
+    for (from, into, bytes) in [
+        (PixelFormat::BGRA8UnormSRGB, PixelFormat::RGBA16Float, 8u64),
+        (PixelFormat::BGRA8Unorm, PixelFormat::RGBA16Float, 8),
+        (PixelFormat::RGBA8Unorm, PixelFormat::R32Float, 4),
+        (PixelFormat::RGBA8Unorm, PixelFormat::RGBA8Uint, 4),
+        (PixelFormat::RG16Unorm, PixelFormat::RGBA8Unorm, 4),
+        (PixelFormat::RGBA16Snorm, PixelFormat::RG32Float, 8),
+    ] {
+        let own_bytes = match from {
+            PixelFormat::RGBA16Snorm => 8,
+            _ => 4,
+        };
+        let pipeline = lane.pipeline((FULL, WHITE), &[from], (None, None), 4);
+        for store in [
+            StoreAction::MultisampleResolve,
+            StoreAction::StoreAndMultisampleResolve,
+        ] {
+            for drawn in [false, true] {
+                let label = format!("{from:?} into {into:?}, {store:?}, drawn {drawn}");
+                let msaa = lane.msaa(from);
+                let resolve = lane.texture(
+                    into,
+                    Shape {
+                        shared: true,
+                        ..ONE
+                    },
+                    TextureUsage::SHADER_READ,
+                );
+                let filled = vec![0x5a; (bytes * SIZE * SIZE) as usize];
+                resolve
+                    .replace_region(
+                        Region::new_2d(0, 0, SIZE, SIZE),
+                        0,
+                        0,
+                        &filled,
+                        bytes * SIZE,
+                        bytes * SIZE * SIZE,
+                    )
+                    .unwrap();
+                // The texels before the pass.
+                let mut before = color_pass(&msaa, None, StoreAction::Store, (0, 0));
+                before.color_attachments[0].clear_color = ClearColor::new(0.75, 0.25, 0.5, 1.0);
+                lane.run(&before, |_, _, _| {}).unwrap();
+                let mut pass = color_pass(&msaa, Some(&resolve), store, (0, 0));
+                pass.color_attachments[0].clear_color = ClearColor::new(0.25, 0.5, 0.75, 1.0);
+                lane.run(&pass, |l, e, h| {
+                    if drawn {
+                        l.draw(e, h, &pipeline, 0.5);
+                    }
+                })
+                .unwrap_or_else(|e| panic!("{label}: {e}"));
+                assert_eq!(
+                    lane.read(&resolve, (0, 0), bytes, BlitOption::None),
+                    filled,
+                    "{label}: the resolve texture"
+                );
+                // What the attachment holds, and what each pass would leave there.
+                let held = lane.single(from);
+                let mut read =
+                    color_pass(&msaa, Some(&held), StoreAction::MultisampleResolve, (0, 0));
+                read.color_attachments[0].load_action = LoadAction::Load;
+                lane.run(&read, |_, _, _| {}).unwrap();
+                let held = lane.read(&held, (0, 0), own_bytes, BlitOption::None);
+                let reference = |clear: ClearColor, draw: bool| {
+                    let texture = lane.msaa(from);
+                    let own = lane.single(from);
+                    let mut pass = color_pass(
+                        &texture,
+                        Some(&own),
+                        StoreAction::StoreAndMultisampleResolve,
+                        (0, 0),
+                    );
+                    pass.color_attachments[0].clear_color = clear;
+                    lane.run(&pass, |l, e, h| {
+                        if draw {
+                            l.draw(e, h, &pipeline, 0.5);
+                        }
+                    })
+                    .unwrap();
+                    lane.read(&own, (0, 0), own_bytes, BlitOption::None)
+                };
+                let rendered = reference(ClearColor::new(0.25, 0.5, 0.75, 1.0), drawn);
+                let earlier = reference(ClearColor::new(0.75, 0.25, 0.5, 1.0), false);
+                // A pass without a draw call renders the attachment through a backing its
+                // texture keeps, on every device (`render.rs`).
+                let kept = store == StoreAction::MultisampleResolve && (!drawn || metals);
+                let either = store == StoreAction::MultisampleResolve && drawn && one_of;
+                let texels = |v: &[u8]| {
+                    v.chunks(own_bytes as usize)
+                        .map(<[u8]>::to_vec)
+                        .collect::<Vec<_>>()
+                };
+                if kept {
+                    assert_eq!(held, earlier, "{label}: the attachment's samples");
+                } else if either {
+                    let all = texels(&held)
+                        .iter()
+                        .zip(texels(&earlier))
+                        .zip(texels(&rendered))
+                        .all(|((h, e), r)| *h == e || *h == r);
+                    assert!(all, "{label}: the attachment's samples {held:02x?}");
+                } else {
+                    assert_eq!(held, rendered, "{label}: the attachment's samples");
+                }
+            }
+        }
     }
     quiet(lane, &messages);
 }

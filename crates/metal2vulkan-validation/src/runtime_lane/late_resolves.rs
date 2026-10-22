@@ -431,14 +431,16 @@ fn late_resolve_targets_are_refused_typed() {
     lane.run(&loading, |l, e, h| {
         l.draw(e, h, &pipeline, 0.5);
         for (target, index, problem) in [
+            // Formats Metal stores the attachment's codes into (not built); the sRGB twin
+            // resolves, and a format Metal does not store into is left untouched, as the
+            // descriptor's.
             (
-                of(PixelFormat::RGBA16Float, SIZE),
+                of(PixelFormat::RGBA8Snorm, SIZE),
                 0,
                 RenderPassProblem::ResolveFormat(color),
             ),
-            // The sRGB twin resolves, as the descriptor's.
             (
-                of(PixelFormat::R32Uint, SIZE),
+                of(PixelFormat::R8Unorm, SIZE),
                 0,
                 RenderPassProblem::ResolveFormat(color),
             ),

@@ -21,6 +21,20 @@
 //!   not): the attachment resolves nowhere. One of the attachment's count takes a copy of its
 //!   samples, which the runtime does not build (refused, `ResolveSamples`), and a depth or
 //!   stencil one a layout pattern (refused).
+//! - **A resolve texture of a format the attachment's tile is not stored into** (our probe `xres`
+//!   on the M3 Max under macOS 27.0.1, plain Metal: 36 non-integer color formats at 2 and 4
+//!   samples into 55 color formats, a Private attachment cleared and drawn or not, a Shared
+//!   resolve texture prefilled; the consumer's M3 Max measurements of `BGRA8Unorm` and
+//!   `BGRA8Unorm_sRGB` into `RGBA16Float`, `BGR10_XR` and its twin, macOS 26.6.2's Maps among
+//!   them, over every load action, storage modes, sizes up to 1920 by 1080 and IOSurfaces): Metal
+//!   holds the samples of an 8-bit norm, sRGB or packed 32-bit format as a word of codes, and of a
+//!   16-bit norm format as 16-bit codes, and stores them only into a texture of a format held so
+//!   (or a 64-bit extended-range one); a resolve into any other format writes nothing
+//!   ([`untouched_across_formats`]). `MultisampleResolve` then leaves the samples as they were
+//!   before the pass, as `DontCare` does, and `StoreAndMultisampleResolve` stores them as `Store`
+//!   does: the runtime does not resolve, and stores the attachment so (in a pass without a draw
+//!   call that clears it, through a backing its texture keeps, `render.rs`). A half, float,
+//!   packed 16-bit or extended-range attachment's resolve writes every format measured.
 //! - **A resolve texture of another pixel format** (probes, an M4 with macOS 27.0.1; Metal's
 //!   validation stops it, "does not match Resolve PixelFormat"): a multisampled attachment
 //!   resolving into its format's sRGB twin keeps its own encoding, a texture or a view alike
@@ -30,11 +44,13 @@
 //!   `BGRA8Unorm` and their twins the rule is one: the attachment's values in its own encoding, in
 //!   the destination's channel order (a texture's or a view's; the four twin pairs measured and six
 //!   of the eight across the orders); the other channel order is not built
-//!   (`NotImplemented(Render)`). Other pairs follow no one rule: `RGBA8Unorm` into `RGBA8Snorm`
-//!   writes its bytes (0x80 as 0x81), into `R32Uint`, `R32Float`, `RGBA8Uint` or `RGBA16Float`
-//!   nothing, `RGBA16Float` into `RGBA8Unorm` converts, `R32Float` into `R32Uint` writes its bits,
-//!   into `RGBA8Unorm` its red with zeros, and `RGBA16Float` into `RG32Float` a pattern of neither;
-//!   each stays refused (`ResolveFormat`). An integer format's resolve writes values no sample
+//!   (`NotImplemented(Render)`). The other pairs Metal writes (the M3 Max and an M4 alike) follow
+//!   no rule the runtime builds: a word of codes is stored into another such format as its codes
+//!   in that format's channel order, 0x80 as 0x81 into a snorm channel, a shared-exponent word
+//!   normalized, into `BGR10A2Unorm` as 10-bit fields swapped (`RGBA8Unorm` into `RGBA8Snorm`
+//!   writes its bytes, 0x80 as 0x81); `RGBA16Float` into `RGBA8Unorm` converts, `R32Float` into
+//!   `R32Uint` writes its bits, into `RGBA8Unorm` its red with zeros, and `RGBA16Float` into
+//!   `RG32Float` a pattern of neither; each stays refused (`ResolveFormat`). An integer format's resolve writes values no sample
 //!   holds, which change from run to run (`RGBA8Uint`, `R32Uint`): refused. Measured over every
 //!   integer color format (an M4 with macOS 27.0.1, without API validation, which
 //!   stops it; the 19 formats, 4 samples, every subset of covered samples over a clear, two runs):
@@ -71,7 +87,8 @@
 //! without a resolve texture; a memoryless resolve texture (a Metal probe on an M4); a
 //! single-sampled depth or stencil attachment, or a color one's late target, a multisampled resolve
 //! texture (but a color one of another sample count, above), another pixel format (but a
-//! multisampled color attachment's sRGB twin, above), an integer color format, a level or slice
+//! multisampled color attachment's sRGB twin and a format its tile is not stored into, above), an
+//! integer color format, a level or slice
 //! past the resolve texture, and a color level reaching past the attachment after a load other than
 //! `Clear`; `DepthResolvedSample` without a depth attachment, or with a separate depth texture
 //! stored beside it; and depth and stencil attachments of one texture that mix storing and
@@ -392,6 +409,120 @@ pub(crate) fn unmodelled_resolve(pf: PixelFormat) -> Option<Unsupported> {
     ExtendedRange::of(pf).map(|_| Unsupported::not_implemented(Feature::Format))
 }
 
+/// What Apple's GPU holds of a multisampled color attachment of a pixel format as its resolve
+/// stores it, by the formats it stores that into ([`untouched_across_formats`]; our probe `xres`,
+/// the M3 Max under macOS 27.0.1, plain Metal: each of the 36 non-integer color formats below at
+/// 2 and 4 samples, resolved into a texture of each of the 55 color formats below).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResolveTile {
+    /// A 32-bit word of codes: the 8-bit unorm, sRGB and snorm formats of one, two and four
+    /// channels and `A8Unorm`, and the packed 32-bit `RGB10A2Unorm`, `BGR10A2Unorm`,
+    /// `RG11B10Float` and `RGB9E5Float`. Stored into a texture of another such format as its codes
+    /// (and into `BGRA10_XR` and its twin as a pattern of neither).
+    Codes32,
+    /// 16-bit unorm and snorm codes: `R16Unorm`, `RG16Unorm`, `RGBA16Unorm` and their snorm
+    /// formats. Stored into a texture of another such format as its codes (and into `BGRA10_XR`
+    /// and its twin as a pattern).
+    Norm16,
+    /// Values: the half and float formats, the packed 16-bit ones and the extended-range ones.
+    /// Stored into a texture of every format measured, converted or as a pattern.
+    Values,
+    /// The integer formats, which are no resolve source: as a resolve texture, measured.
+    Integers,
+}
+
+impl ResolveTile {
+    /// The tile of `pf`; `None` for a format the probe did not resolve into (a depth, stencil,
+    /// compressed, three-channel, two-plane or YCbCr format, `R16Float`'s private kin).
+    fn of(pf: PixelFormat) -> Option<ResolveTile> {
+        use PixelFormat as P;
+        Some(match pf {
+            P::A8Unorm
+            | P::R8Unorm
+            | P::R8UnormSRGB
+            | P::R8Snorm
+            | P::RG8Unorm
+            | P::RG8UnormSRGB
+            | P::RG8Snorm
+            | P::RGBA8Unorm
+            | P::RGBA8UnormSRGB
+            | P::RGBA8Snorm
+            | P::BGRA8Unorm
+            | P::BGRA8UnormSRGB
+            | P::RGB10A2Unorm
+            | P::BGR10A2Unorm
+            | P::RG11B10Float
+            | P::RGB9E5Float => ResolveTile::Codes32,
+            P::R16Unorm
+            | P::R16Snorm
+            | P::RG16Unorm
+            | P::RG16Snorm
+            | P::RGBA16Unorm
+            | P::RGBA16Snorm => ResolveTile::Norm16,
+            P::R16Float
+            | P::RG16Float
+            | P::RGBA16Float
+            | P::R32Float
+            | P::RG32Float
+            | P::RGBA32Float
+            | P::B5G6R5Unorm
+            | P::A1BGR5Unorm
+            | P::ABGR4Unorm
+            | P::BGR5A1Unorm
+            | P::BGR10XR
+            | P::BGR10XRSRGB
+            | P::BGRA10XR
+            | P::BGRA10XRSRGB => ResolveTile::Values,
+            P::R8Uint
+            | P::R8Sint
+            | P::R16Uint
+            | P::R16Sint
+            | P::RG8Uint
+            | P::RG8Sint
+            | P::R32Uint
+            | P::R32Sint
+            | P::RG16Uint
+            | P::RG16Sint
+            | P::RGBA8Uint
+            | P::RGBA8Sint
+            | P::RGB10A2Uint
+            | P::RG32Uint
+            | P::RG32Sint
+            | P::RGBA16Uint
+            | P::RGBA16Sint
+            | P::RGBA32Uint
+            | P::RGBA32Sint => ResolveTile::Integers,
+            _ => return None,
+        })
+    }
+}
+
+/// Whether the multisampled color attachment `source` names a resolve texture, as `wanted`
+/// states it, that Metal leaves untouched across formats ([`untouched_across_formats`]): its
+/// store action resolves or is `Unknown`. [`color`] gives it no resolve.
+pub(super) fn unresolved_across(source: &Target, wanted: &Wanted<'_>) -> bool {
+    source.samples > 1
+        && (wanted.store.resolves() || wanted.store == StoreAction::Unknown)
+        && wanted.texture.is_some_and(|into| {
+            untouched_across_formats(source.texture.pixel_format(), into.pixel_format())
+        })
+}
+
+/// Whether Metal leaves a resolve texture of pixel format `into` untouched by the resolve of a
+/// multisampled color attachment of `from`, another format (the module docs): a word of codes, or
+/// 16-bit norm codes ([`ResolveTile`]), into a format of another tile but the 64-bit
+/// extended-range ones. Every pair measured gave one answer at 2 and 4 samples, under both
+/// resolving store actions, drawn and not.
+fn untouched_across_formats(from: PixelFormat, into: PixelFormat) -> bool {
+    use PixelFormat as P;
+    let (Some(source), Some(destination)) = (ResolveTile::of(from), ResolveTile::of(into)) else {
+        return false;
+    };
+    matches!(source, ResolveTile::Codes32 | ResolveTile::Norm16)
+        && destination != source
+        && !matches!(into, P::BGRA10XR | P::BGRA10XRSRGB)
+}
+
 fn problem(call: &'static str, p: RenderPassProblem) -> Error {
     invalid(call, Problem::RenderPass(p))
 }
@@ -465,10 +596,10 @@ pub(super) fn color(
     ) {
         return Err(problem(call, RenderPassProblem::ResolveFormat(which)));
     }
-    if let Some(unsupported) = [source.texture.pixel_format(), texture.pixel_format()]
-        .into_iter()
-        .find_map(unmodelled_resolve)
-    {
+    // An extended-range attachment's resolve, not modelled. A resolve texture of such a format is
+    // the attachment's own or its twin, so of such an attachment, or of another format, which a
+    // resolve leaves untouched or `destination` refuses.
+    if let Some(unsupported) = unmodelled_resolve(source.texture.pixel_format()) {
         return Err(Error::Unsupported(unsupported));
     }
     // An attachment rendered through the view of its word (`metal::format::WordAttachment`) holds
@@ -974,7 +1105,8 @@ pub(super) fn color_copy(
 /// The resolve destination of `source` in `texture` at `wanted`'s level, slice and depth plane,
 /// checked as Metal checks it (but for `source`'s sample count, `single_sampled`); `None` for a
 /// multisampled color resolve texture of another sample count than a multisampled `source`'s,
-/// which plain Metal leaves untouched (the module docs).
+/// and for a resolve texture of a format a multisampled `source`'s tile is not stored into
+/// ([`untouched_across_formats`]), which plain Metal leaves untouched (the module docs).
 fn destination(
     call: &'static str,
     device: &Device,
@@ -1001,10 +1133,15 @@ fn destination(
         return Err(problem(call, RenderPassProblem::ResolveSamples(which)));
     }
     // A multisampled color attachment resolving into its format's sRGB twin keeps its own
-    // encoding (the module docs): it resolves in the attachment's format.
+    // encoding (the module docs): it resolves in the attachment's format. One whose tile Metal
+    // does not store into the resolve texture's format leaves that texture untouched.
     let pixel_format = source.texture.pixel_format();
     let twin = source.samples > 1 && srgb_twin(pixel_format) == Some(facts.pixel_format);
-    if facts.pixel_format != pixel_format && !twin {
+    let across = source.samples > 1
+        && facts.samples == 1
+        && matches!(which, Attachment::Color(_))
+        && untouched_across_formats(pixel_format, facts.pixel_format);
+    if facts.pixel_format != pixel_format && !twin && !across {
         // The other channel order of the 8-bit four-channel family: measured, not built.
         if source.samples > 1 && other_channel_order(pixel_format, facts.pixel_format) {
             return Err(Error::NotImplemented(RuntimeGap::Render));
@@ -1058,9 +1195,10 @@ fn destination(
         (facts.extent[1] >> level).max(1),
     ];
     // A level of another extent resolves the overlap (`color` refuses a color one reaching past
-    // the attachment without a clear); one of another sample count is left untouched where
-    // its extent is the attachment's (measured), and refused elsewhere (unmeasured).
-    if untouched {
+    // the attachment without a clear); one of another sample count or a format the attachment's
+    // tile is not stored into is left untouched where its extent is the attachment's
+    // (measured), and refused elsewhere (unmeasured).
+    if untouched || across {
         return match extent == source.extent {
             true => Ok(None),
             false => Err(problem(call, RenderPassProblem::ResolveSize(which))),
