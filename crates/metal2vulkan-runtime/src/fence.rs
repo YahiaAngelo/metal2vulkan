@@ -195,7 +195,10 @@ impl ComputeCommandEncoder {
     /// `updateFence:`: the fence is updated after the encoder's dispatches.
     pub fn update_fence(&mut self, fence: &Fence) -> Result<(), Error> {
         self.log(|_| ComputeCall::UpdateFence(fence.clone()));
-        self.core().update_fence("update_fence", fence, None)
+        self.core().update_fence("update_fence", fence, None)?;
+        // Its unit of command predication ends with it, as Metal's does (`predication.rs`).
+        self.fence_updated();
+        Ok(())
     }
 
     /// `waitForFence:`: the encoder's dispatches wait for the fence's last update before them in

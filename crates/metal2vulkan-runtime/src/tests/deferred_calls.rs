@@ -23,8 +23,8 @@ use crate::render::{BATCH_CALLS, HANDED_BATCHES};
 use crate::StoreAction;
 use crate::{
     BlitOption, Buffer, CommandBuffer, CommandBufferError, CommandBufferStatus, Degradation,
-    DegradeNotice, Device, DeviceKind, DeviceOptions, EncoderCall, Error, EventRef, MessageSink,
-    Origin, Problem, RenderCommandEncoder, RenderPipelineState, ResourceOptions, RuntimeGap,
+    DegradeNotice, Device, DeviceKind, DeviceOptions, EncoderCall, Error, EventRef, FailureOrigin,
+    MessageSink, Origin, Problem, RenderCommandEncoder, RenderPipelineState, ResourceOptions,
     ShaderCacheOptions, Size, Texture, TextureDescriptor, VertexAmplificationViewMapping, Viewport,
 };
 use ash::vk;
@@ -890,45 +890,61 @@ fn a_commit_after_an_end_in_flight_returns_and_keeps_its_order() {
     }
 }
 
-/// A commit after an end in flight refuses at the call what the commit refuses there, under both
-/// policies with the same error: with a predication block left open in a compute encoder before
-/// the pass, the commit returns `PredicationOpenAtUnitEnd`, and the command buffer stays
-/// uncommitted. Where the device takes no command predication there is nothing to refuse.
+/// A commit after an end in flight takes a command buffer one of whose units of command predication
+/// ended with a live block open, under both policies alike: an If whose condition failed, left open
+/// in a compute encoder before the pass, fails the command buffer at its completion with Metal's
+/// GPU recovery's error (`PredicationOpenAtUnitEnd`, code 1, Metal's description), and one whose
+/// condition held completes it. Where the device takes no command predication there is nothing to
+/// run.
 #[test]
-fn a_commit_after_an_end_in_flight_refuses_a_predication_block_left_open() {
-    let scratch = Scratch::new("deferred-commit-refused");
+fn a_commit_after_an_end_in_flight_fails_a_skipping_predication_block_left_open() {
+    let scratch = Scratch::new("deferred-commit-open-block");
     for policy in POLICIES {
         let device = device(&scratch.0, policy, &[], &Heard::default());
         let state = rectangle_state(&device);
         let queue = device.new_command_queue().unwrap();
-        let command_buffer = queue.command_buffer().unwrap();
         let word = device.new_buffer(4, ResourceOptions::shared()).unwrap();
-        let mut compute = command_buffer.compute_command_encoder().unwrap();
-        if let Err(error) = compute.encode_start_if(Some(&word), 0, 0, 0) {
-            assert!(matches!(error, Error::Unsupported(_)), "{error:?}");
-            eprintln!("{policy:?}: the device takes no command predication: {error}");
-            return;
+        for (reference, error) in [
+            (1, Some(CommandBufferError::PredicationOpenAtUnitEnd)),
+            (0, None),
+        ] {
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut compute = command_buffer.compute_command_encoder().unwrap();
+            if let Err(error) = compute.encode_start_if(Some(&word), 0, 0, reference) {
+                assert!(matches!(error, Error::Unsupported(_)), "{error:?}");
+                eprintln!("{policy:?}: the device takes no command predication: {error}");
+                return;
+            }
+            compute.end_encoding().unwrap();
+            let target = target(&device);
+            let mut encoder = command_buffer
+                .render_command_encoder(&pass(&target))
+                .unwrap();
+            rectangle(&state, &mut encoder);
+            encoder
+                .draw_primitives(PrimitiveType::Triangle, 0, 6, 1, 0)
+                .unwrap();
+            encoder.end_encoding().unwrap();
+            command_buffer.commit().unwrap();
+            command_buffer.wait_until_completed().unwrap();
+            assert_eq!(command_buffer.error(), error, "{policy:?} {reference}");
+            let description = error.map(|_| {
+                "Discarded (victim of GPU error/recovery) \
+                 (00000005:kIOGPUCommandBufferCallbackErrorInnocentVictim)"
+                    .to_owned()
+            });
+            assert_eq!(
+                command_buffer.error_description(),
+                description,
+                "{policy:?}"
+            );
+            if let Some(error) = error {
+                assert_eq!(
+                    (error.metal_code(), error.origin()),
+                    (1, FailureOrigin::Metal)
+                );
+            }
         }
-        compute.end_encoding().unwrap();
-        let target = target(&device);
-        let mut encoder = command_buffer
-            .render_command_encoder(&pass(&target))
-            .unwrap();
-        rectangle(&state, &mut encoder);
-        encoder
-            .draw_primitives(PrimitiveType::Triangle, 0, 6, 1, 0)
-            .unwrap();
-        encoder.end_encoding().unwrap();
-        assert_eq!(
-            command_buffer.commit(),
-            Err(Error::NotImplemented(RuntimeGap::PredicationOpenAtUnitEnd)),
-            "{policy:?}"
-        );
-        assert_eq!(
-            command_buffer.status(),
-            CommandBufferStatus::NotEnqueued,
-            "{policy:?}"
-        );
     }
 }
 

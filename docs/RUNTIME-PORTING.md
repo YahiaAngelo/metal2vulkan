@@ -161,10 +161,10 @@ narrow refusal that the call's rustdoc describes.
 | `DispatchThreadgroupsIndirect` | `dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:…` | `ComputeCommandEncoder::dispatch_threadgroups_indirect` |
 | `DispatchThreads` | `dispatchThreads:threadsPerThreadgroup:` | `ComputeCommandEncoder::dispatch_threads` |
 | `DispatchThreadsIndirect` | `dispatchThreadsWithIndirectBuffer:indirectBufferOffset:` (SPI) | `ComputeCommandEncoder::dispatch_threads_indirect` (a host step reads the arguments) |
-| `EncodeStartDoWhile` | `encodeStartDoWhile` (SPI) | `ComputeCommandEncoder::encode_start_do_while`, as Metal runs it, laid down as 64 copies of the loop's commands (16 inside another loop;; refused: a fourth loop open, and (at the commit) a live loop ending in a later encoder; a loop past its copies fails the command buffer *(partial)* |
-| `EncodeStartElse` | `encodeStartElse` (SPI) | `ComputeCommandEncoder::encode_start_else`, as Metal runs it; with no block open refused `NotImplemented(PredicationUnbalanced)` *(partial)* |
-| `EncodeStartIf` | `encodeStartIf:offset:comparison:referenceValue:` (SPI) | `ComputeCommandEncoder::encode_start_if`, as Metal runs it, on a counter the runtime's step kernel moves; refused: a word past its buffer, a nil buffer with no block open, and (at the commit) a live block open where its unit ends *(partial)* |
-| `EncodeStartWhile` | `encodeStartWhile:offset:comparison:referenceValue:` (SPI) | `ComputeCommandEncoder::encode_start_while`, as Metal runs it, laid down as `encode_start_do_while`'s loops are; refused as there, and as `encode_start_if` refuses its word *(partial)* |
+| `EncodeStartDoWhile` | `encodeStartDoWhile` (SPI) | `ComputeCommandEncoder::encode_start_do_while`, as Metal runs it, its body in its unit's later encoders included, laid down as 64 copies of the loop's commands (16 inside another loop); refused: a fourth loop open; a loop past its copies fails the command buffer (`PredicatedLoopPastCopies`) where Metal runs on *(partial)* |
+| `EncodeStartElse` | `encodeStartElse` (SPI) | `ComputeCommandEncoder::encode_start_else`, as Metal runs it; with no block open an unbalanced record, dropping its range of the unit's work as Metal's does; refused where that range holds dispatches from before the unit's first record (`NotImplemented(PredicationDropsUngatedWork)`) *(partial)* |
+| `EncodeStartIf` | `encodeStartIf:offset:comparison:referenceValue:` (SPI) | `ComputeCommandEncoder::encode_start_if`, as Metal runs it, on a counter the runtime's step kernel moves; a live block open where its unit ends fails the command buffer where its commands skip there, as Metal's GPU recovery does (`PredicationOpenAtUnitEnd`); refused: a word past its buffer, and a nil buffer with no block open where `encode_start_else` refuses *(partial)* |
+| `EncodeStartWhile` | `encodeStartWhile:offset:comparison:referenceValue:` (SPI) | `ComputeCommandEncoder::encode_start_while`, as Metal runs it, laid down as `encode_start_do_while`'s loops are; refused as there, and as `encode_start_if` refuses *(partial)* |
 | `EndEncoding` | `endEncoding` | `ComputeCommandEncoder::end_encoding` |
 | `ExecuteCommandsIndirect` | `executeCommandsInBuffer:indirectBuffer:indirectBufferOffset:` | `ComputeCommandEncoder::execute_commands_in_buffer_indirect`; `_checked` adds an `IndirectCommandCheck` its host step calls on each command first |
 | `ExecuteCommandsInBuffer` | `executeCommandsInBuffer:withRange:` | `ComputeCommandEncoder::execute_commands_in_buffer`; `_checked` adds an `IndirectCommandCheck` a host step calls on each command first, and the `IndirectCommandCheckNeeds` it looks for |
@@ -194,9 +194,9 @@ narrow refusal that the call's rustdoc describes.
 | Item | Metal | Runtime |
 |---|---|---|
 | `encode` |  | one `ComputeCommandEncoder` method per `ComputeCmd` (above) |
-| `encode_end_do_while` | `encodeEndDoWhile:offset:comparison:referenceValue:` (SPI) | `ComputeCommandEncoder::encode_end_do_while`, answering Metal's `BOOL`; with no block open refused `NotImplemented(PredicationUnbalanced)` *(partial)* |
-| `encode_end_if` | `encodeEndIf` (SPI) | `ComputeCommandEncoder::encode_end_if`, answering Metal's `BOOL`; with no block open refused `NotImplemented(PredicationUnbalanced)` *(partial)* |
-| `encode_end_while` | `encodeEndWhile` (SPI) | `ComputeCommandEncoder::encode_end_while`, answering Metal's `BOOL`; with no block open refused `NotImplemented(PredicationUnbalanced)` *(partial)* |
+| `encode_end_do_while` | `encodeEndDoWhile:offset:comparison:referenceValue:` (SPI) | `ComputeCommandEncoder::encode_end_do_while`, answering Metal's `BOOL`; with no block open answering `NO` and dropping its range as Metal's does; refused as `encode_start_if` refuses *(partial)* |
+| `encode_end_if` | `encodeEndIf` (SPI) | `ComputeCommandEncoder::encode_end_if`, answering Metal's `BOOL`; with no block open answering `NO` and dropping its range as Metal's does; refused as `encode_start_else` refuses *(partial)* |
+| `encode_end_while` | `encodeEndWhile` (SPI) | `ComputeCommandEncoder::encode_end_while`, answering Metal's `BOOL`; with no block open answering `NO` and dropping its range as Metal's does; refused as `encode_start_else` refuses *(partial)* |
 
 ### `TextureDescriptor`: `MTLTextureDescriptor`
 

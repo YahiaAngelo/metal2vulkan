@@ -1,11 +1,13 @@
 //! Command predication (`encode_start_if`, `encode_start_else`, `encode_end_if`, and the loops'
 //! starts and ends) on the device the cfg selects, under the validation layer, against what Metal
-//! answered on an M4 under macOS 27.0.1. The owned synthetic kernel `prd_mark` adds 1 to word `t`
-//! of a log, so the log shows which dispatches ran, each once:
+//! answered on an Apple M3 Max under macOS 27.0.1 (the Metal platform's probe,
+//! `metal::platform::predication_tests`, measures the same streams there). The owned synthetic
+//! kernel `prd_mark` adds 1 to word `t` of a log, so the log shows which dispatches ran, each once:
 //!
-//! - streams of records and marks as the probes wrote them ([`run`]'s notation): blocks nested,
-//!   with Elses, spanning a unit's encoders of one dispatch type, and killed by misused records,
-//!   run the marks Metal ran and answer what Metal answered;
+//! - streams of records and marks ([`run`]'s notation, the table `predication_streams.tsv`):
+//!   blocks nested, with Elses, spanning a unit's encoders, killed by misused records, and
+//!   unbalanced records dropping their ranges, with fences, setters and indirect dispatches among
+//!   them, run the marks Metal ran and answer what Metal answered;
 //! - the condition compares as Metal's codes say, reads the word at the offset rounded down to a
 //!   multiple of 4, and reads what a dispatch of the encoder wrote just before, with no barrier,
 //!   in a serial and a concurrent encoder;
@@ -14,10 +16,12 @@
 //!   an indirect range; inside a holding one each runs once; setters inside a skipped block take
 //!   effect;
 //! - loops run as Metal's ran, each pass with the encoder's state each command was encoded with,
-//!   nested, around Ifs and every dispatch form, and a loop that would run past the copies the
-//!   runtime lays down fails its command buffer;
-//! - what the runtime refuses: an unbalanced record, a word past its buffer, a live block open
-//!   where its unit ends (at the commit), a fourth loop open, and a loop spanning encoders.
+//!   nested, around Ifs and every dispatch form, across their unit's encoders, and a loop that
+//!   would run past the copies the runtime lays down fails its command buffer;
+//! - a live block open where its unit ends fails the command buffer where its commands skip there,
+//!   as Metal's GPU recovery does, and is harmless where they run;
+//! - what the runtime refuses: a word past its buffer, a fourth loop open, and an unbalanced record
+//!   that is its unit's first after dispatches of the unit.
 
 use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
@@ -118,6 +122,19 @@ fn one() -> Size {
     Size::new(1, 1, 1)
 }
 
+/// Write `words` from word 0 of `buffer` from the CPU.
+fn write_words(buffer: &Buffer, words: &[u32]) {
+    let contents = buffer
+        .contents()
+        .expect("a Shared buffer has contents")
+        .as_ptr();
+    for (i, &word) in words.iter().enumerate() {
+        // SAFETY: the buffer holds at least `4 * words.len()` bytes at `contents`, alive with it,
+        // and no command buffer of these tests runs while the CPU writes it.
+        unsafe { contents.cast::<u32>().add(i).write_unaligned(word) }
+    }
+}
+
 /// Write `value` into word 0 of `buffer` from the CPU.
 fn write_word(buffer: &Buffer, value: u32) {
     let contents = buffer
@@ -199,176 +216,155 @@ fn on_device(test: impl FnOnce(&Device)) {
     assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
 }
 
-/// Run `script` on `device` in one command buffer, in the probes' notation: `Tn` marks `n`; `I1`
-/// and `I0` start an If holding and failing (word 0 is 1, compared `==` with 1 and with 0); `In`
-/// starts one on a nil buffer; `L` is an Else; `W1` and `W0` start a While holding and failing,
-/// `D` a DoWhile; `E`, `V`, `Z0` and `Zn` are an `encodeEndIf`, an `encodeEndWhile`, an
-/// `encodeEndDoWhile` failing and one on a nil buffer, whose answers are kept; `|` and `%` go on
-/// in a new serial and concurrent encoder (a leading `%` makes the first concurrent); `B` puts a
-/// blit encoder between two serial ones. The tags that ran, and the answers.
-fn run(device: &Device, script: &str) -> (Vec<u32>, String) {
-    let marks = Marks::new(device);
-    let queue = device.new_command_queue().unwrap();
-    let command_buffer = queue.command_buffer().unwrap();
-    let open = |token: &str| match token {
-        "%" => command_buffer
-            .compute_command_encoder_with_dispatch_type(DispatchType::Concurrent)
-            .unwrap(),
-        _ => command_buffer.compute_command_encoder().unwrap(),
-    };
-    let mut tokens = script.split_whitespace().peekable();
-    let mut encoder = open(tokens.next_if_eq(&"%").unwrap_or("|"));
+/// What [`run`] runs streams with: the marking kernel's state, the log, the condition words
+/// (word 0 is 1), indirect dispatch arguments (one threadgroup of one at 0; a grid of one thread
+/// in a group of one at 16) and a fence.
+pub(crate) struct Streams {
+    marks: Marks,
+    arguments: Buffer,
+    fence: metal2vulkan_runtime::Fence,
+    queue: metal2vulkan_runtime::CommandQueue,
+}
+
+impl Streams {
+    pub(crate) fn new(device: &Device) -> Streams {
+        Streams {
+            marks: Marks::new(device),
+            arguments: buffer_with(device, &bytes(&[1, 1, 1, 0, 1, 1, 1, 1, 1, 1])).unwrap(),
+            fence: device.new_fence(),
+            queue: device.new_command_queue().unwrap(),
+        }
+    }
+}
+
+/// Run `script` in one command buffer, in the probes' notation: `Tn` marks `n` (its setters and
+/// `dispatchThreads`), `Gn` and `Hn` by `dispatchThreadgroupsWithIndirectBuffer` and
+/// `dispatchThreadsWithIndirectBuffer`, `bn` sets what `Tn` sets and dispatches nothing, `t`
+/// dispatches with the state set; `I1` and `I0` start an If holding and failing (word 0 is 1,
+/// compared `==` with 1 and with 0), `In` one on a nil buffer; `L` is an Else; `W1`, `W0` and
+/// `Wn` start a While holding, failing and on a nil buffer, `D` a DoWhile; `E`, `V`, `Z0` and
+/// `Zn` are an `encodeEndIf`, an `encodeEndWhile`, an `encodeEndDoWhile` failing and one on a nil
+/// buffer, whose answers are kept; `U` makes the log resident, `Fu` and `Fw` update and wait for a
+/// fence; `|` and `%` go on in a new serial and concurrent encoder, `B` ends the encoder and
+/// encodes a blit (the next command opens a serial encoder, as one with no encoder open does).
+/// The tags that ran, and the answers.
+pub(crate) fn run(streams: &Streams, script: &str) -> (Vec<u32>, String) {
+    let marks = &streams.marks;
+    write_words(&marks.log, &[0; LOG_WORDS]);
+    write_words(&marks.word, &[1, 0, 0, 0]);
+    let command_buffer = streams.queue.command_buffer().unwrap();
+    let mut open: Option<ComputeCommandEncoder> = None;
     let mut answers = String::new();
     let answer = |yes: bool| if yes { '1' } else { '0' };
-    for token in tokens {
+    for token in script.split_whitespace() {
         match token {
-            "I1" => encoder
-                .encode_start_if(Some(&marks.word), 0, EQUAL, 1)
-                .unwrap(),
-            "I0" => encoder
-                .encode_start_if(Some(&marks.word), 0, EQUAL, 0)
-                .unwrap(),
+            "|" | "%" => {
+                if let Some(encoder) = open.take() {
+                    encoder.end_encoding().unwrap();
+                }
+                let dispatch_type = match token {
+                    "%" => DispatchType::Concurrent,
+                    _ => DispatchType::Serial,
+                };
+                open = Some(
+                    command_buffer
+                        .compute_command_encoder_with_dispatch_type(dispatch_type)
+                        .unwrap(),
+                );
+                continue;
+            }
+            "B" => {
+                if let Some(encoder) = open.take() {
+                    encoder.end_encoding().unwrap();
+                }
+                let mut blit = command_buffer.blit_command_encoder().unwrap();
+                blit.fill_buffer(&marks.word, 8..12, 1).unwrap();
+                blit.end_encoding().unwrap();
+                continue;
+            }
+            _ => {}
+        }
+        let encoder = open.get_or_insert_with(|| command_buffer.compute_command_encoder().unwrap());
+        let word = Some(&marks.word);
+        let tag = |token: &str| token[1..].parse::<u32>().unwrap();
+        match token {
+            "I1" => encoder.encode_start_if(word, 0, EQUAL, 1).unwrap(),
+            "I0" => encoder.encode_start_if(word, 0, EQUAL, 0).unwrap(),
             "In" => encoder.encode_start_if(None, 0, EQUAL, 0).unwrap(),
             "L" => encoder.encode_start_else().unwrap(),
-            "W1" => encoder
-                .encode_start_while(Some(&marks.word), 0, EQUAL, 1)
-                .unwrap(),
-            "W0" => encoder
-                .encode_start_while(Some(&marks.word), 0, EQUAL, 0)
-                .unwrap(),
+            "W1" => encoder.encode_start_while(word, 0, EQUAL, 1).unwrap(),
+            "W0" => encoder.encode_start_while(word, 0, EQUAL, 0).unwrap(),
+            "Wn" => encoder.encode_start_while(None, 0, EQUAL, 0).unwrap(),
             "D" => encoder.encode_start_do_while().unwrap(),
             "E" => answers.push(answer(encoder.encode_end_if().unwrap())),
             "V" => answers.push(answer(encoder.encode_end_while().unwrap())),
             "Z0" => answers.push(answer(
-                encoder
-                    .encode_end_do_while(Some(&marks.word), 0, EQUAL, 0)
-                    .unwrap(),
+                encoder.encode_end_do_while(word, 0, EQUAL, 0).unwrap(),
             )),
             "Zn" => answers.push(answer(
                 encoder.encode_end_do_while(None, 0, EQUAL, 0).unwrap(),
             )),
-            "|" | "%" => {
-                encoder.end_encoding().unwrap();
-                encoder = open(token);
+            "U" => encoder
+                .use_resource(
+                    marks.log.as_resource(),
+                    ResourceUsage::READ | ResourceUsage::WRITE,
+                )
+                .unwrap(),
+            "Fu" => encoder.update_fence(&streams.fence).unwrap(),
+            "Fw" => encoder.wait_for_fence(&streams.fence).unwrap(),
+            "t" => encoder.dispatch_threads(one(), one()).unwrap(),
+            _ if token.starts_with('T') => marks.mark(encoder, tag(token)),
+            _ if token.starts_with('b') => marks.bind(encoder, tag(token)),
+            _ if token.starts_with('G') => {
+                marks.bind(encoder, tag(token));
+                encoder
+                    .dispatch_threadgroups_indirect(&streams.arguments, 0, one())
+                    .unwrap();
             }
-            "B" => {
-                encoder.end_encoding().unwrap();
-                let mut blit = command_buffer.blit_command_encoder().unwrap();
-                blit.fill_buffer(&marks.word, 8..12, 1).unwrap();
-                blit.end_encoding().unwrap();
-                encoder = open("|");
+            _ if token.starts_with('H') => {
+                marks.bind(encoder, tag(token));
+                encoder
+                    .dispatch_threads_indirect(&streams.arguments, 16)
+                    .unwrap();
             }
-            tag => marks.mark(
-                &mut encoder,
-                tag.strip_prefix('T').unwrap().parse().unwrap(),
-            ),
+            _ => panic!("no token {token}"),
         }
     }
-    encoder.end_encoding().unwrap();
+    if let Some(encoder) = open {
+        encoder.end_encoding().unwrap();
+    }
     complete(&command_buffer);
     (marks.ran(), answers)
 }
 
-/// Streams Metal ran on an M4 under macOS 27.0.1 ([`run`]'s notation), the tags that ran and
-/// what the Ends answered: from our probes (`else0t` to `elsenest`, `span_*` to `kill_open`,
-/// `while_kill`, `n04`, `k*`, `r*`), each case under its probe's name (`while_kill` without its
-/// counter, which its killed body never ran; `while0` and `do0`, of a loop whose condition fails at
-/// once, without theirs). Only streams the runtime takes are here: none with an unbalanced record
-/// or a live block open where its unit ends. `elsenest` and `else2_skipped` logged no answers;
-/// theirs are Metal's rule for Ends where no misuse killed a block (each answers YES; every If of
-/// `cmp`'s 63 rows) and inside a killed one.
-const SCRIPTS: &[(&str, &str, &[u32], &str)] = &[
-    ("else0t", "T9 I1 T1 E T8", &[1, 8, 9], "1"),
-    ("else0f", "T9 I0 T1 E T8", &[8, 9], "1"),
-    ("else2t", "T9 I1 T1 L T2 L T3 E T8", &[8, 9], "1"),
-    ("else2f", "T9 I0 T1 L T2 L T3 E T8", &[8, 9], "1"),
-    (
-        "elsenest",
-        "I0 I1 T1 L T2 E L I1 T3 L T4 E I0 T5 L T6 E E T7",
-        &[3, 6, 7],
-        "1111",
-    ),
-    (
-        "span_ss_t",
-        "T9 I1 T1 | T2 E T3 | T4",
-        &[1, 2, 3, 4, 9],
-        "1",
-    ),
-    ("span_ss_f", "T9 I0 T1 | T2 E T3 | T4", &[3, 4, 9], "1"),
-    (
-        "span_cc_t",
-        "% T9 I1 T1 % T2 E T3 % T4",
-        &[1, 2, 3, 4, 9],
-        "1",
-    ),
-    ("span_cc_f", "% T9 I0 T1 % T2 E T3 % T4", &[3, 4, 9], "1"),
-    ("kill_nested", "I1 T1 I1 T2 V T3 E T4 E T5", &[5], "001"),
-    ("kill_else_t", "I1 T1 V T2 L T3 E T4", &[4], "01"),
-    ("kill_else_f", "I0 T1 V T2 L T3 E T4", &[4], "01"),
-    ("else_kill_t", "I1 T1 L T2 V T3 E T4", &[4], "01"),
-    ("else_kill_f", "I0 T1 L T2 V T3 E T4", &[4], "01"),
-    (
-        "else2_skipped",
-        "I0 I1 T1 L T2 L T3 E T4 L T5 E T6",
-        &[6],
-        "01",
-    ),
-    (
-        "else2_inner",
-        "I1 T1 I1 T2 L T3 L T4 E T5 L T6 E T7",
-        &[7],
-        "01",
-    ),
-    ("kill_open", "T9 I1 T1 V T2 B T3", &[3, 9], "0"),
-    ("n04", "T1 I1 T2 In T3 E T4 B T5", &[1, 4, 5], "1"),
-    ("k01", "I1 T1 I1 T2 I1 T3 V T4 E T5 E T6 E T7", &[7], "0001"),
-    ("k02", "I1 T1 V T2 I1 T3 E T4 E T5", &[5], "001"),
-    ("k03", "I1 T1 E T2 I1 T3 V E T4", &[1, 2, 4], "101"),
-    ("k04", "I0 T1 I1 T2 V E T3 L T4 E T5", &[5], "001"),
-    ("k05", "I1 T1 V V T2 E T3", &[3], "001"),
-    ("k06", "I1 T1 | T2 V T3 E T4", &[4], "01"),
-    ("k07", "I1 T1 I1 T2 V E T3 L T4 E T5", &[5], "001"),
-    (
-        "k08",
-        "T0 I1 T1 I1 T2 E T3 I1 T4 V E T5 E T6",
-        &[0, 6],
-        "1001",
-    ),
-    ("k09", "I1 T1 I1 T2 L T3 V E T4 E T5", &[5], "001"),
-    ("k11", "I1 T1 I1 V E T2 B T3", &[3], "00"),
-    ("k12", "I0 T1 I1 V E T2 E T3", &[3], "001"),
-    ("k14", "I1 T1 I1 T2 I1 T3 V E E T4 E T5", &[5], "0001"),
-    ("k17", "I1 T1 I0 T2 V E T3 E T4", &[4], "001"),
-    ("k18", "I1 T1 I1 T2 E T3 V T4 E T5", &[5], "101"),
-    ("k19", "I1 T1 V T2 E T3 I1 T4 V T5 E T6", &[3, 6], "0101"),
-    ("k20", "T0 I1 T1 I1 T2 V T3 E T4 E T5", &[0, 5], "001"),
-    ("k21", "I1 T1 I1 T2 V T3 E T4 B T5", &[5], "00"),
-    ("k22", "I1 T1 I1 T2 V T3 E T4 | T5 E T6", &[6], "001"),
-    ("k23", "I1 I1 I1 V E E E T1", &[1], "0001"),
-    ("k24", "I1 I1 I1 I1 V E E E E T1", &[1], "00001"),
-    ("k25", "I1 T1 I1 T2 V T3 L T4 E T5 E T6", &[6], "001"),
-    ("k26", "I1 T1 V T2 L T3 L T4 E T5", &[5], "01"),
-    ("k27", "I1 I1 V E T1 L T2 E T3", &[3], "001"),
-    ("k28", "I0 I1 V E T1 L T2 E T3", &[3], "001"),
-    ("while_kill", "W1 T7 E T8 V T9", &[9], "01"),
-    ("k15", "D T1 D T2 E T3 Z0 T4 Z0 T5", &[5], "001"),
-    ("k16", "I1 T1 D T2 E T3 Z0 T4 E T5", &[5], "001"),
-    ("k30", "D T1 I1 T2 Zn T3 E T4 Z0 T5", &[5], "001"),
-    ("r08", "I0 D T1 Z0 E T2", &[2], "11"),
-    ("r09", "I1 V D T1 Z0 T2 E T3", &[3], "001"),
-    ("while0", "T1 W0 T2 V T3", &[1, 3], "1"),
-    ("do0", "T1 D T2 Z0 T3", &[1, 2, 3], "1"),
-];
+/// The streams Metal ran on an M3 Max under macOS 27.0.1, each with the tags that ran and what its
+/// Ends answered (`predication_streams.tsv`).
+pub(crate) fn measured_streams() -> Vec<(&'static str, &'static str, Vec<u32>, &'static str)> {
+    include_str!("predication_streams.tsv")
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.is_empty())
+        .map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            let ran = (fields[2].split(',').filter(|tag| !tag.is_empty()))
+                .map(|tag| tag.parse().unwrap())
+                .collect();
+            (fields[0], fields[1], ran, fields[3])
+        })
+        .collect()
+}
 
-/// Every stream of [`SCRIPTS`] runs the marks Metal ran, each once, and its Ends answer what
-/// Metal's answered.
+/// Every measured stream runs the marks Metal ran, each once, and its Ends answer what Metal's
+/// answered.
 #[test]
 fn streams_run_what_metal_ran() {
     on_device(|device| {
+        let streams = Streams::new(device);
+        let measured = measured_streams();
+        assert!(measured.len() >= 600, "{}", measured.len());
         let mut wrong = Vec::new();
-        for &(name, script, ran, answers) in SCRIPTS {
-            let got = run(device, script);
-            if got != (ran.to_vec(), answers.to_string()) {
+        for (name, script, ran, answers) in &measured {
+            let got = run(&streams, script);
+            if got != (ran.clone(), answers.to_string()) {
                 wrong.push(format!(
                     "{name} `{script}`: ran {:?} answered {:?}, Metal ran {ran:?} answered \
                      {answers:?}",
@@ -376,18 +372,25 @@ fn streams_run_what_metal_ran() {
                 ));
             }
         }
-        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+        assert!(
+            wrong.is_empty(),
+            "{} of {}:\n{}",
+            wrong.len(),
+            measured.len(),
+            wrong.join("\n")
+        );
     });
 }
 
 /// Which branch each of `cmp`'s rows took on Metal: `T` the If's, `E` the
 /// Else's, for the rows [`cmp_rows`] lists, in order.
-const CMP_BRANCHES: &str = "ETETETTEETTEEETETTETEETEETEETEETEETETEETEETEEETEETEETEETEEETEET";
+pub(crate) const CMP_BRANCHES: &str =
+    "ETETETTEETTEEETETTETEETEETEETEETEETETEETEETEEETEETEETEETEEETEET";
 
 /// `cmp`'s rows over the words `0x80000007, 0xffffffff, 5, 0`: each comparison code (and codes
 /// past Metal's, which compare `==`) against references below, at and above word 0; then `==`
 /// at each offset from 1 to 9, against each word.
-fn cmp_rows() -> Vec<(u64, u64, u32)> {
+pub(crate) fn cmp_rows() -> Vec<(u64, u64, u32)> {
     let codes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 255, 0x1_0000_0002, u64::MAX];
     let codes = codes
         .into_iter()
@@ -648,43 +651,45 @@ fn every_dispatch_form_runs_as_its_block_says() {
     });
 }
 
-/// What the runtime refuses, recording nothing, where Metal's answer is not one it can give: an
-/// unbalanced record (an End or Else with no block open, a Start or an `encodeEndDoWhile` on a nil
-/// buffer with none), a word past its buffer's end, and a fourth loop open (item 7); the work
-/// around them runs. A live block open where its unit ends refuses the commit: at a change of
-/// dispatch type (whose EndIf then has no block open), at a blit encoder, and at the command
-/// buffer's end.
+/// What the runtime refuses, recording nothing, where it cannot give Metal's answer: a word past
+/// its buffer's end, a fourth loop open, and an unbalanced record that is its unit's first after
+/// dispatches of the unit, in its encoder or an earlier one of the unit (Metal drops those, which
+/// ran ungated); the work around them runs. After a blit the next encoder starts a unit, whose
+/// unbalanced record drops nothing earlier, and an unbalanced record after a block drops what
+/// it gated, both as Metal's do.
 #[test]
 fn what_the_runtime_refuses() {
     on_device(|device| {
         let marks = Marks::new(device);
         let queue = device.new_command_queue().unwrap();
-        let unbalanced = Err(Error::NotImplemented(RuntimeGap::PredicationUnbalanced));
+        let ungated = Err(Error::NotImplemented(
+            RuntimeGap::PredicationDropsUngatedWork,
+        ));
         let past = Err(Error::NotImplemented(RuntimeGap::PredicationWordPastBuffer));
         let deep = Err(Error::NotImplemented(RuntimeGap::PredicatedLoopDepth));
         let command_buffer = queue.command_buffer().unwrap();
         let mut encoder = command_buffer.compute_command_encoder().unwrap();
         marks.mark(&mut encoder, 1);
-        assert_eq!(encoder.encode_end_if().map(drop), unbalanced);
-        assert_eq!(encoder.encode_start_else(), unbalanced);
-        assert_eq!(encoder.encode_end_while().map(drop), unbalanced);
+        assert_eq!(encoder.encode_end_if().map(drop), ungated);
+        assert_eq!(encoder.encode_start_else(), ungated);
+        assert_eq!(encoder.encode_end_while().map(drop), ungated);
         assert_eq!(
             encoder.encode_end_do_while(None, 0, EQUAL, 0).map(drop),
-            unbalanced
+            ungated
         );
-        assert_eq!(encoder.encode_start_if(None, 0, EQUAL, 0), unbalanced);
+        assert_eq!(encoder.encode_start_if(None, 0, EQUAL, 0), ungated);
+        assert_eq!(encoder.encode_start_while(None, 0, EQUAL, 0), ungated);
         let word = &marks.word;
-        assert_eq!(encoder.encode_start_if(Some(word), 16, EQUAL, 0), past);
-        assert_eq!(
-            encoder.encode_start_if(Some(word), 0x1_0000_0000, EQUAL, 0),
-            past
-        );
-        assert_eq!(encoder.encode_start_while(None, 0, EQUAL, 0), unbalanced);
         assert_eq!(
             encoder
                 .encode_end_do_while(Some(word), 0, EQUAL, 0)
                 .map(drop),
-            unbalanced
+            ungated
+        );
+        assert_eq!(encoder.encode_start_if(Some(word), 16, EQUAL, 0), past);
+        assert_eq!(
+            encoder.encode_start_if(Some(word), 0x1_0000_0000, EQUAL, 0),
+            past
         );
         // Three loops open, failing at once; a fourth is refused.
         encoder.encode_start_while(Some(word), 0, EQUAL, 0).unwrap();
@@ -705,54 +710,303 @@ fn what_the_runtime_refuses() {
         assert_eq!(encoder.encode_end_if(), Ok(true));
         marks.mark(&mut encoder, 3);
         encoder.end_encoding().unwrap();
+        let blit = || {
+            let mut blit = command_buffer.blit_command_encoder().unwrap();
+            blit.fill_buffer(word, 8..12, 1).unwrap();
+            blit.end_encoding().unwrap();
+        };
+        // The unit's dispatches in an earlier encoder: refused there too.
+        blit();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        marks.mark(&mut encoder, 6);
+        encoder.end_encoding().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        assert_eq!(encoder.encode_end_if().map(drop), ungated);
+        encoder.end_encoding().unwrap();
+        // A blit ends the unit: the next one's unbalanced record drops its own work only.
+        blit();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        assert_eq!(encoder.encode_end_if(), Ok(false));
+        marks.mark(&mut encoder, 5);
+        encoder.end_encoding().unwrap();
         complete(&command_buffer);
-        assert_eq!(marks.ran(), [1, 2, 3]);
+        assert_eq!(marks.ran(), [1, 2, 3, 6]);
+    });
+}
 
-        let open = Err(Error::NotImplemented(RuntimeGap::PredicationOpenAtUnitEnd));
-        for end in ["concurrent", "blit", "commit"] {
-            let command_buffer = queue.command_buffer().unwrap();
-            let mut encoder = command_buffer.compute_command_encoder().unwrap();
-            encoder.encode_start_if(Some(word), 0, EQUAL, 1).unwrap();
-            marks.mark(&mut encoder, 1);
-            encoder.end_encoding().unwrap();
-            let next = match end {
-                "concurrent" => Some(DispatchType::Concurrent),
-                "blit" => {
-                    let mut blit = command_buffer.blit_command_encoder().unwrap();
-                    blit.fill_buffer(word, 8..12, 1).unwrap();
-                    blit.end_encoding().unwrap();
-                    Some(DispatchType::Serial)
-                }
-                _ => None,
-            };
-            if let Some(dispatch_type) = next {
-                let mut encoder = command_buffer
-                    .compute_command_encoder_with_dispatch_type(dispatch_type)
-                    .unwrap();
-                assert_eq!(encoder.encode_end_if().map(drop), unbalanced, "{end}");
+/// A block open where its unit ends, as Metal answers it on an M3 Max under macOS 27.0.1: where
+/// the unit's commands skip there (a failed If, a failed While, a held If's Else, a failing If
+/// inside a held one) Metal's GPU recovery fails the command buffer, `Internal`, code 1, with
+/// Metal's description, at the command buffer's end, at a blit, and at the end of an encoder that
+/// updated a fence; where they run (a held If, a held While, which ran once, a DoWhile, a failed
+/// If's Else) and in a killed block the command buffer completes, every mark Metal ran run.
+#[test]
+fn a_block_open_where_its_unit_ends_fails_where_metals_recovery_does() {
+    on_device(|device| {
+        let streams = Streams::new(device);
+        let failed = Some(CommandBufferError::PredicationOpenAtUnitEnd);
+        let cases: [(&str, Option<CommandBufferError>, &[u32]); 12] = [
+            ("T1 I0 T2", failed, &[]),
+            ("T1 I0 T2 B T3", failed, &[]),
+            ("T1 W0 T2 B T3", failed, &[]),
+            ("T1 I1 T2 L T3 B T4", failed, &[]),
+            ("T1 I1 I0 T2 B T3", failed, &[]),
+            ("T1 I0 T2 Fu | E T4", failed, &[]),
+            ("T5 B I1 T1 B T3", None, &[1, 3, 5]),
+            ("T5 B W1 T1 B T3", None, &[1, 3, 5]),
+            ("T5 B D T1 B T3", None, &[1, 3, 5]),
+            ("T5 B I0 T1 L T2 B T3", None, &[2, 3, 5]),
+            ("T5 B I1 V T1 B T3", None, &[3, 5]),
+            ("T9 I1 T1 % E T3", None, &[1, 9]),
+        ];
+        for (script, error, ran) in cases {
+            let (got, status, description) = run_to_end(&streams, script);
+            assert_eq!(status, error, "{script}");
+            if error.is_some() {
+                assert_eq!(
+                    description.as_deref(),
+                    Some(
+                        "Discarded (victim of GPU error/recovery) \
+                         (00000005:kIOGPUCommandBufferCallbackErrorInnocentVictim)"
+                    ),
+                    "{script}"
+                );
+            } else {
+                assert_eq!(got, ran, "{script}");
+            }
+        }
+    });
+}
+
+/// [`run`] of `script` to its command buffer's end, completed or failed: the tags that ran, the
+/// command buffer's error, and its description.
+fn run_to_end(
+    streams: &Streams,
+    script: &str,
+) -> (Vec<u32>, Option<CommandBufferError>, Option<String>) {
+    let marks = &streams.marks;
+    write_words(&marks.log, &[0; LOG_WORDS]);
+    write_words(&marks.word, &[1, 0, 0, 0]);
+    let command_buffer = streams.queue.command_buffer().unwrap();
+    let mut open: Option<ComputeCommandEncoder> = None;
+    for token in script.split_whitespace() {
+        if matches!(token, "|" | "%" | "B") {
+            if let Some(encoder) = open.take() {
                 encoder.end_encoding().unwrap();
             }
-            assert_eq!(command_buffer.commit(), open, "{end}");
         }
+        match token {
+            "|" => open = Some(command_buffer.compute_command_encoder().unwrap()),
+            "%" => {
+                open = Some(
+                    command_buffer
+                        .compute_command_encoder_with_dispatch_type(DispatchType::Concurrent)
+                        .unwrap(),
+                )
+            }
+            "B" => {
+                let mut blit = command_buffer.blit_command_encoder().unwrap();
+                blit.fill_buffer(&marks.word, 8..12, 1).unwrap();
+                blit.end_encoding().unwrap();
+            }
+            _ => {
+                let encoder =
+                    open.get_or_insert_with(|| command_buffer.compute_command_encoder().unwrap());
+                let word = Some(&marks.word);
+                match token {
+                    "I1" => encoder.encode_start_if(word, 0, EQUAL, 1).unwrap(),
+                    "I0" => encoder.encode_start_if(word, 0, EQUAL, 0).unwrap(),
+                    "W1" => encoder.encode_start_while(word, 0, EQUAL, 1).unwrap(),
+                    "W0" => encoder.encode_start_while(word, 0, EQUAL, 0).unwrap(),
+                    "D" => encoder.encode_start_do_while().unwrap(),
+                    "L" => encoder.encode_start_else().unwrap(),
+                    "E" => drop(encoder.encode_end_if().unwrap()),
+                    "V" => drop(encoder.encode_end_while().unwrap()),
+                    "Fu" => encoder.update_fence(&streams.fence).unwrap(),
+                    _ => marks.mark(encoder, token[1..].parse().unwrap()),
+                }
+            }
+        }
+    }
+    if let Some(encoder) = open {
+        encoder.end_encoding().unwrap();
+    }
+    command_buffer.commit().unwrap();
+    command_buffer.wait_until_completed_for(WAIT).unwrap();
+    let ran = marks.counts();
+    let ran = (0..LOG_WORDS as u32)
+        .filter(|&tag| ran[tag as usize] != 0)
+        .collect();
+    (
+        ran,
+        command_buffer.error(),
+        command_buffer.error_description(),
+    )
+}
 
-        // A live loop that starts in one encoder and ends in the next of its unit refuses the
-        // commit: the runtime lays a loop down from its own encoder's commands.
-        let across = Err(Error::NotImplemented(
-            RuntimeGap::PredicatedLoopAcrossEncoders,
-        ));
-        let command_buffer = queue.command_buffer().unwrap();
-        let mut encoder = command_buffer.compute_command_encoder().unwrap();
-        encoder.encode_start_do_while().unwrap();
-        marks.mark(&mut encoder, 1);
-        encoder.end_encoding().unwrap();
-        let mut encoder = command_buffer.compute_command_encoder().unwrap();
-        assert_eq!(
-            encoder.encode_end_do_while(Some(word), 0, EQUAL, 0),
-            Ok(true)
-        );
-        encoder.end_encoding().unwrap();
-        assert_eq!(command_buffer.commit(), across);
+/// A loop spans its unit's encoders, as Metal's do on an M3 Max under macOS 27.0.1: its body's
+/// commands in each encoder run each pass, serial and concurrent, across three encoders, and
+/// around an If that spans them too, each with the bindings and bytes it was encoded with (an
+/// earlier encoder's state included); a loop whose unit ends at a change of dispatch type ran
+/// once, held, and its End in the next unit is unbalanced there.
+#[test]
+fn loops_span_their_units_encoders() {
+    on_device(|device| {
+        let cases: [SpanningCase; 6] = [
+            (false, &[(0, 3), (5, 3), (6, 1)], |s| {
+                s.start_while(3);
+                s.mark(0);
+                s.next(false);
+                s.mark(5);
+                s.end_while();
+                s.mark(6);
+            }),
+            (false, &[(0, 3), (5, 3), (6, 1)], |s| {
+                s.start_do();
+                s.mark(0);
+                s.next(false);
+                s.mark(5);
+                s.end_do(3);
+                s.mark(6);
+            }),
+            (false, &[(0, 3), (5, 3), (7, 3), (6, 1)], |s| {
+                s.start_while(3);
+                s.mark(0);
+                s.next(false);
+                s.mark(5);
+                s.next(false);
+                s.mark(7);
+                s.end_while();
+                s.mark(6);
+            }),
+            (true, &[(0, 3), (5, 3), (6, 1)], |s| {
+                s.start_while(3);
+                s.mark(0);
+                s.next(true);
+                s.mark(5);
+                s.end_while();
+                s.mark(6);
+            }),
+            (false, &[(0, 3), (5, 3), (7, 3), (6, 1)], |s| {
+                s.start_do();
+                s.mark(0);
+                s.next(false);
+                let marks = s.marks;
+                let word = Some(&marks.word);
+                assert_eq!(s.encoder().encode_start_if(word, 0, EQUAL, 1), Ok(()));
+                s.mark(5);
+                s.next(false);
+                assert_eq!(s.encoder().encode_end_if(), Ok(true));
+                s.mark(7);
+                s.end_do(3);
+                s.mark(6);
+            }),
+            // `D T10 | b10 y0 o16 t T0 z3 t`: the bytes and offset set in the second encoder
+            // after its own bindings, each pass.
+            (false, &[(0, 4), (10, 3), (16, 3)], |s| {
+                s.start_do();
+                s.mark(10);
+                s.next(false);
+                let marks = s.marks;
+                marks.bind(s.encoder(), 10);
+                let encoder = s.encoder();
+                encoder.set_bytes(&0u32.to_le_bytes(), 0).unwrap();
+                encoder.set_buffer_offset(64, 1).unwrap();
+                encoder.dispatch_threads(one(), one()).unwrap();
+                s.mark(0);
+                s.end_do(3);
+                s.encoder().dispatch_threads(one(), one()).unwrap();
+            }),
+        ];
+        for (case, (concurrent, want, encode)) in cases.into_iter().enumerate() {
+            let marks = Marks::new(device);
+            let queue = device.new_command_queue().unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            let dispatch_type = match concurrent {
+                true => DispatchType::Concurrent,
+                false => DispatchType::Serial,
+            };
+            let encoder = command_buffer
+                .compute_command_encoder_with_dispatch_type(dispatch_type)
+                .unwrap();
+            let mut spanning = Spanning {
+                marks: &marks,
+                command_buffer: &command_buffer,
+                encoder: Some(encoder),
+            };
+            encode(&mut spanning);
+            spanning.encoder.take().unwrap().end_encoding().unwrap();
+            complete(&command_buffer);
+            let mut counts = vec![0; LOG_WORDS];
+            for &(tag, n) in want {
+                counts[tag] = n;
+            }
+            assert_eq!(marks.counts(), counts, "case {case}");
+        }
+        let streams = Streams::new(device);
+        assert_eq!(run(&streams, "W1 T1 % V T3"), (vec![1], "0".to_owned()));
     });
+}
+
+/// A case of [`loops_span_their_units_encoders`]: whether its first encoder is concurrent, the
+/// marks Metal ran (tag and count), and its encoding.
+type SpanningCase = (bool, &'static [(usize, u32)], fn(&mut Spanning));
+
+/// A loop's commands across a unit's encoders ([`loops_span_their_units_encoders`]).
+struct Spanning<'a> {
+    marks: &'a Marks,
+    command_buffer: &'a CommandBuffer,
+    encoder: Option<ComputeCommandEncoder>,
+}
+
+impl Spanning<'_> {
+    fn encoder(&mut self) -> &mut ComputeCommandEncoder {
+        self.encoder.as_mut().unwrap()
+    }
+
+    fn mark(&mut self, tag: u32) {
+        let marks = self.marks;
+        marks.mark(self.encoder(), tag);
+    }
+
+    /// End the encoder and open the next of its unit, concurrent where `concurrent`.
+    fn next(&mut self, concurrent: bool) {
+        self.encoder.take().unwrap().end_encoding().unwrap();
+        let dispatch_type = match concurrent {
+            true => DispatchType::Concurrent,
+            false => DispatchType::Serial,
+        };
+        self.encoder = Some(
+            self.command_buffer
+                .compute_command_encoder_with_dispatch_type(dispatch_type)
+                .unwrap(),
+        );
+    }
+
+    /// `while (log[0] != n)`.
+    fn start_while(&mut self, n: u32) {
+        let log = &self.marks.log;
+        self.encoder
+            .as_mut()
+            .unwrap()
+            .encode_start_while(Some(log), 0, NOT_EQUAL, n)
+            .unwrap();
+    }
+
+    fn end_while(&mut self) {
+        assert_eq!(self.encoder().encode_end_while(), Ok(true));
+    }
+
+    fn start_do(&mut self) {
+        self.encoder().encode_start_do_while().unwrap();
+    }
+
+    /// `while (log[0] < n)`.
+    fn end_do(&mut self, n: u32) {
+        let log = &self.marks.log;
+        let end = (self.encoder.as_mut().unwrap()).encode_end_do_while(Some(log), 0, LESS, n);
+        assert_eq!(end, Ok(true));
+    }
 }
 
 /// `loop`'s marks on `device`: a command buffer of one serial encoder (concurrent where
@@ -792,7 +1046,7 @@ fn put(encoder: &mut ComputeCommandEncoder, put: &ComputePipelineState, marks: &
     encoder.dispatch_threads(one(), one()).unwrap();
 }
 
-/// Loops run as Metal's ran on an M4 under macOS 27.0.1, each counting in the
+/// Loops run as Metal's ran on an M3 Max under macOS 27.0.1 (and an M4), each counting in the
 /// log what the probe counted: `while0` to `while5` (`while (log[0] != n) mark 0`), `do0` to
 /// `do5` (`do mark 0 while (log[0] < n)`), at 64 runs, the copies the runtime lays down, too;
 /// `whileconc` in a concurrent encoder (its body writes the word, no barrier); `loopnest3`

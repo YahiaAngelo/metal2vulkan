@@ -227,8 +227,9 @@ impl CommandBuffer {
         dispatch_type: DispatchType,
     ) -> Result<ComputeCommandEncoder, Error> {
         let core = EncoderCore::open(self, call, dispatch_type == DispatchType::Serial)?;
-        // It joins its command buffer's unit of command predication, or starts the next.
-        self.state().enter_predication(dispatch_type);
+        // It joins its command buffer's unit of command predication, carrying on the loops open
+        // across its start, or starts the next.
+        let carried = self.state().enter_predication(dispatch_type);
         Ok(ComputeCommandEncoder {
             core,
             dispatch_type,
@@ -240,7 +241,7 @@ impl CommandBuffer {
             indirect_stage_in: None,
             residency: self.inherited_residency(false),
             writers: Writers::default(),
-            captures: Captures::default(),
+            captures: Captures::carried(carried),
             log: (self.device().shared().rebinds.any())
                 .then(|| self.device().shared().scheduler.spare_logs().compute()),
             dispatches: 0,
@@ -741,6 +742,7 @@ impl ComputeCommandEncoder {
                 threads_per_group,
             },
         )?;
+        self.worked();
         self.capture(|| Event::Threadgroups(groups, threads));
         Ok(())
     }
@@ -761,6 +763,7 @@ impl ComputeCommandEncoder {
                 threads_per_group,
             },
         )?;
+        self.worked();
         self.capture(|| Event::Threads(threads, per_group));
         Ok(())
     }
@@ -795,6 +798,7 @@ impl ComputeCommandEncoder {
         };
         let arguments = Arguments::Threadgroups { threads_per_group };
         self.dispatch_indirect(CALL, indirect_buffer, indirect_buffer_offset, arguments)?;
+        self.worked();
         self.capture(|| {
             Event::ThreadgroupsIndirect(indirect_buffer.clone(), indirect_buffer_offset, threads)
         });
@@ -825,6 +829,7 @@ impl ComputeCommandEncoder {
         const CALL: &str = "dispatch_threads_indirect";
         let arguments = Arguments::Threads;
         self.dispatch_indirect(CALL, indirect_buffer, indirect_buffer_offset, arguments)?;
+        self.worked();
         self.capture(|| Event::ThreadsIndirect(indirect_buffer.clone(), indirect_buffer_offset));
         Ok(())
     }
@@ -1101,6 +1106,7 @@ impl ComputeCommandEncoder {
         }
         let fixed = u64::from(range.start)..u64::from(range.end);
         self.defer_execution(icb, ExecutionRange::Fixed(range), pipeline, check)?;
+        self.worked();
         self.capture(|| Event::Execute(icb.clone(), fixed));
         Ok(())
     }
@@ -1180,6 +1186,7 @@ impl ComputeCommandEncoder {
             indirect_execute::RANGE_BYTES,
         )?;
         self.defer_execution(icb, ExecutionRange::Indirect(copy), pipeline, check)?;
+        self.worked();
         self.capture(|| Event::ExecuteIndirect(icb.clone(), range_buffer.clone(), offset));
         Ok(())
     }
@@ -1317,9 +1324,25 @@ impl ComputeCommandEncoder {
         &mut self.captures
     }
 
+    /// What the encoder made resident so far, which a predicated loop carried to its unit's next
+    /// encoder replays its commands with (`predication.rs`).
+    pub(super) fn residency_now(&self) -> Residency {
+        self.residency.clone()
+    }
+
+    /// Make resident here what `residency`, an earlier encoder's of the unit, made resident: a
+    /// predicated loop's copy replays that encoder's commands here (`predication.rs`).
+    pub(super) fn carry_residency(&mut self, residency: &Residency) {
+        for used in self.residency.carry(residency) {
+            self.core.retain(used);
+        }
+    }
+
     /// `endEncoding`. What it binds is held until the command buffer completes, as Metal holds
     /// what an encoder was handed.
     pub fn end_encoding(mut self) -> Result<(), Error> {
+        // Its unit of command predication takes what it encoded (`predication.rs`).
+        self.end_predication()?;
         self.table.let_go_all(&mut self.core);
         // Its log, which its command buffer keeps where a rebind may need it (`replay.rs`).
         let replay = self.log.map(|log| Replay::Compute {

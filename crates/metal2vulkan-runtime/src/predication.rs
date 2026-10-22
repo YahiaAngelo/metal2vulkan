@@ -2,24 +2,27 @@
 //! `encodeStartIf:offset:comparison:referenceValue:`, `encodeStartElse` and `encodeEndIf`, and its
 //! loops, `encodeStartWhile:offset:comparison:referenceValue:` to `encodeEndWhile` and
 //! `encodeStartDoWhile` to `encodeEndDoWhile:offset:comparison:referenceValue:`, as Metal runs
-//! them (measured on an M4 under macOS 27.0.1).
+//! them (measured on an M3 Max under macOS 27.0.1, which the runtime answers as on every device;
+//! an M4 under macOS 27.0.1 gave the same answers for every stream both ran).
 //!
 //! # What Metal does
 //!
 //! - **A unit** of predication is a run of a command buffer's compute encoders of one dispatch
 //!   type with nothing between them. A blit, render or resource state encoder, an event wait or
-//!   signal, an encoder of the other dispatch type, or the command buffer's end ends it; a
-//!   scheduled handler does not (nor does a binary semaphore wait or signal, which Metal has
-//!   not). A block may span its unit's encoders; a record after the unit's end is the next
-//!   unit's.
+//!   signal, an encoder of the other dispatch type, the end of an encoder that updated a fence
+//!   (`updateFence:`), or the command buffer's end ends it; a scheduled handler, a fence wait and
+//!   a memory barrier do not (nor does a binary semaphore wait or signal, which Metal has not). A
+//!   block may span its unit's encoders, a loop's included; a record after the unit's end is the
+//!   next unit's.
 //! - **The condition** is `word OP reference` (`PredicationCompare`, Metal's codes 0 to 5, and
 //!   `==` for any other code), the word the `u32` at the offset rounded down to a multiple of 4,
 //!   read when the GPU reaches the record: after the work before it, with or without a barrier,
 //!   and after a CPU write made before then.
 //! - **A skipped region** runs none of its dispatches, of any form, and none of its executions
 //!   of an indirect command buffer. Setters, barriers, resource uses and fences take effect in
-//!   encode order whatever runs.
-//! - **Nesting** has no limit (2^20 levels measured).
+//!   encode order whatever runs (a fence updated inside a skipped block or a dropped range is
+//!   updated).
+//! - **Nesting** has no limit (2^20 levels of Ifs measured, six of loops).
 //! - **A loop** runs its commands again and again: a While while its condition holds, tested
 //!   before each pass, a DoWhile once and again while its End's condition holds, tested after
 //!   each pass; each word read when the GPU reaches the test. Each pass runs every command with
@@ -31,17 +34,23 @@
 //!   block, with every block in it, runs nothing from its start on, the commands of the unit's
 //!   earlier encoders included; the record answers NO. Every End then answers NO but the one
 //!   that closes that outermost block, which answers YES, and the unit runs again after it. A
-//!   further misuse inside it changes nothing.
-//! - **An unbalanced record** (an End or Else with no open block, a Start or an
-//!   `encodeEndDoWhile` on a nil buffer with none) answers NO and drops its unit's work from the
-//!   unit's start up to a point the later records decide (the next Else or End of a block opened
-//!   after it, or the start of a DoWhile, with exceptions no rule fitted, and one stream that
-//!   ends the process): refused, recording nothing
-//!   ([`RuntimeGap::PredicationUnbalanced`]).
-//! - **A block open where its unit ends**: a killed one is harmless; a live If whose condition
-//!   held is too, and one whose condition failed fails the command buffer in a GPU recovery,
-//!   its unit's work, from before the If too, not run. Which happens is GPU data, so the commit
-//!   refuses such a command buffer ([`RuntimeGap::PredicationOpenAtUnitEnd`]).
+//!   further misuse inside it changes nothing. A dispatch encoded in a killed block after the
+//!   kill is not one Metal emits (below).
+//! - **An unbalanced record** (an End or Else with no block open, a Start or an
+//!   `encodeEndDoWhile` on a nil buffer with none) answers NO and drops a range of its unit's
+//!   work: from its anchor, the start of the unit's last block opened with no block open (or the
+//!   unit's start where none was), to the next record (or the unit's end). Every dispatch in the
+//!   range runs nothing, the ones encoded before the record included; the next record runs as
+//!   though the range were not there. Where the range holds no dispatch Metal emitted (setters,
+//!   resource uses, barriers and fences are none), the block the next record opens is killed
+//!   from its start instead (as a misused record kills it). Further unbalanced records before the
+//!   next record widen the range.
+//! - **A block open where its unit ends**: a killed one is harmless; a live one fails the command
+//!   buffer in a GPU recovery where the unit's commands skip there (a failed If or While, a held
+//!   If's Else, any block inside one that skips), and is harmless where they run (a held If or
+//!   While, which then ran once, a DoWhile, a failed If's Else). The failure is Metal's
+//!   `MTLCommandBufferErrorInternal` (`PageFault` in some runs), and how much else of the command
+//!   buffer ran varies run to run.
 //! - **A word past its buffer's end** reads whatever memory lies there (zero past a lone
 //!   buffer; the next buffer's bytes in a heap): refused
 //!   ([`RuntimeGap::PredicationWordPastBuffer`]).
@@ -53,25 +62,38 @@
 //!   (`bind::predication_step_module`), behind a barrier from everything before it and with one
 //!   to the commands after it. A device without device addresses refuses every call
 //!   (`Unsupported{CommandPredication}`).
-//! - **Gated dispatches.** A dispatch encoded inside a block runs by `vkCmdDispatchIndirect`
-//!   from a gate the step before it writes: its group counts where the counter is 0, else zero.
-//!   A dispatch on the flat path gates its preprocess, whose command then stays zero. A dispatch
-//!   or an execution a host step records reads the counter there, once the work before it
-//!   completed, and records nothing where it is not 0; an execution inside a block is always
-//!   recorded so (`Degradation::HostReplayedIndirectCommands`).
+//! - **Gated dispatches.** A dispatch encoded inside a block, or after the unit's first block
+//!   opened with none open (so a later unbalanced record can drop it), runs by
+//!   `vkCmdDispatchIndirect` from a gate the step before it writes: its group counts where the
+//!   counter is 0, else zero. A dispatch on the flat path gates its preprocess, whose command then
+//!   stays zero. A dispatch or an execution a host step records reads the counter there, once the
+//!   work before it completed, and records nothing where it is not 0; an execution inside a block
+//!   is always recorded so (`Degradation::HostReplayedIndirectCommands`).
 //! - **A kill** rewrites the outermost open block's start step as `PredicationOp::Dead`, whose
 //!   End is then `PredicationOp::EndDead`; this model gives Metal's answers.
-//! - **A loop** is laid down as copies of its commands: its first copy is what the encoder encodes
-//!   between its Start and its End, which the encoder notes as it goes (each command's public call
-//!   with the encoder's state it ran with, `Captures`); at the End the encoder encodes the further
-//!   copies, 64 in all, or 16 inside another loop, each behind a copy start step and closed by a
-//!   copy end step, and then a step past them. The copies share a flag the first failing test sets,
-//!   after which every copy skips; a step past the copies sets the command buffer's overflow word
-//!   where the loop would run another, which fails the command buffer at its completion
-//!   (`CommandBufferError::PredicatedLoopPastCopies`). A loop inside another's copy is laid down
-//!   again in each. A killed loop gets no copies. Refused: a fourth loop open
-//!   ([`RuntimeGap::PredicatedLoopDepth`]), and, at the commit, a live loop that started in an
-//!   earlier encoder of its unit ([`RuntimeGap::PredicatedLoopAcrossEncoders`]).
+//! - **A dropped range** rewrites its anchor's step as `PredicationOp::Drop` and every step since
+//!   as `PredicationOp::Hold` (or, anchored at the unit's start, records a `Drop` step at the
+//!   record), so its gated dispatches run nothing; the next record first records a
+//!   `PredicationOp::Resume`. A range anchored at the unit's start whose work the runtime ran
+//!   ungated (the unit's dispatches before its first record) cannot be dropped: refused
+//!   ([`RuntimeGap::PredicationDropsUngatedWork`]).
+//! - **A block open where its unit ends**: each compute encoder that ends with a live block open
+//!   records a `PredicationOp::UnitEnd` step, which writes whether the counter skips into the
+//!   unit's check word; where the unit ended so, a set word fails the command buffer at its
+//!   completion (`CommandBufferError::PredicationOpenAtUnitEnd`, Metal's code), before its
+//!   completed handlers run. The rest of the command buffer runs.
+//! - **A loop** is laid down as copies of its commands: its first copy is what the encoders
+//!   encode between its Start and its End, which they note as they go (each command's public call
+//!   with the encoder's state it ran with, `Captures`, carried from an encoder to the next of its
+//!   unit, the boundary a barrier and the ended encoder's residency); at the End the encoder
+//!   encodes the further copies, 64 in all, or 16 inside another loop, each behind a copy start
+//!   step and closed by a copy end step, and then a step past them. The copies share a flag the
+//!   first failing test sets, after which every copy skips; a step past the copies sets the
+//!   command buffer's overflow word where the loop would run another, which fails the command
+//!   buffer at its completion, before its completed handlers run
+//!   (`CommandBufferError::PredicatedLoopPastCopies`), where Metal runs on. A loop inside
+//!   another's copy is laid down again in each. A killed loop gets no copies. Refused: a fourth
+//!   loop open ([`RuntimeGap::PredicatedLoopDepth`]), where Metal nests on.
 
 use super::buffer::Buffer;
 use super::compute::{ComputeCommandEncoder, EncoderState};
@@ -79,6 +101,7 @@ use super::encoder::EncoderCore;
 use super::error::{internal, Error, RuntimeGap};
 use super::indirect_command_buffer::IndirectCommandBuffer;
 use super::owned_kernel::{OwnedKernel, OwnedModule};
+use super::residency::Residency;
 use super::resource::ResourceKey;
 use super::tracker::{Access, Barrier, Use, UseRange};
 use super::upload::{Upload, Uploads};
@@ -92,21 +115,21 @@ use metal2vulkan::metal::{BarrierScope, DispatchType};
 use std::ops::Range;
 
 /// A command buffer's command predication (the module docs): its current unit, the gated runs of
-/// its records, and whether a unit ended with a live block open.
+/// its records, and the check words of the units that ended with a live block open.
 #[derive(Default)]
 pub(super) struct Predication {
     unit: Option<Unit>,
     /// Each step's record and the gates of the dispatches it runs, until the commit writes
     /// their tables.
     runs: Vec<Run>,
-    /// A unit ended with a live block open: the commit refuses.
-    open_at_end: bool,
+    /// The check words of the units that ended with a live block open, each set where the unit's
+    /// commands skipped there: the command buffer fails at its completion
+    /// (`CommandBufferError::PredicationOpenAtUnitEnd`).
+    open_checks: Vec<Upload>,
     /// The word a loop's last copy sets where the loop would run another (made with the
     /// command buffer's first loop): the command buffer fails at its completion
     /// (`CommandBufferError::PredicatedLoopPastCopies`).
     overflow: Option<Upload>,
-    /// A live loop spanned its unit's encoders: the commit refuses.
-    across_encoders: bool,
 }
 
 /// The most loops open at once: each nesting multiplies its body's copies.
@@ -172,6 +195,31 @@ struct Unit {
     /// The run (in [`Predication::runs`]) of its last step, which gates the dispatches encoded
     /// now.
     run: Option<usize>,
+    /// What an unbalanced record would drop, or drops (the module docs).
+    range: Droppable,
+    /// Its open encoder updated a fence: the unit ends with that encoder.
+    closing: bool,
+    /// The word its encoders' `UnitEnd` steps write, made at the first that ended with a live
+    /// block open.
+    check: Option<Upload>,
+    /// The bodies of the loops its last encoder ended with open, which its next encoder carries
+    /// on (`Captures`).
+    carried: Vec<Vec<(EncoderState, Event)>>,
+}
+
+/// The range of a unit an unbalanced record drops (the module docs): from the anchor to the next
+/// record.
+#[derive(Default)]
+struct Droppable {
+    /// The start step of the unit's last block opened with none open; `None`: the unit's start.
+    anchor: Option<Upload>,
+    /// Every step recorded since the anchor, which a drop holds.
+    since: Vec<Upload>,
+    /// A dispatch Metal emitted since the anchor (or the unit's start): one encoded outside a
+    /// killed block.
+    work: bool,
+    /// An unbalanced record dropped from the anchor on, and no record came since.
+    dropping: bool,
 }
 
 /// An open block.
@@ -198,12 +246,13 @@ pub(super) struct Looping {
     flag: Upload,
 }
 
-/// An End of a loop: Metal's answer, the step to record, if any, and, where the loop is live (no
-/// misused record killed it), the loop, with a DoWhile's condition, whose further copies the
-/// encoder lays down.
+/// An End of a loop: Metal's answer, the step to record, if any, whether it closed the loop
+/// (whose body's capture then ends), and, where the loop is live (no misused record killed it),
+/// the loop, with a DoWhile's condition, whose further copies the encoder lays down.
 struct LoopEnd {
     answer: bool,
     record: Option<Upload>,
+    closed: bool,
     copies: Option<(Looping, Option<Test>)>,
 }
 
@@ -223,6 +272,10 @@ impl Unit {
             stack: Vec::new(),
             dead: false,
             run: None,
+            range: Droppable::default(),
+            closing: false,
+            check: None,
+            carried: Vec::new(),
         }
     }
 
@@ -238,68 +291,72 @@ impl Unit {
                 .write_at(PredicationStep::OP_OFFSET, &PredicationOp::Dead.word());
         }
     }
+
+    /// Whether its dispatches run from gates: inside a block, after its first block opened with
+    /// none open, or in a dropped range.
+    fn gated(&self) -> bool {
+        !self.stack.is_empty() || self.range.anchor.is_some() || self.range.dropping
+    }
+
+    /// Whether a block is open that no misuse killed.
+    fn live_open(&self) -> bool {
+        !self.stack.is_empty() && !self.dead
+    }
+
+    /// The open encoder's dispatches since the last record (`worked`): Metal emitted them where
+    /// no misuse killed the open block.
+    fn note_work(&mut self, worked: bool) {
+        if worked && !self.dead {
+            self.range.work = true;
+        }
+    }
 }
 
 impl Predication {
     /// A compute encoder of `dispatch_type` opened at `place` among the ended encoders, after
-    /// `events` event waits and signals: it joins the current unit, or that one ends and it
-    /// starts the next.
+    /// `events` event waits and signals: it joins the current unit, taking the bodies of the loops
+    /// open across its start, or that one ends and it starts the next.
     pub(super) fn enter(
         &mut self,
         place: usize,
         events: (usize, usize),
         dispatch_type: DispatchType,
-    ) {
+    ) -> Vec<Vec<(EncoderState, Event)>> {
         if let Some(unit) = &mut self.unit {
-            if unit.place + 1 == place
+            if !unit.closing
+                && unit.place + 1 == place
                 && unit.events == events
                 && unit.dispatch_type == dispatch_type
             {
                 unit.place = place;
-                return;
+                return std::mem::take(&mut unit.carried);
             }
         }
         self.end_unit();
         self.unit = Some(Unit::new(place, events, dispatch_type));
+        Vec::new()
     }
 
-    /// The current unit ends: one with a live block open refuses the commit.
+    /// The open compute encoder updated a fence: its unit ends with it.
+    pub(super) fn fence_updated(&mut self) {
+        if let Some(unit) = &mut self.unit {
+            unit.closing = true;
+        }
+    }
+
+    /// The current unit ends: one with a live block open keeps its check word for the completion.
     fn end_unit(&mut self) {
         if let Some(unit) = self.unit.take() {
-            self.open_at_end |= !unit.stack.is_empty() && !unit.dead;
+            if unit.live_open() {
+                self.open_checks.extend(unit.check);
+            }
         }
-    }
-
-    /// [`commit`](Self::commit)'s refusals, made with nothing changed: those of `commit` at the
-    /// call where the commit's own work waits for a render encoder's end
-    /// (`render/queued_commits.rs`), which a render encoder's calls leave as they are.
-    pub(super) fn commit_refusal(&self) -> Result<(), Error> {
-        let live_open =
-            (self.unit.as_ref()).is_some_and(|unit| !unit.stack.is_empty() && !unit.dead);
-        if self.open_at_end || live_open {
-            return Err(Error::NotImplemented(RuntimeGap::PredicationOpenAtUnitEnd));
-        }
-        if self.across_encoders {
-            return Err(Error::NotImplemented(
-                RuntimeGap::PredicatedLoopAcrossEncoders,
-            ));
-        }
-        Ok(())
     }
 
     /// The command buffer commits: its last unit ends, and each run's table is written into its
-    /// record. Refused where a unit ended with a live block open
-    /// ([`RuntimeGap::PredicationOpenAtUnitEnd`]), or as the arena refuses a table.
+    /// record. Refused as the arena refuses a table.
     pub(super) fn commit(&mut self, uploads: &mut Uploads, device: &Device) -> Result<(), Error> {
         self.end_unit();
-        if self.open_at_end {
-            return Err(Error::NotImplemented(RuntimeGap::PredicationOpenAtUnitEnd));
-        }
-        if self.across_encoders {
-            return Err(Error::NotImplemented(
-                RuntimeGap::PredicatedLoopAcrossEncoders,
-            ));
-        }
         for run in self.runs.iter().filter(|run| !run.gates.is_empty()) {
             let bytes = PredicationStep::table(addressed(&run.record)?, &run.gates);
             let table = uploads.upload(device, &bytes, bytes.len() as u64)?;
@@ -311,7 +368,8 @@ impl Predication {
         Ok(())
     }
 
-    /// The open encoder's unit.
+    /// The open encoder's unit, with the encoder's dispatches since the last record (`worked`)
+    /// noted.
     fn unit(&mut self) -> Result<&mut Unit, Error> {
         self.unit
             .as_mut()
@@ -341,6 +399,9 @@ impl Predication {
         let unit = self.unit()?;
         unit.counter = Some(counter);
         unit.run = Some(run);
+        if unit.range.anchor.is_some() {
+            unit.range.since.push(record.clone());
+        }
         Ok(record)
     }
 
@@ -363,36 +424,113 @@ impl Predication {
             .is_some_and(|overflow| u32::from_le_bytes(overflow.read::<4>()) != 0)
     }
 
-    /// A Start or an `encodeEndDoWhile` on a nil buffer: inside a block it kills, answering NO;
-    /// with none it is refused ([`RuntimeGap::PredicationUnbalanced`]).
-    fn nil(&mut self) -> Result<(), Error> {
+    /// Whether a unit ended with a live block open where its commands skipped, as Metal's GPU
+    /// recovery fails the command buffer: read once the command buffer completed.
+    pub(super) fn open_at_unit_end(&self) -> bool {
+        (self.open_checks.iter()).any(|check| u32::from_le_bytes(check.read::<4>()) != 0)
+    }
+
+    /// An unbalanced record (the module docs): its range drops from the anchor on; the step to
+    /// record, where the range starts at the unit's start. Refused, changing nothing: a range from
+    /// the unit's start over dispatches the runtime ran ungated
+    /// ([`RuntimeGap::PredicationDropsUngatedWork`]).
+    fn unbalanced(
+        &mut self,
+        uploads: &mut Uploads,
+        device: &Device,
+    ) -> Result<Option<Upload>, Error> {
+        let range = &mut self.unit()?.range;
+        if range.dropping {
+            return Ok(None);
+        }
+        if let Some(anchor) = &range.anchor {
+            anchor.write_at(PredicationStep::OP_OFFSET, &PredicationOp::Drop.word());
+            for step in &range.since {
+                step.write_at(PredicationStep::OP_OFFSET, &PredicationOp::Hold.word());
+            }
+            range.dropping = true;
+            return Ok(None);
+        }
+        if range.work {
+            return Err(Error::NotImplemented(
+                RuntimeGap::PredicationDropsUngatedWork,
+            ));
+        }
+        let record = self.step(uploads, device, |counter| {
+            PredicationStep::new(counter, PredicationOp::Drop)
+        })?;
+        self.unit()?.range.dropping = true;
+        Ok(Some(record))
+    }
+
+    /// A Start with no block open, before its own step: where a range is dropping, the `Resume`
+    /// step to record first, and whether the block it opens is killed from its start (the range
+    /// held no work Metal emitted).
+    fn resume(
+        &mut self,
+        uploads: &mut Uploads,
+        device: &Device,
+    ) -> Result<(Option<Upload>, bool), Error> {
+        let unit = self.unit()?;
+        if !unit.stack.is_empty() || !unit.range.dropping {
+            return Ok((None, false));
+        }
+        let dead = !unit.range.work;
+        let record = self.step(uploads, device, |counter| {
+            PredicationStep::new(counter, PredicationOp::Resume)
+        })?;
+        self.unit()?.range.dropping = false;
+        Ok((Some(record), dead))
+    }
+
+    /// Open a block of `kind` started by `record`: one with none open is the unit's anchor, and is
+    /// killed from its start where `dead` (the module docs).
+    fn open(&mut self, record: &Upload, kind: Kind, dead: bool) -> Result<(), Error> {
         let unit = self.unit()?;
         if unit.stack.is_empty() {
-            return Err(Error::NotImplemented(RuntimeGap::PredicationUnbalanced));
+            unit.range = Droppable {
+                anchor: Some(record.clone()),
+                ..Droppable::default()
+            };
         }
-        unit.kill();
+        unit.stack.push(Block {
+            start: record.clone(),
+            kind,
+        });
+        if dead {
+            unit.kill();
+        }
         Ok(())
     }
 
-    /// `encodeStartIf:...` of `test`: the step to record.
+    /// A Start or an `encodeEndDoWhile` on a nil buffer: inside a block it kills, answering NO;
+    /// with none it is unbalanced: the step to record, if any.
+    fn nil(&mut self, uploads: &mut Uploads, device: &Device) -> Result<Option<Upload>, Error> {
+        let unit = self.unit()?;
+        if unit.stack.is_empty() {
+            return self.unbalanced(uploads, device);
+        }
+        unit.kill();
+        Ok(None)
+    }
+
+    /// `encodeStartIf:...` of `test`: the steps to record, a `Resume` first where a range drops.
     fn start_if(
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
         test: &Test,
-    ) -> Result<Upload, Error> {
+    ) -> Result<(Option<Upload>, Upload), Error> {
+        let (resume, dead) = self.resume(uploads, device)?;
         let record = self.step(uploads, device, |counter| {
             test.of(PredicationStep::new(counter, PredicationOp::If))
         })?;
-        self.unit()?.stack.push(Block {
-            start: record.clone(),
-            kind: Kind::If { elsed: false },
-        });
-        Ok(record)
+        self.open(&record, Kind::If { elsed: false }, dead)?;
+        Ok((resume, record))
     }
 
     /// `encodeStartElse`: the step to record, if any. An Else on a loop, or an If's second,
-    /// kills.
+    /// kills; with no block open it is unbalanced.
     fn start_else(
         &mut self,
         uploads: &mut Uploads,
@@ -400,7 +538,7 @@ impl Predication {
     ) -> Result<Option<Upload>, Error> {
         let unit = self.unit()?;
         let Some(top) = unit.stack.last() else {
-            return Err(Error::NotImplemented(RuntimeGap::PredicationUnbalanced));
+            return self.unbalanced(uploads, device);
         };
         if !matches!(top.kind, Kind::If { elsed: false }) {
             unit.kill();
@@ -444,7 +582,7 @@ impl Predication {
     }
 
     /// `encodeEndIf`: Metal's answer, and the step to record, if any. An End of a loop kills
-    /// and answers NO.
+    /// and answers NO; with no block open it is unbalanced, answering NO.
     fn end_if(
         &mut self,
         uploads: &mut Uploads,
@@ -452,7 +590,7 @@ impl Predication {
     ) -> Result<(bool, Option<Upload>), Error> {
         let unit = self.unit()?;
         let Some(top) = unit.stack.last() else {
-            return Err(Error::NotImplemented(RuntimeGap::PredicationUnbalanced));
+            return Ok((false, self.unbalanced(uploads, device)?));
         };
         if !matches!(top.kind, Kind::If { .. }) {
             unit.kill();
@@ -470,27 +608,30 @@ impl Predication {
         })
     }
 
-    /// `encodeStartWhile:...` of `test`, or `encodeStartDoWhile` (`None`): its first copy's
-    /// start step to record. Refused past [`MAX_LOOP_DEPTH`] open loops
-    /// ([`RuntimeGap::PredicatedLoopDepth`]).
+    /// `encodeStartWhile:...` of `test`, or `encodeStartDoWhile` (`None`): the steps to record, a
+    /// `Resume` first where a range drops, then its first copy's start. Refused past
+    /// [`MAX_LOOP_DEPTH`] open loops ([`RuntimeGap::PredicatedLoopDepth`]).
     fn start_loop(
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
         test: Option<&Test>,
-    ) -> Result<Upload, Error> {
+    ) -> Result<(Option<Upload>, Upload), Error> {
         if self.loops_open() >= MAX_LOOP_DEPTH {
             return Err(Error::NotImplemented(RuntimeGap::PredicatedLoopDepth));
         }
+        let (resume, dead) = self.resume(uploads, device)?;
         let looping = Looping {
             test: test.cloned(),
             flag: uploads.upload(device, &[], 16)?,
         };
-        self.copy_start(uploads, device, &looping)
+        let record = self.copy_step(uploads, device, &looping)?;
+        self.open(&record, Kind::Loop(looping), dead)?;
+        Ok((resume, record))
     }
 
-    /// The start of a copy of `looping`: its step's record, its block open.
-    fn copy_start(
+    /// The start of a copy of `looping`: its step's record.
+    fn copy_step(
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
@@ -500,7 +641,17 @@ impl Predication {
             Some(_) => PredicationOp::While,
             None => PredicationOp::Do,
         };
-        let record = self.loop_step(uploads, device, looping, (op, looping.test.as_ref()))?;
+        self.loop_step(uploads, device, looping, (op, looping.test.as_ref()))
+    }
+
+    /// The start of a further copy of `looping`: its step's record, its block open.
+    fn copy_start(
+        &mut self,
+        uploads: &mut Uploads,
+        device: &Device,
+        looping: &Looping,
+    ) -> Result<Upload, Error> {
+        let record = self.copy_step(uploads, device, looping)?;
         self.unit()?.stack.push(Block {
             start: record.clone(),
             kind: Kind::Loop(looping.clone()),
@@ -563,7 +714,7 @@ impl Predication {
 
     /// `encodeEndWhile` (`None`) or `encodeEndDoWhile:...` of `test`: Metal's answer, the step
     /// to record, if any, and the loop to lay further copies of where it is live. An End of
-    /// another block kills and answers NO.
+    /// another block kills and answers NO; with no block open it is unbalanced, answering NO.
     fn end_loop(
         &mut self,
         uploads: &mut Uploads,
@@ -572,7 +723,12 @@ impl Predication {
     ) -> Result<LoopEnd, Error> {
         let unit = self.unit()?;
         let Some(top) = unit.stack.last() else {
-            return Err(Error::NotImplemented(RuntimeGap::PredicationUnbalanced));
+            return Ok(LoopEnd {
+                answer: false,
+                record: self.unbalanced(uploads, device)?,
+                closed: false,
+                copies: None,
+            });
         };
         let looping = match &top.kind {
             Kind::Loop(looping) if looping.test.is_some() == test.is_none() => looping.clone(),
@@ -581,6 +737,7 @@ impl Predication {
                 return Ok(LoopEnd {
                     answer: false,
                     record: None,
+                    closed: false,
                     copies: None,
                 });
             }
@@ -590,6 +747,7 @@ impl Predication {
             return Ok(LoopEnd {
                 answer,
                 record: Some(record),
+                closed: true,
                 copies: None,
             });
         }
@@ -597,18 +755,49 @@ impl Predication {
         Ok(LoopEnd {
             answer: true,
             record: Some(record),
+            closed: true,
             copies: Some((looping, test.cloned())),
         })
     }
 
-    /// A loop the encoder lays no copies of, as it opened in an earlier encoder of its unit:
-    /// the commit refuses ([`RuntimeGap::PredicatedLoopAcrossEncoders`]).
-    fn loop_across_encoders(&mut self) {
-        self.across_encoders = true;
+    /// The open encoder ends, with `worked` its dispatches since its last record and `open` the
+    /// bodies of the loops it leaves open, which its unit's next encoder carries on: where its
+    /// unit has a live block open, the `UnitEnd` step to record.
+    fn encoder_ends(
+        &mut self,
+        uploads: &mut Uploads,
+        device: &Device,
+        (worked, open): (bool, Vec<Vec<(EncoderState, Event)>>),
+    ) -> Result<Option<Upload>, Error> {
+        let unit = self.unit()?;
+        unit.note_work(worked);
+        unit.carried = open;
+        if !unit.live_open() {
+            return Ok(None);
+        }
+        let check = match &unit.check {
+            Some(check) => check.clone(),
+            None => uploads.upload(device, &[], 16)?,
+        };
+        let word = addressed(&check)?;
+        let record = self.step(uploads, device, |counter| {
+            PredicationStep::new(counter, PredicationOp::UnitEnd).checking(word)
+        })?;
+        self.unit()?.check = Some(check);
+        Ok(Some(record))
+    }
+
+    /// Whether the open encoder's unit records anything at the encoder's end: it has a block
+    /// open, or loops whose bodies the encoder carries on.
+    pub(super) fn ends_with_open_blocks(&self) -> bool {
+        self.unit
+            .as_ref()
+            .is_some_and(|unit| !unit.stack.is_empty())
     }
 
     /// The gates of a dispatch the open encoder records now, one per command of `counts` (its
-    /// group counts), where its unit has a block open; none where not, and it runs as recorded.
+    /// group counts), where its unit gates its dispatches (`Unit::gated`); none where not, and it
+    /// runs as recorded.
     pub(super) fn gates(
         &mut self,
         uploads: &mut Uploads,
@@ -618,12 +807,12 @@ impl Predication {
         let Some(unit) = &self.unit else {
             return Ok(Vec::new());
         };
-        if unit.stack.is_empty() {
+        if !unit.gated() {
             return Ok(Vec::new());
         }
         let run = unit
             .run
-            .ok_or_else(|| internal("an open predication block without its step"))?;
+            .ok_or_else(|| internal("a gated predication unit without its step"))?;
         let mut gates = Vec::with_capacity(counts.len());
         let mut addresses = Vec::with_capacity(counts.len());
         for &count in counts {
@@ -639,11 +828,11 @@ impl Predication {
         Ok(gates)
     }
 
-    /// The check of a command the open encoder leaves to a host step, where its unit has a block
-    /// open.
+    /// The check of a command the open encoder leaves to a host step, where its unit gates its
+    /// dispatches.
     pub(super) fn host_gate(&self) -> Option<HostGate> {
         let unit = self.unit.as_ref()?;
-        if unit.stack.is_empty() {
+        if !unit.gated() {
             return None;
         }
         unit.counter.clone().map(HostGate)
@@ -723,6 +912,20 @@ fn record_step(
     Ok(())
 }
 
+/// Record `steps` (their records and tests, each where there is one) into `core` in order.
+fn record_steps(
+    core: &mut EncoderCore,
+    kernel: OwnedKernel,
+    steps: [(Option<&Upload>, Option<&Test>); 2],
+) -> Result<(), Error> {
+    for (record, test) in steps {
+        if let Some(record) = record {
+            record_step(core, kernel, record, test)?;
+        }
+    }
+    Ok(())
+}
+
 /// A command a compute encoder encoded inside a loop, as its copies replay it: the public call's
 /// arguments.
 #[derive(Clone)]
@@ -733,6 +936,10 @@ pub(super) enum Event {
     ThreadsIndirect(Buffer, u64),
     /// A memory barrier, of a scope or of resources: one global barrier.
     Barrier,
+    /// The end of the loop's encoder and the start of the next of its unit: one global barrier,
+    /// as Metal orders an encoder's commands after the ones before, and what the ended encoder
+    /// made resident, which its commands ran with.
+    Encoder(Residency),
     Execute(IndirectCommandBuffer, Range<u64>),
     ExecuteIndirect(IndirectCommandBuffer, Buffer, u64),
     StartIf(Option<Buffer>, u64, u64, u32),
@@ -744,13 +951,27 @@ pub(super) enum Event {
     EndDoWhile(Option<Buffer>, u64, u64, u32),
 }
 
-/// A compute encoder's captures of the bodies of the loops it opened and has not closed, the
-/// innermost last: each command with the encoder's state it ran with.
+/// A compute encoder's captures of the bodies of the loops open in it (opened in it, or carried
+/// from its unit's encoder before), the innermost last: each command with the encoder's state it
+/// ran with; and whether it dispatched since its last record.
 #[derive(Default)]
 pub(super) struct Captures {
     open: Vec<Vec<(EncoderState, Event)>>,
     /// The captures below it take no command: those a loop's further copies replay.
     floor: usize,
+    /// It encoded a dispatch or an execution since its last record (`Unit::note_work`).
+    worked: bool,
+}
+
+impl Captures {
+    /// The captures of an encoder that carries on `open`, the bodies of the loops its unit's
+    /// encoder before left open.
+    pub(super) fn carried(open: Vec<Vec<(EncoderState, Event)>>) -> Captures {
+        Captures {
+            open,
+            ..Captures::default()
+        }
+    }
 }
 
 impl ComputeCommandEncoder {
@@ -762,7 +983,8 @@ impl ComputeCommandEncoder {
             .owned_kernel(OwnedModule::PredicationStep)
     }
 
-    /// Run `record` on the command buffer's predication with its arena, under its lock.
+    /// Run `record` on the command buffer's predication with its arena, under its lock, the
+    /// encoder's dispatches since its last record noted first.
     fn predication<T>(
         &mut self,
         record: impl FnOnce(&mut Predication, &mut Uploads, &Device) -> Result<T, Error>,
@@ -770,12 +992,70 @@ impl ComputeCommandEncoder {
         // Its commands, and those of its command buffer's other encoders, run gated inside
         // blocks that end at the commit: none of them is encoded again (`replay.rs`).
         self.stop_logging();
+        let worked = self.captures().worked;
+        self.captures().worked = false;
         let core = self.core();
         let device = core.device().clone();
         let mut state = core.command_buffer().state();
         let state = &mut *state;
         state.predicated = true;
+        if let Some(unit) = &mut state.predication.unit {
+            unit.note_work(worked);
+        }
         record(&mut state.predication, &mut state.uploads, &device)
+    }
+
+    /// The encoder dispatched, or executed an indirect command buffer's commands: work Metal
+    /// emits for its unit where no misuse killed the open block (the module docs).
+    pub(super) fn worked(&mut self) {
+        self.captures().worked = true;
+    }
+
+    /// The encoder updated a fence: its unit of predication ends with it (the module docs).
+    pub(super) fn fence_updated(&mut self) {
+        let mut state = self.core().command_buffer().state();
+        state.predication.fence_updated();
+    }
+
+    /// As the encoder ends: its unit takes its dispatches since its last record, and the bodies
+    /// of the loops it leaves open, each closed by the encoder's boundary (`Event::Encoder`),
+    /// which its unit's next encoder carries on; where its unit has a live block open, it records
+    /// the `UnitEnd` step (the module docs). Nothing where the command buffer used no
+    /// predication.
+    pub(super) fn end_predication(&mut self) -> Result<(), Error> {
+        let worked = self.captures().worked;
+        self.captures().worked = false;
+        let open_blocks = {
+            let mut state = self.core().command_buffer().state();
+            if !state.predicated {
+                // No record yet: only its dispatches, which a later unbalanced record of its unit
+                // would find ran ungated.
+                if let Some(unit) = &mut state.predication.unit {
+                    unit.note_work(worked);
+                }
+                return Ok(());
+            }
+            state.predication.ends_with_open_blocks()
+        };
+        let mut open = std::mem::take(&mut self.captures().open);
+        if !open.is_empty() {
+            let boundary = (self.encoder_state(), Event::Encoder(self.residency_now()));
+            for body in &mut open {
+                body.push(boundary.clone());
+            }
+        }
+        let kernel = match open_blocks {
+            true => Some(self.predication_kernel()?),
+            false => None,
+        };
+        let record = self.predication(|predication, uploads, device| {
+            predication.encoder_ends(uploads, device, (worked, open))
+        })?;
+        match (record, kernel) {
+            (Some(record), Some(kernel)) => record_step(self.core(), kernel, &record, None),
+            (None, _) => Ok(()),
+            (Some(_), None) => Err(internal("a predication unit end without its kernel")),
+        }
     }
 
     /// The condition of a record of `call` on `buffer` (`None`: a nil buffer), with the step
@@ -826,6 +1106,11 @@ impl ComputeCommandEncoder {
                 self.memory_barrier_with_scope(BarrierScope::BUFFERS);
                 Ok(())
             }
+            // What the ended encoder made resident joined this one's before the copies.
+            Event::Encoder(_) => {
+                self.core().barrier(Barrier::everything());
+                Ok(())
+            }
             Event::Execute(icb, range) => self.execute_commands_in_buffer(icb, range.clone()),
             Event::ExecuteIndirect(icb, buffer, offset) => {
                 self.execute_commands_in_buffer_indirect(icb, buffer, *offset)
@@ -854,10 +1139,14 @@ impl ComputeCommandEncoder {
         test: Option<&Test>,
         event: impl FnOnce() -> Event,
     ) -> Result<(), Error> {
-        let record = self.predication(|predication, uploads, device| {
+        let (resume, record) = self.predication(|predication, uploads, device| {
             predication.start_loop(uploads, device, test)
         })?;
-        record_step(self.core(), kernel, &record, test)?;
+        record_steps(
+            self.core(),
+            kernel,
+            [(resume.as_ref(), None), (Some(&record), test)],
+        )?;
         self.capture(event);
         self.captures().open.push(Vec::new());
         Ok(())
@@ -874,24 +1163,25 @@ impl ComputeCommandEncoder {
         let end = self.predication(|predication, uploads, device| {
             predication.end_loop(uploads, device, test)
         })?;
-        let Some(record) = &end.record else {
+        let Some((looping, test)) = end.copies else {
+            // A killed loop's End, a misused or an unbalanced one: no copies.
+            if let Some(record) = &end.record {
+                record_step(self.core(), kernel, record, None)?;
+            }
+            if end.closed {
+                self.captures().open.pop();
+            }
             self.capture(event);
             return Ok(end.answer);
         };
-        record_step(self.core(), kernel, record, test)?;
-        // The loop's body, where this encoder opened it.
-        let body = self.captures().open.pop();
+        let record = end
+            .record
+            .ok_or_else(|| internal("a live loop's End without its step"))?;
+        record_step(self.core(), kernel, &record, test.as_ref())?;
+        let body = (self.captures().open.pop())
+            .ok_or_else(|| internal("a live loop's End without its body"))?;
         self.capture(event);
-        match (end.copies, body) {
-            (Some((looping, test)), Some(body)) => {
-                self.lay_copies(kernel, (&looping, test.as_ref()), &body)?;
-            }
-            (Some(_), None) => self.predication(|predication, _, _| {
-                predication.loop_across_encoders();
-                Ok(())
-            })?,
-            (None, _) => {}
-        }
+        self.lay_copies(kernel, (&looping, test.as_ref()), &body)?;
         Ok(end.answer)
     }
 
@@ -906,6 +1196,12 @@ impl ComputeCommandEncoder {
     ) -> Result<(), Error> {
         let nested = self.predication(|predication, _, _| Ok(predication.loops_open() > 0))?;
         let copies = if nested { NESTED_COPIES } else { FIRST_COPIES };
+        // The commands of the unit's earlier encoders replay here with what those made resident.
+        for (_, event) in body {
+            if let Event::Encoder(residency) = event {
+                self.carry_residency(residency);
+            }
+        }
         let state = self.encoder_state();
         let floor = self.captures().floor;
         self.captures().floor = self.captures().open.len();
@@ -948,11 +1244,13 @@ impl ComputeCommandEncoder {
     /// to a multiple of 4) of `buffer` compares so with `reference_value` when the GPU reaches the
     /// call (`comparison`: Metal's codes, `metal2vulkan::bind::PredicationCompare`), and those
     /// after its Else where not (the module docs). A nil `buffer` inside a block kills the
-    /// outermost open block, as Metal's does.
+    /// outermost open block, as Metal's does; with none open it is an unbalanced record, which
+    /// drops its range of the unit's work, as Metal's does.
     ///
     /// Refused, recording nothing: a buffer of another device (`Invalid`); a word past the
     /// buffer's end (`NotImplemented(PredicationWordPastBuffer)`); a nil buffer with no block
-    /// open (`NotImplemented(PredicationUnbalanced)`); a device without device addresses
+    /// open whose range holds the unit's dispatches from before its first record
+    /// (`NotImplemented(PredicationDropsUngatedWork)`); a device without device addresses
     /// (`Unsupported{CommandPredication}`).
     pub fn encode_start_if(
         &mut self,
@@ -965,12 +1263,20 @@ impl ComputeCommandEncoder {
         let (kernel, test) = self.condition("encode_start_if", buffer, offset, arguments)?;
         match &test {
             Some(test) => {
-                let record = self.predication(|predication, uploads, device| {
+                let (resume, record) = self.predication(|predication, uploads, device| {
                     predication.start_if(uploads, device, test)
                 })?;
-                record_step(self.core(), kernel, &record, Some(test))?;
+                record_steps(
+                    self.core(),
+                    kernel,
+                    [(resume.as_ref(), None), (Some(&record), Some(test))],
+                )?;
             }
-            None => self.predication(|predication, _, _| predication.nil())?,
+            None => {
+                let record = self
+                    .predication(|predication, uploads, device| predication.nil(uploads, device))?;
+                record_steps(self.core(), kernel, [(record.as_ref(), None), (None, None)])?;
+            }
         }
         self.capture(|| Event::StartIf(buffer.cloned(), offset, comparison, reference_value));
         Ok(())
@@ -978,10 +1284,12 @@ impl ComputeCommandEncoder {
 
     /// `encodeStartElse` (SPI): the commands encoded after it, up to the open If's
     /// `encodeEndIf`, run where its condition failed (the module docs). A second Else in one If, or
-    /// an Else on a loop, kills the outermost open block, as Metal's does.
+    /// an Else on a loop, kills the outermost open block, as Metal's does; with no block open it is
+    /// an unbalanced record, as Metal's is.
     ///
-    /// Refused, recording nothing: no block open (`NotImplemented(PredicationUnbalanced)`); a
-    /// device without device addresses (`Unsupported{CommandPredication}`).
+    /// Refused, recording nothing: no block open where its range holds the unit's dispatches from
+    /// before its first record (`NotImplemented(PredicationDropsUngatedWork)`); a device without
+    /// device addresses (`Unsupported{CommandPredication}`).
     pub fn encode_start_else(&mut self) -> Result<(), Error> {
         let kernel = self.predication_kernel()?;
         let record = self
@@ -995,10 +1303,10 @@ impl ComputeCommandEncoder {
 
     /// `encodeEndIf` (SPI): closes the open If, answering Metal's `YES`; on a loop it kills the
     /// outermost open block and answers `NO`; inside a block a misused record killed, `NO` but
-    /// for the End that closes that block (the module docs).
+    /// for the End that closes that block; with no block open it is an unbalanced record,
+    /// answering `NO` (the module docs).
     ///
-    /// Refused, recording nothing: no block open (`NotImplemented(PredicationUnbalanced)`); a
-    /// device without device addresses (`Unsupported{CommandPredication}`).
+    /// Refused, recording nothing: as [`encode_start_else`](Self::encode_start_else) refuses.
     pub fn encode_end_if(&mut self) -> Result<bool, Error> {
         let kernel = self.predication_kernel()?;
         let (answer, record) =
@@ -1013,16 +1321,17 @@ impl ComputeCommandEncoder {
     /// `encodeStartWhile:offset:comparison:referenceValue:` (SPI): the commands encoded after it,
     /// up to its `encodeEndWhile`, run again and again while the condition (read as
     /// [`encode_start_if`](Self::encode_start_if) reads it, before each run) holds, each run with
-    /// the encoder's state each command was encoded with (the module docs). A nil `buffer` inside a
-    /// block kills the outermost open block, as Metal's does.
+    /// the encoder's state each command was encoded with (the module docs), the commands of its
+    /// unit's later encoders included. A nil `buffer` is taken as
+    /// [`encode_start_if`](Self::encode_start_if)'s.
     ///
     /// The runtime lays the loop down as copies of its commands (64, or 16 inside another loop);
-    /// a loop that would run past its copies fails the command buffer at its completion
-    /// (`CommandBufferError::PredicatedLoopPastCopies`), where Metal runs on.
+    /// a loop that would run past its copies fails the command buffer at its completion, before
+    /// its completed handlers run (`CommandBufferError::PredicatedLoopPastCopies`), where Metal
+    /// runs on.
     ///
     /// Refused, recording nothing: as [`encode_start_if`](Self::encode_start_if) refuses, and
-    /// with three loops open (`NotImplemented(PredicatedLoopDepth)`). A loop that spans its unit's
-    /// encoders refuses the commit (`NotImplemented(PredicatedLoopAcrossEncoders)`).
+    /// with three loops open (`NotImplemented(PredicatedLoopDepth)`), where Metal nests on.
     pub fn encode_start_while(
         &mut self,
         buffer: Option<&Buffer>,
@@ -1036,7 +1345,9 @@ impl ComputeCommandEncoder {
         match &test {
             Some(test) => self.open_loop(kernel, Some(test), event),
             None => {
-                self.predication(|predication, _, _| predication.nil())?;
+                let record = self
+                    .predication(|predication, uploads, device| predication.nil(uploads, device))?;
+                record_steps(self.core(), kernel, [(record.as_ref(), None), (None, None)])?;
                 self.capture(event);
                 Ok(())
             }
@@ -1052,10 +1363,10 @@ impl ComputeCommandEncoder {
     }
 
     /// `encodeEndWhile` (SPI): closes the open While loop, answering Metal's `YES`; on another
-    /// block it kills the outermost open block and answers `NO` (the module docs).
+    /// block it kills the outermost open block and answers `NO`; with no block open it is an
+    /// unbalanced record, answering `NO` (the module docs).
     ///
-    /// Refused, recording nothing: no block open (`NotImplemented(PredicationUnbalanced)`); a
-    /// device without device addresses (`Unsupported{CommandPredication}`).
+    /// Refused, recording nothing: as [`encode_start_else`](Self::encode_start_else) refuses.
     pub fn encode_end_while(&mut self) -> Result<bool, Error> {
         let kernel = self.predication_kernel()?;
         self.close_loop(kernel, None, || Event::EndWhile)
@@ -1065,7 +1376,8 @@ impl ComputeCommandEncoder {
     /// whose body runs again where its condition (read as
     /// [`encode_start_if`](Self::encode_start_if) reads it, after each run) holds, answering
     /// Metal's `YES`; on another block, or for a nil `buffer` inside a block, it kills the
-    /// outermost open block and answers `NO` (the module docs).
+    /// outermost open block and answers `NO`; with no block open it is an unbalanced record,
+    /// answering `NO` (the module docs).
     ///
     /// Refused, recording nothing: as [`encode_start_if`](Self::encode_start_if) refuses.
     pub fn encode_end_do_while(
@@ -1081,7 +1393,9 @@ impl ComputeCommandEncoder {
         match &test {
             Some(test) => self.close_loop(kernel, Some(test), event),
             None => {
-                self.predication(|predication, _, _| predication.nil())?;
+                let record = self
+                    .predication(|predication, uploads, device| predication.nil(uploads, device))?;
+                record_steps(self.core(), kernel, [(record.as_ref(), None), (None, None)])?;
                 self.capture(event);
                 Ok(false)
             }
