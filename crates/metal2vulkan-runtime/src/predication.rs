@@ -101,14 +101,16 @@
 //!   encode between its Start and its End, which they note as they go (each command's public call
 //!   with the encoder's state it ran with, `Captures`, carried from an encoder to the next of its
 //!   unit, the boundary a barrier and the ended encoder's residency); at the End the encoder
-//!   encodes the further copies, 64 in all, or 16 inside another loop, each behind a copy start
-//!   step and closed by a copy end step, and then a step past them. The copies share a flag the
-//!   first failing test sets, after which every copy skips; a step past the copies sets the
-//!   command buffer's overflow word where the loop would run another, which fails the command
-//!   buffer at its completion, before its completed handlers run
+//!   encodes the further copies ([`copies_of`]): 64 in all, or 16 inside another loop, but no more
+//!   than keep the steps and gated dispatches the loop lays down within [`LAID_BUDGET`] (counting
+//!   the first copy's, inner loops' copies included), and at least one, so neither a long body
+//!   nor nesting multiplies a loop's commands past what a driver takes in one command buffer;
+//!   each behind a copy start step and closed by a copy end step, and then a step past them. The
+//!   copies share a flag the first failing test sets, after which every copy skips; a step past
+//!   the copies sets the command buffer's overflow word where the loop would run another, which
+//!   fails the command buffer at its completion, before its completed handlers run
 //!   (`CommandBufferError::PredicatedLoopPastCopies`), where Metal runs on. A loop inside
-//!   another's copy is laid down again in each. A killed loop gets no copies. Refused: a fourth
-//!   loop open ([`RuntimeGap::PredicatedLoopDepth`]), where Metal nests on.
+//!   another's copy is laid down again in each. A killed loop gets no copies.
 
 use super::buffer::Buffer;
 use super::compute::{ComputeCommandEncoder, EncoderState};
@@ -153,16 +155,34 @@ pub(super) struct Predication {
     /// command buffer's first loop): the command buffer fails at its completion
     /// (`CommandBufferError::PredicatedLoopPastCopies`).
     overflow: Option<Upload>,
+    /// The steps and gated dispatches recorded so far: what a loop's copies lay down is counted
+    /// from it ([`copies_of`]).
+    laid: u64,
 }
 
-/// The most loops open at once: each nesting multiplies its body's copies.
-const MAX_LOOP_DEPTH: usize = 3;
+/// The copies of a loop no other loop holds, at most.
+const FIRST_COPIES: u64 = 64;
 
-/// The copies of a loop no other loop holds.
-const FIRST_COPIES: usize = 64;
+/// The copies of a loop inside another, at most.
+const NESTED_COPIES: u64 = 16;
 
-/// The copies of a loop inside another.
-const NESTED_COPIES: usize = 16;
+/// The steps and gated dispatches a loop's copies lay down, at most, where the first copy alone
+/// does not pass it: MoltenVK 1.4.2 on an Apple M3 Max ended the process (Metal's
+/// `IOGPUMetalDeviceShmem` allocation failed) at a loop of six nested loops laid as 64, 16 and 16
+/// copies of the outer three (some 400,000 commands in one command buffer).
+const LAID_BUDGET: u64 = 16_384;
+
+/// The copies laid down in all of a loop with `depth` loops open around it whose first copy laid
+/// down `first` steps and gated dispatches: [`FIRST_COPIES`] or [`NESTED_COPIES`], but no more than
+/// keep them within [`LAID_BUDGET`], and at least one.
+fn copies_of(depth: usize, first: u64) -> u64 {
+    let most = if depth == 0 {
+        FIRST_COPIES
+    } else {
+        NESTED_COPIES
+    };
+    (LAID_BUDGET / first.max(1)).clamp(1, most)
+}
 
 /// A record's condition: the `u32` at byte `at` of `buffer` (Metal's offset rounded down to a
 /// multiple of 4), compared so with `reference`: at `place`, its device address, or in the bound
@@ -361,6 +381,8 @@ enum Kind {
 pub(super) struct Looping {
     test: Option<Test>,
     flag: Upload,
+    /// The command buffer's steps and gated dispatches laid down before it ([`Predication::laid`]).
+    laid_at: u64,
 }
 
 /// An End of a loop: Metal's answer, the step to record, if any, whether it closed the loop
@@ -563,6 +585,7 @@ impl Predication {
             false => PredicationStep::RECORD_BYTES,
         };
         let record = uploads.upload(device, &[], bytes)?;
+        self.laid += 1;
         let at = place(device, &record)?;
         record.write(&step(place(device, &counter)?).record(at));
         let run = self.runs.len();
@@ -798,21 +821,18 @@ impl Predication {
     }
 
     /// `encodeStartWhile:...` of `test`, or `encodeStartDoWhile` (`None`): the steps to record, a
-    /// `Resume` first where a range drops, then its first copy's start. Refused past
-    /// [`MAX_LOOP_DEPTH`] open loops ([`RuntimeGap::PredicatedLoopDepth`]).
+    /// `Resume` first where a range drops, then its first copy's start.
     fn start_loop(
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
         test: Option<&Test>,
     ) -> Result<(Option<Step>, Step), Error> {
-        if self.loops_open() >= MAX_LOOP_DEPTH {
-            return Err(Error::NotImplemented(RuntimeGap::PredicatedLoopDepth));
-        }
         let (resume, dead) = self.resume(uploads, device)?;
         let looping = Looping {
             test: test.cloned(),
             flag: uploads.upload(device, &[], 16)?,
+            laid_at: self.laid,
         };
         let record = self.copy_step(uploads, device, &looping)?;
         self.open(&record, Kind::Loop(looping), dead)?;
@@ -1025,6 +1045,7 @@ impl Predication {
         let record = self.runs[run].record.clone();
         let bound = self.runs[run].capacity.is_some();
         let first = self.runs[run].gates.len() as u64;
+        self.laid += counts.len() as u64;
         let mut gates = Vec::with_capacity(counts.len());
         let mut places = Vec::with_capacity(counts.len());
         for (i, &count) in (0..).zip(counts) {
@@ -1408,7 +1429,7 @@ impl ComputeCommandEncoder {
     }
 
     /// Open a loop of `test` (`None`: a DoWhile) by the call of `event`, recording its first
-    /// copy's start: refused past [`MAX_LOOP_DEPTH`] open loops. Its body is captured from here.
+    /// copy's start. Its body is captured from here.
     fn open_loop(
         &mut self,
         kernel: OwnedKernel,
@@ -1471,8 +1492,10 @@ impl ComputeCommandEncoder {
         (looping, test): (&Looping, Option<&Test>),
         body: &[(EncoderState, Event)],
     ) -> Result<(), Error> {
-        let nested = self.predication(|predication, _, _| Ok(predication.loops_open() > 0))?;
-        let copies = if nested { NESTED_COPIES } else { FIRST_COPIES };
+        let copies = self.predication(|predication, _, _| {
+            let first = predication.laid - looping.laid_at;
+            Ok(copies_of(predication.loops_open(), first))
+        })?;
         // The commands of the unit's earlier encoders replay here with what those made resident.
         for (_, event) in body {
             if let Event::Encoder(residency) = event {
@@ -1496,7 +1519,7 @@ impl ComputeCommandEncoder {
         kernel: OwnedKernel,
         (looping, test): (&Looping, Option<&Test>),
         body: &[(EncoderState, Event)],
-        copies: usize,
+        copies: u64,
     ) -> Result<(), Error> {
         for _ in 1..copies {
             let record = self.predication(|predication, uploads, device| {
@@ -1629,13 +1652,13 @@ impl ComputeCommandEncoder {
     /// unit's later encoders included. A nil `buffer` is taken as
     /// [`encode_start_if`](Self::encode_start_if)'s.
     ///
-    /// The runtime lays the loop down as copies of its commands (64, or 16 inside another loop);
-    /// a loop that would run past its copies fails the command buffer at its completion, before
-    /// its completed handlers run (`CommandBufferError::PredicatedLoopPastCopies`), where Metal
-    /// runs on.
+    /// The runtime lays the loop down as copies of its commands (64, or 16 inside another loop,
+    /// fewer where the copies would lay down more than 16384 steps and gated dispatches, and at
+    /// least one); a loop that would run past its copies fails the command buffer at its
+    /// completion, before its completed handlers run
+    /// (`CommandBufferError::PredicatedLoopPastCopies`), where Metal runs on.
     ///
-    /// Refused, recording nothing: as [`encode_start_if`](Self::encode_start_if) refuses, and
-    /// with three loops open (`NotImplemented(PredicatedLoopDepth)`), where Metal nests on.
+    /// Refused, recording nothing: as [`encode_start_if`](Self::encode_start_if) refuses.
     pub fn encode_start_while(
         &mut self,
         buffer: Option<&Buffer>,

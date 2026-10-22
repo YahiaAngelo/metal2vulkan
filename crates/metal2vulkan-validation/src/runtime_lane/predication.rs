@@ -20,8 +20,8 @@
 //!   would run past the copies the runtime lays down fails its command buffer;
 //! - a live block open where its unit ends fails the command buffer where its commands skip there,
 //!   as Metal's GPU recovery does, and is harmless where they run;
-//! - what the runtime refuses: a word past its buffer, a fourth loop open, and an unbalanced record
-//!   that is its unit's first after dispatches of the unit.
+//! - what the runtime refuses: a word past its buffer, and an unbalanced record that is its
+//!   unit's first after dispatches of the unit.
 
 use super::{
     buffer_with, read_buffer, validated_device, validated_device_with, Messages, ScratchCache, WAIT,
@@ -262,17 +262,19 @@ fn on_device(test: impl Fn(&Device)) {
 
 /// What [`run`] runs streams with: the marking kernel's state, the log, the condition words
 /// (word 0 is 1), indirect dispatch arguments (one threadgroup of one at 0; a grid of one thread
-/// in a group of one at 16) and a fence.
+/// in a group of one at 16), a fence and `prd_put`'s state.
 pub(crate) struct Streams {
     marks: Marks,
     arguments: Buffer,
     fence: metal2vulkan_runtime::Fence,
     queue: metal2vulkan_runtime::CommandQueue,
+    put: ComputePipelineState,
 }
 
 impl Streams {
     pub(crate) fn new(device: &Device) -> Streams {
         Streams {
+            put: kernel(device, "prd_put", false),
             marks: Marks::new(device),
             arguments: buffer_with(device, &bytes(&[1, 1, 1, 0, 1, 1, 1, 1, 1, 1])).unwrap(),
             fence: device.new_fence(),
@@ -292,15 +294,44 @@ impl Streams {
 /// makes the log resident, `Fu` and `Fw` update and wait for a
 /// fence; `|` and `%` go on in a new serial and concurrent encoder, `B` ends the encoder and
 /// encodes a blit (the next command opens a serial encoder, as one with no encoder open does).
-/// The tags that ran, and the answers.
+/// The tags that ran, each once, and the answers, of a command buffer that completed.
 pub(crate) fn run(streams: &Streams, script: &str) -> (Vec<u32>, String) {
+    let ran = run_counted(streams, script);
+    if let Some(error) = ran.refused {
+        panic!("{script}: refused {error:?}");
+    }
+    assert_eq!(
+        (ran.status, ran.error),
+        (CommandBufferStatus::Completed, None),
+        "{script}"
+    );
+    (streams.marks.ran(), ran.answers)
+}
+
+/// What a stream's command buffer ran ([`run_counted`]).
+struct Counted {
+    status: CommandBufferStatus,
+    error: Option<CommandBufferError>,
+    /// Each tag's marks, by tag.
+    counts: Vec<u32>,
+    answers: String,
+    /// The first record the runtime refused, which recorded nothing.
+    refused: Option<Error>,
+}
+
+/// [`run`]'s stream, with these for loops that count, as the Metal probe's: `w<n>[@k]` starts a
+/// While on log word `k` (0 where none) `!= n`, `z<n>[@k]` ends a DoWhile on it `< n`, `i<n>[@k]`
+/// starts an If on it `== n`, `Q<k>` writes 0 into log word `k`, `y<n>` sets the bytes to `n`,
+/// `o<n>` sets buffer 1's offset to word `n`. Its command buffer's status and error once it ended,
+/// each tag's marks, and the answers.
+fn run_counted(streams: &Streams, script: &str) -> Counted {
     let marks = &streams.marks;
     write_words(&marks.log, &[0; LOG_WORDS]);
     write_words(&marks.word, &[1, 0, 0, 0]);
     let command_buffer = streams.queue.command_buffer().unwrap();
     let mut open: Option<ComputeCommandEncoder> = None;
     let mut answers = String::new();
-    let answer = |yes: bool| if yes { '1' } else { '0' };
+    let mut refused = None;
     for token in script.split_whitespace() {
         match token {
             "|" | "%" => {
@@ -331,27 +362,37 @@ pub(crate) fn run(streams: &Streams, script: &str) -> (Vec<u32>, String) {
         }
         let encoder = open.get_or_insert_with(|| command_buffer.compute_command_encoder().unwrap());
         let word = Some(&marks.word);
+        let log = Some(&marks.log);
         let tag = |token: &str| token[1..].parse::<u32>().unwrap();
+        // A record's answer, if it has one, is kept; its refusal too, the first one, and the
+        // stream goes on.
+        let mut record = |result: Result<Option<bool>, Error>| match result {
+            Ok(Some(yes)) => answers.push(if yes { '1' } else { '0' }),
+            Ok(None) => {}
+            Err(error) => {
+                refused.get_or_insert(error);
+            }
+        };
+        let mut kept = |result: Result<(), Error>| record(result.map(|()| None));
+        // A loop token's `n` and log word `k`.
+        let number = |token: &str| -> (u32, u64) {
+            let (n, k) = token[1..].split_once('@').unwrap_or((&token[1..], "0"));
+            (n.parse().unwrap(), k.parse().unwrap())
+        };
         match token {
-            "I1" => encoder.encode_start_if(word, 0, EQUAL, 1).unwrap(),
-            "I0" => encoder.encode_start_if(word, 0, EQUAL, 0).unwrap(),
-            "In" => encoder.encode_start_if(None, 0, EQUAL, 0).unwrap(),
-            "L" => encoder.encode_start_else().unwrap(),
-            "W1" => encoder.encode_start_while(word, 0, EQUAL, 1).unwrap(),
-            "W0" => encoder.encode_start_while(word, 0, EQUAL, 0).unwrap(),
-            "Wn" => encoder.encode_start_while(None, 0, EQUAL, 0).unwrap(),
-            "D" => encoder.encode_start_do_while().unwrap(),
-            "E" => answers.push(answer(encoder.encode_end_if().unwrap())),
-            "V" => answers.push(answer(encoder.encode_end_while().unwrap())),
-            "Z0" => answers.push(answer(
-                encoder.encode_end_do_while(word, 0, EQUAL, 0).unwrap(),
-            )),
-            "Zn" => answers.push(answer(
-                encoder.encode_end_do_while(None, 0, EQUAL, 0).unwrap(),
-            )),
-            "Zp" => answers.push(answer(
-                encoder.encode_end_do_while(word, PAST, EQUAL, 0).unwrap(),
-            )),
+            "I1" => kept(encoder.encode_start_if(word, 0, EQUAL, 1)),
+            "I0" => kept(encoder.encode_start_if(word, 0, EQUAL, 0)),
+            "In" => kept(encoder.encode_start_if(None, 0, EQUAL, 0)),
+            "L" => kept(encoder.encode_start_else()),
+            "W1" => kept(encoder.encode_start_while(word, 0, EQUAL, 1)),
+            "W0" => kept(encoder.encode_start_while(word, 0, EQUAL, 0)),
+            "Wn" => kept(encoder.encode_start_while(None, 0, EQUAL, 0)),
+            "D" => kept(encoder.encode_start_do_while()),
+            "E" => record(encoder.encode_end_if().map(Some)),
+            "V" => record(encoder.encode_end_while().map(Some)),
+            "Z0" => record(encoder.encode_end_do_while(word, 0, EQUAL, 0).map(Some)),
+            "Zn" => record(encoder.encode_end_do_while(None, 0, EQUAL, 0).map(Some)),
+            "Zp" => record(encoder.encode_end_do_while(word, PAST, EQUAL, 0).map(Some)),
             "U" => encoder
                 .use_resource(
                     marks.log.as_resource(),
@@ -375,14 +416,150 @@ pub(crate) fn run(streams: &Streams, script: &str) -> (Vec<u32>, String) {
                     .dispatch_threads_indirect(&streams.arguments, 16)
                     .unwrap();
             }
+            _ if token.starts_with('w') => {
+                let (n, k) = number(token);
+                kept(encoder.encode_start_while(log, 4 * k, NOT_EQUAL, n));
+            }
+            _ if token.starts_with('z') => {
+                let (n, k) = number(token);
+                record(encoder.encode_end_do_while(log, 4 * k, LESS, n).map(Some));
+            }
+            _ if token.starts_with('i') => {
+                let (n, k) = number(token);
+                kept(encoder.encode_start_if(log, 4 * k, EQUAL, n));
+            }
+            _ if token.starts_with('Q') => put(encoder, &streams.put, marks, tag(token).into()),
+            _ if token.starts_with('y') => {
+                encoder.set_bytes(&tag(token).to_le_bytes(), 0).unwrap();
+            }
+            _ if token.starts_with('o') => {
+                encoder
+                    .set_buffer_offset(4 * u64::from(tag(token)), 1)
+                    .unwrap();
+            }
             _ => panic!("no token {token}"),
         }
     }
     if let Some(encoder) = open {
         encoder.end_encoding().unwrap();
     }
-    complete(&command_buffer);
-    (marks.ran(), answers)
+    command_buffer.commit().unwrap();
+    command_buffer.wait_until_completed_for(WAIT).unwrap();
+    Counted {
+        status: command_buffer.status(),
+        error: command_buffer.error(),
+        counts: marks.counts(),
+        answers,
+        refused,
+    }
+}
+
+/// A loop case: its stream ([`run_counted`]'s notation), each tag's count Metal ran, and its
+/// Ends' answers.
+pub(crate) type LoopCase = (String, Vec<(usize, u32)>, &'static str);
+
+/// The loops Metal ran on an M3 Max under macOS 27.0.1 (`metal_runs_loops_as_the_lane_expects`
+/// on the Metal platform runs each there): the passes of Whiles and DoWhiles of 0 to 64, a While
+/// in a concurrent encoder, three nested loops, each pass's bindings, an If in a DoWhile; loops
+/// spanning a unit's encoders (serial, concurrent, three, around an If, inside a spanning If, with
+/// an encoder's own bindings) and a serial encoder's While its concurrent encoder ends, which
+/// kills it; four to six nested loops; and loops of 65 to 100000 passes, past the copies the
+/// runtime lays down.
+pub(crate) fn loop_cases() -> Vec<LoopCase> {
+    let mut cases: Vec<LoopCase> = Vec::new();
+    for n in [0u32, 1, 5, 64] {
+        cases.push((
+            format!("w{n} T0 T1 V T2"),
+            vec![(0, n), (1, n), (2, 1)],
+            "1",
+        ));
+        let runs = n.max(1);
+        cases.push((
+            format!("D T0 T1 z{n} T2"),
+            vec![(0, runs), (1, runs), (2, 1)],
+            "1",
+        ));
+    }
+    let fixed: [(&str, &[(usize, u32)], &str); 21] = [
+        ("% w7 T0 V", &[(0, 7)], "1"),
+        (
+            "w3 T0 Q1 w4@1 T1 Q2 D T2 T3 z5@2 V V",
+            &[(0, 3), (1, 4), (2, 5), (3, 60)],
+            "111",
+        ),
+        (
+            "D T10 y0 o16 t T11 T0 z3 t",
+            &[(0, 4), (10, 3), (11, 3), (16, 3)],
+            "1",
+        ),
+        (
+            "D T0 i2 T2 L T3 E T1 z4",
+            &[(0, 4), (1, 4), (2, 1), (3, 3)],
+            "11",
+        ),
+        ("w3 T0 | T5 V T6", &[(0, 3), (5, 3), (6, 1)], "1"),
+        ("D T0 | T5 z3 T6", &[(0, 3), (5, 3), (6, 1)], "1"),
+        (
+            "w3 T0 | T5 | T7 V T6",
+            &[(0, 3), (5, 3), (7, 3), (6, 1)],
+            "1",
+        ),
+        ("% w3 T0 % T5 V T6", &[(0, 3), (5, 3), (6, 1)], "1"),
+        ("w3 T0 % T5 V T6", &[(0, 1)], "0"),
+        (
+            "D T0 | I1 T5 | E T7 z3 T6",
+            &[(0, 3), (5, 3), (7, 3), (6, 1)],
+            "11",
+        ),
+        (
+            "I1 D T0 | T5 z3 | T7 E T6",
+            &[(0, 3), (5, 3), (7, 1), (6, 1)],
+            "11",
+        ),
+        (
+            "D T10 | b10 y0 o16 t T0 z3 t",
+            &[(0, 4), (10, 3), (16, 3)],
+            "1",
+        ),
+        (
+            "w2@1 T1 Q2 w2@2 T2 Q3 w2@3 T3 Q4 w2@4 T4 Q5 w2@5 T5 Q6 w2@6 T6 T50 V V V V V V",
+            &[(1, 2), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2), (50, 64)],
+            "111111",
+        ),
+        (
+            "D T1 Q2 D T2 Q3 D T3 Q4 D T4 T50 z2@4 z2@3 z2@2 z2@1",
+            &[(1, 2), (2, 2), (3, 2), (4, 2), (50, 16)],
+            "1111",
+        ),
+        ("w65 T0 T1 V T2", &[(0, 65), (1, 65), (2, 1)], "1"),
+        ("w1000 T0 V T2", &[(0, 1000), (2, 1)], "1"),
+        ("D T0 z100000 T2", &[(0, 100_000), (2, 1)], "1"),
+        (
+            "w2@1 T1 Q2 w17@2 T2 T50 V V",
+            &[(1, 2), (2, 17), (50, 34)],
+            "11",
+        ),
+        (
+            "w3@1 T1 Q2 w100@2 T2 T50 V V",
+            &[(1, 3), (2, 100), (50, 300)],
+            "11",
+        ),
+        (
+            "w2@1 T1 Q2 w2@2 T2 T50 V V",
+            &[(1, 2), (2, 2), (50, 4)],
+            "11",
+        ),
+        (
+            "D T1 D T2 D T3 D T4 T50 Z0 Z0 Z0 Z0",
+            &[(1, 1), (2, 1), (3, 1), (4, 1), (50, 1)],
+            "1111",
+        ),
+    ];
+    let fixed = fixed
+        .iter()
+        .map(|(script, want, answers)| (script.to_string(), want.to_vec(), *answers));
+    cases.extend(fixed);
+    cases
 }
 
 /// The streams Metal ran on an M3 Max under macOS 27.0.1, each with the tags that ran and what its
@@ -700,8 +877,8 @@ fn every_dispatch_form_runs_as_its_block_says() {
 }
 
 /// What the runtime refuses, recording nothing, where it cannot give Metal's answer: a word past
-/// its buffer's end where the record reads it (a Start's, a live DoWhile's End's), a fourth loop
-/// open, and an unbalanced record that is its unit's first after
+/// its buffer's end where the record reads it (a Start's, a live DoWhile's End's), and an
+/// unbalanced record that is its unit's first after
 /// dispatches of the unit, in its encoder or an earlier one of the unit (Metal drops those, which
 /// ran ungated); the work around them runs. After a blit the next encoder starts a unit, whose
 /// unbalanced record drops nothing earlier, and an unbalanced record after a block drops what
@@ -715,7 +892,6 @@ fn what_the_runtime_refuses() {
             RuntimeGap::PredicationDropsUngatedWork,
         ));
         let past = Err(Error::NotImplemented(RuntimeGap::PredicationWordPastBuffer));
-        let deep = Err(Error::NotImplemented(RuntimeGap::PredicatedLoopDepth));
         let command_buffer = queue.command_buffer().unwrap();
         let mut encoder = command_buffer.compute_command_encoder().unwrap();
         marks.mark(&mut encoder, 1);
@@ -740,19 +916,6 @@ fn what_the_runtime_refuses() {
             encoder.encode_start_if(Some(word), 0x1_0000_0000, EQUAL, 0),
             past
         );
-        // Three loops open, failing at once; a fourth is refused.
-        encoder.encode_start_while(Some(word), 0, EQUAL, 0).unwrap();
-        encoder.encode_start_do_while().unwrap();
-        encoder.encode_start_while(Some(word), 0, EQUAL, 0).unwrap();
-        assert_eq!(encoder.encode_start_while(Some(word), 0, EQUAL, 1), deep);
-        assert_eq!(encoder.encode_start_do_while(), deep);
-        marks.mark(&mut encoder, 4);
-        assert_eq!(encoder.encode_end_while(), Ok(true));
-        assert_eq!(
-            encoder.encode_end_do_while(Some(word), 0, EQUAL, 0),
-            Ok(true)
-        );
-        assert_eq!(encoder.encode_end_while(), Ok(true));
         // A live DoWhile's End reads its word.
         encoder.encode_start_do_while().unwrap();
         let end = encoder.encode_end_do_while(Some(word), PAST, EQUAL, 0);
@@ -1209,6 +1372,72 @@ fn loops_run_as_metal_ran() {
             assert_eq!(end, Ok(true));
         });
         expect(got, &[(0, 4), (1, 4), (2, 1), (3, 3)], "loopif");
+    });
+}
+
+/// The loops Metal ran ([`loop_cases`]) run its passes, answer what its Ends answered and
+/// complete, but those that run past the copies the runtime lays down, which fail their command
+/// buffers (`CommandBufferError::PredicatedLoopPastCopies`), where Metal runs on, and one whose
+/// unbalanced End would drop the unit's ungated dispatches, refused
+/// (`RuntimeGap::PredicationDropsUngatedWork`).
+#[test]
+fn loop_streams_run_as_metal_ran() {
+    const PAST_COPIES: [&str; 7] = [
+        "w2@1 T1 Q2 w2@2 T2 Q3 w2@3 T3 Q4 w2@4 T4 Q5 w2@5 T5 Q6 w2@6 T6 T50 V V V V V V",
+        "D T1 Q2 D T2 Q3 D T3 Q4 D T4 T50 z2@4 z2@3 z2@2 z2@1",
+        "w65 T0 T1 V T2",
+        "w1000 T0 V T2",
+        "D T0 z100000 T2",
+        "w2@1 T1 Q2 w17@2 T2 T50 V V",
+        "w3@1 T1 Q2 w100@2 T2 T50 V V",
+    ];
+    // Its unbalanced End drops the dispatches the unit ran before its first record.
+    const DROPS_UNGATED: &str = "w3 T0 % T5 V T6";
+    on_device(|device| {
+        let streams = Streams::new(device);
+        let mut wrong = Vec::new();
+        for (script, want, answers) in loop_cases() {
+            let got = run_counted(&streams, &script);
+            if script == DROPS_UNGATED {
+                let ungated = Error::NotImplemented(RuntimeGap::PredicationDropsUngatedWork);
+                if got.refused != Some(ungated) {
+                    wrong.push(format!("{script}: refused {:?}", got.refused));
+                }
+                continue;
+            }
+            if let Some(error) = got.refused {
+                wrong.push(format!("{script}: refused {error:?}"));
+                continue;
+            }
+            if PAST_COPIES.contains(&script.as_str()) {
+                let failed = (
+                    CommandBufferStatus::Error,
+                    Some(CommandBufferError::PredicatedLoopPastCopies),
+                );
+                if (got.status, got.error) != failed {
+                    wrong.push(format!("{script}: {:?} {:?}", got.status, got.error));
+                }
+                continue;
+            }
+            let mut counts = vec![0; LOG_WORDS];
+            for &(tag, n) in &want {
+                counts[tag] = n;
+            }
+            let ok = (CommandBufferStatus::Completed, None);
+            if (got.status, got.error) != ok || got.counts != counts || got.answers != answers {
+                wrong.push(format!(
+                    "{script}: {:?} {:?} answered {:?}, counts {:?}; Metal ran {want:?} \
+                     answered {answers:?}",
+                    got.status,
+                    got.error,
+                    got.answers,
+                    (got.counts.iter().enumerate())
+                        .filter(|(_, &n)| n > 0)
+                        .collect::<Vec<_>>()
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     });
 }
 

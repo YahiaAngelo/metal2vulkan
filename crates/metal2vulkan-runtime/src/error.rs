@@ -1508,11 +1508,6 @@ pub enum RuntimeGap {
     /// 4) past its buffer's end. Metal reads whatever memory lies there: zero past a lone buffer,
     /// the next buffer's bytes inside a heap.
     PredicationWordPastBuffer,
-    /// A predicated loop started (`ComputeCommandEncoder::encode_start_while`,
-    /// `encode_start_do_while`) with three loops already open in its unit. Metal nests them
-    /// without limit (six measured); the runtime lays a loop down as copies of its commands (64,
-    /// or 16 inside another loop), so each level multiplies the copies of the commands inside it.
-    PredicatedLoopDepth,
     /// A blit copy between a buffer and a multisampled texture (`copyFromBuffer:...toTexture:`
     /// into, or `copyFromTexture:...toBuffer:` out of, a texture of more than one sample).
     /// Vulkan copies no multisampled image to or from a buffer (its `vkCmdCopyBufferToImage` and

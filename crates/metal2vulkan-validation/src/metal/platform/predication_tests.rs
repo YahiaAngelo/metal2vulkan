@@ -7,7 +7,9 @@
 
 use crate::gpu::compile;
 use crate::gpu::wait::metal::commit_and_wait;
-use crate::runtime_lane::predication::{cmp_rows, measured_streams, CMP_BRANCHES, PAST};
+use crate::runtime_lane::predication::{
+    cmp_rows, loop_cases, measured_streams, CMP_BRANCHES, PAST,
+};
 use core::ffi::c_void;
 use core::ptr::NonNull;
 use objc2::msg_send;
@@ -377,110 +379,16 @@ fn metal_compares_as_recorded() {
     assert_eq!(branches, CMP_BRANCHES);
 }
 
-/// A loop case: its script, each tag's count Metal ran, and its Ends' answers.
-type LoopCase = (&'static str, &'static [(usize, u32)], &'static str);
-
-/// A loop case as [`metal_runs_loops_as_the_lane_expects`] runs it.
-type LoopRun = (String, Vec<(usize, u32)>, &'static str);
-
-/// Metal's loops, as the runtime lane's loop tests expect them: the passes of Whiles and DoWhiles
-/// of 0 to 64, a While in a concurrent encoder, three nested loops, each pass's bindings, an If in
-/// a DoWhile; loops spanning a unit's encoders (serial, concurrent, three, around an If, inside a
-/// spanning If, with an encoder's own bindings) and a serial encoder's While its concurrent
-/// encoder ends, which kills it; six nested loops; and loops of 65 to 100000 passes, past the
-/// copies the runtime lays down, which Metal runs on.
+/// Metal's loops, as the runtime lane's loop tests expect them ([`loop_cases`]): the passes of
+/// Whiles and DoWhiles of 0 to 64, a While in a concurrent encoder, three nested loops, each
+/// pass's bindings, an If in a DoWhile; loops spanning a unit's encoders (serial, concurrent,
+/// three, around an If, inside a spanning If, with an encoder's own bindings) and a serial
+/// encoder's While its concurrent encoder ends, which kills it; six nested loops; and loops of 65
+/// to 100000 passes, past the copies the runtime lays down, which Metal runs on.
 #[test]
 fn metal_runs_loops_as_the_lane_expects() {
     let probe = Probe::new();
-    let mut cases: Vec<LoopRun> = Vec::new();
-    for n in [0u32, 1, 5, 64] {
-        cases.push((
-            format!("w{n} T0 T1 V T2"),
-            vec![(0, n), (1, n), (2, 1)],
-            "1",
-        ));
-        let runs = n.max(1);
-        cases.push((
-            format!("D T0 T1 z{n} T2"),
-            vec![(0, runs), (1, runs), (2, 1)],
-            "1",
-        ));
-    }
-    let fixed: [LoopCase; 20] = [
-        ("% w7 T0 V", &[(0, 7)], "1"),
-        (
-            "w3 T0 Q1 w4@1 T1 Q2 D T2 T3 z5@2 V V",
-            &[(0, 3), (1, 4), (2, 5), (3, 60)],
-            "111",
-        ),
-        (
-            "D T10 y0 o16 t T11 T0 z3 t",
-            &[(0, 4), (10, 3), (11, 3), (16, 3)],
-            "1",
-        ),
-        (
-            "D T0 i2 T2 L T3 E T1 z4",
-            &[(0, 4), (1, 4), (2, 1), (3, 3)],
-            "11",
-        ),
-        ("w3 T0 | T5 V T6", &[(0, 3), (5, 3), (6, 1)], "1"),
-        ("D T0 | T5 z3 T6", &[(0, 3), (5, 3), (6, 1)], "1"),
-        (
-            "w3 T0 | T5 | T7 V T6",
-            &[(0, 3), (5, 3), (7, 3), (6, 1)],
-            "1",
-        ),
-        ("% w3 T0 % T5 V T6", &[(0, 3), (5, 3), (6, 1)], "1"),
-        ("w3 T0 % T5 V T6", &[(0, 1)], "0"),
-        (
-            "D T0 | I1 T5 | E T7 z3 T6",
-            &[(0, 3), (5, 3), (7, 3), (6, 1)],
-            "11",
-        ),
-        (
-            "I1 D T0 | T5 z3 | T7 E T6",
-            &[(0, 3), (5, 3), (7, 1), (6, 1)],
-            "11",
-        ),
-        (
-            "D T10 | b10 y0 o16 t T0 z3 t",
-            &[(0, 4), (10, 3), (16, 3)],
-            "1",
-        ),
-        (
-            "w2@1 T1 Q2 w2@2 T2 Q3 w2@3 T3 Q4 w2@4 T4 Q5 w2@5 T5 Q6 w2@6 T6 T50 V V V V V V",
-            &[(1, 2), (2, 2), (3, 2), (4, 2), (5, 2), (6, 2), (50, 64)],
-            "111111",
-        ),
-        (
-            "D T1 Q2 D T2 Q3 D T3 Q4 D T4 T50 z2@4 z2@3 z2@2 z2@1",
-            &[(1, 2), (2, 2), (3, 2), (4, 2), (50, 16)],
-            "1111",
-        ),
-        ("w65 T0 T1 V T2", &[(0, 65), (1, 65), (2, 1)], "1"),
-        ("w1000 T0 V T2", &[(0, 1000), (2, 1)], "1"),
-        ("D T0 z100000 T2", &[(0, 100_000), (2, 1)], "1"),
-        (
-            "w2@1 T1 Q2 w17@2 T2 T50 V V",
-            &[(1, 2), (2, 17), (50, 34)],
-            "11",
-        ),
-        (
-            "w3@1 T1 Q2 w100@2 T2 T50 V V",
-            &[(1, 3), (2, 100), (50, 300)],
-            "11",
-        ),
-        (
-            "w2@1 T1 Q2 w2@2 T2 T50 V V",
-            &[(1, 2), (2, 2), (50, 4)],
-            "11",
-        ),
-    ];
-    let fixed = fixed
-        .iter()
-        .map(|(script, want, answers)| (script.to_string(), want.to_vec(), *answers));
-    cases.extend(fixed);
-    for (script, want, answers) in cases {
+    for (script, want, answers) in loop_cases() {
         let got = probe.run(&script);
         let mut counts = vec![0; LOG_WORDS];
         for (tag, n) in want {

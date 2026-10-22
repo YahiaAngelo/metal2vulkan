@@ -14,14 +14,14 @@ Columns:
   - `none`: no public API path: malformed or non-Metal input, Apple-private calls, or a cap no valid program of ordinary size meets;
   - `?`: not assessed yet.
 
-Generated at `8b7d70192`.
+Generated at `8a051b041`.
 
 ## Totals
 
 | Kind | Variants | With a site | Reach system | Reach app | Reach rare | Reach none | Unassessed |
 |---|---|---|---|---|---|---|---|
 | Translator and front-end refusals | 124 | 124 | 6 | 33 | 68 | 17 | 0 |
-| Runtime gaps | 66 | 66 | 1 | 8 | 41 | 16 | 0 |
+| Runtime gaps | 65 | 65 | 1 | 8 | 41 | 15 | 0 |
 | Apple-only calls | 9 | 9 | 1 | 0 | 0 | 8 | 0 |
 | Binder refusals at a device limit | 9 | 9 | 0 | 1 | 7 | 1 | 0 |
 | Translation caps | 14 | 14 | 0 | 0 | 7 | 7 | 0 |
@@ -224,7 +224,6 @@ Generated at `8b7d70192`.
 | `HostHeapUncompressedMultisample` | A multisample texture in a heap over host pages (`Device::new_heap_with_bytes_no_copy`) that Metal keeps uncompressed | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/texture/heap.rs:1924` | `none`: a multisample texture Metal keeps uncompressed in a runtime extension's heap over host pages |
 | `PredicationDropsUngatedWork` | An unbalanced command-predication record (`ComputeCommandEncoder::encode_end_if` and the other ends, or `encode_start_else`, with no block open;... | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/predication.rs:641` | `none`: an unbalanced Apple-private command-predication record as its unit's first, after dispatches of the unit |
 | `PredicationWordPastBuffer` | A predication condition word (`encode_start_if`'s offset, rounded down to a multiple of 4) past its buffer's end | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/predication.rs:193` | `none`: an Apple-private predication condition word past its buffer |
-| `PredicatedLoopDepth` | A predicated loop started (`ComputeCommandEncoder::encode_start_while`, `encode_start_do_while`) with three loops already open in its unit | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/predication.rs:810` | `none`: an Apple-private predicated loop four deep |
 | `MultisampledBufferCopy` | A blit copy between a buffer and a multisampled texture (`copyFromBuffer:...toTexture:` into, or `copyFromTexture:...toBuffer:` out of, a texture... | every device (runtime piece not built) | 2: `crates/metal2vulkan-runtime/src/blit_texture.rs:485`, `crates/metal2vulkan-runtime/src/blit_texture.rs:641` | `rare`: a buffer<->multisampled-texture copy on a device without sample-rate shading, an integer multisample attachment at the count, or the copy format's storage; and, where maintenance8's depth/colour copies are missing or wrong, what the sample-rate draws cannot move: a 16-bit depth, or a depth or stencil texture they cannot sample or render to (emulated elsewhere; the consumer's Maps pans and screensaver make the copy) |
 | `ColorAttachmentGroups` | What a render pass the device draws in color groups does not build | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/render/color_groups.rs:106` | `app`: in a render pass of more color attachments than the device draws at once (five or more on a device of four), or one at an index past them: a pipeline state of other colors, a tile state, an execution of render commands, a draw reading another group's attachment |
 
@@ -482,7 +481,6 @@ Each refusal's sites, with the function that builds it.
 - `gap::HostHeapUncompressedMultisample`: `crates/metal2vulkan-runtime/src/texture/heap.rs:1924 (host_heap_plan)`
 - `gap::PredicationDropsUngatedWork`: `crates/metal2vulkan-runtime/src/predication.rs:641 (unbalanced)`
 - `gap::PredicationWordPastBuffer`: `crates/metal2vulkan-runtime/src/predication.rs:193 (new)`
-- `gap::PredicatedLoopDepth`: `crates/metal2vulkan-runtime/src/predication.rs:810 (start_loop)`
 - `gap::MultisampledBufferCopy`: `crates/metal2vulkan-runtime/src/blit_texture.rs:485 (copy_from_buffer_to_texture)`; `crates/metal2vulkan-runtime/src/blit_texture.rs:641 (copy_from_texture_to_buffer)`
 - `gap::ColorAttachmentGroups`: `crates/metal2vulkan-runtime/src/render/color_groups.rs:106 (gap)`
 - `apple::ProtectedContent`: `crates/metal2vulkan-runtime/src/apple_only.rs:200 (check)`

@@ -2864,12 +2864,12 @@ each item named states the rule in full.
   while and do-while loops) runs Metal's blocks and loops on every device, with or without
   buffer device addresses, its unbalanced records answering `NO` and dropping their ranges, and
   its live blocks left open where a unit ends failing the command buffer as Metal's GPU recovery
-  does (`PredicationOpenAtUnitEnd`). A loop is laid down as 64
-  copies (16 inside another loop); one that runs past them fails its command buffer
+  does (`PredicationOpenAtUnitEnd`). Loops nest to any depth. A loop is laid down as 64 copies
+  (16 inside another loop, fewer where they would lay down more than 16384 steps and gated
+  dispatches, and at least one); one that runs past them fails its command buffer
   (`PredicatedLoopPastCopies`), where Metal runs on. Refused where Metal runs on
-  (`RuntimeGap`): a fourth loop open (`PredicatedLoopDepth`), a word past its buffer
-  (`PredicationWordPastBuffer`), and an unbalanced record that is its unit's first after
-  dispatches of the unit (`PredicationDropsUngatedWork`).
+  (`RuntimeGap`): a word past its buffer (`PredicationWordPastBuffer`), and an unbalanced record
+  that is its unit's first after dispatches of the unit (`PredicationDropsUngatedWork`).
 - **A GPU-written indirect command naming a placed ID runs that ID's live holder**, the state made
   last; once it is released, nothing.
 - **An indirect render command keeps a draw's values to 32 bits**, as Metal's records keep most of
