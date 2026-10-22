@@ -1114,6 +1114,10 @@ pub struct Limits {
     /// `variableSampleLocations`: the sample locations may differ between pipelines of one
     /// subpass; `false` where `VK_EXT_sample_locations` is not exposed.
     pub variable_sample_locations: bool,
+    /// `provokingVertexModePerPipeline` (`VkPhysicalDeviceProvokingVertexPropertiesEXT`): the
+    /// pipelines of one render pass instance may differ in provoking vertex mode; `false` where
+    /// `VK_EXT_provoking_vertex` is not exposed.
+    pub provoking_vertex_mode_per_pipeline: bool,
     /// `VkPhysicalDeviceMeshShaderPropertiesEXT`: every limit 0 where `VK_EXT_mesh_shader` is not
     /// exposed.
     pub mesh: MeshLimits,

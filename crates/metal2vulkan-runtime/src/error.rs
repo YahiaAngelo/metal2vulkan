@@ -1409,6 +1409,13 @@ pub enum RuntimeGap {
     /// into a varying (a device whose fragment stage cannot declare it), from vertex indices the
     /// list's are not.
     PrivatePrimitives,
+    /// A draw under Apple's last provoking vertex (`setProvokingVertexMode:` 1) on a device
+    /// without `VK_EXT_provoking_vertex`'s last vertex, which the runtime draws as the list of its
+    /// primitives led by their last vertices (`render/provoking.rs`), where that list cannot be
+    /// drawn as Metal draws, as for `PrivatePrimitives`: a direct draw without indices from a
+    /// vertex start past `i32::MAX`, or whose list a `u32` cannot count; and a draw over indices
+    /// or from indirect arguments the index rewrite pass cannot draw, as for `RestartedStrip`.
+    ProvokingVertex,
     /// An indexed draw (`drawIndexedPrimitives:`) of a pipeline whose fragment function reads
     /// `[[primitive_id]]` on a device whose fragment stage cannot declare it (neither
     /// `geometryShader` nor `tessellationShader`), which draws its indices as vertices from 0 in

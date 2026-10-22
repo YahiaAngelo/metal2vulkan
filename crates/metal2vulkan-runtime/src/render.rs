@@ -295,7 +295,7 @@ use super::fresh_unwritten::FreshUnwritten;
 use super::function_table::VisibleFunctionTable;
 use super::heap_sets;
 use super::index_bounds::{self, BoundsPass, BoundsSteps};
-use super::index_rewrite::{self, RewritePass, RewriteSteps, WrittenList};
+use super::index_rewrite::{self, Listed, RewritePass, RewriteSteps, WrittenList};
 use super::kept_bytes;
 use super::linear_attachment;
 use super::linear_merge::LinearMerge;
@@ -399,6 +399,7 @@ mod pass_start_reads;
 mod pass_steps;
 mod pending;
 mod pending_tile;
+mod provoking;
 mod queued_commits;
 mod replay;
 mod reroute;
@@ -639,6 +640,23 @@ impl Assembly {
             DrawPrimitiveType::Nine => return None,
         })
     }
+
+    /// The program that lists the assembly's primitives in Metal's order
+    /// (`index_rewrite::RewriteProgram`): a line or triangle type's, or a private type's own.
+    /// `None` for points, patches and meshes, which no list holds.
+    fn program(self) -> Option<RewriteProgram> {
+        Some(match self {
+            Assembly::Primitives(primitive) => match primitive {
+                PrimitiveType::LineStrip => RewriteProgram::LineStrip,
+                PrimitiveType::TriangleStrip => RewriteProgram::TriangleStrip,
+                PrimitiveType::Line => RewriteProgram::LineList,
+                PrimitiveType::Triangle => RewriteProgram::TriangleList,
+                PrimitiveType::Point => return None,
+            },
+            Assembly::Private(program) => program,
+            Assembly::Patches | Assembly::Meshes => return None,
+        })
+    }
 }
 
 /// How a draw of primitive type 9 fails its command buffer, as Metal's GPU fails it
@@ -726,6 +744,9 @@ struct DrawSettings {
     depth16_pass: Option<bool>,
     /// The side of its depth bias (`BindState::depth16_bias_raises`).
     depth16_bias_raises: Option<bool>,
+    /// Its `VkPipeline` takes the last provoking vertex (`render/provoking.rs`,
+    /// `FixedState::provoking_last`).
+    provoking_last: bool,
 }
 
 /// The render encoder state one draw takes, statically or as dynamic state, in Vulkan's terms
@@ -7038,7 +7059,11 @@ impl RenderLowering {
         // An indexed strip the encoder's call restarts at another index than Vulkan's, and a draw
         // of one of Metal's private types, is drawn as a list, of its class's list topology
         // (`render/restart.rs`).
-        let restarted = self.restarted(assembly, &draw);
+        // A draw under the last provoking vertex is drawn as a list on a device without it
+        // (`render/provoking.rs`).
+        let provoking = self.provoking(call, &pipeline, assembly, &draw);
+        let rotated_weights = provoking.rotates_weights(assembly, &pipeline);
+        let restarted = self.restarted(assembly, &draw, provoking);
         let quad_primitive_ids = match assembly {
             Assembly::Private(program) => private_primitive_ids(&pipeline, program)?,
             _ => false,
@@ -7119,6 +7144,7 @@ impl RenderLowering {
                 &settings,
                 primitive_id_indices,
                 quad_primitive_ids,
+                rotated_weights,
             ),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut unlisted),
@@ -7130,6 +7156,18 @@ impl RenderLowering {
         let planes = |form: &ExtendedRange| matches!(form, ExtendedRange::Planes { .. });
         if plan.variant.extended_range.values().any(planes) {
             self.core.device().shared().counts.two_plane_draw();
+        }
+        match provoking {
+            provoking::Provoking::AsIs => {}
+            provoking::Provoking::Native => self
+                .core
+                .device()
+                .shared()
+                .counts
+                .provoking_last_pipeline_draw(),
+            provoking::Provoking::Listed(_) => {
+                self.core.device().shared().counts.provoking_listed_draw()
+            }
         }
         self.give_up_extended_shadows(&pipeline, &live.state);
         // The draw's primitive type: an indexed capture draw's layout says whether its strip
@@ -7307,8 +7345,10 @@ impl RenderLowering {
             self.skipped_draw();
             return Ok(());
         }
-        // A direct draw of a private type without indices draws the list the CPU writes; every
-        // other draw drawn as a list, the list the index rewrite pass writes.
+        // A direct draw of a private type without indices draws the list the CPU writes; a direct
+        // indexed draw of a program that never restarts, reading its indices in place, the list
+        // a run of the index gather pass writes; every other draw drawn as a list, the list the
+        // index rewrite pass writes.
         let (rewrite, listed) = match restarted {
             None => (None, None),
             Some(restarted) => match (&draw, &buffers.index, &buffers.indirect) {
@@ -7323,10 +7363,66 @@ impl RenderLowering {
                 ) => {
                     let list = WrittenList::new(
                         &mut self.core,
-                        restarted.program,
+                        ((restarted.program, restarted.order), restarted.gap.gap()),
                         (vertex_start, vertex_count),
                     )?;
-                    (None, Some(list))
+                    (None, Some(Listed::Written(list)))
+                }
+                (
+                    &DrawCall::Indexed {
+                        index_count,
+                        instance_count,
+                        base_vertex,
+                        base_instance,
+                        ..
+                    },
+                    Some(index),
+                    None,
+                ) if restarted.program.gathers() && index.in_place() && !self.replaying => {
+                    let size = restarted.index_size.unwrap_or(4);
+                    let arguments = index_rewrite::Arguments::Direct {
+                        count: index_count,
+                        instances: instance_count,
+                        base_vertex,
+                        base_instance,
+                    };
+                    let reads = index_rewrite::reads(Some(index), &arguments, size);
+                    if self.unordered.written(&reads) {
+                        return Err(Error::NotImplemented(restarted.gap.gap()));
+                    }
+                    // Indices an earlier draw or tile dispatch of the encoder wrote behind a
+                    // memory barrier are read before the draw's render pass instance: the index
+                    // rewrite pass's step there writes its list.
+                    let gathered = match self.core.uses().written(&reads) {
+                        true => None,
+                        false => self.core.gather(
+                            index_rewrite::GatherRequest {
+                                program: restarted.program,
+                                order: restarted.order,
+                                index,
+                                count: index_count,
+                                wide: size == 4,
+                            },
+                            &reads,
+                        )?,
+                    };
+                    match gathered {
+                        Some(list) => (None, Some(Listed::Gathered(list))),
+                        None => {
+                            let pass = RewritePass::new(
+                                &mut self.core,
+                                (
+                                    (restarted.program, restarted.restart, restarted.order),
+                                    restarted.gap.gap(),
+                                ),
+                                Some(index),
+                                &arguments,
+                                size,
+                                reads,
+                            )?;
+                            (Some(pass), None)
+                        }
+                    }
                 }
                 (draw, index, indirect) => {
                     if commands.indirect_needs_arguments && !commands.index_bounds_pass {
@@ -7366,13 +7462,14 @@ impl RenderLowering {
                     let reads = index_rewrite::reads(index, &arguments, size);
                     let in_place = index_rewrite::in_place(index, &arguments, size);
                     if self.unordered.written(&in_place) {
-                        return Err(Error::NotImplemented(index_rewrite::gap_of(
-                            restarted.program,
-                        )));
+                        return Err(Error::NotImplemented(restarted.gap.gap()));
                     }
                     let pass = RewritePass::new(
                         &mut self.core,
-                        (restarted.program, restarted.restart),
+                        (
+                            (restarted.program, restarted.restart, restarted.order),
+                            restarted.gap.gap(),
+                        ),
                         index,
                         &arguments,
                         size,
@@ -8248,7 +8345,7 @@ impl RenderLowering {
         // pass's one.
         let sized = device.shared().sized_index_bind;
         let one = |draw| ([draw; 2], 1);
-        // A list the CPU wrote draws as the indexed draw of it the binder's draw of the vertices
+        // A list the CPU or a gather run wrote draws as the indexed draw of it the binder's draw
         // becomes.
         let listed_draw = match &listed {
             Some(list) => Some(
@@ -9242,6 +9339,8 @@ impl RenderLowering {
     /// `settings` binds in, reading its indices as `primitive_id_indices` says (`BindState::
     /// primitive_id_indices`, [`primitive_id_indices`]), its quads' primitive IDs as
     /// `quad_primitive_ids` says (`BindState::quad_primitive_ids`, [`private_primitive_ids`]),
+    /// its triangles' barycentric weights as `rotated_weights` says (`BindState::rotated_weights`,
+    /// `render/provoking.rs`),
     /// its vertex, object and mesh tables
     /// `pass_start`'s or the encoder's
     /// ([`refresh_bind_state`](Self::refresh_bind_state)), its runtime samplers' address modes
@@ -9254,10 +9353,11 @@ impl RenderLowering {
     fn settle_draw(
         &self,
         live: &mut LiveBind,
-        (pipeline, settings, primitive_id_indices, quad_primitive_ids): (
+        (pipeline, settings, primitive_id_indices, quad_primitive_ids, rotated_weights): (
             &DrawingState,
             &DrawSettings,
             Option<IndexType>,
+            bool,
             bool,
         ),
         (pass_start, sampler_maps): (&PassStartTables, &SamplerMaps),
@@ -9301,6 +9401,7 @@ impl RenderLowering {
             reshape.field(&mut state.depth16_bias_raises, settings.depth16_bias_raises);
             reshape.field(&mut state.primitive_id_indices, primitive_id_indices);
             reshape.field(&mut state.quad_primitive_ids, quad_primitive_ids);
+            reshape.field(&mut state.rotated_weights, rotated_weights);
             reshape.field_from(&mut state.dropped_colors, &colors.dropped);
             reshape.field_from(&mut state.extended_shadows, shadows);
             let snapshots = snapshot.as_ref().map_or(&NO_INDICES, |w| &w.slots);

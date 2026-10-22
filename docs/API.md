@@ -2225,6 +2225,31 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   direct draw, an indirect one, or an indirect command's in an execution. Cost: the points rasterize
   nothing, the vertex function run for each, where what Metal draws is undefined: most of its draws
   draw nothing, and some a few of the points or a box.
+- `metal2vulkan-degrade-provoking-vertex-lines` (precision). `ProvokingVertexLines`: A draw of
+  lines under Apple's last provoking vertex (`setProvokingVertexMode:` 1), of a pipeline state that
+  reads it (a flat input, or a slice or viewport its vertex function selects), on a device without
+  `VK_EXT_provoking_vertex`'s last vertex (or whose pipelines of one render pass instance share one
+  mode): each line is drawn from its last vertex to its first, so a first-vertex pipeline reads
+  Metal's provoking vertex. Cost: each line's flat inputs are Metal's, but it can cover other
+  pixels and interpolate its smooth inputs otherwise than Metal's line from its first vertex to its
+  last.
+- `metal2vulkan-degrade-provoking-vertex-unmatched` (precision). `ProvokingVertexUnmatched`: A draw
+  under Apple's last provoking vertex (`setProvokingVertexMode:` 1) the runtime draws otherwise than
+  Metal. On a device without `VK_EXT_provoking_vertex`'s last vertex (or whose pipelines of one
+  render pass instance share one mode), what no list the runtime draws holds as Metal draws it: a
+  draw of triangles whose fragment function reads flat inputs and `[[barycentric_coord]]`, each
+  drawn from its last vertex, its second and third weights taken back to Metal's order from the
+  drawn triangle's, Metal's but for rounding; patches and mesh draws, whose flat inputs read the
+  first vertex. On a device with it, a strip whose vertex function computes
+  `[[primitive_id]]` into its varying (a device without `geometryShader` and `tessellationShader`),
+  whose IDs read each primitive's last vertex; and a slice or viewport a vertex function selects
+  where the pipeline selects it in a synthesized geometry stage (a device without
+  `shaderOutputLayer` or `shaderOutputViewportIndex`, an index that differs between a primitive's
+  vertices, or weights the stage writes), from each primitive's first vertex. And on every device,
+  a mode past 1, its top bit set or not, which Metal draws a third way that differs between
+  pipeline states (every line's flat inputs and `[[primitive_id]]` 0) and the runtime as mode 1:
+  announced at the call. Cost: flat inputs or a computed primitive ID read another vertex than Metal's, or
+  barycentric weights come in another order than Metal's or round otherwise.
 - `metal2vulkan-degrade-visibility-count-per-color` (precision). `VisibilityCountPerColor`: A
   draw counted by a `Counting` visibility result whose fragment function writes more than one color
   attachment, on ANV (`RuntimeDriverDefect::OcclusionCountPerColorOutput`). Cost: the result is

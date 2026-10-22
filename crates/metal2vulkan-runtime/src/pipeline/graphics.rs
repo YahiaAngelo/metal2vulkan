@@ -172,6 +172,11 @@ pub(crate) struct FixedState {
     /// without a depth attachment): its fragments write no color attachment, so every
     /// attachment's write mask is empty.
     pub(crate) masks_color: bool,
+    /// A draw under Apple's last provoking vertex (`setProvokingVertexMode:` 1) on a device
+    /// that draws it natively (`render/provoking.rs`): the rasterization state chains
+    /// `VkPipelineRasterizationProvokingVertexStateCreateInfoEXT` with
+    /// `VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT`, never dynamic.
+    pub(crate) provoking_last: bool,
 }
 
 /// The depth clip and clamp of a draw through a viewport depth range past `[0, 1]`
@@ -299,6 +304,8 @@ pub(crate) struct GraphicsContent {
     rasterizer_discard: bool,
     depth_clamp: bool,
     polygon_mode: vk::PolygonMode,
+    /// The last vertex provokes ([`FixedState::provoking_last`]).
+    provoking_last: bool,
     cull_mode: vk::CullModeFlags,
     front_face: vk::FrontFace,
     depth_bias: bool,
@@ -536,6 +543,7 @@ impl GraphicsContent {
                     key.fixed.depth_range,
                     key.fixed.depth_clamp,
                     key.fixed.polygon_mode,
+                    key.fixed.provoking_last,
                     key.fixed.cull_mode,
                     key.fixed.front_face,
                     self.depth_bias,
@@ -649,6 +657,15 @@ impl GraphicsContent {
             .line_width(1.0);
         if self.depth_clip.is_some() {
             raster = raster.push_next(&mut depth_clip);
+        }
+        // "If this structure is not provided when creating the pipeline, the pipeline will use
+        // the VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT mode" (the Vulkan specification, Flat
+        // Shading): only the last vertex chains it, which `provokingVertexLast` enables
+        // (`VUID-VkPipelineRasterizationProvokingVertexStateCreateInfoEXT-provokingVertexMode-04883`).
+        let mut provoking = vk::PipelineRasterizationProvokingVertexStateCreateInfoEXT::default()
+            .provoking_vertex_mode(vk::ProvokingVertexModeEXT::LAST_VERTEX);
+        if self.provoking_last {
+            raster = raster.push_next(&mut provoking);
         }
         // The pass's sample positions on a grid of one pixel, each already on the sixteenths
         // every device with the extension takes exactly (`sample_positions.rs`).
@@ -934,6 +951,7 @@ impl VariantObjects {
             rasterizer_discard: graphics.rasterizer_discard,
             depth_clamp: key.fixed.depth_clamp,
             polygon_mode: key.fixed.polygon_mode.into(),
+            provoking_last: key.fixed.provoking_last,
             cull_mode: key.fixed.cull_mode.into(),
             front_face: key.fixed.front_face.into(),
             depth_bias: bias.enable,
@@ -1225,6 +1243,7 @@ mod tests {
             viewports: 1,
             depth_range: None,
             masks_color: false,
+            provoking_last: false,
         }
     }
 

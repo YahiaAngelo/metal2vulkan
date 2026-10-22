@@ -459,6 +459,11 @@ pub enum RuntimeFact {
     /// writes from `BindState::depth_clamp_range`, a negative NaN storing 0 as Metal's does. Its
     /// plans state the variant the shape asks for (`BindShape::depth_clamp_range`).
     DepthClampRange,
+    /// The fragment function was compiled under `VariantKey::rotated_weights`
+    /// (`LoweringInputs::rotated_weights`) and reads `[[barycentric_coord]]`: it takes Metal's
+    /// weights back from a triangle drawn with Metal's last vertex first. Its plans state the
+    /// variant the shape asks for (`BindShape::rotated_weights`).
+    RotatedWeights,
     /// The function reads, samples, gathers, or fetches through a sampler the color texture
     /// bound to the slot, on a profile whose sparse textures are sparse images (it enables
     /// `shaderResourceResidency`): where that texture is sparse, a block of it that holds no

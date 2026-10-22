@@ -128,6 +128,10 @@
 //!   it writes its depth, clamps that depth to the draw's range itself
 //!   (`VariantKey::depth_clamp_range`), from the draw's `PushField::DepthClampRange`
 //!   (`BindState::depth_clamp_range`), as Metal stores a negative NaN as 0 past the range.
+//! - **Rotated weights**. A draw of triangles drawn with Metal's last vertex first
+//!   (`BindShape::rotated_weights`) of a pipeline whose fragment function reads
+//!   `[[barycentric_coord]]` runs the variant that takes Metal's weights back from the drawn
+//!   triangle's (`VariantKey::rotated_weights`, `LoweringInputs::rotated_weights`).
 //! - **Pass depth**. Plain Metal stores into the render pass's depth whatever depth format the
 //!   pipeline names: a draw against a `Depth16Unorm` depth whose pipeline names another, or
 //!   against another depth (the hidden `float` one included) whose pipeline names `Depth16Unorm`
@@ -1348,6 +1352,14 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
         .dependencies
         .iter()
         .any(|d| d.fact == RuntimeFact::DepthClampRange);
+    // A draw of triangles with Metal's last vertex first: the variant whose fragment function
+    // takes Metal's barycentric weights back from the drawn triangle's. A pipeline whose fragment
+    // function reads no weights has none to take.
+    let rotated_weights = shape.rotated_weights && p.graphics.reads_barycentric_coord;
+    let compiled_rotated = p
+        .dependencies
+        .iter()
+        .any(|d| d.fact == RuntimeFact::RotatedWeights);
     // A draw that biases a `Depth16Unorm` depth on a profile that stores its unbiased depths as
     // Metal's codes but not its biased ones: the variant whose fragment stage adds the bias and
     // writes Metal's code, where its function can take that form (`LoweringInputs::depth16_codes`):
@@ -2483,6 +2495,7 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
         (&variant.srgb_textures, &variant.cross_class),
     );
     variant.depth_clamp_range = depth_clamp_range;
+    variant.rotated_weights = rotated_weights;
     variant.depth16_pass = depth16_pass;
     variant.depth16_biased = depth16_biased;
     variant.depth16_bias_raises = depth16_bias_raises;
@@ -2526,6 +2539,7 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
                 || compiled_compensation != viewport_compensation
                 || other_colors
                 || compiled_range != depth_clamp_range
+                || compiled_rotated != rotated_weights
                 || compiled_depth16_pass != depth16_pass
                 || compiled_biased != depth16_biased
                 || compiled_bias_raises != depth16_bias_raises

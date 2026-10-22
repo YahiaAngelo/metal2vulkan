@@ -190,6 +190,14 @@ pub struct BindState {
     /// other draw.
     #[cfg_attr(feature = "serde", serde(default))]
     pub depth_clamp_range: Option<[f32; 2]>,
+    /// Whether the draw draws triangles with Metal's last vertex first, `(c, a, b)` for Metal's
+    /// `(a, b, c)`: a list the consumer draws for triangles under Apple's last provoking vertex
+    /// (`setProvokingVertexMode:` 1) on a device that takes flat inputs from the first vertex.
+    /// A pipeline whose fragment function reads `[[barycentric_coord]]` runs the variant that takes
+    /// Metal's weights back from the drawn triangle's (`BindShape::rotated_weights`,
+    /// `VariantKey::rotated_weights`). Part of the shape; `false` for every other draw.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub rotated_weights: bool,
     /// Whether the depth the draw renders against is `Depth16Unorm`: its render pass's depth
     /// attachment's format, or `false` for the hidden `float` depth a pass without one tests;
     /// `None` where the draw has no depth. Plain Metal stores into that depth whatever format the
@@ -696,6 +704,7 @@ impl BindState {
             dropped_colors: self.dropped_colors.clone(),
             kept_imageblock_bytes: self.kept_imageblock_bytes,
             depth_clamp_range: self.depth_clamp_range.is_some(),
+            rotated_weights: self.rotated_weights,
             interlocked_colors: self.interlocked_colors.clone(),
             fragment_tests: self.fragment_tests,
             extended_shadows: self.extended_shadows.clone(),
@@ -750,6 +759,7 @@ impl BindState {
             dropped_colors,
             kept_imageblock_bytes,
             depth_clamp_range,
+            rotated_weights,
             interlocked_colors,
             fragment_tests,
             extended_shadows,
@@ -780,6 +790,7 @@ impl BindState {
             && self.dropped_colors == *dropped_colors
             && self.kept_imageblock_bytes == *kept_imageblock_bytes
             && self.depth_clamp_range.is_some() == *depth_clamp_range
+            && self.rotated_weights == *rotated_weights
             && self.interlocked_colors == *interlocked_colors
             && self.fragment_tests == *fragment_tests
             && self.extended_shadows == *extended_shadows
@@ -1602,6 +1613,11 @@ pub struct BindShape {
     /// the depth it writes to the draw's range itself (`VariantKey::depth_clamp_range`).
     #[cfg_attr(feature = "serde", serde(default))]
     pub depth_clamp_range: bool,
+    /// `BindState.rotated_weights`: the variant whose fragment function takes Metal's barycentric
+    /// weights back from triangles drawn with Metal's last vertex first
+    /// (`VariantKey::rotated_weights`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub rotated_weights: bool,
     /// `BindState.interlocked_colors`: the variant whose fragment function writes those it writes
     /// through the interlocked storage form (`VariantKey::interlocked_colors`).
     #[cfg_attr(feature = "serde", serde(default))]

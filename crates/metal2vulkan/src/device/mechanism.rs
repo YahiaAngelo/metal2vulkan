@@ -196,6 +196,7 @@ pub fn mechanism(fact: &RuntimeFact, profile: &DeviceProfile) -> Mechanism {
         // A separate compile of the fragment function, which a draw in depth clamp mode through
         // a range above 0 asks for.
         RuntimeFact::DepthClampRange => Mechanism::Variant,
+        RuntimeFact::RotatedWeights => Mechanism::Variant,
         // The binder specializes the lanes from the bound texture's pixel format and swizzle.
         RuntimeFact::ConstantLanes { .. } => Mechanism::Specialization,
         // A separate compile that reads the tables' words through their device addresses, which

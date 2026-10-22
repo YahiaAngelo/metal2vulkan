@@ -242,6 +242,35 @@ pub trait Gpu {
     /// `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:` of triangles
     /// and 16-bit indices from the buffer's start.
     fn draw_indexed(&self, encoder: &mut Self::RenderEncoder, count: usize, indices: &Self::Buffer);
+    /// `drawPrimitives:vertexStart:vertexCount:` of triangles.
+    fn draw_triangles(&self, encoder: &mut Self::RenderEncoder, start: usize, count: usize);
+    /// `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:` of triangles
+    /// and 16-bit indices from `offset`.
+    fn draw_indexed_at(
+        &self,
+        encoder: &mut Self::RenderEncoder,
+        count: usize,
+        indices: &Self::Buffer,
+        offset: usize,
+    );
+    /// `drawPrimitives:indirectBuffer:indirectBufferOffset:` of triangles.
+    fn draw_triangles_indirect(
+        &self,
+        encoder: &mut Self::RenderEncoder,
+        arguments: &Self::Buffer,
+        offset: usize,
+    );
+    /// `drawIndexedPrimitives:indexType:indexBuffer:indexBufferOffset:indirectBuffer:
+    /// indirectBufferOffset:` of triangles and 16-bit indices from the buffer's start.
+    fn draw_indexed_indirect(
+        &self,
+        encoder: &mut Self::RenderEncoder,
+        indices: &Self::Buffer,
+        arguments: &Self::Buffer,
+        offset: usize,
+    );
+    /// `setProvokingVertexMode:` (Apple's SPI).
+    fn set_provoking_vertex_mode(&self, encoder: &mut Self::RenderEncoder, mode: u64);
     /// `useResource:usage:stages:` of `buffer`, read by the vertex stage.
     fn use_in_vertex(&self, encoder: &mut Self::RenderEncoder, buffer: &Self::Buffer);
     /// `executeCommandsInBuffer:withRange:` of draws `0..count`.

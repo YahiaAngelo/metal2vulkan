@@ -928,6 +928,7 @@ codec_enum! {
         ShaderTessellationAndGeometryPointSize, MultiviewGeometryShader,
         AttachmentFeedbackLoopLayout, ExtendedDynamicState3ColorWriteMask,
         ShaderFmaFloat16,
+        ProvokingVertexLast,
     }
     VkExtension {
         ExtRobustness2, ExtImageRobustness, ExtShaderAtomicFloat, ExtShaderAtomicFloat2,
@@ -952,6 +953,7 @@ codec_enum! {
         KhrShaderQuadControl,
         ExtAttachmentFeedbackLoopLayout, ExtExtendedDynamicState3,
         KhrFormatFeatureFlags2,
+        ExtProvokingVertex,
     }
     SubgroupOp { Basic, Vote, Arithmetic, Ballot, Shuffle, ShuffleRelative, Clustered, Quad }
     FloatWidth { F16, F32, F64 }
@@ -977,7 +979,7 @@ codec_enum! {
         MetalFragmentSimdgroups, MetalVertexSimdgroups, CenterFragCoordDepth, SampleFragCoordDepth,
         MetalHalfTexelWrites, MetalNormStorageWrites, Unorm8LinearFilter, DeviceSampling,
         MetalDepth16Stores, MetalDepth16BiasedStores, MetalInterpolation, MetalFirstVertexIndices,
-        MetalFullQuads,
+        MetalFullQuads, ProvokingVertexModePerPipeline,
     }
     VkLimit {
         MaxComputeWorkGroupSize(f0), MaxComputeWorkGroupCount(f0), MaxComputeWorkGroupInvocations,
@@ -1187,6 +1189,7 @@ codec_enum! {
         ZeroedColor { color, format },
         DroppedColor { color },
         DepthClampRange,
+        RotatedWeights,
         ConstantLanes { slot },
         FunctionTableRange { addressed },
         TestedStorageWrites { early_tests, early_variant },

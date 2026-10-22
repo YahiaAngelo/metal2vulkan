@@ -35,7 +35,9 @@
 //!   without a geometry, tessellation or mesh stage "the provoking vertex is determined by the
 //!   primitive topology": "the provoking vertex for p_i is v_3i" in a triangle list, "v_2i" in a
 //!   line list, and "v_i" in a strip and of points (the Vulkan specification's flat shading and
-//!   primitive topologies; no pipeline enables `VK_EXT_provoking_vertex`'s last vertex). So each
+//!   primitive topologies, in a pipeline of the first provoking vertex, Vulkan's default; under
+//!   `VK_EXT_provoking_vertex`'s last vertex a list's primitive `i` reads `(n i + n - 1) / n`, `i`
+//!   too, and a strip's `i` plus its primitives' vertices less one). So each
 //!   fragment reads `i`, its primitive's index among the draw's primitives of its instance, which
 //!   is Metal's `[[primitive_id]]`: restarted in each instance, moved by no vertex start, base
 //!   vertex or base instance, a flat varying taking the first vertex (Metal probes on the M3 Max,
@@ -488,8 +490,8 @@ pub(super) const MERGED_WORDS: u64 = 600;
 /// `PrimitiveId`: at each return, `(VertexIndex - first) / n` (`vertex` is the input builtin's
 /// object), in wrapping `u32` arithmetic, `first` the draw's first vertex ([`FirstVertex`]) and
 /// `n` `PushField::VerticesPerPrimitive`, to its `IoRole::PrimitiveId` varying (`object`). A
-/// primitive's flat inputs read its provoking vertex, its first, so each of its fragments reads
-/// the index of the primitive in its instance.
+/// primitive's flat inputs read its provoking vertex, its first in a pipeline of Vulkan's default
+/// provoking vertex, so each of its fragments reads the index of the primitive in its instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PrimitiveIdStore {
     pub vertex: usize,
@@ -983,7 +985,7 @@ fn pointer(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, link: &Link) -> BR
     let g = global(cx, link.object)?;
     let base = fb.module().global_value(g)?;
     match link.place {
-        Place::Whole | Place::Prefix(_) | Place::Weights => Ok(base),
+        Place::Whole | Place::Weights { .. } => Ok(base),
         Place::Element0 | Place::Spread(_) => {
             let zero = fb.u32_const(0)?;
             let zero = fb.module().const_value(zero)?;
@@ -1012,8 +1014,7 @@ fn uint_lanes(form: Form) -> Form {
 
 /// `x`, a value loaded through `link`, as the lowered representation of its form: a narrow
 /// integer masked to its width, a narrow float rounded to its format, a `bool` carried as `uint`
-/// compared with 0, the leading lanes of a [`Place::Prefix`] read, the weights of a
-/// [`Place::Weights`] read.
+/// compared with 0, the weights of a [`Place::Weights`] read.
 fn to_lowered(
     cx: &EmitCx<'_>,
     fb: &mut FunctionBuilder<'_>,
@@ -1030,26 +1031,40 @@ fn to_lowered(
     narrow::round(fb, form, x)
 }
 
-/// The value `x` loaded through `link` holds at its place: a prefix of a wider variable's
-/// lanes, the three barycentric weights, or the whole.
+/// The value `x` loaded through `link` holds at its place: the leading barycentric weights, or
+/// the whole.
 fn placed(fb: &mut FunctionBuilder<'_>, link: &Link, x: SValue) -> BResult<SValue> {
-    Ok(match link.place {
-        Place::Prefix(1) => fb.composite_extract(x, &[0])?,
-        Place::Prefix(n) => {
-            let lanes: Vec<u32> = (0..u32::from(n)).collect();
-            fb.vector_shuffle(x, x, &lanes)?
-        }
-        Place::Weights => weights(fb, x)?,
-        Place::Whole | Place::Element0 | Place::Spread(_) => x,
+    let Place::Weights { lanes, rotated } = link.place else {
+        return Ok(x);
+    };
+    let x = match rotated {
+        true => rotated_weights(fb, x)?,
+        false => x,
+    };
+    Ok(match lanes {
+        1 => fb.composite_extract(x, &[0])?,
+        2 => fb.vector_shuffle(x, x, &[0, 1])?,
+        _ => weights(fb, x)?,
     })
 }
 
-/// The three barycentric weights of `x`, a `float3` (`BaryCoordKHR`) or `float2`
-/// (`IoRole::Barycentric`) whose first two lanes are the first two weights: those, and
-/// `1 - (x + y)` as the third, Metal's (`plan::input_builtin`). Each operation is rounded on its
-/// own (`NoContraction`), so no device fuses or reorders it.
-fn weights(fb: &mut FunctionBuilder<'_>, x: SValue) -> BResult<SValue> {
+/// `1 - (x + y)` of `x` and `y`, each operation rounded on its own (`NoContraction`), so no
+/// device fuses or reorders it.
+fn one_less_sum(fb: &mut FunctionBuilder<'_>, x: SValue, y: SValue) -> BResult<SValue> {
     use crate::lower::arith::FloatFmt;
+    let sum = fb.binary_no_contraction(BinOp::FAdd, x, y)?;
+    let f32_ = Form {
+        held: Held::Float(FloatFmt::F32),
+        lanes: 1,
+    };
+    let one = ops::splat(fb, f32_, u64::from(1.0f32.to_bits()))?;
+    fb.binary_no_contraction(BinOp::FSub, one, sum)
+}
+
+/// The three barycentric weights of `x`, a `float3` (`BaryCoordKHR`) or `float2`
+/// (`IoRole::Barycentric`, or [`rotated_weights`]') whose first two lanes are the first two
+/// weights: those, and `1 - (x + y)` as the third, Metal's (`plan::input_builtin`).
+fn weights(fb: &mut FunctionBuilder<'_>, x: SValue) -> BResult<SValue> {
     let f32_ty = fb.module().ty(SType::Float { width: 32 })?;
     let ty = fb.module().ty(SType::Vector {
         elem: f32_ty,
@@ -1057,14 +1072,27 @@ fn weights(fb: &mut FunctionBuilder<'_>, x: SValue) -> BResult<SValue> {
     })?;
     let first = fb.composite_extract(x, &[0])?;
     let second = fb.composite_extract(x, &[1])?;
-    let sum = fb.binary_no_contraction(BinOp::FAdd, first, second)?;
-    let f32_ = Form {
-        held: Held::Float(FloatFmt::F32),
-        lanes: 1,
-    };
-    let one = ops::splat(fb, f32_, u64::from(1.0f32.to_bits()))?;
-    let third = fb.binary_no_contraction(BinOp::FSub, one, sum)?;
+    let third = one_less_sum(fb, first, second)?;
     fb.composite_construct(ty, &[first, second, third])
+}
+
+/// Metal's first two barycentric weights of a triangle drawn with Metal's last vertex first,
+/// `(c, a, b)` for Metal's `(a, b, c)` (`Place::Weights`'s `rotated`), of `x`, whose first two
+/// lanes `(x, y)` are the drawn triangle's first two weights: `(y, 1 - (x + y))`. The first is
+/// Metal's bit for bit, since Metal interpolates a rotated triangle alike, and the second its own
+/// rounding of Metal's, as the third weight [`weights`] computes from them is (Metal probes on the
+/// Apple M3 Max, macOS 27.0.1, 200 triangles: 67,821 of 67,821 pixels' first weight, 9,150 the
+/// first two, the rest within `2^-15` of Metal's; 61,548, 9,877 and `2^-17` without perspective).
+fn rotated_weights(fb: &mut FunctionBuilder<'_>, x: SValue) -> BResult<SValue> {
+    let f32_ty = fb.module().ty(SType::Float { width: 32 })?;
+    let ty = fb.module().ty(SType::Vector {
+        elem: f32_ty,
+        len: 2,
+    })?;
+    let first = fb.composite_extract(x, &[0])?;
+    let second = fb.composite_extract(x, &[1])?;
+    let third = one_less_sum(fb, first, second)?;
+    fb.composite_construct(ty, &[second, third])
 }
 
 /// `x`, the `f32` lanes (of a `float` or `half` form `form`) of a varying the fragment function
@@ -2524,9 +2552,7 @@ fn store(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, link: &Link, x: SVal
         x
     };
     match link.place {
-        Place::Prefix(_) | Place::Weights => {
-            Err(cx.fail("an output stored through a prefix of its variable"))
-        }
+        Place::Weights { .. } => Err(cx.fail("an output stored through the barycentric weights")),
         Place::Whole | Place::Element0 => {
             let p = pointer(cx, fb, link)?;
             fb.store(p, x, MemAccess::default())

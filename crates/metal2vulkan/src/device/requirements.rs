@@ -321,6 +321,14 @@ pub enum VkFeature {
     /// (`VUID-RuntimeSpirv-shaderFmaFloat16-10977`), which Vulkan's precision table makes correctly
     /// rounded: a `half` fused multiply-add in one instruction under the 16-bit float controls.
     ShaderFmaFloat16,
+    // Appended.
+    /// `VK_EXT_provoking_vertex`'s `provokingVertexLast`: a pipeline whose rasterization state
+    /// chains `VkPipelineRasterizationProvokingVertexStateCreateInfoEXT` with
+    /// `VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT`
+    /// (`VUID-VkPipelineRasterizationProvokingVertexStateCreateInfoEXT-provokingVertexMode-04883`),
+    /// under which a primitive's flat inputs read its last vertex, as Metal's
+    /// `setProvokingVertexMode:` of 1 draws.
+    ProvokingVertexLast,
 }
 
 /// A Vulkan device extension the new core can require.
@@ -432,6 +440,10 @@ pub enum VkExtension {
     /// device without `shaderStorageImageReadWithoutFormat` (or `Write`), as the SPIR-V
     /// capabilities `StorageImageReadWithoutFormat` and `StorageImageWriteWithoutFormat` allow.
     KhrFormatFeatureFlags2,
+    // Appended.
+    /// `VK_EXT_provoking_vertex` (never promoted): [`VkFeature::ProvokingVertexLast`] and
+    /// [`VkProperty::ProvokingVertexModePerPipeline`].
+    ExtProvokingVertex,
 }
 
 /// One subgroup operation class (`VkSubgroupFeatureFlagBits`).
@@ -769,6 +781,13 @@ pub enum VkProperty {
     /// module whose group operations observe other lanes requires it in place of
     /// `shaderQuadControl` on a device without that feature.
     MetalFullQuads,
+    /// `provokingVertexModePerPipeline` (`VkPhysicalDeviceProvokingVertexPropertiesEXT`, where
+    /// `VK_EXT_provoking_vertex` is listed): the pipelines bound within one render pass instance
+    /// may have different provoking vertex modes. Without it "all pipelines bound within a render
+    /// pass instance must have the same provokingVertexMode" (the Vulkan specification's flat
+    /// shading), including "any pipeline already bound when beginning the render pass instance"
+    /// (`VUID-vkCmdBindPipeline-pipelineBindPoint-04881`).
+    ProvokingVertexModePerPipeline,
 }
 
 /// One depth or stencil resolve mode (`VkResolveModeFlagBits`), named by

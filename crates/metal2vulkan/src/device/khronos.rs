@@ -706,6 +706,8 @@ fn limits(p: &Props<'_>, api: ApiVersion, extensions: &BTreeSet<String>) -> Resu
     // The sample-location properties exist where `VK_EXT_sample_locations` is exposed; elsewhere
     // no count takes custom locations.
     let sample_locations = Route::Ext(&["VK_EXT_sample_locations"], None).exposed(api, extensions);
+    // The provoking-vertex property exists where `VK_EXT_provoking_vertex` is exposed.
+    let provoking_vertex = Route::Ext(&["VK_EXT_provoking_vertex"], None).exposed(api, extensions);
     let accel = Route::Ext(&["VK_KHR_acceleration_structure"], None).exposed(api, extensions);
     let accel_limit = |name: &str| -> Result<u32, Error> {
         if accel {
@@ -851,6 +853,8 @@ fn limits(p: &Props<'_>, api: ApiVersion, extensions: &BTreeSet<String>) -> Resu
             vk::SampleCountFlags::default()
         },
         variable_sample_locations: sample_locations && p.bool("variableSampleLocations")?,
+        provoking_vertex_mode_per_pipeline: provoking_vertex
+            && p.bool("provokingVertexModePerPipeline")?,
         mesh: if Route::Ext(&["VK_EXT_mesh_shader"], None).exposed(api, extensions) {
             mesh_limits(p)?
         } else {
@@ -1071,6 +1075,7 @@ const PROPERTY_STRUCTS: &[&str] = &[
     "VkPhysicalDeviceDepthStencilResolvePropertiesKHR",
     "VkPhysicalDeviceSampleLocationsPropertiesEXT",
     "VkPhysicalDeviceMeshShaderPropertiesEXT",
+    "VkPhysicalDeviceProvokingVertexPropertiesEXT",
 ];
 
 /// How a feature structure is exposed.
@@ -1270,6 +1275,7 @@ fn feature_route(structure: &str) -> Option<Route> {
         "VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT" => {
             Ext(&["VK_EXT_primitive_topology_list_restart"], None)
         }
+        "VkPhysicalDeviceProvokingVertexFeaturesEXT" => Ext(&["VK_EXT_provoking_vertex"], None),
         "VkPhysicalDeviceRayQueryFeaturesKHR" => Ext(&["VK_KHR_ray_query"], None),
         "VkPhysicalDeviceAccelerationStructureFeaturesKHR" => {
             Ext(&["VK_KHR_acceleration_structure"], None)
@@ -1659,6 +1665,7 @@ pub(super) const FEATURE_MEMBERS: &[(&str, VkFeature)] = {
             "primitiveTopologyPatchListRestart",
             F::PrimitiveTopologyPatchListRestart,
         ),
+        ("provokingVertexLast", F::ProvokingVertexLast),
     ]
 };
 
@@ -1723,6 +1730,7 @@ pub(crate) fn extension_from_name(name: &str) -> Option<VkExtension> {
         "VK_EXT_depth_clamp_control" => E::ExtDepthClampControl,
         "VK_EXT_sample_locations" => E::ExtSampleLocations,
         "VK_EXT_primitive_topology_list_restart" => E::ExtPrimitiveTopologyListRestart,
+        "VK_EXT_provoking_vertex" => E::ExtProvokingVertex,
         "VK_KHR_synchronization2" => E::KhrSynchronization2,
         "VK_KHR_shader_untyped_pointers" => E::KhrShaderUntypedPointers,
         "VK_KHR_cooperative_matrix" => E::KhrCooperativeMatrix,

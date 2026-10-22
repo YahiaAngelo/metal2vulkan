@@ -246,8 +246,9 @@ pub struct LoweringInputs {
     /// vertex (Vulkan's base vertex of a draw without indices, read as `[[base_vertex]]` is) and
     /// `n` its vertices per primitive, `PushField::VerticesPerPrimitive` (3 for a triangle list,
     /// 2 for a line list, 1 for a strip or points). A primitive's flat inputs read its provoking
-    /// vertex, its first, at stream position `n · i` of a list's primitive `i` and `i` of a
-    /// strip's, so every fragment reads its primitive's index in its instance, Metal's
+    /// vertex, its first in a pipeline of Vulkan's default provoking vertex, at stream position
+    /// `n · i` of a list's primitive `i` and `i` of a strip's, so every fragment reads its
+    /// primitive's index in its instance, Metal's
     /// `[[primitive_id]]` (Metal probes on the M3 Max, macOS 27.0.1). An emulated
     /// post-tessellation one writes its patch's position in the draw, `patchStart + i`, at every
     /// vertex of the patch: Metal's primitive id behind the tessellator (measured on the M3 Max,
@@ -465,6 +466,17 @@ pub struct LoweringInputs {
     /// it.
     #[cfg_attr(feature = "serde", serde(default))]
     pub depth_clamp_range: bool,
+    /// The fragment function's triangles are drawn with Metal's last vertex first
+    /// (`VariantKey::rotated_weights`): a triangle Metal draws as `(a, b, c)` is drawn as
+    /// `(c, a, b)`, so that a first-vertex device takes its flat inputs from Metal's provoking
+    /// vertex under Apple's `setProvokingVertexMode:` 1. Its `[[barycentric_coord]]` reads take
+    /// Metal's weights back from the drawn triangle's first two, `(x, y)`: `y` (Metal's first,
+    /// bit for bit), `1 - (x + y)`, and `1 - (y + (1 - (x + y)))`, which are Metal's second and
+    /// third but for rounding (Metal probes on the Apple M3 Max, macOS 27.0.1). It states
+    /// `RuntimeFact::RotatedWeights`. A function that reads no weights, or any other function,
+    /// compiles as without it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub rotated_weights: bool,
     /// Storage-image texture slots bound to a swizzled texture (`VariantKey::swizzled_storage`):
     /// the function applies the bound texture's swizzle, its slot's `SpecKey::TextureSwizzle`
     /// word, to each texel it reads there, out of bounds too, after converting the texel, and

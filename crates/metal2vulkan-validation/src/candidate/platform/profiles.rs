@@ -969,7 +969,8 @@ fn limit_bound(name: &str) -> Option<Bound> {
         "supports_non_zero_first_instance"
         | "independent_resolve_none"
         | "independent_resolve"
-        | "variable_sample_locations" => Bound::Implies,
+        | "variable_sample_locations"
+        | "provoking_vertex_mode_per_pipeline" => Bound::Implies,
         "framebuffer_color_sample_counts"
         | "framebuffer_depth_sample_counts"
         | "framebuffer_integer_color_sample_counts"

@@ -754,7 +754,8 @@ pub enum IoRole {
     /// `[[primitive_id]]` on a device that cannot declare a fragment `PrimitiveId` (neither
     /// `geometryShader` nor `tessellationShader`) or under that field. A plain vertex function
     /// writes at each vertex the index of the primitive the vertex provokes: a flat input reads the
-    /// primitive's provoking vertex, its first (the Vulkan specification's primitive topologies),
+    /// primitive's provoking vertex, its first in a pipeline of Vulkan's default provoking vertex
+    /// (the Vulkan specification's primitive topologies),
     /// whose stream position is the primitive's own times its vertex count in a list and the
     /// primitive's own in a strip, so the vertex writes its stream position over the draw's vertex
     /// count per primitive (`PushField::VerticesPerPrimitive`): Metal's count of the draw's

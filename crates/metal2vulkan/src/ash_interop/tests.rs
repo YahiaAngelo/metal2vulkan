@@ -163,6 +163,7 @@ fn feature_struct_size(ty: avk::StructureType) -> usize {
         avk::PhysicalDeviceDepthClipEnableFeaturesEXT<'static>,
         DepthClampControlFeatures,
         avk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT<'static>,
+        avk::PhysicalDeviceProvokingVertexFeaturesEXT<'static>,
         avk::PhysicalDeviceRayQueryFeaturesKHR<'static>,
         avk::PhysicalDeviceMeshShaderFeaturesEXT<'static>,
         avk::PhysicalDeviceAccelerationStructureFeaturesKHR<'static>,
@@ -454,6 +455,7 @@ const EVERY_EXTENSION: &[&CStr] = &[
     c"VK_EXT_depth_clip_enable",
     c"VK_EXT_depth_clamp_control",
     c"VK_EXT_primitive_topology_list_restart",
+    c"VK_EXT_provoking_vertex",
     c"VK_EXT_sample_locations",
     c"VK_KHR_ray_query",
     c"VK_KHR_acceleration_structure",
@@ -511,6 +513,7 @@ fn every_feature_has_a_source() {
         VkExtension::ExtDepthClipEnable,
         VkExtension::ExtDepthClampControl,
         VkExtension::ExtPrimitiveTopologyListRestart,
+        VkExtension::ExtProvokingVertex,
         VkExtension::ExtSampleLocations,
     ] {
         assert!(desc.extensions.contains(&ext), "{ext:?}");
@@ -519,6 +522,7 @@ fn every_feature_has_a_source() {
         avk::PhysicalDeviceDepthClipEnableFeaturesEXT::STRUCTURE_TYPE,
         DepthClampControlFeatures::STRUCTURE_TYPE,
         avk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT::STRUCTURE_TYPE,
+        avk::PhysicalDeviceProvokingVertexFeaturesEXT::STRUCTURE_TYPE,
     ] {
         assert!(
             chain.contains(&structure.as_raw()),
@@ -582,6 +586,7 @@ fn unexposed_structures_are_never_chained() {
         VkFeature::DepthClampControl,
         VkFeature::PrimitiveTopologyListRestart,
         VkFeature::PrimitiveTopologyPatchListRestart,
+        VkFeature::ProvokingVertexLast,
         VkFeature::MultisampleArrayImage,
         VkFeature::ImageView2DOn3DImage,
         VkFeature::SeparateStencilMaskRef,

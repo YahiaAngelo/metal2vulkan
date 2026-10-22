@@ -319,6 +319,7 @@ struct FeatureChain {
     depth_clip_enable: avk::PhysicalDeviceDepthClipEnableFeaturesEXT<'static>,
     depth_clamp_control: DepthClampControlFeatures,
     list_restart: avk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT<'static>,
+    provoking_vertex: avk::PhysicalDeviceProvokingVertexFeaturesEXT<'static>,
     ray_query: avk::PhysicalDeviceRayQueryFeaturesKHR<'static>,
     acceleration_structure: avk::PhysicalDeviceAccelerationStructureFeaturesKHR<'static>,
     portability_subset: avk::PhysicalDevicePortabilitySubsetFeaturesKHR<'static>,
@@ -369,6 +370,7 @@ const EXT_DEPTH_BIAS_CONTROL: &[&str] = &["VK_EXT_depth_bias_control"];
 const EXT_DEPTH_CLIP_ENABLE: &[&str] = &["VK_EXT_depth_clip_enable"];
 const EXT_DEPTH_CLAMP_CONTROL: &[&str] = &["VK_EXT_depth_clamp_control"];
 const EXT_LIST_RESTART: &[&str] = &["VK_EXT_primitive_topology_list_restart"];
+const EXT_PROVOKING_VERTEX: &[&str] = &["VK_EXT_provoking_vertex"];
 const EXT_SAMPLE_LOCATIONS: &[&str] = &["VK_EXT_sample_locations"];
 const EXT_RAY_QUERY: &[&str] = &["VK_KHR_ray_query"];
 const EXT_ACCELERATION_STRUCTURE: &[&str] = &["VK_KHR_acceleration_structure"];
@@ -414,6 +416,7 @@ pub(crate) struct Chained {
     depth_clip_enable: bool,
     depth_clamp_control: bool,
     list_restart: bool,
+    provoking_vertex: bool,
     ray_query: bool,
     acceleration_structure: bool,
     portability_subset: bool,
@@ -462,6 +465,7 @@ impl Chained {
             depth_clip_enable: x.ext(EXT_DEPTH_CLIP_ENABLE),
             depth_clamp_control: x.ext(EXT_DEPTH_CLAMP_CONTROL),
             list_restart: x.ext(EXT_LIST_RESTART),
+            provoking_vertex: x.ext(EXT_PROVOKING_VERTEX),
             ray_query: x.ext(EXT_RAY_QUERY),
             acceleration_structure: x.ext(EXT_ACCELERATION_STRUCTURE),
             portability_subset: x.ext(EXT_PORTABILITY_SUBSET),
@@ -530,6 +534,7 @@ impl FeatureChain {
                 depth_clip_enable,
                 depth_clamp_control,
                 list_restart,
+                provoking_vertex,
                 ray_query,
                 acceleration_structure,
                 portability_subset,
@@ -757,6 +762,7 @@ feature_sources! { c, x;
     PrimitiveTopologyListRestart => on(c.list_restart.primitive_topology_list_restart);
     PrimitiveTopologyPatchListRestart =>
         on(c.list_restart.primitive_topology_patch_list_restart);
+    ProvokingVertexLast => on(c.provoking_vertex.provoking_vertex_last);
     RayQuery => on(c.ray_query.ray_query);
     AccelerationStructure => on(c.acceleration_structure.acceleration_structure);
     ConstantAlphaColorBlendFactors =>
@@ -796,6 +802,7 @@ struct PropertyChain {
     generated_commands: GeneratedCommandsProperties,
     sample_locations: avk::PhysicalDeviceSampleLocationsPropertiesEXT<'static>,
     mesh_shader: avk::PhysicalDeviceMeshShaderPropertiesEXT<'static>,
+    provoking_vertex: avk::PhysicalDeviceProvokingVertexPropertiesEXT<'static>,
 }
 
 /// Which property structures are chained.
@@ -813,6 +820,7 @@ struct PropertiesChained {
     generated_commands: bool,
     sample_locations: bool,
     mesh_shader: bool,
+    provoking_vertex: bool,
 }
 
 impl PropertiesChained {
@@ -832,6 +840,7 @@ impl PropertiesChained {
             generated_commands: x.ext(EXT_GENERATED_COMMANDS),
             sample_locations: x.ext(EXT_SAMPLE_LOCATIONS),
             mesh_shader: x.ext(EXT_MESH_SHADER),
+            provoking_vertex: x.ext(EXT_PROVOKING_VERTEX),
         }
     }
 }
@@ -870,7 +879,8 @@ impl PropertyChain {
                 acceleration_structure,
                 generated_commands,
                 sample_locations,
-                mesh_shader
+                mesh_shader,
+                provoking_vertex
             );
             // SAFETY: as in `FeatureChain::query`.
             unsafe { instance.get_physical_device_properties2(pd, &mut p2) };
@@ -1258,6 +1268,10 @@ fn limits(l: &avk::PhysicalDeviceLimits, p: &PropertyChain, chained: &Properties
             p.sample_locations.sample_location_sample_counts.as_raw(),
         ),
         variable_sample_locations: on(p.sample_locations.variable_sample_locations),
+        // `false` where `VK_EXT_provoking_vertex` is not listed (the structure is not chained).
+        provoking_vertex_mode_per_pipeline: on(p
+            .provoking_vertex
+            .provoking_vertex_mode_per_pipeline),
         // Zero where `VK_EXT_mesh_shader` is not listed (the structure is not chained).
         mesh: mesh_limits(&p.mesh_shader),
         max_point_size: crate::device::whole_point_size(l.point_size_range[1]),

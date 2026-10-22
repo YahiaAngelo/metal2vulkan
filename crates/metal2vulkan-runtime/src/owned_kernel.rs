@@ -55,6 +55,9 @@ pub(super) enum OwnedModule {
     IndexBoundsPlan,
     /// `bind::index_bounds_fill_module`: the plan's reservation in the index pool, filled.
     IndexBoundsFill,
+    /// `bind::index_gather_module`: the lists of a run of direct indexed draws over one index
+    /// buffer, by one dispatch (`index_rewrite.rs`).
+    IndexGather,
     /// `bind::replay_preprocess_module`: a device replay's preprocess, which reads every buffer
     /// at its device address (no storage buffer; its push bytes, `gpu_execute.rs`).
     ReplayPreprocess,
@@ -235,6 +238,11 @@ impl OwnedModule {
                 let module = metal2vulkan::bind::index_bounds_fill_module(device.compile_device())
                     .map_err(Error::Compile)?;
                 Ok((module.spirv.to_vec(), 3, 0))
+            }
+            OwnedModule::IndexGather => {
+                let module = metal2vulkan::bind::index_gather_module(device.compile_device())
+                    .map_err(Error::Compile)?;
+                Ok((module.spirv.to_vec(), 4, 0))
             }
             OwnedModule::ReplayPreprocess => {
                 let module = metal2vulkan::bind::replay_preprocess_module(device.compile_device())
@@ -475,6 +483,7 @@ pub(super) struct OwnedKernels {
     visibility_combine: Option<OwnedKernel>,
     index_bounds_plan: Option<OwnedKernel>,
     index_bounds_fill: Option<OwnedKernel>,
+    index_gather: Option<OwnedKernel>,
     replay_preprocess: Option<OwnedKernel>,
     draw_replay_preprocess: Option<OwnedKernel>,
     draw_merge_blocks: Option<OwnedKernel>,
@@ -518,6 +527,7 @@ impl OwnedKernels {
             self.visibility_combine,
             self.index_bounds_plan,
             self.index_bounds_fill,
+            self.index_gather,
             self.replay_preprocess,
             self.draw_replay_preprocess,
             self.draw_merge_blocks,
@@ -641,6 +651,7 @@ impl OwnedKernels {
             OwnedModule::VisibilityCombine => &mut self.visibility_combine,
             OwnedModule::IndexBoundsPlan => &mut self.index_bounds_plan,
             OwnedModule::IndexBoundsFill => &mut self.index_bounds_fill,
+            OwnedModule::IndexGather => &mut self.index_gather,
             OwnedModule::ReplayPreprocess => &mut self.replay_preprocess,
             OwnedModule::DrawReplayPreprocess => &mut self.draw_replay_preprocess,
             OwnedModule::DrawMerge(metal2vulkan::bind::MergePhase::Blocks) => {

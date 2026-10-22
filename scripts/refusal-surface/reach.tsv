@@ -179,7 +179,6 @@ gap	VertexFetchPast4GiB	rare	vertex fetch past 4 GiB of a bind offset
 gap	StageInFetchPast4GiB	rare	stage-in fetch past 4 GiB of a bind offset
 apple	ProtectedContent	none	Apple-private (no public header)
 apple	LineWidth	none	Apple-private (no public header)
-apple	ProvokingVertexMode	none	Apple-private (no public header)
 apple	ViewportTransformDisabled	none	Apple-private (no public header)
 apple	VertexAmplificationMode	none	Apple-private (no public header)
 apple	DepthCleared	none	Apple-private (no public header)
@@ -218,6 +217,7 @@ ratemap	SampleCount	rare	a rate map axis of more distinct samples than measured 
 budget	Time	none	a translation past its deadline: a defect of ours to fix on any supported input (AGENTS.md: 20 seconds)
 gap	LibrarySource	app	a library compiled from Metal source (newLibraryWithSource:); the runtime takes metallibs and AIR
 gap	RestartedStrip	none	a strip after the Apple-private setPrimitiveRestartEnabled:index: whose rewrite pass cannot run as Metal draws
+gap	ProvokingVertex	none	a draw after the Apple-private setProvokingVertexMode: 1, on a device without the last provoking vertex, whose rotated list cannot draw as Metal draws
 gap	PrivatePrimitives	none	a draw of an Apple-private primitive type (OpenGL on Metal's quads and kin) whose list cannot draw as Metal draws: a primitive_id varying, a vertex start past 2^31
 gap	PrimitiveIdIndices	rare	an indexed draw of a primitive_id pipeline, on a device without geometry or tessellation shaders, whose indices the encoder wrote since its last barrier
 feature	PrivateRenderState	none	Apple-private pipeline fields of OpenGL on Metal (no public header)

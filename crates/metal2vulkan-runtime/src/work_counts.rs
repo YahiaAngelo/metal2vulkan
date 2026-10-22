@@ -182,6 +182,9 @@ pub(crate) struct Counters {
     draws_settled: AtomicU64,
     depth16_sided_draws: AtomicU64,
     two_plane_draws: AtomicU64,
+    provoking_last_pipeline_draws: AtomicU64,
+    provoking_listed_draws: AtomicU64,
+    gathered_draws: AtomicU64,
     bound_notices_made: AtomicU64,
     argument_tables_retained: AtomicU64,
     argument_objects_retained: AtomicU64,
@@ -1364,6 +1367,25 @@ impl Counters {
     /// (`VariantKey::extended_range`).
     pub(crate) fn two_plane_draw(&self) {
         self.two_plane_draws.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A draw under the last provoking vertex ran a `VkPipeline` of the last vertex
+    /// (`render/provoking.rs`).
+    pub(crate) fn provoking_last_pipeline_draw(&self) {
+        self.provoking_last_pipeline_draws
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A draw under the last provoking vertex drew the list of its primitives in Metal's mode-1
+    /// order or led by their last vertices (`render/provoking.rs`).
+    pub(crate) fn provoking_listed_draw(&self) {
+        self.provoking_listed_draws.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A direct indexed draw drawn as a list joined a run of the index gather pass, which writes
+    /// the run's lists by one dispatch (`index_rewrite.rs`).
+    pub(crate) fn gathered_draw(&self) {
+        self.gathered_draws.fetch_add(1, Ordering::Relaxed);
     }
 
     /// A bind of a variant made the notices it announces at every occurrence
@@ -3136,6 +3158,19 @@ pub struct WorkCounts {
     /// slot's raw texels and decodes them, and filters each linear sample of the slot itself over
     /// four of them, where a draw of another texture samples through the device's sampler.
     pub two_plane_draws: u64,
+    /// Draws under Apple's last provoking vertex (`setProvokingVertexMode:` 1) of a pipeline
+    /// state that reads it, which ran a `VkPipeline` whose provoking vertex is the last
+    /// (`VK_EXT_provoking_vertex`).
+    pub provoking_last_pipeline_draws: u64,
+    /// Draws under Apple's last provoking vertex, of a pipeline state that reads it, on a device
+    /// without it, which drew the list of their primitives a GPU pass (or the CPU) wrote, in
+    /// Metal's mode-1 order or led by each primitive's last vertex.
+    pub provoking_listed_draws: u64,
+    /// Direct indexed draws drawn as a list (a restarted strip's, a private primitive type's, or
+    /// one led by its primitives' last vertices) whose list the index gather pass wrote: one
+    /// dispatch for each run of such draws over one index buffer, where the index rewrite pass
+    /// takes three per draw.
+    pub gathered_draws: u64,
     /// Notices of a variant's that a bind announces at every occurrence
     /// (`DeviceOptions::announce_each`), made for a bind: once per variant until the
     /// specializations or the formats its notices name change; each bind announces them.
@@ -4085,6 +4120,11 @@ impl Device {
             draws_settled: counters.draws_settled.load(Ordering::Relaxed),
             depth16_sided_draws: counters.depth16_sided_draws.load(Ordering::Relaxed),
             two_plane_draws: counters.two_plane_draws.load(Ordering::Relaxed),
+            provoking_last_pipeline_draws: counters
+                .provoking_last_pipeline_draws
+                .load(Ordering::Relaxed),
+            provoking_listed_draws: counters.provoking_listed_draws.load(Ordering::Relaxed),
+            gathered_draws: counters.gathered_draws.load(Ordering::Relaxed),
             bound_notices_made: counters.bound_notices_made.load(Ordering::Relaxed),
             argument_tables_retained: counters.argument_tables_retained.load(Ordering::Relaxed),
             argument_objects_retained: counters.argument_objects_retained.load(Ordering::Relaxed),

@@ -363,6 +363,10 @@ pub fn function_key(
         h.bytes(b"depth-clamp-range");
     }
     // Appended only when set.
+    if inputs.rotated_weights {
+        h.bytes(b"rotated-weights");
+    }
+    // Appended only when set.
     if inputs.addressed_function_tables {
         h.bytes(b"addressed-function-tables");
     }

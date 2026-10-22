@@ -628,6 +628,69 @@ impl Gpu for Runtime {
             .expect("draw_indexed_primitives");
     }
 
+    fn draw_triangles(&self, encoder: &mut rt::RenderCommandEncoder, start: usize, count: usize) {
+        encoder
+            .draw_primitives(PrimitiveType::Triangle, start as u32, count as u32, 1, 0)
+            .expect("draw_primitives");
+    }
+
+    fn draw_indexed_at(
+        &self,
+        encoder: &mut rt::RenderCommandEncoder,
+        count: usize,
+        indices: &rt::Buffer,
+        offset: usize,
+    ) {
+        encoder
+            .draw_indexed_primitives(
+                PrimitiveType::Triangle,
+                count as u32,
+                IndexType::UInt16,
+                indices,
+                offset as u64,
+                1,
+                0,
+                0,
+            )
+            .expect("draw_indexed_primitives");
+    }
+
+    fn draw_triangles_indirect(
+        &self,
+        encoder: &mut rt::RenderCommandEncoder,
+        arguments: &rt::Buffer,
+        offset: usize,
+    ) {
+        encoder
+            .draw_primitives_indirect(PrimitiveType::Triangle, arguments, offset as u64)
+            .expect("draw_primitives_indirect");
+    }
+
+    fn draw_indexed_indirect(
+        &self,
+        encoder: &mut rt::RenderCommandEncoder,
+        indices: &rt::Buffer,
+        arguments: &rt::Buffer,
+        offset: usize,
+    ) {
+        encoder
+            .draw_indexed_primitives_indirect(
+                PrimitiveType::Triangle,
+                IndexType::UInt16,
+                indices,
+                0,
+                arguments,
+                offset as u64,
+            )
+            .expect("draw_indexed_primitives_indirect");
+    }
+
+    fn set_provoking_vertex_mode(&self, encoder: &mut rt::RenderCommandEncoder, mode: u64) {
+        encoder
+            .set_provoking_vertex_mode(mode)
+            .expect("set_provoking_vertex_mode");
+    }
+
     fn use_in_vertex(&self, encoder: &mut rt::RenderCommandEncoder, buffer: &rt::Buffer) {
         encoder
             .use_resource(
@@ -999,6 +1062,12 @@ impl Gpu for Runtime {
                 "dispatches_planned_as_before",
                 c.dispatches_planned_as_before,
             ),
+            (
+                "provoking_last_pipeline_draws",
+                c.provoking_last_pipeline_draws,
+            ),
+            ("provoking_listed_draws", c.provoking_listed_draws),
+            ("gathered_draws", c.gathered_draws),
         ]
         .into_iter()
         .map(|(name, count)| (name, count as f64))

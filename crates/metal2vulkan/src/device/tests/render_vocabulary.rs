@@ -55,10 +55,10 @@ fn stated_flags(json: &Value, member: &str) -> BTreeSet<String> {
         .collect()
 }
 
-/// The eight features ARTIFACT 180 adds, and `imageViewFormatSwizzle` (ARTIFACT 203), each with its
-/// structure, its member, and the extension that exposes it (`None`: `VkPhysicalDeviceFeatures`,
-/// Vulkan 1.0).
-const FEATURES: [(&str, &str, VkFeature, Option<VkExtension>); 9] = [
+/// The eight features ARTIFACT 180 adds, `imageViewFormatSwizzle` (ARTIFACT 203) and
+/// `provokingVertexLast`, each with its structure, its member, and the extension that exposes it
+/// (`None`: `VkPhysicalDeviceFeatures`, Vulkan 1.0).
+const FEATURES: [(&str, &str, VkFeature, Option<VkExtension>); 10] = [
     (
         "VkPhysicalDeviceFeatures",
         "fullDrawIndexUint32",
@@ -113,6 +113,12 @@ const FEATURES: [(&str, &str, VkFeature, Option<VkExtension>); 9] = [
         VkFeature::PrimitiveTopologyPatchListRestart,
         Some(VkExtension::ExtPrimitiveTopologyListRestart),
     ),
+    (
+        "VkPhysicalDeviceProvokingVertexFeaturesEXT",
+        "provokingVertexLast",
+        VkFeature::ProvokingVertexLast,
+        Some(VkExtension::ExtProvokingVertex),
+    ),
 ];
 
 /// Each feature is read, and enabled, exactly where the profile's source states it true in an
@@ -152,6 +158,7 @@ fn render_features_follow_each_source() {
             VkExtension::ExtDepthClipEnable,
             VkExtension::ExtDepthClampControl,
             VkExtension::ExtPrimitiveTopologyListRestart,
+            VkExtension::ExtProvokingVertex,
             VkExtension::ExtSampleLocations,
         ] {
             let has = desc.extensions.contains(&extension);
@@ -164,11 +171,13 @@ fn render_features_follow_each_source() {
         }
     }
     // RADV, ANV, NVIDIA and lavapipe list depth clipping and list restart; RADV, ANV and NVIDIA
-    // the clamp control; every Linux venue and MoltenVK the sample locations.
+    // the clamp control; every Linux venue and MoltenVK the sample locations; every native
+    // profile (RADV, ANV, NVIDIA, lavapipe, SwiftShader) the provoking vertex.
     for (extension, at_least) in [
         (VkExtension::ExtDepthClipEnable, 10),
         (VkExtension::ExtDepthClampControl, 5),
         (VkExtension::ExtPrimitiveTopologyListRestart, 10),
+        (VkExtension::ExtProvokingVertex, 15),
         (VkExtension::ExtSampleLocations, 10),
     ] {
         let count = listed.get(&extension).copied().unwrap_or(0);
@@ -343,4 +352,40 @@ fn an_omitted_resolve_mode_or_index_value_reads_its_versions_guarantee() {
     let full =
         DeviceDescription::from_khronos_json(&doc(r#""fullDrawIndexUint32": true"#), None).unwrap();
     assert_eq!(full.limits.max_draw_indexed_index_value, u32::MAX);
+}
+
+/// `provokingVertexModePerPipeline` is read where `VK_EXT_provoking_vertex` is listed, and holds
+/// as the profile states it: every committed profile that lists the extension states it true
+/// (RADV, ANV, NVIDIA, lavapipe and SwiftShader); MoltenVK lists no extension and has neither the
+/// feature nor the property.
+#[test]
+fn the_provoking_vertex_mode_per_pipeline_follows_each_source() {
+    let mut listed = 0;
+    for (stem, text) in committed_profiles() {
+        let json: Value = serde_json::from_str(&text).unwrap();
+        let desc = DeviceDescription::from_khronos_json(&text, None).unwrap();
+        let dev = Device::new(desc.clone(), DevicePolicy::default()).unwrap();
+        let properties = &dev.profile().fields().enabled.properties;
+        let exposed = desc.extensions.contains(&VkExtension::ExtProvokingVertex);
+        let stated = stated_true(
+            &json,
+            "VkPhysicalDeviceProvokingVertexPropertiesEXT",
+            "provokingVertexModePerPipeline",
+        );
+        assert_eq!(
+            desc.limits.provoking_vertex_mode_per_pipeline,
+            exposed && stated,
+            "{stem}"
+        );
+        assert_eq!(
+            properties.contains(&VkProperty::ProvokingVertexModePerPipeline),
+            exposed && stated,
+            "{stem}"
+        );
+        if stem.starts_with("moltenvk") {
+            assert!(!exposed, "{stem}");
+        }
+        listed += usize::from(exposed && stated);
+    }
+    assert!(listed >= 15, "{listed}");
 }
