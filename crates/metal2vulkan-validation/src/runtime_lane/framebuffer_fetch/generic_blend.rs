@@ -27,6 +27,16 @@
 //! fast math Metal fuses the source-over product into its sum; a `half4` output's 10-bit and 8-bit
 //! channels lie within one code (Metal reads them in `half`), the 16-bit normalized and 8-bit snorm
 //! ones too.
+//!
+//! A blend of the second source (the owned fixture `fbl_fetch_dual`, fast math: `half4` and
+//! `float4` outputs and second outputs, each loaded from its own buffer) into `RGBA32Float`,
+//! `RGBA16Float`, `RGBA16Unorm` and `RGBA8Unorm`: the second output's color over one minus it, and
+//! its alpha over one minus it, the second source clamped as the source; checked as above. Metal
+//! makes and draws such a pipeline; against our probe of it (both outputs `half4` or `float4`,
+//! fast and safe math) the model holds every channel of `RGBA32Float` without fast math and of
+//! `RGBA8Unorm` of `float4` outputs, and `RGBA16Unorm`'s within one code; Metal blends
+//! `RGBA16Float` in `half` and writes it toward zero, so there the model is a code off in about
+//! half the channels, and further where a `half` step overflows.
 
 use super::{form, library, through_inputs};
 use crate::runtime_lane::degrade_notices::counts;
@@ -59,8 +69,10 @@ const COLOR: [f32; 4] = [0.25, 1.5, -0.5, 0.75];
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Layout {
     Float32,
+    Half16,
     Unorm16,
     Snorm8,
+    Unorm8,
     Rgb10a2,
     A8,
 }
@@ -70,8 +82,8 @@ impl Layout {
     fn bytes(self) -> usize {
         match self {
             Layout::Float32 => 16,
-            Layout::Unorm16 => 8,
-            Layout::Snorm8 | Layout::Rgb10a2 => 4,
+            Layout::Half16 | Layout::Unorm16 => 8,
+            Layout::Snorm8 | Layout::Unorm8 | Layout::Rgb10a2 => 4,
             Layout::A8 => 1,
         }
     }
@@ -79,9 +91,9 @@ impl Layout {
     /// The low end of the range a normalized format clamps the source to.
     fn low(self) -> Option<f32> {
         match self {
-            Layout::Float32 => None,
+            Layout::Float32 | Layout::Half16 => None,
             Layout::Snorm8 => Some(-1.0),
-            Layout::Unorm16 | Layout::Rgb10a2 | Layout::A8 => Some(0.0),
+            Layout::Unorm16 | Layout::Unorm8 | Layout::Rgb10a2 | Layout::A8 => Some(0.0),
         }
     }
 
@@ -91,9 +103,13 @@ impl Layout {
             Layout::Float32 => {
                 std::array::from_fn(|c| f32::from_le_bytes(b[4 * c..4 * c + 4].try_into().unwrap()))
             }
+            Layout::Half16 => {
+                std::array::from_fn(|c| from_half(u16::from_le_bytes([b[2 * c], b[2 * c + 1]])))
+            }
             Layout::Unorm16 => std::array::from_fn(|c| {
                 f32::from(u16::from_le_bytes([b[2 * c], b[2 * c + 1]])) / 65535.0
             }),
+            Layout::Unorm8 => std::array::from_fn(|c| f32::from(b[c]) / 255.0),
             Layout::Snorm8 => std::array::from_fn(|c| (f32::from(b[c] as i8) / 127.0).max(-1.0)),
             Layout::Rgb10a2 => {
                 let w = u32::from_le_bytes(b.try_into().unwrap());
@@ -112,10 +128,11 @@ impl Layout {
             Layout::Float32 => (0..4)
                 .map(|c| i64::from(u32::from_le_bytes(b[4 * c..4 * c + 4].try_into().unwrap())))
                 .collect(),
-            Layout::Unorm16 => (0..4)
+            Layout::Half16 | Layout::Unorm16 => (0..4)
                 .map(|c| i64::from(u16::from_le_bytes([b[2 * c], b[2 * c + 1]])))
                 .collect(),
             Layout::Snorm8 => b.iter().map(|&x| i64::from(x as i8)).collect(),
+            Layout::Unorm8 => b.iter().map(|&x| i64::from(x)).collect(),
             Layout::Rgb10a2 => {
                 let w = u32::from_le_bytes(b.try_into().unwrap());
                 vec![
@@ -137,8 +154,10 @@ impl Layout {
         };
         match self {
             Layout::Float32 => v.iter().map(|x| i64::from(x.to_bits())).collect(),
+            Layout::Half16 => v.iter().map(|&x| i64::from(to_half(x))).collect(),
             Layout::Unorm16 => v.iter().map(|&x| code(x, 0.0, 65535.0)).collect(),
             Layout::Snorm8 => v.iter().map(|&x| code(x, -1.0, 127.0)).collect(),
+            Layout::Unorm8 => v.iter().map(|&x| code(x, 0.0, 255.0)).collect(),
             Layout::Rgb10a2 => vec![
                 code(v[0], 0.0, 1023.0),
                 code(v[1], 0.0, 1023.0),
@@ -167,6 +186,9 @@ enum Blend {
     /// Color: the blend color over one minus the blend alpha, reverse subtracted; alpha: the
     /// destination alpha over one minus the source color, subtracted.
     Constant,
+    /// The second source's color over one minus it, added, and its alpha over one minus it,
+    /// added: the function's second output weighs the first against the destination.
+    Dual,
 }
 
 impl Blend {
@@ -192,6 +214,14 @@ impl Blend {
                 F::OneMinusSourceColor,
                 O::Subtract,
             ),
+            Blend::Dual => (
+                F::Source1Color,
+                F::OneMinusSource1Color,
+                O::Add,
+                F::Source1Alpha,
+                F::OneMinusSource1Alpha,
+                O::Add,
+            ),
         };
         a.source_rgb_blend_factor = sc;
         a.destination_rgb_blend_factor = dc;
@@ -202,15 +232,16 @@ impl Blend {
         a
     }
 
-    /// The model's blend of source `s` over destination `d` into a format of `layout` (the
-    /// module docs).
-    fn model(self, layout: Layout, s: [f32; 4], d: [f32; 4]) -> [f32; 4] {
+    /// The model's blend of source `s` (and second source `s1`) over destination `d` into a
+    /// format of `layout` (the module docs).
+    fn model(self, layout: Layout, (s, s1): ([f32; 4], [f32; 4]), d: [f32; 4]) -> [f32; 4] {
         let clamp = |x: f32| match layout.low() {
             Some(low) if x.is_nan() => low,
             Some(low) => x.clamp(low, 1.0),
             None => x,
         };
         let s = s.map(clamp);
+        let s1 = s1.map(clamp);
         let c = COLOR.map(clamp);
         match self {
             Blend::Over => {
@@ -225,6 +256,7 @@ impl Blend {
                     _ => d[k] * m - s[k] * c[k],
                 })
             }
+            Blend::Dual => std::array::from_fn(|k| s[k] * s1[k] + d[k] * (1.0 - s1[k])),
         }
     }
 }
@@ -297,8 +329,9 @@ fn from_half(b: u16) -> f32 {
     }
 }
 
-/// The target's bytes before the draw, and the sources (two a pixel) as `half`s where `half`.
-fn data(layout: Layout, half: bool) -> (Vec<u8>, Vec<[f32; 4]>) {
+/// The target's bytes before the draw, and the sources and second sources (two of each a pixel),
+/// as `half`s where `half`.
+fn data(layout: Layout, half: bool) -> (Vec<u8>, [Vec<[f32; 4]>; 2]) {
     let mut words = Words(0x51ab_1e8b_17c0_de55);
     let bytes = match layout {
         Layout::Float32 => (0..4 * TEXELS)
@@ -308,18 +341,21 @@ fn data(layout: Layout, half: bool) -> (Vec<u8>, Vec<[f32; 4]>) {
             .map(|_| (words.next() >> 24) as u8)
             .collect(),
     };
-    let sources = (0..2 * TEXELS)
-        .map(|_| {
-            [0; 4].map(|_: u8| {
-                let x = words.lane(true);
-                match half {
-                    true => from_half(to_half(x)),
-                    false => x,
-                }
+    let mut sources = || {
+        (0..2 * TEXELS)
+            .map(|_| {
+                [0; 4].map(|_: u8| {
+                    let x = words.lane(true);
+                    match half {
+                        true => from_half(to_half(x)),
+                        false => x,
+                    }
+                })
             })
-        })
-        .collect();
-    (bytes, sources)
+            .collect()
+    };
+    let first = sources();
+    (bytes, [first, sources()])
 }
 
 /// A private `SIDE`² texture of `pf` holding `bytes`, `bpp` a texel.
@@ -389,13 +425,14 @@ fn pipeline(
     }
 }
 
-/// One draw of `state` over a target of `pf` holding `bytes`, the sources `sources` (`half`s
-/// where `half`): the target's bytes after it, and whether it announced `unmeasured-fetch-blend`.
+/// One draw of `state` over a target of `pf` holding `bytes`, the sources and second sources
+/// `sources` (`half`s where `half`) in buffers 0 and 1: the target's bytes after it, and whether it
+/// announced `unmeasured-fetch-blend`.
 fn draw(
     (lane, messages): (&Lane, &Messages),
     state: &RenderPipelineState,
     (pf, layout): (PixelFormat, Layout),
-    (half, bytes, sources): (bool, &[u8], &[[f32; 4]]),
+    (half, bytes, sources): (bool, &[u8], &[Vec<[f32; 4]>; 2]),
 ) -> (Vec<u8>, bool) {
     let kind = Degradation::from_precision_note(PrecisionNote::UnmeasuredFetchBlend);
     let bpp = layout.bytes() as u64;
@@ -404,19 +441,21 @@ fn draw(
     second.usage = TextureUsage::RENDER_TARGET;
     second.resource_options = ResourceOptions::private();
     let second = lane.device.new_texture(&second).unwrap();
-    let src: Vec<u8> = match half {
-        true => sources
-            .iter()
-            .flat_map(|s| s.map(to_half))
-            .flat_map(u16::to_le_bytes)
-            .collect(),
-        false => sources
-            .iter()
-            .flatten()
-            .flat_map(|v| v.to_le_bytes())
-            .collect(),
-    };
-    let src = buffer_with(&lane.device, &src).unwrap();
+    let buffers = sources.each_ref().map(|sources| {
+        let bytes: Vec<u8> = match half {
+            true => sources
+                .iter()
+                .flat_map(|s| s.map(to_half))
+                .flat_map(u16::to_le_bytes)
+                .collect(),
+            false => sources
+                .iter()
+                .flatten()
+                .flat_map(|v| v.to_le_bytes())
+                .collect(),
+        };
+        buffer_with(&lane.device, &bytes).unwrap()
+    });
     let mut pass = RenderPassDescriptor::new();
     let attachment = &mut pass.color_attachments[0];
     attachment.texture = Some(target.clone());
@@ -431,7 +470,11 @@ fn draw(
     lane.run(&pass, |_, encoder, _| {
         encoder.set_render_pipeline_state(state).unwrap();
         encoder.set_blend_color(COLOR[0], COLOR[1], COLOR[2], COLOR[3]);
-        encoder.set_fragment_buffer(Some(&src), 0, 0).unwrap();
+        for (index, buffer) in buffers.iter().enumerate() {
+            encoder
+                .set_fragment_buffer(Some(buffer), 0, index as u32)
+                .unwrap();
+        }
         encoder
             .draw_primitives(PrimitiveType::Triangle, 0, 3, 1, 0)
             .unwrap();
@@ -439,6 +482,60 @@ fn draw(
     .unwrap();
     let announced = counts(&messages.take_notices()).contains_key(&kind);
     (lane.read(&target, (0, 0), bpp, BlitOption::None), announced)
+}
+
+/// Draw `entry` of `library` (whose vertex function is `vertex`, whose outputs are `half`s where
+/// `half`) into a target of `pf` blended by `blend`, and check it (the module docs): print its line,
+/// and on a device that fetches through the pixel interlock assert that it announced
+/// `unmeasured-fetch-blend` and that every channel lies within one code of the model's (a `float`
+/// channel's exactly). Whether it drew.
+fn checked(
+    (lane, messages): (&Lane, &Messages),
+    (library, vertex): (&Library, &str),
+    (entry, half): (&str, bool),
+    (pf, layout): (PixelFormat, Layout),
+    blend: Blend,
+) -> bool {
+    let device = lane.device.name();
+    let Some(state) = pipeline(lane, (library, vertex), entry, blend.attachment(pf)) else {
+        return false;
+    };
+    let (bytes, sources) = data(layout, half);
+    let data = (half, bytes.as_slice(), &sources);
+    let (read, announced) = draw((lane, messages), &state, (pf, layout), data);
+    let bpp = layout.bytes();
+    let nan = |code: i64| match layout {
+        Layout::Float32 => f32::from_bits(code as u32).is_nan(),
+        Layout::Half16 => code & 0x7c00 == 0x7c00 && code & 0x3ff != 0,
+        _ => false,
+    };
+    let (mut equal, mut channels, mut worst) = (0, 0, 0);
+    for i in 0..TEXELS {
+        let d = layout.decode(&bytes[bpp * i..bpp * i + bpp]);
+        let chosen = if d[3] == 0.0 { i + TEXELS } else { i };
+        let s = (sources[0][chosen], sources[1][chosen]);
+        let want = layout.encode(blend.model(layout, s, d));
+        let got = layout.codes(&read[bpp * i..bpp * i + bpp]);
+        for (&w, &g) in want.iter().zip(&got) {
+            channels += 1;
+            match w == g || (nan(w) && nan(g)) {
+                true => equal += 1,
+                false if layout == Layout::Float32 => worst = i64::MAX,
+                false => worst = worst.max((w - g).abs()),
+            }
+        }
+    }
+    println!(
+        "FETCH-GENERIC {entry} {pf:?} {blend:?} | {device} | through {} | the model's \
+         {equal}/{channels} channels, worst {worst} | announced {announced}",
+        form(lane),
+    );
+    if !through_inputs(lane) {
+        let what = format!("{entry} {pf:?} {blend:?} on {device}");
+        assert!(announced, "{what}: no unmeasured-fetch-blend");
+        assert!(worst <= 1, "{what}: {equal}/{channels}, worst {worst}");
+    }
+    true
 }
 
 /// Each draw announces `unmeasured-fetch-blend` and stores the model's channels, a 32-bit float
@@ -451,7 +548,6 @@ fn a_blended_fetch_of_another_format_stores_the_generic_blend() {
         options.announce_each = [kind].into_iter().collect();
     });
     let device = lane.device.name();
-    let interlock = !through_inputs(&lane);
     let mut drawn = 0;
     for safe in [false, true] {
         let (library, vertex) = match safe {
@@ -468,48 +564,49 @@ fn a_blended_fetch_of_another_format_stores_the_generic_blend() {
                 ("fbl8_safe_loaded_float", false),
             ],
         };
-        for (pf, layout) in FORMATS {
+        for format in FORMATS {
             for blend in [Blend::Over, Blend::Constant] {
-                for (entry, half) in entries {
-                    let blended = blend.attachment(pf);
-                    let Some(state) = pipeline(&lane, (&library, vertex), entry, blended) else {
-                        continue;
-                    };
-                    let (bytes, sources) = data(layout, half);
-                    let data = (half, bytes.as_slice(), sources.as_slice());
-                    let (read, announced) = draw((&lane, &messages), &state, (pf, layout), data);
-                    let bpp = layout.bytes();
-                    let (mut equal, mut channels, mut worst) = (0, 0, 0);
-                    for i in 0..TEXELS {
-                        let d = layout.decode(&bytes[bpp * i..bpp * i + bpp]);
-                        let chosen = if d[3] == 0.0 { i + TEXELS } else { i };
-                        let want = layout.encode(blend.model(layout, sources[chosen], d));
-                        let got = layout.codes(&read[bpp * i..bpp * i + bpp]);
-                        for (&w, &g) in want.iter().zip(&got) {
-                            channels += 1;
-                            let nans = layout == Layout::Float32
-                                && f32::from_bits(w as u32).is_nan()
-                                && f32::from_bits(g as u32).is_nan();
-                            match w == g || nans {
-                                true => equal += 1,
-                                false if layout == Layout::Float32 => worst = i64::MAX,
-                                false => worst = worst.max((w - g).abs()),
-                            }
-                        }
-                    }
-                    println!(
-                        "FETCH-GENERIC {entry} {pf:?} {blend:?} | {device} | through {} | the \
-                         model's {equal}/{channels} channels, worst {worst} | announced {announced}",
-                        form(&lane),
-                    );
-                    if interlock {
-                        let what = format!("{entry} {pf:?} {blend:?} on {device}");
-                        assert!(announced, "{what}: no unmeasured-fetch-blend");
-                        assert!(worst <= 1, "{what}: {equal}/{channels}, worst {worst}");
-                    }
-                    drawn += 1;
+                for entry in entries {
+                    let fixture = (&library, vertex);
+                    drawn +=
+                        usize::from(checked((&lane, &messages), fixture, entry, format, blend));
                 }
             }
+        }
+    }
+    assert!(drawn > 0, "no draw on {device}");
+    let _ = messages.take_notices();
+    quiet(lane, &messages);
+}
+
+/// A blend of the second source, read from the function's second output (the owned fixture
+/// `fbl_fetch_dual`), into a 32-bit float, a 16-bit float, a 16-bit unorm and an 8-bit unorm
+/// target: each draw announces `unmeasured-fetch-blend` and stores the model's channels, as above.
+#[test]
+fn a_second_source_blend_of_a_fetched_attachment_stores_the_generic_blend() {
+    let kind = Degradation::from_precision_note(PrecisionNote::UnmeasuredFetchBlend);
+    let (messages, _cache, lane) = lane_with(|options| {
+        options.announce_each = [kind].into_iter().collect();
+    });
+    let device = lane.device.name();
+    let library = library(&lane, "fbl_fetch_dual");
+    let formats = [
+        (PixelFormat::RGBA32Float, Layout::Float32),
+        (PixelFormat::RGBA16Float, Layout::Half16),
+        (PixelFormat::RGBA16Unorm, Layout::Unorm16),
+        (PixelFormat::RGBA8Unorm, Layout::Unorm8),
+    ];
+    let mut drawn = 0;
+    for format in formats {
+        for entry in [("fbd_dual_half", true), ("fbd_dual_float", false)] {
+            let fixture = (&library, "fbd_vertex");
+            drawn += usize::from(checked(
+                (&lane, &messages),
+                fixture,
+                entry,
+                format,
+                Blend::Dual,
+            ));
         }
     }
     assert!(drawn > 0, "no draw on {device}");

@@ -1162,22 +1162,18 @@ impl Blend {
     /// channel the format lacks counts as written), computed by [`blend_generic`]: in `float`, each
     /// factor, product and sum rounded to `float`, nearest even, a factor of zero keeping its
     /// product as IEEE 754 adds, the forms of [`BlendMath::Rounded`] whatever the module's math. A
-    /// factor of the second source is not built (`Feature::ExtendedRangeBlend` `DualSource`).
+    /// factor of the second source reads the function's second (index 1) output.
     pub fn generic(
         eq: &BlendEquation,
         has_alpha: bool,
         written: ColorWriteMask,
     ) -> Result<Blend, Error> {
-        let b = planned_for(
+        planned_for(
             eq,
             (has_alpha, Family::HalfFloat),
             written,
             (false, BlendMath::Rounded),
-        )?;
-        match b.reads_second() {
-            true => Err(refused(ExtendedRangeBlend::DualSource)),
-            false => Ok(b),
-        }
+        )
     }
 
     /// Metal's blend `eq` of a four-lane output of a module of math `math`, blended in `arith`
@@ -2206,12 +2202,14 @@ pub fn blend_unorm8(
 /// lane, a NaN to the low end), as a fixed-function blend clamps them; `color`, the encoder's blend
 /// color (a `uvec4` of its `f32`s' bits, `PushField::HalfBlendColor`, where `b` reads it,
 /// [`Blend::reads_constant`]), is what `BlendColor` reads, and `OneMinusBlendColor` reads one minus
-/// it. Not Metal's arithmetic for the format, which is not built: a near-equivalent.
+/// it; `s1`, the second source (a `vec4` of `f32`, the function's second output, where `b` reads
+/// it, [`Blend::reads_second`]), is clamped as `s`. Not Metal's arithmetic for the format, which is
+/// not built: a near-equivalent.
 pub fn blend_generic(
     fb: &mut FunctionBuilder<'_>,
     b: &Blend,
     range: Option<(f32, f32)>,
-    (s, d): (Value, Value),
+    (s, s1, d): (Value, Option<Value>, Value),
     color: Option<Value>,
 ) -> BResult<Value> {
     let f = floats();
@@ -2226,6 +2224,10 @@ pub fn blend_generic(
         fb.glsl(GlslOp::FClamp, &[v, low, high])
     };
     let s = clamp(fb, s)?;
+    let s1 = match s1 {
+        Some(v) => Some(clamp(fb, v)?),
+        None => None,
+    };
     let constant = match color {
         Some(words) => {
             let ft = ty(fb, f)?;
@@ -2243,7 +2245,7 @@ pub fn blend_generic(
         constant,
         sf: None,
         math: BlendMath::Rounded,
-        s1: None,
+        s1,
         arith: BlendArith::Float,
         negates_one_minus: false,
     };

@@ -2212,10 +2212,11 @@ degradations! {
         /// The blend of a color attachment the fragment function reads, computed by the shader in
         /// the pixel interlock's storage form, of a format whose Metal blend arithmetic is not
         /// built (a 32-bit float, 16-bit normalized, 8-bit signed normalized, 10-bit, packed
-        /// float or `A8Unorm` format, among others, or an 8-bit unorm one written by fewer than
-        /// four lanes): in `float`, each step rounded, the source and the blend color clamped to a
-        /// normalized format's range, the device's conversion storing the result. Metal's blend
-        /// for these formats is not measured.
+        /// float or `A8Unorm` format, among others, an 8-bit unorm one written by fewer than four
+        /// lanes, or a 16-bit float or 8-bit unorm one under a blend of the second source): in
+        /// `float`, each step rounded, the sources and the blend color clamped to a normalized
+        /// format's range, the device's conversion storing the result. Metal's blend for these
+        /// formats is not measured.
         UnmeasuredFetchBlend = "unmeasured-fetch-blend";
     }
 }

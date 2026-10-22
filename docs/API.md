@@ -2474,13 +2474,15 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   framebuffer fetch only through the pixel interlock (MoltenVK, RADV, ANV), of a format whose Metal
   blend arithmetic is not built: a format whose channels read as floats but a 16-bit float, an
   sRGB and an extended-range one (a 32-bit float, 16-bit normalized, 8-bit signed normalized,
-  10-bit, packed float or `A8Unorm` format, among others), or an 8-bit unorm one written by an
-  output of fewer than four lanes. No Vulkan blend applies to the storage write, so the shader
+  10-bit, packed float or `A8Unorm` format, among others), an 8-bit unorm one written by an
+  output of fewer than four lanes, or a 16-bit float or 8-bit unorm one under a blend of the second
+  source or beside a second (index 1) output. No Vulkan blend applies to the storage write, so the
+  shader
   computes the pipeline's blend in `float`: each factor, product and sum rounded to nearest even,
   the source and the blend color clamped first to a normalized format's range (a NaN to its low
   end), an output's missing lane zero, and the result stored through the device's conversion.
-  Metal's blend arithmetic for these formats is not measured, so the bound is not known. A blend
-  of the second source there is refused.
+  Metal's blend arithmetic for these formats is not measured, so the bound is not known. A factor
+  of the second source reads the function's second output, clamped as the source.
 - `metal2vulkan-degrade-fp8-value` (precision). `PrecisionNote::Fp8Value`: An 8-bit float converts
   to an integer from the format's documented value with Metal's saturating float-to-integer rule,
   where Metal's device here answers otherwise: Metal on Apple M3 compiles these reads but extends
