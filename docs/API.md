@@ -3042,6 +3042,17 @@ each item named states the rule in full.
   the runtime's do (0.04 to 1.5 ms after it on MoltenVK, Metal's 0.01 to 0.03 ms).
 - **A page fault or a victim of the GPU's recovery completes as its work does** (about 1 ms on
   MoltenVK), where Metal completed it 16.8 to 30.0 ms after its commit.
+- **A queue's second caused GPU error revokes it, as Metal's does**, and only an event wait held
+  across the revocation is answered unmeasured. Measured on the M3 Max (macOS 27.0.1, about sixty
+  command buffers): page faults and hangs (`CommandBufferError::PageFault`, `GpuHang`) count
+  against their queue, victims of the GPU's recovery (`GpuRecoveryVictim`) do not; from the
+  completion of the queue's second counted command buffer, every one committed on that queue fails
+  at its commit with `CommandBufferError::AccessRevoked` (`MTLCommandBufferErrorAccessRevoked`, 4),
+  running nothing and firing none of its event signals, for good (two seconds on too), while one
+  committed before it runs; the device's other queues, new ones too, run on. The runtime counts the
+  faults and hangs it makes Metal's answer for (primitive type 9, an execution of indirect
+  commands under a state it cannot inherit), not the ones the driver relays, and decides at the
+  commit: a command buffer committed before the revocation runs whatever its event waits.
 
 **Heaps and memory**
 

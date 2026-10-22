@@ -1662,10 +1662,15 @@ pub enum CommandBufferError {
     /// passes: the runtime runs them.
     ///
     /// Also an indexed draw of primitive type 9
-    /// ([`DrawPrimitiveType::Nine`](crate::DrawPrimitiveType::Nine)), of 1 to 3 indices on the M3
-    /// Max (macOS 27.0.1): its render encoder runs nothing, the encoders after it run, every
-    /// event signal fires, and the queue runs on; Metal completed it 16.8 to 19.5 ms after its
-    /// commit, the runtime as its work completes.
+    /// ([`DrawPrimitiveType::Nine`](crate::DrawPrimitiveType::Nine)), of any index count, of no
+    /// index or instance too, on the M3 Max (macOS 27.0.1): its render encoder runs nothing, the
+    /// encoders after it run, every event signal fires, and the queue runs on; Metal completed it
+    /// 16.8 to 19.5 ms after its commit, the runtime as its work completes.
+    ///
+    /// Such a fault, as the runtime makes it, counts against the command buffer's queue, as a
+    /// [`GpuHang`](Self::GpuHang) does: from the completion of the queue's second, its later
+    /// command buffers fail with [`AccessRevoked`](Self::AccessRevoked). A relayed one is the
+    /// driver's queue's.
     ///
     /// Also a page fault Metal answers for the command buffer's work under MoltenVK, which the
     /// runtime relays (`CommandBufferError::Execution`).
@@ -1686,7 +1691,8 @@ pub enum CommandBufferError {
     /// reads `Scheduled` 5.06 ms after its commit (later where the work before the draw is
     /// submitted later), completes no sooner than 32.7 ms after its commit and 27.5 ms after the
     /// work before the draw ran, and runs nothing of its queue's others: the outcome of Metal's
-    /// slower submission (`command_buffer/hang.rs`).
+    /// slower submission (`command_buffer/hang.rs`). It counts against its queue as a
+    /// [`PageFault`](Self::PageFault) does.
     GpuHang,
     /// Metal failed the command buffer as a victim of its GPU's recovery, at an indirect draw of
     /// primitive type 9, indexed or not, whatever its arguments
@@ -1695,8 +1701,17 @@ pub enum CommandBufferError {
     /// (00000005:kIOGPUCommandBufferCallbackErrorInnocentVictim)", its `GPUStartTime` 0), 16.9 to
     /// 30.0 ms after its commit (the M3 Max, macOS 27.0.1, 5 draws): its render encoder ran
     /// nothing, the encoders after it ran, every event signal fired, and the queue ran on. The
-    /// runtime completes it as its work completes.
+    /// runtime completes it as its work completes. It does not count against its queue.
     GpuRecoveryVictim,
+    /// Metal ignored the command buffer, committed on a queue whose second command buffer with a
+    /// GPU error it caused ([`PageFault`](Self::PageFault), [`GpuHang`](Self::GpuHang); not a
+    /// [`GpuRecoveryVictim`](Self::GpuRecoveryVictim)) had completed:
+    /// `MTLCommandBufferErrorAccessRevoked` (4, "Ignored (for causing prior/excessive GPU errors)
+    /// (00000004:kIOGPUCommandBufferCallbackErrorSubmissionsIgnored)" on the M3 Max, macOS
+    /// 27.0.1). It reads `Scheduled` and completes at its commit, nothing of it runs and none of
+    /// its event signals fires; so does every later one of the queue, while the device's other
+    /// queues, new ones too, run on (`command_buffer/revocation.rs`).
+    AccessRevoked,
     /// Metal failed the command buffer's work with this `MTLCommandBufferError` code, which the
     /// driver relayed: MoltenVK, which runs each batch as a Metal command buffer, reports a
     /// failed one, and the runtime gives its code to the command buffer whose batch it was
@@ -1953,7 +1968,8 @@ pub struct TessellationRecordsOverflow {
 impl CommandBufferError {
     /// Metal's `MTLCommandBufferError` code for this error: `MTLCommandBufferErrorDeviceRemoved`
     /// (11) for a lost device, `OutOfMemory` (8) for the device's memory, the index pool's and the
-    /// records pool's (mesh and tessellation), and a detached buffer's, `PageFault` (3), and
+    /// records pool's (mesh and tessellation), and a detached buffer's, `AccessRevoked` (4) for a
+    /// revoked queue's, `PageFault` (3), and
     /// `Internal` (1), also for the runtime's refusals (a cubic argument sampler's reach among
     /// them, a sampler state left out of an argument-sampler listing, a host step's object nothing
     /// made, a named use rebound before the submission, and a predicated loop past its copies); a
@@ -1988,6 +2004,7 @@ impl CommandBufferError {
             CommandBufferError::PageFault => 3,
             CommandBufferError::GpuHang => 2,
             CommandBufferError::GpuRecoveryVictim => 1,
+            CommandBufferError::AccessRevoked => 4,
             CommandBufferError::PipelineCreation(cause) => match cause {
                 PipelineCreationCause::OutOfMemory(_) => 8,
                 PipelineCreationCause::DeviceLost => 11,
@@ -2010,6 +2027,7 @@ impl CommandBufferError {
             | CommandBufferError::PageFault
             | CommandBufferError::GpuHang
             | CommandBufferError::GpuRecoveryVictim
+            | CommandBufferError::AccessRevoked
             | CommandBufferError::Execution(_)
             | CommandBufferError::RenderTargetSize
             | CommandBufferError::DetachedBacking

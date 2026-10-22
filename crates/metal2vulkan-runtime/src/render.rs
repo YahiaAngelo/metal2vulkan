@@ -3146,9 +3146,9 @@ impl RenderLowering {
         };
         let empty = index_count == 0 || instance_count == 0;
         let Some(assembly) = Assembly::of(primitive_type) else {
-            // Metal's GPU faults at any indices.
+            // Metal's GPU faults at it, of any index count, of no index or instance too.
             let fault = NineFailure::Fault(CommandBufferError::PageFault);
-            return self.draw_nine(call, empty, (!empty).then_some(fault));
+            return self.draw_nine(call, empty, Some(fault));
         };
         self.draw(call, assembly, draw, buffers, empty)
     }

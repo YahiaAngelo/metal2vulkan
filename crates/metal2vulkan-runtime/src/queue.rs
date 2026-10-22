@@ -30,6 +30,7 @@
 use super::attachment_stand_in::BackingPool;
 use super::command_buffer::hang::QueueHangs;
 use super::command_buffer::own::{running, slot_wait, Answer, Context};
+use super::command_buffer::revocation::QueueErrors;
 use super::command_buffer::CommandBuffer;
 use super::contexts;
 use super::degradation::Degradation;
@@ -100,6 +101,9 @@ struct QueueShared {
     /// The program's handles of it ([`Handle`]): a predicated loop that would run on without
     /// bound stops once none is left (`command_buffer/rerun.rs`).
     handles: AtomicUsize,
+    /// Its command buffers that completed with a GPU error they caused, which revoke it at the
+    /// second (`command_buffer/revocation.rs`).
+    errors: QueueErrors,
 }
 
 /// A queue's slots: one per uncompleted command buffer, at most `max`.
@@ -276,6 +280,7 @@ impl Device {
                 kept_images: KeptImages::default(),
                 hangs: Arc::default(),
                 handles: AtomicUsize::new(1),
+                errors: QueueErrors::default(),
             }),
             Handle(true),
         )
@@ -404,6 +409,12 @@ impl CommandQueue {
     /// event wait meanwhile (`command_buffer/hang.rs`).
     pub(super) fn hangs(&self) -> &Arc<QueueHangs> {
         &self.0.hangs
+    }
+
+    /// Its command buffers that completed with a GPU error they caused
+    /// (`command_buffer/revocation.rs`).
+    pub(super) fn errors(&self) -> &QueueErrors {
+        &self.0.errors
     }
 
     /// Place a command buffer of the queue that completed after every one placed before: `place`

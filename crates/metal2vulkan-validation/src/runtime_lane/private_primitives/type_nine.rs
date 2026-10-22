@@ -20,14 +20,19 @@
 //!   the hang) and one committed after the hang.
 //! - **A direct draw of 1 or 2 vertices, or of no vertex or instance** draws nothing: the pass
 //!   clears, and every command buffer runs.
-//! - **An indexed draw** (1, 2 or 3 indices) faults Metal's GPU: the command buffer fails with
+//! - **An indexed draw** (any index count, none or of no instance too) faults Metal's GPU: the
+//!   command buffer fails with
 //!   `MTLCommandBufferErrorPageFault` ([`CommandBufferError::PageFault`]); the pass runs nothing
 //!   (no clear), its other encoders run and its signal fires, and the queue's others run.
 //! - **An indirect draw** (of 3 vertices or none) **or an indexed indirect one** fails the command
 //!   buffer as a victim of the GPU's recovery, `MTLCommandBufferErrorInternal`
 //!   ([`CommandBufferError::GpuRecoveryVictim`]), with the indexed draw's other answers.
+//! - **A queue's second fault or hang revokes it**; victims do not count. Once the queue's second
+//!   command buffer that faulted or hung completed, every one committed on it fails at once with
+//!   `MTLCommandBufferErrorAccessRevoked` ([`CommandBufferError::AccessRevoked`]): nothing of it
+//!   runs and its event signals do not fire; a new queue runs on.
 //!
-//! Each scenario commits on the lane's queue the command buffer of the draw (a blit's mark, the
+//! Each scenario commits on a queue of its own the command buffer of the draw (a blit's mark, the
 //! pass of the draw over a target the host filled, a mark, an event signal of 1, a mark), at once
 //! one that marks and signals 2, and on another queue one that marks. 10 ms on, on the lane's
 //! queue, it commits one that marks and three that wait for an event first, then mark: the host
@@ -87,9 +92,9 @@ const OTHERS: [usize; 7] = [3, 4, 5, 6, 7, 8, 9];
 enum Draw {
     /// `drawPrimitives:vertexStart:vertexCount:instanceCount:`.
     Direct { vertices: u32, instances: u32 },
-    /// `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:` of 16-bit
-    /// indices 0, 1, 2.
-    Indexed(u32),
+    /// `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:`
+    /// of 16-bit indices 0, 1, 2.
+    Indexed { indices: u32, instances: u32 },
     /// `drawPrimitives:indirectBuffer:indirectBufferOffset:` of this vertex count, one instance.
     Indirect(u32),
     /// `drawIndexedPrimitives:indexType:...:indirectBuffer:` of 3 16-bit indices.
@@ -236,7 +241,12 @@ fn targets(lane: &Lane) -> (Vec<Texture>, RenderPassDescriptor) {
 }
 
 /// Run the scenario (the module docs) of `draw` under `pipeline`.
-fn scenario(lane: &Lane, pipeline: &RenderPipelineState, draw: Draw) -> Outcome {
+fn scenario(
+    lane: &Lane,
+    queue: &CommandQueue,
+    pipeline: &RenderPipelineState,
+    draw: Draw,
+) -> Outcome {
     let device = &lane.device;
     let marks = buffer_with(device, &[0; 40]).unwrap();
     let event = device.new_shared_event().unwrap();
@@ -253,7 +263,7 @@ fn scenario(lane: &Lane, pipeline: &RenderPipelineState, draw: Draw) -> Outcome 
     let arguments = buffer_with(device, &arguments).unwrap();
     let (targets, pass) = targets(lane);
 
-    let mut drawn = Tracked::new(&lane.queue);
+    let mut drawn = Tracked::new(queue);
     drawn.mark(&marks, 0);
     let mut encoder = drawn.command_buffer.render_command_encoder(&pass).unwrap();
     encoder.set_render_pipeline_state(pipeline).unwrap();
@@ -269,9 +279,19 @@ fn scenario(lane: &Lane, pipeline: &RenderPipelineState, draw: Draw) -> Outcome 
             vertices,
             instances,
         } => encoder.draw_primitives(nine, 0, vertices, instances, 0),
-        Draw::Indexed(count) => {
-            encoder.draw_indexed_primitives(nine, count, IndexType::UInt16, &indices, 0, 1, 0, 0)
-        }
+        Draw::Indexed {
+            indices: count,
+            instances,
+        } => encoder.draw_indexed_primitives(
+            nine,
+            count,
+            IndexType::UInt16,
+            &indices,
+            0,
+            instances,
+            0,
+            0,
+        ),
         Draw::Indirect(_) => encoder.draw_primitives_indirect(nine, &arguments, 0),
         Draw::IndexedIndirect => encoder.draw_indexed_primitives_indirect(
             nine,
@@ -291,16 +311,16 @@ fn scenario(lane: &Lane, pipeline: &RenderPipelineState, draw: Draw) -> Outcome 
         .unwrap();
     drawn.mark(&marks, 2);
 
-    let mut at_once = Tracked::new(&lane.queue);
+    let mut at_once = Tracked::new(queue);
     at_once.mark(&marks, 3);
     at_once
         .command_buffer
         .encode_signal_event(EventRef::from(&event), 2)
         .unwrap();
-    let mut later = Tracked::new(&lane.queue);
+    let mut later = Tracked::new(queue);
     later.mark(&marks, 4);
     let waiting = |slot: usize, gate| {
-        let tracked = Tracked::new(&lane.queue);
+        let tracked = Tracked::new(queue);
         tracked
             .command_buffer
             .encode_wait_for_event(EventRef::from(gate), 1)
@@ -340,7 +360,7 @@ fn scenario(lane: &Lane, pipeline: &RenderPipelineState, draw: Draw) -> Outcome 
     held.wait();
     other.wait();
     signaller.wait_until_completed_for(WAIT).unwrap();
-    let mut after = Tracked::new(&lane.queue);
+    let mut after = Tracked::new(queue);
     after.mark(&marks, 9);
     after.commit();
     after.wait();
@@ -371,7 +391,9 @@ fn answers_as_metal_does(draws: &[Draw], expected: Expected) {
         let lane = Lane::new(device);
         let pipeline = lane.pipeline("pt_plain");
         for &draw in draws {
-            let outcome = scenario(&lane, &pipeline, draw);
+            // A queue of its own: a queue's second fault or hang revokes it (`AccessRevoked`).
+            let queue = lane.device.new_command_queue().unwrap();
+            let outcome = scenario(&lane, &queue, &pipeline, draw);
             check(&outcome, expected, &format!("{draw:?} on {name}"));
             let [drawn, rest @ ..] = &outcome.answers;
             let ms = |answer: &Answer| answer.took().as_secs_f64() * 1e3;
@@ -543,12 +565,213 @@ fn a_direct_draw_of_type_nine_of_fewer_vertices_draws_nothing() {
 /// `GpuRecoveryVictim`: the pass runs nothing, everything else runs.
 #[test]
 fn indexed_draws_of_type_nine_fault_and_indirect_ones_are_victims() {
+    let indexed = |indices, instances| Draw::Indexed { indices, instances };
     answers_as_metal_does(
-        &[Draw::Indexed(1), Draw::Indexed(2), Draw::Indexed(3)],
+        &[
+            indexed(1, 1),
+            indexed(2, 1),
+            indexed(3, 1),
+            indexed(0, 1),
+            indexed(3, 0),
+            indexed(0, 0),
+        ],
         Expected::Fails(CommandBufferError::PageFault),
     );
     answers_as_metal_does(
         &[Draw::Indirect(3), Draw::Indirect(0), Draw::IndexedIndirect],
         Expected::Fails(CommandBufferError::GpuRecoveryVictim),
+    );
+}
+
+/// One command buffer on `queue` of a mark into `marks` at `slot`, the draw of type 9 `draw` under
+/// `pipeline` where there is one, and an event signal of 1; committed, waited for: its answer,
+/// whether it marked, and the event's value.
+fn one(
+    lane: &Lane,
+    queue: &CommandQueue,
+    pipeline: &RenderPipelineState,
+    draw: Option<Draw>,
+) -> (Answer, bool, u64) {
+    let device = &lane.device;
+    let marks = buffer_with(device, &[0; 40]).unwrap();
+    let event = device.new_shared_event().unwrap();
+    let indices = buffer_with(device, &[0, 0, 1, 0, 2, 0, 0, 0]).unwrap();
+    let arguments: Vec<u8> = [3u32, 1, 0, 0, 0]
+        .iter()
+        .flat_map(|w| w.to_le_bytes())
+        .collect();
+    let arguments = buffer_with(device, &arguments).unwrap();
+    let mut tracked = Tracked::new(queue);
+    tracked.mark(&marks, 0);
+    if let Some(draw) = draw {
+        let (_targets, pass) = targets(lane);
+        let mut encoder = tracked
+            .command_buffer
+            .render_command_encoder(&pass)
+            .unwrap();
+        encoder.set_render_pipeline_state(pipeline).unwrap();
+        encoder
+            .set_vertex_buffer(Some(&lane.positions), 0, 0)
+            .unwrap();
+        encoder
+            .set_vertex_buffer(Some(&lane.offsets), 0, 1)
+            .unwrap();
+        let nine = DrawPrimitiveType::Nine;
+        match draw {
+            Draw::Direct {
+                vertices,
+                instances,
+            } => encoder.draw_primitives(nine, 0, vertices, instances, 0),
+            Draw::Indexed {
+                indices: count,
+                instances,
+            } => encoder.draw_indexed_primitives(
+                nine,
+                count,
+                IndexType::UInt16,
+                &indices,
+                0,
+                instances,
+                0,
+                0,
+            ),
+            Draw::Indirect(_) => encoder.draw_primitives_indirect(nine, &arguments, 0),
+            Draw::IndexedIndirect => encoder.draw_indexed_primitives_indirect(
+                nine,
+                IndexType::UInt16,
+                &indices,
+                0,
+                &arguments,
+                0,
+            ),
+        }
+        .unwrap();
+        encoder.end_encoding().unwrap();
+    }
+    tracked
+        .command_buffer
+        .encode_signal_event(EventRef::from(&event), 1)
+        .unwrap();
+    tracked.commit();
+    tracked.wait();
+    let marked = read_buffer(&marks, 0, 4).unwrap()[0] == MARKS[0].1;
+    (tracked.answer(), marked, event.signaled_value())
+}
+
+/// On one queue, each of `draws` of type 9 in turn (its command buffer failing with its error),
+/// each followed by a command buffer of no draw: those run until the queue's second fault or hang
+/// completed, and from then on every command buffer of the queue fails at its commit with
+/// `AccessRevoked`, running nothing and signalling nothing, while a new queue runs.
+fn revokes_after(draws: &[(Draw, CommandBufferError)], revoked_from: Option<usize>) {
+    let cache = ScratchCache::new().unwrap();
+    let messages = Messages::default();
+    {
+        let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
+        let name = device.name().to_owned();
+        let lane = Lane::new(device);
+        let pipeline = lane.pipeline("pt_plain");
+        let queue = lane.device.new_command_queue().unwrap();
+        let revoked = |answer: &Answer, marked: bool, event: u64, label: &str| {
+            assert_eq!(answer.status, CommandBufferStatus::Error, "{label}");
+            assert_eq!(
+                answer.error,
+                Some(CommandBufferError::AccessRevoked),
+                "{label}"
+            );
+            assert!(!marked, "{label}: its mark ran");
+            assert_eq!(event, 0, "{label}: its event signal fired");
+            assert!(answer.scheduled <= answer.completed, "{label}");
+        };
+        for (at, &(draw, error)) in draws.iter().enumerate() {
+            let label = format!("{draw:?} (draw {at}) on {name}");
+            let (answer, marked, event) = one(&lane, &queue, &pipeline, Some(draw));
+            match revoked_from {
+                Some(from) if at > from => revoked(&answer, marked, event, &label),
+                _ => {
+                    assert_eq!(answer.status, CommandBufferStatus::Error, "{label}");
+                    assert_eq!(answer.error, Some(error), "{label}");
+                    assert!(marked, "{label}: its mark before the pass ran");
+                    assert_eq!(event, 1, "{label}: its event signal");
+                }
+            }
+            let (after, marked, event) = one(&lane, &queue, &pipeline, None);
+            let label = format!("the command buffer after {label}");
+            match revoked_from {
+                Some(from) if at >= from => revoked(&after, marked, event, &label),
+                _ => {
+                    assert!(after.completed_cleanly(), "{label}: {after:?}");
+                    assert!(marked && event == 1, "{label}: it ran");
+                }
+            }
+            println!(
+                "{name}: {draw:?}: {:?} in {:.1} ms; after it {:?} {:?} in {:.2} ms",
+                answer.error,
+                answer.took().as_secs_f64() * 1e3,
+                after.status,
+                after.error,
+                after.took().as_secs_f64() * 1e3,
+            );
+        }
+        let fresh = lane.device.new_command_queue().unwrap();
+        let (answer, marked, event) = one(&lane, &fresh, &pipeline, None);
+        assert!(
+            answer.completed_cleanly(),
+            "a new queue on {name}: {answer:?}"
+        );
+        assert!(marked && event == 1, "a new queue's command buffer ran");
+    }
+    let reported = messages.take();
+    assert!(
+        reported.is_empty(),
+        "the validation layer reported: {reported:#?}"
+    );
+}
+
+/// A queue's second command buffer that faulted revokes it, as Metal's does: every command buffer
+/// committed on it after that one completed fails with `AccessRevoked` (a fault's draw too), and
+/// a new queue runs.
+#[test]
+fn a_queue_s_second_fault_revokes_it() {
+    let fault = CommandBufferError::PageFault;
+    let indexed = Draw::Indexed {
+        indices: 3,
+        instances: 1,
+    };
+    revokes_after(
+        &[(indexed, fault), (indexed, fault), (indexed, fault)],
+        Some(1),
+    );
+}
+
+/// Victims of the GPU's recovery do not count against their queue, a hang does: victims and a
+/// fault leave the queue running, and a hang and a fault revoke it.
+#[test]
+fn victims_do_not_count_against_their_queue_and_a_hang_does() {
+    let victim = CommandBufferError::GpuRecoveryVictim;
+    let fault = CommandBufferError::PageFault;
+    let indexed = Draw::Indexed {
+        indices: 3,
+        instances: 1,
+    };
+    revokes_after(
+        &[
+            (Draw::Indirect(3), victim),
+            (Draw::IndexedIndirect, victim),
+            (indexed, fault),
+            (Draw::Indirect(0), victim),
+        ],
+        None,
+    );
+    let hang = Draw::Direct {
+        vertices: 3,
+        instances: 1,
+    };
+    revokes_after(
+        &[
+            (hang, CommandBufferError::GpuHang),
+            (indexed, fault),
+            (hang, CommandBufferError::GpuHang),
+        ],
+        Some(1),
     );
 }

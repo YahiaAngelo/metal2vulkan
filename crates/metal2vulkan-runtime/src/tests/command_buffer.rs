@@ -254,6 +254,7 @@ fn a_command_buffer_error_names_whose_failure_it_is() {
         (E::PageFault, Metal, 3),
         (E::GpuHang, Metal, 2),
         (E::GpuRecoveryVictim, Metal, 1),
+        (E::AccessRevoked, Metal, 4),
         (E::Execution(1), Metal, 1),
         (E::Execution(12), Metal, 12),
         (E::RenderTargetSize, Metal, 1),
