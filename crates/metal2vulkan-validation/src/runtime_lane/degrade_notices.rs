@@ -12,7 +12,7 @@
 //! `sparse_textures`, in `buffer_texture_blits`, in `amplified_draws`, in `color_writes`, in
 //! `binary_archives`, in `view_reinterpretation`, in `mipmaps_exact`, in `clear_reach`, in
 //! `resolves`, in `mesh_draws`, in `visibility`, in `pass_start_reads`, in `unorm_depth_bias`, in
-//! `pvrtc_textures`, in `heaps`, in `rate_maps`, in `rebind_reach` or in `blits` takes, each test checking that
+//! `pvrtc_textures`, in `heaps`, in `rate_maps`, in `rebind_reach`, in `predication` or in `blits` takes, each test checking that
 //! its kinds are announced exactly once: the buffers over
 //! host bytes ([`HOST_BYTES`]), blits ([`BLITS`]),
 //! dispatches ([`DISPATCHES`]), render passes ([`PASSES`]), framebuffer fetch's passes
@@ -119,7 +119,9 @@
 //! counts of draws writing several colors on a driver that counts each sample once per color in
 //! `color_groups` ([`PER_COLOR_COUNTS`]), passes that load and draw a signed normalized attachment
 //! holding a minimum code, or an `RGB9E5Float` one holding an unnormalized word, in
-//! `snorm_tile_store` ([`SNORM_MINIMUM`], [`SHARED_EXPONENT`]),
+//! `snorm_tile_store` ([`SNORM_MINIMUM`], [`SHARED_EXPONENT`]), condition words of command
+//! predication past their buffer that read memory unrelated to it in `predication`
+//! ([`WORD_PAST_BUFFER`]),
 //! and
 //! pipeline states, whose stages' precision notes and reconvergence are announced where the
 //! runtime makes their objects (one site, which maps every note to its kind; a fragment function's
@@ -189,6 +191,7 @@ use super::mipmaps_exact::{M3_MIPMAPS, TIE_MIPMAPS};
 use super::no_copy_heaps::HEAP;
 use super::pass_start_reads::{FRAGMENTS_BEFORE_GEOMETRY, IN_PLACE_VERTEX_READS};
 use super::patches::EMULATED_TESSELLATION;
+use super::predication::WORD_PAST_BUFFER;
 use super::pvrtc_textures::UNREADABLE;
 use super::rate_mapped_passes::ZERO_LAYER_AFTER_RELEASE;
 use super::rebind_reach::REBOUND_USES;
@@ -568,6 +571,7 @@ fn every_kind_has_a_site_a_lane_test_takes() {
         &EMULATED_TESSELLATION,
         &EXACT_FORMS_OVER_LIMIT,
         &GROUPED,
+        &WORD_PAST_BUFFER,
     ];
     for kind in lists.into_iter().flatten().copied().chain(stage_kinds) {
         assert!(listed.insert(kind), "{kind:?} is listed twice");
