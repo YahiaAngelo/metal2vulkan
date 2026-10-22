@@ -1781,7 +1781,13 @@ pub enum CommandBufferError {
     /// completes, before its completed handlers run, and only so; a block whose commands ran there
     /// is harmless, as on Metal. The rest of the command buffer runs: how much of it Metal's
     /// recovery runs varies run to run.
-    PredicationOpenAtUnitEnd,
+    PredicationOpenAtUnitEnd {
+        /// The index of the call that opened the outermost block left open in the first unit
+        /// that failed so, among the command buffer's command-predication calls that returned
+        /// `Ok` (`encode_start_if` and the other six), counting from 0. Metal's error names no
+        /// record.
+        record: u32,
+    },
     /// The command buffer encoded a render pass without attachments whose
     /// `defaultRasterSampleCount`'s low 8 bits are 16 to 127, which Metal's encoder takes: Metal
     /// fails the command buffer with `MTLCommandBufferErrorInternal` ("Internal Error
@@ -2002,7 +2008,7 @@ impl CommandBufferError {
             | CommandBufferError::HostStepObject(_)
             | CommandBufferError::EncodedUseRebound
             | CommandBufferError::PredicatedLoopPastCopies
-            | CommandBufferError::PredicationOpenAtUnitEnd
+            | CommandBufferError::PredicationOpenAtUnitEnd { .. }
             | CommandBufferError::DefaultRasterSampleCount
             | CommandBufferError::CallRefused(_) => 1,
             CommandBufferError::PageFault => 3,
@@ -2033,7 +2039,7 @@ impl CommandBufferError {
             | CommandBufferError::Execution(_)
             | CommandBufferError::RenderTargetSize
             | CommandBufferError::DetachedBacking
-            | CommandBufferError::PredicationOpenAtUnitEnd
+            | CommandBufferError::PredicationOpenAtUnitEnd { .. }
             | CommandBufferError::DefaultRasterSampleCount => FailureOrigin::Metal,
             CommandBufferError::Internal(_)
             | CommandBufferError::IndexPoolOverflow

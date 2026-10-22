@@ -3894,9 +3894,11 @@ impl CommandBufferShared {
                     // A unit of command predication ended with a live block open where its
                     // commands skipped (`predication.rs`): Metal's GPU recovery failed the command
                     // buffer.
-                    if state.predication.open_at_unit_end() && state.error.is_none() {
+                    if let (Some(record), None) =
+                        (state.predication.open_at_unit_end(), state.error)
+                    {
                         state.status = CommandBufferStatus::Error;
-                        state.error = Some(CommandBufferError::PredicationOpenAtUnitEnd);
+                        state.error = Some(CommandBufferError::PredicationOpenAtUnitEnd { record });
                         state.relayed_description = Some(
                             CommandBufferError::PREDICATION_OPEN_AT_UNIT_END_DESCRIPTION.to_owned(),
                         );

@@ -738,20 +738,26 @@ fn what_the_runtime_refuses() {
 /// the unit's commands skip there (a failed If, a failed While, a held If's Else, a failing If
 /// inside a held one) Metal's GPU recovery fails the command buffer, `Internal`, code 1, with
 /// Metal's description, at the command buffer's end, at a blit, and at the end of an encoder that
-/// updated a fence; where they run (a held If, a held While, which ran once, a DoWhile, a failed
-/// If's Else) and in a killed block the command buffer completes, every mark Metal ran run.
+/// updated a fence, the error naming the record that opened the outermost block left open in the
+/// first unit that failed so; where they run (a held If, a held While, which ran once, a DoWhile,
+/// a failed If's Else) and in a killed block the command buffer completes, every mark Metal ran
+/// run.
 #[test]
 fn a_block_open_where_its_unit_ends_fails_where_metals_recovery_does() {
     on_device(|device| {
         let streams = Streams::new(device);
-        let failed = Some(CommandBufferError::PredicationOpenAtUnitEnd);
-        let cases: [(&str, Option<CommandBufferError>, &[u32]); 12] = [
-            ("T1 I0 T2", failed, &[]),
-            ("T1 I0 T2 B T3", failed, &[]),
-            ("T1 W0 T2 B T3", failed, &[]),
-            ("T1 I1 T2 L T3 B T4", failed, &[]),
-            ("T1 I1 I0 T2 B T3", failed, &[]),
-            ("T1 I0 T2 Fu | E T4", failed, &[]),
+        let failed = |record| Some(CommandBufferError::PredicationOpenAtUnitEnd { record });
+        let cases: [(&str, Option<CommandBufferError>, &[u32]); 15] = [
+            ("T1 I0 T2", failed(0), &[]),
+            ("T1 I0 T2 B T3", failed(0), &[]),
+            ("T1 W0 T2 B T3", failed(0), &[]),
+            ("T1 I1 T2 L T3 B T4", failed(0), &[]),
+            ("T1 I1 I0 T2 B T3", failed(0), &[]),
+            ("T1 I0 T2 Fu | E T4", failed(0), &[]),
+            // The record named: the outermost open block's, in the first unit that failed.
+            ("I1 E T1 I0 T2", failed(2), &[]),
+            ("I1 T1 B I0 T2", failed(1), &[]),
+            ("T1 I0 T2 B I0 T3", failed(0), &[]),
             ("T5 B I1 T1 B T3", None, &[1, 3, 5]),
             ("T5 B W1 T1 B T3", None, &[1, 3, 5]),
             ("T5 B D T1 B T3", None, &[1, 3, 5]),

@@ -893,7 +893,7 @@ fn a_commit_after_an_end_in_flight_returns_and_keeps_its_order() {
 /// A commit after an end in flight takes a command buffer one of whose units of command predication
 /// ended with a live block open, under both policies alike: an If whose condition failed, left open
 /// in a compute encoder before the pass, fails the command buffer at its completion with Metal's
-/// GPU recovery's error (`PredicationOpenAtUnitEnd`, code 1, Metal's description), and one whose
+/// GPU recovery's error (`PredicationOpenAtUnitEnd` of its record 0, code 1, Metal's description), and one whose
 /// condition held completes it. Where the device takes no command predication there is nothing to
 /// run.
 #[test]
@@ -905,7 +905,10 @@ fn a_commit_after_an_end_in_flight_fails_a_skipping_predication_block_left_open(
         let queue = device.new_command_queue().unwrap();
         let word = device.new_buffer(4, ResourceOptions::shared()).unwrap();
         for (reference, error) in [
-            (1, Some(CommandBufferError::PredicationOpenAtUnitEnd)),
+            (
+                1,
+                Some(CommandBufferError::PredicationOpenAtUnitEnd { record: 0 }),
+            ),
             (0, None),
         ] {
             let command_buffer = queue.command_buffer().unwrap();

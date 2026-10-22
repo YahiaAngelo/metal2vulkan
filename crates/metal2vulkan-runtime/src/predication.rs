@@ -80,7 +80,8 @@
 //! - **A block open where its unit ends**: each compute encoder that ends with a live block open
 //!   records a `PredicationOp::UnitEnd` step, which writes whether the counter skips into the
 //!   unit's check word; where the unit ended so, a set word fails the command buffer at its
-//!   completion (`CommandBufferError::PredicationOpenAtUnitEnd`, Metal's code), before its
+//!   completion (`CommandBufferError::PredicationOpenAtUnitEnd`, Metal's code, with the index of
+//!   the record that opened the unit's outermost open block), before its
 //!   completed handlers run. The rest of the command buffer runs.
 //! - **A loop** is laid down as copies of its commands: its first copy is what the encoders
 //!   encode between its Start and its End, which they note as they go (each command's public call
@@ -123,9 +124,13 @@ pub(super) struct Predication {
     /// their tables.
     runs: Vec<Run>,
     /// The check words of the units that ended with a live block open, each set where the unit's
-    /// commands skipped there: the command buffer fails at its completion
+    /// commands skipped there, with the index of the record that opened the unit's outermost
+    /// open block: the command buffer fails at its completion
     /// (`CommandBufferError::PredicationOpenAtUnitEnd`).
-    open_checks: Vec<Upload>,
+    open_checks: Vec<(Upload, u32)>,
+    /// The command buffer's command-predication calls that returned `Ok` so far: the index of
+    /// the next (the calls a loop's copies replay not counted).
+    records: u32,
     /// The word a loop's last copy sets where the loop would run another (made with the
     /// command buffer's first loop): the command buffer fails at its completion
     /// (`CommandBufferError::PredicatedLoopPastCopies`).
@@ -226,6 +231,9 @@ struct Droppable {
 struct Block {
     /// Its start step's record, whose op a kill rewrites.
     start: Upload,
+    /// The index of the call that opened it among its command buffer's command-predication calls
+    /// ([`Predication::records`]); a block a loop's copy opens has its loop End's.
+    record: u32,
     kind: Kind,
 }
 
@@ -344,13 +352,21 @@ impl Predication {
         }
     }
 
-    /// The current unit ends: one with a live block open keeps its check word for the completion.
+    /// The current unit ends: one with a live block open keeps its check word for the completion,
+    /// with the index of the record that opened its outermost open block.
     fn end_unit(&mut self) {
         if let Some(unit) = self.unit.take() {
-            if unit.live_open() {
-                self.open_checks.extend(unit.check);
+            if let (true, Some(check), Some(outermost)) =
+                (unit.live_open(), unit.check, unit.stack.first())
+            {
+                self.open_checks.push((check, outermost.record));
             }
         }
+    }
+
+    /// A command-predication call returned `Ok`: the next call's index is one more.
+    pub(super) fn counted(&mut self) {
+        self.records += 1;
     }
 
     /// The command buffer commits: its last unit ends, and each run's table is written into its
@@ -424,10 +440,13 @@ impl Predication {
             .is_some_and(|overflow| u32::from_le_bytes(overflow.read::<4>()) != 0)
     }
 
-    /// Whether a unit ended with a live block open where its commands skipped, as Metal's GPU
-    /// recovery fails the command buffer: read once the command buffer completed.
-    pub(super) fn open_at_unit_end(&self) -> bool {
-        (self.open_checks.iter()).any(|check| u32::from_le_bytes(check.read::<4>()) != 0)
+    /// Where a unit ended with a live block open where its commands skipped, as Metal's GPU
+    /// recovery fails the command buffer, the index of the record that opened the first such
+    /// unit's outermost open block: read once the command buffer completed.
+    pub(super) fn open_at_unit_end(&self) -> Option<u32> {
+        (self.open_checks.iter())
+            .find(|(check, _)| u32::from_le_bytes(check.read::<4>()) != 0)
+            .map(|(_, record)| *record)
     }
 
     /// An unbalanced record (the module docs): its range drops from the anchor on; the step to
@@ -486,6 +505,7 @@ impl Predication {
     /// Open a block of `kind` started by `record`: one with none open is the unit's anchor, and is
     /// killed from its start where `dead` (the module docs).
     fn open(&mut self, record: &Upload, kind: Kind, dead: bool) -> Result<(), Error> {
+        let index = self.records;
         let unit = self.unit()?;
         if unit.stack.is_empty() {
             unit.range = Droppable {
@@ -495,6 +515,7 @@ impl Predication {
         }
         unit.stack.push(Block {
             start: record.clone(),
+            record: index,
             kind,
         });
         if dead {
@@ -652,8 +673,10 @@ impl Predication {
         looping: &Looping,
     ) -> Result<Upload, Error> {
         let record = self.copy_step(uploads, device, looping)?;
+        let index = self.records;
         self.unit()?.stack.push(Block {
             start: record.clone(),
+            record: index,
             kind: Kind::Loop(looping.clone()),
         });
         Ok(record)
@@ -961,6 +984,9 @@ pub(super) struct Captures {
     floor: usize,
     /// It encoded a dispatch or an execution since its last record (`Unit::note_work`).
     worked: bool,
+    /// It is laying a loop's copies down, whose replayed calls are not the command buffer's
+    /// records (`Predication::records`).
+    replaying: bool,
 }
 
 impl Captures {
@@ -1009,6 +1035,15 @@ impl ComputeCommandEncoder {
     /// emits for its unit where no misuse killed the open block (the module docs).
     pub(super) fn worked(&mut self) {
         self.captures().worked = true;
+    }
+
+    /// A command-predication call of the encoder returned `Ok`: it is a record of its command
+    /// buffer's, unless a loop's copy replayed it.
+    fn counted<T>(&mut self, result: Result<T, Error>) -> Result<T, Error> {
+        if result.is_ok() && !self.captures().replaying {
+            self.core().command_buffer().state().predication.counted();
+        }
+        result
     }
 
     /// The encoder updated a fence: its unit of predication ends with it (the module docs).
@@ -1203,10 +1238,12 @@ impl ComputeCommandEncoder {
             }
         }
         let state = self.encoder_state();
-        let floor = self.captures().floor;
+        let (floor, replaying) = (self.captures().floor, self.captures().replaying);
         self.captures().floor = self.captures().open.len();
+        self.captures().replaying = true;
         let laid = self.copies(kernel, (looping, test), body, copies);
         self.captures().floor = floor;
+        self.captures().replaying = replaying;
         self.restore_state(state);
         laid
     }
@@ -1259,6 +1296,18 @@ impl ComputeCommandEncoder {
         comparison: u64,
         reference_value: u32,
     ) -> Result<(), Error> {
+        let result = self.encode_start_if_uncounted(buffer, offset, comparison, reference_value);
+        self.counted(result)
+    }
+
+    /// [`encode_start_if`](Self::encode_start_if), not yet counted among the command buffer's records.
+    fn encode_start_if_uncounted(
+        &mut self,
+        buffer: Option<&Buffer>,
+        offset: u64,
+        comparison: u64,
+        reference_value: u32,
+    ) -> Result<(), Error> {
         let arguments = (comparison, reference_value);
         let (kernel, test) = self.condition("encode_start_if", buffer, offset, arguments)?;
         match &test {
@@ -1291,6 +1340,12 @@ impl ComputeCommandEncoder {
     /// before its first record (`NotImplemented(PredicationDropsUngatedWork)`); a device without
     /// device addresses (`Unsupported{CommandPredication}`).
     pub fn encode_start_else(&mut self) -> Result<(), Error> {
+        let result = self.encode_start_else_uncounted();
+        self.counted(result)
+    }
+
+    /// [`encode_start_else`](Self::encode_start_else), not yet counted among the command buffer's records.
+    fn encode_start_else_uncounted(&mut self) -> Result<(), Error> {
         let kernel = self.predication_kernel()?;
         let record = self
             .predication(|predication, uploads, device| predication.start_else(uploads, device))?;
@@ -1308,6 +1363,12 @@ impl ComputeCommandEncoder {
     ///
     /// Refused, recording nothing: as [`encode_start_else`](Self::encode_start_else) refuses.
     pub fn encode_end_if(&mut self) -> Result<bool, Error> {
+        let result = self.encode_end_if_uncounted();
+        self.counted(result)
+    }
+
+    /// [`encode_end_if`](Self::encode_end_if), not yet counted among the command buffer's records.
+    fn encode_end_if_uncounted(&mut self) -> Result<bool, Error> {
         let kernel = self.predication_kernel()?;
         let (answer, record) =
             self.predication(|predication, uploads, device| predication.end_if(uploads, device))?;
@@ -1339,6 +1400,18 @@ impl ComputeCommandEncoder {
         comparison: u64,
         reference_value: u32,
     ) -> Result<(), Error> {
+        let result = self.encode_start_while_uncounted(buffer, offset, comparison, reference_value);
+        self.counted(result)
+    }
+
+    /// [`encode_start_while`](Self::encode_start_while), not yet counted among the command buffer's records.
+    fn encode_start_while_uncounted(
+        &mut self,
+        buffer: Option<&Buffer>,
+        offset: u64,
+        comparison: u64,
+        reference_value: u32,
+    ) -> Result<(), Error> {
         let arguments = (comparison, reference_value);
         let (kernel, test) = self.condition("encode_start_while", buffer, offset, arguments)?;
         let event = || Event::StartWhile(buffer.cloned(), offset, comparison, reference_value);
@@ -1358,6 +1431,12 @@ impl ComputeCommandEncoder {
     /// run, and again while that End's condition holds after each run, as
     /// [`encode_start_while`](Self::encode_start_while)'s run, laid down and refused as there.
     pub fn encode_start_do_while(&mut self) -> Result<(), Error> {
+        let result = self.encode_start_do_while_uncounted();
+        self.counted(result)
+    }
+
+    /// [`encode_start_do_while`](Self::encode_start_do_while), not yet counted among the command buffer's records.
+    fn encode_start_do_while_uncounted(&mut self) -> Result<(), Error> {
         let kernel = self.predication_kernel()?;
         self.open_loop(kernel, None, || Event::StartDoWhile)
     }
@@ -1368,6 +1447,12 @@ impl ComputeCommandEncoder {
     ///
     /// Refused, recording nothing: as [`encode_start_else`](Self::encode_start_else) refuses.
     pub fn encode_end_while(&mut self) -> Result<bool, Error> {
+        let result = self.encode_end_while_uncounted();
+        self.counted(result)
+    }
+
+    /// [`encode_end_while`](Self::encode_end_while), not yet counted among the command buffer's records.
+    fn encode_end_while_uncounted(&mut self) -> Result<bool, Error> {
         let kernel = self.predication_kernel()?;
         self.close_loop(kernel, None, || Event::EndWhile)
     }
@@ -1381,6 +1466,19 @@ impl ComputeCommandEncoder {
     ///
     /// Refused, recording nothing: as [`encode_start_if`](Self::encode_start_if) refuses.
     pub fn encode_end_do_while(
+        &mut self,
+        buffer: Option<&Buffer>,
+        offset: u64,
+        comparison: u64,
+        reference_value: u32,
+    ) -> Result<bool, Error> {
+        let result =
+            self.encode_end_do_while_uncounted(buffer, offset, comparison, reference_value);
+        self.counted(result)
+    }
+
+    /// [`encode_end_do_while`](Self::encode_end_do_while), not yet counted among the command buffer's records.
+    fn encode_end_do_while_uncounted(
         &mut self,
         buffer: Option<&Buffer>,
         offset: u64,
