@@ -4186,6 +4186,16 @@ impl IndirectRenderCommand {
             control_point_index_buffer,
             tessellation_factor_buffer,
         )?;
+        // Its control-point index buffer takes the words of the object threadgroup lengths 0 and
+        // 1 (`set_object_threadgroup_memory_length`).
+        if matches!(action, Action::DrawIndexedPatches { .. })
+            && self.descriptor().command_types.intersects(MESH_TYPES)
+        {
+            for index in 0..2 {
+                let field = RecordField::ThreadgroupMemoryLength { index, length: 0 };
+                self.edit(CALL, field, None)?;
+            }
+        }
         self.edit(CALL, RecordField::Action(action), None)
     }
 
@@ -4402,17 +4412,21 @@ impl IndirectRenderCommand {
         Err(self.render_state("set_triangle_fill_mode"))
     }
 
-    /// `setObjectThreadgroupMemoryLength:atIndex:`: taken at any index, as plain Metal takes one
-    /// at or past the descriptor's `max_object_threadgroup_memory_bind_count`, where its
-    /// validation stops it, and runs the command as before (an M4). The command
-    /// keeps none: an executed command whose mesh draw's object function has threadgroup memory
-    /// arguments is `NotImplemented(IndirectRenderCommands)`. Refused (`Invalid`): a command
-    /// of a buffer whose command types hold no mesh draw (`ObjectThreadgroupMemory`), where
-    /// Metal's process ends, and of a buffer of dispatches (`CommandKind`).
+    /// `setObjectThreadgroupMemoryLength:atIndex:`: the command's mesh draw runs its object
+    /// function with the lengths the command set, 0 where it set none, never the encoder's (the
+    /// M3 Max: an argument past a length of 16 reached the next argument, whatever the encoder
+    /// set). Taken at any index, as plain Metal takes one at or past the descriptor's
+    /// `max_object_threadgroup_memory_bind_count`, where its validation stops it (an M4); the
+    /// record holds indices below 31, which is every one a function binds, and one past them
+    /// changes nothing. Differs: the record's first two lengths are an indexed patch draw's
+    /// control-point index buffer, so such a draw on the command clears them, and a length set
+    /// there while the command holds one is dropped. Refused (`Invalid`): a command of a buffer
+    /// whose command types hold no mesh draw (`ObjectThreadgroupMemory`), where Metal's process
+    /// ends, and of a buffer of dispatches (`CommandKind`).
     pub fn set_object_threadgroup_memory_length(
         &self,
-        _length: u32,
-        _index: u32,
+        length: u32,
+        index: u32,
     ) -> Result<(), Error> {
         const CALL: &str = "set_object_threadgroup_memory_length";
         if self.of_compute() {
@@ -4424,7 +4438,19 @@ impl IndirectRenderCommand {
                 IndirectCommandBufferProblem::ObjectThreadgroupMemory,
             ));
         }
-        Ok(())
+        if index >= THREADGROUP_BUFFER_ARGUMENT_COUNT {
+            return Ok(());
+        }
+        let patch =
+            |view: &RecordView<'_>| matches!(view.action(), Action::DrawIndexedPatches { .. });
+        if index < 2 && self.icb.read_record(self.index, patch)? {
+            return Ok(());
+        }
+        let field = RecordField::ThreadgroupMemoryLength {
+            index: index as usize,
+            length,
+        };
+        self.edit(CALL, field, None)
     }
 
     /// Refuse, for `call`, a getter of a command of a buffer of dispatches (`CommandKind`,

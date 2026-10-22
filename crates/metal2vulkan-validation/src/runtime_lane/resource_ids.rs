@@ -97,7 +97,11 @@ pub(super) const DELAYED_DEALLOCATORS: [Degradation; 1] = [Degradation::HostDeal
 /// (`DriverFact::HostTransferImagesKeepTheirBytes`) and the format takes the usage at optimal
 /// tiling (the runtime enables `hostImageCopy` wherever the device has it), else a linear image
 /// where the format's linear tiling samples, else the optimal image. The size query announces the
-/// first kind as the heap's texture would.
+/// first kind as the heap's texture would. And `heap-texture-untiled-layout` where its image
+/// lies in the heap's memory in the driver's layout, not Metal's: on any driver but one whose
+/// single-sample colour images bound to memory lie as Metal lays a heap texture out
+/// (`DriverFact::ColorImagesLieAsMetalHeapTextures`), or whose route is another than the
+/// optimal image bound there (`texture/heap.rs`, `Device::device_heap_layout`).
 fn heap_texture_kinds(device: &Device, descriptor: &TextureDescriptor) -> BTreeSet<Degradation> {
     let answer = device.heap_texture_size_and_align(descriptor).unwrap();
     let metal = device
@@ -133,6 +137,10 @@ fn heap_texture_kinds(device: &Device, descriptor: &TextureDescriptor) -> BTreeS
         (
             Degradation::HeapTextureHidesAliasedWrites,
             hides && !transfer && !linear,
+        ),
+        (
+            Degradation::HeapTextureUntiledLayout,
+            hides || !facts.contains(&DriverFact::ColorImagesLieAsMetalHeapTextures),
         ),
     ])
 }

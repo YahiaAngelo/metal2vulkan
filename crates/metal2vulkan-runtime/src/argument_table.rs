@@ -1327,9 +1327,12 @@ impl ArgumentTable {
                 sampler(index)
             );
         }
-        // A table read whole binds nothing else (`stage_table` starts from the empty table).
+        // A table read whole binds nothing else (`stage_table` starts from the empty table), but
+        // for the object stage's threadgroup lengths, the encoder's, which the draw writes into
+        // the kept table after the read (`RenderLowering::refresh_bind_state`).
+        let lengths = stage != Stage::Object && !kept.threadgroup_lengths.is_empty();
         assert!(
-            kept.threadgroup_lengths.is_empty() && kept.acceleration_structures.is_empty(),
+            !lengths && kept.acceleration_structures.is_empty(),
             "{DIFFERS}: {stage:?} keeps threadgroup lengths {:?} and acceleration structures {:?}, \
              where the table read whole has none",
             kept.threadgroup_lengths,

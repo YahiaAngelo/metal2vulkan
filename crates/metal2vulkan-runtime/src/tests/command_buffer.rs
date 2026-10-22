@@ -130,9 +130,9 @@ fn metal_fails_a_command_buffer_from_an_encoder_on() {
 /// Metal's submissions of encoders of the probe shapes' kinds with these event counts before
 /// each (`checks::metal_submissions`): each render pass alone, runs of one kind of blits or
 /// computes, split where an event wait or signal lies between two encoders.
-/// Encoders Metal's GPU faults run nothing: alone, the command buffer completes with `PageFault`
-/// and every signal fires; beside another failure, that failure's error and signals stand, and
-/// the encoders either fails run nothing.
+/// From the first encoder Metal's GPU faults on nothing runs: alone, the command buffer completes
+/// with `PageFault` and every signal fires; beside another failure, that failure's error and
+/// signals stand, and the encoders either fails run nothing.
 #[test]
 fn encoders_metal_s_gpu_faults_run_nothing() {
     let page_fault = CommandBufferError::PageFault;
@@ -141,7 +141,7 @@ fn encoders_metal_s_gpu_faults_run_nothing() {
     assert_eq!(
         Failure::with_faults(None, &faulted, 4),
         Some(Failure {
-            encoders: FailedEncoders::Set(BTreeSet::from([1, 3])),
+            encoders: FailedEncoders::From(1),
             signals: FailedSignals::Every,
             error: Some(CommandBufferError::PageFault),
         })
@@ -153,7 +153,7 @@ fn encoders_metal_s_gpu_faults_run_nothing() {
             4
         ),
         Some(Failure {
-            encoders: FailedEncoders::Set(BTreeSet::from([1, 2, 3])),
+            encoders: FailedEncoders::From(1),
             signals: FailedSignals::From(2),
             error: Some(CommandBufferError::RenderTargetSize),
         })
@@ -173,7 +173,7 @@ fn encoders_metal_s_gpu_faults_run_nothing() {
         Failure::with_faults(Failure::of(Some(set), None, 4), &faulted, 4)
             .map(|f| (f.encoders, f.error)),
         Some((
-            FailedEncoders::Set(BTreeSet::from([0, 1, 3])),
+            FailedEncoders::Set(BTreeSet::from([0, 1, 2, 3])),
             Some(CommandBufferError::Injected(16))
         ))
     );
@@ -211,11 +211,7 @@ fn encoders_metal_s_gpu_faults_run_nothing() {
     let mixed = BTreeMap::from([(1, victim), (2, page_fault)]);
     assert_eq!(
         Failure::with_faults(None, &mixed, 4).map(|f| (f.encoders, f.signals, f.error)),
-        Some((
-            FailedEncoders::Set(BTreeSet::from([1, 2])),
-            FailedSignals::Every,
-            Some(victim)
-        ))
+        Some((FailedEncoders::From(1), FailedSignals::Every, Some(victim)))
     );
     // A hang fails from its encoder on, every signal firing.
     assert_eq!(

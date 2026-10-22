@@ -8,7 +8,8 @@
 //!
 //! - **A direct draw of 3 vertices or more** (1 or 2 instances) hangs Metal's GPU: the command
 //!   buffer reads `Scheduled` 0.68 to 13.2 ms after its commit and fails with
-//!   `MTLCommandBufferErrorTimeout` ([`CommandBufferError::GpuHang`]) 28.3 to 46.2 ms after it.
+//!   `MTLCommandBufferErrorTimeout` ([`CommandBufferError::GpuHang`]) 28.3 to 46.2 ms after it,
+//!   mostly 27.5 to 28.9 ms after it read `Scheduled`.
 //!   Its encoders before the pass run; the pass (its clear too) and every encoder after it run
 //!   nothing; its event signal fires. Every command buffer of its queue scheduled meanwhile reads
 //!   `Scheduled` from the hang's on, as committed or as its wait is met, and completes with no
@@ -21,9 +22,12 @@
 //! - **A direct draw of 1 or 2 vertices, or of no vertex or instance** draws nothing: the pass
 //!   clears, and every command buffer runs.
 //! - **An indexed draw** (any index count, none or of no instance too) faults Metal's GPU: the
-//!   command buffer fails with
-//!   `MTLCommandBufferErrorPageFault` ([`CommandBufferError::PageFault`]); the pass runs nothing
-//!   (no clear), its other encoders run and its signal fires, and the queue's others run.
+//!   command buffer fails with `MTLCommandBufferErrorPageFault` ([`CommandBufferError::PageFault`])
+//!   6.86 to 10.3 ms after it read `Scheduled`; the pass runs nothing (no clear), the encoder
+//!   before it runs and its signal fires, and the queue's others run, the one committed at once
+//!   reading `Scheduled` before it completed and completing after it. The encoders after the pass
+//!   were lost to the GPU's recovery where the GPU ran just before, the runtime's answer (they ran
+//!   where it was idle before, as after 3 s idle: `CommandBufferError::PageFault`).
 //! - **An indirect draw** (of 3 vertices or none) **or an indexed indirect one** fails the command
 //!   buffer as a victim of the GPU's recovery, `MTLCommandBufferErrorInternal`
 //!   ([`CommandBufferError::GpuRecoveryVictim`]), with the indexed draw's other answers.
@@ -56,8 +60,13 @@ use std::time::{Duration, Instant};
 /// 5.06 ms.
 const SCHEDULED: Duration = Duration::from_micros(5_060);
 
-/// The earliest Metal failed a command buffer its GPU hung at after its commit: 32.7 ms.
-const HANG: Duration = Duration::from_micros(32_700);
+/// The earliest Metal failed a command buffer its GPU hung at after it read `Scheduled`:
+/// 27.5 ms.
+const HANG: Duration = Duration::from_micros(27_500);
+
+/// The earliest Metal completed a command buffer its GPU faulted at, or failed as a victim of its
+/// recovery, after it read `Scheduled`: 6.86 ms.
+const FAULT: Duration = Duration::from_micros(6_860);
 
 /// When the host meets the event wait of the queue's command buffer it meets during a hang,
 /// after the draw's commit.
@@ -134,6 +143,11 @@ impl Answer {
     /// From its commit to its scheduled handler.
     fn to_scheduled(&self) -> Duration {
         self.scheduled - self.committed
+    }
+
+    /// From its scheduled handler to its completed handler.
+    fn from_scheduled(&self) -> Duration {
+        self.completed - self.scheduled
     }
 
     /// It completed with no error.
@@ -467,13 +481,13 @@ fn check(outcome: &Outcome, expected: Expected, label: &str) {
             assert_eq!(drawn.status, CommandBufferStatus::Error, "{label}");
             assert_eq!(drawn.error, Some(CommandBufferError::GpuHang), "{label}");
             assert!(
-                drawn.took() >= HANG,
-                "{label}: failed in {:?}",
-                drawn.took()
+                drawn.from_scheduled() >= HANG,
+                "{label}: failed {:?} after it read Scheduled",
+                drawn.from_scheduled()
             );
             let scheduled = drawn.to_scheduled();
             assert!(
-                (SCHEDULED..HANG).contains(&scheduled),
+                scheduled >= SCHEDULED,
                 "{label}: read Scheduled {scheduled:?} after its commit"
             );
             // The queue's command buffers committed during the hang read `Scheduled` from the
@@ -510,12 +524,21 @@ fn check(outcome: &Outcome, expected: Expected, label: &str) {
         Expected::Fails(error) => {
             assert_eq!(drawn.status, CommandBufferStatus::Error, "{label}");
             assert_eq!(drawn.error, Some(error), "{label}");
-            assert!(!outcome.cleared, "{label}: the pass ran nothing");
-            assert_eq!(
-                outcome.marks,
-                marked(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
-                "{label}"
+            assert!(
+                drawn.from_scheduled() >= FAULT,
+                "{label}: failed {:?} after it read Scheduled",
+                drawn.from_scheduled()
             );
+            // The queue's command buffer committed at once reads `Scheduled` during the fault and
+            // completes after it.
+            assert!(
+                at_once.scheduled < drawn.completed && at_once.completed >= drawn.completed,
+                "{label}: at once read Scheduled {:?} and completed {:?} after its commit",
+                at_once.to_scheduled(),
+                at_once.took()
+            );
+            assert!(!outcome.cleared, "{label}: the pass ran nothing");
+            assert_eq!(outcome.marks, marked(&[0, 3, 4, 5, 6, 7, 8, 9]), "{label}");
         }
     }
 }
@@ -562,7 +585,9 @@ fn a_direct_draw_of_type_nine_of_fewer_vertices_draws_nothing() {
 }
 
 /// An indexed draw of type 9 fails its command buffer with `PageFault`, and an indirect one with
-/// `GpuRecoveryVictim`: the pass runs nothing, everything else runs.
+/// `GpuRecoveryVictim`, no sooner than Metal's did: the pass and the encoders after it run
+/// nothing, the encoder before it and the queue's other command buffers run, its event signal
+/// fires.
 #[test]
 fn indexed_draws_of_type_nine_fault_and_indirect_ones_are_victims() {
     let indexed = |indices, instances| Draw::Indexed { indices, instances };

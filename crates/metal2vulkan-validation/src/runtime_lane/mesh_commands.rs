@@ -1227,3 +1227,109 @@ fn a_pipeline_on_a_buffer_of_no_draw_of_its_kind_is_refused() {
         }
     });
 }
+
+/// An executed command's mesh draw runs its object function with the threadgroup memory lengths
+/// the command set, never the encoder's, as Metal does (the M3 Max under macOS 27.0.1: an
+/// encoder's own draw and each case below, `icb_object_threadgroup`'s function): argument 0 of
+/// 256 bytes keeps `a`'s 64 words off `b`, so b[0] and a[63] read 0xb and 0xa; one of 16 bytes
+/// lets them reach `b`, and a[63], past both, reads 0. From the CPU's records at the commit, and
+/// from the records a host step reads where an encoder made the buffer resident for writing.
+#[test]
+fn a_command_s_mesh_draw_runs_with_its_own_object_threadgroup_lengths() {
+    on_device(|device, _| {
+        let lane = Lane::new(device);
+        let bitcode = llvm_assemble(&engine_dir().join("icb_object_threadgroup.ll")).unwrap();
+        let library = device.new_library_with_air(&bitcode).unwrap();
+        let state = lane
+            .mesh_pipeline(
+                &library,
+                Some("icb_object_threadgroup_object"),
+                "icb_object_threadgroup_mesh",
+                "icb_object_threadgroup_fragment",
+                1,
+            )
+            .unwrap();
+        let (one, threads) = (Size::new(1, 1, 1), Size::new(32, 1, 1));
+        // The encoder's lengths, the command's, and Metal's b[0] and a[63].
+        let cases: [([u32; 2], [u32; 2], [u32; 2]); 2] = [
+            ([16, 16], [256, 16], [0xb, 0xa]),
+            ([256, 16], [16, 16], [0xa, 0]),
+        ];
+        let set_encoder = |encoder: &mut RenderCommandEncoder, lengths: [u32; 2]| {
+            for (index, length) in (0u32..).zip(lengths) {
+                encoder
+                    .set_object_threadgroup_memory_length(length, index)
+                    .unwrap();
+            }
+        };
+        let read = |out: &Buffer| {
+            let bytes = read_buffer(out, 0, 8).unwrap();
+            let words = bytes.as_chunks::<4>().0;
+            [0, 1].map(|at| u32::from_le_bytes(words[at]))
+        };
+        for written in [false, true] {
+            for (encoder_lengths, command_lengths, metal) in cases {
+                let out = words(device, &[0; 4]);
+                let mut descriptor = IndirectCommandBufferDescriptor::new();
+                descriptor.command_types = IndirectCommandType::DRAW_MESH_THREADGROUPS;
+                descriptor.inherit_pipeline_state = false;
+                descriptor.inherit_buffers = false;
+                descriptor.max_object_buffer_bind_count = 1;
+                descriptor.max_mesh_buffer_bind_count = 1;
+                descriptor.max_object_threadgroup_memory_bind_count = 2;
+                let icb = device
+                    .new_indirect_command_buffer(&descriptor, 1, ResourceOptions::shared())
+                    .unwrap();
+                let command = icb.indirect_render_command_at(0).unwrap();
+                command.set_render_pipeline_state(&state).unwrap();
+                command.set_object_buffer(Some(&out), 0, 0).unwrap();
+                for (index, length) in (0u32..).zip(command_lengths) {
+                    command
+                        .set_object_threadgroup_memory_length(length, index)
+                        .unwrap();
+                }
+                command
+                    .draw_mesh_threadgroups(one, threads, threads)
+                    .unwrap();
+                if written {
+                    // An earlier encoder makes the buffer resident for writing: its execution's
+                    // commands are then a host step's.
+                    let queue = device.new_command_queue().unwrap();
+                    let command_buffer = queue.command_buffer().unwrap();
+                    let mut encoder = command_buffer.compute_command_encoder().unwrap();
+                    encoder
+                        .use_resource(icb.as_resource(), ResourceUsage::WRITE)
+                        .unwrap();
+                    encoder.end_encoding().unwrap();
+                    command_buffer.commit().unwrap();
+                    command_buffer.wait_until_completed_for(WAIT).unwrap();
+                }
+                let name = format!("{encoder_lengths:?} {command_lengths:?} written {written}");
+                let setup =
+                    |encoder: &mut RenderCommandEncoder| set_encoder(encoder, encoder_lengths);
+                lane.execute_after(&name, &icb, 1, setup, &[&out]).unwrap();
+                assert_eq!(read(&out), metal, "{name} on {}", device.name());
+            }
+        }
+        // The encoder's own draw, under each case's encoder lengths, as Metal's.
+        for (encoder_lengths, _, _) in &cases {
+            let out = words(device, &[0; 4]);
+            let icb = lane.icb(IndirectCommandType::DRAW_MESH_THREADGROUPS, true, 1);
+            let name = format!("encoder {encoder_lengths:?}");
+            let setup = |encoder: &mut RenderCommandEncoder| {
+                set_encoder(encoder, *encoder_lengths);
+                encoder.set_render_pipeline_state(&state).unwrap();
+                encoder.set_object_buffer(Some(&out), 0, 0).unwrap();
+                encoder
+                    .draw_mesh_threadgroups(one, threads, threads)
+                    .unwrap();
+            };
+            lane.execute_after(&name, &icb, 1, setup, &[&out]).unwrap();
+            let metal = match encoder_lengths[0] {
+                256 => [0xb, 0xa],
+                _ => [0xa, 0],
+            };
+            assert_eq!(read(&out), metal, "{name} on {}", device.name());
+        }
+    });
+}
