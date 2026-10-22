@@ -1912,7 +1912,10 @@ pub fn index_rewrite_module(
 }
 
 mod gather;
-pub use gather::{index_gather_module, GatherDraw, IndexGather, IndexGatherModule};
+pub use gather::plan::{index_gather_plan_module, IndexGatherPlanModule};
+pub use gather::{
+    index_gather_module, GatherDraw, IndexGather, IndexGatherModule, IndirectGatherDraw,
+};
 
 #[cfg(test)]
 mod tests;
