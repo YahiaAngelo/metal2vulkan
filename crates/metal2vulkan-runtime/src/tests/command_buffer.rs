@@ -237,7 +237,7 @@ fn encoders_metal_s_gpu_faults_run_nothing() {
 fn a_command_buffer_error_names_whose_failure_it_is() {
     use crate::error::{
         FailureOrigin::{Metal, Runtime},
-        HostStepObject, MemoryKind, MeshRecordsOverflow, PipelineCreationCause, VkResultCode,
+        MemoryKind, MeshRecordsOverflow, PipelineCreationCause, VkResultCode,
     };
     use crate::sparse::SparseProblem;
     use CommandBufferError as E;
@@ -289,7 +289,6 @@ fn a_command_buffer_error_names_whose_failure_it_is() {
             Runtime,
             1,
         ),
-        (E::HostStepObject(HostStepObject::Image), Runtime, 1),
         (E::EncodedUseRebound, Runtime, 1),
     ] {
         assert_eq!(

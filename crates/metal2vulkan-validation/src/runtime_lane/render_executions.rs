@@ -2464,11 +2464,7 @@ fn a_host_step_s_variant_of_a_state_made_after_the_commit_shares_the_state_s_sam
 /// `render_arguments::SAMPLED`), binds the device's neutrals its plan names (its set 1's heap
 /// array's neutral element and its argument samplers' neutrals), which the state's creation made
 /// on the program's thread: the step, on the scheduler's thread inside the exit guard's section,
-/// makes no image, memory or submission of its own. Before, the step made the neutral image
-/// itself (`vkCreateImage`, outside the guard's table), and in builds with debug assertions the
-/// section's table ended the process (`SIGABRT`, "Unable to load create_image"), nothing else on
-/// the test's own device having made a neutral of that kind; a release build made it on the
-/// scheduler's thread. The buffer's records are the GPU's to write (an earlier blit copied one),
+/// makes no image, memory or submission of its own. The buffer's records are the GPU's to write (an earlier blit copied one),
 /// so its execution is a host step's; the command buffer waits for an event, and once the commit
 /// returned the test makes the state, encodes command 0 with it and the argument buffer on the
 /// CPU, and signals. The draw writes Metal's texels, under the validation layer, announcing the

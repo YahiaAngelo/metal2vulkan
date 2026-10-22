@@ -4334,13 +4334,9 @@ fn recording_error(device: &Device, error: Error) -> CommandBufferError {
 
 /// The command-buffer error of a host step whose recording failed with `error`: a refusal, what
 /// `commit` refuses where the CPU wrote the records, is [`CommandBufferError::Refused`], kept in
-/// `refusal`; an object the step needed and nothing made before it is
-/// [`CommandBufferError::HostStepObject`] of its kind; a Vulkan failure, a lost device, memory,
-/// and the runtime's own broken invariant fail it as a recording does ([`recording_error`]).
+/// `refusal`; a Vulkan failure, a lost device, memory, and the runtime's own broken invariant fail
+/// it as a recording does ([`recording_error`]).
 fn step_error(device: &Device, error: Error, refusal: &mut Option<Error>) -> CommandBufferError {
-    if let Error::HostStepObject(object) = error {
-        return CommandBufferError::HostStepObject(object);
-    }
     let refused = match &error {
         Error::Compile(metal2vulkan::error::Error::Internal(_)) => false,
         Error::Invalid(_)

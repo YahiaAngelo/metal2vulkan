@@ -42,11 +42,12 @@
 //!   or binds per-bind strides that are not dynamic state; a draw in a run of another shape; a
 //!   command whose buffers ask another variant all the same (the commit compiles that variant where
 //!   the encoder's state asks it, an inherited buffer slot bound with bytes among it); and a state
-//!   made after the commit. The step makes no neutral (`neutral.rs`): the commit makes those of the
-//!   plans it settles, and a state made with `supportIndirectCommandBuffers` made, at its creation,
-//!   those its variants' plans may bind with nothing bound (`GraphicsState::make_neutrals`). Nor
-//!   does it make an image, a render pass or a framebuffer (`creation.rs`): one it needs that
-//!   nothing made before fails the command buffer `CommandBufferError::HostStepObject`.
+//!   made after the commit. The commit makes the neutrals of the plans it settles, a state made
+//!   with `supportIndirectCommandBuffers` made, at its creation, those its variants' plans may bind
+//!   with nothing bound (`GraphicsState::make_neutrals`), and the commit makes the runs' passes
+//!   and memoryless backings ahead (`ahead.rs`), so the step, a serial point of the command
+//!   buffers' stream, seldom makes one; what nothing made before it, the step makes itself
+//!   (`neutral.rs`, `creation.rs`).
 //! - **Each command** draws as the encoder's `draw_primitives`, `draw_indexed_primitives` or
 //!   `draw_patches` would, through the same steps (`RenderCommandEncoder::draw`; part 5c for the
 //!   indexed and patch draws), into the instance the execution was encoded in, with the
@@ -1813,9 +1814,9 @@ impl RenderLowering {
         let device = self.core.device();
         let stages = &variant.pipeline().stages;
         device.degrade_argument_pixel_samplers(stages, argument_samplers.take(device));
-        // The neutrals the plan binds, which the step makes none of (`neutral.rs`). One not made
-        // here (the device out of memory) leaves the variant settled: the step refuses the
-        // neutral where it binds it, typed (`CommandBufferError::HostStepObject`).
+        // The neutrals the plan binds, made here so the step need not (`neutral.rs`). One not made
+        // here (the device out of memory) leaves the variant settled: the step makes it where it
+        // binds it.
         let _ = crate::binding::make_neutrals(self.core.device(), &plan);
         let graphics = &variant.pipeline().graphics;
         let storage = self.storage_attachments(graphics)?;
@@ -2664,9 +2665,9 @@ impl DeferredPass {
     }
 
     /// Make, at the commit of `command_buffer` and on its thread, what the host step that
-    /// records the pass needs and would otherwise make on the scheduler's thread, which makes
-    /// no render pass, framebuffer or image (`creation.rs`): `ahead.rs`. Once; a part it fails
-    /// to make the step refuses as it meets it (`CommandBufferError::HostStepObject`).
+    /// records the pass needs and would otherwise make on the scheduler's thread, a serial point
+    /// of the command buffers' stream: `ahead.rs`. Once; a part it fails to make the step makes
+    /// as it meets it.
     pub(crate) fn make_ahead(&self, command_buffer: &CommandBuffer) {
         if self.ahead.get().is_some() {
             return;

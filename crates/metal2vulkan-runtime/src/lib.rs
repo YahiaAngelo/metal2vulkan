@@ -254,7 +254,6 @@ pub use dynamic_library::DynamicLibrary;
 pub use error::DynamicLibraryError;
 pub use error::ExtensionFeature;
 pub use error::FailureOrigin;
-pub use error::HostStepObject;
 pub use error::InstanceExtensionRequired;
 pub use error::MetalError;
 pub use error::Nil;

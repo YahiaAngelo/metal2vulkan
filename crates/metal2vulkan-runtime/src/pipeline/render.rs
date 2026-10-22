@@ -27,8 +27,8 @@
 //! - **Neutrals**. A state an indirect command buffer's commands may draw (made with
 //!   `supportIndirectCommandBuffers`) makes, at its creation, the device's neutrals its compiled
 //!   variants' plans may bind with nothing bound (`binding::make_neutrals`): an execution's host
-//!   step may draw it, though it was made after the commit, and a host step makes no neutral
-//!   (`neutral.rs`).
+//!   step may draw it, though it was made after the commit, and a neutral made before is one the
+//!   step, a serial point of the command buffers' stream, need not make (`neutral.rs`).
 //!
 //! The descriptor names the compile layer's functions ([`Function::function_descriptor`] gives
 //! one of a runtime function).
@@ -1613,19 +1613,19 @@ impl GraphicsState {
 
     /// Make the device's neutrals the plans of its compiled variants, its base and its
     /// large-buffer form, may bind (`binding::make_neutrals`), at the state's creation, which
-    /// may wait, so that no draw's encoding makes one: a neutral image takes memory of its own,
-    /// and NVIDIA's `vkAllocateMemory` waited 2.37 s for other processes' GPU work inside an
-    /// encoding. Before, only a state that indirect command buffers may draw
-    /// made them here: an execution's host step may draw it (one made after the commit
-    /// included, `render/executions.rs`), and a host step makes no neutral (`neutral.rs`). Each
-    /// plan is the one for nothing bound, which writes a neutral at every slot a bind could leave
-    /// unbound, each of the kind its function declares, the kind a bound texture the slot cannot
-    /// take is replaced with too; another variant of the state, of the same functions, declares
-    /// the same textures, samplers and heap arrays. The commit makes those of the variants it
-    /// settles (`RenderCommandEncoder::settle_draw_of`), a shader-side stencil's neutral among
-    /// them; a host step's draw of a state made after the commit on a variant whose plan asks
-    /// for a neutral neither made is refused. Nothing where the state is made in a host step (a
-    /// twin: the state it is a twin of, of the same functions, made them). A plan or a neutral
+    /// may wait, so that neither a draw's encoding nor a host step, a serial point of the command
+    /// buffers' stream that may draw it (an execution's, of a state made after the commit
+    /// included, `render/executions.rs`), makes one: a neutral image takes memory of its own, and
+    /// NVIDIA's `vkAllocateMemory` waited 2.37 s for other processes' GPU work inside an encoding.
+    /// Each plan is the one for nothing bound, which writes a neutral at every slot a bind could
+    /// leave unbound, each of the kind its function declares, the kind a bound texture the slot
+    /// cannot take is replaced with too; another variant of the state, of the same functions,
+    /// declares the same textures, samplers and heap arrays. The commit makes those of the
+    /// variants it settles (`RenderCommandEncoder::settle_draw_of`), a shader-side stencil's
+    /// neutral among them; a host step's draw of a state made after the commit on a variant whose
+    /// plan asks for a neutral neither made makes it (`neutral.rs`). Nothing where the state is
+    /// made in a host step (a twin: the state it is a twin of, of the same functions, made them).
+    /// A plan or a neutral
     /// that fails is left to the draw that binds it, which meets it as it is then. Then room kept
     /// in the memory the encodings place their own resources in (`Device::keep_room`).
     fn make_neutrals(&self) {
