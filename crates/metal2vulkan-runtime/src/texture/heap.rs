@@ -29,8 +29,10 @@
 //!   (`AliasRoute::Lossless`), holding what that memory held, as a heap's texture holds what its
 //!   bytes held; the heap's bytes keep what they held, where Metal's compressed bytes change as the
 //!   texture is written (no layout of its samples either way; `heap-texture-lossless-layout` per
-//!   texture). One Metal keeps uncompressed lays its samples out in the heap's bytes, which no
-//!   route holds yet: `NotImplemented(HostHeapUncompressedMultisample)`. A compressed one takes
+//!   texture). One Metal keeps uncompressed, which lays its samples out in the heap's bytes (each
+//!   pixel's samples side by side in Metal's tiles), takes that route too, its samples apart from
+//!   the heap's bytes (`heap-texture-untiled-layout` per texture), as does one of a sample count
+//!   whose layout is not measured. A compressed one takes
 //!   that route in any heap whose memory its optimal image does not take where the device's linear
 //!   images cannot hold it (an NVIDIA GPU's `Shared` heap), announced alike, where it was refused
 //!   `HeapTextureTiling` as the device's lack. So does an uncompressed one there (a depth texture
@@ -1971,10 +1973,10 @@ impl Device {
     /// image takes copies and the moves fit the device; elsewhere it takes the routes above,
     /// announced untiled when it is made.
     ///
-    /// A multisample texture Metal keeps losslessly compressed (`Untiled::LOSSLESS_MULTISAMPLE`) is
-    /// its optimal image in memory of its own (`AliasRoute::Lossless`); any other, whose samples
-    /// Metal lays out in the heap's bytes or whose layout is not measured,
-    /// `NotImplemented(HostHeapUncompressedMultisample)`.
+    /// A multisample texture is its optimal image in memory of its own (`AliasRoute::Lossless`):
+    /// one Metal keeps losslessly compressed (`Untiled::LOSSLESS_MULTISAMPLE`), and one whose
+    /// samples Metal lays out in the heap's bytes or whose layout is not measured, announced
+    /// untiled when it is made.
     fn host_heap_plan(
         &self,
         call: &'static str,
@@ -1986,11 +1988,6 @@ impl Device {
             return Err(Error::NotImplemented(RuntimeGap::HeapTextureMemory));
         }
         if p.layout.samples > 1 {
-            if p.metal_layout != HeapLayout::Untiled(Untiled::LOSSLESS_MULTISAMPLE) {
-                return Err(Error::NotImplemented(
-                    RuntimeGap::HostHeapUncompressedMultisample,
-                ));
-            }
             let facts = self
                 .shared()
                 .textures

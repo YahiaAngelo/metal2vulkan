@@ -1131,9 +1131,8 @@ pub enum RuntimeGap {
     /// the heap's. Memory of its own would lose the heap's aliasing. (A texture whose linear image
     /// needs extended usage is checked format by format, not refused with it.) In a heap over host
     /// pages, also a texture no linear image over the pages serves and no shadow of the heap's
-    /// bytes holds, and one with a depth twin. A multisample texture there that Metal keeps
-    /// compressed is made in memory of its own, and any other is
-    /// [`RuntimeGap::HostHeapUncompressedMultisample`].
+    /// bytes holds, and one with a depth twin. A multisample texture there is made in memory of
+    /// its own.
     HeapTextureMemory,
     /// A visible-function table of more entries than one buffer of the device's
     /// `max_buffer_length` holds words for, or than its size word holds: the runtime keeps a
@@ -1500,18 +1499,6 @@ pub enum RuntimeGap {
         /// The descriptor's pixel format.
         pixel_format: PixelFormat,
     },
-    /// A multisample texture in a heap over host pages (`Device::new_heap_with_bytes_no_copy`)
-    /// that Metal keeps uncompressed: without `allowGPUOptimizedContents`, of `ShaderWrite` or
-    /// `PixelFormatView` usage (a colour format), or whose sample grid (`width x 2·height` at 2
-    /// samples, `2·width x 2·height` at 4) is under 16 on its shorter side. Metal makes it and lays
-    /// its samples out in the heap's bytes (each pixel's samples side by side in Metal's tiles,
-    /// measured on an Apple M4 under macOS 27.0.1 and an M3 Max under 26.7, alike), which a
-    /// buffer over them reads and writes; no route of the runtime's holds them there yet. Also a
-    /// sample count Apple's GPUs do not make (8), whose layout is not measured, and an
-    /// uncompressed `Depth32Float_Stencil8` texture's, also not measured. One Metal keeps
-    /// compressed is made, in memory of its own (`heap-texture-lossless-layout`). The heap size
-    /// query answers Metal's size and alignment for it.
-    HostHeapUncompressedMultisample,
     /// An unbalanced command-predication record (`ComputeCommandEncoder::encode_end_if` and the
     /// other ends, or `encode_start_else`, with no block open; `encode_start_if` on a nil buffer
     /// with none) that is its unit's first record, after dispatches of the unit (of this encoder,

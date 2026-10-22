@@ -104,8 +104,9 @@
 //!   the consumer's report), and so does a one-sample one, of every type and level count,
 //!   compressed or not (every one of 14552 answers each on the M4 and the M3 Max, 2D, and 12330 on
 //!   the M4, 2D arrays, cubes and cube arrays). Over host pages a compressed one lies in memory of
-//!   its own and is announced `heap-texture-lossless-layout`; an uncompressed one is refused
-//!   (`RuntimeGap::HostHeapUncompressedMultisample`, `heap.rs`). In any
+//!   its own and is announced `heap-texture-lossless-layout`; an uncompressed one lies in memory
+//!   of its own too, its samples apart from the heap's bytes (`heap-texture-untiled-layout`,
+//!   `heap.rs`). In any
 //!   heap one whose image the heap's memory or Metal's answer cannot hold lies in memory of its own
 //!   too.
 //! - **Two aspects.** A single-sample `Depth32Float_Stencil8` texture lies in two planes, its depth

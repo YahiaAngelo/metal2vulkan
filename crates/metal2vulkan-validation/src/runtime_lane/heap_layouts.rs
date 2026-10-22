@@ -32,8 +32,8 @@
 //! - **Multisample textures**. One Metal keeps losslessly compressed lies in memory of its own:
 //!   counted and announced `heap-texture-lossless-layout`, usable (a pass clears and resolves it),
 //!   the heap's bytes keeping every byte they held; the heap's detach is refused while it lives (no
-//!   stand-in zeroes samples). One Metal keeps uncompressed is refused
-//!   `NotImplemented(HostHeapUncompressedMultisample)`. The size query answers at least Metal's
+//!   stand-in zeroes samples). One Metal keeps uncompressed lies in memory of its own too: counted
+//!   and announced `heap-texture-untiled-layout`, usable. The size query answers at least Metal's
 //!   for both.
 
 use super::degrade_notices::{counts, on_device, on_device_with};
@@ -1185,13 +1185,15 @@ fn block_rows_lie_as_their_level_lays_them_out(
 /// counted and announced (`heap-texture-lossless-layout`, the first of its kind, with its ID); the
 /// heap's detach refused while it lives (`NotImplemented(DetachTextures)`); a pass clears it and
 /// resolves it into a texture that reads the clear colour in every texel, and the heap's bytes
-/// keep every byte they held. Without it, which Metal keeps uncompressed, refused
-/// `NotImplemented(HostHeapUncompressedMultisample)`. The size query answers at least Metal's for
+/// keep every byte they held. Without it, which Metal keeps uncompressed (its samples side by side
+/// in Metal's tiles in the heap's bytes), made in memory of its own too, counted and announced
+/// `heap-texture-untiled-layout` with its ID; a pass clears and resolves it alike, the heap's
+/// bytes kept. The size query answers at least Metal's for
 /// each on every device (66048 and 65536 bytes at 128; and measured for the
 /// uncompressed one where the device cannot hold its samples in the heap's bytes, an NVIDIA GPU's:
 /// no optimal image in host-visible memory, no multisample linear image).
 #[test]
-fn a_host_heap_s_compressed_multisample_texture_lies_apart_from_its_bytes() {
+fn a_host_heap_s_multisample_textures_lie_apart_from_its_bytes() {
     on_device(|device, messages| {
         if device.properties().supports_texture_sample_count(4) != Ok(true) {
             eprintln!("HEAPLAYOUT multisample: the device takes no 4-sample texture");
@@ -1214,10 +1216,6 @@ fn a_host_heap_s_compressed_multisample_texture_lies_apart_from_its_bytes() {
                 Ok(answer) => assert!(answer.size >= size && answer.align >= 128, "{answer:?}"),
                 Err(error) => panic!("the size query: {error:?}"),
             }
-        }
-        match heap.new_texture_at_offset(&plain, OFFSET) {
-            Err(Error::NotImplemented(RuntimeGap::HostHeapUncompressedMultisample)) => {}
-            other => panic!("an uncompressed multisample texture: {other:?}"),
         }
         let before = named(HEAP, 11);
         mapping.write(0, &before);
@@ -1242,37 +1240,50 @@ fn a_host_heap_s_compressed_multisample_texture_lies_apart_from_its_bytes() {
             Err(Error::NotImplemented(RuntimeGap::DetachTextures)) => {}
             other => panic!("a detach with a multisample texture: {other:?}"),
         }
+        // Without it: made apart too, its samples' layout announced.
+        let untiled = Degradation::HeapTextureUntiledLayout;
+        let untiled_objects = device
+            .degraded_objects(untiled)
+            .expect("a kind counted per texture");
+        let uncompressed = heap.new_texture_at_offset(&plain, 3 * OFFSET).unwrap();
+        assert_eq!(
+            layout_notices(messages),
+            [(untiled, Some(uncompressed.object_id()))]
+        );
+        assert_eq!(device.degraded_objects(untiled), Some(untiled_objects + 1));
         let mut target = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 64, 64, false);
         target.usage = TextureUsage::RENDER_TARGET;
         target.resource_options = shared();
         let resolved = device.new_texture(&target).unwrap();
-        let mut pass = RenderPassDescriptor::new();
-        let color = &mut pass.color_attachments[0];
-        color.texture = Some(texture.clone());
-        color.load_action = LoadAction::Clear;
-        color.clear_color = ClearColor::new(0.2, 0.4, 0.6, 1.0);
-        color.store_action = StoreAction::MultisampleResolve;
-        color.resolve_texture = Some(resolved.clone());
         let queue = device.new_command_queue().unwrap();
-        let command_buffer = queue.command_buffer().unwrap();
-        let encoder = command_buffer.render_command_encoder(&pass).unwrap();
-        encoder.end_encoding().unwrap();
-        run(&command_buffer);
-        let mut texels = vec![0u8; 64 * 64 * 4];
-        let region = Region::new_2d(0, 0, 64, 64);
-        resolved
-            .get_bytes(&mut texels, 64 * 4, 0, region, 0, 0)
-            .unwrap();
-        assert!(
-            texels.chunks(4).all(|texel| texel == [51, 102, 153, 255]),
-            "resolved: {:?}",
-            &texels[..16]
-        );
+        for source in [&texture, &uncompressed] {
+            let mut pass = RenderPassDescriptor::new();
+            let color = &mut pass.color_attachments[0];
+            color.texture = Some(source.clone());
+            color.load_action = LoadAction::Clear;
+            color.clear_color = ClearColor::new(0.2, 0.4, 0.6, 1.0);
+            color.store_action = StoreAction::MultisampleResolve;
+            color.resolve_texture = Some(resolved.clone());
+            let command_buffer = queue.command_buffer().unwrap();
+            let encoder = command_buffer.render_command_encoder(&pass).unwrap();
+            encoder.end_encoding().unwrap();
+            run(&command_buffer);
+            let mut texels = vec![0u8; 64 * 64 * 4];
+            let region = Region::new_2d(0, 0, 64, 64);
+            resolved
+                .get_bytes(&mut texels, 64 * 4, 0, region, 0, 0)
+                .unwrap();
+            assert!(
+                texels.chunks(4).all(|texel| texel == [51, 102, 153, 255]),
+                "resolved: {:?}",
+                &texels[..16]
+            );
+        }
         let after = mapping.read(0..HEAP);
         let differ = (0..HEAP).filter(|&i| after[i] != before[i]).count();
         assert_eq!(differ, 0, "the heap's bytes changed");
-        drop((texture, resolved, heap));
+        drop((texture, uncompressed, resolved, heap));
         drop(mapping);
-        eprintln!("HEAPLAYOUT multisample: compressed made apart, uncompressed refused");
+        eprintln!("HEAPLAYOUT multisample: compressed and uncompressed made apart");
     });
 }
