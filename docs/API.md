@@ -1816,14 +1816,18 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   (`DriverFact::TileStoreIsMetals`), nor under `TileStorePolicy::Exact` for an attachment the load
   pass rewrites as Metal's store leaves it.
 - `metal2vulkan-degrade-two-plane-buffer-blit` (precision). `TwoPlaneBufferBlit`: A blit between a
-  buffer and a level of `RGB10A8_2P_XR10` or its sRGB twin whose width is not a multiple of 4: it
-  moves the texels at the rows the texture holds them in, where Metal's blit addresses the level's
-  rows `⌊4 w / 16⌋ · 16` bytes apart, short of its rows, and so moves texels into and out of other
-  rows (into the texture overlapping rows, in an order that varies). Cost: the texels move between
-  the buffer's rows and the texture's as getBytes and replaceRegion move them; Metal's blit
-  addresses the texture's rows floor(4w/16)*16 bytes apart where they lie align(4w,16) bytes apart,
-  so out of the texture it reads texels of earlier rows and padding (0) into later rows of the
-  buffer, and into it writes rows over each other in an order that varies.
+  buffer and a level of `RGB10A8_2P_XR10` or its sRGB twin whose width is not a multiple of 4,
+  where Metal's blit addresses the level's rows `⌊4 w / 16⌋ · 16` bytes apart, short of where they
+  lie, and so moves texels into and out of other rows and the bytes between them. A 2D texture or
+  array of one level is blitted at Metal's rows; announced there are a blit into it whose rows
+  meet, and a blit out of a texture of the device's memory that reads bytes between its rows after
+  a fill or a blit wrote some. Any other such texture (more levels, a view, 1D, 3D, a surface's)
+  moves the texels at the rows the texture holds them in. Cost: where rows meet in a blit into the
+  texture the earlier row's bytes stand, where Metal's GPU writes them in an order that depends on
+  the copy's size; a blit out of a texture of the device's memory reads the bytes between its rows
+  that a fill or a blit wrote as 0, where Metal's reads them back; and a texture of more than one
+  level, a view, a 1D or 3D texture or a surface's moves its texels at the rows it holds them in,
+  where Metal's blit addresses its rows floor(4w/16)*16 bytes apart.
 - `metal2vulkan-degrade-unadvertised-vertex-simdgroups` (validity). `UnadvertisedVertexSimdgroups`:
   A render pipeline state whose vertex function runs simdgroup functions on a driver measured to run
   a vertex function's subgroup operations as Metal does though its `subgroupSupportedStages` leaves
@@ -2228,9 +2232,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   device reports maps to them. Cost: the device gives no answer for them (`PrivateAnswer::value` is
   `None`); Metal's measured answers on Apple's GPUs ride beside, never as this device's.
 - `metal2vulkan-degrade-unpacked-fill-color` (precision). `UnpackedFillColor`: A color fill
-  (`BlitCommandEncoder::fill_texture_color`) whose color is packed in a format whose fills do not
-  follow the color: compressed, 4:2:2, depth, stencil, two-plane or padded 10-bit. Cost: every unit
-  of the region holds zero bytes, whatever the color, where Metal's constant is its own process's.
+  (`BlitCommandEncoder::fill_texture_color`) whose color is packed in a format Metal packs no color
+  in: compressed, 4:2:2, depth, stencil, two-plane, YCbCr, padded 10-bit, `Invalid` or a private
+  format. Metal fills bytes of the calling thread's stack there, which hold the last color fill's
+  packed texel only where no other call used them since. Cost: every unit of the region holds the
+  command buffer's last packed texel over zeros, whatever the color, where Metal's bytes are its
+  stack's.
 - `metal2vulkan-degrade-unsized-points` (precision). `UnsizedPoints`: A draw of points that
   rasterizes, of some vertices and instances, under a render pipeline state whose vertex function
   writes no `[[point_size]]` and whose input primitive topology class is not the point class: a

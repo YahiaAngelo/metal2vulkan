@@ -5336,8 +5336,13 @@ impl Texture {
         if host.host_len().is_none_or(|len| (bytes.len() as u64) < len) {
             return Err(invalid(CALL, Problem::Copy(CopyProblem::BufferRange)));
         }
-        // A two-plane texture's color words, each texel's first word.
-        if planes {
+        // A two-plane texture's color words, each texel's first word; a heap shadow's are the
+        // heap's bytes, which `read_region` reads (as `replace_region` writes them).
+        let heap_shadow = matches!(
+            &self.0.storage,
+            Storage::Image(image) if matches!(image.owner, Owner::HeapShadow(_))
+        );
+        if planes && !heap_shadow {
             let mut words = vec![0; host.packed_len() as usize];
             self.read_color_words(&image_region, &mut words)?;
             host.unpack(&words, bytes);

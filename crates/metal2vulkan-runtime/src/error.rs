@@ -604,6 +604,11 @@ pub enum Problem {
     HandlerAfterCommit,
     /// The given slices' lengths differ.
     LengthMismatch,
+    /// A texture fill given no pattern bytes (`fillTexture:...:bytes:length:` of length 0).
+    /// Metal's validation stops it ("buffer length for format ... must be at least" a unit's
+    /// bytes); plain Metal reads a unit's bytes from the pattern's address all the same, bytes the
+    /// call does not give (an Apple M3 Max under macOS 27.0.1).
+    EmptyFillPattern,
     /// `offset..offset + size` runs past a resource of `length` bytes: Metal stops it
     /// (`Invalid`). A resource placed past its heap's end is [`HeapProblem::PastEnd`].
     RangeOutOfBounds {

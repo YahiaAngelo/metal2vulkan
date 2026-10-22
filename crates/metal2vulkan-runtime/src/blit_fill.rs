@@ -5,45 +5,73 @@
 //!
 //! **Metal's answer** (an Apple M4 under macOS 27.0.1, our own probes; every byte of every level,
 //! slice and aspect read back after one fill over bytes of `0xEE`, 112 formats, one case a
-//! process). A fill writes the pattern, cut at a unit's bytes or repeated to them, into every unit
-//! of the region, and leaves every other byte:
+//! process; and an Apple M3 Max under macOS 27.0.1, our probes `surface.m`, `tp.m`, `ds.m` and
+//! `misc.m`, every byte of the surface, buffer or texture read back). A fill writes the pattern,
+//! cut at a unit's bytes or repeated to them, into every unit of the region, and leaves every
+//! other byte:
 //! - a **compressed** format's unit is a block: the region's origin and size count blocks, cut at
 //!   the level's blocks (74 formats, PVRTC at square power-of-two extents);
 //! - every other format's unit is a texel, and the region counts texels, cut at the level: an
 //!   ordinary color or depth format's texel (31 formats); a 4:2:2 format's 2 bytes (`GBGR422`,
 //!   `BGRG422`, at bytes `2x` and `2x + 1` of a row, which the 4:2:2 copies move); a stencil
-//!   format's 1 byte (`Stencil8`, `X32Stencil8`); `Depth32Float_Stencil8`'s 4 depth bytes, its
+//!   format's 1 byte (`Stencil8`, `X32Stencil8`, an `X32_Stencil8` view's too); `Depth32Float_Stencil8`'s 4 depth bytes, its
 //!   stencil kept;
+//! - a **two-plane YCbCr** texture over a surface's plane (every one of the 24 formats the runtime
+//!   makes, over plane 0 of `420v` to `x444` and plane 1 of the 4:2:2 and 4:4:4 surfaces) has
+//!   the plane's code as its unit, 1 byte or 2 (a 10-bit code's word), at the plane's rows, the
+//!   other plane kept, as its blits move it; a **packed** one's (`YCBCR10_420_2P_PACKED` to
+//!   `YCBCR10_444_2P_PACKED_sRGB`, over `p420` to `p444`) every fill writes one zero byte at each
+//!   texel's `x` of its row of the plane, whatever the pattern or color;
+//! - a **padded 10-bit** texture (`R10Unorm_X6`, `RG10Unorm_X12` and their `_sRGB` twins, which
+//!   Metal holds over memory alone) has its 2 or 4 bytes as its unit, at the buffer's or plane's
+//!   rows;
 //! - a **two-plane extended-range** texel (`RGB10A8_2P_XR10` and its sRGB twin) is its color word
-//!   in plane 0, 4 bytes, its alpha kept, at Metal's blit rows (`⌊4 w / 16⌋ · 16` bytes apart):
+//!   in plane 0, 4 bytes, its alpha kept. Metal writes row `y` of the region `⌊4 w / 16⌋ · 16`
+//!   bytes apart (16 below a width of 4), its texel `x` at byte `4 x` of it, `w` level 0's width:
 //!   where a heap's bytes hold the planes (a one-level 2D texture), the fill writes those bytes
-//!   there, rows overlapping included. A texture of its own memory (one level, 8 and 12 texels
-//!   wide, a 2D array's slice too) is written at its rows when its width is a multiple of 4; at
-//!   another width Metal's blit rows move texels between rows and into bytes between them, which
-//!   the runtime does not hold, and of a texture of more than one level Metal's blits read back
-//!   bytes no rule fits (both refused). A texture over a surface's planes is written at its GPU
-//!   rows (plane 0's `bytesPerRow` rounded down to 16, the rows Metal's blits address it at) at any
-//!   width, its alpha plane and every byte between the rows kept (`RGB10A8_2P_XR10` over 7 surfaces
-//!   and the sRGB twin over one, 16, 33, 37, 61, 64 and the consumer's 384 texels wide, a region, a
-//!   whole texture with a 3-byte pattern and a region past the level, every byte of each surface
-//!   read back).
+//!   there, rows overlapping included. A texture of its own memory, and a heap's of more levels
+//!   or slices, which the runtime holds apart from the heap's bytes, takes the same bytes of
+//!   level 0 of the slice at any level, the region cut at the level's extent (3D: image 0): each
+//!   word lands on the texel of level 0's rows (`align(4 w, 16)` bytes apart) it meets, or between
+//!   them, which the runtime does not hold (`getBytes` of every texel after fills of 1 to 37
+//!   texels wide, 1 to 3 levels, arrays of 2, 1D and 3D, of its own memory and a heap's; a
+//!   texture's levels and slices past the first lie in bytes that overlap, which Metal's own
+//!   copies show and the runtime holds apart). A texture over a surface's planes is written at
+//!   its GPU rows (plane 0's `bytesPerRow` rounded down to 16, the rows Metal's blits address it
+//!   at) at any width, its alpha plane and every byte between the rows kept (`RGB10A8_2P_XR10`
+//!   over 7 surfaces and the sRGB twin over one, 16, 33, 37, 61, 64 and the consumer's 384 texels
+//!   wide, a region, a whole texture with a 3-byte pattern and a region past the level, every
+//!   byte of each surface read back).
 //!
 //! A **color fill** packs the color in `pixelFormat:` (the texture's own format without it) by
 //! the fill's own rules (`fill_value.rs`), which are not a `Clear` load action's, and fills that
 //! pattern: the packed texel's bytes, repeated or cut at the texture's texel (12 pairs of formats,
 //! 256 colors each: 128 colors packed in each of 70 formats into textures of 18 formats of 1 to 16
-//! bytes). Packed in a format whose fills do not follow the color (compressed, 4:2:2, depth,
-//! stencil, two-plane, padded 10-bit), Metal's bytes are one constant
-//! for every color of a process, bytes it did not write for the color, which differ between
-//! processes and machines. (Refused before.) The runtime fills zero bytes there, one constant for
-//! every color, and announces it once (`Degradation::UnpackedFillColor`, one of Metal's answers).
+//! bytes; on the M3 Max the 88 formats Metal packs a color in, 1,144 colors each, into
+//! `RGBA32Uint` texels). In every other format (213: compressed, 4:2:2, depth, stencil,
+//! two-plane, YCbCr, padded, `Invalid` and the private formats) Metal packs nothing and fills
+//! bytes of the calling thread's stack, the texel's bytes of a 16-byte buffer the packing writes:
+//! a probe that set the stack below its call to one byte read that byte back in every texel, and
+//! two consecutive color fills in one encoder find the first's packed texel there, but an
+//! encoder's end, a blit or a byte fill between them leave other bytes (pointers of the process,
+//! differing between processes). The runtime holds that buffer per command buffer, zeros at its
+//! start, each color fill's packed texel over its first bytes, and fills its bytes there, as
+//! Metal's consecutive fills do; announced once (`Degradation::UnpackedFillColor`). Metal's
+//! validation stops such a fill ("must be a color format", "is not compatible with the texture
+//! format").
 //!
 //! **Placement** (31 cases of a byte fill of `RGBA8Unorm` textures of each type,
 //! every byte of every slice and level read back): a level past the texture's writes nothing; a 1D,
 //! 2D or 3D texture ignores the slice, a cube takes the slice's face modulo 6, and an array (1D, 2D
 //! or cube) writes nothing at a slice past its own; a 3D texture writes the region's depth images,
 //! cut at the level's depth, and every other type one image, ignoring the region's `z` and depth. A
-//! texture of another type (multisample, texture buffer) is unmeasured.
+//! texture buffer's fill writes its texels at its offset in the buffer, cut at its width, whatever
+//! the level, slice and row (the M3 Max, offsets 0, 4, 64 and 68). A multisample texture's fill
+//! writes every sample of the region's texels (the M3 Max, 2 and 4 samples), which the runtime does
+//! not build.
+//!
+//! An empty pattern Metal's validation stops; plain Metal reads a unit's bytes from the pattern's
+//! address all the same, which the call does not give (`Problem::EmptyFillPattern`).
 //!
 //! **`fillBuffer:range:pattern4:`** ([`BlitCommandEncoder::fill_buffer_pattern4`]; 10 ranges of a
 //! 256-byte buffer) writes the 4-byte pattern from the range's start, restarting it at each
@@ -53,16 +81,19 @@
 //! **How.** Each fill is copies the encoder already makes: a staging buffer of the pattern's units
 //! (4 MiB at most, copied again for a larger region) and `copy_from_buffer_to_texture` into the
 //! region's units of each image, so shadows, twins, carriers and two planes take their own paths;
-//! a heap's two-plane texture, one copy of the color words into the heap's bytes. A pattern4
-//! fill copies its bytes from a staging buffer. Refused (`AppleOnly::FillUnmeasured`): what the
-//! probes did not cover.
+//! a heap's two-plane texture, one copy of the color words into the heap's bytes; a two-plane
+//! texture held apart, the plane words' copy (`two_planes.rs`) into the rectangles of texels the
+//! words land on; a texture buffer and a packed YCbCr texture, copies into the buffer's bytes. A
+//! pattern4 fill copies its bytes from a staging buffer. Refused (`AppleOnly::FillUnmeasured`): a
+//! multisample texture's fill.
 
 use super::apple_only::AppleOnly;
 use super::blit::{bytes_in, reads, writes, BlitCommandEncoder};
+use super::blit_plan::BufferLayout;
 use super::chroma_pairs::{is_four_two_two, TEXEL_BYTES};
 use super::clear_value::has_channels;
-use super::copy_plan::{block_bytes, block_extent, level_extent, BlitOption};
-use super::error::Error;
+use super::copy_plan::{block_bytes, block_extent, level_extent, BlitOption, ImageRegion};
+use super::error::{invalid, Error, Problem};
 use super::fill_value::fill_texel;
 use super::heap::Heap;
 use super::render_values::ClearColor;
@@ -72,9 +103,10 @@ use super::two_planes;
 use super::values::{Origin, Region, Size};
 use super::{Buffer, Degradation};
 use ash::vk;
-use metal2vulkan::bind::PlaneRows;
-use metal2vulkan::metal::format::{is_depth_stencil, padded_only_over_memory, ExtendedRange};
+use metal2vulkan::bind::YCbCrCodes;
+use metal2vulkan::metal::format::{padded_only_over_memory, ycbcr_format, ExtendedRange};
 use metal2vulkan::metal::{PixelFormat, TextureType};
+use metal2vulkan::vk::ImageAspectFlags;
 use std::ops::Range;
 
 /// The most bytes a fill stages at once: a larger region copies them again.
@@ -89,6 +121,9 @@ enum FillUnit {
     Texels { bytes: u32, option: BlitOption },
     /// A two-plane extended-range texel's color word, its alpha kept.
     PlaneWords,
+    /// A packed two-plane YCbCr texel (`YCBCR10_420_2P_PACKED`, ...): one zero byte at the
+    /// texel's `x` of its row of the plane, whatever the pattern.
+    PackedCodes,
 }
 
 /// The fill unit of `pf`, `None` for a format the probes did not cover.
@@ -106,6 +141,17 @@ fn fill_unit(pf: PixelFormat) -> Option<FillUnit> {
     }
     if is_four_two_two(pf) {
         return texels(TEXEL_BYTES, BlitOption::None);
+    }
+    // A two-plane YCbCr texel is its plane's code, 1 or 2 bytes, as Metal's blits move it.
+    if let Some(codes) = ycbcr_format(pf).and_then(YCbCrCodes::of) {
+        if codes.packed {
+            return Some(FillUnit::PackedCodes);
+        }
+        return texels(codes.bytes, BlitOption::None);
+    }
+    // A padded 10-bit texel (a texture over memory alone) is its 2 or 4 bytes.
+    if padded_only_over_memory(pf) {
+        return texels(block_bytes(pf)?, BlitOption::None);
     }
     match pf {
         P::Stencil8 => texels(1, BlitOption::None),
@@ -149,14 +195,55 @@ fn unmeasured() -> Error {
     Error::AppleOnly(AppleOnly::FillUnmeasured)
 }
 
-/// Whether Metal's color fills of a color packed in `pf` write bytes that do not follow the color
-/// (the module docs): a compressed, 4:2:2, depth, stencil, two-plane or padded 10-bit format.
-fn unpacked(pf: PixelFormat) -> bool {
-    block_extent(pf).is_some()
-        || is_four_two_two(pf)
-        || is_depth_stencil(pf)
-        || two_planes::holds_planes(pf)
-        || padded_only_over_memory(pf)
+/// The texels of a two-plane extended-range level `width` texels wide that a fill of the units
+/// `x` by `y` writes (the module docs): each row `y` written at [`two_planes::buffer_blit_rows`] apart, its
+/// words landing on the texels of the level's rows `align(4 w, 16)` bytes apart, those past a row's
+/// texels in the bytes between the rows. As rectangles `(x, y)` of the level, in rows that
+/// ascend.
+fn plane_rectangles(width: u64, x: Range<u64>, y: Range<u64>) -> Vec<(Range<u64>, Range<u64>)> {
+    let rows = two_planes::buffer_blit_rows(width, true);
+    let pitch = (4 * width).next_multiple_of(16);
+    // The words written, as spans of bytes of the level that ascend and do not meet.
+    let mut spans: Vec<Range<u64>> = Vec::new();
+    for row in y {
+        let span = row * rows + 4 * x.start..row * rows + 4 * x.end;
+        match spans.last_mut() {
+            Some(last) if span.start <= last.end => last.end = last.end.max(span.end),
+            _ => spans.push(span),
+        }
+    }
+    // Each row's runs of texels, in order.
+    let mut runs: Vec<(u64, Range<u64>)> = Vec::new();
+    for span in spans {
+        let mut at = span.start;
+        while at < span.end {
+            let row = at / pitch;
+            let row_end = ((row + 1) * pitch).min(span.end);
+            let texels = (at - row * pitch) / 4..((row_end - row * pitch) / 4).min(width);
+            if !texels.is_empty() {
+                match runs.last_mut() {
+                    Some((last, run)) if *last == row && texels.start <= run.end => {
+                        run.end = run.end.max(texels.end);
+                    }
+                    _ => runs.push((row, texels)),
+                }
+            }
+            at = row_end;
+        }
+    }
+    // Consecutive rows of one run each, the same, make one rectangle.
+    let mut out: Vec<(Range<u64>, Range<u64>)> = Vec::new();
+    for (i, (row, run)) in runs.iter().enumerate() {
+        let alone = |j: usize| runs.iter().filter(|(r, _)| *r == runs[j].0).count() == 1;
+        if let Some((columns, rows)) = out.last_mut() {
+            if alone(i) && rows.end == *row && columns == run && i > 0 && alone(i - 1) {
+                rows.end += 1;
+                continue;
+            }
+        }
+        out.push((run.clone(), *row..row + 1));
+    }
+    out
 }
 
 /// Where a fill of `region` at `level` and `slice` of `texture` writes, as plain Metal places it
@@ -170,9 +257,7 @@ fn placement(
     let record = texture.record();
     if matches!(
         texture.texture_type(),
-        TextureType::Type2DMultisample
-            | TextureType::Type2DMultisampleArray
-            | TextureType::TextureBuffer
+        TextureType::Type2DMultisample | TextureType::Type2DMultisampleArray
     ) {
         return Err(unmeasured());
     }
@@ -211,18 +296,21 @@ impl BlitCommandEncoder {
     /// unit's bytes, as plain Metal writes it (`blit_fill.rs`). A compressed format's unit is a
     /// block, and the region's origin and size count blocks; every other format's is a texel (a
     /// 4:2:2 format's 2 bytes, a stencil format's 1, the depth of `Depth32Float_Stencil8`, a
-    /// two-plane extended-range texel's color word). The region is cut at the level; an empty one
-    /// writes nothing.
+    /// two-plane YCbCr texture's plane code, a two-plane extended-range texel's color word). A
+    /// packed two-plane YCbCr texture's texels each take one zero byte, whatever the pattern. The
+    /// region is cut at the level; an empty one writes nothing.
     ///
     /// Placed as plain Metal places it (the module docs): a level past the texture's, or a slice
     /// past an array's, writes nothing; a 1D, 2D or 3D texture ignores the slice and a cube takes
-    /// it modulo 6; a 3D texture writes the region's depth images, every other type one image.
+    /// it modulo 6; a 3D texture writes the region's depth images, every other type one image; a
+    /// texture buffer writes its texels whatever the level, slice and row. A two-plane
+    /// extended-range texture's rows are Metal's fill rows, and a level past its first writes level
+    /// 0, as Metal's fills do.
     ///
-    /// Refused: a texture of another device (`Invalid`); `AppleOnly::FillUnmeasured`, what the
-    /// probes did not cover: a multisample texture or a texture buffer, an empty pattern, a
-    /// format outside the measured families (the module docs), and a two-plane texture other
-    /// than a heap's one-level 2D one, one over a surface's planes, or a one-level texture of its
-    /// own a multiple of 4 wide.
+    /// Refused: a texture of another device (`Invalid`), and an empty pattern
+    /// (`Invalid(EmptyFillPattern)`), which Metal's validation stops and whose bytes plain Metal
+    /// reads from past the call's; `AppleOnly::FillUnmeasured` for a multisample texture, whose
+    /// samples Metal fills and the runtime does not.
     pub fn fill_texture(
         &mut self,
         texture: &Texture,
@@ -248,13 +336,13 @@ impl BlitCommandEncoder {
     /// even, an integer channel's NaN is 0 or the extreme by its kind, and the extended-range
     /// formats are packed.
     ///
-    /// A color packed in a format whose fills do not follow the color (compressed, 4:2:2, depth,
-    /// stencil, two-plane, padded 10-bit) fills zero bytes, one constant for every color, as
-    /// Metal's fills write one constant of their process's there, and the device announces
-    /// `Degradation::UnpackedFillColor` once.
+    /// A color packed in a format Metal packs no color in (compressed, 4:2:2, depth, stencil,
+    /// two-plane, YCbCr, padded 10-bit, `Invalid`, the private formats) fills the command buffer's
+    /// last color fill's packed texel, over zeros at its start (the module docs): Metal fills bytes
+    /// of the calling thread's stack there, which hold that texel only where no other call used
+    /// them since. The device announces `Degradation::UnpackedFillColor` once.
     ///
-    /// Refused as [`fill_texture`] refuses; `AppleOnly::FillUnmeasured` for a color packed in a
-    /// format whose fills the probes did not cover.
+    /// Refused as [`fill_texture`] refuses.
     ///
     /// [`fill_texture`]: BlitCommandEncoder::fill_texture
     pub fn fill_texture_color(
@@ -266,38 +354,36 @@ impl BlitCommandEncoder {
         color: ClearColor,
         pixel_format: Option<PixelFormat>,
     ) -> Result<(), Error> {
-        self.log(|_| {
-            BlitCall::FillTextureColor(Box::new((
-                texture.clone(),
-                level,
-                slice,
-                region,
-                color,
-                pixel_format,
-            )))
-        });
         const CALL: &str = "fill_texture_color";
-        self.core().check_device(CALL, texture.device())?;
         let packed_in = pixel_format.unwrap_or(texture.pixel_format());
         let channels = [color.red, color.green, color.blue, color.alpha];
-        if let Some(pattern) = fill_texel(packed_in, channels) {
-            return self.fill(CALL, texture, (level, slice), region, &pattern);
+        // The texel, which the command buffer's slot takes; else the slot's bytes.
+        let texel = fill_texel(packed_in, channels);
+        let slot = self.core().command_buffer().fill_slot(texel.as_deref());
+        let pattern = texel.clone().unwrap_or(slot.to_vec());
+        // Logged as the bytes it fills, which a call encoded again fills again.
+        self.log(|log| {
+            BlitCall::FillTexture(
+                Box::new((texture.clone(), level, slice, region)),
+                log.byte_span(&pattern),
+            )
+        });
+        self.fill(CALL, texture, (level, slice), region, &pattern)?;
+        if texel.is_none() {
+            let format = texture.pixel_format();
+            self.core()
+                .device()
+                .degrade(Degradation::UnpackedFillColor, || {
+                    (
+                        format!("a color fill of a {format:?} texture, packed in {packed_in:?}"),
+                        "Metal packs no color there and fills bytes of the calling thread's \
+                         stack, which hold the last color fill's packed texel only where no \
+                         other call used them since; the runtime fills the command buffer's last \
+                         color fill's packed texels, over zeros"
+                            .to_owned(),
+                    )
+                });
         }
-        if !unpacked(packed_in) {
-            return Err(unmeasured());
-        }
-        self.fill(CALL, texture, (level, slice), region, &[0])?;
-        let format = texture.pixel_format();
-        self.core()
-            .device()
-            .degrade(Degradation::UnpackedFillColor, || {
-                (
-                    format!("a color fill of a {format:?} texture, packed in {packed_in:?}"),
-                    "Metal's fills there write one constant of its process's for every color; \
-                     the runtime fills zero bytes"
-                        .to_owned(),
-                )
-            });
         Ok(())
     }
 
@@ -382,11 +468,8 @@ impl BlitCommandEncoder {
         self.core().check_device(call, texture.device())?;
         self.see(texture);
         if pattern.is_empty() {
-            return Err(unmeasured());
+            return Err(invalid(call, Problem::EmptyFillPattern));
         }
-        let Some((slice, images)) = placement(texture, level, slice, region)? else {
-            return Ok(());
-        };
         let Size {
             width,
             height,
@@ -396,12 +479,19 @@ impl BlitCommandEncoder {
             return Ok(());
         }
         let unit = fill_unit(texture.pixel_format()).ok_or_else(unmeasured)?;
+        if texture.texture_type() == TextureType::TextureBuffer {
+            return self.texture_buffer_fill(texture, unit, region, pattern);
+        }
+        let Some((slice, images)) = placement(texture, level, slice, region)? else {
+            return Ok(());
+        };
         let level_u32 = u32::try_from(level).map_err(|_| unmeasured())?;
         let [w, h, _] = level_extent(texture.record(), level_u32).map(u64::from);
         let (bytes, extent, option) = match unit {
             FillUnit::Blocks { bytes, extent } => (bytes, extent, BlitOption::None),
             FillUnit::Texels { bytes, option } => (bytes, [1, 1], option),
             FillUnit::PlaneWords => (4, [1, 1], BlitOption::None),
+            FillUnit::PackedCodes => (1, [1, 1], BlitOption::None),
         };
         let [bw, bh] = extent.map(u64::from);
         let x = cut(region.origin.x, width, w.div_ceil(bw));
@@ -410,17 +500,15 @@ impl BlitCommandEncoder {
             return Ok(());
         }
         let unit_bytes = unit_of(pattern, bytes);
+        if unit == FillUnit::PackedCodes {
+            return self.packed_code_fill(texture, (x, y));
+        }
         if unit == FillUnit::PlaneWords && !texture.over_buffer() {
             if let Some((heap, at)) = texture.heap_planes() {
                 return self.plane_heap_fill(texture, (heap, at), w, (x, y), &unit_bytes);
             }
-            // Metal's fill rows are its blits' (`⌊4 w / 16⌋ · 16` bytes apart), the texture's own
-            // only at a width that is a multiple of 4; of a texture of more than one level, its
-            // blits read back bytes no rule fits.
-            if texture.heap().is_some() || texture.mipmap_level_count() > 1 || !w.is_multiple_of(4)
-            {
-                return Err(unmeasured());
-            }
+            // Every level is filled as level 0, at Metal's fill rows (the module docs).
+            return self.plane_texel_fill(texture, slice, (x, y), &unit_bytes);
         }
         self.fill_rows(
             texture,
@@ -476,7 +564,7 @@ impl BlitCommandEncoder {
     }
 
     /// Write `word` at each texel `x` by `y` of the one-level two-plane `texture` of `width`
-    /// texels whose planes lie in `heap`'s bytes from byte `at`, at Metal's blit rows: the
+    /// texels whose planes lie in `heap`'s bytes from byte `at`, at Metal's fill rows: the
     /// texels' color words, rows that meet merged, in one copy into the heap's bytes. Its alpha
     /// bytes are not written.
     fn plane_heap_fill(
@@ -490,51 +578,165 @@ impl BlitCommandEncoder {
         let Some(bytes) = heap.bytes() else {
             return Err(unmeasured());
         };
-        let width = u32::try_from(width).map_err(|_| unmeasured())?;
-        let blit = u64::from(PlaneRows::of(width).blit);
-        // Each row's words, from byte `at + row * blit + 4 x`; rows ascend, so a row that meets
+        let rows = two_planes::buffer_blit_rows(width, true);
+        // Each row's words, from byte `at + row * rows + 4 x`; rows ascend, so a row that meets
         // the one before extends it.
         let mut spans: Vec<Range<u64>> = Vec::new();
         for row in y {
-            let span = at + row * blit + 4 * x.start..at + row * blit + 4 * x.end;
+            let span = at + row * rows + 4 * x.start..at + row * rows + 4 * x.end;
             match spans.last_mut() {
                 Some(last) if span.start <= last.end => last.end = last.end.max(span.end),
                 _ => spans.push(span),
             }
         }
+        self.fill_spans(bytes, &spans, word)?;
+        self.core().retain(texture.clone());
+        Ok(())
+    }
+
+    /// Write `unit` repeated from each span's first byte into the bytes `spans` of `buffer`
+    /// (ascending, disjoint), in one command of copies from a staging buffer.
+    fn fill_spans(
+        &mut self,
+        buffer: &Buffer,
+        spans: &[Range<u64>],
+        unit: &[u8],
+    ) -> Result<(), Error> {
         let (Some(first), Some(last)) = (spans.first(), spans.last()) else {
             return Ok(());
         };
         let written = first.start..last.end;
-        // Every span starts on a word (the texture's place and `blit` are multiples of 4) and is
-        // whole words long, so the staging buffer's words land on them.
+        // A staging buffer of whole units, so each copy from its start begins the unit again.
         let longest = spans.iter().map(|s| s.end - s.start).max().unwrap_or(0);
-        let length = longest.min(STAGING_BYTES);
-        let staging = self.staging(word, length)?;
+        let whole = unit.len() as u64;
+        let length = longest.min((STAGING_BYTES / whole).max(1) * whole);
+        let staging = self.staging(unit, length)?;
         let (source, from) = staging.at(0);
-        let (destination, _) = bytes.at(written.start);
+        // Read as a blit's (`host_residency.rs`).
+        let (destination, base) = self.core().blit_at(buffer, written.start)?;
         let mut regions = Vec::new();
-        for span in &spans {
+        for span in spans {
             let mut start = span.start;
             while start < span.end {
                 let size = (span.end - start).min(length);
                 regions.push(vk::BufferCopy {
                     src_offset: from,
-                    dst_offset: bytes.at(start).1,
+                    dst_offset: base + (start - written.start),
                     size,
                 });
                 start += size;
             }
         }
-        let uses = [reads(&staging, 0..length), writes(bytes, written)];
+        let uses = [reads(&staging, 0..length), writes(buffer, written)];
         self.command(&uses, |device, raw| {
             // SAFETY: the encoder's command buffer is recording; the staging buffer and the
-            // heap's bytes are live and retained until it completes; each region lies inside
-            // both, and the heap's regions are disjoint.
+            // buffer are live and retained until it completes; each region lies inside both,
+            // and the buffer's regions are disjoint.
             unsafe { device.cmd_copy_buffer(raw, source, destination, &regions) };
         })?;
         self.core().retain(staging);
+        self.core().retain(buffer.clone());
+        Ok(())
+    }
+
+    /// Write `unit` into the texels `x` of the texture buffer `texture`, cut at its width: at
+    /// its offset in its buffer, whatever the level, slice and row (the module docs).
+    fn texture_buffer_fill(
+        &mut self,
+        texture: &Texture,
+        unit: FillUnit,
+        region: Region,
+        pattern: &[u8],
+    ) -> Result<(), Error> {
+        let FillUnit::Texels { bytes, .. } = unit else {
+            return Err(unmeasured());
+        };
+        let Some(texels) = texture.buffer_texels() else {
+            return Err(unmeasured());
+        };
+        let x = cut(region.origin.x, region.size.width, texture.width());
+        if x.is_empty() {
+            return Ok(());
+        }
+        let bytes = u64::from(bytes);
+        let at = texels.layout.offset;
+        let span = at + x.start * bytes..at + x.end * bytes;
+        let buffer = texels.buffer.clone();
+        self.fill_spans(&buffer, &[span], &unit_of(pattern, bytes as u32))?;
         self.core().retain(texture.clone());
+        Ok(())
+    }
+
+    /// Fill the texels `x` by `y` of a packed two-plane YCbCr `texture` over a surface's plane:
+    /// one zero byte at each texel's `x` of its row of the plane (the module docs).
+    fn packed_code_fill(
+        &mut self,
+        texture: &Texture,
+        (x, y): (Range<u64>, Range<u64>),
+    ) -> Result<(), Error> {
+        let Some(texels) = texture.buffer_texels() else {
+            return Err(unmeasured());
+        };
+        let (offset, pitch) = (texels.layout.offset, texels.layout.row_pitch);
+        let spans: Vec<Range<u64>> = y
+            .map(|row| offset + row * pitch)
+            .map(|start| start + x.start..start + x.end)
+            .collect();
+        let buffer = texels.buffer.clone();
+        self.fill_spans(&buffer, &spans, &[0])?;
+        self.core().retain(texture.clone());
+        Ok(())
+    }
+
+    /// Write `word` at the texels of level 0 of `slice` of the two-plane extended-range `texture`
+    /// (of its own memory, or a heap's held apart) that a fill of the units `x` by `y` of any of
+    /// its levels writes (the module docs): copies of the color words alone, at Metal's fill
+    /// rows mapped onto the texels' rows.
+    fn plane_texel_fill(
+        &mut self,
+        texture: &Texture,
+        slice: u64,
+        (x, y): (Range<u64>, Range<u64>),
+        word: &[u8],
+    ) -> Result<(), Error> {
+        let width = u64::from(level_extent(texture.record(), 0)[0]);
+        let layer = u32::try_from(slice).map_err(|_| unmeasured())?;
+        // The bytes between the level's rows a fill writes are not held: noted, so a blit that
+        // reads them back announces it (`two_planes.rs`).
+        let size = [x.end - x.start, y.end - y.start];
+        let spans = two_planes::row_spans(width, [x.start, y.start], size, true);
+        if spans
+            .iter()
+            .flatten()
+            .any(|span| two_planes::between_rows(span, width))
+        {
+            texture.keep_outside();
+        }
+        for (columns, rows) in plane_rectangles(width, x, y) {
+            let w = columns.end - columns.start;
+            let per_copy = (STAGING_BYTES / (4 * w)).clamp(1, rows.end - rows.start);
+            let staging = self.staging(word, 4 * w * per_copy)?;
+            let mut row = rows.start;
+            while row < rows.end {
+                let end = (row + per_copy).min(rows.end);
+                let region = ImageRegion {
+                    aspect: ImageAspectFlags::COLOR,
+                    level: 0,
+                    layer,
+                    layers: 1,
+                    origin: [columns.start, row, 0].map(|v| v as u32),
+                    size: [w, end - row, 1].map(|v| v as u32),
+                };
+                let layout = BufferLayout {
+                    offset: 0,
+                    bytes_per_row: 4 * w,
+                    bytes_per_image: 4 * w * (end - row),
+                };
+                self.plane_words_copy(&staging, texture, &region, &layout, true)?;
+                row = end;
+            }
+            self.core().retain(staging);
+        }
         Ok(())
     }
 

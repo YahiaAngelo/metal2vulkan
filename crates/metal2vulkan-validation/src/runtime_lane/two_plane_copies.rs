@@ -24,7 +24,10 @@
 //! probe keeps. A texture-to-texture copy's planes are also checked against Metal's byte model
 //! (`bind::plane_copy`, which Metal's measured copies pin), at 48 x 20 and at widths that are not a
 //! multiple of 4; a copy whose rows overlap in the destination is announced once
-//! (`two-plane-texture-copy`), and so is a buffer blit at a width off 4 (`two-plane-buffer-blit`).
+//! (`two-plane-texture-copy`). A buffer blit at a width off 4 is checked against `bp.m`'s words
+//! (an Apple M3 Max under macOS 27.0.1, `ROW_BLITS`): Metal's rows, announced
+//! (`two-plane-buffer-blit`) where rows meet in a blit into the texture and where a blit out of a
+//! texture of the device's memory reads bytes between rows that a fill wrote.
 //! A differing output is printed whole, on one `XR-TWO-PLANE-COPIES-DIFFERS` line.
 
 use super::degrade_notices::{counts, on_device};
@@ -858,39 +861,256 @@ fn chained_blits_reading_kept_bytes_are_announced() {
     });
 }
 
-/// A blit between a buffer and a level whose width is not a multiple of 4 moves the texels as
-/// `get_bytes` and `replace_region` do, announced once (`two-plane-buffer-blit`): Metal's blit
-/// addresses the level's rows short of where they lie.
-#[test]
-fn buffer_blits_at_widths_off_4_are_announced() {
-    on_device(|device, messages| {
-        let lane = lane(device);
-        let (w, h) = (5u64, 4u64);
-        let (t, _, alpha) = lane.filled(FORMATS[0].0, 1, (w, h));
-        let input = random_bytes(2, (4 * w * h) as usize);
-        let buffer = buffer_with(device, &input).unwrap();
-        lane.blit(|e| {
-            e.copy_from_buffer_to_texture(
-                &buffer,
-                0,
-                4 * w,
-                4 * w * h,
-                Size::new(w, h, 1),
+/// One of `bp.m`'s blits between a buffer and a two-plane texture of one level at a width off 4
+/// (an Apple M3 Max under macOS 27.0.1): the texture's width, height and slices, whether in a
+/// placement heap of Metal's size, the slice, a fill of `a1 a2 a3 a4` first (x, y, width,
+/// height), out of the texture or into it, the region (x, y, width, height), and Metal's words as
+/// the probe printed them: out of the texture, the buffer's; into it, the texels' by `get_bytes`
+/// (`t<s>.<i>` texel `i`'s word of slice `s` as `replace_region` set it, `t<i>` slice 0's).
+struct RowBlit {
+    extent: [u64; 3],
+    heap: bool,
+    slice: u64,
+    fill: Option<[u64; 4]>,
+    out: bool,
+    region: [u64; 4],
+    metal: &'static str,
+    /// The runtime's words where they are not Metal's, announced (`two-plane-buffer-blit`).
+    ours: Option<&'static str>,
+}
+
+const fn row_blit(
+    (extent, heap, slice): ([u64; 3], bool, u64),
+    fill: Option<[u64; 4]>,
+    (out, region): (bool, [u64; 4]),
+    metal: &'static str,
+) -> RowBlit {
+    RowBlit {
+        extent,
+        heap,
+        slice,
+        fill,
+        out,
+        region,
+        metal,
+        ours: None,
+    }
+}
+
+const OWN: bool = false;
+const OUT: bool = true;
+const IN: bool = false;
+
+/// Metal's blits that the runtime answers alike and announces nothing for.
+const ROW_BLITS: [RowBlit; 13] = [
+    row_blit(([5, 3, 1], OWN, 0), None, (OUT, [0, 0, 5, 3]),
+        "t0 t1 t2 t3 t4 | t4 00000000 00000000 00000000 t5 | t5 t6 t7 t8 t9"),
+    row_blit(([5, 3, 1], OWN, 0), None, (OUT, [1, 1, 3, 2]), "00000000 00000000 00000000 | t6 t7 t8"),
+    row_blit(([7, 4, 1], OWN, 0), None, (OUT, [2, 1, 4, 3]),
+        "t6 00000000 t7 t8 | t9 t10 t11 t12 | t13 00000000 t14 t15"),
+    row_blit(([3, 4, 1], OWN, 0), None, (OUT, [0, 0, 3, 4]),
+        "t0 t1 t2 | 00000000 00000000 00000000 | 00000000 00000000 00000000 | 00000000 00000000 00000000"),
+    row_blit(([3, 4, 1], OWN, 0), None, (OUT, [1, 0, 2, 3]),
+        "t1 t2 | 00000000 00000000 | 00000000 00000000"),
+    row_blit(([1, 5, 1], OWN, 0), None, (OUT, [0, 0, 1, 5]),
+        "t0 | 00000000 | 00000000 | 00000000 | 00000000"),
+    row_blit(([5, 3, 2], OWN, 1), None, (OUT, [0, 0, 5, 3]),
+        "t1.0 t1.1 t1.2 t1.3 t1.4 | t1.4 00000000 00000000 00000000 t1.5 | t1.5 t1.6 t1.7 t1.8 t1.9"),
+    row_blit(([7, 4, 1], OWN, 0), None, (IN, [2, 1, 4, 3]),
+        "t0 t1 t2 t3 t4 t5 b0000000 | b0000002 b0000003 b0000100 b0000101 b0000102 b0000103 b0000200 | b0000202 b0000203 t16 t17 t18 t19 t20 | t21 t22 t23 t24 t25 t26 t27"),
+    row_blit(([3, 4, 1], OWN, 0), None, (IN, [0, 0, 3, 4]),
+        "b0000000 b0000001 b0000002 | b0000100 b0000101 b0000102 | b0000200 b0000201 b0000202 | b0000300 b0000301 b0000302"),
+    row_blit(([3, 4, 1], OWN, 0), None, (IN, [1, 1, 2, 2]),
+        "t0 t1 t2 | t3 b0000000 b0000001 | t6 b0000100 b0000101 | t9 t10 t11"),
+    row_blit(([5, 3, 1], true, 0), Some([1, 1, 2, 1]), (OUT, [0, 0, 5, 3]),
+        "t0 t1 t2 t3 t4 | t4 a4a3a2a1 a4a3a2a1 00000000 t5 | t5 t6 t7 t8 t9"),
+    row_blit(([7, 4, 1], true, 0), None, (IN, [2, 1, 4, 3]),
+        "t0 t1 t2 t3 t4 t5 b0000000 | b0000002 b0000003 b0000100 b0000101 b0000102 b0000103 b0000200 | b0000202 b0000203 t16 t17 t18 t19 t20 | t21 t22 t23 t24 t25 t26 t27"),
+    row_blit(([3, 4, 1], true, 0), None, (OUT, [0, 0, 3, 4]),
+        "t0 t1 t2 | 00000000 00000000 00000000 | 00000000 00000000 00000000 | 00000000 00000000 00000000"),
+];
+
+/// Metal's blits that the runtime announces: into the texture with rows that meet (each answered
+/// as Metal's here, where the earlier row's bytes stood), and out of a texture of the device's
+/// memory after a fill wrote bytes between its rows (read as 0).
+const ANNOUNCED_ROW_BLITS: [RowBlit; 4] = [
+    row_blit(([5, 6, 1], OWN, 0), None, (IN, [0, 1, 5, 4]),
+        "t0 t1 t2 t3 b0000000 | b0000004 b0000101 b0000102 b0000103 b0000104 | b0000204 b0000301 b0000302 b0000303 b0000304 | t15 t16 t17 t18 t19 | t20 t21 t22 t23 t24 | t25 t26 t27 t28 t29"),
+    row_blit(([5, 6, 1], true, 0), None, (IN, [0, 1, 5, 4]),
+        "t0 t1 t2 t3 b0000000 | b0000004 b0000101 b0000102 b0000103 b0000104 | b0000204 b0000301 b0000302 b0000303 b0000304 | t15 t16 t17 t18 t19 | t20 t21 t22 t23 t24 | t25 t26 t27 t28 t29"),
+    row_blit(([7, 4, 3], OWN, 2), None, (IN, [1, 1, 5, 3]),
+        "t2.0 t2.1 t2.2 t2.3 t2.4 b0000000 b0000001 | b0000003 b0000004 b0000101 b0000102 b0000103 b0000104 b0000201 | b0000203 b0000204 t2.16 t2.17 t2.18 t2.19 t2.20 | t2.21 t2.22 t2.23 t2.24 t2.25 t2.26 t2.27"),
+    RowBlit {
+        ours: Some("t0 t1 t2 t3 t4 | t4 00000000 00000000 00000000 t5 | t5 t6 t7 t8 t9"),
+        ..row_blit(([5, 3, 1], OWN, 0), Some([1, 1, 2, 1]), (OUT, [0, 0, 5, 3]),
+            "t0 t1 t2 t3 t4 | t4 a4a3a2a1 a4a3a2a1 00000000 t5 | t5 t6 t7 t8 t9")
+    },
+];
+
+/// The words `printed` names, as `bp.m` printed them.
+fn printed_words(printed: &str) -> Vec<u32> {
+    printed
+        .split_whitespace()
+        .filter(|token| *token != "|")
+        .map(|token| match token.strip_prefix('t') {
+            Some(texel) => {
+                let (slice, index) = texel.split_once('.').unwrap_or(("0", texel));
+                0x1000_0000
+                    + (u32::from_str_radix(slice, 16).unwrap() << 16)
+                    + index.parse::<u32>().unwrap()
+            }
+            None => u32::from_str_radix(token, 16).unwrap(),
+        })
+        .collect()
+}
+
+/// `blit`'s words, as the runtime answers them.
+fn row_blit_words(device: &Device, queue: &CommandQueue, blit: &RowBlit) -> Vec<u32> {
+    let [w, h, slices] = blit.extent;
+    let mut d = metal2vulkan_runtime::TextureDescriptor::texture_2d(FORMATS[0].0, w, h, false);
+    if slices > 1 {
+        d.texture_type = metal2vulkan::metal::TextureType::Type2DArray;
+        d.array_length = slices;
+    }
+    d.usage = metal2vulkan::metal::TextureUsage::SHADER_READ;
+    d.resource_options = metal2vulkan_runtime::ResourceOptions::shared();
+    let t = match blit.heap {
+        true => {
+            let size = device.heap_texture_size_and_align(&d).unwrap().size;
+            let heap = device
+                .new_heap(&metal2vulkan_runtime::HeapDescriptor::new(
+                    metal2vulkan_runtime::HeapType::Placement,
+                    size,
+                    metal2vulkan_runtime::ResourceOptions::shared(),
+                ))
+                .unwrap();
+            heap.new_texture_at_offset(&d, 0).unwrap()
+        }
+        false => device.new_texture(&d).unwrap(),
+    };
+    for s in 0..slices {
+        let words: Vec<u8> = (0..w * h)
+            .flat_map(|i| (0x1000_0000 + (s << 16) as u32 + i as u32).to_le_bytes())
+            .collect();
+        t.replace_region(Region::new_2d(0, 0, w, h), 0, s, &words, 4 * w, 4 * w * h)
+            .unwrap();
+    }
+    let run = |body: &dyn Fn(&mut metal2vulkan_runtime::BlitCommandEncoder)| {
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.blit_command_encoder().unwrap();
+        body(&mut encoder);
+        encoder.end_encoding().unwrap();
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+    };
+    if let Some([x, y, fw, fh]) = blit.fill {
+        run(&|e| {
+            e.fill_texture(
                 &t,
                 0,
                 0,
-                Origin::new(0, 0, 0),
+                Region::new_2d(x, y, fw, fh),
+                &[0xa1, 0xa2, 0xa3, 0xa4],
+            )
+            .unwrap()
+        });
+    }
+    let [x, y, rw, rh] = blit.region;
+    let row = 4 * rw;
+    let words = |bytes: Vec<u8>| -> Vec<u32> {
+        bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| u32::from_le_bytes(*b))
+            .collect()
+    };
+    if blit.out {
+        let buffer = buffer_with(device, &vec![0xee; (row * rh) as usize]).unwrap();
+        run(&|e| {
+            e.copy_from_texture_to_buffer(
+                &t,
+                blit.slice,
+                0,
+                Origin::new(x, y, 0),
+                Size::new(rw, rh, 1),
+                &buffer,
+                0,
+                row,
+                row * rh,
                 BlitOption::None,
             )
             .unwrap()
         });
-        assert_eq!(lane.planes_sized(&t, (w, h)), (input, alpha));
+        return words(read_buffer(&buffer, 0, row * rh).unwrap());
+    }
+    let input: Vec<u8> = (0..rh)
+        .flat_map(|r| (0..rw).map(move |c| 0xb000_0000u32 + ((r as u32) << 8) + c as u32))
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    let buffer = buffer_with(device, &input).unwrap();
+    run(&|e| {
+        e.copy_from_buffer_to_texture(
+            &buffer,
+            0,
+            row,
+            row * rh,
+            Size::new(rw, rh, 1),
+            &t,
+            blit.slice,
+            0,
+            Origin::new(x, y, 0),
+            BlitOption::None,
+        )
+        .unwrap()
+    });
+    let mut texels = vec![0; (4 * w * h) as usize];
+    t.get_bytes(
+        &mut texels,
+        4 * w,
+        4 * w * h,
+        Region::new_2d(0, 0, w, h),
+        0,
+        blit.slice,
+    )
+    .unwrap();
+    words(texels)
+}
+
+/// A blit between a buffer and a two-plane texture of one level at a width off 4, of its own
+/// memory or a heap's, moves Metal's words at Metal's rows: out of the texture the bytes between
+/// rows too (0 in a new texture, a heap's as a fill left them), and below a width of 4 only the
+/// first row; announced (`two-plane-buffer-blit`) only where rows meet in a blit into it and
+/// where a blit out of a texture of the device's memory reads bytes between its rows that a fill
+/// wrote.
+#[test]
+fn buffer_blits_at_widths_off_4_take_metal_s_rows() {
+    on_device(|device, messages| {
+        let queue = device.new_command_queue().unwrap();
+        let mut wrong = Vec::new();
+        let mut check = |n: usize, blit: &RowBlit, want: &str| {
+            let ours = row_blit_words(device, &queue, blit);
+            if ours != printed_words(want) {
+                println!("XR-TWO-PLANE-COPIES-DIFFERS rows {n}: {ours:08x?} (Metal's {want})");
+                wrong.push(n);
+            }
+        };
+        for (n, blit) in ROW_BLITS.iter().enumerate() {
+            check(n, blit, blit.metal);
+        }
+        let notices = counts(&messages.take_notices());
+        assert_eq!(notices.get(&TWO_PLANE_COPIES[1]), None, "{notices:?}");
+        for (n, blit) in ANNOUNCED_ROW_BLITS.iter().enumerate() {
+            check(100 + n, blit, blit.ours.unwrap_or(blit.metal));
+        }
         let notices = counts(&messages.take_notices());
         assert_eq!(
             notices.get(&TWO_PLANE_COPIES[1]).copied(),
             Some(1),
             "{notices:?}"
         );
+        assert!(wrong.is_empty(), "blits unlike Metal's: {wrong:?}");
     });
 }
 

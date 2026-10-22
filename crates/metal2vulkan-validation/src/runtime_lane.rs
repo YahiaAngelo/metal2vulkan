@@ -732,6 +732,8 @@ mod submit_per_import;
 mod sum_regroup;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod surface_aliases;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod surface_fills;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd), target_os = "linux"))]
 mod surface_texture_costs;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]

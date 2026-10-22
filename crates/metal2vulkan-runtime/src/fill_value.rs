@@ -11,7 +11,12 @@
 //! and signs and 26 doubles at rounding edges into each format; our probe packed 128 colors in each
 //! format into textures of 18 others, which hold the packed texel repeated, as an Apple M3 Max
 //! under macOS 26.7 does too, a fill at a time and 2,249 fills in one encoder alike (our probe
-//! `fil5.m`). This module reproduces every texel and every threshold.
+//! `fil5.m`). On an Apple M3 Max under macOS 27.0.1 our probe `pack.m` packed 1,144 colors (88
+//! specials, 1,024 random, 32 NaNs) in each of the 88 formats Metal packs a color in, into
+//! `RGBA32Uint` texels, each holding the packed texel repeated, the extended-range `_sRGB` twins'
+//! too, in one encoder, an encoder a fill and a process a fill alike (`twins.m`); `classify.m`
+//! found the 213 other formats pack nothing. This module reproduces every texel and every
+//! threshold.
 //!
 //! Each channel converts its double; every rule but the integers' takes the double's `float`
 //! first (rounded to nearest even, an overflow the infinity):
@@ -55,11 +60,17 @@
 //! 16-bit words, blue, green, red and alpha, each code in the word's top 10 bits; `BGR10_XR` is
 //! blue in bits 0 to 9, green, then red, the top two bits zero; `RGB9E5Float`'s exponent is last.
 //!
-//! A format whose filled bytes do not follow the color has no packing here: compressed, 4:2:2,
-//! depth, stencil and two-plane formats (one constant for every color of a process), and the padded
-//! 10-bit formats (`R10Unorm_X6`, `RG10Unorm_X12` and their `_sRGB` twins: one texel for every
-//! color, of bytes that differ between machines and runs). Neither has a format whose fills the
-//! probes did not cover.
+//! These formats are packed by the same rules: the `RGB8`, `RGB16` and `RGB32` ones (their
+//! `RGBA` twins' first three channels), `BGRA4Unorm` (blue in bits 0 to 3, then
+//! green, red and alpha), `ARGB8Unorm_sRGB` (alpha first, then the sRGB red, green and blue),
+//! `BGRA10Unorm` and `BGRA10Uint` (four 16-bit words, blue, green, red and alpha, each code in the
+//! word's top 10 bits), and `RGBA16Float_XR` (halves of the `float` clamped to `[-384/510,
+//! 639/510]`, alpha to `[0, 1]`, NaN 0, an alpha of 0 or less `+0`).
+//!
+//! In every other format Metal packs no color (compressed, 4:2:2, depth, stencil, two-plane,
+//! YCbCr, padded 10-bit, `Invalid`, the private 10- and 12-bit, PQ and HLG formats, and
+//! `RGB10A2Unorm_sRGB`): its fill writes bytes it did not pack for the color (`blit_fill.rs`), and
+//! there is no packing here.
 
 use metal2vulkan::metal::PixelFormat;
 
@@ -92,6 +103,10 @@ enum Conversion {
     XrAlpha,
     /// An extended-range `_sRGB` color channel's 10-bit code.
     XrSrgb,
+    /// An extended-range half color channel: the `float` clamped to Apple's extended range.
+    XrHalf,
+    /// An extended-range half alpha: the `float` clamped to `[0, 1]`.
+    XrHalfAlpha,
 }
 
 impl Conversion {
@@ -104,7 +119,10 @@ impl Conversion {
             | Conversion::Sint(bits)
             | Conversion::Zero(bits) => bits,
             Conversion::Srgb => 8,
-            Conversion::Half | Conversion::Bfloat => 16,
+            Conversion::Half
+            | Conversion::Bfloat
+            | Conversion::XrHalf
+            | Conversion::XrHalfAlpha => 16,
             Conversion::Float => 32,
             Conversion::Ufloat(mantissa) => mantissa + 5,
             Conversion::XrColor | Conversion::XrAlpha | Conversion::XrSrgb => 10,
@@ -127,6 +145,21 @@ impl Conversion {
             Conversion::XrColor => extended(x, XR_LOW, XR_HIGH),
             Conversion::XrAlpha => extended(x, 0.0, 1.0),
             Conversion::XrSrgb => first_at_most(&XR_SRGB_FIRST, x, XR_ZERO),
+            Conversion::XrHalf => {
+                let v = x as f32;
+                let v = if v.is_nan() {
+                    0.0
+                } else {
+                    v.clamp(XR_LOW, XR_HIGH)
+                };
+                u64::from(super::clear_value::f32_to_f16(v))
+            }
+            // Zero or less, `-0` and NaN among them, is `+0`.
+            Conversion::XrHalfAlpha => {
+                let v = x as f32;
+                let v = if v > 0.0 { v.min(1.0) } else { 0.0 };
+                u64::from(super::clear_value::f32_to_f16(v))
+            }
         }
     }
 }
@@ -192,6 +225,17 @@ fn fields(pf: PixelFormat) -> Option<Vec<Field>> {
             });
         }
         out
+    };
+    // Blue, green, red and alpha, each in the top 10 bits of a 16-bit word.
+    let words = |conversion| {
+        [(2, 6), (1, 22), (0, 38), (3, 54)]
+            .into_iter()
+            .map(|(channel, at)| Field {
+                channel,
+                at,
+                conversion,
+            })
+            .collect()
     };
     Some(match pf {
         P::A8Unorm => packed(&[(3, C::Unorm(8))]),
@@ -289,6 +333,29 @@ fn fields(pf: PixelFormat) -> Option<Vec<Field>> {
         P::RGBX32Uint => in_order(4, C::Uint(32), C::Zero(32)),
         P::RGBX32Sint => in_order(4, C::Sint(32), C::Zero(32)),
         P::RGBX32Float => same(4, C::Float),
+        P::RGB8Unorm => same(3, C::Unorm(8)),
+        P::RGB8Snorm => same(3, C::Snorm(8)),
+        P::RGB8Uint => same(3, C::Uint(8)),
+        P::RGB8Sint => same(3, C::Sint(8)),
+        P::RGB16Unorm => same(3, C::Unorm(16)),
+        P::RGB16Snorm => same(3, C::Snorm(16)),
+        P::RGB16Uint => same(3, C::Uint(16)),
+        P::RGB16Sint => same(3, C::Sint(16)),
+        P::RGB16Float => same(3, C::Half),
+        P::RGB16Bfloat => same(3, C::Bfloat),
+        P::RGB32Uint => same(3, C::Uint(32)),
+        P::RGB32Sint => same(3, C::Sint(32)),
+        P::RGB32Float => same(3, C::Float),
+        P::BGRA4Unorm => packed(&[
+            (2, C::Unorm(4)),
+            (1, C::Unorm(4)),
+            (0, C::Unorm(4)),
+            (3, C::Unorm(4)),
+        ]),
+        P::ARGB8UnormSRGB => packed(&[(3, C::Unorm(8)), (0, C::Srgb), (1, C::Srgb), (2, C::Srgb)]),
+        P::RGBA16FloatXR => in_order(4, C::XrHalf, C::XrHalfAlpha),
+        P::BGRA10Unorm => words(C::Unorm(10)),
+        P::BGRA10Uint => words(C::Uint(10)),
         P::BGRA10XR => xr(false, Some(54), [6, 22, 38]),
         P::BGRA10XRSRGB => xr(true, Some(54), [6, 22, 38]),
         P::BGR10XR => xr(false, None, [0, 10, 20]),

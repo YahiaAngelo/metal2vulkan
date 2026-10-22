@@ -57,7 +57,6 @@ use super::indirect_command_buffer::IndirectCommandBuffer;
 use super::pipeline::{ComputePipelineState, RenderPipelineState};
 use super::render::{RenderLog, RenderRoom};
 use super::render_pass::RenderPassDescriptor;
-use super::render_values::ClearColor;
 use super::residency::Residency;
 use super::resource::ResourceRef;
 use super::sampler::SamplerState;
@@ -66,7 +65,7 @@ use super::used_resources::EncoderKind;
 use super::values::{Origin, Region, Size};
 use super::{BlitCommandEncoder, ComputeCommandEncoder};
 use crate::copy_plan::BlitOption;
-use metal2vulkan::metal::{BarrierScope, DispatchType, PixelFormat, ResourceUsage};
+use metal2vulkan::metal::{BarrierScope, DispatchType, ResourceUsage};
 use std::cell::Cell;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
@@ -616,14 +615,14 @@ pub(super) struct SamplersWithLodClamps {
     pub(super) first: u32,
 }
 
-/// One public call of a blit encoder, its arguments owned (the method of each variant's name).
+/// One public call of a blit encoder, its arguments owned (the method of each variant's name; a
+/// color fill as the byte fill of the bytes it fills).
 pub(super) enum BlitCall {
     CopyBufferToBuffer(Buffer, u64, Buffer, u64, u64),
     FillBuffer(Buffer, Range<u64>, u8),
     FillBufferPattern4(Buffer, Range<u64>, u32),
     SynchronizeResource(Resource),
     FillTexture(Box<(Texture, u64, u64, Region)>, Span),
-    FillTextureColor(Box<(Texture, u64, u64, Region, ClearColor, Option<PixelFormat>)>),
     CopyBufferToTexture(Box<BufferToTexture>),
     CopyTextureToBuffer(Box<TextureToBuffer>),
     CopyTextureToTexture(Box<TextureToTexture>),
@@ -656,7 +655,6 @@ impl BlitCall {
     pub(super) fn extra(&self) -> usize {
         match self {
             BlitCall::FillTexture(call, _) => std::mem::size_of_val(&**call),
-            BlitCall::FillTextureColor(call) => std::mem::size_of_val(&**call),
             BlitCall::CopyBufferToTexture(call) => std::mem::size_of_val(&**call),
             BlitCall::CopyTextureToBuffer(call) => std::mem::size_of_val(&**call),
             BlitCall::CopyTextureToTexture(call) => std::mem::size_of_val(&**call),
@@ -918,10 +916,6 @@ fn blit(
         B::FillTexture(call, pattern) => {
             let (texture, level, slice, region) = &**call;
             encoder.fill_texture(texture, *level, *slice, *region, log.bytes_of(*pattern))
-        }
-        B::FillTextureColor(call) => {
-            let (texture, level, slice, region, color, format) = &**call;
-            encoder.fill_texture_color(texture, *level, *slice, *region, *color, *format)
         }
         B::CopyBufferToTexture(call) => encoder.copy_from_buffer_to_texture(
             &call.source,

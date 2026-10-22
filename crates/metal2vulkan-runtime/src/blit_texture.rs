@@ -714,9 +714,13 @@ impl BlitCommandEncoder {
             )));
         }
         // At a width that is not a multiple of 4 Metal's blit addresses the level's rows short of
-        // where they lie, moving texels between rows: announced, the texels moved as `getBytes`
-        // and `replaceRegion` move them.
+        // where they lie, moving texels between rows: at those rows for a 2D texture or array of
+        // one level (`two_planes/buffer_rows.rs`); for another (more levels, a view, 1D, 3D, a
+        // surface's), announced, the texels moved as `getBytes` and `replaceRegion` move them.
         let width = level_extent(texture.record(), region.level)[0];
+        if !width.is_multiple_of(4) && two_planes::rows_held(texture) {
+            return self.plane_rows_copy(buffer, texture, &image, layout, into_texture);
+        }
         if !width.is_multiple_of(4) {
             let pf = texture.pixel_format();
             self.core()
@@ -726,7 +730,8 @@ impl BlitCommandEncoder {
                         "`{call}` between a buffer and a {} texture level {width} texels wide",
                         pf.name()
                     );
-                    let reason = "the texels move at the rows the texture holds them in, where \
+                    let reason = "a texture of more than one level, a view, a 1D or 3D texture or a surface's: \
+                                  the texels move at the rows the texture holds them in, where \
                                   Metal's blit addresses its rows floor(4w/16)*16 bytes apart, \
                                   short of them, and so moves texels between rows"
                         .to_owned();
