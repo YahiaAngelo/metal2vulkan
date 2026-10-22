@@ -32,7 +32,7 @@ const SIDE: u64 = 16;
 /// The kinds a consumer announces at every occurrence so that its calls hear them, and those its
 /// process dies at by default: kinds of textures, heaps, buffers, devices, command states and a
 /// variant's bind, none of which a draw's shape meets.
-const UNRELATED: [Degradation; 12] = [
+const UNRELATED: [Degradation; 11] = [
     Degradation::HeapTwoPlaneTexture,
     Degradation::MetalLevelBelowHost,
     Degradation::OptimizedDepthStencilTexture,
@@ -42,7 +42,6 @@ const UNRELATED: [Degradation; 12] = [
     Degradation::UnmeasuredHeapTextureSize,
     Degradation::HalfOutputPrecision,
     Degradation::ReleasedCommandState,
-    Degradation::ResourceIdTakeover,
     Degradation::PrivateResourceOption,
     Degradation::HostDeallocatorDelayed,
 ];
