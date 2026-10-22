@@ -122,6 +122,8 @@ mod mipmap_scratch;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod multisample_buffer_copy;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod multisample_buffer_layouts;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod nan_signs;
 mod noted_apart;
 mod numbered_samplers;

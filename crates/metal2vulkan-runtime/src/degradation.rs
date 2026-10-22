@@ -472,8 +472,9 @@ degradations! {
              pattern buffer the encoder makes once";
         /// A blit copies between a buffer and a texture in a layout Vulkan cannot state.
         StagedTextureCopy = "staged-texture-copy", Performance,
-            "the rows go through a tightly packed scratch buffer, which its creation clears by \
-             a fill it waits for: two copies instead of one";
+            "the rows go through a tightly packed scratch buffer: two copies instead of one, \
+             and for a single-sample texture the scratch's creation clears it by a fill it \
+             waits for";
         /// A blit copies texel rows of a texture over a buffer to or from bytes of the same
         /// buffer that they share, which Vulkan's copy forbids.
         OverlappingTexelCopy = "overlapping-texel-copy", Performance,

@@ -1502,11 +1502,15 @@ pub enum RuntimeGap {
     /// `vkCmdCopyImageToBuffer` require a sample count of one,
     /// VUID-vkCmdCopyBufferToImage-dstImage-07973), so the single-sample buffer-image path cannot
     /// take it. Plain Metal copies it per sample, the pixel's samples consecutive in the buffer:
-    /// texel `(x, y)` sample `s` of an `n`-sample texture lies at
-    /// `offset + y * bytesPerRow + (x * n + s) * bpp`, whole or into a sub-region, for `R32Uint`
-    /// and `RGBA8Unorm` at 2 and 4 samples (measured on an Apple M4 under macOS 27.0.1; rows sit
-    /// `bytesPerRow` apart even where that is below `n * width * bpp`, so
-    /// they overlap, and the debug layer stays silent). The runtime runs that copy exactly
+    /// texel `(x, y)` sample `s` of an `n`-sample texture of `bpp`-byte samples lies at
+    /// `offset + y * bytesPerRow + (x * n + s) * bpp`, whole or into a sub-region, where the
+    /// offset and `bytesPerRow` are multiples of the pixel's `n * bpp` bytes, rows overlapping
+    /// into the texture where `bytesPerRow` is below a row; at others it rounds the first row's
+    /// offset and the pitch down (measured on an Apple M3 Max under macOS 27.0.1, for 1- to
+    /// 16-byte colour, depth and stencil samples at 2 and 4 samples; its API validation refuses an
+    /// offset off the pixel). The runtime places the rows as Metal does, through a staging buffer
+    /// where a row's offset in the `VkBuffer` is off a sample (`staged-texture-copy`), but for the
+    /// layouts of `MultisampledBufferLayout`. The runtime runs that copy exactly
     /// (`sample_interleave.rs`) through a single-sample wide image and a multisampled uint scratch,
     /// by a compute split and a sample-rate merge draw. This is the refusal where the device cannot
     /// run that: no `sampleRateShading`, no integer multisample color attachment at the count, no
@@ -1521,6 +1525,15 @@ pub enum RuntimeGap {
     /// recorded invalid Vulkan and some drivers hung instead of failing (the consumer's NVIDIA
     /// Xid 32 stall).
     MultisampledBufferCopy,
+    /// A blit copy between a buffer and a multisampled texture (as for `MultisampledBufferCopy`)
+    /// in a buffer layout whose rows plain Metal places by a rule the runtime does not hold
+    /// (measured on an Apple M3 Max under macOS 27.0.1): a `bytesPerRow` of 0 from an offset that
+    /// is a multiple of 16 bytes (but for a single row from offset 0), where Metal lays the pixels
+    /// out in a block order from the buffer's byte 0 whatever the offset; and, for a pixel (a
+    /// texel's samples) of 32 bytes or more, a `bytesPerRow` below a row, or off the pixel for
+    /// more than one row, whose rows Metal places by a rule not measured whole. The runtime copies
+    /// every other layout as plain Metal does.
+    MultisampledBufferLayout,
     /// What a render pass the device draws in color groups does not build: a pass of more color
     /// attachments with a texture than the lesser of the device's `maxColorAttachments` and
     /// `maxFragmentOutputAttachments` (four on a device at Vulkan's floor), or of one at an index

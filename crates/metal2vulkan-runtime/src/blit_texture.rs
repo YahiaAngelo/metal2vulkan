@@ -62,8 +62,8 @@ use super::blit_plan::{
 };
 use super::compressed_blit::{rule_of, rules_of};
 use super::copy_plan::{
-    block_bytes, check_region, colour_unit, copy_unit, depth_bytes, level_extent, shape,
-    BlitOption, CopyProblem, CopyRefusal, CopyUnit, ImageRegion, TextureRegion,
+    check_region, colour_unit, copy_unit, depth_bytes, level_extent, shape, BlitOption,
+    CopyProblem, CopyRefusal, CopyUnit, ImageRegion, TextureRegion,
 };
 use super::deferred::Deferred;
 use super::degradation::Degradation;
@@ -479,6 +479,8 @@ impl BlitCommandEncoder {
                     destination_texture.degrade_depth_upload(CALL, aspect, true, true);
                     destination_texture.degrade_depth_denormals(CALL, aspect, false, true);
                     copy.announce(self.core().device(), CALL, destination_texture);
+                    let format = destination_texture.pixel_format();
+                    copy.announce_staging(self.core().device(), format, true);
                     self.core().retain(copy);
                     // Every sample of the region written, as the single-sample path's.
                     let written = multisampled_texels(&region);
@@ -590,27 +592,11 @@ impl BlitCommandEncoder {
         // multisampled texture is emulated per sample through a scratch and a wide image
         // (`sample_interleave.rs`), or refused typed where the device cannot run that. Rows that
         // overlap out of a multisampled texture race on Metal (no exact answer), as out of a
-        // single-sample one (`blit_plan::placed_rows`), so they stay refused.
+        // single-sample one (`blit_plan::placed_rows`), so the emulation's placement of the rows
+        // refuses them (`sample_interleave::placed_rows`).
         let samples = source_texture.record().samples;
         if samples > 1 {
-            // Rows (of more than one) overlap in the buffer where `bytesPerRow` is below a row's
-            // bytes; out of the texture Metal's row writes then race, so refuse as the
-            // single-sample path does (`blit_plan::placed_rows`).
             let aspect = multisampled_aspect(CALL, source_texture, options)?;
-            if size.height > 1 {
-                let bpp = match aspect == ImageAspectFlags::COLOR {
-                    true => block_bytes(source_texture.pixel_format()),
-                    false => Some(unit(CALL, source_texture, options)?.bytes),
-                };
-                if let Some(bpp) = bpp {
-                    // A row of more bytes than `u64::MAX` is longer than any pitch.
-                    let row_bytes = (size.width.checked_mul(u64::from(samples)))
-                        .and_then(|samples| samples.checked_mul(u64::from(bpp)));
-                    if row_bytes.is_none_or(|row_bytes| layout.bytes_per_row < row_bytes) {
-                        return Err(invalid(CALL, Problem::Copy(CopyProblem::BytesPerRow)));
-                    }
-                }
-            }
             let region = region(CALL, source_origin, size, source_level, source_slice)?;
             let region = multisampled_region(CALL, source_texture, region)?;
             let (raw_buffer, base) = self.core().blit_at(destination_buffer, 0)?;
@@ -641,6 +627,8 @@ impl BlitCommandEncoder {
                             unsafe { copy.record(device, raw) };
                         },
                     )?;
+                    let format = source_texture.pixel_format();
+                    copy.announce_staging(self.core().device(), format, false);
                     self.core().retain(copy);
                     Ok(())
                 }

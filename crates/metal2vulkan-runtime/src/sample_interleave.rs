@@ -4,15 +4,19 @@
 //!
 //! Vulkan copies no multisampled image to or from a buffer. Metal copies such a blit per sample,
 //! the pixel's samples consecutive in the buffer: texel `(x, y)` sample `s` of an `n`-sample
-//! texture lies at `offset + y * bytesPerRow + (x * n + s) * bpp` (measured on an Apple M4 under
-//! macOS 27.0.1). The runtime moves the samples the only way Vulkan can, through
+//! texture lies at `offset + y * bytesPerRow + (x * n + s) * bpp` where the offset and
+//! `bytesPerRow` are multiples of the pixel's `n * bpp` bytes, and where it rounds them to
+//! otherwise ([`placed_rows`], measured on an Apple M3 Max under macOS 27.0.1). The runtime moves
+//! the samples the only way Vulkan can, through
 //! two images in the unsigned-integer copy format of the texel size ([`PlanesCopy`]), so a
 //! texel's bits cross unchanged:
 //!
 //! - a **wide** single-sample 2D image, `band_w * n` texels wide and `band_h` tall, whose column
 //!   `x * n + s` holds sample `s` of pixel `x`. It is filled from, or emptied into, the buffer by
 //!   ordinary buffer-image copies, one per row, so any `bytesPerRow` (overlapping rows included)
-//!   is exact;
+//!   is exact. A buffer-image copy's offset is a multiple of the copy format's texel, so where a
+//!   row's offset in the buffer's `VkBuffer` is not, the rows go through a tightly packed staging
+//!   buffer by buffer copies (announced as `staged-texture-copy`);
 //! - a **scratch** multisampled uint image of the band, the same sample count as the texture, in
 //!   which each pixel's samples sit in their sample slots, rendered from or split into the wide
 //!   image by the interleave modules, and moved to or from the real texture's band sub-rect by a
@@ -48,14 +52,16 @@
 //! A device that cannot run the modules (no `sampleRateShading`, no integer multisample color
 //! attachment at the count, no storage/sampled/transfer of the copy format, or a texture without
 //! transfer usage), or the depth or stencil move, refuses the copy typed
-//! (`RuntimeGap::MultisampledBufferCopy`), the caller's honest fallback.
+//! (`RuntimeGap::MultisampledBufferCopy`), the caller's honest fallback; a layout whose rows Metal
+//! places by a rule the runtime does not hold, typed too (`RuntimeGap::MultisampledBufferLayout`).
 
 use super::binding_view::VkView;
 use super::blit_plan::BufferLayout;
 use super::command_buffer::CommandBuffer;
 use super::copy_plan::{depth_bytes, CopyProblem, ImageRegion, TextureRegion};
+use super::degradation::Degradation;
 use super::device::{device_error, lock};
-use super::error::{internal, invalid, vulkan, Error, Problem};
+use super::error::{internal, invalid, vulkan, Error, Problem, RuntimeGap};
 use super::exit_guard;
 use super::image_plan::{sample_count, ImagePlan};
 use super::release;
@@ -66,7 +72,7 @@ use super::texture::Texture;
 use super::texture_descriptor::{largest_side, TextureDescriptor};
 use super::tracker::{Access, Barrier, Use};
 use super::values::ResourceOptions;
-use super::Device;
+use super::{Buffer, Device};
 use crate::device::functions::Vk;
 use crate::shader_cache::driver::Making;
 use ash::vk;
@@ -608,18 +614,36 @@ enum Recorded {
     },
     /// The move between the scratch and a depth or stencil texture's aspect (`sample_copy.rs`).
     Move(SampleCopy),
+    /// Buffer copies between the buffer's rows and the staging buffer's (`Staging`).
+    Rows {
+        src: vk::Buffer,
+        dst: vk::Buffer,
+        regions: Vec<vk::BufferCopy>,
+    },
+}
+
+/// The tightly packed buffer a copy's rows go through where a row's offset in the buffer's
+/// `VkBuffer` is off the copy format's texel, which a buffer-image copy's offset must be a
+/// multiple of (VUID-VkBufferImageCopy-bufferOffset-00193): its `VkBuffer`, where its byte 0
+/// lies in it, and the buffer, held until the command buffer completes.
+struct Staging {
+    raw: vk::Buffer,
+    at: u64,
+    _buffer: Buffer,
 }
 
 /// The emulated copy: its steps, the resource uses the command barriers over, the stages it
-/// runs in, the band objects, and the textures it holds until the command buffer completes (the
-/// copy's own, its scratch and wide images, and the texture it copies into or out of). The buffer
-/// it copies with is held by the encoder (`EncoderCore::blit_at`).
+/// runs in, the band objects, the textures it holds until the command buffer completes (the
+/// copy's own, its scratch and wide images, and the texture it copies into or out of), and the
+/// staging buffer its rows go through, if they do (with the first row's offset in the buffer).
+/// The buffer it copies with is held by the encoder (`EncoderCore::blit_at`).
 pub(super) struct InterleaveCopy {
     steps: Vec<Recorded>,
     pub(super) uses: Vec<Use<ResourceKey>>,
     pub(super) stages: vk::PipelineStageFlags2,
     _holder: Holder,
     _textures: Vec<Texture>,
+    staging: Option<(Staging, u64)>,
 }
 
 /// A 2D view of `texture`'s only level and layer in its own format, serving `usage`.
@@ -753,33 +777,91 @@ fn bands(width: u32, height: u32, samples: u32, bpp: u64, limit: u32) -> Vec<(u3
     tiles
 }
 
-/// Whether the buffer's rows of a copy of `size` texels at `samples`, `bpp` bytes a sample, laid
-/// out as `layout` ([`buffer_rows`]: row `y` of `width * samples` samples at
-/// `offset + y * bytesPerRow`), lie within its first `length` bytes. Rows lie in order, so the
-/// last ends past every other; one past `u64::MAX` lies past every buffer.
-pub(super) fn rows_within(
-    layout: &BufferLayout,
-    size: [u32; 3],
-    samples: u32,
-    bpp: u64,
-    length: u64,
-) -> bool {
-    let [width, height, _] = size.map(u64::from);
-    if width == 0 || height == 0 {
-        return true;
-    }
-    let row = (width * u64::from(samples)).checked_mul(bpp);
-    let end = (layout.row_at(0, height - 1)).and_then(|last| last.checked_add(row?));
-    end.is_some_and(|end| end <= length)
+/// Why plain Metal's placement of a multisampled copy's rows ([`placed_rows`]) gives no rows the
+/// runtime copies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Unplaced {
+    /// A layout whose rows plain Metal places by a rule the runtime does not hold
+    /// (`RuntimeGap::MultisampledBufferLayout`).
+    Gap,
+    /// A pitch below a row out of the texture, where plain Metal's row writes race, or into it
+    /// one below the pixel's placement unit from an offset that is a multiple of 16, from which
+    /// it reads bytes the buffer does not hold (`CopyProblem::BytesPerRow`).
+    BytesPerRow,
+    /// A row past `length`, or past `u64::MAX` (`CopyProblem::BufferRange`).
+    BufferRange,
 }
 
-/// The buffer-image copy regions for a band of `bw` by `bh` texels at `samples`, the band's
-/// column base `bx` texels and row base `by`, reading or writing the buffer at `base + offset`
-/// with `bytes_per_row`, each row at `by + ry`: one region per row (so any `bytesPerRow`,
-/// overlapping rows included, is exact), between the buffer and the wide image's rows `0..bh`.
+/// Where plain Metal places the buffer's rows of a blit between a buffer of `length` bytes laid
+/// out as `layout` and `rows` rows of a multisampled texture whose pixels (a texel's samples,
+/// consecutive) are `pixel` bytes, `row_bytes` a row (`into_texture` from the buffer): each row's
+/// offset from the buffer's byte 0, in order. Measured on an Apple M3 Max under macOS 27.0.1 (its
+/// API validation stops every offset off the pixel), for 1-, 2-, 4-, 8- and 16-byte colour, depth
+/// and stencil samples at 2 and 4 samples, both ways, 1 to 8 texels wide:
+///
+/// - the first row lies at the offset rounded down to 4 bytes, or to the pixel where that is
+///   smaller, and to 2 bytes for a 32-byte pixel;
+/// - each next row lies `bytesPerRow` rounded down to the pixel, or to 16 bytes where that is
+///   smaller, further on: into the texture at a pitch below a row too, rows that overlap
+///   included, and every row at the first where the pitch rounds to 0 from an offset off 16.
+///
+/// Refused (`Unplaced::BytesPerRow`): out of the texture, a pitch below a row of more than one
+/// row; into it, one between 0 and the unit it rounds to from an offset that is a multiple of 16,
+/// from which plain Metal reads bytes the buffer does not hold. The runtime's gap
+/// (`Unplaced::Gap`): a pitch of 0 from an offset that is a multiple of 16 (but for a single row
+/// from 0), where plain Metal lays the pixels out in a block order, from byte 0 whatever the
+/// offset; and a pixel of 32 bytes or more at a pitch below a row, or off the pixel for more than
+/// one row, whose rows plain Metal places by a rule not measured whole. A row past `length`
+/// (`Unplaced::BufferRange`) is refused as a single-sample copy's layout past its buffer is. An
+/// empty copy places no rows.
+pub(super) fn placed_rows(
+    layout: &BufferLayout,
+    pixel: u64,
+    row_bytes: u64,
+    rows: u64,
+    length: u64,
+    into_texture: bool,
+) -> Result<Vec<u64>, Unplaced> {
+    if rows == 0 || row_bytes == 0 {
+        return Ok(Vec::new());
+    }
+    let (offset, bpr) = (layout.offset, layout.bytes_per_row);
+    let block_order = offset.is_multiple_of(16);
+    if bpr == 0 && block_order && (offset != 0 || rows > 1) {
+        return Err(Unplaced::Gap);
+    }
+    if pixel >= 32 && (bpr < row_bytes || (rows > 1 && !bpr.is_multiple_of(pixel))) {
+        return Err(Unplaced::Gap);
+    }
+    let align = if pixel == 32 { 2 } else { pixel.min(4) };
+    let first = offset - offset % align;
+    let unit = pixel.min(16);
+    if rows > 1 && bpr < row_bytes && (!into_texture || (bpr < unit && block_order)) {
+        return Err(Unplaced::BytesPerRow);
+    }
+    let pitch = bpr - bpr % unit;
+    let starts = (0..rows)
+        .map(|y| (y.checked_mul(pitch)).and_then(|row| first.checked_add(row)))
+        .collect::<Option<Vec<u64>>>()
+        .ok_or(Unplaced::BufferRange)?;
+    // The rows follow one another (a pitch is never negative), so the last ends furthest.
+    let past = (starts.last())
+        .is_some_and(|&start| start.checked_add(row_bytes).is_none_or(|end| end > length));
+    match past {
+        true => Err(Unplaced::BufferRange),
+        false => Ok(starts),
+    }
+}
+
+/// The buffer-image copy regions for a band of `bw` by `bh` texels at `samples`, `bpp` bytes a
+/// sample, the band's column base `bx` texels and row base `by`, between the wide image's rows
+/// `0..bh` and the rows of the buffer that start `starts` bytes from `base` ([`placed_rows`]), or
+/// (`staged`) a tightly packed scratch's from `base`: one region per row, so rows that overlap
+/// are exact.
 fn buffer_rows(
     base: u64,
-    layout: &BufferLayout,
+    starts: &[u64],
+    staged: bool,
     (bx, by): (u32, u32),
     (bw, bh): (u32, u32),
     samples: u32,
@@ -789,10 +871,10 @@ fn buffer_rows(
     let row_texels = u64::from(bw) * n;
     (0..bh)
         .map(|ry| {
-            let offset = base
-                + layout.offset
-                + u64::from(by + ry) * layout.bytes_per_row
-                + u64::from(bx) * n * bpp;
+            let offset = match staged {
+                true => base + u64::from(ry) * row_texels * bpp,
+                false => base + starts[(by + ry) as usize] + u64::from(bx) * n * bpp,
+            };
             vk::BufferImageCopy {
                 buffer_offset: offset,
                 buffer_row_length: 0,
@@ -814,6 +896,29 @@ fn buffer_rows(
                     depth: 1,
                 },
             }
+        })
+        .collect()
+}
+
+/// The copies of a band's rows between the buffer (its rows from `base`, at `starts`) and the
+/// staging scratch (tightly packed from `at`), buffer to scratch: a band of `bw` by `bh` texels
+/// at `samples`, `bpp` bytes a sample, from column `bx` and row `by`.
+fn staged_rows(
+    (base, starts): (u64, &[u64]),
+    at: u64,
+    (bx, by): (u32, u32),
+    (bw, bh): (u32, u32),
+    samples: u32,
+    bpp: u64,
+) -> Vec<vk::BufferCopy> {
+    let row = u64::from(bw) * u64::from(samples) * bpp;
+    (0..bh)
+        .map(|ry| vk::BufferCopy {
+            src_offset: base
+                + starts[(by + ry) as usize]
+                + u64::from(bx) * u64::from(samples) * bpp,
+            dst_offset: at + u64::from(ry) * row,
+            size: row,
         })
         .collect()
 }
@@ -876,8 +981,12 @@ impl InterleaveCopy {
     /// device cannot run it (the caller refuses typed). The texture's Vulkan format and the aspect
     /// decide the copy format ([`copy_format`]); a format of no copy (not a single-texel color
     /// format of 1, 2, 4, 8 or 16 bytes, nor a 16- or 32-bit depth or a stencil) gives `None`.
-    /// Refused (`Invalid`, [`CopyProblem::BufferRange`]): a row's samples past `length`, as a
-    /// single-sample copy's layout past its buffer is.
+    /// The buffer's rows lie where plain Metal places them ([`placed_rows`]), through a staging
+    /// buffer where a row's offset in the `VkBuffer` is off the copy format's texel. Refused
+    /// (`Invalid`): a row's samples past `length` ([`CopyProblem::BufferRange`]), as a
+    /// single-sample copy's layout past its buffer is, and a pitch [`placed_rows`] refuses
+    /// ([`CopyProblem::BytesPerRow`]); a layout it places by a rule the runtime does not hold
+    /// is the gap `RuntimeGap::MultisampledBufferLayout`.
     pub(super) fn plan(
         call: &'static str,
         maker: &CommandBuffer,
@@ -897,6 +1006,24 @@ impl InterleaveCopy {
         let Some(copy) = copy_format(format, aspect) else {
             return Ok(None);
         };
+        let bpp = texel_bytes(copy);
+        let samples = samples.max(1);
+        let [width, height, _] = region.size;
+        let pixel = u64::from(samples) * bpp;
+        let row_bytes = u64::from(width) * pixel;
+        let rows = u64::from(height);
+        let starts = match placed_rows(layout, pixel, row_bytes, rows, length, into_texture) {
+            Ok(starts) => starts,
+            Err(Unplaced::Gap) => {
+                return Err(Error::NotImplemented(RuntimeGap::MultisampledBufferLayout))
+            }
+            Err(Unplaced::BytesPerRow) => {
+                return Err(invalid(call, Problem::Copy(CopyProblem::BytesPerRow)))
+            }
+            Err(Unplaced::BufferRange) => {
+                return Err(invalid(call, Problem::Copy(CopyProblem::BufferRange)))
+            }
+        };
         // The real texture must take the transfer the `vkCmdCopyImage` needs.
         let transfer = if into_texture {
             ImageUsageFlags::TRANSFER_DST
@@ -905,11 +1032,6 @@ impl InterleaveCopy {
         };
         if !plan.usage.contains(transfer) {
             return Ok(None);
-        }
-        let bpp = texel_bytes(copy);
-        let samples = samples.max(1);
-        if !rows_within(layout, region.size, samples, bpp, length) {
-            return Err(invalid(call, Problem::Copy(CopyProblem::BufferRange)));
         }
         // The device's modules and pipelines; `Unsupported` means the device cannot run them.
         let made = if into_texture {
@@ -922,7 +1044,6 @@ impl InterleaveCopy {
             Err(Error::Unsupported(_)) => return Ok(None),
             Err(error) => return Err(error),
         }
-        let [width, height, _] = region.size;
         if width == 0 || height == 0 {
             return Ok(Some(InterleaveCopy {
                 steps: Vec::new(),
@@ -930,6 +1051,7 @@ impl InterleaveCopy {
                 stages: INTERLEAVE_STAGES,
                 _holder: Holder::new(&device, 0, 0)?,
                 _textures: Vec::new(),
+                staging: None,
             }));
         }
         let [ox, oy, _] = region.origin;
@@ -948,6 +1070,29 @@ impl InterleaveCopy {
             .max_image_dimension_2d
             .min(metal_side);
         let tiles = bands(width, height, samples, bpp, limit);
+        // A buffer-image copy's offset is a multiple of the copy format's texel; the pitch is a
+        // multiple of the pixel or of 16 bytes ([`placed_rows`]), so of the texel too, and only
+        // the first row's offset (and a no-copy buffer's byte 0 in its `VkBuffer`) may miss it.
+        let staged = (starts.iter()).any(|&start| !(base + start).is_multiple_of(bpp));
+        let staging = match staged {
+            true => {
+                // One band's rows at a time, every band through the same buffer.
+                let band = (tiles.iter())
+                    .map(|&(_, _, bw, bh)| u64::from(bw) * pixel * u64::from(bh))
+                    .max()
+                    .unwrap_or(0);
+                // A buffer the runtime makes for its own use starts at its `VkBuffer`'s start
+                // (`Buffer::base`), so its rows' offsets are multiples of the texel.
+                let buffer = device.scratch_buffer(band)?;
+                let (raw, at) = buffer.at(0);
+                Some(Staging {
+                    raw,
+                    at,
+                    _buffer: buffer,
+                })
+            }
+            false => None,
+        };
         let count = tiles.len() as u32;
         let (splits, merges) = if into_texture { (0, count) } else { (count, 0) };
         let mut holder = Holder::new(&device, splits, merges)?;
@@ -995,7 +1140,46 @@ impl InterleaveCopy {
             };
             let wide_image = wide.raw_image()?;
             let scratch_image = scratch.raw_image()?;
-            let regions = buffer_rows(base, layout, (bx, by), (bw, bh), samples, bpp);
+            // Into the texture, the buffer's rows move into the staging buffer first; out of it,
+            // they move out of it last.
+            let (rows_buffer, regions, staged_step) = match &staging {
+                Some(staging) => {
+                    let rows = staged_rows(
+                        (base, &starts),
+                        staging.at,
+                        (bx, by),
+                        (bw, bh),
+                        samples,
+                        bpp,
+                    );
+                    let rows = match into_texture {
+                        true => Recorded::Rows {
+                            src: buffer,
+                            dst: staging.raw,
+                            regions: rows,
+                        },
+                        false => Recorded::Rows {
+                            src: staging.raw,
+                            dst: buffer,
+                            regions: (rows.into_iter())
+                                .map(|r| vk::BufferCopy {
+                                    src_offset: r.dst_offset,
+                                    dst_offset: r.src_offset,
+                                    size: r.size,
+                                })
+                                .collect(),
+                        },
+                    };
+                    let regions =
+                        buffer_rows(staging.at, &starts, true, (bx, by), (bw, bh), samples, bpp);
+                    (staging.raw, regions, Some(rows))
+                }
+                None => {
+                    let regions =
+                        buffer_rows(base, &starts, false, (bx, by), (bw, bh), samples, bpp);
+                    (buffer, regions, None)
+                }
+            };
             let (tx, ty) = (ox + bx, oy + by);
             // The scratch and the texture's band: a colour texture's by one `vkCmdCopyImage`; a
             // depth or stencil aspect's by the multisampled blit copies' move, refused as it is.
@@ -1084,8 +1268,9 @@ impl InterleaveCopy {
                 // SAFETY: `info` and its array are live for the call; the view is live.
                 let framebuffer = unsafe { crate::creation::framebuffer(raw, &info) }?;
                 holder.framebuffers.push(framebuffer);
+                steps.extend(staged_step);
                 steps.push(Recorded::BufferRows {
-                    buffer,
+                    buffer: rows_buffer,
                     wide: wide_image,
                     regions,
                     into_wide: true,
@@ -1111,11 +1296,12 @@ impl InterleaveCopy {
                     groups: [bw.div_ceil(local), bh.div_ceil(local), samples],
                 });
                 steps.push(Recorded::BufferRows {
-                    buffer,
+                    buffer: rows_buffer,
                     wide: wide_image,
                     regions,
                     into_wide: false,
                 });
+                steps.extend(staged_step);
             }
             let write = Access::new(
                 vk::PipelineStageFlags2::ALL_COMMANDS,
@@ -1130,12 +1316,14 @@ impl InterleaveCopy {
             textures.push(wide);
             textures.push(scratch);
         }
+        let first = starts.first().copied().unwrap_or(0);
         Ok(Some(InterleaveCopy {
             steps,
             uses,
             stages,
             _holder: holder,
             _textures: textures,
+            staging: staging.map(|staging| (staging, first)),
         }))
     }
 
@@ -1147,6 +1335,34 @@ impl InterleaveCopy {
                 moved.announce(device, call, destination);
             }
         }
+    }
+
+    /// Announce, once the copy is recorded, that its rows went through a staging buffer
+    /// (`staged-texture-copy`), with a texture of `format`, `into_texture` from the buffer.
+    pub(super) fn announce_staging(
+        &self,
+        device: &Device,
+        format: PixelFormat,
+        into_texture: bool,
+    ) {
+        let Some((_, offset)) = self.staging else {
+            return;
+        };
+        device.degrade(Degradation::StagedTextureCopy, || {
+            let object = match into_texture {
+                true => format!(
+                    "a copy from a buffer at offset {offset} into a multisampled {format:?} \
+                     texture"
+                ),
+                false => format!(
+                    "a copy from a multisampled {format:?} texture into a buffer at offset \
+                     {offset}"
+                ),
+            };
+            let reason = "Vulkan cannot state the buffer's layout: a row's offset in the VkBuffer \
+                          is off a sample's bytes";
+            (object, reason.to_owned())
+        });
     }
 
     /// Record the copy into `command_buffer`, each step between barriers from everything before
@@ -1267,6 +1483,9 @@ impl InterleaveCopy {
                     // The move's images rest in `GENERAL`, live until the copy completes, and
                     // `sample_copy::plan` checked its regions, formats and targets.
                     Recorded::Move(moved) => moved.record(raw, command_buffer),
+                    Recorded::Rows { src, dst, regions } => {
+                        raw.cmd_copy_buffer(command_buffer, *src, *dst, regions)
+                    }
                 }
                 Barrier::everything().record(raw, command_buffer);
             }
