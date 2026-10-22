@@ -87,6 +87,7 @@ use metal2vulkan::pipeline::{
     ComputePipeline, PrecisionNote, Reconvergence, RenderPipeline, SlotRef, SpecKey, StageModule,
 };
 use metal2vulkan::vk::{ImageAspectFlags, ShaderStage};
+use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -2358,10 +2359,11 @@ impl Announced {
     }
 
     /// Whether `degradation` is announced now: at each occurrence of a kind the device announces
-    /// at each, else for the first time, once per kind.
+    /// at each (met at every occurrence, [`EachWatch`]), else for the first time, once per kind.
     pub(super) fn now(&self, degradation: Degradation) -> bool {
         let (word, bit) = degradation.bit();
         if self.each[word] & bit != 0 {
+            met_each();
             return true;
         }
         let seen = &self.seen[word];
@@ -2390,17 +2392,45 @@ impl Announced {
         self.each[word] & bit != 0
     }
 
-    /// Whether the device announces some kind at every occurrence.
-    fn some_each(&self) -> bool {
-        self.each.iter().any(|&each| each != 0)
-    }
-
     /// Whether the device announces any kind of `kinds` at every occurrence: an AND a word.
     fn any_each(&self, kinds: &Kinds) -> bool {
         self.each
             .iter()
             .zip(&kinds.0)
             .any(|(each, kinds)| each & kinds != 0)
+    }
+}
+
+thread_local! {
+    /// How many notices this thread met that their device announces, or refuses, at every
+    /// occurrence ([`EachWatch`]).
+    static MET_EACH: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Count a notice met on this thread that its device announces, or refuses, at every occurrence.
+fn met_each() {
+    MET_EACH.with(|met| met.set(met.get().wrapping_add(1)));
+}
+
+/// A watch over the notices the calling thread meets, from its start, that their device announces
+/// at every occurrence (`DeviceOptions::announce_each`: [`Announced::now`], a bind's notices) or
+/// refuses at every occurrence while it lowers a render encoder's call
+/// (`DeviceOptions::lowering_refuses`, wherever it is met). Work that met none while watched announced nothing its
+/// next run from the same inputs would announce again, so a memo may keep what it derived and a
+/// later use take it without deriving it again (`render/draw_shape.rs`): every other kind is
+/// announced once per device, which its first derivation did. It needs no list of the kinds the
+/// work may announce, so it cannot drift from the work's code.
+pub(crate) struct EachWatch(u64);
+
+impl EachWatch {
+    /// A watch from now.
+    pub(crate) fn start() -> EachWatch {
+        EachWatch(MET_EACH.with(Cell::get))
+    }
+
+    /// Whether this thread met such a notice since the watch started.
+    pub(crate) fn met(&self) -> bool {
+        MET_EACH.with(Cell::get) != self.0
     }
 }
 
@@ -2677,8 +2707,14 @@ impl Device {
     ) {
         let shared = self.shared();
         // A kind the device refuses while lowering a call after it returned refuses the call,
-        // at every occurrence, rather than being announced (`render/deferral.rs`).
-        if crate::render::lowering::current().is_some() && shared.lowering_refuses(degradation) {
+        // at every occurrence, rather than being announced (`render/deferral.rs`): met at every
+        // occurrence wherever it is met ([`EachWatch`]), as a call met in one place may be
+        // lowered in the other.
+        let refuses = shared.lowering_refuses(degradation);
+        if refuses {
+            met_each();
+        }
+        if refuses && crate::render::lowering::current().is_some() {
             let (object, reason) = describe();
             crate::render::lowering::refuse(DegradeNotice::new(degradation, object, reason));
             return;
@@ -2851,13 +2887,6 @@ impl Device {
         }
     }
 
-    /// Whether the device's options ask for some kind at every occurrence
-    /// (`DeviceOptions::announce_each`): a draw then derives its shape anew, announcing as it
-    /// does (`render/draw_shape.rs`).
-    pub(crate) fn announces_some_each(&self) -> bool {
-        self.shared().announced.some_each()
-    }
-
     /// Whether a bind of a variant of `kinds` (`Kinds::of`) announces any of them: whether the
     /// device's options ask for any at every occurrence (`DeviceOptions::announce_each`), an AND
     /// a word. A bind that would take work to describe its notices (the formats it binds) asks
@@ -2900,6 +2929,7 @@ impl Device {
     /// occurrence: through the device's message sink, else on stderr.
     pub(crate) fn announce_bound(&self, notices: &[BoundNotice]) {
         for (degradation, message) in notices {
+            met_each();
             match check_announcement(*degradation, true) {
                 None => self.deliver(message),
                 misplaced => self.deliver_placed(*degradation, message.clone(), misplaced),

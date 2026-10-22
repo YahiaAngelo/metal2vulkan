@@ -45,6 +45,8 @@ mod contexts;
 mod copy_bounds;
 mod copy_plan;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod cpu_copy_layouts;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod deferred_calls;
 mod degradation;
 mod depth_copy;
@@ -56,6 +58,8 @@ mod detach_lost;
 mod device;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod dispatch_pending;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod draw_shape_notices;
 mod driver_defects;
 mod enables;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]

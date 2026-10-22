@@ -275,7 +275,7 @@ use super::color_resolve::{self, ShaderResolves};
 use super::command_buffer::CommandBuffer;
 use super::deferred::Deferred;
 use super::degradation::{
-    BoundFormats, CompiledPipeline, Degradation, HandedToMetal, SplitCauses, WholePass,
+    BoundFormats, CompiledPipeline, Degradation, EachWatch, HandedToMetal, SplitCauses, WholePass,
 };
 use super::depth_stand_in::DepthStandIn;
 use super::depth_stencil::{DepthStencilState, FailingDraw};
@@ -7803,9 +7803,11 @@ impl RenderLowering {
                 kept
             }
             None => {
+                let watch = EachWatch::start();
                 let inputs = self.shape_inputs();
                 let shaped = inputs.draw_state(graphics, &settings, failed, depth16)?;
-                if let Some(token) = shape_token {
+                // Kept where its derivation announced nothing at each occurrence.
+                if let (Some(token), false) = (shape_token, watch.met()) {
                     self.shape_memo.keep_state(token, &variant, &shaped);
                 }
                 shaped
@@ -7976,6 +7978,7 @@ impl RenderLowering {
         let draw_pipeline = match found {
             Some(made) => DrawPipeline::Made(made),
             None => {
+                let watch = EachWatch::start();
                 let key = draw_key();
                 let (draw_pipeline, own) = match deferrable {
                     true => variant.begin_graphics_pipeline(
@@ -7994,8 +7997,10 @@ impl RenderLowering {
                         true,
                     ),
                 };
-                // Kept where it is the key's own, made: not a residual form.
-                if let (Some(token), DrawPipeline::Made(made), true) = (token, &draw_pipeline, own)
+                // Kept where it is the key's own, made: not a residual form; and where finding it
+                // announced nothing at each occurrence.
+                if let (Some(token), DrawPipeline::Made(made), true, false) =
+                    (token, &draw_pipeline, own, watch.met())
                 {
                     self.shape_memo.keep_pipeline(token, &looked, made);
                 }
@@ -9009,7 +9014,8 @@ impl RenderLowering {
     /// A draw's settings ([`draw_settings`](Self::draw_settings)), with the hidden depth and
     /// stencil it gives the pass: those an earlier draw of the encoder derived from the same
     /// inputs, else derived and kept (`render/draw_shape.rs`); with the token of their memo
-    /// entry, `None` on a device that announces some notice at every occurrence.
+    /// entry, `None` where their derivation met a notice the device announces at every
+    /// occurrence ([`EachWatch`]), which keeps nothing.
     fn shaped_settings(
         &mut self,
         call: &'static str,
@@ -9018,11 +9024,6 @@ impl RenderLowering {
     ) -> Result<(DrawSettings, Option<Target>, Option<ShapeToken>), Error> {
         let hidden = self.needed_hidden()?;
         let given = hidden.is_some();
-        if self.core.device().announces_some_each() {
-            let inputs = self.shape_inputs();
-            let settings = inputs.settings(call, (pipeline, assembly), given, true)?;
-            return Ok((settings, hidden, None));
-        }
         let inputs = self.shape_inputs();
         let inputs = (inputs.versions, inputs.counts_visibility);
         if let Some((kept, token)) = self.shape_memo.settings((pipeline, assembly), inputs) {
@@ -9034,9 +9035,14 @@ impl RenderLowering {
             );
             return Ok((kept, hidden, Some(token)));
         }
+        let watch = EachWatch::start();
         let settings = self
             .shape_inputs()
             .settings(call, (pipeline, assembly), given, true)?;
+        // Derived again at each draw, which announces it again.
+        if watch.met() {
+            return Ok((settings, hidden, None));
+        }
         let token = (self.shape_memo).keep_settings((pipeline, assembly), inputs, &settings);
         Ok((settings, hidden, Some(token)))
     }

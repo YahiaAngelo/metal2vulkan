@@ -1111,22 +1111,25 @@ impl Device {
     /// On a device that keeps MoltenVK's residency set (`argument_buffers.rs`), a line to the
     /// device's message sink (`Verbose`, id name `metal2vulkan-host-import-freed`) for a host
     /// import of `bytes` freed: MoltenVK removes its buffer from the set and commits the set at
-    /// once, with the submissions in flight on the device's queues it names. Elsewhere nothing.
+    /// once, with the submissions in flight on the device's queues it names. Elsewhere nothing,
+    /// and nothing made where the sink hears no `Verbose` message
+    /// (`MessageSink::with_least_severity`).
     pub(super) fn note_import_freed(&self, bytes: u64) {
+        let severity = super::MessageSeverity::Verbose;
+        let shared = self.shared();
+        let Some(sink) = (shared.instance.sink()).filter(|sink| sink.hears(severity)) else {
+            return;
+        };
         let facts = super::device::argument_buffers::Facts::of(&self.properties().description);
         if !facts.keeps_residency_set() {
             return;
         }
-        let shared = self.shared();
-        let Some(sink) = shared.instance.sink() else {
-            return;
-        };
         let in_flight: usize = shared
             .relayed_queues()
             .map(|(_, flights)| flights.in_flight())
             .sum();
         sink.deliver(&super::DebugMessage {
-            severity: super::MessageSeverity::Verbose,
+            severity,
             kind: super::MessageKind {
                 general: true,
                 ..super::MessageKind::default()

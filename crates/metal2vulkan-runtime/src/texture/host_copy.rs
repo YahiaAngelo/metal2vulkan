@@ -34,9 +34,12 @@
 //! - **Made.** The making moves the image to `GENERAL` and writes zeros over every texel on the
 //!   host ([`start`]), as Metal's new `Shared` and `Managed` textures read zero: no first move
 //!   waits for a submission (`first_move.rs`), and nothing waits for the GPU.
-//! - **Copied.** `replace_region` packs the caller's bytes and copies them into the image on the
-//!   host (and into its depth twin), and `get_bytes` copies the image's texels out and lays them
-//!   out: no submission, no wait. The host's writes are visible to every command submitted after
+//! - **Copied.** `replace_region` copies the caller's bytes into the image on the host (and into
+//!   its depth twin), straight from them where they are laid out packed
+//!   (`HostLayout::is_packed`), else from packed bytes, and `get_bytes` copies the image's texels
+//!   out, into the
+//!   caller's bytes where they are laid out packed (`HostLayout::is_packed`), else into packed
+//!   bytes it lays out from: no submission, no wait. The host's writes are visible to every command submitted after
 //!   the call (a submission orders the host's writes before it); a batch's writes are visible to
 //!   the host once it completed (every batch ends with its writes made available to the host,
 //!   `tracker.rs`).

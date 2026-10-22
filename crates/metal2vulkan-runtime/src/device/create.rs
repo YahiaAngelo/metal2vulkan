@@ -274,22 +274,48 @@ pub(crate) fn setting_values(
 /// degrade notices. It is called on whichever thread the driver, the layer, or the runtime
 /// reports from, so it must be `Send + Sync`; a panic inside it is caught.
 #[derive(Clone)]
-pub struct MessageSink(Arc<dyn Fn(&DebugMessage) + Send + Sync>);
+pub struct MessageSink {
+    receive: Arc<dyn Fn(&DebugMessage) + Send + Sync>,
+    /// The least severity of the messages it hears, but degrade notices
+    /// ([`with_least_severity`](Self::with_least_severity)).
+    least: MessageSeverity,
+}
 
 impl MessageSink {
-    /// A sink calling `receive` with each message.
+    /// A sink calling `receive` with each message, of every severity.
     pub fn new(receive: impl Fn(&DebugMessage) + Send + Sync + 'static) -> MessageSink {
-        MessageSink(Arc::new(receive))
+        MessageSink {
+            receive: Arc::new(receive),
+            least: MessageSeverity::Verbose,
+        }
     }
 
-    /// Whether `other` is this sink (a clone of it), not merely one that does the same.
+    /// No Metal counterpart: the sink, hearing no message of a severity below `least` but the
+    /// devices' degrade notices ([`DebugMessage::degradation`]), which it hears whatever `least`
+    /// says. The runtime makes none of the messages of its own the sink skips: it formats no text
+    /// for them (a host import freed on a device that keeps MoltenVK's residency set, a `Verbose`
+    /// line, `metal2vulkan-host-import-freed`, the only one that may come at every call).
+    pub fn with_least_severity(self, least: MessageSeverity) -> MessageSink {
+        MessageSink { least, ..self }
+    }
+
+    /// Whether `other` is this sink (a clone of it, hearing the same severities), not merely one
+    /// that does the same.
     pub(crate) fn same(&self, other: &MessageSink) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        Arc::ptr_eq(&self.receive, &other.receive) && self.least == other.least
     }
 
-    /// Hand `message` to the sink; a panic inside it is caught.
+    /// Whether the sink hears messages of `severity` that are no degrade notice.
+    pub(crate) fn hears(&self, severity: MessageSeverity) -> bool {
+        severity >= self.least
+    }
+
+    /// Hand `message` to the sink, where it hears it; a panic inside it is caught.
     pub(crate) fn deliver(&self, message: &DebugMessage) {
-        crate::exit_guard::program(|| (self.0)(message));
+        if message.degradation.is_none() && !self.hears(message.severity) {
+            return;
+        }
+        crate::exit_guard::program(|| (self.receive)(message));
     }
 }
 
@@ -1635,6 +1661,56 @@ mod tests {
         ];
         for driver in others {
             assert!(!super::kept_cache_is_metals(driver), "{driver:?}");
+        }
+    }
+
+    /// A sink with a least severity hears no message below it but degrade notices, which it hears
+    /// whatever their severity; a sink of `MessageSink::new` hears every severity; and a sink with
+    /// another least severity is not the same sink, though it calls the same receiver.
+    #[test]
+    fn a_sink_hears_no_message_below_its_least_severity_but_notices() {
+        use super::{DebugMessage, MessageKind, MessageSeverity as S};
+        use crate::{Degradation, DegradeNotice};
+        let received: Arc<Mutex<Vec<(S, bool)>>> = Arc::default();
+        let every = {
+            let received = Arc::clone(&received);
+            MessageSink::new(move |message| {
+                let notice = message.degradation.is_some();
+                received.lock().unwrap().push((message.severity, notice))
+            })
+        };
+        let message = |severity, notice: bool| {
+            let mut message = DebugMessage {
+                severity,
+                kind: MessageKind::default(),
+                id_name: String::new(),
+                id: 0,
+                text: String::new(),
+                degradation: None,
+            };
+            if notice {
+                let kind = Degradation::UnsizedPoints;
+                let notice = DegradeNotice::new(kind, String::new(), String::new());
+                message = DebugMessage {
+                    severity,
+                    ..notice.message()
+                };
+            }
+            message
+        };
+        let all = [S::Verbose, S::Info, S::Warning, S::Error];
+        for least in all {
+            let sink = every.clone().with_least_severity(least);
+            assert_eq!(sink.same(&every), least == S::Verbose, "{least:?}");
+            for severity in all {
+                assert_eq!(sink.hears(severity), severity >= least);
+                for notice in [false, true] {
+                    sink.deliver(&message(severity, notice));
+                    let heard = received.lock().unwrap().pop();
+                    let expected = (notice || severity >= least).then_some((severity, notice));
+                    assert_eq!(heard, expected, "{least:?}: {severity:?}, notice {notice}");
+                }
+            }
         }
     }
 

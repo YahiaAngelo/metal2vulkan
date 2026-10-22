@@ -140,6 +140,7 @@ use metal2vulkan::vk::{
 };
 use stand_in::StandIn;
 use std::any::Any;
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
 use std::ptr::NonNull;
@@ -5177,26 +5178,36 @@ impl Texture {
         // A shadowed view's texels are its texture's (`texture/view_shadow.rs`).
         let truth = view_shadow::truth(image);
         let copy = buffer_image_copy(&image_region);
-        if truth.takes_host_copies() {
-            let mut packed = vec![0; host.packed_len() as usize];
+        // The caller's bytes packed, where a copy or a decoded twin's decode takes them so.
+        let len = host.packed_len() as usize;
+        let pack = || {
+            let mut packed = vec![0; len];
             host.pack(bytes, &mut packed);
+            packed
+        };
+        // Copied on the host from the caller's bytes where they are laid out packed, else from
+        // packed bytes.
+        if truth.takes_host_copies() {
+            let packed = match host.is_packed() {
+                true => Cow::Borrowed(&bytes[..len]),
+                false => Cow::Owned(pack()),
+            };
             if truth.host_write(copy, &packed)? {
                 if denormal {
                     self.degrade_depth_denormals(CALL, image_region.aspect, true, false);
                 }
-                return truth.decode_written(&image_region, packed);
+                return truth.decode_written(&image_region, || packed.into_owned());
             }
         }
         if denormal {
             self.degrade_depth_denormals(CALL, image_region.aspect, false, false);
         }
-        if truth.takes_staging_copies() {
-            let mut packed = vec![0; host.packed_len() as usize];
-            host.pack(bytes, &mut packed);
-            if truth.staging_write(copy, &packed)? {
-                // A decoded twin's decode, staged; on the CPU while a batch may read it.
-                return truth.decode_written(&image_region, packed);
-            }
+        // Packed into the staging buffer from the caller's bytes.
+        if truth.takes_staging_copies()
+            && truth.staging_write(copy, len as u64, |staged| host.pack(bytes, staged))?
+        {
+            // A decoded twin's decode, staged; on the CPU while a batch may read it.
+            return truth.decode_written(&image_region, pack);
         }
         let device = self.device();
         if truth.defers_copies() {
@@ -5420,19 +5431,29 @@ impl Texture {
         // A shadowed view's texels are its texture's (`texture/view_shadow.rs`).
         let truth = view_shadow::truth(image);
         let copy = buffer_image_copy(image_region);
+        // Copied on the host into the caller's bytes where they are laid out packed, else into
+        // packed bytes laid out from there.
         if truth.takes_host_copies() {
-            let mut packed = vec![0; host.packed_len() as usize];
-            if truth.host_read(copy, &mut packed)? {
-                host.unpack(&packed, bytes);
+            let read = match host.is_packed() {
+                true => truth.host_read(copy, &mut bytes[..host.packed_len() as usize])?,
+                false => {
+                    let mut packed = vec![0; host.packed_len() as usize];
+                    let read = truth.host_read(copy, &mut packed)?;
+                    if read {
+                        host.unpack(&packed, bytes);
+                    }
+                    read
+                }
+            };
+            if read {
                 return Ok(());
             }
         }
-        if truth.takes_staging_copies() {
-            let mut packed = vec![0; host.packed_len() as usize];
-            if truth.staging_read(copy, &mut packed)? {
-                host.unpack(&packed, bytes);
-                return Ok(());
-            }
+        // Laid out from the staging buffer.
+        if truth.takes_staging_copies()
+            && truth.staging_read(copy, host.packed_len(), |staged| host.unpack(staged, bytes))?
+        {
+            return Ok(());
         }
         let device = self.device();
         let mut staging = Staging::new(device, host.packed_len())?;

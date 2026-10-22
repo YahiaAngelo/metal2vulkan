@@ -3222,8 +3222,9 @@ pub struct WorkCounts {
     /// depth bias) and their `VkPipeline`. The inputs are the drawing state, variant, plan and
     /// instance's compatible pass by identity, the pass's layout, the encoder's state and vertex
     /// amplification and the instance's shape by version, and the assembly, the vertex strides,
-    /// the fixed state and the topology by value (`render/draw_shape.rs`). None on a device that
-    /// announces some notice at every occurrence.
+    /// the fixed state and the topology by value (`render/draw_shape.rs`). None of a shape whose
+    /// derivation announces a notice the device announces at every occurrence
+    /// (`DeviceOptions::announce_each`).
     pub draw_shapes_reused: u64,
     /// Compute encoders' dispatches that took the bind state, variant, plan, commands and made
     /// `VkPipeline`s their encoder's last dispatch settled, rather than settling them again:

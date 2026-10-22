@@ -133,7 +133,7 @@ Vulkan-side choices Metal has no counterpart for:
 | `instance_extensions`, `device_extensions` | Extensions beyond those the runtime enables (a swapchain, for example). |
 | `instance_api_version` | The instance's `apiVersion` (1.2 when unset); a version outside 1.2 to the loader's is refused, never clamped. |
 | `withheld_features`, `withheld_extensions`, `withhold_generated_commands`, `withhold_view_reinterpretation` | Parts of the recommended enables to leave off; the device then compiles for what is enabled. |
-| `messages` | A `MessageSink` for the validation layer's messages and the runtime's notices; without one, notices go to stderr. |
+| `messages` | A `MessageSink` for the validation layer's messages and the runtime's notices; without one, notices go to stderr. `MessageSink::with_least_severity` skips messages below a severity (never a degrade notice), and the runtime then formats none of its own lines it would skip. |
 | `shader_cache` | Where translated shaders are kept, and how much. |
 | `gpu_times_from_host` | Answer command buffers' GPU times from the host clock, sparing two timestamps per command buffer. |
 | `announce_each` | Degradation kinds to announce at every occurrence instead of once. |
