@@ -1668,14 +1668,13 @@ impl CommandBuffer {
             color_groups::check_twin(&full)?;
         }
         // Each later group runs the encoder's calls again from its log, which such a pass keeps
-        // whatever the device's rebinds.
+        // whatever the device's rebinds, as does a pass over a rasterization-rate map, which a
+        // reset of the map before its submission encodes again (`rate_mapped_pass.rs`).
         let log = match (&again, groups > 1) {
             (_, true) => Some(device.shared().scheduler.spare_logs().render(given)),
-            (None, false) => device
-                .shared()
-                .rebinds
-                .any()
-                .then(|| device.shared().scheduler.spare_logs().render(given)),
+            (None, false) => (device.shared().rebinds.any()
+                || given.rasterization_rate_map.is_some())
+            .then(|| device.shared().scheduler.spare_logs().render(given)),
             (Some(_), false) => None,
         };
         let projected;
@@ -1719,6 +1718,10 @@ impl CommandBuffer {
             None => EncoderCore::open(self, CALL, EncoderKind::Render, false)?,
             Some(_) => EncoderCore::replaying(self, false)?,
         };
+        if let Some(pass) = &rate_map {
+            let (map, state) = pass.taken();
+            core.take_rate_map(map, state);
+        }
         // The whole pass, every group's colors.
         let whole = full.as_ref().unwrap_or(&layout);
         if let Some(error) = whole.fails_command_buffer {

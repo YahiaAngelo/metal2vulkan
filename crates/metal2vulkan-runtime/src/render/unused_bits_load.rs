@@ -16,7 +16,8 @@
 //!   values: every code of each tile it stores back goes through `half` to nearest even and back to
 //!   the nearest bfloat code, a NaN to `0x7fc0` (`ExtendedRange::load_code`; on an Apple M4
 //!   under macOS 27.0.1, every code of each format: 56,829 move, and only in the tiles the draws'
-//!   primitives reach). The tiles it stores are those a draw's primitives reach (the half of a rect
+//!   primitives reach; the M3 Max under macOS 27.0.1 alike, our probe `bfl`: every code of the
+//!   tile a small triangle reached, of each format, and none elsewhere). The tiles it stores are those a draw's primitives reach (the half of a rect
 //!   whose edge lies on x = 32 reaches the tiles right of it; a zero-area rect or one off the
 //!   target reaches none), within the render area rounded up to 32 texels a side from the origin
 //!   and kept within the texture; every tile of it where a color attachment of the pass is cleared
@@ -523,9 +524,10 @@ pub(super) fn record(
                      rewrites only the tiles a draw's primitives reach (or every tile where a \
                      color attachment is cleared): in tiles no draw reaches the unused bits are \
                      made canonical and BGRA10_XR alpha codes clamped to [384, 894], a padded \
-                     word's low six bits zeroed (an _sRGB twin's code through Metal's table) and, \
-                     under the exact tile store, a signed normalized minimum code raised and an \
-                     RGB9E5Float word normalized, where Metal keeps those texels' bytes"
+                     word's low six bits zeroed (an _sRGB twin's code through Metal's table), a \
+                     bfloat code moved through half and, under the exact tile store, a signed \
+                     normalized minimum code raised and an RGB9E5Float word normalized, where \
+                     Metal keeps those texels' bytes"
                         .to_owned(),
                 )
             });

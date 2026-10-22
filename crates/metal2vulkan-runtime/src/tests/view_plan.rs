@@ -777,17 +777,19 @@ fn a_view_keeps_its_images_components_of_one_count_and_width() {
     assert_eq!(refused.needs, Needs::NotRepresentable);
 }
 
-/// A two-plane YCbCr texture viewed in its own format or its `_sRGB` twin's retyped as a 2D array
-/// is refused, typed (`NotImplemented(TextureView)`, naming the view's format): Metal reads such
-/// a view otherwise than the texture, unmeasured here. A view of its own type is made.
+/// A two-plane YCbCr texture viewed in its own format retyped as a 2D array passes the plan (its
+/// view reads the luma codes, `Texture::luma_view`); one in its `_sRGB` twin's is refused, typed
+/// (`NotImplemented(TextureView)`, naming the view's format), unmeasured. A view of its own type
+/// is made.
 #[test]
-fn a_ycbcr_texture_retyped_is_refused_typed() {
+fn a_ycbcr_texture_retyped_in_its_twin_is_refused_typed() {
     let (_, device) = lavapipe();
     for (pf, view) in [
         (PixelFormat::YCBCR84202P, PixelFormat::YCBCR84202P),
         (PixelFormat::YCBCR84202P, PixelFormat::YCBCR84202PSRGB),
         (PixelFormat::RGB84202P, PixelFormat::RGB84202P),
         (PixelFormat::YCBCR104442P, PixelFormat::YCBCR104442P),
+        (PixelFormat::YCBCR104442P, PixelFormat::YCBCR104442PSRGB),
         (PixelFormat::RGB104222P, PixelFormat::RGB104222P),
     ] {
         let mut source = texture(PixelFormat::RGBA8Unorm, TextureUsage::SHADER_READ);
@@ -802,7 +804,8 @@ fn a_ycbcr_texture_retyped_is_refused_typed() {
             ..ViewRequest::of_format(&source, view)
         };
         match check_view(&source, &retyped, device.profile()) {
-            Err(ViewRefusal::Unsupported(u)) => {
+            Ok(_) if pf == view => {}
+            Err(ViewRefusal::Unsupported(u)) if pf != view => {
                 assert_eq!(u.feature, Feature::TextureView, "{pf:?} as {view:?}");
                 assert_eq!(u.needs, Needs::NotImplemented, "{pf:?} as {view:?}");
             }

@@ -36,8 +36,9 @@
 //!   types, the multisample types, and 3D alone. A view of a type that is not an array has one
 //!   slice, a cube six, a cube array a multiple of six. Metal makes a cube view of an image that
 //!   is not square, which Vulkan cannot (`NotRepresentable(TextureView)`). A two-plane YCbCr
-//!   texture's view of another type (a 2D array of its slice), which Metal reads otherwise than
-//!   the texture, is refused `NotImplemented(TextureView)`.
+//!   texture's view of another type (a 2D array of its slice) in its own format reads its luma
+//!   codes alone, as Metal's does (`Texture::luma_view`); one in its `_sRGB` twin's format is
+//!   refused `NotImplemented(TextureView)`, unmeasured.
 //! - **Ranges.** Levels and slices count from the viewed texture's own (a view of a view is
 //!   relative to that view), are not empty, and stay in it.
 //! - **Swizzles.** A view made without a swizzle has the viewed texture's swizzle; one made with a
@@ -474,11 +475,13 @@ pub(super) fn check_view(
         return Err(ViewProblem::TypeIncompatible.into());
     }
     // Metal views a two-plane YCbCr texture in its own format (or its `_sRGB` twin's) retyped,
-    // as a 2D array of its one slice, and reads that view otherwise than the texture (the
-    // consumer's report, an M3 Max: the codes unconverted, luma in red for the 500- and
-    // 540-style formats, other values for the twins), unmeasured here: the runtime's gap. A view
-    // of its own type reads as the texture.
-    if ycbcr(source.pixel_format) && ty != source.texture_type {
+    // as a 2D array of its one slice, and reads that view otherwise than the texture: in its own
+    // format the luma codes alone (`Texture::luma_view`); in the twin's, unmeasured, the
+    // runtime's gap. A view of its own type reads as the texture.
+    if ycbcr(source.pixel_format)
+        && ty != source.texture_type
+        && request.pixel_format != source.pixel_format
+    {
         return Err(ViewRefusal::Unsupported(
             Unsupported::not_implemented(Feature::TextureView).naming_format(request.pixel_format),
         ));

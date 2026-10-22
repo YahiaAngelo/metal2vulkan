@@ -1970,9 +1970,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   gives the older release's: it can stop or refuse a texture or a dispatch the host's Metal makes,
   and never makes one the older release stops.
 - `metal2vulkan-degrade-unreached-tiles-rewritten` (precision). `UnreachedTilesRewritten`: A render
-  pass that loads a color attachment of an extended-range or padded 10-bit format (`BGR10_XR`,
-  `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and their sRGB twins, and
-  `RGB10A2Unorm_sRGB`), or under
+  pass that loads a color attachment of an extended-range, padded 10-bit or bfloat format
+  (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and their sRGB twins,
+  `RGB10A2Unorm_sRGB`, `R16Bfloat`, `RG16Bfloat` and `RGBA16Bfloat`), or under
   `TileStorePolicy::Exact` of a signed normalized format or `RGB9E5Float`, stores it and draws,
   whose load pass rewrites every 32 x 32 tile of its render area: Metal's pass rewrites
   only the tiles a draw's primitives reach, and every tile only where a color attachment of the pass
@@ -1981,12 +1981,21 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   (BGR10_XR's bits 30 and 31 ones, BGRA10_XR's low six bits of each field and the two-plane color
   word's top two bits zeros) and BGRA10_XR alpha codes clamped to [384, 894], so an out-of-range raw
   alpha reads back changed, a padded word's low six bits zeroed (an sRGB twin's code moved through
-  Metal's table) and, under the exact tile store, a signed normalized minimum code raised and an
+  Metal's table), a bfloat code moved through half (out of half's range to an infinity or zero, a
+  NaN to 0x7fc0) and, under the exact tile store, a signed normalized minimum code raised and an
   RGB9E5Float word normalized; the tiles a draw reaches are Metal's.
 - `metal2vulkan-degrade-zero-layer-map-after-release` (precision). `ZeroLayerMapAfterRelease`: A
   draw in a render pass over a rasterization-rate map of no layers that was made after the device
-  released a map of one or more layers. Cost: the draws write nothing, where Metal draws rows of the
-  pass (a 64-pixel map's rows 0 to 15, at the positions of a pass with no map).
+  released a map of one or more layers, or reset from one of layers. Cost: the draws write nothing,
+  where Metal draws rows of the pass (a 64-pixel map's rows 0 to 15, at the positions of a pass
+  with no map).
+- `metal2vulkan-degrade-rate-map-reset-unencoded` (precision). `RateMapResetUnencoded`: A render
+  pass over a rasterization-rate map reset (`RasterizationRateMap::reset_using_descriptor`) after
+  the pass took it and before its command buffer was submitted, in an encoder the runtime could not
+  encode again (it kept no log: a command predication's command buffer, a render encoder opened
+  while a buffer of the device was detached, or one that left work for a host step). Announced at
+  the commit, or at the reset where the command buffer was committed. Cost: the pass draws by the
+  map as it took it, where Metal's GPU draws by the map as reset.
 - `metal2vulkan-degrade-heap-texture-lossless-layout` (precision). `HeapTextureLosslessLayout`: A
   texture made in a heap over host pages (`new_heap_with_bytes_no_copy`), or a depth or stencil
   texture made in any heap as a shadow of Metal's tiles (on a driver that lays such images apart from
@@ -3164,12 +3173,25 @@ each item named states the rule in full.
   exit's status and one line on standard error: the exit handlers registered before the runtime's
   last registration (a terminal's restore, say) do not run, where Metal's exit runs them.
 
+**Two-plane YCbCr textures**
+
+- **A view of an `_sRGB` twin as a 2D array reads its luma codes**, as its converted format's
+  view does, where Metal's reads change from run to run.
+
 **Rasterization-rate maps**
 
-- **A map of no layers answers its coordinate maps**, where Metal ends the process.
+- **A map of no layers refuses its coordinate maps, and a mutable map not yet reset its
+  physical-to-screen map**, where Metal ends the process.
 - **A screen past 16384 pixels a side is refused**, where Apple's compile crashes or returns a
   corrupt size.
 - **A parameter-data copy Metal makes unsafely is refused**: into a `Private` buffer, or past the
   buffer's length.
-- **A physical size past the map's layers has width 0.**
+- **A physical size past the map's layers has width 0**, but after a reset to fewer layers, which
+  keeps the earlier layers' widths, as Metal does. Past layer 1 Metal reads the map's other fields and the
+  memory after them (an M3 Max: at layer 2 the vertical extent, at 3 and 4 the screen's sides), and
+  a layer near the top of the range ends the process.
+- **A mutable map's pass stops at the physical size**, where Metal rasterizes past the screen edge
+  (an M3 Max: a 64-pixel half-rate map's pass to 49 by 49 pixels); announced with
+  `rasterization-rate-map`.
+- **A pass of no draws over a mutable map stores its clear**, where Metal's GPU hangs.
 - **A rate-mapped pass draws region by region, and refuses a cutting scissor.**

@@ -5172,7 +5172,13 @@ impl Texture {
             }
         };
         let mut record = record;
-        let storage = if !apart {
+        // A two-plane YCbCr texture's view as another type reads its luma codes alone
+        // (`texture/ycbcr_image.rs`).
+        let luma = self.luma_view(call, &record).transpose()?;
+        let storage = if let Some((storage, read_as)) = luma {
+            record.read_as = Some(read_as);
+            storage
+        } else if !apart {
             self.0.storage.clone()
         } else if let Some((image, read_as)) = self.read_through(&record) {
             self.device().shared().counts.view_through_swizzle_made();

@@ -1,12 +1,13 @@
 //! The rasterization-rate map's creation rules and answers that need no device
-//! (`rate_map::compile`, `rate_map::physical_size`).
+//! (`rate_map::compile`, `rate_map::physical_size`, `rate_map::MapState`).
 
 use super::super::error::{Error, Invalid, Problem};
-use super::super::rate_map::{compile, physical_size, RateMapProblem};
+use super::super::rate_map::{compile, physical_size, MapState, RateMapProblem};
 use super::super::values::Size;
 use metal2vulkan::bind::{
     RasterizationRateMap, RateMapDescriptor, RateMapLayerDescriptor, UnpinnedCompile,
 };
+use metal2vulkan::metal::Mutability;
 
 /// A descriptor of `width` by `height` screen pixels and these layers' samples.
 fn descriptor(width: u32, height: u32, layers: &[(&[f32], &[f32])]) -> RateMapDescriptor {
@@ -126,4 +127,107 @@ fn a_layer_past_the_map_has_no_width_and_the_shared_height() {
     for layer in [0, 1, 2] {
         assert_eq!(physical_size(&empty, layer), Size::new(0, 16, 1), "{layer}");
     }
+}
+
+/// A mutable map before its first reset answers as Metal's (our probe `rm`, the M3 Max under
+/// macOS 27.0.1): its descriptor's screen and layer count, a physical size of 0 by 0 at every
+/// layer, and parameter data of zeros. Its reset compiles the descriptor given as a fresh map of
+/// it would be, and a map of another mutability is compiled at once.
+#[test]
+fn a_mutable_map_is_compiled_at_its_reset() {
+    let mut mutable = descriptor(256, 128, &[(&[0.1], &[0.1])]);
+    mutable.mutability = Mutability::Mutable;
+    let unset = MapState::made(&mutable, false).unwrap();
+    assert!(unset.compiled().is_none());
+    assert_eq!(unset.screen_size(), [256, 128]);
+    assert_eq!(unset.layer_count(), 1);
+    for layer in [0, 1, 2, u64::MAX] {
+        assert_eq!(unset.physical_size(layer), Size::new(0, 0, 1), "{layer}");
+    }
+    assert!(unset.words().iter().all(|&word| word == 0));
+    assert_eq!(unset.words().len(), 24_624 / 4);
+    let plain = descriptor(256, 128, &[(&[0.1], &[0.1])]);
+    let reset = unset.reset(&plain, false).unwrap();
+    let fresh = MapState::made(&plain, false).unwrap();
+    assert_eq!(reset.compiled(), fresh.compiled());
+    assert_eq!(reset.physical_size(0), Size::new(32, 16, 1));
+    // Plain Metal makes a mutable map of a descriptor its API validation stops.
+    for (screen, layers) in [([64, 64], 3), ([0, 64], 1), ([40000, 64], 1)] {
+        let mut stopped = descriptor(screen[0], screen[1], &[HALF; 3][..layers]);
+        stopped.mutability = Mutability::Mutable;
+        let unset = MapState::made(&stopped, false).unwrap();
+        assert_eq!(unset.screen_size(), screen);
+        assert_eq!(unset.layer_count(), layers as u32);
+        assert_eq!(unset.physical_size(0), Size::new(0, 0, 1));
+        let reset = unset.reset(&plain, false).unwrap();
+        assert_eq!(reset.compiled(), fresh.compiled());
+    }
+    for mutability in [Mutability::Default, Mutability::Immutable] {
+        let mut d = plain.clone();
+        d.mutability = mutability;
+        assert_eq!(
+            MapState::made(&d, false).unwrap().compiled(),
+            fresh.compiled(),
+            "{mutability:?}"
+        );
+    }
+}
+
+/// A reset refuses what ends Metal's process, three layers, and what the compile layer does not
+/// compile, a screen side of 0 among them (Metal's validation does not look at a reset), leaving
+/// nothing changed.
+#[test]
+fn a_reset_refuses_what_metal_or_the_compile_stops() {
+    let map = MapState::made(&descriptor(64, 64, &[HALF]), false).unwrap();
+    assert_eq!(
+        map.reset(&descriptor(64, 64, &[HALF; 3]), false).err(),
+        Some(Error::Invalid(Invalid::new(
+            "reset_using_descriptor",
+            Problem::RateMap(RateMapProblem::LayerCount { count: 3 }),
+        )))
+    );
+    for (width, height, extent) in [
+        (0, 64, 0),
+        (64, 0, 0),
+        (16385, 64, 16385),
+        (70000, 64, 70000),
+    ] {
+        assert_eq!(
+            map.reset(&descriptor(width, height, &[HALF]), false).err(),
+            Some(Error::RateMap(UnpinnedCompile::ScreenExtent { extent })),
+            "{width}x{height}"
+        );
+    }
+}
+
+/// A map reset to fewer layers keeps the physical width each layer below 2 held, at the reset's
+/// vertical extent, as Metal answers (our probe `none`, the M3 Max under macOS 27.0.1: maps of
+/// 100 by 60 screen pixels, one layer of quality 1 and of 0.5, and two of 0.5 and 0.25, reset to
+/// no layers over 64 by 32). Past layer 1 Metal reads past its table (16 at layer 2); the
+/// runtime answers width 0 there. A map reset to none after layers draws from what they left.
+#[test]
+fn a_reset_keeps_the_widths_past_its_layers() {
+    let none = descriptor(64, 32, &[]);
+    for (layers, widths) in [
+        (&[(&[1.0][..], &[1.0][..])][..], [100, 0]),
+        (&[HALF], [64, 0]),
+        (&[HALF, (&[0.25], &[0.25])], [64, 32]),
+    ] {
+        let earlier = MapState::made(&descriptor(100, 60, layers), false).unwrap();
+        let reset = earlier.reset(&none, false).unwrap();
+        assert_eq!(reset.layer_count(), 0);
+        for (layer, width) in widths.into_iter().enumerate() {
+            assert_eq!(
+                reset.physical_size(layer as u64),
+                Size::new(width, 16, 1),
+                "{widths:?} at {layer}"
+            );
+        }
+        assert_eq!(reset.physical_size(2), Size::new(0, 16, 1));
+        assert!(reset.made_after_release());
+    }
+    let fresh = MapState::made(&none, false).unwrap();
+    assert!(!fresh.made_after_release());
+    assert!(MapState::made(&none, true).unwrap().made_after_release());
+    assert_eq!(fresh.physical_size(0), Size::new(0, 16, 1));
 }

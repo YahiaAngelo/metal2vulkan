@@ -588,7 +588,7 @@ impl EncoderCore {
                 self.device().shared().counts.set_zero_set_reused();
                 return Ok((Some(set), None));
             }
-            let found = (self.command_buffer().state().descriptors.sets()).find(layout, writes);
+            let found = (self.command_buffer().state().descriptors).find(layout, writes);
             if let Some(set) = found {
                 self.device().shared().counts.set_zero_set_found();
                 self.last_set_zero.keep(layout, set, writes);
@@ -613,11 +613,7 @@ impl EncoderCore {
     /// records, so every object its writes name is held until the command buffer completes.
     pub(super) fn keep_set_zero(&mut self, written: WrittenSet, writes: &[Write]) {
         self.last_set_zero.keep(written.layout, written.set, writes);
-        (self.command_buffer().state().descriptors.sets()).keep(
-            written.layout,
-            written.set,
-            writes,
-        );
+        (self.command_buffer().state().descriptors).keep(written.layout, written.set, writes);
     }
 
     /// The queue flags of the family its command buffer records for: its queue's `VkQueue`'s.
@@ -1850,14 +1846,25 @@ impl EncoderCore {
         self.faults.get_or_insert(error);
     }
 
+    /// Note that its render pass is over `map`, which it took as `state`: a reset of the map
+    /// before its command buffer's submission has it encoded again (`rate_mapped_pass.rs`).
+    pub(super) fn take_rate_map(
+        &mut self,
+        map: crate::rate_map::RasterizationRateMap,
+        state: std::sync::Arc<crate::rate_map::MapState>,
+    ) {
+        self.taken.take_rate_map(map, state);
+    }
+
     /// End the encoder, one of `kind` that made `residency` resident (a compute or render
     /// encoder's): its shadowed textures written since their last copy back are copied back,
     /// it joins the command buffer's ended encoders (`State::encoder_ended`), and its recording
     /// and what it used join the command buffer's, in order, one part at a time, each part
     /// after the first in a batch of its own.
-    /// The command buffer keeps `replay`, the encoder's log (`replay.rs`), where a rebind before
-    /// its first submission may need the encoder encoded again (a command of it named a buffer
-    /// over host pages, detached ones included) and the encoder can be (it left no segment for
+    /// The command buffer keeps `replay`, the encoder's log (`replay.rs`), where a rebind or a
+    /// reset before its first submission may need the encoder encoded again (a command of it
+    /// named a buffer over host pages, detached ones included, or its pass is over a
+    /// rasterization-rate map) and the encoder can be (it left no segment for
     /// later but one an encoding again records at once, `Segment::records_again`, and fails
     /// nothing as it commits); else the log goes here.
     pub(super) fn end_with_replay(
@@ -1891,7 +1898,7 @@ impl EncoderCore {
         // Why it keeps none, where a command named a buffer over host pages: the rebound notice
         // says (`command_buffer/rebound_use.rs`).
         let unlogged = match &replay {
-            _ if !self.taken.names_a_pin() => None,
+            _ if !self.taken.encodes_again() => None,
             None => Some(Unlogged::NoCalls),
             Some(_) if !self.segments.iter().all(Segment::records_again) => {
                 Some(Unlogged::Segments)
@@ -1906,7 +1913,7 @@ impl EncoderCore {
             let keeps = self.segments.iter().all(Segment::records_again)
                 && self.fails_command_buffer.is_none()
                 && self.faults.is_none()
-                && self.taken.names_a_pin();
+                && self.taken.encodes_again();
             if !keeps {
                 self.device().shared().scheduler.spare_logs().give(log);
                 return None;

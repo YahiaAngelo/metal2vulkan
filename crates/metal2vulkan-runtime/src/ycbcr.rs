@@ -75,7 +75,12 @@
 //! - **Views.** A converted texture's view as its `_sRGB` twin (Metal makes it with
 //!   `ShaderRead` usage alone) is a texture of the twin over the same planes, with a conversion
 //!   of its own: Metal's view reads what a texture of the twin over the surface reads, bit for
-//!   bit (`texture/ycbcr_image.rs`).
+//!   bit (`texture/ycbcr_image.rs`). A view in the texture's own format as a 2D array reads the
+//!   luma codes alone, `(Y, 0, 0, 1)`, or `(0, Y, 0, 1)` of a format read as codes, its linear
+//!   sample the luma of the code-reading format's (the M3 Max under macOS 27.0.1, bit for bit):
+//!   an image of the codes over the same planes read through a swizzle
+//!   (`Texture::luma_view`); an `_sRGB` twin's reads no defined value on Metal and reads as its
+//!   converted format's here.
 //! - **Refused** (`Unsupported`, `NotImplemented`, `Feature::Format`, naming what): a surface of
 //!   an OSType the format is not measured over (Metal makes 505 and 543 over plane 0 of many
 //!   more), or whose chroma plane is smaller than the format's (Metal reads past it), plane 1 of a
@@ -87,10 +92,11 @@
 //!   buffer (above); a copy between two such textures (Metal copies both planes), a view in another
 //!   format than the twin (a twin's view as its converted format among them, unmeasured), and a
 //!   pass rendering into one but as **Passes** below say (Metal converts back into the planes). A
-//!   function's writes to a 4:2:0 or 4:2:2 format are dropped, as Metal drops them
-//!   (`metal::format::writes_dropped`); a 4:4:4 `_sRGB` twin's or packed format's are refused (the
-//!   twins' encoding is not found, and the M3 drops the packed formats' writes where the M4 stores
-//!   them), as are a texture's over plane 1 (not measured) and a slot's that reads the texture too.
+//!   function's writes to a 4:2:0, 4:2:2 or packed format are dropped, as Metal drops them (the
+//!   packed 4:4:4 ones on the M3 Max under macOS 27.0.1, where an M4 stores them;
+//!   `metal::format::writes_dropped`); a 4:4:4 `_sRGB` twin's are refused (the twins' encoding is
+//!   not found), as are a texture's over plane 1 (not measured) and a slot's that reads the
+//!   texture too.
 //! - **Writes** (on an Apple M4 under macOS 27.0.1, on an Apple M3 Max under macOS 26.7, byte for
 //!   byte alike). Metal stores a function's writes to `YCBCR8_444_2P`, `YCBCR10_444_2P`,
 //!   `RGB8_444_2P` and `RGB10_444_2P` (503, 507, 542, 545) into both planes: each written texel's
@@ -523,7 +529,8 @@ impl YCbCrConversion {
         // The chroma bytes the planes read past their span, zeros (a texture over plane 1,
         // whose chroma codes are 0), filled at every conversion.
         let [cw, ch] = planes.chroma_size().map(u64::from);
-        let chroma_row = 2 * u64::from(planes.codes.bytes) * cw;
+        // A row of `2 * cw` codes: as many units, or a third of them packed.
+        let chroma_row = planes.codes.units(2 * cw) * u64::from(planes.codes.bytes);
         let [chroma_at, chroma_pitch] = planes.chroma.map(u64::from);
         let chroma_end = chroma_at + chroma_pitch * (ch.max(1) - 1) + chroma_row;
         let zeros = chroma_end.saturating_sub(bytes).next_multiple_of(4);

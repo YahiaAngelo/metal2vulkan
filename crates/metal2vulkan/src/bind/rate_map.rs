@@ -66,6 +66,7 @@
 use std::fmt;
 
 use crate::air::canon::rate_map_data as format;
+use crate::metal::Mutability;
 
 /// The physical granularity of a map: the width and height in physical pixels of every tile but
 /// each axis's last (Apple M3 and M4 report the same, and Metal's parameter data is per 32
@@ -99,7 +100,7 @@ const MAX_MEASURED_SAMPLES: [usize; MAX_COMPILED_LAYERS] = [9, 4];
 
 /// A rasterization-rate map's description (`MTLRasterizationRateMapDescriptor`).
 #[non_exhaustive]
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RateMapDescriptor {
     /// `screenSize`: the width and height in screen pixels of the region from the origin.
     pub screen_size: [u32; 2],
@@ -107,15 +108,27 @@ pub struct RateMapDescriptor {
     pub layers: Vec<RateMapLayerDescriptor>,
     /// `label`: the name the map keeps. The compile ignores it.
     pub label: Option<String>,
+    /// `mutability` (Apple's private `setMutability:`): `Immutable` until set, as Metal's
+    /// descriptor answers. A map made of a `Mutable` descriptor is compiled only at its reset
+    /// (the runtime's `RasterizationRateMap::reset_using_descriptor`). The compile ignores it.
+    pub mutability: Mutability,
+}
+
+impl Default for RateMapDescriptor {
+    /// [`RateMapDescriptor::new`] of an empty screen.
+    fn default() -> RateMapDescriptor {
+        RateMapDescriptor::new([0, 0])
+    }
 }
 
 impl RateMapDescriptor {
-    /// A descriptor of `screen_size` with no layers and no label.
+    /// A descriptor of `screen_size` with no layers and no label, `Immutable`.
     pub fn new(screen_size: [u32; 2]) -> RateMapDescriptor {
         RateMapDescriptor {
             screen_size,
             layers: Vec::new(),
             label: None,
+            mutability: Mutability::Immutable,
         }
     }
 }
@@ -181,7 +194,10 @@ pub enum RateMapError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UnpinnedCompile {
     /// A screen extent above 16384: Apple's compile crashed on every width from 24576 and a
-    /// height of 32768, and returned a map of a corrupt physical size at a height of 16385.
+    /// height of 32768, and returned a map of a corrupt physical size at a height of 16385. Or
+    /// one of 0, which Metal's API validation stops at a map's creation, and which a reset
+    /// (where it does not look) compiles to no physical extent on that axis, not measured
+    /// further.
     ScreenExtent { extent: u32 },
     /// More than two layers: Apple M3 supports two, and its compile crashes on more.
     LayerCount { count: usize },
@@ -216,6 +232,9 @@ pub enum UnpinnedCompile {
 impl fmt::Display for UnpinnedCompile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            UnpinnedCompile::ScreenExtent { extent: 0 } => {
+                f.write_str("a screen extent of 0, whose compile is not measured")
+            }
             UnpinnedCompile::ScreenExtent { extent } => write!(
                 f,
                 "screen extent {extent} is above {MAX_COMPILED_EXTENT}, where Apple's compile \
@@ -478,6 +497,10 @@ impl RasterizationRateMap {
     /// (`parameterBufferSizeAndAlign.align`).
     pub const PARAMETER_DATA_ALIGNMENT: u64 = 4;
 
+    /// The parameter data's size in bytes (`parameterBufferSizeAndAlign.size`): 24,624, Metal's
+    /// for every map ([`Self::parameter_data_size`]).
+    pub const PARAMETER_DATA_SIZE: u64 = format::BYTES as u64;
+
     /// Compile `desc` (`newRasterizationRateMapWithDescriptor:`) by this module's rule, Apple
     /// M3's, or refuse it ([`RateMapError::Unpinned`]) outside the bounds the rule is measured in.
     /// A descriptor of no layers compiles to a map of none.
@@ -559,6 +582,27 @@ impl RasterizationRateMap {
         ))
     }
 
+    /// [`Self::new`] of `desc`, its tables written over `earlier`, the parameter data's words a
+    /// map held, as Metal's private `resetUsingDescriptor:` writes them: every entry this map's
+    /// tables write ([`Self::words`] holds which: each table's lines, and zero words past them),
+    /// and every other word as `earlier` holds it. So a map reset to fewer layers, or to a smaller
+    /// screen, keeps the entries past its own (measured on an Apple M3 Max under macOS 27.0.1:
+    /// every word of maps of no layers reset from maps of one and two layers and from a taller
+    /// screen). Words past `earlier`'s are zero. Only the parameter data differs from
+    /// [`Self::new`]'s map: the CPU coordinate maps read no entry past a map's own.
+    pub fn new_over(
+        desc: &RateMapDescriptor,
+        earlier: &[u32],
+    ) -> Result<RasterizationRateMap, RateMapError> {
+        let mut map = RasterizationRateMap::new(desc)?;
+        let mut words = vec![0u32; format::WORDS as usize];
+        let kept = earlier.len().min(words.len());
+        words[..kept].copy_from_slice(&earlier[..kept]);
+        map.encode_into(&mut words);
+        map.words = words;
+        Ok(map)
+    }
+
     /// Whether every layer's every tile spans as many screen pixels as physical ones: the map
     /// is the identity inside the screen.
     pub fn is_identity(&self) -> bool {
@@ -603,27 +647,34 @@ impl RasterizationRateMap {
         layers: Vec<[RateMapAxis; 2]>,
         vertical: &RateMapAxis,
     ) -> RasterizationRateMap {
+        let mut map = RasterizationRateMap {
+            screen_size,
+            layers,
+            vertical: vertical.clone(),
+            words: Vec::new(),
+        };
         let mut words = vec![0u32; format::WORDS as usize];
-        for (l, [horizontal, _]) in (0u32..).zip(&layers) {
+        map.encode_into(&mut words);
+        map.words = words;
+        map
+    }
+
+    /// Write its tables' entries into `words` (the parameter data's), leaving every other word.
+    fn encode_into(&self, words: &mut [u32]) {
+        for (l, [horizontal, _]) in (0u32..).zip(&self.layers) {
             encode(
-                &mut words,
+                words,
                 horizontal,
                 format::table(l, 0, false),
                 format::table(l, 0, true),
             );
         }
         encode(
-            &mut words,
-            vertical,
+            words,
+            &self.vertical,
             format::table(0, 1, false),
             format::table(0, 1, true),
         );
-        RasterizationRateMap {
-            screen_size,
-            layers,
-            vertical: vertical.clone(),
-            words,
-        }
     }
 
     /// `screenSize`.

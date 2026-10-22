@@ -56,7 +56,8 @@
 //! draw over an attachment loaded with `DontCare` in `clear_reach` ([`DONT_CARE_LOADS`]), passes
 //! that draw and load a rotated texture of rotation 4 in `rotated_textures` ([`ROTATED_LOADS`]),
 //! draws over a rate map of no layers made after a map of layers was released in
-//! `rate_mapped_passes` ([`ZERO_LAYER_AFTER_RELEASE`]),
+//! `rate_mapped_passes` ([`ZERO_LAYER_AFTER_RELEASE`]), and passes over a map reset after they took
+//! it that the runtime cannot encode again there ([`RESET_UNENCODED`]),
 //! IOSurface planes under 16 bytes a row in `buffer_texture_blits` ([`NARROW_ROWS`]), one
 //! texture's depth stored and resolved beside its stencil resolved alone in `resolves` ([`MIXED_RESOLVES`]), mesh
 //! draws emulated on a device without `VK_EXT_mesh_shader` in `mesh_draws` ([`EMULATED_MESH`]),
@@ -197,7 +198,7 @@ use super::patches::EMULATED_TESSELLATION;
 use super::predication::WORD_PAST_BUFFER;
 use super::provoking::PROVOKING;
 use super::pvrtc_textures::UNREADABLE;
-use super::rate_mapped_passes::ZERO_LAYER_AFTER_RELEASE;
+use super::rate_mapped_passes::{RESET_UNENCODED, ZERO_LAYER_AFTER_RELEASE};
 use super::rebind_reach::REBOUND_USES;
 use super::resolves::{color_pass, lane, quiet, MIXED_RESOLVES, ONE};
 use super::resource_ids::{
@@ -546,6 +547,7 @@ fn every_kind_has_a_site_a_lane_test_takes() {
         &REBOUND_USES,
         &DETACHED_REACHES,
         &ZERO_LAYER_AFTER_RELEASE,
+        &RESET_UNENCODED,
         &HEAP_LAYOUTS,
         &SHADER_DEPTH,
         &TIE_MIPMAPS,

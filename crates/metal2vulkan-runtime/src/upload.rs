@@ -39,10 +39,12 @@
 //!   are zero (a new buffer reads zero).
 
 use super::buffer::Buffer;
+use super::device::lock;
 use super::error::{Error, MemoryKind};
 use super::values::{CpuCacheMode, HazardTrackingMode, ResourceOptions, StorageMode};
 use super::Device;
 use ash::vk;
+use std::sync::{Arc, Mutex};
 
 /// The size of a command buffer's first ordinary chunk.
 const FIRST_CHUNK_BYTES: u64 = 4 * 1024;
@@ -58,6 +60,10 @@ pub(super) struct Uploads {
     /// The ordinary chunks opened: the next is [`FIRST_CHUNK_BYTES`] times two to this power,
     /// at most [`CHUNK_BYTES`].
     opened: u32,
+    /// The arena of a predicated loop's check, lent while it records a run again
+    /// (`command_buffer/rerun.rs`): every region comes from it meanwhile, and goes once that run
+    /// completed.
+    lent: Option<Arc<Mutex<Uploads>>>,
 }
 
 struct Chunk {
@@ -80,7 +86,14 @@ impl Uploads {
         Uploads {
             chunks: Vec::new(),
             opened: 0,
+            lent: None,
         }
+    }
+
+    /// Take every region from `lent`, a predicated loop's check's arena, while it is lent; `None`:
+    /// from this one again.
+    pub(super) fn lend(&mut self, lent: Option<Arc<Mutex<Uploads>>>) {
+        self.lent = lent;
     }
 
     /// Every chunk, taken out: no command reads the arena any more, and the chunks go as the
@@ -91,7 +104,14 @@ impl Uploads {
         Uploads {
             chunks: std::mem::take(&mut self.chunks),
             opened,
+            lent: None,
         }
+    }
+
+    /// The bytes its regions took of its chunks (a device test's measure).
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+    pub(super) fn bytes(&self) -> u64 {
+        self.chunks.iter().map(|chunk| chunk.used).sum()
     }
 
     /// A region of `len` bytes (at least `bytes.len()`) holding `bytes` and then zeros.
@@ -114,6 +134,9 @@ impl Uploads {
         len: u64,
         address_alignment: u64,
     ) -> Result<Upload, Error> {
+        if let Some(lent) = &self.lent {
+            return lock(lent).upload_aligned(device, bytes, len, address_alignment);
+        }
         let len = len.max(bytes.len() as u64);
         let alignment = device.shared().upload_alignment;
         // The first offset from `from`, a multiple of the upload alignment, whose device address

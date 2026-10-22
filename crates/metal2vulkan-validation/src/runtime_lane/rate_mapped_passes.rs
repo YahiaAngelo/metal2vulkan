@@ -33,13 +33,15 @@ use super::{buffer_with, validated_device, Messages, ScratchCache, WAIT};
 use crate::candidate::runtime_case::{render_pipeline_descriptor, render_pipeline_state};
 use crate::gpu::TEST_DEVICE;
 use crate::store::CorpusStore;
+use metal2vulkan::metal::Mutability;
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
-    Buffer, ClearColor, CommandBufferStatus, Degradation, Device, Error, Invalid, LoadAction,
-    Problem, RasterizationRateMap, Region, RegionRefusal, RenderCommandEncoder,
+    Buffer, ClearColor, CommandBufferStatus, Degradation, Device, Error, EventRef, Invalid,
+    LoadAction, Problem, RasterizationRateMap, Region, RegionRefusal, RenderCommandEncoder,
     RenderPassDescriptor, RenderPassProblem, RenderPipelineState, ResourceOptions, RuntimeGap,
     ScissorRect, StoreAction, Texture, TextureDescriptor, Viewport,
 };
+use std::collections::BTreeSet;
 use std::path::Path;
 
 /// The public case whose pipeline the passes draw.
@@ -505,6 +507,263 @@ fn a_pass_over_a_map_of_no_layers_draws_nothing() {
         fixture.draw(&empty, &target, |_| {}).unwrap();
         assert!(cleared(&target), "zero_before_release_zero2");
         assert!(!announced_after_release(messages), "zero_before_release");
+    });
+}
+
+/// When a test resets the map from the identity to half quality (our probe `rm`'s cases).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ResetAt {
+    /// After the encoder opened.
+    Opened,
+    /// After its draw.
+    Drawn,
+    /// After `end_encoding`.
+    Ended,
+    /// After `commit`, while the command buffer waits for an event the CPU signals after the
+    /// reset.
+    Held,
+    /// After the command buffer completed.
+    Completed,
+}
+
+/// A map of the screen at `quality` (`Mutable` where `mutable`, reset to that quality).
+fn reset_map(fixture: &Fixture, quality: f32, mutable: bool) -> RasterizationRateMap {
+    let mut made = descriptor(SCREEN, SCREEN, &[(quality, quality)]);
+    if mutable {
+        made.mutability = Mutability::Mutable;
+    }
+    let map = fixture.device.new_rasterization_rate_map(&made).unwrap();
+    if mutable {
+        map.reset_using_descriptor(&descriptor(SCREEN, SCREEN, &[(quality, quality)]))
+            .unwrap();
+    }
+    map
+}
+
+/// A pass over `map` into `target` with one draw, `map` reset to `to` at `at`; the command
+/// buffer completed. Before the reset where `before`, run on the command buffer before the pass.
+fn reset_in_pass(
+    fixture: &Fixture,
+    map: &RasterizationRateMap,
+    target: &Texture,
+    to: &metal2vulkan::bind::RateMapDescriptor,
+    at: ResetAt,
+) {
+    let device = &fixture.device;
+    let reset = || map.reset_using_descriptor(to).unwrap();
+    let queue = device.new_command_queue().unwrap();
+    let command_buffer = queue.command_buffer().unwrap();
+    let event = device.new_shared_event().unwrap();
+    if at == ResetAt::Held {
+        command_buffer
+            .encode_wait_for_event(EventRef::from(&event), 1)
+            .unwrap();
+    }
+    let mut encoder = command_buffer
+        .render_command_encoder(&pass(map, target))
+        .unwrap();
+    if at == ResetAt::Opened {
+        reset();
+    }
+    encoder.set_render_pipeline_state(&fixture.state).unwrap();
+    encoder
+        .set_fragment_buffer(Some(&fixture.screen), 0, 0)
+        .unwrap();
+    encoder
+        .draw_primitives(PrimitiveType::Triangle, 0, 3, 1, 0)
+        .unwrap();
+    if at == ResetAt::Drawn {
+        reset();
+    }
+    encoder.end_encoding().unwrap();
+    if at == ResetAt::Ended {
+        reset();
+    }
+    command_buffer.commit().unwrap();
+    if at == ResetAt::Held {
+        reset();
+        event.set_signaled_value(1);
+    }
+    command_buffer.wait_until_completed_for(WAIT).unwrap();
+    assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+    if at == ResetAt::Completed {
+        reset();
+    }
+}
+
+/// Our probe `rm` (the M3 Max under macOS 27.0.1, each case in a process of its own): Metal's
+/// pass reads the map as the GPU runs it, so a reset from the identity to half quality after the
+/// encoder opened, after its draw, after `end_encoding`, and after `commit` while the command
+/// buffer waits for an event the CPU signals after the reset each shades the half-quality map's
+/// 33 by 33 physical pixels; a reset after the command buffer completed leaves the identity's 64
+/// by 64. The runtime encodes the pass again for the reset, once, from its log: at the commit for
+/// a reset before it, in the reset's call after it (`WorkCounts::encoders_reencoded`). A mutable
+/// map and an immutable one alike (Metal resets either), and without a notice.
+#[test]
+fn a_reset_shows_in_a_pass_not_yet_submitted() {
+    let half = (33 * 33, [0, 0, 32, 32], [[0.5, 0.5], [32.5, 32.5]]);
+    let identity = (64 * 64, [0, 0, 63, 63], [[0.5, 0.5], [63.5, 63.5]]);
+    let to = descriptor(SCREEN, SCREEN, &[(0.5, 0.5)]);
+    for at in [
+        ResetAt::Opened,
+        ResetAt::Drawn,
+        ResetAt::Ended,
+        ResetAt::Held,
+        ResetAt::Completed,
+    ] {
+        for mutable in [true, false] {
+            fresh(|fixture, messages| {
+                let map = reset_map(fixture, 1.0, mutable);
+                let target = fixture.target(64);
+                let before = fixture.device.work_counts().encoders_reencoded;
+                reset_in_pass(fixture, &map, &target, &to, at);
+                let again = fixture.device.work_counts().encoders_reencoded - before;
+                let case = format!("{at:?}, mutable {mutable}");
+                match at {
+                    ResetAt::Completed => {
+                        assert_eq!(shaded(&target), identity, "{case}");
+                        assert_eq!(again, 0, "{case}");
+                    }
+                    _ => {
+                        assert_eq!(shaded(&target), half, "{case}");
+                        assert_eq!(again, 1, "{case}");
+                    }
+                }
+                let kinds = counts(&messages.take_notices());
+                assert!(
+                    !kinds.contains_key(&Degradation::RateMapResetUnencoded),
+                    "{case}: {kinds:?}"
+                );
+            });
+        }
+    }
+}
+
+/// Our probe `rm`'s `held_two`: two passes of one command buffer waiting for an event, the first
+/// ended before a reset to half quality and the second opened after it, then a reset to a quarter
+/// before the CPU signals the event: both shade the quarter's 32 by 32 physical pixels, as Metal's
+/// GPU reads the map as it runs them.
+#[test]
+fn a_reset_shows_in_every_pass_not_yet_submitted() {
+    fresh(|fixture, _| {
+        let device = &fixture.device;
+        let map = reset_map(fixture, 1.0, true);
+        let queue = device.new_command_queue().unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        let event = device.new_shared_event().unwrap();
+        command_buffer
+            .encode_wait_for_event(EventRef::from(&event), 1)
+            .unwrap();
+        let targets = [fixture.target(64), fixture.target(64)];
+        for (index, target) in targets.iter().enumerate() {
+            if index == 1 {
+                map.reset_using_descriptor(&descriptor(SCREEN, SCREEN, &[(0.5, 0.5)]))
+                    .unwrap();
+            }
+            let mut encoder = command_buffer
+                .render_command_encoder(&pass(&map, target))
+                .unwrap();
+            encoder.set_render_pipeline_state(&fixture.state).unwrap();
+            encoder
+                .set_fragment_buffer(Some(&fixture.screen), 0, 0)
+                .unwrap();
+            encoder
+                .draw_primitives(PrimitiveType::Triangle, 0, 3, 1, 0)
+                .unwrap();
+            encoder.end_encoding().unwrap();
+        }
+        command_buffer.commit().unwrap();
+        map.reset_using_descriptor(&descriptor(SCREEN, SCREEN, &[(0.25, 0.25)]))
+            .unwrap();
+        event.set_signaled_value(1);
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+        let quarter = (32 * 32, [0, 0, 31, 31], [[0.5, 0.5], [31.5, 31.5]]);
+        for (index, target) in targets.iter().enumerate() {
+            assert_eq!(shaded(target), quarter, "pass {index}");
+        }
+    });
+}
+
+/// Our probe `rm`'s `unset_pass`, `none_pass` and `none_mut_pass` (the M3 Max under macOS
+/// 27.0.1): a pass over a mutable map not yet reset, and over a map of no layers made while no map
+/// of layers was released, mutable or not, runs its clear and store and each draw's vertex
+/// function (Metal's counted 3 runs for a triangle), and shades nothing. The runtime records the
+/// draw through an empty scissor: its replay calls `vkCmdDraw` once (`commands_replayed`, on a
+/// device that records through its recorder).
+#[test]
+fn a_pass_over_a_map_of_no_compiled_layers_runs_its_vertex_function_alone() {
+    let unset = |screen: u32, layers: &[(f32, f32)]| {
+        let mut made = descriptor(screen, screen, layers);
+        made.mutability = Mutability::Mutable;
+        made
+    };
+    for (name, made) in [
+        ("unset", unset(SCREEN, &[(0.5, 0.5)])),
+        ("none", descriptor(SCREEN, SCREEN, &[])),
+        ("none_mutable", unset(SCREEN, &[])),
+    ] {
+        fresh(|fixture, messages| {
+            let device = &fixture.device;
+            let map = device.new_rasterization_rate_map(&made).unwrap();
+            let target = filled(fixture, 64);
+            let before = device.work_counts();
+            fixture.draw(&map, &target, |_| {}).unwrap();
+            let after = device.work_counts();
+            assert!(cleared(&target), "{name}");
+            if after.command_buffers_deferred > before.command_buffers_deferred {
+                let draws = after.commands_replayed.cmd_draw - before.commands_replayed.cmd_draw;
+                assert_eq!(draws, 1, "{name}: the vertex function's draw");
+            }
+            assert!(!announced_after_release(messages), "{name}");
+        });
+    }
+}
+
+/// The kind [`a_pass_the_runtime_cannot_encode_again_draws_by_the_map_it_took`] takes.
+pub(super) const RESET_UNENCODED: [Degradation; 1] = [Degradation::RateMapResetUnencoded];
+
+/// A pass whose command buffer used command predication keeps no log (`replay.rs`), so a reset
+/// of its map before the commit cannot encode it again: it draws by the map as it took it, the
+/// identity's 64 by 64 pixels, where Metal's GPU draws by the map as reset, and the commit
+/// announces [`RESET_UNENCODED`], once for two such command buffers.
+#[test]
+fn a_pass_the_runtime_cannot_encode_again_draws_by_the_map_it_took() {
+    fresh(|fixture, messages| {
+        let device = &fixture.device;
+        let word = buffer_with(device, &0u32.to_le_bytes()).unwrap();
+        let identity = (64 * 64, [0, 0, 63, 63], [[0.5, 0.5], [63.5, 63.5]]);
+        for _ in 0..2 {
+            let map = reset_map(fixture, 1.0, true);
+            let target = fixture.target(64);
+            let queue = device.new_command_queue().unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut compute = command_buffer.compute_command_encoder().unwrap();
+            compute.encode_start_if(Some(&word), 0, 0, 0).unwrap();
+            compute.encode_end_if().unwrap();
+            compute.end_encoding().unwrap();
+            let mut encoder = command_buffer
+                .render_command_encoder(&pass(&map, &target))
+                .unwrap();
+            encoder.set_render_pipeline_state(&fixture.state).unwrap();
+            encoder
+                .set_fragment_buffer(Some(&fixture.screen), 0, 0)
+                .unwrap();
+            encoder
+                .draw_primitives(PrimitiveType::Triangle, 0, 3, 1, 0)
+                .unwrap();
+            encoder.end_encoding().unwrap();
+            map.reset_using_descriptor(&descriptor(SCREEN, SCREEN, &[(0.5, 0.5)]))
+                .unwrap();
+            command_buffer.commit().unwrap();
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+            assert_eq!(shaded(&target), identity);
+        }
+        // Beside it, the fixture's making and buffer, and the reset's map drawn by regions.
+        let mut made: BTreeSet<Degradation> = fixture.made.clone();
+        made.insert(Degradation::RasterizationRateMap);
+        assert_made_once(messages, &RESET_UNENCODED, &made);
     });
 }
 

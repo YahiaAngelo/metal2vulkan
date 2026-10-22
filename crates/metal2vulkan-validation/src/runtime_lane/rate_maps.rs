@@ -18,6 +18,7 @@ use crate::gpu::TEST_DEVICE;
 use metal2vulkan::bind::{
     RasterizationRateMap as CompiledMap, RateMapDescriptor, RateMapLayerDescriptor, UnpinnedCompile,
 };
+use metal2vulkan::metal::Mutability;
 use metal2vulkan_runtime::{
     Coordinate2D, CpuCacheMode, Degradation, Device, Error, HazardTrackingMode, Invalid, Problem,
     RateMapProblem, ResourceOptions, Size, StorageMode,
@@ -110,8 +111,8 @@ fn a_rate_map_answers_as_metal_does() {
         assert_eq!(map.physical_size_for_layer(u64::MAX), Size::new(0, 33, 1));
         let at = Coordinate2D::new(10.0, 10.0);
         for layer in [0, 1, u64::MAX] {
-            let physical = map.map_screen_to_physical_coordinates(at, layer);
-            let screen = map.map_physical_to_screen_coordinates(at, layer);
+            let physical = map.map_screen_to_physical_coordinates(at, layer).unwrap();
+            let screen = map.map_physical_to_screen_coordinates(at, layer).unwrap();
             for value in [physical.x, physical.y] {
                 assert!(
                     (value - 5.079_365_3).abs() <= 1.0e-5,
@@ -132,6 +133,21 @@ fn a_rate_map_answers_as_metal_does() {
         assert_eq!(empty.layer_count(), 0);
         assert_eq!(empty.physical_granularity(), Size::new(32, 32, 1));
         assert_eq!(empty.physical_size_for_layer(0), Size::new(0, 16, 1));
+        // Its coordinate maps end Metal's process: refused.
+        let no_layers = |call| {
+            Err(Error::Invalid(Invalid::new(
+                call,
+                Problem::RateMap(RateMapProblem::NoLayers),
+            )))
+        };
+        assert_eq!(
+            empty.map_screen_to_physical_coordinates(at, 0),
+            no_layers("map_screen_to_physical_coordinates")
+        );
+        assert_eq!(
+            empty.map_physical_to_screen_coordinates(at, 0),
+            no_layers("map_physical_to_screen_coordinates")
+        );
         let two = device
             .new_rasterization_rate_map(&descriptor(64, 64, &[(0.5, 0.5), (1.0, 0.25)]))
             .unwrap();
@@ -278,5 +294,104 @@ fn parameter_data_copies_where_the_cpu_reaches() {
         drop((foreign, other));
         let reported = messages.take();
         assert!(reported.is_empty(), "the second device: {reported:#?}");
+    });
+}
+
+/// A mutable map answers as Metal's does on an M3 Max: before its first reset, its descriptor's
+/// screen and layer count, a physical size of 0 by 0 at every layer, Metal's granularity and
+/// parameter size, a screen-to-physical map to (0, 0), parameter data of zeros, and a refused
+/// physical-to-screen map (it ends Metal's process); plain Metal makes it of a descriptor its API
+/// validation stops (three layers, a screen side of 0 or 40000). Its reset compiles the descriptor given, to Metal's bytes and answers,
+/// keeping the map's label and mutability; a reset refuses three layers (Metal's process ends) and
+/// a screen side of 0 (the compile layer's), changing nothing. A map reset to no layers keeps the
+/// widths of its earlier layers, and its tables past the new entries.
+#[test]
+fn a_mutable_map_answers_as_metal_until_its_reset() {
+    on_device(|device, _| {
+        let mut made = descriptor(64, 64, &[(0.5, 0.5)]);
+        made.mutability = Mutability::Mutable;
+        made.label = Some("mut".to_owned());
+        let map = device.new_rasterization_rate_map(&made).unwrap();
+        assert_eq!(map.mutability(), Mutability::Mutable);
+        assert_eq!(map.label(), Some("mut"));
+        assert_eq!(map.screen_size(), Size::new(64, 64, 1));
+        assert_eq!(map.layer_count(), 1);
+        for layer in [0, 1, u64::MAX] {
+            assert_eq!(map.physical_size_for_layer(layer), Size::new(0, 0, 1));
+        }
+        assert_eq!(map.physical_granularity(), Size::new(32, 32, 1));
+        let sized = map.parameter_buffer_size_and_align();
+        assert_eq!((sized.size, sized.align), (24_624, 4));
+        let at = Coordinate2D::new(10.0, 10.0);
+        assert_eq!(
+            map.map_screen_to_physical_coordinates(at, 0),
+            Ok(Coordinate2D::new(0.0, 0.0))
+        );
+        assert_eq!(
+            map.map_physical_to_screen_coordinates(at, 0),
+            Err(Error::Invalid(Invalid::new(
+                "map_physical_to_screen_coordinates",
+                Problem::RateMap(RateMapProblem::NotCompiled),
+            )))
+        );
+        let copied = |map: &metal2vulkan_runtime::RasterizationRateMap| {
+            let shared = ResourceOptions::new(
+                StorageMode::Shared,
+                CpuCacheMode::DefaultCache,
+                HazardTrackingMode::Tracked,
+            );
+            let buffer = device.new_buffer(24_624, shared).unwrap();
+            map.copy_parameter_data_to_buffer(&buffer, 0).unwrap();
+            read_buffer(&buffer, 0, 24_624).unwrap()
+        };
+        assert!(copied(&map).iter().all(|&b| b == 0), "a map not yet reset");
+        // Plain Metal makes a mutable map of a descriptor its API validation stops.
+        for (width, layers) in [(64, 3), (0, 1), (40000, 1)] {
+            let mut stopped = descriptor(width, 64, &[(0.5, 0.5); 3][..layers]);
+            stopped.mutability = Mutability::Mutable;
+            let unset = device.new_rasterization_rate_map(&stopped).unwrap();
+            assert_eq!(unset.screen_size(), Size::new(width.into(), 64, 1));
+            assert_eq!(unset.layer_count(), layers as u64);
+            assert_eq!(unset.physical_size_for_layer(0), Size::new(0, 0, 1));
+            assert!(copied(&unset).iter().all(|&b| b == 0));
+        }
+        let mut half = descriptor(64, 64, &[(0.5, 0.5)]);
+        half.label = Some("reset".to_owned());
+        map.reset_using_descriptor(&half).unwrap();
+        assert_eq!(map.label(), Some("mut"));
+        assert_eq!(map.mutability(), Mutability::Mutable);
+        assert_eq!(map.physical_size_for_layer(0), Size::new(33, 33, 1));
+        assert_eq!(copied(&map), CompiledMap::new(&half).unwrap().to_bytes());
+        let physical = map.map_screen_to_physical_coordinates(at, 0).unwrap();
+        for value in [physical.x, physical.y] {
+            assert!((value - 5.079_365_3).abs() <= 1.0e-5, "{physical:?}");
+        }
+        let before = copied(&map);
+        assert_eq!(
+            map.reset_using_descriptor(&descriptor(64, 64, &[(0.5, 0.5); 3])),
+            Err(Error::Invalid(Invalid::new(
+                "reset_using_descriptor",
+                Problem::RateMap(RateMapProblem::LayerCount { count: 3 }),
+            )))
+        );
+        assert_eq!(
+            map.reset_using_descriptor(&descriptor(0, 64, &[(0.5, 0.5)])),
+            Err(Error::RateMap(UnpinnedCompile::ScreenExtent { extent: 0 }))
+        );
+        assert_eq!(copied(&map), before, "a refused reset");
+        // A map of another mutability is compiled at once, and a reset compiles over it.
+        let mut plain = descriptor(100, 60, &[(0.5, 0.5), (0.25, 0.25)]);
+        plain.mutability = Mutability::Default;
+        let map = device.new_rasterization_rate_map(&plain).unwrap();
+        assert_eq!(map.mutability(), Mutability::Default);
+        let none = descriptor(64, 32, &[]);
+        map.reset_using_descriptor(&none).unwrap();
+        assert_eq!(map.layer_count(), 0);
+        assert_eq!(map.physical_size_for_layer(0), Size::new(64, 16, 1));
+        assert_eq!(map.physical_size_for_layer(1), Size::new(32, 16, 1));
+        assert_eq!(map.physical_size_for_layer(2), Size::new(0, 16, 1));
+        let earlier = CompiledMap::new(&plain).unwrap();
+        let over = CompiledMap::new_over(&none, earlier.words()).unwrap();
+        assert_eq!(copied(&map), over.to_bytes());
     });
 }

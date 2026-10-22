@@ -29,11 +29,13 @@
 //!   more descriptors than the pool it would open ([`DescriptorArena::fitted`]), so a texture that
 //!   holds its sets for its life holds no larger pool than its own.
 
-use super::binding::SetCache;
+use super::binding::{SetCache, Write};
+use super::device::lock;
 use super::error::{vulkan, Error};
 use super::spares::{release_in_section, DescriptorPool};
 use super::Device;
 use ash::vk;
+use std::sync::{Arc, Mutex};
 
 /// The sets of a command buffer's first pool.
 pub(super) const FIRST: u32 = 16;
@@ -176,6 +178,10 @@ pub(crate) struct DescriptorArena {
     /// (`binding::SetCache`), from its first command that looks one up: forgotten as the pools
     /// go. Boxed, so a fitted arena, which keeps none, stays small.
     sets: Option<Box<SetCache>>,
+    /// The arena of a predicated loop's check, lent while it records a run again
+    /// (`command_buffer/rerun.rs`): every set is allocated from it, and kept there, meanwhile,
+    /// and its pools are reset once that run completed ([`reset`](Self::reset)).
+    lent: Option<Arc<Mutex<DescriptorArena>>>,
 }
 
 impl DescriptorArena {
@@ -188,7 +194,14 @@ impl DescriptorArena {
             device: None,
             fitted: true,
             sets: None,
+            lent: None,
         }
+    }
+
+    /// Allocate every set from `lent`, a predicated loop's check's arena, and keep it there,
+    /// while it is lent; `None`: from this one again.
+    pub(crate) fn lend(&mut self, lent: Option<Arc<Mutex<DescriptorArena>>>) {
+        self.lent = lent;
     }
 
     /// One set of `layout`, whose needs are `needs` (not empty), from the newest pool with room
@@ -199,6 +212,9 @@ impl DescriptorArena {
         layout: vk::DescriptorSetLayout,
         needs: &SetNeeds,
     ) -> Result<vk::DescriptorSet, Error> {
+        if let Some(lent) = &self.lent {
+            return lock(lent).allocate(device, layout, needs);
+        }
         let raw = device.shared().vk();
         let at = match self.book.place(needs) {
             Ok(at) => at,
@@ -244,10 +260,64 @@ impl DescriptorArena {
         Ok(set)
     }
 
-    /// The sets 0 of its pools the command buffer's recorded commands wrote, by what they hold
-    /// (`binding::SetCache`).
-    pub(crate) fn sets(&mut self) -> &mut SetCache {
-        self.sets.get_or_insert_default()
+    /// The set 0 of `layout` holding `writes` that one of the command buffer's recorded commands
+    /// wrote (`binding::SetCache::find`): of its own pools, or of the arena lent, which its own
+    /// outlive.
+    pub(crate) fn find(
+        &mut self,
+        layout: vk::DescriptorSetLayout,
+        writes: &[Write],
+    ) -> Option<vk::DescriptorSet> {
+        let own = (self.sets.as_mut()).and_then(|sets| sets.find(layout, writes));
+        match &self.lent {
+            Some(lent) if own.is_none() => lock(lent).find(layout, writes),
+            _ => own,
+        }
+    }
+
+    /// Keep `set`, of `layout`, written with `writes`, once its command recorded
+    /// (`binding::SetCache::keep`): in the arena lent where one is, whose pools it came from.
+    pub(crate) fn keep(
+        &mut self,
+        layout: vk::DescriptorSetLayout,
+        set: vk::DescriptorSet,
+        writes: &[Write],
+    ) {
+        match &self.lent {
+            Some(lent) => lock(lent).keep(layout, set, writes),
+            None => self.sets.get_or_insert_default().keep(layout, set, writes),
+        }
+    }
+
+    /// How many pools it holds (a device test's measure).
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+    pub(crate) fn pools(&self) -> usize {
+        self.pools.len()
+    }
+
+    /// Reset every pool, for the sets of the commands recorded next: no command uses their sets
+    /// any more (the run again of a predicated loop's check completed, `command_buffer/rerun.rs`).
+    /// Inside a section of the exit guard. Refused as `vkResetDescriptorPool` refuses, the pools
+    /// then released.
+    pub(crate) fn reset(&mut self) -> Result<(), Error> {
+        self.sets = None;
+        let Some(device) = &self.device else {
+            return Ok(());
+        };
+        let raw = device.shared().vk();
+        for pool in &self.pools {
+            // SAFETY: no pending command uses the pool's sets (the caller's), and only this arena
+            // holds it.
+            let reset = unsafe {
+                raw.reset_descriptor_pool(pool.raw, vk::DescriptorPoolResetFlags::empty())
+            };
+            if let Err(error) = reset {
+                self.release();
+                return Err(vulkan(error));
+            }
+        }
+        self.book.rooms = self.pools.iter().map(|pool| pool.room.clone()).collect();
+        Ok(())
     }
 
     /// Every pool, taken out, for the caller to give back or release where it holds no lock: to
@@ -261,6 +331,7 @@ impl DescriptorArena {
             device: self.device.clone(),
             fitted: self.fitted,
             sets: None,
+            lent: None,
         }
     }
 

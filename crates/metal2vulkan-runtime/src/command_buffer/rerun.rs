@@ -23,9 +23,10 @@
 //!   wrote: an indirect dispatch's arguments, an execution's records or its block's counter), waits
 //!   for them too, then records it again as its host step did (`Deferred::step`), or as the commit
 //!   did on the GPU alone (`Deferred::record_on_gpu`), and goes on. Those recordings come from a
-//!   command pool of the check's own, taken back after each run again, so a loop that runs on
-//!   holds no more command buffers than one run; the descriptor sets and uploads they take stay
-//!   with the command buffer until it completes, as its first run's do.
+//!   command pool of the check's own, and take their descriptor sets and uploads from arenas of
+//!   its own, lent to the command buffer meanwhile ([`RunArenas`]); once the run again completed,
+//!   the pool is taken back, the sets' pools reset and the uploads let go (their chunks parked
+//!   for the next run, `recycle.rs`), so a loop that runs on holds no more of them than one run.
 //! - **The check** is a host step (`Deferred::Loop`), its segment the first of the batch after the
 //!   laying: once the work before it completed, it reads the unit's halt word. 0: the batch goes.
 //!   Else a thread of its own ([`run_again`]) runs the laying again on the command buffer's
@@ -49,6 +50,7 @@ use super::{
     command_pool, recording_error, step_error, submission_error, CommandBuffer, CommandBufferShared,
 };
 use crate::deferred::{Deferred, StepInputs};
+use crate::descriptor_arena::DescriptorArena;
 use crate::device::lock;
 use crate::encoder::{Recorded, RecordedSegment, Segment};
 use crate::error::{internal, CommandBufferError, Error};
@@ -56,7 +58,7 @@ use crate::exit_guard::{self, Call};
 use crate::retained::Retained;
 use crate::spares::CommandPool;
 use crate::tracker::EncoderUses;
-use crate::upload::Upload;
+use crate::upload::{Upload, Uploads};
 use ash::vk;
 use metal2vulkan::bind::ReplayFaults;
 use std::sync::atomic::Ordering;
@@ -72,6 +74,41 @@ pub(crate) enum Piece {
     Raw(vk::CommandBuffer),
     /// Work the encoder left apart there, which each run again records again.
     Apart(Deferred),
+}
+
+/// The arenas a check's runs again take their descriptor sets and uploads from, each lent to the
+/// command buffer while a run's work apart records (`Uploads::lend`, `DescriptorArena::lend`),
+/// and emptied once the run completed ([`settle`](Self::settle)).
+struct RunArenas {
+    uploads: Arc<Mutex<Uploads>>,
+    descriptors: Arc<Mutex<DescriptorArena>>,
+}
+
+impl RunArenas {
+    /// Empty arenas.
+    fn new() -> RunArenas {
+        RunArenas {
+            uploads: Arc::new(Mutex::new(Uploads::new())),
+            descriptors: Arc::new(Mutex::new(DescriptorArena::default())),
+        }
+    }
+
+    /// Lend the arenas to the command buffer of `state`, or (`false`) take them back.
+    fn lend(&self, state: &mut super::State, lent: bool) {
+        state.uploads.lend(lent.then(|| Arc::clone(&self.uploads)));
+        state
+            .descriptors
+            .lend(lent.then(|| Arc::clone(&self.descriptors)));
+    }
+
+    /// The run again completed, so nothing uses what it took: the sets' pools reset for the next
+    /// run, and the uploads let go, without a lock of the command buffer (a chunk's last holder
+    /// parks it, `recycle.rs`). Inside a section of the exit guard; refused as the reset is.
+    fn settle(&self) -> Result<(), Error> {
+        let uploads = lock(&self.uploads).take();
+        drop(uploads);
+        lock(&self.descriptors).reset()
+    }
 }
 
 /// How a run again records a piece of work apart: as its first run did.
@@ -214,15 +251,15 @@ impl LoopCheck {
         Ok(nothing())
     }
 
-    /// Run the laying again on `buffer`'s `VkQueue`, its work apart recorded from `pool`, and
-    /// read the halt word.
+    /// Run the laying again on `buffer`'s `VkQueue`, its work apart recorded from `pool` and
+    /// `arenas`, and read the halt word.
     fn run_once(
         &self,
         buffer: &Hold<CommandBufferShared>,
-        pool: &Arc<Mutex<CommandPool>>,
+        (pool, arenas): (&Arc<Mutex<CommandPool>>, &RunArenas),
     ) -> Round {
         let mut recordings = Vec::new();
-        let ran = self.run_pieces(buffer, pool, &mut recordings);
+        let ran = self.run_pieces(buffer, (pool, arenas), &mut recordings);
         // Its recordings' command buffers go back to the pool for the next run: they ended there,
         // none of the command buffer's own pool (`CommandBufferShared::end_raw` counted them).
         let ended: usize = recordings.iter().map(|done| done.raws.len()).sum();
@@ -245,6 +282,14 @@ impl LoopCheck {
             Err(Stop::Failed(error)) => return Round::Failed(error),
             Err(Stop::Exiting) => return Round::Exiting,
         }
+        {
+            let Some(_busy) = exit_guard::enter() else {
+                return Round::Exiting;
+            };
+            if let Err(error) = arenas.settle() {
+                return Round::Failed(recording_error(&buffer.device, error));
+            }
+        }
         buffer.device.shared().counts.predicated_loop_ran_again();
         match self.halted() {
             true => Round::Again,
@@ -258,7 +303,7 @@ impl LoopCheck {
     fn run_pieces(
         &self,
         buffer: &Hold<CommandBufferShared>,
-        pool: &Arc<Mutex<CommandPool>>,
+        sources: (&Arc<Mutex<CommandPool>>, &RunArenas),
         recordings: &mut Vec<RecordedSegment>,
     ) -> Result<(), Stop> {
         let device = &buffer.device;
@@ -278,7 +323,7 @@ impl LoopCheck {
                         self.submit(buffer, &submits)?;
                         submits.clear();
                     }
-                    let done = self.record(buffer, pool, work, again)?;
+                    let done = self.record(buffer, sources, work, again)?;
                     submits.extend(&done.raws);
                     recordings.push(done);
                 }
@@ -287,12 +332,13 @@ impl LoopCheck {
         self.submit(buffer, &submits)
     }
 
-    /// Record `work` again as `again` says, its command buffers from `pool`, as a host step: on
-    /// this thread, inside a section of the exit guard, with no lock of the command buffer held.
+    /// Record `work` again as `again` says, its command buffers from `pool` and its sets and
+    /// uploads from `arenas`, as a host step: on this thread, inside a section of the exit guard,
+    /// with no lock of the command buffer held.
     fn record(
         &self,
         buffer: &Hold<CommandBufferShared>,
-        pool: &Arc<Mutex<CommandPool>>,
+        (pool, arenas): (&Arc<Mutex<CommandPool>>, &RunArenas),
         work: &Deferred,
         again: &Again,
     ) -> Result<RecordedSegment, Stop> {
@@ -302,7 +348,11 @@ impl LoopCheck {
         };
         let _turn = lock(&buffer.reencoding);
         let command_buffer = CommandBuffer(Arc::clone(buffer));
-        lock(&buffer.state).rerun_pool = Some(Arc::clone(pool));
+        {
+            let mut state = lock(&buffer.state);
+            state.rerun_pool = Some(Arc::clone(pool));
+            arenas.lend(&mut state, true);
+        }
         let record = || {
             exit_guard::host_step(|| match again {
                 Again::OnGpu => (work.record_on_gpu(&command_buffer)?)
@@ -317,6 +367,7 @@ impl LoopCheck {
         };
         let mut state = lock(&buffer.state);
         state.rerun_pool = None;
+        arenas.lend(&mut state, false);
         match recorded {
             // Its first run named no detached buffer, or the command buffer failed there.
             Ok(done) if done.taken.dead() => {
@@ -454,16 +505,21 @@ fn run_again(check: &LoopCheck, buffer: Hold<CommandBufferShared>) {
         };
         command_pool(device, family).map(|pool| Arc::new(Mutex::new(pool)))
     };
+    let arenas = RunArenas::new();
     let (failure, settled) = match &pool {
         Ok(pool) => loop {
-            let round = before_round(&buffer).unwrap_or_else(|| check.run_once(&buffer, pool));
+            let round =
+                before_round(&buffer).unwrap_or_else(|| check.run_once(&buffer, (pool, &arenas)));
             match round {
                 Round::Again => continue,
                 Round::Ended => break (None, true),
                 // A recording it left unended leaves the pool to be reset.
                 Round::Failed(error) => break (Some(error), false),
                 // What it holds stays held to the process's end, as the scheduler's does.
-                Round::Exiting => return std::mem::forget(buffer),
+                Round::Exiting => {
+                    std::mem::forget(arenas);
+                    return std::mem::forget(buffer);
+                }
             }
         },
         Err(error) => (Some(recording_error(device, error.clone())), true),

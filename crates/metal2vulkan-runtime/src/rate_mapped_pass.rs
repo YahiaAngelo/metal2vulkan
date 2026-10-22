@@ -52,17 +52,47 @@
 //!   platform". A scissor that holds the viewport's pixels clips nothing the viewport does not, so
 //!   the plan takes none; one that cuts into the viewport over a map that is not the identity is
 //!   refused, as the compile layer refuses it ([`RegionRefusal::Scissor`]).
-//! - **A map of no layers**. Metal makes one where its API validation is off, and a pass over one
-//!   made while no map of layers has been released runs its load, clear, and store actions and its
-//!   draws write nothing (an M4, each in its own process three times: a full-screen triangle over a
-//!   cleared target of 8 and of 64 pixels, with and without a scissor, a map of 256 pixels over a
-//!   target of 8, beside a live map of one layer, and in a sequence of passes); the runtime records
-//!   none of its draws. Whether Metal runs such a draw's vertex function is not measured. A map of
-//!   no layers made after a map of layers was released draws on Metal, an M4 and an M3 Max alike: a
-//!   64-pixel one over a 64-pixel target its physical rows 0 to 15 at full width, at the positions
-//!   of a pass with no map, whatever map was released. The runtime draws nothing there and
-//!   announces it: a draw over a map of no layers made after the device released a map of layers
-//!   announces `zero-layer-map-after-release`.
+//! - **A map of no layers, and a mutable map not yet reset**. Metal makes a map of no layers
+//!   where its API validation is off, and a pass over one made while no map of layers has been
+//!   released runs its load, clear, and store actions and its draws write nothing (an M4, each in
+//!   its own process three times: a full-screen triangle over a cleared target of 8 and of 64
+//!   pixels, with and without a scissor, a map of 256 pixels over a target of 8, beside a live map
+//!   of one layer, and in a sequence of passes); a pass over a mutable map not yet reset alike
+//!   (the M3 Max under macOS 27.0.1). Metal runs each draw's vertex function there (the M3 Max:
+//!   a vertex function counting its runs ran 3 times for a triangle, over a map made of no
+//!   layers, immutable or mutable, and over a mutable one not yet reset), so the runtime records
+//!   each draw through an empty scissor: its vertex function runs, and no fragment. A map of no
+//!   layers made after a map of layers was released, or reset from layers, draws on Metal, an M4
+//!   and an M3 Max alike: a 64-pixel one over a 64-pixel target its physical rows 0 to 15 at full
+//!   width, at the positions of a pass with no map, whatever map was released. The runtime draws
+//!   nothing there and announces it: a draw over such a map announces
+//!   `zero-layer-map-after-release`.
+//! - **A reset** (`RasterizationRateMap::reset_using_descriptor`). Metal's pass reads the map as
+//!   the GPU runs it (our probe `rm`, the M3 Max under macOS 27.0.1, each case in a process of its
+//!   own: a reset from the identity to half quality after the encoder was made, after its draw,
+//!   after `endEncoding`, after `commit` and after `commit` while the command buffer waited for an
+//!   event the CPU signalled after the reset each shaded the half-quality map's pixels; two passes
+//!   of one waiting command buffer, the first ended before a reset and both before a second, shaded
+//!   the second's; a reset after the command buffer completed changed nothing). The runtime plans
+//!   each draw by the map as its encoder took it as it opened, which the encoder notes
+//!   (`EncoderCore::take_rate_map`), and keeps the pass's log (`render/replay.rs`). A reset puts
+//!   the map's new state in place under the lock a submission reads its mark under, and marks each
+//!   committed command buffer whose last event group is not yet submitted and whose pass took the
+//!   map; their passes that took it are encoded again from their logs, in the reset's call, before
+//!   that submission (`command_buffer/reencode.rs`), and a command buffer not yet committed has
+//!   them encoded again at its commit. A group submitted before the reset draws by the map as its
+//!   passes took it: Metal's GPU, already reading, may do either. An encoder that kept no log (a
+//!   command predication's command buffer, an encoder opened while a buffer of the device was
+//!   detached, one that left work for a host step), or whose encoding again is refused (the pass
+//!   checked against the map as reset), draws by the map as it took it, announced
+//!   (`rate-map-reset-unencoded`).
+//! - **A mutable map's pass past the screen** (the M3 Max under macOS 27.0.1, a quad far past the
+//!   clip volume): Metal rasterizes a pass over a `Mutable` map past the screen's edge along the
+//!   last tiles' lines, to a bound not found (a 64-pixel screen at half quality shaded 49 physical
+//!   columns of its 33, one at 0.75 shaded 64 of 54), where a pass over a map of any other
+//!   mutability stops at the physical size. An identity map's pass stopped at its physical size
+//!   in every case measured, mutable or not. The runtime's pass stops at the physical size, inside
+//!   the near-equivalent the map's compile announces (`rasterization-rate-map`).
 //! - **What the plan refuses** is `NotImplemented(RuntimeGap::RateMapRegions)`, naming the
 //!   compile layer's reason ([`RegionRefusal`]): a viewport of no extent or a flipped one, a
 //!   scissor as above, a plan past its bound or past the device's viewport limits, a pipeline whose
@@ -72,13 +102,14 @@
 
 use super::degradation::Degradation;
 use super::error::{internal, invalid, Error, Problem, RuntimeGap};
-use super::rate_map::RasterizationRateMap;
+use super::rate_map::{MapState, RasterizationRateMap};
 use super::render_pass::{PassLayout, RenderPassDescriptor, RenderPassProblem};
 use super::render_values::{ScissorRect, Viewport};
 use super::Device;
 use ash::vk;
 use metal2vulkan::bind::{RegionError, RegionLimits};
 use metal2vulkan::pipeline::GraphicsState;
+use std::sync::Arc;
 
 /// Why a draw in a rate-mapped pass is not drawn region by region: the compile layer's
 /// [`RegionError`](metal2vulkan::bind::RegionError), by kind (the module docs).
@@ -113,6 +144,8 @@ pub enum RegionRefusal {
 #[derive(Clone)]
 pub(super) struct RateMappedPass {
     map: RasterizationRateMap,
+    /// The map as the encoder took it, which its draws are planned by.
+    state: Arc<MapState>,
     area: [u32; 2],
     /// Every layer of the map is the first's: each slice is rasterized alike.
     alike: bool,
@@ -132,12 +165,11 @@ pub(super) fn check_descriptor(
     if !map.device().same(device) {
         return Err(invalid(call, Problem::ForeignObject));
     }
-    let compiled = map.compiled();
-    let layers = compiled.layer_count();
+    let state = map.state();
+    let layers = state.layer_count();
     // Past the layers of a map whose layers are alike every slice takes layer 0, as plain Metal
     // rasterizes past one layer (the module docs).
-    let alike = (1..layers).all(|layer| compiled.layer(layer) == compiled.layer(0));
-    if descriptor.render_target_array_length > u64::from(layers) && !alike {
+    if descriptor.render_target_array_length > u64::from(layers) && !state.layers_alike() {
         return Err(invalid(
             call,
             Problem::RenderPass(RenderPassProblem::RateMapArrayLength {
@@ -160,8 +192,8 @@ impl RateMappedPass {
         let Some(map) = &descriptor.rasterization_rate_map else {
             return Ok(None);
         };
-        let compiled = map.compiled();
-        let screen = compiled.screen_size();
+        let state = map.state();
+        let screen = state.screen_size();
         let attached =
             layout.colors.iter().flatten().next().is_some() || layout.depth_stencil.is_some();
         let area = if !attached {
@@ -181,13 +213,17 @@ impl RateMappedPass {
             // render area cuts each region's scissor (the module docs).
             screen
         };
-        let alike =
-            (1..compiled.layer_count()).all(|layer| compiled.layer(layer) == compiled.layer(0));
         Ok(Some(RateMappedPass {
             map: map.clone(),
+            alike: state.layers_alike(),
+            state,
             area,
-            alike,
         }))
+    }
+
+    /// The map and the map as the pass took it, which its encoder notes (`EncoderCore::take_rate_map`).
+    pub(super) fn taken(&self) -> (RasterizationRateMap, Arc<MapState>) {
+        (self.map.clone(), Arc::clone(&self.state))
     }
 
     /// Whether every layer of the map is the first's, so a draw rasterizes every slice alike
@@ -238,30 +274,43 @@ impl RateMappedPass {
                 // Inside the area, which fits a `u32` (checked at the setter).
                 [scissor.x, scissor.y, scissor.width, scissor.height].map(|v| v as u32)
             });
-        // A map of no layers rasterizes nothing: the draw is not recorded. One made after the
-        // device released a map of layers is one Metal may draw from that map's memory: announced.
-        if self.map.compiled().layer_count() == 0 {
-            if self.map.made_after_release() {
-                self.map
-                    .device()
-                    .degrade(Degradation::ZeroLayerMapAfterRelease, || {
-                        let [width, height] = self.map.compiled().screen_size();
-                        (
-                            format!(
-                                "a render pass over a rasterization rate map of no layers, \
-                                 {width} by {height} screen pixels, made after a map of layers \
-                                 was released"
-                            ),
-                            "Metal draws such a pass (an Apple M4 and an Apple M3 Max drew a \
-                             64-pixel map's rows 0 to 15 at the positions of a pass with no map, \
-                             whatever map was released); the runtime draws \
-                             nothing"
-                                .to_owned(),
-                        )
-                    });
+        // A map not yet reset, and a map of no layers, rasterize nothing: the draw runs its vertex
+        // function alone, through an empty scissor, as Metal's does. One made, or reset, after a
+        // map of layers is one Metal draws from that map's memory: announced.
+        let compiled = match self.state.compiled() {
+            Some(map) if map.layer_count() > 0 => map,
+            compiled => {
+                if self.state.made_after_release() {
+                    let [width, height] = self.state.screen_size();
+                    self.map
+                        .device()
+                        .degrade(Degradation::ZeroLayerMapAfterRelease, || {
+                            (
+                                format!(
+                                    "a render pass over a rasterization rate map of no layers, \
+                                     {width} by {height} screen pixels, made after a map of \
+                                     layers was released, or reset from layers"
+                                ),
+                                "Metal draws such a pass (an Apple M4 and an Apple M3 Max drew \
+                                 a 64-pixel map's rows 0 to 15 at the positions of a pass with \
+                                 no map, whatever map was released); the runtime draws \
+                                 nothing"
+                                    .to_owned(),
+                            )
+                        });
+                }
+                debug_assert!(compiled.is_none_or(|map| map.layer_count() == 0));
+                let viewport = vk::Viewport {
+                    x: 0.0,
+                    y: 1.0,
+                    width: 1.0,
+                    height: -1.0,
+                    min_depth: viewport.znear as f32,
+                    max_depth: viewport.zfar as f32,
+                };
+                return Ok(vec![(viewport, vk::Rect2D::default())]);
             }
-            return Ok(Vec::new());
-        }
+        };
         // Metal rasterizes each primitive by the map's layer of the slice it renders: the plan of
         // that slice's layer bounds a draw of one slice, and the first layer's any draw over a map
         // of layers alike; a draw whose primitives choose over layers that differ is refused as
@@ -271,9 +320,7 @@ impl RateMappedPass {
             (Some(slice), false) => (slice, true),
             (None, false) => (0, false),
         };
-        let plan = self
-            .map
-            .compiled()
+        let plan = compiled
             .regions(layer, guest, clip, limits)
             .and_then(|plan| {
                 match bounded {
@@ -347,4 +394,26 @@ fn refusal(error: RegionError) -> Error {
         other => return internal(&format!("a rate-mapped draw's plan: {other}")),
     };
     Error::NotImplemented(RuntimeGap::RateMapRegions(kind))
+}
+
+/// Announce, at the commit of its command buffer, that an encoder whose pass took a
+/// rasterization-rate map since reset, and that kept no log (`unlogged` says why, where known),
+/// draws by the map as it took it (the module docs).
+pub(super) fn degrade_unencoded(
+    device: &Device,
+    unlogged: Option<crate::command_buffer::rebound_use::Unlogged>,
+) {
+    device.degrade(Degradation::RateMapResetUnencoded, || {
+        let why = match unlogged {
+            Some(why) => format!(", not encoded again as {why}"),
+            None => String::new(),
+        };
+        (
+            format!(
+                "a render pass over a rasterization rate map reset after the pass took it{why}"
+            ),
+            "the pass draws by the map as it took it, where Metal's GPU draws by the map as reset"
+                .to_owned(),
+        )
+    });
 }

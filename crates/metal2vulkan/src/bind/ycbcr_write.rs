@@ -26,9 +26,10 @@
 //!   red, each `round(clamp(v, 0, 1) · (2^b - 1))` of the exact product, to nearest (a NaN 0).
 //!   The `float` product rounded instead misses about 1 in 14 values within 3 ulps of a tie.
 //!
-//! The `_sRGB` twins' writes follow none of these (their linear value steps by `1 / 8192`, then a
-//! curve that is not the reads' inverse), and the packed formats' writes are stored by the M4 and
-//! dropped by the M3: neither is encoded here ([`ycbcr_write`] answers `None`).
+//! The `_sRGB` twins' writes follow none of these (their linear value is taken through a
+//! linear-to-sRGB curve within a code of the exact curve, not the reads' inverse), and the packed
+//! formats' writes are dropped (the M3 Max under macOS 27.0.1; an M4 stores them): neither is
+//! encoded here ([`ycbcr_write`] answers `None`).
 //!
 //! **A render pass's store** (our own probes over CoreVideo `420v`, `420f`, `422v`, `444v` and
 //! `444f` surfaces on an Apple M4 under macOS 27.0.1: every byte of the converted 8-bit formats'

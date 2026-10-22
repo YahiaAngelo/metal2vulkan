@@ -1413,9 +1413,10 @@ degradations! {
              dispatch of another dispatch type ends the process), the device gives the older \
              release's: it can stop or refuse a texture or a dispatch the host's Metal makes, and \
              never makes one the older release stops";
-        /// A render pass that loads a color attachment of an extended-range or padded 10-bit
-        /// format (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and
-        /// their sRGB twins, and `RGB10A2Unorm_sRGB`), or under
+        /// A render pass that loads a color attachment of an extended-range, padded 10-bit or
+        /// bfloat format (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`,
+        /// `RG10Unorm_X12` and their sRGB twins, `RGB10A2Unorm_sRGB`, `R16Bfloat`, `RG16Bfloat`
+        /// and `RGBA16Bfloat`), or under
         /// [`metal2vulkan::device::TileStorePolicy::Exact`] of a
         /// signed normalized format or `RGB9E5Float`, stores it and draws, whose load pass
         /// (`render/unused_bits_load.rs`) rewrites every 32 x 32 tile of its render area: Metal's
@@ -1429,17 +1430,30 @@ degradations! {
              canonical (BGR10_XR's bits 30 and 31 ones, BGRA10_XR's low six bits of each field \
              and the two-plane color word's top two bits zeros) and BGRA10_XR alpha codes \
              clamped to [384, 894], so an out-of-range raw alpha reads back changed, a padded \
-             word's low six bits zeroed (an sRGB twin's code moved through Metal's table) and, \
-             under the exact tile store, a signed normalized minimum code raised and an \
-             RGB9E5Float word normalized; the tiles a draw reaches are Metal's";
+             word's low six bits zeroed (an sRGB twin's code moved through Metal's table), a \
+             bfloat code moved through half (out of half's range to an infinity or zero, a NaN \
+             to 0x7fc0) and, under the exact tile store, a signed normalized minimum code raised \
+             and an RGB9E5Float word normalized; the tiles a draw reaches are Metal's";
         /// A draw in a render pass over a rasterization-rate map of no layers that was made after
-        /// the device released a map of one or more layers (`rate_mapped_pass.rs`). The draw
+        /// the device released a map of one or more layers, or reset from one of layers
+        /// (`rate_mapped_pass.rs`). The draw
         /// writes nothing, where Metal draws: an Apple M4 and an Apple M3 Max drew a 64-pixel
         /// map's physical rows 0 to 15 over a 64-pixel target at the positions of a pass with no
         /// map, whatever map was released. Announced at the draw.
         ZeroLayerMapAfterRelease = "zero-layer-map-after-release", Precision,
             "the draws write nothing, where Metal draws rows of the pass (a 64-pixel map's rows 0 \
              to 15, at the positions of a pass with no map)";
+        /// A render pass over a rasterization-rate map that was reset
+        /// (`RasterizationRateMap::reset_using_descriptor`) after the pass took it and before
+        /// its command buffer was submitted, in an encoder the runtime could not encode again
+        /// (it kept no log: a command predication's command buffer, a render encoder opened
+        /// while a buffer of the device was detached, or one that left work for a host step;
+        /// `rate_mapped_pass.rs`). The pass draws by the map as it took it, where Metal's GPU
+        /// reads the map as it runs the pass (the M3 Max under macOS 27.0.1). Announced at the
+        /// commit, or at the reset where the command buffer was committed.
+        RateMapResetUnencoded = "rate-map-reset-unencoded", Precision,
+            "the pass draws by the map as it took it, where Metal's GPU draws by the map as \
+             reset";
         /// A texture made in a heap over host pages (`new_heap_with_bytes_no_copy`), or a depth
         /// or stencil texture made in any heap as a shadow of Metal's tiles (on a driver that
         /// lays such images apart from their memory or keeps them GPU-optimized: MoltenVK), that
