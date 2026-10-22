@@ -76,7 +76,7 @@ use super::render_values::{LoadAction, StoreAction};
 use super::resource::ResourceKey;
 use super::sample_positions;
 use super::stencil_copy::{self, StencilPlanes};
-use super::texture::{copy_units, Texture};
+use super::texture::{copy_units, ImageMaker, Texture};
 use super::texture_descriptor::TextureDescriptor;
 use super::tracker::{Access, Barrier, Use};
 use super::values::ResourceOptions;
@@ -539,7 +539,7 @@ fn usable_twin(
 /// one sample) that copies both ways ([`usable_twin`]). Refused where the device does not make it
 /// (a sample count its colour attachments of the format do not take).
 pub(super) fn colour_image(
-    maker: &CommandBuffer,
+    maker: &dyn ImageMaker,
     (format, pixel_format): (Format, PixelFormat),
     samples: u32,
     [width, height]: [u32; 2],

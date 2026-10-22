@@ -712,6 +712,47 @@ impl ShadowCopies {
         }
     }
 
+    /// Record a merge's keep of the shadow's texels into `to` from `at`, laid out as in the
+    /// buffer from the texture's first byte (`shadow_merge.rs`): as
+    /// [`record_out`](Self::record_out) copies them; but where a heap's tiled texture's image
+    /// takes the bytes inexactly (`HeapTiledCopies::takes_inexactly`: a multisample depth the
+    /// driver's fragment depth changes), the heap's bytes themselves, so the merge writes each
+    /// byte the image holds otherwise than the heap: every byte a command wrote, and the values
+    /// the copy in changed (the announced `drawn-depth-copy`), never a byte of the heap's in a
+    /// value a command wrote.
+    ///
+    /// # Safety
+    ///
+    /// As `record_out`'s.
+    pub(super) unsafe fn record_kept(
+        &self,
+        device: &Vk,
+        command_buffer: vk::CommandBuffer,
+        to: vk::Buffer,
+        at: u64,
+    ) {
+        if let ShadowSource::Bytes {
+            buffer,
+            target: ShadowTarget::Tiled { staging, tiles, .. },
+            ..
+        } = &self.source
+        {
+            if tiles.takes_inexactly() {
+                let region = vk::BufferCopy {
+                    src_offset: staging.into.src_offset,
+                    dst_offset: at,
+                    size: staging.into.size,
+                };
+                // SAFETY: the caller's contract; the texture's bytes lie in the heap's buffer from
+                // the staging copy's first, and `to` holds them from `at`.
+                unsafe { device.cmd_copy_buffer(command_buffer, buffer.raw(), to, &[region]) };
+                return;
+            }
+        }
+        // SAFETY: the caller's contract.
+        unsafe { self.record_out(device, command_buffer, to, at) };
+    }
+
     /// Record a copy of the shadow's texels into `to` from `at`, laid out as in the buffer from
     /// the texture's first byte (`shadow_merge.rs`).
     ///

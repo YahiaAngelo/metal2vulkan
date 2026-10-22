@@ -1744,9 +1744,11 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   where Metal's compiler folds the output to a constant that zeroes the factor (an alpha of the
   literal 1 under `OneMinusSourceAlpha`), Metal stores zero there (measured on an Apple M4).
 - `metal2vulkan-degrade-drawn-depth-copy` (precision). `DrawnDepthCopy`: A blit copy into a
-  multisampled 32-bit float depth texture from a colour one or a buffer, or a render pass's
-  separate multisampled 32-bit float depth texture copied to and from its scratch image, by the
-  sample-rate `FragDepth` draw, on a device whose copies go by draws and whose driver's fragment
+  multisampled 32-bit float depth texture from a colour one or a buffer, a render pass's separate
+  multisampled 32-bit float depth texture copied to and from its scratch image, or a heap's such
+  texture held as a shadow of its samples in Metal's tiles, which takes the heap's bytes (then a
+  value the draw changes is written back to the heap's bytes changed, announced as the texture is
+  made), by the sample-rate `FragDepth` draw, on a device whose copies go by draws and whose driver's fragment
   depth is not measured to store every value unchanged: measured to change some values (MoltenVK,
   NVIDIA's), or not measured at all (any other driver, and lavapipe releases not measured). The
   reason names the values that driver changes, or, on a driver not measured, those Vulkan leaves to
@@ -1951,11 +1953,15 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   texture made in any heap as a shadow of Metal's tiles (on a driver that lays such images apart from
   their memory or keeps them GPU-optimized: MoltenVK), that Metal keeps losslessly compressed: its
   bytes on Metal are no layout of its texels, so the runtime lays them out as its own, its
-  uncompressed tiles where it tiles them. Also such a texture whose image lies in a heap over the
-  device's memory: the image, of the runtime's usage, need not be compressed as Metal's. Cost: the texture's reads, writes and copies are Metal's, but its bytes in the heap are not
-  Metal's compressed bytes (a single-sample texture's texels in the runtime's layout; a multisample
-  texture's image lies in memory of its own, the heap's bytes keeping what they held): a buffer or
-  texture over them reads and writes other bytes than Metal's would.
+  uncompressed tiles where it tiles them. A multisample texture so (its sample grid's shorter side
+  16 or more) holds its samples in its uncompressed tiles, or, where the device does not move its
+  samples to and from a buffer, lies in memory of its own, the heap's bytes keeping what they held.
+  Also such a texture whose image lies in a heap over the device's memory: the image, of the
+  runtime's usage, need not be compressed as Metal's. Cost: the texture's reads, writes and copies
+  are Metal's, but its bytes in the heap are not Metal's compressed bytes (its texels or samples in
+  the runtime's layout, or a multisample texture's image in memory of its own, the heap's bytes
+  keeping what they held): a buffer or texture over them reads and writes other bytes than Metal's
+  would.
 - `metal2vulkan-degrade-heap-texture-block-compressed-layout` (precision).
   `HeapTextureBlockCompressedLayout`: A texture of a block-compressed format made in a heap over
   host pages whose placement the device's Metal level does not measure: Metal places a format
@@ -1969,7 +1975,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-heap-texture-untiled-layout` (precision). `HeapTextureUntiledLayout`: A
   texture made in a heap over host pages that Metal lays out tiled where the runtime does not: a
   layout not measured (a format whose layout in Metal's heaps is not probed), an image that holds
-  other bytes than Metal's elements, or moves past the device's limits. Also a texture made in any
+  other bytes than Metal's elements, moves past the device's limits, or a multisample texture whose
+  samples the device does not move to and from a buffer (a 16-bit depth where its multisampled
+  copies go by draws), in memory of its own. Also a texture made in any
   other heap (over the device's memory) whose bytes there are not Metal's layout: its image bound
   there in the driver's layout, on a driver whose colour images are not measured to lie as Metal's
   heap textures (`DriverFact::ColorImagesLieAsMetalHeapTextures`) or of a depth or stencil texture

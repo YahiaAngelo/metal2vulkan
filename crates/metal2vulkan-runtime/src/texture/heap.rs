@@ -24,24 +24,24 @@
 //!   or `ShaderAtomic` usage stays uncompressed, a depth or stencil texture of no usage does), and
 //!   the runtime plans an image Metal keeps uncompressed so its driver keeps it so (`image_plan`),
 //!   so the image is no larger than Metal's answer.
-//! - **Multisample textures over host pages**. One Metal keeps losslessly compressed
-//!   (`heap_tiled::sample_grid`) is its optimal image in memory of its own
-//!   (`AliasRoute::Lossless`), holding what that memory held, as a heap's texture holds what its
-//!   bytes held; the heap's bytes keep what they held, where Metal's compressed bytes change as the
-//!   texture is written (no layout of its samples either way; `heap-texture-lossless-layout` per
-//!   texture). One Metal keeps uncompressed, which lays its samples out in the heap's bytes (each
-//!   pixel's samples side by side in Metal's tiles), takes that route too, its samples apart from
-//!   the heap's bytes (`heap-texture-untiled-layout` per texture), as does one of a sample count
-//!   whose layout is not measured. A compressed one takes
-//!   that route in any heap whose memory its optimal image does not take where the device's linear
-//!   images cannot hold it (an NVIDIA GPU's `Shared` heap), announced alike, where it was refused
-//!   `HeapTextureTiling` as the device's lack. So does an uncompressed one there (a depth texture
-//!   of a `Shared` heap on MoltenVK, whose optimal depth images take no host-visible memory), and
-//!   one whose image is larger than Metal's answer where that is not its image's (an `X32_Stencil8`
-//!   or `BlockWritesOnly` one), where they were refused `HeapTextureTiling` and
-//!   `NotImplemented(HeapTextureMemory)`: each answers Metal's size and alignment, its samples
-//!   apart from the heap's bytes, where Metal lays them out (`heap-texture-untiled-layout` per
-//!   texture).
+//! - **Multisample textures over host pages**, and in any heap whose memory its optimal image does
+//!   not take where the device's linear images cannot hold it (an NVIDIA GPU's `Shared` heap; a
+//!   depth texture of a `Shared` heap on MoltenVK, whose optimal depth images take no host-visible
+//!   memory), or whose image is larger than Metal's answer where that is not its image's (an
+//!   `X32_Stencil8` or `BlockWritesOnly` one), where they were refused `HeapTextureTiling` and
+//!   `NotImplemented(HeapTextureMemory)`: a shadow of its samples in the heap's bytes
+//!   (`AliasRoute::Tiled`, `heap_tiled.rs`), at Metal's size and alignment. One Metal keeps
+//!   uncompressed lies in Metal's tiles there, each pixel's samples side by side, counted tiled with
+//!   no notice; one Metal keeps losslessly compressed (`heap_tiled::sample_grid`), whose bytes are
+//!   no layout of its samples, in the tiles Metal lays it in uncompressed
+//!   (`heap-texture-lossless-layout` per texture). Its samples move between its image and the
+//!   heap's bytes by the multisampled blits' interleave copies; where the device runs none (a 16-bit
+//!   depth on a device whose multisampled copies go by draws), or its image holds other bytes than
+//!   Metal's elements, or its sample count's layout is not measured, it is its optimal image in
+//!   memory of its own (`AliasRoute::Lossless`), holding what that memory held, as a heap's texture
+//!   holds what its bytes held, the heap's bytes keeping what they held
+//!   (`heap-texture-lossless-layout` or `heap-texture-untiled-layout` per texture, as Metal keeps
+//!   it compressed or not).
 //! - **Where Metal's answer is not its image's** (the consumer's report): Metal answers a 4:2:2
 //!   texture its rows of 2-byte texels at a multiple of 16 bytes, the last unpadded, at an
 //!   alignment of 16, and an `X32_Stencil8` texture as a `Stencil8` one
@@ -78,9 +78,9 @@
 //!   drops a depth or stencil texture's metadata with it off, which no Vulkan request reaches on
 //!   MoltenVK ([`DriverFact::DepthStencilImagesStayGpuOptimized`]): there the texture is a shadow
 //!   of Metal's tiles in the heap's bytes (below) and answers Metal's size; where no such shadow
-//!   serves it (a multisample texture, a depth twin, a layout not measured), the answer stays the
-//!   optimized texture's, larger than Metal's, and the device announces
-//!   `optimized-depth-stencil-texture` once.
+//!   serves it (a multisample texture whose samples the device does not move, a depth twin, a
+//!   layout not measured), the answer stays the optimized texture's, larger than Metal's, and the
+//!   device announces `optimized-depth-stencil-texture` once.
 //! - **The heap's memory.** A heap's buffer lies at a multiple of [`HEAP_BASE_ALIGNMENT`] of its
 //!   memory (256 KiB, the largest image alignment measured), of a type optimal images take where
 //!   its storage class has one, else of one linear images take ([`HeapTypes::heap_memory`],
@@ -129,10 +129,10 @@
 //!   compressed bytes with it on no layout of the texels, which the shadow holds in its
 //!   uncompressed tiles, announced `heap-texture-lossless-layout` per texture. So is one whose
 //!   image the heap's memory takes none of, as below, and one whose image the driver keeps
-//!   GPU-optimized where Metal's is not. Any other such image, its own or its twin, is a shadow of
-//!   the heap's bytes in rows (`AliasRoute::Shadow`), or, where no shadow serves (a multisample
-//!   texture, a depth twin), aliases none of the heap's other resources, and the device announces
-//!   `heap-depth-stencil-apart` once when it makes one.
+//!   GPU-optimized where Metal's is not, a multisample one too (its samples, above). Any other such
+//!   image, its own or its twin, is a shadow of the heap's bytes in rows (`AliasRoute::Shadow`), or,
+//!   where no shadow serves (a depth twin), aliases none of the heap's other resources, and the
+//!   device announces `heap-depth-stencil-apart` once when it makes one.
 //! - **Heaps over the device's memory**. A texture whose image is bound in such a heap's memory
 //!   lies there in the driver's layout. On a driver whose single-sample colour images lie as Metal
 //!   lays out a heap texture of the image's usage
@@ -504,20 +504,21 @@ enum AliasRoute {
     /// A texture Metal tiles in the heap's bytes (`heap_tiled.rs`) in a heap over host pages, or
     /// in any heap one that no image bound there serves as Metal's (a depth or stencil image the
     /// driver lays apart from its memory or keeps GPU-optimized, one the heap's memory takes no
-    /// image of): its optimal image in memory of its own, whose elements the encoders move from
+    /// image of, a multisample one held otherwise in memory of its own): its optimal image in
+    /// memory of its own, whose elements (a multisample texture's samples) the encoders move from
     /// Metal's tiles in the heap's bytes and back (a texture Metal keeps losslessly compressed,
     /// its uncompressed tiles), a shadow of them (`shadowed-texture`).
     Tiled,
     /// A multisample texture's optimal image in memory of its own, apart from the heap's bytes,
-    /// which keep what they held; no copy moves samples between them (Vulkan copies no
-    /// multisampled image to a buffer). It is one Metal keeps losslessly compressed in a heap
-    /// over host pages (`heap_tiled::Untiled::LOSSLESS_MULTISAMPLE`), whose bytes there are no
-    /// layout of its samples on Metal either; and in any heap one whose optimal image takes none
-    /// of the heap's memory where no linear image serves, or whose image is larger than Metal's
-    /// answer where that is not its image's (`Device::metal_heap_answer`). It takes Metal's answer
-    /// of the heap where that is measured. Announced per texture by its layout
-    /// (`heap-texture-lossless-layout` where Metal compresses it, `heap-texture-untiled-layout`
-    /// where Metal lays its samples out in the heap's bytes), not by its route.
+    /// which keep what they held, where no shadow of its samples serves (`heap_tiled.rs`: the
+    /// device moves none to and from a buffer, its image holds other bytes than Metal's elements,
+    /// or its layout is not measured): in a heap over host pages, and in any heap one whose
+    /// optimal image takes none of the heap's memory where no linear image serves, or whose image
+    /// is larger than Metal's answer where that is not its image's (`Device::metal_heap_answer`).
+    /// It takes Metal's answer of the heap where that is measured. Announced per texture by its
+    /// layout (`heap-texture-lossless-layout` where Metal compresses it,
+    /// `heap-texture-untiled-layout` where Metal lays its samples out in the heap's bytes), not by
+    /// its route.
     Lossless,
 }
 
@@ -762,6 +763,44 @@ pub(crate) fn heap_plane_layout(
         }
     }
     (planes, end)
+}
+
+/// The planes of a multisample heap texture's tight buffer, whose image is of `format`
+/// (presenting `pf`), of `extent` and `layers` at `samples` (`texture/heap_tiled.rs`): its one
+/// level's planes as [`heap_plane_layout`] lays them, each pixel's samples one element of all
+/// their bytes, sample `s` at `s·B`, as Metal's blits lay a multisample texture out in a buffer
+/// and its tiles hold its pixels; and the bytes they span.
+pub(crate) fn sample_plane_layout(
+    format: Format,
+    pf: PixelFormat,
+    extent: [u32; 3],
+    layers: u32,
+    samples: u32,
+) -> (Vec<HeapPlane>, u64) {
+    let (planes, end) = heap_plane_layout(format, pf, extent, 1, layers);
+    let n = u64::from(samples.max(1));
+    let planes = planes
+        .into_iter()
+        .map(|plane| HeapPlane {
+            offset: plane.offset * n,
+            unit: plane.unit * n,
+            pitch: plane.pitch * n,
+            image_pitch: plane.image_pitch * n,
+            ..plane
+        })
+        .collect();
+    (planes, end * n)
+}
+
+/// The planes of the tight buffer of a tiled heap texture's image of `plan`
+/// (`texture/heap_tiled.rs`): a multisample image's samples ([`sample_plane_layout`]), else
+/// [`heap_plane_layout`]'s.
+fn tight_planes(plan: &ImagePlan) -> (Vec<HeapPlane>, u64) {
+    let (format, pf, extent) = (plan.format, plan.pixel_format, plan.extent);
+    match plan.samples.as_raw() {
+        1 => heap_plane_layout(format, pf, extent, plan.levels, plan.layers),
+        samples => sample_plane_layout(format, pf, extent, plan.layers, samples),
+    }
 }
 
 /// The greatest common divisor of `a` and `b`.
@@ -1372,14 +1411,11 @@ impl Device {
             }
         } else {
             match self.heap_image(free.clone(), plan, layout.texture_type, class, mine) {
-                // A multisample texture Metal keeps losslessly compressed, whose bytes in the
-                // heap are no layout of its samples, where neither its optimal image takes the
-                // heap's memory nor the device's linear images can hold it (an NVIDIA GPU's
-                // `Shared` heap): its optimal image in memory of its own, as over host pages,
-                // announced (`heap-texture-lossless-layout`).
-                // So is one Metal keeps uncompressed (a `Shared` heap's depth texture on
-                // MoltenVK, whose optimal images take no host-visible memory), its samples apart
-                // from the heap's bytes, where Metal lays them out (`heap-texture-untiled-layout`).
+                // A multisample texture where neither its optimal image takes the heap's memory
+                // nor the device's linear images can hold it (an NVIDIA GPU's `Shared` heap; a
+                // `Shared` heap's depth texture on MoltenVK, whose optimal images take no
+                // host-visible memory): its optimal image in memory of its own, as over host
+                // pages, a shadow of its samples in Metal's tiles there where one serves (below).
                 Err(error) if linear_refusal(&error) && twin.is_none() && layout.samples > 1 => {
                     let requirements = self.planned_requirements(
                         &free,
@@ -1471,8 +1507,8 @@ impl Device {
                 if twin.is_some() {
                     return Err(Error::NotImplemented(RuntimeGap::HeapTextureMemory));
                 }
-                // A multisample image, which no copy shadows, lies in memory of its own apart
-                // from the heap's bytes, as one the heap's memory cannot hold (above).
+                // A multisample image, which no copy of rows shadows, lies in memory of its own,
+                // as one the heap's memory cannot hold (above).
                 if layout.samples > 1 {
                     image.route = AliasRoute::Lossless;
                 } else if !shadowable(&image.plan, metal.size) {
@@ -1502,6 +1538,18 @@ impl Device {
                     size_and_align = answer;
                     metal_layout = tiles;
                 }
+            }
+        }
+        // A multisample texture in memory of its own is a shadow of its samples in Metal's tiles
+        // there (a compressed one's uncompressed tiles), where the device moves them
+        // (`heap_tiled.rs`): its bytes are Metal's, and it takes Metal's answer.
+        if image.route == AliasRoute::Lossless && layout.samples > 1 && twin.is_none() {
+            let shadow = self.sample_tiles(&layout, &image.plan, &metal_layout, metal_answer)?;
+            if let Some((plan, tiles, answer)) = shadow {
+                image.plan = plan;
+                image.route = AliasRoute::Tiled;
+                size_and_align = answer;
+                metal_layout = tiles;
             }
         }
         check_heap_base(size_and_align.align)?;
@@ -1944,7 +1992,7 @@ impl Device {
             *planned = Some(Planned::of(&p));
             let offset = heap_offset(heap, call, p.size_and_align, offset)?;
             let place = HeapPlace::new(heap, offset, p.size_and_align.size, false);
-            return self.heap_texture_at(heap, &bytes, p, place, options, descriptor);
+            return self.heap_texture_at((call, heap), &bytes, p, place, options, descriptor);
         }
         let (_, _, type_index) = bytes.memory();
         let images = std::iter::once(&p.image).chain(p.twin.as_ref().map(|(twin, _)| twin));
@@ -1966,7 +2014,7 @@ impl Device {
         // A placement heap's texture answers aliasable from the start, as Metal's does.
         let aliasable = heap.heap_type() == HeapType::Placement;
         let place = HeapPlace::new(heap, offset, p.size_and_align.size, aliasable);
-        self.heap_texture_at(heap, &bytes, p, place, options, descriptor)
+        self.heap_texture_at((call, heap), &bytes, p, place, options, descriptor)
     }
 
     /// The plan of a texture of `descriptor` in a heap over the caller's host memory whose own
@@ -1994,10 +2042,10 @@ impl Device {
     /// image takes copies and the moves fit the device; elsewhere it takes the routes above,
     /// announced untiled when it is made.
     ///
-    /// A multisample texture is its optimal image in memory of its own (`AliasRoute::Lossless`):
-    /// one Metal keeps losslessly compressed (`Untiled::LOSSLESS_MULTISAMPLE`), and one whose
-    /// samples Metal lays out in the heap's bytes or whose layout is not measured, announced
-    /// untiled when it is made.
+    /// A multisample texture is a shadow of its samples in Metal's tiles (`AliasRoute::Tiled`, a
+    /// compressed one's uncompressed tiles, [`sample_tiles`](Self::sample_tiles)), where one
+    /// serves; elsewhere its optimal image in memory of its own (`AliasRoute::Lossless`), announced
+    /// when it is made (`Untiled::LOSSLESS_MULTISAMPLE`, or untiled).
     fn host_heap_plan(
         &self,
         call: &'static str,
@@ -2009,14 +2057,34 @@ impl Device {
             return Err(Error::NotImplemented(RuntimeGap::HeapTextureMemory));
         }
         if p.layout.samples > 1 {
+            // A shadow of its samples in Metal's tiles serves it over host pages as in any heap.
+            if p.image.route == AliasRoute::Tiled {
+                return Ok(p);
+            }
             let facts = self
                 .shared()
                 .textures
                 .facts(self.compile_device().profile());
             let (plan, _) = plan_texture_images(&p.layout, descriptor.image_usage(), false, &facts)
                 .map_err(|refusal| image_error(call, refusal))?;
+            let plan = self.with_free_usage(plan, p.layout.texture_type)?;
+            let answer = Some(p.size_and_align);
+            let shadow = self.sample_tiles(&p.layout, &plan, &p.metal_layout, answer)?;
+            if let Some((plan, tiles, _)) = shadow {
+                let image = HeapImage {
+                    plan,
+                    tiling: vk::ImageTiling::OPTIMAL,
+                    requirements: p.image.requirements,
+                    route: AliasRoute::Tiled,
+                };
+                return Ok(HeapPlan {
+                    image,
+                    metal_layout: tiles,
+                    ..p
+                });
+            }
             let image = HeapImage {
-                plan: self.with_free_usage(plan, p.layout.texture_type)?,
+                plan,
                 tiling: vk::ImageTiling::OPTIMAL,
                 requirements: p.image.requirements,
                 route: AliasRoute::Lossless,
@@ -2326,22 +2394,107 @@ impl Device {
         }
     }
 
+    /// The image of a multisample texture of `layout` held as a shadow of its samples in the
+    /// tiles Metal lays them in (`AliasRoute::Tiled`; a compressed one's uncompressed tiles,
+    /// [`shadow_tiles`]), where Metal lays it out as `metal` and answers `answer`: `plan` with the
+    /// usages the moves take ([`with_sample_moves_usage`](Self::with_sample_moves_usage)), the
+    /// tiles, and the answer, which the texture takes; `None` where the tiles are not known, do not
+    /// fit the answer, or the device does not move the samples ([`tiles_serve`](Self::tiles_serve)).
+    fn sample_tiles(
+        &self,
+        layout: &TextureLayout,
+        plan: &ImagePlan,
+        metal: &HeapLayout,
+        answer: Option<SizeAndAlign>,
+    ) -> Result<Option<(ImagePlan, HeapLayout, SizeAndAlign)>, Error> {
+        let level = self.properties().metal_level;
+        let (Some(tiles), Some(answer)) = (shadow_tiles(layout, plan.format, level, metal), answer)
+        else {
+            return Ok(None);
+        };
+        let plan = self.with_sample_moves_usage(plan, layout.texture_type)?;
+        let serves =
+            (tiles.tiles()).is_some_and(|tiled| self.tiles_serve(&plan, tiled, answer.size));
+        Ok(serves.then_some((plan, tiles, answer)))
+    }
+
+    /// `plan` with the usages a multisample image's moves to and from a buffer take
+    /// (`sample_interleave.rs`), where the device makes such an image: copies both ways, and a
+    /// depth or stencil image's draws, which sample it and render into it; else `plan`.
+    fn with_sample_moves_usage(
+        &self,
+        plan: &ImagePlan,
+        texture_type: TextureType,
+    ) -> Result<ImagePlan, Error> {
+        let mut usage = ImageUsageFlags::TRANSFER_SRC | ImageUsageFlags::TRANSFER_DST;
+        if !colour(plan) {
+            usage |= ImageUsageFlags::SAMPLED | ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
+        }
+        if plan.usage.contains(usage) {
+            return Ok(plan.clone());
+        }
+        let candidate = ImagePlan {
+            usage: plan.usage | usage,
+            ..plan.clone()
+        };
+        Ok(match self.image_requirements(&candidate, texture_type)? {
+            Some(_) => candidate,
+            None => plan.clone(),
+        })
+    }
+
     /// Whether a shadow of Metal's tiles `tiled` serves an image of `plan` whose texture takes
-    /// `size` bytes of its heap: an image of one sample that takes copies, whose tiles fit those
-    /// bytes, and whose moves fit the device (`HeapTiledCopies::fit`).
+    /// `size` bytes of its heap: an image that takes copies, whose tiles fit those bytes, and
+    /// whose moves fit the device (`HeapTiledCopies::fit`); a multisample one, whose samples the
+    /// device moves to and from a buffer ([`sample_moves_run`](Self::sample_moves_run)).
     fn tiles_serve(&self, plan: &ImagePlan, tiled: &TiledTexture, size: u64) -> bool {
         let copies = ImageUsageFlags::TRANSFER_SRC | ImageUsageFlags::TRANSFER_DST;
-        let (planes, tight_len) = heap_plane_layout(
-            plan.format,
-            plan.pixel_format,
-            plan.extent,
-            plan.levels,
-            plan.layers,
-        );
-        plan.samples == SampleCountFlags::COUNT_1
-            && plan.usage.contains(copies)
+        let (planes, tight_len) = tight_planes(plan);
+        plan.usage.contains(copies)
             && tiled.size <= size
             && HeapTiledCopies::fit(self, tiled, &planes, tight_len)
+            && (plan.samples == SampleCountFlags::COUNT_1 || self.sample_moves_run(plan))
+    }
+
+    /// Whether the device moves the samples of a multisample image of `plan` to and from a buffer
+    /// (`HeapTiledCopies::plan_samples`, `sample_interleave.rs`): the moves planned once for an
+    /// image of one pixel of its format, usage and sample count, and remembered. A failure to make
+    /// what the moves need answers no: the texture then lies in memory of its own.
+    fn sample_moves_run(&self, plan: &ImagePlan) -> bool {
+        let key = (plan.format, plan.pixel_format, plan.usage, plan.samples);
+        let answers = &self.shared().textures.sample_moves;
+        if let Some(&(_, runs)) = lock(answers).iter().find(|(known, _)| *known == key) {
+            return runs;
+        }
+        let runs = self.sample_moves_try(plan).unwrap_or(false);
+        lock(answers).push((key, runs));
+        runs
+    }
+
+    /// [`sample_moves_run`](Self::sample_moves_run)'s trial: the moves of an image of `plan`'s
+    /// format, usage and sample count, one pixel of one slice, planned over no buffer.
+    fn sample_moves_try(&self, plan: &ImagePlan) -> Result<bool, Error> {
+        let samples = plan.samples.as_raw();
+        let one = ImagePlan {
+            extent: [1, 1, 1],
+            levels: 1,
+            layers: 1,
+            image_type: metal2vulkan::vk::ImageType::TYPE_2D,
+            ..plan.clone()
+        };
+        let descriptor = TextureDescriptor {
+            texture_type: TextureType::Type2DMultisample,
+            pixel_format: plan.pixel_format,
+            width: 1,
+            height: 1,
+            sample_count: samples.into(),
+            usage: TextureUsage::SHADER_READ,
+            resource_options: ResourceOptions::private(),
+            ..TextureDescriptor::default()
+        };
+        let texture = Device::new_planned_texture(self, &descriptor, one.clone())?;
+        let (planes, _) = tight_planes(&one);
+        HeapTiledCopies::samples_run(self, &texture, &planes)
     }
 
     /// The memory requirements of a linear image of `plan` made for host allocations, in the
@@ -2649,7 +2802,7 @@ impl Device {
     /// twin, where it has one, inside the same range.
     fn heap_texture_at(
         &self,
-        heap: &Heap,
+        (call, heap): (&'static str, &Heap),
         bytes: &Buffer,
         p: HeapPlan,
         place: HeapPlace,
@@ -2801,6 +2954,22 @@ impl Device {
             None,
             IdUse::Program(descriptor.placement),
         );
+        // A multisample texture's moves between its image and Metal's tiles, which name its
+        // image's views, are planned once it is (`heap_tiled.rs`); `sample_tiles` found that the
+        // device runs them.
+        if route == AliasRoute::Tiled && p.layout.samples > 1 {
+            let copies = texture.shadow().and_then(|copies| copies.target());
+            let Some(ShadowTarget::Tiled { tiles, .. }) = copies else {
+                return Err(internal(
+                    "a tiled multisample heap texture without its tiles",
+                ));
+            };
+            if !tiles.plan_samples(self, call, &texture)? {
+                return Err(internal(
+                    "a tiled multisample heap texture whose samples the device does not move",
+                ));
+            }
+        }
         heap.hold_texture(&texture);
         // It holds what its bytes held: its twin decodes all of it before any command reads it.
         texture.decode_whole()?;
@@ -2819,7 +2988,11 @@ impl Device {
                     self.shared().counts.heap_texture_tiled();
                 }
                 HeapLayout::Uncompressed(_) => {
-                    self.degrade_heap_layout(Untiled::LOSSLESS, texture.object_id());
+                    let lossless = match p.layout.samples {
+                        1 => Untiled::LOSSLESS,
+                        _ => Untiled::LOSSLESS_SAMPLES,
+                    };
+                    self.degrade_heap_layout(lossless, texture.object_id());
                 }
                 HeapLayout::Untiled(untiled) => {
                     self.degrade_heap_layout(untiled, texture.object_id());
@@ -3045,13 +3218,8 @@ impl Device {
         (place, options, descriptor): (HeapPlace, ResourceOptions, &TextureDescriptor),
     ) -> Result<Image, Error> {
         let plan = image.plan;
-        let (planes, tight_len) = heap_plane_layout(
-            plan.format,
-            plan.pixel_format,
-            plan.extent,
-            plan.levels,
-            plan.layers,
-        );
+        let samples = plan.samples.as_raw();
+        let (planes, tight_len) = tight_planes(&plan);
         let (regions, _) = heap_planes(
             plan.format,
             plan.pixel_format,
@@ -3068,7 +3236,7 @@ impl Device {
         let (heap_bytes, tracked) = bytes.tracked(place.offset..place.offset + tiled.size);
         let hazard = options.hazard_tracking_mode()?;
         let staging = HeapTiledCopies::staging(self, &tiled, start, hazard)?;
-        let shape = (&planes[..], tight_len);
+        let shape = (&planes[..], tight_len, samples);
         let tiles = HeapTiledCopies::new(self, &staging, tiled, shape, &regions, hazard)?;
         let tiles = Box::new(tiles);
         let shadow_range = UseRange::Image {

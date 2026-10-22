@@ -57,7 +57,6 @@
 
 use super::binding_view::VkView;
 use super::blit_plan::BufferLayout;
-use super::command_buffer::CommandBuffer;
 use super::copy_plan::{depth_bytes, CopyProblem, ImageRegion, TextureRegion};
 use super::degradation::Degradation;
 use super::device::{device_error, lock};
@@ -68,7 +67,7 @@ use super::release;
 use super::resource::ResourceKey;
 use super::sample_copy::{self, SampleCopy, Side};
 use super::sample_planes::{pipeline_layout, set_layout, shader_module};
-use super::texture::Texture;
+use super::texture::{ImageMaker, Texture};
 use super::texture_descriptor::{largest_side, TextureDescriptor};
 use super::tracker::{Access, Barrier, Use};
 use super::values::ResourceOptions;
@@ -633,10 +632,11 @@ struct Staging {
 }
 
 /// The emulated copy: its steps, the resource uses the command barriers over, the stages it
-/// runs in, the band objects, the textures it holds until the command buffer completes (the
-/// copy's own, its scratch and wide images, and the texture it copies into or out of), and the
-/// staging buffer its rows go through, if they do (with the first row's offset in the buffer).
-/// The buffer it copies with is held by the encoder (`EncoderCore::blit_at`).
+/// runs in, the band objects, the copy's own images (its scratch and wide images), held as long
+/// as the copy, and the staging buffer its rows go through, if they do (with the first row's
+/// offset in the buffer). The texture it copies into or out of is its caller's to hold while a
+/// command buffer records the copy (a blit's encoder retains it; a heap texture's copies are its
+/// own, `texture/heap_tiled.rs`), and so is the buffer it copies with (`EncoderCore::blit_at`).
 pub(super) struct InterleaveCopy {
     steps: Vec<Recorded>,
     pub(super) uses: Vec<Use<ResourceKey>>,
@@ -667,7 +667,7 @@ fn whole_view(
 
 /// A single-sample wide image of `width` by `height` in the copy format, with `usage`.
 fn wide_texture(
-    maker: &CommandBuffer,
+    maker: &dyn ImageMaker,
     copy: PlanesCopy,
     [width, height]: [u32; 2],
     usage: ImageUsageFlags,
@@ -702,7 +702,7 @@ fn wide_texture(
 /// A multisampled uint scratch image of `width` by `height` at `samples` in the copy format,
 /// with `usage`.
 fn scratch_texture(
-    maker: &CommandBuffer,
+    maker: &dyn ImageMaker,
     copy: PlanesCopy,
     [width, height]: [u32; 2],
     samples: u32,
@@ -991,7 +991,7 @@ impl InterleaveCopy {
     /// is the gap `RuntimeGap::MultisampledBufferLayout`.
     pub(super) fn plan(
         call: &'static str,
-        maker: &CommandBuffer,
+        maker: &dyn ImageMaker,
         buffer: vk::Buffer,
         base: u64,
         length: u64,
@@ -1116,9 +1116,6 @@ impl InterleaveCopy {
         };
         uses.push(texture.image_use(level..level + 1, layer..layer + 1, stage, into_texture)?);
         let texture_image = texture.raw_image()?;
-        // The copy holds the texture its steps record on until its command buffer completes, as
-        // it holds its wide and scratch images.
-        textures.push(texture.clone());
         for (bx, by, bw, bh) in tiles {
             let wide_usage = if into_texture {
                 ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST
@@ -1327,6 +1324,15 @@ impl InterleaveCopy {
             _textures: textures,
             staging: staging.map(|staging| (staging, first)),
         }))
+    }
+
+    /// What its depth move's `FragDepth` draw changes where it writes a 32-bit float depth
+    /// inexactly (the announced `drawn-depth-copy`); `None` where every step is exact.
+    pub(super) fn inexact_depth(&self) -> Option<&'static str> {
+        self.steps.iter().find_map(|step| match step {
+            Recorded::Move(moved) => moved.inexact_depth(),
+            _ => None,
+        })
     }
 
     /// Announce, once the copy is recorded, what its depth move announces for `call` into

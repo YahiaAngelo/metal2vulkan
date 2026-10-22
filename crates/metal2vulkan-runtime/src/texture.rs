@@ -136,7 +136,8 @@ use metal2vulkan::metal::format::{
 };
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::vk::{
-    ComponentMapping, Format, FormatFeatureFlags2, ImageAspectFlags, ImageUsageFlags, ImageViewType,
+    ComponentMapping, Format, FormatFeatureFlags2, ImageAspectFlags, ImageUsageFlags,
+    ImageViewType, SampleCountFlags,
 };
 use stand_in::StandIn;
 use std::any::Any;
@@ -181,6 +182,9 @@ pub(crate) use attached_reads::feedback_candidate;
 pub use shared::SharedTextureHandle;
 pub use wrapped::{VkImageLayouts, WrappedImageProblem};
 
+/// The kind of multisample image [`TextureState::sample_moves`] answers for.
+pub(super) type SampleMovesKey = (Format, PixelFormat, ImageUsageFlags, SampleCountFlags);
+
 /// What a device's textures share: the format facts their images are planned from, and how an
 /// image is placed in a memory block, apart from linear resources (and, on a driver that needs
 /// it, from the compression data's chunk).
@@ -206,6 +210,10 @@ pub(super) struct TextureState {
     /// Whether the usage a framebuffer fetch's form needs costs a color render target's image
     /// nothing, by its description (`framebuffer_fetch.rs`).
     pub(super) usage_answers: Mutex<UsageAnswers>,
+    /// Whether the device moves a multisample image's samples to and from a buffer, by the
+    /// image's format, pixel format, usage and sample count: a heap texture's tiled shadow's
+    /// moves (`texture/heap.rs`, `Device::sample_moves_run`), one entry a kind of image.
+    pub(super) sample_moves: Mutex<Vec<(SampleMovesKey, bool)>>,
     /// Each pixel format's texture capabilities, worked out at its first query
     /// (`families/formats.rs`).
     pub(super) format_answers: Mutex<HashMap<PixelFormat, FormatAnswers>>,
@@ -257,6 +265,7 @@ impl TextureState {
             recycled: Mutex::new(Recycler::new(recycle::IMAGES)),
             storage_placeholders: Mutex::new(Placeholders::default()),
             usage_answers: Mutex::new(UsageAnswers::default()),
+            sample_moves: Mutex::new(Vec::new()),
             format_answers: Mutex::new(HashMap::new()),
             #[cfg(unix)]
             modifier_features: Mutex::new(HashMap::new()),
@@ -1514,6 +1523,35 @@ fn copy_error(call: &'static str, refusal: CopyRefusal) -> Error {
     }
 }
 
+/// What the runtime makes its own images for ([`Device::new_planned_texture`]): an encoder's
+/// command buffer, which holds each until it completes, or the device, whose caller holds each as
+/// long as a command may use it (a heap's multisample texture's copies, `texture/heap_tiled.rs`).
+pub(super) trait ImageMaker {
+    /// The device that makes them.
+    fn device(&self) -> &Device;
+    /// Hold `texture`, one of them, as the maker holds them.
+    fn hold(&self, texture: Texture);
+}
+
+impl ImageMaker for CommandBuffer {
+    fn device(&self) -> &Device {
+        CommandBuffer::device(self)
+    }
+
+    fn hold(&self, texture: Texture) {
+        self.hold_own_texture(texture);
+    }
+}
+
+impl ImageMaker for Device {
+    fn device(&self) -> &Device {
+        self
+    }
+
+    /// The caller holds it.
+    fn hold(&self, _: Texture) {}
+}
+
 impl Device {
     /// `newTextureWithDescriptor:`: a texture of `descriptor`, its contents undefined.
     ///
@@ -2276,14 +2314,14 @@ impl Device {
     }
 
     /// A tracked `Private` texture of `descriptor` whose image `plan` states, planned by the
-    /// caller rather than from the descriptor: an image only an encoder's commands use, such as
+    /// caller rather than from the descriptor: an image only the runtime's commands use, such as
     /// the combined depth/stencil image a pass of separate depth and stencil textures renders
-    /// into (`depth_stencil_scratch.rs`), made by an encoder of `maker`, which holds it until it
-    /// completes. Its image starts in `UNDEFINED`, which the device's next submission leaves for
-    /// `GENERAL` (`texture/first_move.rs`): making it waits for no GPU work. Refused as
-    /// `new_texture` refuses the image.
+    /// into (`depth_stencil_scratch.rs`), made for `maker`, which holds it as its
+    /// [`ImageMaker`] says. Its image starts in `UNDEFINED`, which the device's next submission
+    /// leaves for `GENERAL` (`texture/first_move.rs`): making it waits for no GPU work. Refused
+    /// as `new_texture` refuses the image.
     pub(super) fn new_planned_texture(
-        maker: &CommandBuffer,
+        maker: &dyn ImageMaker,
         descriptor: &TextureDescriptor,
         plan: ImagePlan,
     ) -> Result<Texture, Error> {
@@ -2298,7 +2336,7 @@ impl Device {
         let record = ViewRecord::of_descriptor(&layout, descriptor);
         let storage = Storage::Image(image.shared());
         let texture = Texture::made(device, storage, record, None, IdUse::Runtime);
-        maker.hold_own_texture(texture.clone());
+        maker.hold(texture.clone());
         Ok(texture)
     }
 

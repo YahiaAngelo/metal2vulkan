@@ -46,7 +46,6 @@
 //! a colour image the device does not make at the sample count.
 
 use super::blit::TRANSFER;
-use super::command_buffer::CommandBuffer;
 use super::copy_plan::ImageRegion;
 use super::depth_copy::{self, DepthDraw, Drawn};
 use super::depth_stencil_scratch::{colour_copies_refused, colour_image, colour_twin};
@@ -55,7 +54,7 @@ use super::image_plan::{sample_count, ImagePlan};
 use super::render_pass::Target;
 use super::resource::ResourceKey;
 use super::stencil_copy::{attachment_use, sampled_use, DrawArea, StencilPlanes, DRAW_STAGES};
-use super::texture::Texture;
+use super::texture::{ImageMaker, Texture};
 use super::texture_descriptor::TextureDescriptor;
 use super::tracker::{Access, Barrier, Use};
 use super::values::ResourceOptions;
@@ -190,7 +189,7 @@ fn checked_twin(
 /// docs): by maintenance8's copies, or by draws where the device's cannot. Refused as the
 /// module docs say.
 pub(super) fn plan(
-    maker: &CommandBuffer,
+    maker: &dyn ImageMaker,
     regions: &[(ImageRegion, ImageRegion)],
     from: Side,
     to: Side,
@@ -224,7 +223,7 @@ pub(super) fn plan(
 
 /// [`plan`]'s copies by maintenance8's `vkCmdCopyImage` (the module docs).
 fn by_copies(
-    maker: &CommandBuffer,
+    maker: &dyn ImageMaker,
     regions: &[(ImageRegion, ImageRegion)],
     from: Side,
     to: Side,
@@ -295,7 +294,7 @@ fn by_copies(
 /// and mutable, so a copy between it and a colour texture of another format of its texel size
 /// goes through a view on MoltenVK (the module docs). Refused where the device does not make it.
 pub(super) fn bits_image(
-    maker: &CommandBuffer,
+    maker: &dyn ImageMaker,
     (format, pixel_format): (Format, PixelFormat),
     samples: u32,
     [width, height]: [u32; 2],
@@ -362,7 +361,7 @@ fn target(
 /// [`plan`]'s copies by draws (the module docs), on a device whose maintenance8 copies cannot
 /// make them; `refused` is why, the refusal of what the draws cannot copy.
 fn by_draws(
-    maker: &CommandBuffer,
+    maker: &dyn ImageMaker,
     regions: &[(ImageRegion, ImageRegion)],
     from: Side,
     to: Side,
@@ -520,6 +519,12 @@ fn by_draws(
 }
 
 impl SampleCopy {
+    /// What the `FragDepth` draw changes where it writes a 32-bit float depth inexactly (the
+    /// announced `drawn-depth-copy`); `None` where every step is exact.
+    pub(super) fn inexact_depth(&self) -> Option<&'static str> {
+        self.inexact_depth
+    }
+
     /// Announce, once the copy is recorded, `drawn-depth-copy` for `call` into `destination`
     /// where the `FragDepth` draw writes its depth inexactly.
     pub(super) fn announce(&self, device: &Device, call: &'static str, destination: &Texture) {

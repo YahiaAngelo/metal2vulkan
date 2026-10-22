@@ -103,12 +103,20 @@
 //!   alignment on MoltenVK was 128 where Metal's is 16 KiB for an array of a 16-KiB depth chain,
 //!   the consumer's report), and so does a one-sample one, of every type and level count,
 //!   compressed or not (every one of 14552 answers each on the M4 and the M3 Max, 2D, and 12330 on
-//!   the M4, 2D arrays, cubes and cube arrays). Over host pages a compressed one lies in memory of
-//!   its own and is announced `heap-texture-lossless-layout`; an uncompressed one lies in memory
-//!   of its own too, its samples apart from the heap's bytes (`heap-texture-untiled-layout`,
-//!   `heap.rs`). In any
-//!   heap one whose image the heap's memory or Metal's answer cannot hold lies in memory of its own
-//!   too.
+//!   the M4, 2D arrays, cubes and cube arrays). The samples of depth and stencil textures lie by
+//!   the same rule (an Apple M3 Max under macOS 27.0.1, `allowGPUOptimizedContents` off: every
+//!   sample of `Depth32Float` textures of 8 x 8 to 100 x 70 at 2 and 4 samples, of `Depth16Unorm`
+//!   ones at 4, and of `Stencil8` and `Depth32Float_Stencil8` ones of 8 x 8 to 200 x 130 at 2 and
+//!   4, and 2- and 3-slice arrays of `Depth32Float` and `Stencil8` at 2 and 4, each slice a chain
+//!   from the one before, drawn by a per-sample draw naming each and found at the bytes the rule
+//!   names), a
+//!   `Depth32Float_Stencil8` texture's stencil plane from its depth plane's answer rounded up to 16
+//!   KiB (`multisample_tiles`). Over host pages, and in any heap whose memory or Metal's answer
+//!   cannot hold its image, one is a shadow of its samples in Metal's tiles (a compressed one's
+//!   uncompressed tiles, announced `heap-texture-lossless-layout`), where its image holds Metal's
+//!   elements and the device moves its samples to and from a buffer (`SampleMoves`); elsewhere its
+//!   image lies in memory of its own, its samples apart from the heap's bytes
+//!   (`heap-texture-untiled-layout`, `heap.rs`).
 //! - **Two aspects.** A single-sample `Depth32Float_Stencil8` texture lies in two planes, its depth
 //!   elements as a `Depth32Float` texture of its shape lies, from its first byte, and its stencil
 //!   elements as a `Stencil8` one lies, from the `Depth32Float` answer rounded up to 16 KiB
@@ -139,29 +147,46 @@
 //! as laid out (`TiledLayout::element`); a command that writes the bytes two ways merges as
 //! any shadow's (`shadow_merge.rs`), the shadow's texels laid out tiled for it
 //! (`HeapTiledCopies::record_out`).
+//!
+//! A **multisample** texture's image moves to and from the tight buffer, which Vulkan copies no
+//! multisampled image to or from, by the interleave copies of the multisampled blits
+//! (`sample_interleave.rs`, [`SampleMoves`]): each pixel's samples one element of all their bytes
+//! there, as Metal's blits lay them out in a buffer and its tiles hold them; a depth or stencil
+//! aspect's through the blits' own moves (maintenance8's copies, or the draws), whatever they
+//! refuse refusing the shadow. The moves are planned once, as the texture is made, holding their
+//! own images (a band of wide and scratch images, and the draws' images, for each slice of each
+//! aspect each way) for its life. Where they write a 32-bit float depth by the `FragDepth` draw on
+//! a driver measured to change some values, the texture announces `drawn-depth-copy` once, and a
+//! merge's keep holds the heap's bytes, not the image's (`ShadowCopies::record_kept`), so a byte
+//! the image holds otherwise than the heap is written back: every byte a command wrote, and the
+//! values the copy in changed.
 
+use super::super::blit_plan::BufferLayout;
 use super::super::buffer::Buffer;
-use super::super::copy_plan::{block_bytes, block_extent, depth_bytes};
+use super::super::copy_plan::{block_bytes, block_extent, depth_bytes, TextureRegion};
 use super::super::degradation::Degradation;
+use super::super::depth_copy;
 use super::super::error::{internal, Error};
 use super::super::heap::SizeAndAlign;
 use super::super::image_plan::block_family;
 use super::super::metal_level::MetalLevel;
 use super::super::owned_kernel::{OwnedKernel, OwnedModule, OwnedSets};
 use super::super::row_copies::RowCopies;
+use super::super::sample_interleave::InterleaveCopy;
 use super::super::shadow::{self, ShadowStaging};
 use super::super::texture_descriptor::TextureLayout;
 use super::super::tracker::Barrier;
 use super::super::values::{CpuCacheMode, HazardTrackingMode, ResourceOptions, StorageMode};
 use super::super::Device;
-use super::copy_units;
 use super::heap::HeapPlane;
+use super::{copy_units, Texture};
 use crate::device::functions::Vk;
 use ash::vk;
 use metal2vulkan::bind::{TiledLevelMove, TiledTexelsModule};
 use metal2vulkan::metal::format::{byte_format, is_depth_stencil, srgb_raw_twin};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::vk::{Format, ImageAspectFlags};
+use std::sync::OnceLock;
 
 /// The bytes of Metal's largest tile, whatever its elements' size.
 const TILE_BYTES: u64 = 16 << 10;
@@ -901,7 +926,17 @@ impl Untiled {
                  depth or stencil format), whose bytes are no layout of its texels",
     };
     /// A multisample texture Metal keeps losslessly compressed (`heap-texture-lossless-layout`),
-    /// which a heap over host pages holds in memory of its own (`heap.rs`).
+    /// held by a shadow of its samples in the tiles Metal lays it in uncompressed (`heap.rs`).
+    pub(crate) const LOSSLESS_SAMPLES: Untiled = Untiled {
+        kind: Degradation::HeapTextureLosslessLayout,
+        reason: "Metal keeps the multisample texture losslessly compressed \
+                 (allowGPUOptimizedContents, a sample grid of 16 or more on its shorter side, \
+                 and none of ShaderWrite, PixelFormatView and ShaderAtomic usage, or a depth or \
+                 stencil format), whose bytes in the heap are no layout of its samples: the \
+                 heap's bytes hold its samples as Metal lays them out uncompressed",
+    };
+    /// A multisample texture Metal keeps losslessly compressed (`heap-texture-lossless-layout`),
+    /// held in memory of its own where no shadow of its samples serves (`heap.rs`).
     pub(crate) const LOSSLESS_MULTISAMPLE: Untiled = Untiled {
         kind: Degradation::HeapTextureLosslessLayout,
         reason: "Metal keeps the multisample texture losslessly compressed \
@@ -924,7 +959,10 @@ impl Untiled {
     /// A multisample texture whose image lies in the heap's bytes, where Metal lays its samples
     /// out by a layout no image of the runtime's is measured to hold
     /// (`heap-texture-untiled-layout`, `heap.rs`).
-    pub(crate) const MULTISAMPLE: Untiled = Untiled::other(MULTISAMPLE_SAMPLES);
+    pub(crate) const MULTISAMPLE: Untiled = Untiled::other(
+        "its image lies in the heap's bytes in the device driver's layout, where Metal lays the \
+         multisample texture's samples out in its tiles",
+    );
     /// A block-compressed texture whose placement the device's Metal level does not measure
     /// (`heap-texture-block-compressed-layout`).
     const BLOCK_COMPRESSED: Untiled = Untiled {
@@ -947,12 +985,15 @@ impl Untiled {
 /// The reason of a texture whose format's layout in Metal's heaps is not measured.
 pub(crate) const UNMEASURED_FORMAT: &str = "its format's layout in Metal's heaps is not measured";
 
-/// The reason of a multisample texture Metal keeps uncompressed, or whose layout is not
-/// measured, which no heap over host pages holds (`heap.rs`), and which lies in memory of its
-/// own where a heap's memory cannot hold its image.
+/// The reason of a multisample texture Metal keeps uncompressed whose image lies in memory of
+/// its own apart from the heap's bytes (`heap.rs`): its image holds other bytes than Metal's
+/// samples, the device cannot move them to and from the heap's bytes, or their layout is not
+/// measured.
 const MULTISAMPLE_SAMPLES: &str = "Metal lays the multisample texture's samples out in the heap's \
-                                   bytes, which no route of the runtime's holds yet, or their \
-                                   layout is not measured";
+                                   bytes, which its image, in memory of its own, does not hold: \
+                                   it holds other bytes than Metal's samples, the device cannot \
+                                   move them to and from the heap's bytes, or their layout is \
+                                   not measured";
 
 /// A texture's elements in Metal's tiles: one layout of all of them ([`TiledTexture::one`]), or a
 /// `Depth32Float_Stencil8` texture's two planes, each one aspect's elements laid out as a texture
@@ -1023,23 +1064,27 @@ impl HeapLayout {
     }
 }
 
-/// The layout a shadow of the heap's bytes holds a single-sample texture of `layout` (its image of
-/// `format`, at the Metal level `level`) in, where Metal lays it out as `metal`: Metal's tiles
-/// where it tiles the texture ([`HeapLayout::Tiled`]); where it keeps the texture losslessly
-/// compressed ([`Untiled::LOSSLESS`]), the tiles it lays the texture in uncompressed
-/// ([`HeapLayout::Uncompressed`]); `None` for any other (a layout not measured, or an image that
-/// holds other bytes than Metal's elements).
+/// The layout a shadow of the heap's bytes holds a texture of `layout` (its image of `format`, at
+/// the Metal level `level`) in, where Metal lays it out as `metal`: Metal's tiles where it tiles
+/// the texture ([`HeapLayout::Tiled`]); where it keeps the texture losslessly compressed
+/// ([`Untiled::LOSSLESS`], [`Untiled::LOSSLESS_MULTISAMPLE`]), the tiles it lays the texture in
+/// uncompressed ([`HeapLayout::Uncompressed`]); `None` for any other (a layout not measured, or
+/// an image that holds other bytes than Metal's elements).
 pub(crate) fn shadow_tiles(
     layout: &TextureLayout,
     format: Format,
     level: MetalLevel,
     metal: &HeapLayout,
 ) -> Option<HeapLayout> {
-    if layout.samples > 1 {
-        return None;
-    }
     match metal {
         HeapLayout::Tiled(_) => Some(metal.clone()),
+        HeapLayout::Untiled(untiled) if *untiled == Untiled::LOSSLESS_MULTISAMPLE => {
+            // A two-aspect texture's stencil plane past its compressed depth plane's answer.
+            let [width, height, _] = layout.extent.map(u64::from);
+            let grid = sample_grid(layout.samples, [width, height])?;
+            let metadata = chain_metadata(grid, false);
+            multisample_tiles(layout, format, Some(metadata)).map(HeapLayout::Uncompressed)
+        }
         HeapLayout::Untiled(untiled) if *untiled == Untiled::LOSSLESS => {
             // A two-aspect texture's depth plane kept compressed, its stencil plane after it.
             if layout.pixel_format == PixelFormat::Depth32FloatStencil8 {
@@ -1194,7 +1239,7 @@ pub(crate) fn metal_heap_layout(
         };
     }
     if layout.samples > 1 {
-        return multisample_heap_layout(layout, usage, allow_gpu_optimized_contents);
+        return multisample_heap_layout(layout, usage, allow_gpu_optimized_contents, format);
     }
     let texture_type = layout.texture_type;
     let one_row = matches!(texture_type, TextureType::Type1D | TextureType::Type1DArray);
@@ -1269,19 +1314,20 @@ pub(crate) fn metal_heap_layout(
 }
 
 /// Metal's answer for a multisample heap texture of `layout` (the module docs), and the runtime's
-/// layout of it over host pages: `usage` and `allow_gpu_optimized_contents` the descriptor's.
-/// Uncompressed, its pixels lie as a one-level texture's elements of all their samples (`S·B`
-/// bytes, sample `s` at `s·B`), a multisample array's slices as an array's; compressed, that
-/// answer and metadata over its sample grid for each slice. `Depth32Float_Stencil8` answers its
-/// two planes: the depth plane (`Depth32Float`'s answer) rounded up to 16 KiB, then the stencil
+/// layout of it, its image of `format`: `usage` and `allow_gpu_optimized_contents` the
+/// descriptor's. Uncompressed, its pixels lie as a one-level texture's elements of all their
+/// samples (`S·B` bytes, sample `s` at `s·B`), a multisample array's slices as an array's; compressed,
+/// that answer and metadata over its sample grid for each slice. `Depth32Float_Stencil8` answers
+/// its two planes: the depth plane (`Depth32Float`'s answer) rounded up to 16 KiB, then the stencil
 /// plane (`Stencil8`'s), at the depth plane's alignment. A sample count Apple's GPUs do not make
-/// is not measured. Metal's compression decides how a heap over host pages holds it
-/// ([`Untiled::LOSSLESS_MULTISAMPLE`]; any other, its samples apart from the heap's bytes): in
-/// memory of its own (`heap.rs`).
+/// is not measured. Uncompressed, its samples in Metal's tiles ([`multisample_tiles`]) where its
+/// image holds Metal's elements; compressed, [`Untiled::LOSSLESS_MULTISAMPLE`], whose uncompressed
+/// tiles a shadow may hold ([`shadow_tiles`]); any other, its samples apart from the heap's bytes.
 fn multisample_heap_layout(
     layout: &TextureLayout,
     usage: TextureUsage,
     allow_gpu_optimized_contents: bool,
+    format: Format,
 ) -> MetalHeapLayout {
     let pf = layout.pixel_format;
     let [width, height, _] = layout.extent.map(u64::from);
@@ -1324,7 +1370,88 @@ fn multisample_heap_layout(
             layout: HeapLayout::Untiled(Untiled::LOSSLESS_MULTISAMPLE),
         };
     }
-    apart(answer)
+    match multisample_tiles(layout, format, None) {
+        Some(tiles) => MetalHeapLayout {
+            answer,
+            layout: HeapLayout::Tiled(tiles),
+        },
+        None => apart(answer),
+    }
+}
+
+/// A multisample texture of `layout`'s samples in Metal's tiles, laid out uncompressed (the
+/// module docs), its image of `format`: each pixel's samples one element of `S·B` bytes (sample
+/// `s` at `s·B`), laid out as a one-level texture's elements of that size, a multisample array's
+/// slices as an array's; a `Depth32Float_Stencil8` texture's depth plane so from its first byte
+/// and its stencil plane from the depth plane's answer (its `metadata` bytes for each slice
+/// counted where Metal keeps it compressed) rounded up to 16 KiB, as a `Stencil8` texture's
+/// samples lie (an Apple M3 Max under macOS 27.0.1: every sample of `Stencil8` and
+/// `Depth32Float_Stencil8` textures of 8 x 8 to 200 x 130 at 2 and 4 samples drawn at the bytes the
+/// rule names). `None` where the image holds other elements than Metal's or a plane has no
+/// layout (a sample count Apple's GPUs do not make).
+fn multisample_tiles(
+    layout: &TextureLayout,
+    format: Format,
+    metadata: Option<u64>,
+) -> Option<TiledTexture> {
+    let pf = layout.pixel_format;
+    let samples = u64::from(layout.samples);
+    let [width, height, _] = layout.extent.map(u64::from);
+    let (ty, slices) = (layout.texture_type, u64::from(layout.layers));
+    sample_grid(layout.samples, [width, height])?;
+    let plane = |bytes: u64| {
+        TiledLayout::of(
+            samples * bytes,
+            Elements::Texels,
+            ty,
+            [width, height, 1],
+            1,
+            slices,
+        )
+    };
+    if pf == PixelFormat::Depth32FloatStencil8 {
+        let holds = matches!(
+            copy_units(format, pf)[..],
+            [
+                (ImageAspectFlags::DEPTH, 4, [1, 1]),
+                (ImageAspectFlags::STENCIL, 1, [1, 1])
+            ]
+        );
+        if !holds {
+            return None;
+        }
+        let (depth, stencil) = (plane(4)?, plane(1)?);
+        let depth_bytes = match metadata {
+            Some(metadata) => with_metadata(&depth, metadata).size,
+            None => depth.size,
+        };
+        let at = depth_bytes.next_multiple_of(PAGE);
+        return Some(TiledTexture {
+            size: at + stencil.size,
+            parts: vec![
+                TiledPart {
+                    aspect: Some(ImageAspectFlags::DEPTH),
+                    at: 0,
+                    layout: depth,
+                },
+                TiledPart {
+                    aspect: Some(ImageAspectFlags::STENCIL),
+                    at,
+                    layout: stencil,
+                },
+            ],
+        });
+    }
+    let unit = metal_element(pf)?;
+    if image_element(pf, format) != Some((unit, [1, 1])) {
+        return None;
+    }
+    let mut tiles = TiledTexture::one(plane(unit)?);
+    // A stencil view's samples are its image's stencil aspect's.
+    if pf == PixelFormat::X32Stencil8 {
+        tiles.parts[0].aspect = Some(ImageAspectFlags::STENCIL);
+    }
+    Some(tiles)
 }
 
 /// One direction of the kernel's moves: its shape, where it lies in the shape buffer, and the
@@ -1347,14 +1474,33 @@ pub(crate) struct HeapTiledCopies {
     /// first.
     _tight: Buffer,
     tight_raw: vk::Buffer,
-    /// The tight buffer's copies to and from the image, one a level.
+    /// The tight buffer's copies to and from the image, one a level: a single-sample image's
+    /// copies; a multisample image's region, which `samples` moves.
     regions: Vec<vk::BufferImageCopy>,
+    /// A multisample image's moves to and from the tight buffer, made once its texture is
+    /// ([`plan_samples`](Self::plan_samples)); `None` for a single-sample image.
+    samples: Option<OnceLock<SampleMoves>>,
+    /// The tight buffer's planes and where it lies in its `VkBuffer`, which a multisample image's
+    /// moves are planned over.
+    planes: Vec<HeapPlane>,
+    tight_at: u64,
     /// The two shapes; held for the texture's life.
     _shapes: Buffer,
     shapes_raw: vk::Buffer,
     moves: [Move; 2],
     kernel: OwnedKernel,
     sets: OwnedSets,
+}
+
+/// A multisample heap texture's moves between its image and the tight buffer, which Vulkan copies
+/// no multisampled image to or from: the interleave copies (`sample_interleave.rs`), each pixel's
+/// samples one after another in the tight buffer as one element of `S·B` bytes, as Metal's blits
+/// lay them out in a buffer and as its tiles hold them (the module docs). One a slice of each
+/// aspect, into the image, and out of it. Each holds its own images for the texture's life, and
+/// none holds the texture: its commands' encoders do while they record them.
+pub(crate) struct SampleMoves {
+    into: Vec<InterleaveCopy>,
+    out: Vec<InterleaveCopy>,
 }
 
 impl HeapTiledCopies {
@@ -1496,7 +1642,7 @@ impl HeapTiledCopies {
         device: &Device,
         staging: &ShadowStaging,
         tiles: TiledTexture,
-        (planes, tight_len): (&[HeapPlane], u64),
+        (planes, tight_len, samples): (&[HeapPlane], u64, u32),
         regions: &[vk::BufferImageCopy],
         hazard: HazardTrackingMode,
     ) -> Result<HeapTiledCopies, Error> {
@@ -1552,6 +1698,9 @@ impl HeapTiledCopies {
             _tight: tight,
             tight_raw,
             regions,
+            samples: (samples > 1).then(OnceLock::new),
+            planes: planes.to_vec(),
+            tight_at,
             _shapes: shapes,
             shapes_raw,
             moves: [into, back],
@@ -1594,6 +1743,101 @@ impl HeapTiledCopies {
         }
     }
 
+    /// Plan a multisample texture's moves between its image and the tight buffer
+    /// ([`SampleMoves`]), `texture` the texture whose image it is, made on `device` by `call`,
+    /// which announces what the moves into the image announce (a 32-bit float depth drawn
+    /// inexactly, `drawn-depth-copy`): `false` where the device cannot run one (its caller checked
+    /// it can, `Device::sample_moves_run`). Nothing for a single-sample texture, or once planned.
+    pub(crate) fn plan_samples(
+        &self,
+        device: &Device,
+        call: &'static str,
+        texture: &Texture,
+    ) -> Result<bool, Error> {
+        let Some(slot) = &self.samples else {
+            return Ok(true);
+        };
+        if slot.get().is_some() {
+            return Ok(true);
+        }
+        let tight = (self.tight_raw, self.tight_at);
+        let Some(moves) = SampleMoves::plan(device, texture, tight, &self.planes)? else {
+            return Ok(false);
+        };
+        if let Some(changes) = moves.into.iter().find_map(InterleaveCopy::inexact_depth) {
+            depth_copy::announce_changes(device, changes, || {
+                let format = texture.pixel_format();
+                format!(
+                    "`{call}`'s multisampled {format:?} texture in a heap, whose image takes the \
+                     depth its bytes hold by draws"
+                )
+            });
+        }
+        // A texture's copies are planned once, as it is made, before any command records them.
+        drop(slot.set(moves));
+        Ok(true)
+    }
+
+    /// Whether the image takes the heap's bytes inexactly: a multisample depth whose moves into
+    /// it draw values the driver's fragment depth changes (`drawn-depth-copy`), which a merge's
+    /// keep then reads from the heap's bytes (`ShadowCopies::record_kept`).
+    pub(crate) fn takes_inexactly(&self) -> bool {
+        let moves = self.samples.as_ref().and_then(OnceLock::get);
+        moves.is_some_and(|moves| moves.into.iter().any(|copy| copy.inexact_depth().is_some()))
+    }
+
+    /// Record the move of the image's elements into the tight buffer: a single-sample image's
+    /// copies, or a multisample one's moves out ([`SampleMoves`]).
+    ///
+    /// # Safety
+    ///
+    /// As `record`'s.
+    unsafe fn image_out(&self, device: &Vk, command_buffer: vk::CommandBuffer, image: vk::Image) {
+        // SAFETY: the caller's contract; the moves' images and objects are this texture's own.
+        unsafe {
+            match &self.samples {
+                None => device.cmd_copy_image_to_buffer(
+                    command_buffer,
+                    image,
+                    vk::ImageLayout::GENERAL,
+                    self.tight_raw,
+                    &self.regions,
+                ),
+                Some(slot) => {
+                    for copy in slot.get().iter().flat_map(|moves| &moves.out) {
+                        copy.record(device, command_buffer);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Record the move of the tight buffer's elements into the image: a single-sample image's
+    /// copies, or a multisample one's moves into it ([`SampleMoves`]).
+    ///
+    /// # Safety
+    ///
+    /// As `record`'s.
+    unsafe fn image_in(&self, device: &Vk, command_buffer: vk::CommandBuffer, image: vk::Image) {
+        // SAFETY: the caller's contract; the moves' images and objects are this texture's own.
+        unsafe {
+            match &self.samples {
+                None => device.cmd_copy_buffer_to_image(
+                    command_buffer,
+                    self.tight_raw,
+                    image,
+                    vk::ImageLayout::GENERAL,
+                    &self.regions,
+                ),
+                Some(slot) => {
+                    for copy in slot.get().iter().flat_map(|moves| &moves.into) {
+                        copy.record(device, command_buffer);
+                    }
+                }
+            }
+        }
+    }
+
     /// Record the move of the texture's `image` from `bytes` (the heap's `VkBuffer`) through
     /// `staging` (`into`), or back, its rows back by `back` (`shadow::record_back`).
     ///
@@ -1611,7 +1855,6 @@ impl HeapTiledCopies {
         into: bool,
         back: Option<&RowCopies>,
     ) {
-        let general = vk::ImageLayout::GENERAL;
         // SAFETY: the caller's contract; the copies lie in the buffers and the image (planned
         // when the texture was made).
         unsafe {
@@ -1620,23 +1863,11 @@ impl HeapTiledCopies {
             // between the elements are the heap's when they are copied back.
             device.cmd_copy_buffer(command_buffer, bytes, staging.raw(), &[staging.into]);
             if !into {
-                device.cmd_copy_image_to_buffer(
-                    command_buffer,
-                    image,
-                    general,
-                    self.tight_raw,
-                    &self.regions,
-                );
+                self.image_out(device, command_buffer, image);
             }
             self.dispatch(device, command_buffer, into);
             if into {
-                device.cmd_copy_buffer_to_image(
-                    command_buffer,
-                    self.tight_raw,
-                    image,
-                    general,
-                    &self.regions,
-                );
+                self.image_in(device, command_buffer, image);
             } else {
                 shadow::record_back(device, command_buffer, (staging, bytes), back);
             }
@@ -1662,13 +1893,7 @@ impl HeapTiledCopies {
         // SAFETY: the caller's contract, as `record`'s.
         unsafe {
             Barrier::everything().record(device, command_buffer);
-            device.cmd_copy_image_to_buffer(
-                command_buffer,
-                image,
-                vk::ImageLayout::GENERAL,
-                self.tight_raw,
-                &self.regions,
-            );
+            self.image_out(device, command_buffer, image);
             self.dispatch(device, command_buffer, false);
             let region = vk::BufferCopy {
                 src_offset: staging.into.dst_offset,
@@ -1677,5 +1902,79 @@ impl HeapTiledCopies {
             };
             device.cmd_copy_buffer(command_buffer, staging.raw(), to, &[region]);
         }
+    }
+}
+
+impl HeapTiledCopies {
+    /// Whether `device` runs the moves of `texture`'s multisample image to and from a tight
+    /// buffer laid out as `planes` ([`SampleMoves`]): planned over no buffer, and dropped.
+    pub(crate) fn samples_run(
+        device: &Device,
+        texture: &Texture,
+        planes: &[HeapPlane],
+    ) -> Result<bool, Error> {
+        let none = (vk::Buffer::null(), 0);
+        Ok(SampleMoves::plan(device, texture, none, planes)?.is_some())
+    }
+}
+
+impl SampleMoves {
+    /// The moves of `texture`'s multisample image to and from the tight buffer (`tight`, its
+    /// `VkBuffer` and where it lies there) laid out as `planes` (one an aspect, its images the
+    /// texture's slices, each pixel's samples one element), its own images made on `device`.
+    /// `None` where the device cannot run one, as the blits' copies of such a texture refuse
+    /// (`sample_interleave.rs`).
+    fn plan(
+        device: &Device,
+        texture: &Texture,
+        (tight, tight_at): (vk::Buffer, u64),
+        planes: &[HeapPlane],
+    ) -> Result<Option<SampleMoves>, Error> {
+        let samples = texture.record().samples;
+        let mut moves = SampleMoves {
+            into: Vec::new(),
+            out: Vec::new(),
+        };
+        for plane in planes {
+            let [width, height, _] = plane.extent;
+            for slice in 0..plane.images {
+                let layout = BufferLayout {
+                    offset: plane.offset + slice * plane.image_pitch,
+                    bytes_per_row: plane.pitch,
+                    bytes_per_image: plane.image_pitch,
+                };
+                let region = TextureRegion {
+                    level: plane.level,
+                    slice: u32::try_from(slice)
+                        .map_err(|_| internal("a multisample heap texture's slice past u32"))?,
+                    origin: [0; 3],
+                    size: [width, height, 1],
+                };
+                for into in [true, false] {
+                    // The tight buffer's rows of this slice end within its image pitch.
+                    let planned = InterleaveCopy::plan(
+                        "a heap multisample texture's sample copy",
+                        device,
+                        tight,
+                        tight_at,
+                        layout.offset + plane.image_pitch,
+                        &layout,
+                        texture,
+                        &region,
+                        plane.aspect,
+                        samples,
+                        into,
+                    )?;
+                    let Some(copy) = planned else {
+                        return Ok(None);
+                    };
+                    match into {
+                        true => moves.into.push(copy),
+                        false => moves.out.push(copy),
+                    }
+                }
+            }
+        }
+        Ok(Some(moves))
     }
 }

@@ -5,6 +5,7 @@
 //! the probe wrote them; and the lossless compression's answers against the probe's C rows and a
 //! second probe's answers.
 
+use crate::copy_plan::block_bytes;
 use crate::metal_level::MetalLevel;
 use crate::texture::heap_tiled::{
     fresh_pattern, level_bytes, lossless_answer, metal_compresses, metal_heap_layout,
@@ -12,6 +13,7 @@ use crate::texture::heap_tiled::{
     GpuRows, HeapLayout, TiledLayout, Untiled,
 };
 use crate::texture_descriptor::TextureLayout;
+use metal2vulkan::metal::format::byte_format;
 use metal2vulkan::metal::{PixelFormat, TextureType as T, TextureUsage};
 use metal2vulkan::vk::{Format, ImageAspectFlags};
 
@@ -732,9 +734,10 @@ fn texture(
 }
 
 /// How the runtime lays a heap texture out over host pages, by its format, usage and shape: a
-/// plain or block-compressed format whose image holds Metal's bytes tiled (PVRTC under 27.0.1); a
-/// compressed, multisample or two-aspect texture, a PVRTC one under 26.7, or one whose image holds
-/// other bytes, untiled, each with its kind, and the answers Metal's where measured.
+/// plain or block-compressed format whose image holds Metal's bytes tiled (PVRTC under 27.0.1),
+/// and an uncompressed multisample texture's samples; a compressed texture, a PVRTC one under
+/// 26.7, or one whose image holds other bytes, untiled, each with its kind, and the answers
+/// Metal's where measured.
 #[test]
 fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
     use crate::degradation::Degradation as D;
@@ -800,7 +803,7 @@ fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
         panic!("a block-compressed texture held decoded is tiled");
     };
     assert_eq!(untiled.kind, D::HeapTextureUntiledLayout);
-    // Multisample: Metal's answer, untiled (`multisample_answers_are_metal_s`).
+    // Multisample: Metal's answer, its samples tiled (`multisample_answers_are_metal_s`).
     let ms = texture(
         T::Type2DMultisample,
         PixelFormat::RGBA8Unorm,
@@ -818,10 +821,10 @@ fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
         multisample.answer.map(|a| (a.size, a.align)),
         Some((65536, 128))
     );
-    let HeapLayout::Untiled(untiled) = multisample.layout else {
-        panic!("a multisample texture is tiled");
+    let HeapLayout::Tiled(tiles) = multisample.layout else {
+        panic!("a multisample texture is untiled");
     };
-    assert_eq!(untiled.kind, D::HeapTextureUntiledLayout);
+    assert_eq!((tiles.parts[0].layout.unit, tiles.size), (16, 65536));
     // Two-aspect: its depth plane's tiles at 0, then its stencil plane's at 16 KiB; kept
     // compressed, its depth plane is, and a shadow's stencil plane lies past the depth plane's
     // compressed answer (`shadow_tiles`).
@@ -888,10 +891,11 @@ fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
 /// A multisample texture's answers and layout kind (on an Apple M4 under macOS 27.0.1; the M3 Max
 /// under 26.7 answered our probe's descriptors alike): compressed by the single-sample rule over
 /// its sample grid (`w x 2h` at 2 samples, `2w x 2h` at 4); uncompressed, its pixels elements of
-/// all their samples in Metal's tiles, a multisample array's slices an array's; compressed, that
-/// plus metadata over the sample grid for each slice. A `Depth32Float_Stencil8` texture answers
-/// neither (its device's); a compressed one is held in memory of its own
-/// (`Untiled::LOSSLESS_MULTISAMPLE`), and over host pages any other too, announced untiled.
+/// all their samples in Metal's tiles, a multisample array's slices an array's, which a shadow
+/// holds where its image holds Metal's elements; compressed, that plus metadata over the sample
+/// grid for each slice, kept compressed (`Untiled::LOSSLESS_MULTISAMPLE`), a shadow holding its
+/// uncompressed tiles. A `Depth32Float_Stencil8` texture's two planes alike, its stencil plane
+/// past its depth plane's answer rounded up to 16 KiB.
 #[test]
 fn multisample_answers_are_metal_s() {
     use crate::degradation::Degradation as D;
@@ -1100,19 +1104,40 @@ fn multisample_answers_are_metal_s() {
         ),
         (P::Stencil8, 4, rt, true, ms, 1, [17, 13], (2176, 128), true),
     ];
+    const M4: MetalLevel = MetalLevel::MacOS27_0_1;
     for (pf, samples, usage, optimized, ty, slices, [w, h], (size, align), compressed) in rows {
         let what = format!("{pf:?} x{samples} {usage:?} {optimized} {ty:?} {slices} {w}x{h}");
         let layout = texture(ty, pf, [w, h, 1], (1, slices, samples));
-        let format = Format::R8G8B8A8_UNORM;
-        let metal = metal_heap_layout(&layout, usage, optimized, format, MetalLevel::MacOS27_0_1);
-        let answer = metal.answer.map(|a| (a.size, a.align));
+        // An image of other bytes than Metal's elements: its samples apart.
+        let other = metal_heap_layout(&layout, usage, optimized, Format::UNDEFINED, M4);
+        let answer = other.answer.map(|a| (a.size, a.align));
         assert_eq!(answer, Some((size, align)), "{what}");
-        let HeapLayout::Untiled(untiled) = metal.layout else {
-            panic!("{what}: tiled");
+        let HeapLayout::Untiled(untiled) = other.layout else {
+            panic!("{what}: tiled over other bytes");
         };
         match compressed {
             true => assert_eq!(untiled, Untiled::LOSSLESS_MULTISAMPLE, "{what}"),
             false => assert_eq!(untiled.kind, D::HeapTextureUntiledLayout, "{what}"),
+        }
+        // Its image of Metal's elements: tiled, or its uncompressed tiles a shadow's.
+        let format = image_format(pf);
+        let metal = metal_heap_layout(&layout, usage, optimized, format, M4);
+        assert_eq!(metal.answer, other.answer, "{what}");
+        let tiles = match (compressed, &metal.layout) {
+            (false, HeapLayout::Tiled(tiles)) => tiles.clone(),
+            (true, HeapLayout::Untiled(untiled)) if *untiled == Untiled::LOSSLESS_MULTISAMPLE => {
+                match shadow_tiles(&layout, format, M4, &metal.layout) {
+                    Some(HeapLayout::Uncompressed(tiles)) => tiles,
+                    shadow => panic!("{what}: a shadow of {shadow:?}"),
+                }
+            }
+            (_, layout) => panic!("{what}: {layout:?}"),
+        };
+        let unit = u64::from(samples) * u64::from(block_bytes(pf).expect("bytes"));
+        assert_eq!(tiles.parts.len(), 1, "{what}");
+        assert_eq!(tiles.parts[0].layout.unit, unit, "{what}");
+        if !compressed {
+            assert_eq!(tiles.size, size, "{what}");
         }
     }
     // `Depth32Float_Stencil8`: its depth plane rounded up to 16 KiB, then its stencil plane, at
@@ -1136,18 +1161,37 @@ fn multisample_answers_are_metal_s() {
     for (samples, optimized, ty, slices, [w, h], (size, align)) in ds_rows {
         let what = format!("Depth32Float_Stencil8 x{samples} {optimized} {ty:?} {slices} {w}x{h}");
         let ds = texture(ty, P::Depth32FloatStencil8, [w, h, 1], (1, slices, samples));
-        let metal = metal_heap_layout(
-            &ds,
-            rt,
-            optimized,
-            Format::D32_SFLOAT_S8_UINT,
-            MetalLevel::MacOS27_0_1,
-        );
+        let metal = metal_heap_layout(&ds, rt, optimized, Format::D32_SFLOAT_S8_UINT, M4);
         let answer = metal.answer.map(|a| (a.size, a.align));
         assert_eq!(answer, Some((size, align)), "{what}");
         let lossless = metal.layout == HeapLayout::Untiled(Untiled::LOSSLESS_MULTISAMPLE);
         let grid = sample_grid(samples, [w, h].map(u64::from)).expect("grid");
         assert_eq!(lossless, optimized && grid[0].min(grid[1]) >= 16, "{what}");
+        // Its two planes, the stencil plane past the depth plane's answer rounded up to 16 KiB:
+        // Metal's tiles, or a compressed one's uncompressed tiles.
+        let format = Format::D32_SFLOAT_S8_UINT;
+        let tiles = match shadow_tiles(&ds, format, M4, &metal.layout) {
+            Some(HeapLayout::Tiled(tiles)) if !lossless => tiles,
+            Some(HeapLayout::Uncompressed(tiles)) if lossless => tiles,
+            shadow => panic!("{what}: a shadow of {shadow:?}"),
+        };
+        let units: Vec<_> = (tiles.parts.iter())
+            .map(|part| (part.aspect, part.layout.unit))
+            .collect();
+        let (depth, stencil) = (ImageAspectFlags::DEPTH, ImageAspectFlags::STENCIL);
+        let n = u64::from(samples);
+        assert_eq!(units, [(Some(depth), 4 * n), (Some(stencil), n)], "{what}");
+        let depth_plane = texture(ty, P::Depth32Float, [w, h, 1], (1, slices, samples));
+        let depth_answer = metal_heap_layout(&depth_plane, rt, optimized, Format::D32_SFLOAT, M4);
+        let at = depth_answer
+            .answer
+            .expect("depth")
+            .size
+            .next_multiple_of(16384);
+        assert_eq!(tiles.parts[1].at, at, "{what}");
+        if !lossless {
+            assert_eq!(tiles.size, size, "{what}");
+        }
     }
     // Eight samples: not measured, no answer, refused over host pages.
     let eight = texture(ms, P::RGBA8Unorm, [64, 64, 1], (1, 1, 8));
@@ -1163,6 +1207,134 @@ fn multisample_answers_are_metal_s() {
         metal.layout,
         HeapLayout::Untiled(Untiled::LOSSLESS_MULTISAMPLE)
     );
+}
+
+/// The image format that holds `pf`'s elements as Metal's bytes: a depth or stencil format's own,
+/// a colour format's byte format.
+fn image_format(pf: PixelFormat) -> Format {
+    match pf {
+        PixelFormat::Depth32Float => Format::D32_SFLOAT,
+        PixelFormat::Depth16Unorm => Format::D16_UNORM,
+        PixelFormat::Stencil8 => Format::S8_UINT,
+        pf => byte_format(pf).expect("a byte format"),
+    }
+}
+
+/// Where a multisample texture's samples lie in Metal's tiles, uncompressed: sample `s` of pixel
+/// `(x, y)` at `tiled(S·B, w, h, x, y) + s·B` from its plane's first byte, the rule an Apple M3 Max
+/// under macOS 27.0.1 drew every sample of these textures at (`Depth32Float` and `Depth16Unorm`,
+/// `Stencil8` and `Depth32Float_Stencil8`, 2 and 4 samples, `allowGPUOptimizedContents` off,
+/// each sample's value naming it), with Metal's answer and the stencil plane's first byte.
+#[test]
+fn multisample_samples_lie_where_metal_draws_them() {
+    use PixelFormat as P;
+    // The probe's own rule: a level of `w x h` elements of `unit` bytes in tiles of the largest
+    // tile's sides cut to the level's powers of two, the tiles row after row, a tile's elements
+    // in Morton order, x's bit lowest.
+    fn tiled(unit: u64, [w, h]: [u64; 2], [x, y]: [u64; 2]) -> u64 {
+        let [tw, th] = match unit {
+            1 => [128, 128],
+            2 => [128, 64],
+            4 => [64, 64],
+            8 => [64, 32],
+            16 => [32, 32],
+            32 => [32, 16],
+            _ => [16, 16],
+        };
+        let (tw, th) = (tw.min(w.next_power_of_two()), th.min(h.next_power_of_two()));
+        let (bx, by) = (tw.trailing_zeros(), th.trailing_zeros());
+        let (mut morton, mut bit) = (0, 0);
+        for i in 0..bx.max(by) {
+            if i < bx {
+                morton |= (((x % tw) >> i) & 1) << bit;
+                bit += 1;
+            }
+            if i < by {
+                morton |= (((y % th) >> i) & 1) << bit;
+                bit += 1;
+            }
+        }
+        (((y / th) * w.div_ceil(tw) + x / tw) * tw * th + morton) * unit
+    }
+    let rt = TextureUsage::RENDER_TARGET;
+    // (format, its image's, samples, extent, Metal's answer, the stencil plane's first byte)
+    let rows = [
+        (
+            P::Depth32Float,
+            Format::D32_SFLOAT,
+            4,
+            [100, 70],
+            0x30000,
+            None,
+        ),
+        (
+            P::Depth32Float,
+            Format::D32_SFLOAT,
+            2,
+            [37, 5],
+            0x1000,
+            None,
+        ),
+        (
+            P::Depth16Unorm,
+            Format::D16_UNORM,
+            4,
+            [64, 64],
+            0x8000,
+            None,
+        ),
+        (P::Stencil8, Format::S8_UINT, 4, [200, 130], 0x30000, None),
+        (P::Stencil8, Format::S8_UINT, 2, [37, 5], 0x400, None),
+        (
+            P::Depth32FloatStencil8,
+            Format::D32_SFLOAT_S8_UINT,
+            4,
+            [64, 64],
+            0x14000,
+            Some(0x10000),
+        ),
+        (
+            P::Depth32FloatStencil8,
+            Format::D32_SFLOAT_S8_UINT,
+            2,
+            [200, 130],
+            0x68000,
+            Some(0x50000),
+        ),
+        (
+            P::Depth32FloatStencil8,
+            Format::D32_SFLOAT_S8_UINT,
+            4,
+            [37, 5],
+            0x4800,
+            Some(0x4000),
+        ),
+    ];
+    for (pf, format, samples, [w, h], size, stencil_at) in rows {
+        let what = format!("{pf:?} x{samples} {w}x{h}");
+        let layout = texture(T::Type2DMultisample, pf, [w, h, 1], (1, 1, samples));
+        let metal = metal_heap_layout(&layout, rt, false, format, MetalLevel::MacOS27_0_1);
+        assert_eq!(metal.answer.map(|a| a.size), Some(size), "{what}");
+        let HeapLayout::Tiled(tiles) = metal.layout else {
+            panic!("{what}: untiled");
+        };
+        assert_eq!(tiles.size, size, "{what}");
+        for part in &tiles.parts {
+            let at = match part.aspect {
+                Some(ImageAspectFlags::STENCIL) if pf == P::Depth32FloatStencil8 => {
+                    stencil_at.expect("a stencil plane")
+                }
+                _ => 0,
+            };
+            assert_eq!(part.at, at, "{what}");
+            for (x, y) in (0..u64::from(h)).flat_map(|y| (0..u64::from(w)).map(move |x| (x, y))) {
+                let ours = part.at + part.layout.element(0, 0, x, y);
+                let unit = part.layout.unit;
+                let metal = at + tiled(unit, [u64::from(w), u64::from(h)], [x, y]);
+                assert_eq!(ours, metal, "{what} ({x}, {y})");
+            }
+        }
+    }
 }
 
 /// Each clear color `fresh_pattern` gives converts to its texel exactly, as Metal's conversion
