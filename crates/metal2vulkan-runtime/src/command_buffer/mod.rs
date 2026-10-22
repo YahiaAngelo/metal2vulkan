@@ -39,6 +39,7 @@ mod group;
 pub(super) mod hang;
 pub(super) mod kept_barriers;
 pub(super) mod own;
+mod protection;
 pub(super) mod rebound_use;
 mod reencode;
 pub(super) mod rerun;
@@ -52,6 +53,7 @@ pub(super) use group::{Group, GroupEnd, GROUP_BATCHES};
 use rebound_use::{ReboundUse, Unlogged};
 pub(super) use submit::{BatchLists, Submitting};
 
+use super::apple_only::AppleOnly;
 use super::compute::EncoderState;
 use super::contexts::{self, Run};
 use super::deferred::{Deferred, Prepared, StepInputs};
@@ -679,6 +681,8 @@ pub(super) struct State {
     /// (`State::first_submission`, `State::later_group`): a rebind encodes again only encoders
     /// of the groups from here (`reencode.rs`).
     judged_to: usize,
+    /// What `set_protection_options` left (`protection.rs`).
+    protection: protection::Protection,
     /// Metal's submissions (`checks::metal_submissions`, by their ended encoders) its first
     /// submission found to name a buffer rebound since, or to hold a detached one, each with
     /// its failure: each fails as its own batch is submitted, after its check
@@ -1691,6 +1695,7 @@ impl CommandBuffer {
                 listing: None,
                 submitted: false,
                 judged_to: 0,
+                protection: protection::Protection::default(),
                 failing: Vec::new(),
                 rebound_use: None,
                 replay_tables: Vec::new(),
@@ -2345,6 +2350,20 @@ impl CommandBuffer {
             if let Some(problem) = failure.as_ref().and_then(|failure| failure.problem(ended)) {
                 return Err(invalid(call, problem));
             }
+            // Metal's GPU fails a command buffer an encoder of which was made under protection
+            // options as a failure given to `commit_failed` fails it, with no signal firing
+            // (`protection.rs`); one given such a failure besides is not measured.
+            let protected = state.protection.failure();
+            let failure = match (failure, &protected) {
+                (Some(_), Some(_)) => return Err(Error::AppleOnly(AppleOnly::ProtectedContent)),
+                (Some(failure), None) => Some(failure),
+                (None, Some((encoders, _))) => Some(CommitFailure {
+                    code: 0,
+                    encoders: encoders.clone(),
+                    signals: false,
+                }),
+                (None, None) => None,
+            };
             // Its last unit of command predication ends, and each step's gates are listed for it.
             if run != CommitRun::Refused {
                 let held = &mut *state;
@@ -2393,7 +2412,10 @@ impl CommandBuffer {
                 let event = Arc::clone(EventRef::Shared(hang.event()).shared());
                 state.batches.hold_signal(event, Hang::DONE);
             }
-            let failure = Failure::of(failure, state.fails_from, ended);
+            let mut failure = Failure::of(failure, state.fails_from, ended);
+            if let (Some(failure), Some((_, error))) = (&mut failure, protected) {
+                failure.error = Some(error);
+            }
             let failure = Failure::with_faults(failure, &state.faulted, ended);
             let failure = match revoked {
                 true => Some(Failure::revoked()),
@@ -2922,8 +2944,8 @@ impl CommandBuffer {
     ///   completed, as Metal's does. It is refused (`WaitWouldDeadlock`) only where it would
     ///   deadlock: when that queue's handlers wait, through the queues they wait for, for this
     ///   one ([`DeadlockCause::Cycle`]), or when it would leave the device's handler threads
-    ///   with none that is not blocked so ([`DeadlockCause::HandlerThreadCap`]: the runtime's
-    ///   cap, above the 256 measured on Metal).
+    ///   with none that is not blocked so ([`DeadlockCause::HandlerThreadCap`]: the 512th, where
+    ///   Metal's handler threads run out and it hangs).
     pub fn wait_until_completed(&self) -> Result<(), Error> {
         let _blocked = match self.completed_wait() {
             Answer::Return => {

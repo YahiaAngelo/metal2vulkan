@@ -114,6 +114,7 @@ mod gpu_time;
 mod heap;
 mod heap_sets;
 mod host_aliases;
+mod host_bytes;
 mod host_memory;
 #[cfg(unix)]
 mod host_residency;
@@ -282,12 +283,13 @@ pub use function_table::{
 };
 pub use gpu_time::host_time;
 pub use heap::{Heap, HeapDescriptor, HeapProblem, HeapType, SizeAndAlign};
+pub use host_bytes::HostBytes;
 pub use host_memory::{Deallocator, HostMemory, KeepAlive};
 pub use indirect_command_buffer::{
     EncodedComputeCommand, EncodedRenderCommand, IndirectBufferBinding, IndirectCommand,
     IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectCommandBufferProblem,
     IndirectCommandCheck, IndirectCommandCheckNeeds, IndirectComputeCommand, IndirectDispatch,
-    IndirectDraw, IndirectRenderCommand,
+    IndirectDraw, IndirectRenderCommand, NIL_PATCH_BUFFER_ADDRESS,
 };
 pub use interop::SemaphoreProblem;
 pub use library::{Function, FunctionDescriptor, Library};

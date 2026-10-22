@@ -5,7 +5,7 @@
 //!
 //! Exact means one of:
 //! - the call states Metal's default, which every runtime object already has: a line width of
-//!   1, the viewport transform on, no protection options;
+//!   1, the viewport transform on;
 //! - the call sets encoder state the runtime draws as Metal does: a provoking vertex mode of 0
 //!   or 1, `render/provoking.rs`;
 //! - the call acts on state no runtime object has: Vulkan shows no texture compression, so a
@@ -28,8 +28,6 @@
 //! states, is accepted and drawn as mode 1, announced at the call (`provoking-vertex-unmatched`).
 //!
 //! Every other call is refused, and records nothing:
-//! - nonzero protection options, whose effect on Metal is not measured (Vulkan's protected
-//!   memory is the nearest form);
 //! - a line width other than 1 (Apple's wide-line rule is unmeasured, where Vulkan has
 //!   `wideLines`);
 //! - a vertex amplification mode whose count is 0, which draws a number of copies that changes
@@ -46,15 +44,16 @@
 //! last packed texel, announced as `unpacked-fill-color`) are built. A multisample fill a device
 //! cannot copy into the texture is refused there, `Unsupported`, as the device's gap.
 //!
-//! [`AppleOnlyCall`] is the table, and every call of it is here: the command buffer's, the
-//! compute, render and blit encoders', and the texture's protection options. A texture's
+//! [`AppleOnlyCall`] is the table, and every call of it is here: the compute, render and blit
+//! encoders', and the texture's protection options. The command buffer's protection options are
+//! `command_buffer/protection.rs`'s, as Metal's GPU answers them, but the forms not measured
+//! ([`AppleOnly::ProtectedContent`]). A texture's
 //! rotation is the runtime's (`TextureDescriptor::rotation`), and command predication, loops
 //! included, is `predication.rs`'s.
 
 use super::blit::BlitCommandEncoder;
 use super::blit_texture::check_slice_level;
 use super::capabilities::MAX_VERTEX_AMPLIFICATION;
-use super::command_buffer::CommandBuffer;
 use super::compute::ComputeCommandEncoder;
 use super::error::Error;
 use super::render::RenderCall;
@@ -68,7 +67,9 @@ use super::texture::Texture;
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AppleOnly {
-    /// Protected content: nonzero `setProtectionOptions:`.
+    /// Protection options whose answer on Metal is not measured
+    /// (`command_buffer/protection.rs`): options changed once an encoder was made under some, or
+    /// after options from 0x10 up, and a resource state encoder made under 1, 3 or 7.
     ProtectedContent,
     /// A line width other than 1 (`setLineWidth:`).
     LineWidth,
@@ -126,8 +127,6 @@ pub enum AppleOnlyCall {
     InvalidateCompressedTextureSlice,
     /// `insertCompressedTextureReinterpretationFlush` (compute encoder).
     CompressedTextureReinterpretationFlush,
-    /// `setProtectionOptions:` (command buffer).
-    SetProtectionOptions(u64),
     /// `setAlphaTestReferenceValue:` (render encoder).
     SetAlphaTestReferenceValue(f32),
     /// `setLineWidth:` (render encoder).
@@ -162,7 +161,6 @@ impl AppleOnlyCall {
             AppleOnlyCall::CompressedTextureReinterpretationFlush => {
                 "insertCompressedTextureReinterpretationFlush"
             }
-            AppleOnlyCall::SetProtectionOptions(_) => "setProtectionOptions:",
             AppleOnlyCall::SetAlphaTestReferenceValue(_) => "setAlphaTestReferenceValue:",
             AppleOnlyCall::SetLineWidth(_) => "setLineWidth:",
             AppleOnlyCall::SetPointSize(_) => "setPointSize:",
@@ -188,10 +186,6 @@ impl AppleOnlyCall {
             | AppleOnlyCall::SetProvokingVertexMode(_)
             | AppleOnlyCall::SetDepthCleared
             | AppleOnlyCall::SetStencilCleared => Ok(()),
-            AppleOnlyCall::SetProtectionOptions(options) => default_or(
-                options == DEFAULT_PROTECTION_OPTIONS,
-                AppleOnly::ProtectedContent,
-            ),
             AppleOnlyCall::SetLineWidth(width) => default_or(width == 1.0, AppleOnly::LineWidth),
             AppleOnlyCall::SetViewportTransformEnabled(enabled) => {
                 default_or(enabled, AppleOnly::ViewportTransformDisabled)
@@ -228,15 +222,6 @@ fn answer(call: AppleOnlyCall) -> Result<(), Error> {
     call.check().map_err(Error::AppleOnly)
 }
 
-impl CommandBuffer {
-    /// `setProtectionOptions:` (SPI): accepted at Metal's default, no protection options
-    /// ([`DEFAULT_PROTECTION_OPTIONS`]); any other value is refused
-    /// ([`AppleOnly::ProtectedContent`]): an SPI's feature is the consumer's to build.
-    pub fn set_protection_options(&self, options: u64) -> Result<(), Error> {
-        answer(AppleOnlyCall::SetProtectionOptions(options))
-    }
-}
-
 impl Texture {
     /// `protectionOptions` (SPI): [`DEFAULT_PROTECTION_OPTIONS`], the only protection options a
     /// runtime texture has.
@@ -251,7 +236,7 @@ impl BlitCommandEncoder {
     /// Metal allows. Refused (`Invalid`, `ForeignObject`) for another device's texture, as every
     /// blit is.
     pub fn invalidate_compressed_texture(&mut self, texture: &Texture) -> Result<(), Error> {
-        self.log(|_| BlitCall::InvalidateCompressedTexture(texture.clone()));
+        self.log(|_| BlitCall::InvalidateCompressedTexture(texture.clone()))?;
         self.core()
             .check_device("invalidate_compressed_texture", texture.device())?;
         answer(AppleOnlyCall::InvalidateCompressedTexture)
@@ -267,7 +252,7 @@ impl BlitCommandEncoder {
         slice: u64,
         level: u64,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::InvalidateCompressedTextureSlice(texture.clone(), slice, level));
+        self.log(|_| BlitCall::InvalidateCompressedTextureSlice(texture.clone(), slice, level))?;
         const CALL: &str = "invalidate_compressed_texture_slice";
         self.core().check_device(CALL, texture.device())?;
         check_slice_level(CALL, texture, slice, level)?;

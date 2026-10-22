@@ -212,14 +212,14 @@ impl ComputeCommandEncoder {
 impl BlitCommandEncoder {
     /// `updateFence:`: the fence is updated after the encoder's commands.
     pub fn update_fence(&mut self, fence: &Fence) -> Result<(), Error> {
-        self.log(|_| BlitCall::UpdateFence(fence.clone()));
+        self.log(|_| BlitCall::UpdateFence(fence.clone()))?;
         self.core().update_fence("update_fence", fence, None)
     }
 
     /// `waitForFence:`: the encoder's commands wait for the fence's last update before them in
     /// the queue's commit order.
     pub fn wait_for_fence(&mut self, fence: &Fence) -> Result<(), Error> {
-        self.log(|_| BlitCall::WaitForFence(fence.clone()));
+        self.log(|_| BlitCall::WaitForFence(fence.clone()))?;
         self.core().wait_for_fence("wait_for_fence", fence, None)
     }
 }

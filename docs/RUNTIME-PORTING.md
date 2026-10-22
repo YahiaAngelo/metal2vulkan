@@ -142,11 +142,11 @@ narrow refusal that the call's rustdoc describes.
 | `encode_wait` | `encodeWaitForEvent:value:` | `CommandBuffer::encode_wait_for_event` |
 | `error` | `error` | `CommandBuffer::error` |
 | `render_encoder` | `renderCommandEncoderWithDescriptor:` | `CommandBuffer::render_command_encoder` *(partial)* |
-| `set_protection_options` | `setProtectionOptions:` (SPI) | `CommandBuffer::set_protection_options`: 0 accepted; anything else refused `AppleOnly::ProtectedContent` *(partial)* |
+| `set_protection_options` | `setProtectionOptions:` (SPI) | `CommandBuffer::set_protection_options`: an encoder made under options other than 0 fails the command buffer from there (`CommandBufferError::ProtectedEncoder`), as Metal's GPU does; 1, 3 and 7 refused where they end Metal's process; changes Metal was not measured at refused `AppleOnly::ProtectedContent` *(partial)* |
 | `status` | `status` | `CommandBuffer::status` |
 | `wait_until_completed` | `waitUntilCompleted` | `CommandBuffer::wait_until_completed`, or `wait_until_completed_for` with a timeout |
 | `wait_until_scheduled` | `waitUntilScheduled` | `CommandBuffer::wait_until_scheduled` |
-| `compute_encoder_for_pass` | `computeCommandEncoderWithDescriptor:` | `CommandBuffer::compute_command_encoder_with_dispatch_type` |
+| `compute_encoder_for_pass` | `computeCommandEncoderWithDescriptor:` | `CommandBuffer::compute_command_encoder_with_dispatch_type`; `compute_command_encoder_with_raw_dispatch_type` for a raw `MTLDispatchType` (every value but 1 serial, as Metal's) |
 | `used_resources` | (none: a runtime extension) | `CommandBuffer::used_resources`: the buffers, textures and heaps its ended encoders' commands use, each as what owns its memory, until it completes; what `detach_backing` waits on |
 | `ended_encoders` | (none: a runtime extension) | `CommandBuffer::ended_encoders`: each ended encoder's kind, the event waits and signals before it, and what its own commands use; with `commit_failed`'s `FailedEncoders::Set`, what fails the one submission that uses a detached resource |
 | `add_submission_handler` | (none: a runtime extension) | `CommandBuffer::add_submission_handler`: a handler run once the command buffer's last batch reached its `VkQueue`, on the device's scheduler thread, which submitted it, before it is `Scheduled`; never for one that fails before |
@@ -264,7 +264,7 @@ narrow refusal that the call's rustdoc describes.
 | `new_texture` | `newTextureWithDescriptor:` | `Device::new_texture` |
 | `reserve_resource_indices` | `reserveResourceIndicesForResourceType:indices:indexCount:` (SPI) | `Device::reserve_resource_ids` |
 | `caps` |  | `Device::properties()`: Metal's public properties (see `DeviceCaps` below) |
-| `new_buffer` | `newBufferWithDescriptor:` (SPI) | `Device::new_buffer_with_descriptor` (`BufferDescriptor` by value, with host contents and an `AddressPlacement`) |
+| `new_buffer` | `newBufferWithDescriptor:` (SPI) | `Device::new_buffer_with_descriptor` (`BufferDescriptor` by value, with host contents and an `AddressPlacement`; contents to copy from memory that may change while it is read as `BufferContents::CopyHost` over a `HostBytes`) |
 | `new_heap` | `newHeapWithDescriptor:` | `Device::new_heap` (`HeapDescriptor::placement` pins its address range) |
 | `reserve_address_pool` | (none: a runtime extension; Metal's own pools of buffers shorter than a page) | `Device::reserve_address_pool` -> `AddressPool`, holding a pin's span; `BufferDescriptor::with_pool_slot(&pool, offset)` places a buffer at the pool's address plus a 256-byte-aligned offset, holding its length rounded up to 256 bytes |
 | `new_heap_over_host_memory` | (none: a runtime extension) | `unsafe Device::new_heap_with_bytes_no_copy`: a heap over the caller's page-aligned memory, a `HostMemory` (`VK_EXT_external_memory_host`, or dma-bufs as for a buffer), the heap twin of `new_buffer_with_bytes_no_copy` |
@@ -312,7 +312,7 @@ narrow refusal that the call's rustdoc describes.
 | Item | Metal | Runtime |
 |---|---|---|
 | `encode` |  | one `IndirectRenderCommand` method per `IcbRenderCmd` (above) |
-| `command_type`, `fragment_buffer_address`, `vertex_attribute_stride`, `vertex_buffer_address`, `has_barrier`, `draw_args`, `draw_indexed_args`, `draw_patches_args`, `draw_indexed_patches_args`, `tessellation_factor_args` | the getters (SPI) | `IndirectRenderCommand::command_type`, `vertex_buffer`, `fragment_buffer`, `has_barrier`, `draw`: each reads its field of the record alone; or `IndirectCommandBuffer::commands`, each render command decoded as an `EncodedRenderCommand` |
+| `command_type`, `fragment_buffer_address`, `vertex_attribute_stride`, `vertex_buffer_address`, `has_barrier`, `draw_args`, `draw_indexed_args`, `draw_patches_args`, `draw_indexed_patches_args`, `tessellation_factor_args` | the getters (SPI) | `IndirectRenderCommand::command_type`, `vertex_buffer`, `fragment_buffer`, `has_barrier`, `draw`: each reads its field of the record alone; or `IndirectCommandBuffer::commands`, each render command decoded as an `EncodedRenderCommand`; a patch draw's buffer addresses as Metal answers them, `NIL_PATCH_BUFFER_ADDRESS` for nil, from `IndirectDraw::patch_index_buffer_address` and `control_point_index_buffer_address` |
 | `pipeline_state_unique_identifier` | `getPipelineStateUniqueIdentifier` (SPI) | `IndirectRenderCommand::pipeline_unique_identifier` (with `pipeline_state` and `pipeline_id`), or that of the command read back (`IndirectCommandBuffer::commands`) *(partial)* |
 
 ### `IcbComputeCmd`: `MTLIndirectComputeCommand` commands
@@ -498,7 +498,7 @@ narrow refusal that the call's rustdoc describes.
 | `new_texture_subview_at_index` | `newTextureViewWithPixelFormat:textureType:levels:slices:…` | `Texture::new_texture_subview_with_placement` (no swizzle) |
 | `pixel_format` | `pixelFormat` | `Texture::pixel_format` |
 | `protection_options` | `protectionOptions` (SPI) | `Texture::protection_options`: always 0 |
-| `replace_region` | `replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:` | `Texture::replace_region` |
+| `replace_region` | `replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:` | `Texture::replace_region`; from memory that may change while it is read (a guest's), `Texture::replace_region_with_host_bytes` over a `HostBytes`, which the call copies once through the pointer, with no copy of the caller's first |
 | `sample_count` | `sampleCount` | `Texture::sample_count` |
 | `texture_type` | `textureType` | `Texture::texture_type` |
 | `usage` | `usage` | `Texture::usage` |

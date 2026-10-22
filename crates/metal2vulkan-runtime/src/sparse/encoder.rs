@@ -84,10 +84,13 @@ impl CommandBuffer {
     pub fn resource_state_command_encoder(&self) -> Result<ResourceStateCommandEncoder, Error> {
         // The last render encoder's end, where its call left it to the device's lowering thread.
         self.settle_end();
+        self.refuse_protected_state_encoder()?;
         let mut state = self.state();
         if let Some(problem) = state.refusal() {
             return Err(invalid("resource_state_command_encoder", problem));
         }
+        // Made under the protection options set now (`command_buffer/protection.rs`).
+        state.protected_made();
         state.encoder_open = true;
         drop(state);
         (self.device().shared().identifiers).encoder_opened(EncoderKind::ResourceState);

@@ -53,6 +53,7 @@
 //! host ([`HostLayout`]); the blit encoder's copies are `blit_plan.rs`'s.
 
 use super::chroma_pairs::{is_four_two_two, TEXEL_BYTES};
+use super::host_bytes::HostBytes;
 use super::pvrtc::{is_pvrtc, BLOCK_BYTES};
 use super::view_plan::ViewRecord;
 use metal2vulkan::bind::YCbCrCodes;
@@ -505,6 +506,15 @@ impl HostLayout {
         let n = self.row_bytes as usize;
         for (h, p) in self.rows() {
             packed[p..p + n].copy_from_slice(&host[h..h + n]);
+        }
+    }
+
+    /// [`pack`](Self::pack) from bytes at a pointer (at least [`host_len`](Self::host_len)),
+    /// each row read once, straight into `packed`.
+    pub(super) fn pack_from(&self, host: HostBytes<'_>, packed: &mut [u8]) {
+        let n = self.row_bytes as usize;
+        for (h, p) in self.rows() {
+            host.copy_into(h, &mut packed[p..p + n]);
         }
     }
 

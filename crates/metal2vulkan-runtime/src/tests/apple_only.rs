@@ -2,14 +2,14 @@
 
 use crate::{AppleOnly, AppleOnlyCall, DEFAULT_PROTECTION_OPTIONS};
 
-/// The 12 Apple-only calls of the table, each at Metal's default where it has one and at values
+/// The 11 Apple-only calls of the table, each at Metal's default where it has one and at values
 /// off it, with the runtime's answer. The getter (`protectionOptions`) is
 /// `no_getter_answers_off_metals_default`'s. A texture's rotation is no longer the table's: the
 /// runtime builds it.
 #[test]
 fn every_apple_only_call_answers_typed() {
     use AppleOnlyCall as C;
-    let table: [(&str, AppleOnlyCall, Result<(), AppleOnly>); 30] = [
+    let table: [(&str, AppleOnlyCall, Result<(), AppleOnly>); 28] = [
         // Compressed-texture controls: no compression is visible on Vulkan.
         (
             "invalidateCompressedTexture:",
@@ -25,13 +25,6 @@ fn every_apple_only_call_answers_typed() {
             "insertCompressedTextureReinterpretationFlush",
             C::CompressedTextureReinterpretationFlush,
             Ok(()),
-        ),
-        // Protection: Metal's default only.
-        ("setProtectionOptions:", C::SetProtectionOptions(0), Ok(())),
-        (
-            "setProtectionOptions:",
-            C::SetProtectionOptions(1),
-            Err(AppleOnly::ProtectedContent),
         ),
         // Render setters.
         (
@@ -163,19 +156,14 @@ fn every_apple_only_call_answers_typed() {
             selectors.push(selector);
         }
     }
-    // The 12 calls of the table's 26 rows (some calls have several rows).
-    assert_eq!(selectors.len(), 12, "{selectors:?}");
+    // The 11 calls of the table's 28 rows (some calls have several rows).
+    assert_eq!(selectors.len(), 11, "{selectors:?}");
 }
 
-/// The getter answers Metal's default, which is the only value a runtime texture can hold,
-/// since any other is refused.
+/// The getter answers Metal's default, the protection options of every runtime texture.
 #[test]
 fn no_getter_answers_off_metals_default() {
     assert_eq!(DEFAULT_PROTECTION_OPTIONS, 0);
-    assert_eq!(
-        AppleOnlyCall::SetProtectionOptions(DEFAULT_PROTECTION_OPTIONS).check(),
-        Ok(())
-    );
 }
 
 /// Each refused Apple-only feature names why ([`AppleOnly::gap`]), and none is a device's gap:

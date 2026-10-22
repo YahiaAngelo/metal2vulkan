@@ -350,12 +350,15 @@ fn blocked_waits(
     answered
 }
 
-/// Metal ran 256 handlers blocked at once: the pool counts as many waits, and refuses none.
+/// Metal ran 511 handlers blocked at once, and hung at the 512th: the pool counts 511 waits, and
+/// refuses the 512th.
 #[test]
 fn as_many_waits_as_metal_ran_at_once_are_all_counted() {
     let contexts: Contexts<Job> = Contexts::start(THREADS).unwrap();
-    let answered = blocked_waits(&contexts, 0x100, 256);
-    assert!(answered.iter().all(Result::is_ok));
+    let answered = blocked_waits(&contexts, 0x100, 512);
+    assert_eq!(answered.iter().filter(|answer| answer.is_ok()).count(), 511);
+    let refused: Vec<_> = answered.iter().filter(|answer| answer.is_err()).collect();
+    assert_eq!(refused, [&Err(DeadlockCause::HandlerThreadCap)]);
     contexts.stop();
 }
 

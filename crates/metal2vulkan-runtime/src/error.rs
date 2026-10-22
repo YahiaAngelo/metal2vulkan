@@ -105,7 +105,7 @@ pub enum Error {
     /// `commandBuffer` on a queue whose command buffers are all held): the runtime refuses it at
     /// once rather than hang. The cause says which of Metal's answers the refusal stands for: where
     /// Metal never returns ([`DeadlockCause::OwnQueue`]), where it would hang too
-    /// ([`DeadlockCause::Cycle`]), where the cap is the runtime's own
+    /// ([`DeadlockCause::Cycle`]), where Metal's handler threads run out and it hangs
     /// ([`DeadlockCause::HandlerThreadCap`]), once the process is exiting
     /// ([`DeadlockCause::Exiting`]), and from a submission handler, which Metal has not
     /// ([`DeadlockCause::SubmissionHandler`]).
@@ -274,8 +274,10 @@ pub enum DeadlockCause {
     Cycle,
     /// From a handler thread, a wait for another queue that would leave the device's handler
     /// threads with none that is not blocked in such a wait (or a marked wait off those threads,
-    /// which none can count). The cap is the runtime's: Metal ran 256 such waits at once, the
-    /// most measured, and the runtime runs them too.
+    /// which none can count): the 512th. Metal ran 511 such waits at once, which returned once
+    /// the command buffers they waited for completed; with 512 its process's dispatch threads ran
+    /// out, and no handler ran nor command buffer completed after: it hangs (the M3 Max under
+    /// macOS 27.0.1). Metal's threads are the process's, the runtime's each device's.
     HandlerThreadCap,
     /// From any thread, once the process is exiting ([`process_exiting`](crate::process_exiting)):
     /// the runtime's threads that schedule and finish command buffers have ended, and it makes no
@@ -492,6 +494,13 @@ pub enum Problem {
     /// ("A command encoder is already encoding to this command buffer", "commit command buffer with
     /// uncommitted encoder", "encodeSignalEvent:value: with uncommitted encoder"; an M4).
     EncoderOpen,
+    /// A compute or render encoder made, or a blit encoder's first command (`call` names the
+    /// blit encoder), under protection options 1, 3 or 7 (`CommandBuffer::set_protection_options`),
+    /// where Metal's process ends (SIGABRT, measured by a consumer on an M3 Max, macOS 26.7).
+    ProtectedEncoder {
+        /// The protection options set.
+        options: u64,
+    },
     /// An encoder of this command buffer was dropped without `end_encoding`: its commands are
     /// lost, so the command buffer can never be committed. Plain Metal asserts as the encoder
     /// goes ("Command encoder released without endEncoding").
@@ -1749,9 +1758,10 @@ pub enum CommandBufferError {
     EncodedUseRebound,
     /// A command of the command buffer used a buffer over the caller's host pages (a no-copy
     /// buffer, a heap over the caller's memory, or a buffer placed in one) that was detached
-    /// (`Buffer::detach_backing`, `Heap::detach_backing`) when the command buffer was first
-    /// submitted: named (a binding, a blit's operand, a vertex, index or indirect buffer) or made
-    /// resident (`use_resource`, `use_heap`). Each of Metal's submissions holding such a command
+    /// (`Buffer::detach_backing`, `Heap::detach_backing`) when the command buffer's submission
+    /// holding the command was submitted (each event group's as its first batch goes): named (a
+    /// binding, a blit's operand, a vertex, index or indirect buffer) or made resident
+    /// (`use_resource`, `use_heap`, whether or not a command reaches it). Each of Metal's submissions holding such a command
     /// ran nothing (the command buffer's split), every other ran, the event signals fired and the
     /// handlers ran, as Metal fails a submission that uses a resource whose memory was taken away
     /// (`OutOfMemory`, code 8; the consumer's rebind probe, an M3 Max under macOS 26.7). A reach of
@@ -1759,6 +1769,13 @@ pub enum CommandBufferError {
     /// detached buffer recorded nothing from that command on, so it fails alike where the buffer
     /// was given pages again before the submission, with [`CommandBufferError::EncodedUseRebound`].
     DetachedBacking,
+    /// An encoder of the command buffer was made under protection options other than 0
+    /// (`CommandBuffer::set_protection_options`; the options set, here), or options from 0x10 up
+    /// were set: as Metal's GPU fails it (measured by a consumer on an M3 Max, macOS 26.7), the
+    /// first such encoder ran nothing, nor did any after it (with none, every encoder ran), and
+    /// none of its event signals fired. Metal's code is 16 ("Protection Violation") below 0x10, 1
+    /// ("Invalid Input") from 0x10 up.
+    ProtectedEncoder(u64),
     /// A command-predication loop (`ComputeCommandEncoder::encode_start_while`,
     /// `encode_start_do_while`) would have run past the copies of its commands the runtime laid
     /// down (at most 64, or 16 inside another loop, fewer for a long body), and its commands hold
@@ -2010,6 +2027,10 @@ impl CommandBufferError {
                 PipelineCreationCause::Vulkan(_) | PipelineCreationCause::Internal => 1,
             },
             CommandBufferError::Execution(code) => code,
+            CommandBufferError::ProtectedEncoder(options) => match options >= 0x10 {
+                true => 1,
+                false => 16,
+            },
         }
     }
 
@@ -2031,6 +2052,7 @@ impl CommandBufferError {
             | CommandBufferError::RenderTargetSize
             | CommandBufferError::DetachedBacking
             | CommandBufferError::PredicationOpenAtUnitEnd { .. }
+            | CommandBufferError::ProtectedEncoder(_)
             | CommandBufferError::DefaultRasterSampleCount => FailureOrigin::Metal,
             CommandBufferError::Internal(_)
             | CommandBufferError::IndexPoolOverflow

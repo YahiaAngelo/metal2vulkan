@@ -519,6 +519,8 @@ mod indirect_executions;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod indirect_host_steps;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod indirect_patch_addresses;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod inline_bytes;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod inline_reasons;
@@ -617,6 +619,8 @@ mod pixel_samplers;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod placement;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod pointer_uploads;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod pool_churn;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod pool_slots;
@@ -635,6 +639,8 @@ mod private_primitives;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod property_reads;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod protection_options;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod provoking;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod pvrtc_textures;
@@ -652,6 +658,8 @@ mod rate_mapped_layers;
 mod rate_mapped_passes;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod rate_maps;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod raw_dispatch_types;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod read_through_views;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]

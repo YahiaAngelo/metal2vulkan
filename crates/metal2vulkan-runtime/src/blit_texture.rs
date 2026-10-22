@@ -457,7 +457,7 @@ impl BlitCommandEncoder {
                 origin: destination_origin,
                 options,
             }))
-        });
+        })?;
         const CALL: &str = "copy_from_buffer_to_texture";
         self.core().check_device(CALL, source_buffer.device())?;
         self.check_texture(CALL, destination_texture)?;
@@ -611,7 +611,7 @@ impl BlitCommandEncoder {
                 bytes_per_image: destination_bytes_per_image,
                 options,
             }))
-        });
+        })?;
         const CALL: &str = "copy_from_texture_to_buffer";
         self.check_texture(CALL, source_texture)?;
         source_texture.check_bytes_reached(CALL)?;
@@ -1062,7 +1062,7 @@ impl BlitCommandEncoder {
                 destination_level,
                 destination_origin,
             }))
-        });
+        })?;
         const CALL: &str = "copy_from_texture_to_texture";
         self.check_pair(CALL, source_texture, destination_texture)?;
         let types = [
@@ -1124,7 +1124,7 @@ impl BlitCommandEncoder {
                 slice_count,
                 level_count,
             )))
-        });
+        })?;
         const CALL: &str = "copy_texture_slices";
         self.check_pair(CALL, source_texture, destination_texture)?;
         if slice_count == 0 || level_count == 0 {
@@ -1158,7 +1158,7 @@ impl BlitCommandEncoder {
         source_texture: &Texture,
         destination_texture: &Texture,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::CopyTexture(source_texture.clone(), destination_texture.clone()));
+        self.log(|_| BlitCall::CopyTexture(source_texture.clone(), destination_texture.clone()))?;
         const CALL: &str = "copy_texture";
         self.check_pair(CALL, source_texture, destination_texture)?;
         let copies = plan_whole_copy(&pair(source_texture, destination_texture)?)
@@ -1796,7 +1796,7 @@ impl BlitCommandEncoder {
     ///
     /// [`Device::mipmap_generation`]: super::Device::mipmap_generation
     pub fn generate_mipmaps(&mut self, texture: &Texture) -> Result<(), Error> {
-        self.log(|_| BlitCall::GenerateMipmaps(texture.clone()));
+        self.log(|_| BlitCall::GenerateMipmaps(texture.clone()))?;
         // A view that reads its image in the image's own format generates them as a texture of
         // that format over the same levels: the same bits, filtered alike
         // (`bind::mipmap_filter`'s layouts pair the formats `metal::format::swizzle_over` pairs).
@@ -1931,7 +1931,7 @@ impl BlitCommandEncoder {
         slice: u64,
         level: u64,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::SynchronizeTexture(texture.clone(), slice, level));
+        self.log(|_| BlitCall::SynchronizeTexture(texture.clone(), slice, level))?;
         const CALL: &str = "synchronize_texture";
         self.check_texture(CALL, texture)?;
         if texture.storage_mode() != StorageMode::Managed {
@@ -1943,7 +1943,7 @@ impl BlitCommandEncoder {
     /// `optimizeContentsForGPUAccess:`: a hint; Vulkan images keep one layout for every access
     /// here, so it records nothing. Refused (`Invalid`) for a texture of another device.
     pub fn optimize_contents_for_gpu_access(&mut self, texture: &Texture) -> Result<(), Error> {
-        self.log(|_| BlitCall::OptimizeForGpu(texture.clone()));
+        self.log(|_| BlitCall::OptimizeForGpu(texture.clone()))?;
         self.check_texture("optimize_contents_for_gpu_access", texture)
     }
 
@@ -1956,7 +1956,7 @@ impl BlitCommandEncoder {
         slice: u64,
         level: u64,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::OptimizeForGpuSliceLevel(texture.clone(), slice, level));
+        self.log(|_| BlitCall::OptimizeForGpuSliceLevel(texture.clone(), slice, level))?;
         const CALL: &str = "optimize_contents_for_gpu_access_slice_level";
         self.check_level_slice(CALL, texture, slice, level)
     }
@@ -1964,7 +1964,7 @@ impl BlitCommandEncoder {
     /// `optimizeContentsForCPUAccess:`: a hint; it records nothing. Refused (`Invalid`) for a
     /// texture of another device.
     pub fn optimize_contents_for_cpu_access(&mut self, texture: &Texture) -> Result<(), Error> {
-        self.log(|_| BlitCall::OptimizeForCpu(texture.clone()));
+        self.log(|_| BlitCall::OptimizeForCpu(texture.clone()))?;
         self.check_texture("optimize_contents_for_cpu_access", texture)
     }
 
@@ -1977,7 +1977,7 @@ impl BlitCommandEncoder {
         slice: u64,
         level: u64,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::OptimizeForCpuSliceLevel(texture.clone(), slice, level));
+        self.log(|_| BlitCall::OptimizeForCpuSliceLevel(texture.clone(), slice, level))?;
         const CALL: &str = "optimize_contents_for_cpu_access_slice_level";
         self.check_level_slice(CALL, texture, slice, level)
     }

@@ -77,6 +77,7 @@ use super::framebuffer_fetch::UsageAnswers;
 use super::fresh_unwritten::{FreshKind, Notice};
 use super::heap::{Heap, HeapProblem, HeapType};
 use super::heap_sets;
+use super::host_bytes::HostBytes;
 use super::image_plan::{
     check_image_limits, plan_image, plan_images, plan_texture_images, DepthImageFacts, ImageFacts,
     ImagePlan, ImageRefusal,
@@ -141,6 +142,7 @@ use metal2vulkan::vk::{
 use stand_in::StandIn;
 use std::any::Any;
 use std::borrow::Cow;
+use std::cell::OnceCell;
 use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
 use std::ptr::NonNull;
@@ -5218,6 +5220,44 @@ impl Texture {
         bytes_per_row: u64,
         bytes_per_image: u64,
     ) -> Result<(), Error> {
+        let upload = Upload::Slice(bytes);
+        self.replace(region, level, slice, upload, bytes_per_row, bytes_per_image)
+    }
+
+    /// [`replace_region`](Self::replace_region) from bytes at a pointer (a runtime extension,
+    /// the same selector): memory that may change while the call reads it (a guest's), which the
+    /// call copies through the pointer, each byte at most once, into memory of its own
+    /// ([`HostBytes`]), with no copy of the caller's first. The rows of a texture whose image the
+    /// copy reaches through a staging buffer (most) go straight into it; the other forms (a
+    /// PVRTC level, texels over a buffer or a heap, a two-plane texture, a depth texture's checks,
+    /// a shadowed view) read the bytes once into a copy, then as `replace_region` reads a slice.
+    /// Refused as `replace_region`.
+    pub fn replace_region_with_host_bytes(
+        &self,
+        region: Region,
+        level: u64,
+        slice: u64,
+        bytes: HostBytes<'_>,
+        bytes_per_row: u64,
+        bytes_per_image: u64,
+    ) -> Result<(), Error> {
+        let upload = Upload::Host {
+            bytes,
+            copy: OnceCell::new(),
+        };
+        self.replace(region, level, slice, upload, bytes_per_row, bytes_per_image)
+    }
+
+    /// `replace_region` from `bytes`, whichever form (the two above).
+    fn replace(
+        &self,
+        region: Region,
+        level: u64,
+        slice: u64,
+        bytes: Upload<'_>,
+        bytes_per_row: u64,
+        bytes_per_image: u64,
+    ) -> Result<(), Error> {
         const CALL: &str = "replace_region";
         let Some(HostCopy {
             region: image_region,
@@ -5236,8 +5276,8 @@ impl Texture {
         let rows;
         let bytes = match cpu_order {
             Some(blocks) => {
-                rows = rows_of_cpu_order(bytes, blocks);
-                &rows[..]
+                rows = rows_of_cpu_order(bytes.slice(), blocks);
+                Upload::Slice(&rows)
             }
             None => bytes,
         };
@@ -5246,24 +5286,24 @@ impl Texture {
             Storage::Texels(texels)
             | Storage::Alias { texels, .. }
             | Storage::Shadow { texels, .. } => {
-                return texels.write(CALL, &image_region, &host, bytes)
+                return texels.write(CALL, &image_region, &host, bytes.slice())
             }
         };
         // A heap shadow's texels are the heap's bytes (but a two-plane texture's later levels').
         if let Owner::HeapShadow(shadow) = &image.owner {
             if shadow.holds(image.plan(), &image_region) {
-                return shadow.write(CALL, image.plan(), &image_region, &host, bytes);
+                return shadow.write(CALL, image.plan(), &image_region, &host, bytes.slice());
             }
         }
         // A two-plane texture's color words over its texels as they are, the alpha words kept.
         if planes {
             let mut words = vec![0; host.packed_len() as usize];
-            host.pack(bytes, &mut words);
+            bytes.pack(&host, &mut words);
             return self.write_color_words(image, &image_region, &words);
         }
         // Bytes that hold a negative or NaN depth, which a depth test compares otherwise.
-        let signed =
-            image_region.aspect == ImageAspectFlags::DEPTH && host.holds_negative_or_nan(bytes);
+        let signed = image_region.aspect == ImageAspectFlags::DEPTH
+            && host.holds_negative_or_nan(bytes.slice());
         self.degrade_depth_upload(CALL, image_region.aspect, signed, false);
         // Bytes whose magnitude stand-in is not themselves (-0, a negative denormal, and, where the
         // device's depth test compares a denormal as zero, a positive one) switch a render
@@ -5273,12 +5313,13 @@ impl Texture {
             && self.usage().contains(TextureUsage::RENDER_TARGET)
         {
             let flush = signed_depth::test_flushes_denormals(self.device());
-            if host.holds_unlike_its_stand_in(bytes, flush) {
+            if host.holds_unlike_its_stand_in(bytes.slice(), flush) {
                 self.switch_on_signed_depth(CALL, false);
             }
         }
         // Bytes that hold a denormal depth, announced as the copy below stores them.
-        let denormal = image_region.aspect == ImageAspectFlags::DEPTH && host.holds_denormal(bytes);
+        let denormal =
+            image_region.aspect == ImageAspectFlags::DEPTH && host.holds_denormal(bytes.slice());
         // A shadowed view's texels are its texture's (`texture/view_shadow.rs`).
         let truth = view_shadow::truth(image);
         let copy = buffer_image_copy(&image_region);
@@ -5286,15 +5327,15 @@ impl Texture {
         let len = host.packed_len() as usize;
         let pack = || {
             let mut packed = vec![0; len];
-            host.pack(bytes, &mut packed);
+            bytes.pack(&host, &mut packed);
             packed
         };
-        // Copied on the host from the caller's bytes where they are laid out packed, else from
-        // packed bytes.
+        // Copied on the host from the caller's bytes where they are laid out packed and held as
+        // a slice, else from packed bytes (host bytes read once, through the pointer).
         if truth.takes_host_copies() {
-            let packed = match host.is_packed() {
-                true => Cow::Borrowed(&bytes[..len]),
-                false => Cow::Owned(pack()),
+            let packed = match (host.is_packed(), bytes.held()) {
+                (true, Some(held)) => Cow::Borrowed(&held[..len]),
+                _ => Cow::Owned(pack()),
             };
             if truth.host_write(copy, &packed)? {
                 if denormal {
@@ -5308,7 +5349,7 @@ impl Texture {
         }
         // Packed into the staging buffer from the caller's bytes.
         if truth.takes_staging_copies()
-            && truth.staging_write(copy, len as u64, |staged| host.pack(bytes, staged))?
+            && truth.staging_write(copy, len as u64, |staged| bytes.pack(&host, staged))?
         {
             // A decoded twin's decode, staged; on the CPU while a batch may read it.
             return truth.decode_written(&image_region, pack);
@@ -5323,7 +5364,7 @@ impl Texture {
             let packed = unsafe {
                 std::slice::from_raw_parts_mut(contents.as_ptr(), host.packed_len() as usize)
             };
-            host.pack(bytes, packed);
+            bytes.pack(&host, packed);
             let (source, start) = staging.at(0);
             let copy = vk::BufferImageCopy {
                 buffer_offset: copy.buffer_offset + start,
@@ -5351,7 +5392,7 @@ impl Texture {
             return truth.queue_second_decode(regions);
         }
         let mut staging = Staging::new(device, host.packed_len())?;
-        host.pack(bytes, staging.bytes());
+        bytes.pack(&host, staging.bytes());
         let (buffer, twin, image) = (staging.raw, self.twin_image(), truth.raw.get());
         // The decoded twin's texels of the region, after the copy; the submission is waited for.
         let decode = truth.decode_pass(std::slice::from_ref(&image_region), PassScratch::Own)?;
@@ -5749,4 +5790,54 @@ struct HostCopy {
     /// A two-plane extended-range texture's color words, its image's texels 8 bytes each
     /// (`two_planes.rs`).
     planes: bool,
+}
+
+/// What `replaceRegion` reads (`Texture::replace`): a slice, or bytes at a pointer
+/// ([`HostBytes`]), read once: straight into the packed rows where nothing read them before,
+/// else into `copy` the first time a form needs them whole, which every later read reads.
+enum Upload<'a> {
+    Slice(&'a [u8]),
+    Host {
+        bytes: HostBytes<'a>,
+        copy: OnceCell<Vec<u8>>,
+    },
+}
+
+impl Upload<'_> {
+    /// How many bytes it holds.
+    fn len(&self) -> usize {
+        match self {
+            Upload::Slice(bytes) => bytes.len(),
+            Upload::Host { bytes, .. } => bytes.len(),
+        }
+    }
+
+    /// Its bytes whole: host bytes read once, here, into a copy of the runtime's own.
+    fn slice(&self) -> &[u8] {
+        match self {
+            Upload::Slice(bytes) => bytes,
+            Upload::Host { bytes, copy } => copy.get_or_init(|| bytes.to_vec()),
+        }
+    }
+
+    /// Its bytes as a slice where it holds one: a slice's, or host bytes once read into a copy;
+    /// `None` for host bytes not read yet, which no reference may cover.
+    fn held(&self) -> Option<&[u8]> {
+        match self {
+            Upload::Slice(bytes) => Some(bytes),
+            Upload::Host { copy, .. } => copy.get().map(Vec::as_slice),
+        }
+    }
+
+    /// `host`'s rows of it, packed into `packed`: host bytes not read yet straight from the
+    /// pointer, each row once.
+    fn pack(&self, host: &HostLayout, packed: &mut [u8]) {
+        match self {
+            Upload::Slice(bytes) => host.pack(bytes, packed),
+            Upload::Host { bytes, copy } => match copy.get() {
+                Some(copy) => host.pack(copy, packed),
+                None => host.pack_from(*bytes, packed),
+            },
+        }
+    }
 }

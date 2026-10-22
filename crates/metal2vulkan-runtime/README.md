@@ -256,6 +256,9 @@ Calls Metal does not have, for a consumer that emulates a Metal device:
   check looks for never calls it, and runs on the GPU alone where it can.
 - `HostMemory::with_dma_buf` and its `DmaBufSource`: dma-bufs of a no-copy object's pages, for a
   device that refuses their pointer.
+- `HostBytes`: bytes at a pointer that may change while a call reads them (a guest's memory),
+  which `Texture::replace_region_with_host_bytes` and `BufferContents::CopyHost` copy once through
+  the pointer, where the slice forms would need the caller's own copy first.
 
 [docs/API.md section 10](../../docs/API.md#10-accepted-differences) lists where the runtime
 answers otherwise than Metal on purpose.
