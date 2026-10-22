@@ -218,7 +218,11 @@ fn multisampled_texels(region: &TextureRegion) -> Written {
 }
 
 /// The copy unit of `texture` copied with `option`.
-fn unit(call: &'static str, texture: &Texture, option: BlitOption) -> Result<CopyUnit, Error> {
+pub(super) fn unit(
+    call: &'static str,
+    texture: &Texture,
+    option: BlitOption,
+) -> Result<CopyUnit, Error> {
     // A texture over a buffer holds a colour format (`linear_plan.rs`): its copy unit is its
     // texel, whatever holds it.
     if texture.over_buffer() {
@@ -1150,7 +1154,7 @@ impl BlitCommandEncoder {
     /// buffer of the encoder out of the image the source's texels are read from. So out of a
     /// texture with a twin into a depth texture without one they read its twin, and into it from a
     /// depth texture they write its twin directly and its image through the buffer.
-    fn texture_copies(
+    pub(super) fn texture_copies(
         &mut self,
         call: &'static str,
         source: &Texture,

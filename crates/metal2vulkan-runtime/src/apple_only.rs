@@ -76,11 +76,6 @@ pub enum AppleOnly {
     /// a surface made with value 2 (read-only), without a fault; the runtime does not model the
     /// key's values.
     SurfaceClientDirection,
-    /// A texture fill (`fillTexture:level:slice:region:bytes:length:` or a color form) of a
-    /// multisample texture: Metal fills every sample of the region's texels (an Apple M3 Max under
-    /// macOS 27.0.1, 2 and 4 samples), which the runtime has not built. Every other fill is built
-    /// (`BlitCommandEncoder::fill_texture`).
-    FillUnmeasured,
 }
 
 /// Why the runtime refuses an [`AppleOnly`] feature. None is a device's gap: no measured Vulkan
@@ -99,7 +94,6 @@ impl AppleOnly {
     /// Why the runtime refuses the feature ([`AppleOnlyGap`]).
     pub const fn gap(self) -> AppleOnlyGap {
         match self {
-            Self::FillUnmeasured => AppleOnlyGap::NotBuilt,
             Self::ProtectedContent
             | Self::LineWidth
             | Self::ViewportTransformDisabled

@@ -33,8 +33,8 @@ use super::{buffer_with, read_buffer};
 use metal2vulkan::metal::format::{is_depth_stencil, padded_only_over_memory, ExtendedRange};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
-    AppleOnly, BlitOption, ClearColor, CommandBufferStatus, CommandQueue, Degradation, Device,
-    Error, HeapDescriptor, HeapType, Origin, Region, ResourceOptions, Size, TextureDescriptor,
+    BlitOption, ClearColor, CommandBufferStatus, CommandQueue, Degradation, Device, Error,
+    HeapDescriptor, HeapType, Origin, Region, ResourceOptions, Size, TextureDescriptor,
 };
 use sha2::{Digest, Sha256};
 use std::time::Duration;
@@ -299,8 +299,7 @@ fn unpacked(raw: u32, case: &Case) -> bool {
 /// Case `name` of format `raw` (of a heap of `heap` bytes where a two-plane format's, else
 /// `wide` as [`case`] takes it): [`two_plane_case`]'s or [`texture_case`]'s answer, and whether
 /// the case is [`unpacked`]. Such a case's answer is `unpacked`, as Metal's table records it,
-/// where its fill wrote what the same case's fill of one zero byte writes, else both answers (or
-/// the refusal, where the fill was refused).
+/// where its fill wrote what the same case's fill of one zero byte writes, else both answers.
 fn case_answer(
     device: &Device,
     queue: &CommandQueue,
@@ -321,21 +320,11 @@ fn case_answer(
     }
     let zeros = run(true);
     let answer = match (answer, zeros) {
-        // A refusal stays the answer: the fill wrote nothing.
-        (Some(answer), _) if answer == "unmeasured" => Some(answer),
         (Some(answer), Some(zeros)) if answer == zeros => Some("unpacked".to_owned()),
         (Some(answer), Some(zeros)) => Some(format!("unpacked-differs:{answer}/{zeros}")),
         (answer, _) => answer,
     };
     (answer, true)
-}
-
-/// The answer a refused fill gives.
-fn refusal(error: Error) -> String {
-    match error {
-        Error::AppleOnly(AppleOnly::FillUnmeasured) => "unmeasured".to_owned(),
-        other => panic!("a fill refused: {other}"),
-    }
 }
 
 /// The descriptor of `case`'s texture of `raw`.
@@ -385,7 +374,7 @@ fn two_plane_case(
     command_buffer.commit().unwrap();
     command_buffer.wait_until_completed_for(WAIT).unwrap();
     if let Err(error) = filled {
-        return refusal(error);
+        panic!("{raw} {name}: a fill refused: {error}");
     }
     // A texture of more levels or slices is held apart from the heap's bytes, which Metal's fill
     // writes (`heap-two-plane-texture`).
@@ -526,7 +515,7 @@ fn texture_case(
         "{raw} {name}"
     );
     if let Err(error) = filled {
-        return Some(refusal(error));
+        panic!("{raw} {name}: a fill refused: {error}");
     }
     let got = read_buffer(&readback, 0, total).unwrap();
     let lines: Vec<String> = parts
@@ -558,7 +547,7 @@ fn texture_fills_write_metal_s_bytes() {
             for name in CASES {
                 let (answer, unpacked) = case_answer(device, &queue, (raw, name), heap, false);
                 // A color fill packed where fills ignore the color, which the runtime ran.
-                unpacked_here |= unpacked && answer.as_deref().is_some_and(|a| a != "unmeasured");
+                unpacked_here |= unpacked && answer.is_some();
                 match answer {
                     Some(answer) => answers.push(format!("{name} {answer}")),
                     // A 4:2:2 texture Metal makes none of; another skip is the device's.

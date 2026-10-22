@@ -1,0 +1,534 @@
+//! Metal's private texture fills of multisample textures (`BlitCommandEncoder::fill_texture` and
+//! `fill_texture_color`), on the device the cfg selects, under the validation layer, against
+//! Metal's samples.
+//!
+//! Each case replays one of our probe `ms.m`'s (an Apple M3 Max under macOS 27.0.1): a private
+//! multisample texture of 5 x 3 texels (a 2-slice array for one), every slice cleared by a pass
+//! (color `(0.25, 0.5, 0.75, 1)`, depth 0.25, stencil `0x5a`), one fill, and every sample read
+//! back by a dispatch: a color format's bits through an unsigned view of its components
+//! (`candidate::runtime_samples`), a depth's bits, a stencil's value (`Depth32Float_Stencil8`'s
+//! through its `X32_Stencil8` view). Metal's answer per case is the first 16 hex digits of the
+//! SHA-256 of the probe's read-back lines, `after  s<slice> y<row>:` and each texel's samples as
+//! it printed them. A sample whose bytes `n · b` of a texel's are 16 or fewer takes its own bytes
+//! of the pattern, past 16 every sample the pattern cut at the texel (`tests::blit_fill` checks
+//! the rule on every measured case without a device). The depths outside `[0, 1]` (`d32-wide-4`)
+//! are not compared where the device's depth copies go by a draw that announced the values it
+//! changes (`drawn-depth-copy`), whose samples it prints on a `SAMPLE-FILLS-DRAWN` line; a
+//! differing case prints a `SAMPLE-FILLS-DIFFERS` line.
+
+use super::resolves::{lane, quiet, Lane};
+use super::WAIT;
+use crate::candidate::runtime_samples::encode_through;
+use crate::executor_contract::multisample::{ReadbackView, SampleRead};
+use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
+use metal2vulkan_runtime::{
+    ClearColor, CommandBufferStatus, Degradation, LoadAction, Region, RenderPassDescriptor,
+    ResourceOptions, StoreAction, Texture, TextureDescriptor,
+};
+use sha2::{Digest, Sha256};
+
+/// The probe's 16-byte pattern.
+const P16: &str = "00112233445566778899aabbccddeeff";
+
+/// The probe's 32-byte pattern.
+const P32: &str = "00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f";
+
+/// Depths in `[0, 1]`, one a sample: a denormal, 1, 0 and 0.25.
+const DEPTHS: &str = "010000000000803f000000000000803e";
+
+/// What a case fills: bytes, or a color packed in the texture's format.
+#[derive(Clone, Copy, Debug)]
+enum Fill {
+    Bytes(&'static str),
+    Color([f64; 4]),
+}
+
+/// One case: its name, the format's raw value, samples, the array's slices (0 for a 2D
+/// multisample texture), the fill's slice, its region's origin and size, what it fills, and
+/// Metal's answer.
+type Case = (
+    &'static str,
+    u32,
+    u64,
+    u64,
+    u64,
+    [u64; 3],
+    [u64; 3],
+    Fill,
+    &'static str,
+);
+
+/// The cases, as the probe ran them.
+const CASES: [Case; 17] = [
+    (
+        "r8-4",
+        10,
+        4,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(P16),
+        "6a3cb9659495a014",
+    ),
+    (
+        "rg8-4",
+        30,
+        4,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(P16),
+        "7ae02f8d059eb534",
+    ),
+    (
+        "rgba8-4",
+        70,
+        4,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(P16),
+        "d2933cdc42077ec8",
+    ),
+    (
+        "rgba8-2",
+        70,
+        2,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(P32),
+        "030f2a7c3939ede7",
+    ),
+    (
+        "bgra8srgb-4",
+        81,
+        4,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(P16),
+        "fb44c4e915f05b98",
+    ),
+    (
+        "rgba16f-4",
+        115,
+        4,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(P16),
+        "5d2db7b16bf04af2",
+    ),
+    (
+        "rgba16f-2",
+        115,
+        2,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(P32),
+        "a729da908613bd7e",
+    ),
+    (
+        "rgba32f-2",
+        125,
+        2,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(P32),
+        "93c2217f450a212d",
+    ),
+    (
+        "r32f-4",
+        55,
+        4,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(P16),
+        "9c5b7be066d1c9fc",
+    ),
+    (
+        "d32-4",
+        252,
+        4,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(DEPTHS),
+        "2098b9445cd43b96",
+    ),
+    (
+        "d32-2",
+        252,
+        2,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(DEPTHS),
+        "869ba839ce907836",
+    ),
+    (
+        "d32-wide-4",
+        252,
+        4,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(P16),
+        "9c5b7be066d1c9fc",
+    ),
+    (
+        "s8-4",
+        253,
+        4,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(P16),
+        "7f346b34bb6eabfb",
+    ),
+    (
+        "d32s8-4",
+        260,
+        4,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Bytes(DEPTHS),
+        "51cb2e517b1b1dd0",
+    ),
+    (
+        "array-4",
+        70,
+        4,
+        2,
+        1,
+        [1, 0, 0],
+        [3, 2, 1],
+        Fill::Bytes(P16),
+        "a626fded296f9cfd",
+    ),
+    (
+        "color-4",
+        70,
+        4,
+        0,
+        0,
+        [1, 1, 0],
+        [2, 1, 1],
+        Fill::Color([0.5, 0.25, 1.0, 0.75]),
+        "ecfad086c3dc487a",
+    ),
+    (
+        "whole-2",
+        70,
+        2,
+        0,
+        3,
+        [0, 0, 1],
+        [9, 9, 2],
+        Fill::Bytes("a1b2c3d4"),
+        "98c79dda44dbd307",
+    ),
+];
+
+/// The texture's side.
+const WIDTH: u32 = 5;
+const HEIGHT: u32 = 3;
+
+/// How a texture of `pf` is read back, as the probe printed it: the kernel, its view's format,
+/// what the readback reads, and the bytes of each printed value (a depth or stencil aspect's
+/// word, else the texel's).
+fn reading(pf: PixelFormat) -> (&'static str, Option<PixelFormat>, SampleRead, usize) {
+    use PixelFormat as P;
+    use ReadbackView as V;
+    match pf {
+        P::R8Unorm => (
+            "rt6_read_words1",
+            Some(P::R8Uint),
+            SampleRead::Color(V::R8Uint),
+            1,
+        ),
+        P::RG8Unorm => (
+            "rt6_read_bytes4",
+            Some(P::RG8Uint),
+            SampleRead::Color(V::R16Uint),
+            2,
+        ),
+        P::RGBA8Unorm | P::BGRA8UnormSRGB => (
+            "rt6_read_bytes4",
+            Some(P::RGBA8Uint),
+            SampleRead::Color(V::R32Uint),
+            4,
+        ),
+        P::RGBA16Float => (
+            "rt6_read_halves4",
+            Some(P::RGBA16Uint),
+            SampleRead::Color(V::Rg32Uint),
+            8,
+        ),
+        P::RGBA32Float => (
+            "rt6_read_words4",
+            Some(P::RGBA32Uint),
+            SampleRead::Color(V::Rgba32Uint),
+            16,
+        ),
+        P::R32Float => (
+            "rt6_read_words1",
+            Some(P::R32Uint),
+            SampleRead::Color(V::R32Uint),
+            4,
+        ),
+        P::Stencil8 => ("rt6_read_stencil", None, SampleRead::Stencil, 1),
+        _ => ("rt6_read_depth", None, SampleRead::Depth, 4),
+    }
+}
+
+/// One value as the probe printed it: a texel of 1 or 2 bytes as one hex number, else its 32-bit
+/// words in order, each `%08x`.
+fn printed(bytes: &[u8]) -> String {
+    match bytes.len() {
+        1 => format!("{:02x}", bytes[0]),
+        2 => format!("{:04x}", u16::from_le_bytes([bytes[0], bytes[1]])),
+        _ => bytes
+            .chunks(4)
+            .map(|word| format!("{:08x}", u32::from_le_bytes(word.try_into().unwrap())))
+            .collect(),
+    }
+}
+
+/// The probe's lines of every sample `bytes` holds (the readback's layout: texels in rows, each
+/// texel's samples, `unit` bytes each) of slice `slice`, labelled `label`.
+fn lines(label: &str, slice: u64, bytes: &[u8], samples: usize, unit: usize) -> Vec<String> {
+    (0..HEIGHT as usize)
+        .map(|y| {
+            let mut line = format!("{label} s{slice} y{y}:");
+            for x in 0..WIDTH as usize {
+                line.push_str(" |");
+                for s in 0..samples {
+                    let at = ((y * WIDTH as usize + x) * samples + s) * unit;
+                    line.push(' ');
+                    line.push_str(&printed(&bytes[at..at + unit]));
+                }
+            }
+            line
+        })
+        .collect()
+}
+
+/// Bytes from hex.
+fn hex(text: &str) -> Vec<u8> {
+    (0..text.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&text[at..at + 2], 16).unwrap())
+        .collect()
+}
+
+/// The first 16 hex digits of the SHA-256 of `lines`, joined by newlines.
+fn digest(lines: &[String]) -> String {
+    let sum = Sha256::digest(lines.join("\n").as_bytes());
+    sum.iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
+/// A 2D multisample view of `texture`'s `slice` in `pf`, or `texture` itself.
+fn slice_of(texture: &Texture, pf: PixelFormat, slice: u64, array: bool) -> Texture {
+    if !array && pf == texture.pixel_format() {
+        return texture.clone();
+    }
+    let kind = if array {
+        TextureType::Type2DMultisample
+    } else {
+        texture.texture_type()
+    };
+    texture
+        .new_texture_view_with_levels_slices(pf, kind, 0..1, slice..slice + 1)
+        .unwrap()
+}
+
+/// Run `case` on `lane`: the probe's lines of every slice's samples after the fill.
+fn run(lane: &Lane, case: &Case) -> Vec<String> {
+    let &(name, raw, samples, slices, slice, origin, size, fill, _) = case;
+    let pf = PixelFormat::try_from(raw).unwrap();
+    let device = &lane.device;
+    let array = slices > 0;
+    let mut descriptor = TextureDescriptor::texture_2d(pf, WIDTH.into(), HEIGHT.into(), false);
+    descriptor.texture_type = if array {
+        TextureType::Type2DMultisampleArray
+    } else {
+        TextureType::Type2DMultisample
+    };
+    descriptor.array_length = slices.max(1);
+    descriptor.sample_count = samples;
+    descriptor.usage =
+        TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ | TextureUsage::PIXEL_FORMAT_VIEW;
+    descriptor.resource_options = ResourceOptions::private();
+    let texture = device.new_texture(&descriptor).unwrap();
+    let depth = matches!(
+        pf,
+        PixelFormat::Depth32Float | PixelFormat::Depth32FloatStencil8
+    );
+    let stencil = matches!(
+        pf,
+        PixelFormat::Stencil8 | PixelFormat::Depth32FloatStencil8
+    );
+    let command_buffer = lane.queue.command_buffer().unwrap();
+    for layer in 0..slices.max(1) {
+        let mut pass = RenderPassDescriptor::new();
+        if depth {
+            pass.depth_attachment.texture = Some(texture.clone());
+            pass.depth_attachment.slice = layer;
+            pass.depth_attachment.load_action = LoadAction::Clear;
+            pass.depth_attachment.clear_depth = 0.25;
+            pass.depth_attachment.store_action = StoreAction::Store;
+        }
+        if stencil {
+            pass.stencil_attachment.texture = Some(texture.clone());
+            pass.stencil_attachment.slice = layer;
+            pass.stencil_attachment.load_action = LoadAction::Clear;
+            pass.stencil_attachment.clear_stencil = 0x5a;
+            pass.stencil_attachment.store_action = StoreAction::Store;
+        }
+        if !depth && !stencil {
+            let color = &mut pass.color_attachments[0];
+            color.texture = Some(texture.clone());
+            color.slice = layer;
+            color.load_action = LoadAction::Clear;
+            color.clear_color = ClearColor::new(0.25, 0.5, 0.75, 1.0);
+            color.store_action = StoreAction::Store;
+        }
+        let encoder = command_buffer.render_command_encoder(&pass).unwrap();
+        encoder.end_encoding().unwrap();
+    }
+    let mut blit = command_buffer.blit_command_encoder().unwrap();
+    let region = Region::new_3d(origin[0], origin[1], origin[2], size[0], size[1], size[2]);
+    match fill {
+        Fill::Bytes(pattern) => blit.fill_texture(&texture, 0, slice, region, &hex(pattern)),
+        Fill::Color([r, g, b, a]) => blit.fill_texture_color(
+            &texture,
+            0,
+            slice,
+            region,
+            ClearColor::new(r, g, b, a),
+            None,
+        ),
+    }
+    .unwrap_or_else(|error| panic!("{name}: fill_texture: {error}"));
+    blit.end_encoding().unwrap();
+    let (kernel, view, read, unit) = reading(pf);
+    let extent = [WIDTH, HEIGHT];
+    let read_slice = |pf: PixelFormat, kernel, read, layer| {
+        let source = slice_of(&texture, pf, layer, array);
+        encode_through(
+            device,
+            &command_buffer,
+            &source,
+            kernel,
+            read,
+            extent,
+            samples as u32,
+        )
+        .unwrap()
+    };
+    let readbacks: Vec<_> = (0..slices.max(1))
+        .map(|layer| {
+            let color = read_slice(view.unwrap_or(pf), kernel, read, layer);
+            let stencil = (pf == PixelFormat::Depth32FloatStencil8).then(|| {
+                read_slice(
+                    PixelFormat::X32Stencil8,
+                    "rt6_read_stencil",
+                    SampleRead::Stencil,
+                    layer,
+                )
+            });
+            (color, stencil)
+        })
+        .collect();
+    command_buffer.commit().unwrap();
+    command_buffer.wait_until_completed_for(WAIT).unwrap();
+    assert_eq!(
+        command_buffer.status(),
+        CommandBufferStatus::Completed,
+        "{name}"
+    );
+    let mut out = Vec::new();
+    let mut stencils = Vec::new();
+    for (layer, (color, stencil)) in (0..).zip(&readbacks) {
+        out.extend(lines(
+            "after ",
+            layer,
+            &color.bytes().unwrap(),
+            samples as usize,
+            unit,
+        ));
+        if let Some(stencil) = stencil {
+            // `Depth32Float_Stencil8`'s stencil, printed as a word.
+            let words: Vec<u8> = stencil
+                .bytes()
+                .unwrap()
+                .iter()
+                .flat_map(|&s| u32::from(s).to_le_bytes())
+                .collect();
+            stencils.extend(lines("afterS ", layer, &words, samples as usize, 4));
+        }
+    }
+    out.extend(stencils);
+    out
+}
+
+/// Every case's samples are Metal's, but a depth whose drawn copy announced (once a device, at
+/// the first depth fill) that it changes values out of `[0, 1]`.
+#[test]
+fn multisample_fills_write_metal_s_samples() {
+    let (messages, _cache, lane) = lane();
+    let name = lane.device.name().to_owned();
+    let mut wrong = Vec::new();
+    let mut drawn = false;
+    for case in &CASES {
+        let lines = run(&lane, case);
+        let got = digest(&lines);
+        drawn |= messages
+            .take_notices()
+            .iter()
+            .filter_map(|m| m.degradation.as_ref())
+            .any(|n| n.degradation == Degradation::DrawnDepthCopy);
+        let (case_name, metal) = (case.0, case.8);
+        if got == metal {
+            continue;
+        }
+        if drawn && case_name == "d32-wide-4" {
+            println!(
+                "SAMPLE-FILLS-DRAWN {name}: {case_name}: the drawn depth copy announced its \
+                 changes: {}",
+                lines[1]
+            );
+            continue;
+        }
+        wrong.push(format!("{case_name}: {got}, Metal's {metal}"));
+    }
+    for line in &wrong {
+        println!("SAMPLE-FILLS-DIFFERS {name}: {line}");
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} cases differ from Metal's",
+        wrong.len()
+    );
+    quiet(lane, &messages);
+}

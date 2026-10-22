@@ -695,6 +695,8 @@ mod same_texture_strips;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod sample_copies;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod sample_fills;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod sample_positions;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod separate_samples;

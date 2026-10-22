@@ -23,6 +23,7 @@ mod binding_view;
 mod blit;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod blit_cover;
+mod blit_fill;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod blit_holds;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]

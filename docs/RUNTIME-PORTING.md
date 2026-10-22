@@ -99,8 +99,8 @@ narrow refusal that the call's rustdoc describes.
 | `EndEncoding` | `endEncoding` | `BlitCommandEncoder::end_encoding` |
 | `FillBuffer` | `fillBuffer:range:value:` | `BlitCommandEncoder::fill_buffer` |
 | `FillBufferPattern4` | `fillBuffer:range:pattern4:` (SPI) | `BlitCommandEncoder::fill_buffer_pattern4` |
-| `FillTexture` | `fillTexture:level:slice:region:bytes:length:` (SPI) | `BlitCommandEncoder::fill_texture`: every texture type but multisample ones (`AppleOnly::FillUnmeasured`), placed as Metal places it, every format *(partial)* |
-| `FillTextureColor` | `fillTexture:level:slice:region:color:pixelFormat:` (SPI), and `...color:` | `BlitCommandEncoder::fill_texture_color`, packed as Metal's fills pack; a color packed in a format Metal packs none in fills the command buffer's last packed texel (announced, `unpacked-fill-color`); a multisample texture is refused `AppleOnly::FillUnmeasured` *(partial)* |
+| `FillTexture` | `fillTexture:level:slice:region:bytes:length:` (SPI) | `BlitCommandEncoder::fill_texture`: every texture type, placed as Metal places it, every format; a multisample texture's samples each take their own bytes of the pattern, as Metal's do *(partial)* |
+| `FillTextureColor` | `fillTexture:level:slice:region:color:pixelFormat:` (SPI), and `...color:` | `BlitCommandEncoder::fill_texture_color`, packed as Metal's fills pack; a color packed in a format Metal packs none in fills the command buffer's last packed texel (announced, `unpacked-fill-color`) *(partial)* |
 | `GenerateMipmaps` | `generateMipmapsForTexture:` | `BlitCommandEncoder::generate_mipmaps` *(partial)* |
 | `InvalidateCompressedTexture` | `invalidateCompressedTexture:` (SPI) | `BlitCommandEncoder::invalidate_compressed_texture`: a no-op (Vulkan shows no compression) |
 | `InvalidateCompressedTextureSlice` | `invalidateCompressedTexture:slice:level:` (SPI) | `BlitCommandEncoder::invalidate_compressed_texture_slice`: a no-op |
