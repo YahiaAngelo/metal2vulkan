@@ -118,10 +118,11 @@
 //! - **Depth and stencil images apart**. On a driver that lays depth and stencil images apart from
 //!   the memory they are bound to ([`DriverFact::DepthStencilImagesLieApart`]: MoltenVK, measured),
 //!   a heap's single-sample depth or stencil texture of a format whose layout is measured
-//!   (`Depth16Unorm`, `Depth32Float`, `Stencil8`) is a shadow of its elements in Metal's tiles in
-//!   the heap's bytes (`AliasRoute::Tiled`, `heap_tiled.rs`), at Metal's size and alignment: a
-//!   Metal probe on the M3 Max under macOS 27.0.1 found every texel of such textures with
-//!   `allowGPUOptimizedContents` off where the tiles place it (37 x 5 to 300 x 200), and Metal's
+//!   (`Depth16Unorm`, `Depth32Float`, `Stencil8`, and `Depth32Float_Stencil8` in two planes) is a
+//!   shadow of its elements in Metal's tiles in the heap's bytes (`AliasRoute::Tiled`,
+//!   `heap_tiled.rs`), at Metal's size and alignment: a Metal probe on the M3 Max under macOS
+//!   27.0.1 found every texel of such textures with `allowGPUOptimizedContents` off where the
+//!   tiles place it (37 x 5 to 300 x 200), and Metal's
 //!   compressed bytes with it on no layout of the texels, which the shadow holds in its
 //!   uncompressed tiles, announced `heap-texture-lossless-layout` per texture. So is one whose
 //!   image the heap's memory takes none of, as below, and one whose image the driver keeps
@@ -164,7 +165,7 @@
 use super::first_move::FirstMove;
 use super::heap_tiled::{
     metal_compresses_layout, metal_heap_layout, modelled_size, shadow_tiles, HeapLayout,
-    HeapTiledCopies, TiledLayout, Untiled, UNMEASURED_FORMAT,
+    HeapTiledCopies, TiledTexture, Untiled, UNMEASURED_FORMAT,
 };
 use super::heap_two_planes::{HeapPlaneCopies, TwoPlaneHeapLayout};
 use super::stand_in::StandIn;
@@ -340,7 +341,7 @@ impl HeapShadow {
     /// image at its first use and back at its end (`shadow.rs`), so `replaceRegion` and
     /// `getBytes` reach them, laid out as [`heap_plane_layout`] says, a row of blocks a piece;
     /// or, for a texture Metal tiles there (`ShadowTarget::Tiled`), as its tiles lay them out
-    /// (`TiledLayout::element`), an element a piece.
+    /// (`TiledLayout::element`, the part of the region's aspect), an element a piece.
     fn pieces(
         &self,
         plan: &ImagePlan,
@@ -350,7 +351,9 @@ impl HeapShadow {
     ) -> Result<(), Error> {
         let [x, y, z] = region.origin.map(u64::from);
         if let Some(ShadowTarget::Tiled { tiles, .. }) = self.copies.target() {
-            let tiled = &tiles.layout;
+            let part = (tiles.tiles.part(region.aspect))
+                .ok_or_else(|| internal("a tiled heap texture has no part of a copy's aspect"))?;
+            let tiled = &part.layout;
             let level = region.level as usize;
             let depth = tiled
                 .levels
@@ -363,7 +366,7 @@ impl HeapShadow {
             for image in 0..host.images {
                 for row in 0..host.rows {
                     for column in 0..across {
-                        let at = tiled.element(base + image, level, x + column, y + row);
+                        let at = part.at + tiled.element(base + image, level, x + column, y + row);
                         let packed = (image * host.rows + row) * host.row_bytes + column * unit;
                         each(
                             (self.place.offset + at) as usize,
@@ -2244,7 +2247,7 @@ impl Device {
         &self,
         call: &'static str,
         p: &HeapPlan,
-        tiled: &TiledLayout,
+        tiled: &TiledTexture,
         descriptor: &TextureDescriptor,
     ) -> Result<Option<HeapImage>, Error> {
         let facts = self
@@ -2266,7 +2269,7 @@ impl Device {
     /// Whether a shadow of Metal's tiles `tiled` serves an image of `plan` whose texture takes
     /// `size` bytes of its heap: an image of one sample that takes copies, whose tiles fit those
     /// bytes, and whose moves fit the device (`HeapTiledCopies::fit`).
-    fn tiles_serve(&self, plan: &ImagePlan, tiled: &TiledLayout, size: u64) -> bool {
+    fn tiles_serve(&self, plan: &ImagePlan, tiled: &TiledTexture, size: u64) -> bool {
         let copies = ImageUsageFlags::TRANSFER_SRC | ImageUsageFlags::TRANSFER_DST;
         let (planes, tight_len) = heap_plane_layout(
             plan.format,
@@ -2751,7 +2754,6 @@ impl Device {
                     self.shared().counts.heap_texture_tiled();
                 }
                 HeapLayout::Uncompressed(_) => {
-                    self.shared().counts.heap_texture_tiled();
                     self.degrade_heap_layout(Untiled::LOSSLESS, texture.object_id());
                 }
                 HeapLayout::Untiled(untiled) => {
@@ -2974,7 +2976,7 @@ impl Device {
         bytes: &Buffer,
         image: HeapImage,
         layout: &TextureLayout,
-        tiled: TiledLayout,
+        tiled: TiledTexture,
         (place, options, descriptor): (HeapPlace, ResourceOptions, &TextureDescriptor),
     ) -> Result<Image, Error> {
         let plan = image.plan;

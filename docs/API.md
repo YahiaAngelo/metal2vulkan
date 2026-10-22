@@ -1947,9 +1947,11 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   released a map of one or more layers. Cost: the draws write nothing, where Metal draws rows of the
   pass (a 64-pixel map's rows 0 to 15, at the positions of a pass with no map).
 - `metal2vulkan-degrade-heap-texture-lossless-layout` (precision). `HeapTextureLosslessLayout`: A
-  texture made in a heap over host pages (`new_heap_with_bytes_no_copy`) that Metal keeps losslessly
-  compressed: its bytes on Metal are no layout of its texels, so the runtime lays them out as its
-  own. Cost: the texture's reads, writes and copies are Metal's, but its bytes in the heap are not
+  texture made in a heap over host pages (`new_heap_with_bytes_no_copy`), or a depth or stencil
+  texture made in any heap as a shadow of Metal's tiles (on a driver that lays such images apart from
+  their memory or keeps them GPU-optimized: MoltenVK), that Metal keeps losslessly compressed: its
+  bytes on Metal are no layout of its texels, so the runtime lays them out as its own, its
+  uncompressed tiles where it tiles them. Cost: the texture's reads, writes and copies are Metal's, but its bytes in the heap are not
   Metal's compressed bytes (a single-sample texture's texels in the runtime's layout; a multisample
   texture's image lies in memory of its own, the heap's bytes keeping what they held): a buffer or
   texture over them reads and writes other bytes than Metal's would.
@@ -1965,7 +1967,7 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   on Metal.
 - `metal2vulkan-degrade-heap-texture-untiled-layout` (precision). `HeapTextureUntiledLayout`: A
   texture made in a heap over host pages that Metal lays out tiled where the runtime does not: a
-  layout not measured (a two-aspect depth and stencil format), an image that holds
+  layout not measured (an `X32_Stencil8` texture's), an image that holds
   other bytes than Metal's elements, or moves past the device's limits. Cost: the texture's reads,
   writes and copies are Metal's, but its texels lie in the heap's bytes in the runtime's layout,
   where Metal tiles them: a buffer or texture over them meets the texels at other bytes than on

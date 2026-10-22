@@ -2178,8 +2178,7 @@ impl Counters {
         (self.heap_slot_writes_deferred).fetch_add(1, Ordering::Relaxed);
     }
 
-    /// A texture in a heap over host pages was made tiled as Metal lays it out
-    /// (`texture/heap_tiled.rs`).
+    /// A heap's texture was made tiled as Metal lays it out (`texture/heap_tiled.rs`).
     pub(crate) fn heap_texture_tiled(&self) {
         self.heap_textures_tiled.fetch_add(1, Ordering::Relaxed);
     }
@@ -2608,8 +2607,10 @@ pub struct WorkCounts {
     /// bytes meet (`host_aliases.rs`): a use of a range met by no more ranges than the classes of
     /// length that lookup visits reads those its range keeps instead.
     pub host_range_lookups: u64,
-    /// Textures made in heaps over host pages laid out as Metal tiles them, each a shadow of its
-    /// elements in the heap's bytes (`texture/heap_tiled.rs`).
+    /// Textures made in heaps laid out as Metal tiles them, each a shadow of its elements in the
+    /// heap's bytes (`texture/heap_tiled.rs`): in a heap over host pages, and a depth or stencil
+    /// texture in any heap on a driver that lays such images apart from their memory or keeps
+    /// them GPU-optimized (MoltenVK).
     pub heap_textures_tiled: u64,
     /// The images heap textures' plans made only to ask their memory requirements, destroyed at
     /// once: none for a plan and tiling asked before on a device that enables `maintenance4`,

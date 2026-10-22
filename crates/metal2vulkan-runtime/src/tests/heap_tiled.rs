@@ -8,12 +8,12 @@
 use crate::metal_level::MetalLevel;
 use crate::texture::heap_tiled::{
     fresh_pattern, level_bytes, lossless_answer, metal_compresses, metal_heap_layout,
-    pattern_levels, sample_grid, BlockPlacement, Elements, FreshDepth, FreshPattern, GpuRows,
-    HeapLayout, TiledLayout, Untiled,
+    pattern_levels, sample_grid, shadow_tiles, BlockPlacement, Elements, FreshDepth, FreshPattern,
+    GpuRows, HeapLayout, TiledLayout, Untiled,
 };
 use crate::texture_descriptor::TextureLayout;
 use metal2vulkan::metal::{PixelFormat, TextureType as T, TextureUsage};
-use metal2vulkan::vk::Format;
+use metal2vulkan::vk::{Format, ImageAspectFlags};
 
 /// One L row: its id, element bytes, block, type, level-0 extent, levels (0 the full chain) and
 /// array length, Metal's size, alignment and chain stride (an array's, cube's or 3D texture's),
@@ -822,16 +822,43 @@ fn heap_textures_are_tiled_where_metal_s_layout_is_measured() {
         panic!("a multisample texture is tiled");
     };
     assert_eq!(untiled.kind, D::HeapTextureUntiledLayout);
-    // Two-aspect: its depth plane at 16 KiB, then its stencil plane, untiled.
+    // Two-aspect: its depth plane's tiles at 0, then its stencil plane's at 16 KiB; kept
+    // compressed, its depth plane is, and a shadow's stencil plane lies past the depth plane's
+    // compressed answer (`shadow_tiles`).
     let ds = texture(
         T::Type2D,
         PixelFormat::Depth32FloatStencil8,
         [64, 64, 1],
         (1, 1, 1),
     );
-    let two = metal_heap_layout(&ds, write, false, Format::D32_SFLOAT_S8_UINT, M4);
+    let format = Format::D32_SFLOAT_S8_UINT;
+    let two = metal_heap_layout(&ds, write, false, format, M4);
     assert_eq!(two.answer.map(|a| (a.size, a.align)), Some((0x5000, 128)));
-    assert!(matches!(two.layout, HeapLayout::Untiled(_)));
+    let HeapLayout::Tiled(tiles) = &two.layout else {
+        panic!("a two-aspect texture is untiled");
+    };
+    let parts: Vec<_> = (tiles.parts.iter())
+        .map(|part| (part.aspect, part.at, part.layout.unit, part.layout.size))
+        .collect();
+    let (depth, stencil) = (
+        Some(ImageAspectFlags::DEPTH),
+        Some(ImageAspectFlags::STENCIL),
+    );
+    assert_eq!(parts, [(depth, 0, 4, 0x4000), (stencil, 0x4000, 1, 0x1000)]);
+    let kept = metal_heap_layout(&ds, write, true, format, M4);
+    assert_eq!(kept.answer.map(|a| (a.size, a.align)), Some((0x9080, 128)));
+    let HeapLayout::Untiled(untiled) = kept.layout else {
+        panic!("a compressed two-aspect texture is tiled");
+    };
+    assert_eq!(untiled.kind, D::HeapTextureLosslessLayout);
+    let shadow = shadow_tiles(&ds, format, M4, &kept.layout);
+    let Some(HeapLayout::Uncompressed(tiles)) = shadow else {
+        panic!("a compressed two-aspect texture has no shadow's tiles");
+    };
+    let ats: Vec<_> = tiles.parts.iter().map(|part| part.at).collect();
+    assert_eq!((ats, tiles.size), (vec![0, 0x8000], 0x9000));
+    let other = metal_heap_layout(&ds, write, false, Format::D32_SFLOAT, M4);
+    assert!(matches!(other.layout, HeapLayout::Untiled(_)));
     // A depth texture without GPU-optimized contents: tiled.
     let depth = texture(T::Type2D, PixelFormat::Depth32Float, [64, 64, 1], (1, 1, 1));
     let tiled_depth = metal_heap_layout(&depth, read, false, Format::D32_SFLOAT, M4);

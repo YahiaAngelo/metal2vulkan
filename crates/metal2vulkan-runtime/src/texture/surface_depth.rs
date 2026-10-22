@@ -35,7 +35,7 @@ use super::super::tracker::UseRange;
 use super::super::values::ResourceOptions;
 use super::super::view_plan::ViewRecord;
 use super::heap::{heap_plane_layout, heap_planes};
-use super::heap_tiled::{Elements, HeapTiledCopies, TiledLayout};
+use super::heap_tiled::{Elements, HeapTiledCopies, TiledLayout, TiledTexture};
 use super::{image_error, IdUse, Image, Storage, Texture};
 use ash::vk;
 use metal2vulkan::metal::format::aspects;
@@ -126,6 +126,8 @@ impl Texture {
                 .into_iter()
                 .filter(|region| region.image_subresource.aspect_mask == aspect)
                 .collect();
+            // The plane's aspect alone: one part, of the planes given.
+            let tiled = TiledTexture::one(tiled);
             if !HeapTiledCopies::fit(device, &tiled, &planes, tight_len) {
                 return Err(gap());
             }

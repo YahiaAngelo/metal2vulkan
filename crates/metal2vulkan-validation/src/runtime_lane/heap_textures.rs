@@ -1716,15 +1716,19 @@ fn heap_depth_textures_keep_their_bytes_with_their_twins() {
 /// (`DriverFact::DepthStencilImagesLieApart`, `DriverFact::DepthStencilImagesStayGpuOptimized`:
 /// MoltenVK): a Metal probe on the M3 Max under macOS 27.0.1 found every texel of `Depth16Unorm`,
 /// `Depth32Float` and `Stencil8` textures of 16x16, 37x5, 64x64, 100x70 and 300x200 with
-/// `allowGPUOptimizedContents` off there, uploaded by a blit naming each texel. Each such texture
-/// here, in a `Shared` placement heap, uploaded so, lies in a buffer over its bytes where the tiles
-/// place it, and bytes a blit writes there through the buffer read back through a blit as those
-/// texels. With the property on, a 64x64 `Depth32Float` texture (which Metal keeps losslessly
-/// compressed, 16512 bytes) holds its uncompressed tiles there, announced
+/// `allowGPUOptimizedContents` off there, uploaded by a blit naming each texel; and each of a
+/// `Depth32Float_Stencil8` texture's in two planes, its depth as a `Depth32Float` texture's at its
+/// first byte and its stencil as a `Stencil8` texture's from the `Depth32Float` answer rounded up
+/// to 16 KiB (one level and mipmapped, one slice and arrays). Each such texture here, in a
+/// `Shared` placement heap, each aspect uploaded so, lies in a buffer over its bytes where the
+/// tiles place it, and bytes a blit writes there through the buffer read back through a blit as
+/// those texels. With the property on, a 64x64 `Depth32Float` texture (which Metal keeps
+/// losslessly compressed, 16512 bytes) holds its uncompressed tiles there, announced
 /// `heap-texture-lossless-layout` once. Elsewhere `HEAPTEX tiles` lines print whether they lie so.
 #[test]
 fn heap_depth_textures_keep_their_texels_in_metal_s_tiles() {
     use super::heap_layouts::tiled_offset;
+    use BlitOption::{DepthFromDepthStencil as DEPTH, None as WHOLE, StencilFromDepthStencil};
     let messages = Messages::default();
     let cache = ScratchCache::new().unwrap();
     let tiled = {
@@ -1734,19 +1738,90 @@ fn heap_depth_textures_keep_their_texels_in_metal_s_tiles() {
             || facts.contains(&DriverFact::DepthStencilImagesStayGpuOptimized);
         let queue = device.new_command_queue().unwrap();
         let options = tracked(StorageMode::Shared);
-        // Each shape's format, element bytes, extent, `allowGPUOptimizedContents` and Metal's size
-        // (every alignment 128), measured.
-        let shapes = [
-            (PixelFormat::Depth16Unorm, 2, [37, 5], false, 0x400),
-            (PixelFormat::Depth16Unorm, 2, [100, 70], false, 0x8000),
-            (PixelFormat::Depth32Float, 4, [37, 5], false, 0x800),
-            (PixelFormat::Depth32Float, 4, [64, 64], false, 0x4000),
-            (PixelFormat::Depth32Float, 4, [100, 70], false, 0x10000),
-            (PixelFormat::Stencil8, 1, [37, 5], false, 0x200),
-            (PixelFormat::Stencil8, 1, [100, 70], false, 0x4000),
-            (PixelFormat::Depth32Float, 4, [64, 64], true, 0x4080),
+        let ds = PixelFormat::Depth32FloatStencil8;
+        // Each shape's format, extent, `allowGPUOptimizedContents` and Metal's size (every
+        // alignment 128), measured, and its aspects: each one's element bytes, blit option and
+        // first byte from the texture's.
+        let shapes: [(PixelFormat, [u64; 2], bool, u64, &[(u64, BlitOption, u64)]); 11] = [
+            (
+                PixelFormat::Depth16Unorm,
+                [37, 5],
+                false,
+                0x400,
+                &[(2, WHOLE, 0)],
+            ),
+            (
+                PixelFormat::Depth16Unorm,
+                [100, 70],
+                false,
+                0x8000,
+                &[(2, WHOLE, 0)],
+            ),
+            (
+                PixelFormat::Depth32Float,
+                [37, 5],
+                false,
+                0x800,
+                &[(4, WHOLE, 0)],
+            ),
+            (
+                PixelFormat::Depth32Float,
+                [64, 64],
+                false,
+                0x4000,
+                &[(4, WHOLE, 0)],
+            ),
+            (
+                PixelFormat::Depth32Float,
+                [100, 70],
+                false,
+                0x10000,
+                &[(4, WHOLE, 0)],
+            ),
+            (
+                PixelFormat::Stencil8,
+                [37, 5],
+                false,
+                0x200,
+                &[(1, WHOLE, 0)],
+            ),
+            (
+                PixelFormat::Stencil8,
+                [100, 70],
+                false,
+                0x4000,
+                &[(1, WHOLE, 0)],
+            ),
+            (
+                PixelFormat::Depth32Float,
+                [64, 64],
+                true,
+                0x4080,
+                &[(4, WHOLE, 0)],
+            ),
+            (
+                ds,
+                [37, 5],
+                false,
+                0x4200,
+                &[(4, DEPTH, 0), (1, StencilFromDepthStencil, 0x4000)],
+            ),
+            (
+                ds,
+                [64, 64],
+                false,
+                0x5000,
+                &[(4, DEPTH, 0), (1, StencilFromDepthStencil, 0x4000)],
+            ),
+            (
+                ds,
+                [100, 70],
+                false,
+                0x14000,
+                &[(4, DEPTH, 0), (1, StencilFromDepthStencil, 0x10000)],
+            ),
         ];
-        for (format, unit, [w, h], allow, metal) in shapes {
+        for (format, [w, h], allow, metal, aspects) in shapes {
             let what = format!("{format:?} {w}x{h} allow {allow}");
             let mut descriptor = TextureDescriptor::texture_2d(format, w, h, false);
             descriptor.resource_options = options;
@@ -1756,87 +1831,92 @@ fn heap_depth_textures_keep_their_texels_in_metal_s_tiles() {
             let heap = heap(device, HeapType::Placement, 1 << 20, options);
             let texture = heap.new_texture_at_offset(&descriptor, 0).unwrap();
             let over = heap.new_buffer_at_offset(answer.size, options, 0).unwrap();
-            // Texel `i`'s element, naming it: a depth of (i + 1) / 2^23 (exact), a 16-bit unorm
-            // of i + 1, a stencil byte of i + 1.
-            let element = |i: u64| -> Vec<u8> {
-                match unit {
-                    4 => ((i + 1) as f32 / (1u32 << 23) as f32)
-                        .to_le_bytes()
-                        .to_vec(),
-                    2 => ((i + 1) as u16).to_le_bytes().to_vec(),
-                    _ => vec![(i + 1) as u8],
-                }
-            };
             let count = w * h;
-            let named: Vec<u8> = (0..count).flat_map(element).collect();
-            let row = w * unit;
-            let blit_in = |source: &Buffer| {
+            let (mut off, mut read_off) = (0, 0);
+            for &(unit, option, first) in aspects {
+                // Texel `i`'s element, naming it: a depth of (i + 1) / 2^23 (exact), a 16-bit
+                // unorm of i + 1, a stencil byte of i + 1.
+                let element = |i: u64| -> Vec<u8> {
+                    match unit {
+                        4 => ((i + 1) as f32 / (1u32 << 23) as f32)
+                            .to_le_bytes()
+                            .to_vec(),
+                        2 => ((i + 1) as u16).to_le_bytes().to_vec(),
+                        _ => vec![(i + 1) as u8],
+                    }
+                };
+                let named: Vec<u8> = (0..count).flat_map(element).collect();
+                let row = w * unit;
+                let blit = |into: bool, buffer: &Buffer| {
+                    let command_buffer = queue.command_buffer().unwrap();
+                    let mut blit = command_buffer.blit_command_encoder().unwrap();
+                    let (origin, size) = (Origin::new(0, 0, 0), Size::new(w, h, 1));
+                    match into {
+                        true => blit.copy_from_buffer_to_texture(
+                            buffer,
+                            0,
+                            row,
+                            row * h,
+                            size,
+                            &texture,
+                            0,
+                            0,
+                            origin,
+                            option,
+                        ),
+                        false => blit.copy_from_texture_to_buffer(
+                            &texture,
+                            0,
+                            0,
+                            origin,
+                            size,
+                            buffer,
+                            0,
+                            row,
+                            row * h,
+                            option,
+                        ),
+                    }
+                    .unwrap();
+                    blit.end_encoding().unwrap();
+                    run(&command_buffer);
+                };
+                gpu_fill(&queue, &over, 0..answer.size, 0xee);
+                blit(true, &staged(device, &named));
+                let bytes = gpu_read(&queue, &over, 0..answer.size);
+                let at = |i: u64| (first + tiled_offset(unit, [w, h], i % w, i / w)) as usize;
+                off += (0..count)
+                    .filter(|&i| bytes.get(at(i)..at(i) + unit as usize) != Some(&element(i)[..]))
+                    .count();
+                // Bytes written through the buffer where the tiles place each texel, naming it
+                // backwards, read back through a blit.
+                let mut backwards = bytes;
+                for i in 0..count {
+                    let at = at(i);
+                    if let Some(bytes) = backwards.get_mut(at..at + unit as usize) {
+                        bytes.copy_from_slice(&element(count - 1 - i));
+                    }
+                }
+                let source = staged(device, &backwards);
                 let command_buffer = queue.command_buffer().unwrap();
-                let mut blit = command_buffer.blit_command_encoder().unwrap();
-                blit.copy_from_buffer_to_texture(
-                    source,
-                    0,
-                    row,
-                    row * h,
-                    Size::new(w, h, 1),
-                    &texture,
-                    0,
-                    0,
-                    Origin::new(0, 0, 0),
-                    BlitOption::None,
-                )
-                .unwrap();
-                blit.end_encoding().unwrap();
+                let mut copy = command_buffer.blit_command_encoder().unwrap();
+                copy.copy_from_buffer_to_buffer(&source, 0, &over, 0, answer.size)
+                    .unwrap();
+                copy.end_encoding().unwrap();
                 run(&command_buffer);
-            };
-            gpu_fill(&queue, &over, 0..answer.size, 0xee);
-            blit_in(&staged(device, &named));
-            let bytes = gpu_read(&queue, &over, 0..answer.size);
-            let at = |i: u64| tiled_offset(unit, [w, h], i % w, i / w) as usize;
-            let off = (0..count)
-                .filter(|&i| bytes[at(i)..at(i) + unit as usize] != element(i)[..])
-                .count();
-            // Bytes written through the buffer where the tiles place each texel, naming it
-            // backwards, read back through a blit.
-            let mut backwards = vec![0u8; answer.size as usize];
-            for i in 0..count {
-                let at = at(i);
-                backwards[at..at + unit as usize].copy_from_slice(&element(count - 1 - i));
+                let read = staged(device, &vec![0; (row * h) as usize]);
+                blit(false, &read);
+                let read = read_buffer(&read, 0, row * h).unwrap();
+                read_off += (0..count)
+                    .filter(|&i| {
+                        let at = (i * unit) as usize;
+                        read[at..at + unit as usize] != element(count - 1 - i)[..]
+                    })
+                    .count();
             }
-            let staged_bytes = staged(device, &backwards);
-            let command_buffer = queue.command_buffer().unwrap();
-            let mut blit = command_buffer.blit_command_encoder().unwrap();
-            blit.copy_from_buffer_to_buffer(&staged_bytes, 0, &over, 0, answer.size)
-                .unwrap();
-            blit.end_encoding().unwrap();
-            run(&command_buffer);
-            let read = staged(device, &vec![0; (row * h) as usize]);
-            let command_buffer = queue.command_buffer().unwrap();
-            let mut blit = command_buffer.blit_command_encoder().unwrap();
-            blit.copy_from_texture_to_buffer(
-                &texture,
-                0,
-                0,
-                Origin::new(0, 0, 0),
-                Size::new(w, h, 1),
-                &read,
-                0,
-                row,
-                row * h,
-                BlitOption::None,
-            )
-            .unwrap();
-            blit.end_encoding().unwrap();
-            run(&command_buffer);
-            let read = read_buffer(&read, 0, row * h).unwrap();
-            let read_off = (0..count)
-                .filter(|&i| {
-                    let at = (i * unit) as usize;
-                    read[at..at + unit as usize] != element(count - 1 - i)[..]
-                })
-                .count();
+            let texels = count * aspects.len() as u64;
             eprintln!(
-                "HEAPTEX tiles {what}: size {} align {}, Metal's {metal} 128; {off} of {count} \
+                "HEAPTEX tiles {what}: size {} align {}, Metal's {metal} 128; {off} of {texels} \
                  texels off Metal's tiles, {read_off} read otherwise from them",
                 answer.size, answer.align
             );
@@ -1904,10 +1984,11 @@ fn aspect_texels(
 /// under a buffer over its answered bytes filled with zeros, cleared by a pass (depth 0.25,
 /// stencil 0x5a) that stores them, then the buffer filled with 0x3e. Where the device's driver
 /// lays depth and stencil images apart from their memory (`DriverFact::DepthStencilImagesLieApart`:
-/// MoltenVK), each texture is a shadow of the heap's bytes, in its planes: the pass's clear lands
-/// in the depth plane, from the texture's first byte, and in the stencil plane after it at a
-/// multiple of 4 bytes, and the fill changes every texel of each aspect read back by a blit
-/// (D32_S8's two regions). Elsewhere the texture aliases the heap's memory in the driver's layout,
+/// MoltenVK), each texture is a shadow of the heap's bytes, in Metal's tiles: the pass's clear
+/// lands in the depth plane, from the texture's first byte, and in the stencil plane, from the
+/// texture's first byte or, for `Depth32Float_Stencil8`, from the `Depth32Float` answer rounded up
+/// to 16 KiB, and the fill changes every texel of each aspect read back by a blit (D32_S8's two
+/// regions). Elsewhere the texture aliases the heap's memory in the driver's layout,
 /// which Metal's answer for a pass's clear is not measured against, so `HEAPTEX attach` lines print
 /// the counts only.
 #[test]
@@ -2013,7 +2094,13 @@ fn a_heap_depth_attachment_s_clear_reaches_the_heap_s_bytes() {
                     at = texels * 4;
                 }
                 if stencil {
-                    at = at.next_multiple_of(4);
+                    // The stencil plane past the depth plane's answer, rounded up to 16 KiB.
+                    if depth {
+                        let mut plane = descriptor;
+                        plane.pixel_format = PixelFormat::Depth32Float;
+                        let answer = device.heap_texture_size_and_align(&plane).unwrap();
+                        at = answer.size.next_multiple_of(16 << 10) as usize;
+                    }
                     assert!(
                         bytes[at..at + texels].iter().all(|&t| t == 0x5a),
                         "{what}: the stencil plane does not hold the clear"
