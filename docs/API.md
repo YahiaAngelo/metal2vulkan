@@ -823,8 +823,10 @@ reads no buffer and no `[[primitive_id]]` may instead merge into one draw (`Draw
 two merge passes (`draw_merge_module`) write each command's first vertex in the merged draw, and
 the vertex function, compiled as its merged variant (`VariantKey::merged_draws`), finds its
 command by that prefix and runs the command's vertex, instance and buffers, in the commands'
-order. A kernel that encodes commands writes the records at
-`bind::indirect_commands::records_address` of the buffer's ID, outside every Metal address.
+order. A kernel that encodes commands writes the records that start at
+`bind::indirect_commands::records_address` of the buffer's ID, outside every Metal address, and
+finds them only at their start: records may run past later IDs' starts, and a resident set
+(`bind::ResidentSet`) keeps each records range whole.
 
 ## 7. Caching
 

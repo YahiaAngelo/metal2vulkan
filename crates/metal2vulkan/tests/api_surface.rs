@@ -799,7 +799,6 @@ surface! {
         const RECORDS_ID_LIMIT;
         const THREADGROUP_BUFFER_ARGUMENT_COUNT;
         fn records_address;
-        fn records_span;
     }
     "cache" => metal2vulkan::cache {
         type Hash256;

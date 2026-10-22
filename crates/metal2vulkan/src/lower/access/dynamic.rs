@@ -1521,13 +1521,25 @@ pub(super) fn emit_word(
     word.ok_or_else(|| cx.fail("an object word without a value"))
 }
 
-/// The wide pointer of guest address `guest` (a `u64`): the resident-set search ([`resolve`]).
-pub(super) fn search(
+/// The wide pointer of the resident allocation that starts at guest address `guest` (a `u64`):
+/// the resident-set search ([`resolve`]), its hit kept only at the allocation's start, any other
+/// address a miss, `(0, guest)`. Indirect command buffers' records are searched so: records longer
+/// than the distance between two IDs' starts run past the next IDs' starts
+/// (`indirect_commands::records_address`), and an ID whose own records are not resident then
+/// misses rather than reaching into another's.
+pub(super) fn search_start(
     cx: &mut EmitCx<'_>,
     fb: &mut FunctionBuilder<'_>,
     guest: SValue,
 ) -> BResult<SValue> {
-    resolve(cx, fb, guest)
+    let p = resolve(cx, fb, guest)?;
+    let root = fb.composite_extract(p, &[0])?;
+    let off = fb.composite_extract(p, &[1])?;
+    let zero = k64(fb, 0)?;
+    let at_start = fb.binary(BinOp::IEqual, off, zero)?;
+    let root = fb.select(at_start, root, zero)?;
+    let off = fb.select(at_start, off, guest)?;
+    pair(fb, root, off)
 }
 
 /// The allocation of wide pointer `p` resolved for plain accesses in the function's coherence,

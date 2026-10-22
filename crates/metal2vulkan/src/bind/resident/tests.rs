@@ -222,6 +222,32 @@ fn the_resident_set_is_sorted_disjoint_and_outermost() {
     assert_eq!(resident_set(Vec::new()), Vec::new());
 }
 
+/// Indirect command buffers' records are kept whole however they overlap, one entry a start (the
+/// largest of those at one start), past the Metal allocations, which coalesce as before: the
+/// records of ID 5, 3 GiB long, run past ID 6's start, and ID 6's own stay an entry, so a search
+/// at each ID's start finds that ID's records.
+#[test]
+fn records_are_kept_whole_one_entry_a_start() {
+    use crate::indirect_commands::records_address;
+    let gib = 1u64 << 30;
+    let metal = entry(0x9000, 0x1000, 0x1000);
+    let inner = entry(0x9100, 0x1100, 0x100);
+    let five = entry(0x10_0000_0000, records_address(5), 3 * gib);
+    let six = entry(0x20_0000_0000, records_address(6), 0x1000);
+    let six_again = entry(0x30_0000_0000, records_address(6), 0x100);
+    let seven = entry(0x40_0000_0000, records_address(7), 0x1000);
+    let set = resident_set(vec![seven, six_again, inner, six, five, metal]);
+    assert_eq!(set, vec![metal, five, six, seven]);
+    for id in [5, 6, 7] {
+        let start = records_address(id);
+        let found = set.iter().rposition(|e| e.guest <= start).unwrap();
+        assert_eq!(
+            set[found].guest, start,
+            "ID {id}'s start is its own entry's"
+        );
+    }
+}
+
 /// Each resident entry's extent is the unpadded run its allocations hold from its guest address. A
 /// 60-byte allocation's entry is 64 bytes and its extent 60; an allocation whose padded window a
 /// partially overlapping one continues holds its whole window; the trimmed one's entry holds up to

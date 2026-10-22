@@ -97,53 +97,30 @@ pub const COMMAND_BUFFER_HEADER_BYTES: usize = 16;
 /// The guest address of the records of the indirect command buffer of resource ID 0, the null
 /// one, which no records lie at ([`records_address`]).
 pub const RECORDS_ADDRESS_BASE: u64 = 1 << 63;
-/// How far a resource ID below [`RECORDS_HIGH_ID`] is shifted to give the guest address of its
-/// records past [`RECORDS_ADDRESS_BASE`] ([`records_address`]): each such ID's records have 2^36
-/// bytes (64 GiB) of guest addresses to themselves, more than the records of any indirect command
-/// buffer Metal makes (fewer than 2^24 commands: on an M3 Max, 2^22 compute commands were made and
-/// 2^24 ended the process).
-pub(crate) const RECORDS_ADDRESS_SHIFT: u32 = 36;
-/// The first resource ID of the high range, whose records lie past [`RECORDS_HIGH_BASE`]: the IDs
-/// below it fill `[2^63, 2^63 + 2^62)`.
-pub(crate) const RECORDS_HIGH_ID: u64 = 1 << (62 - RECORDS_ADDRESS_SHIFT);
-/// The guest address the high range's records are placed from, `2^63 + 2^62`.
-pub(crate) const RECORDS_HIGH_BASE: u64 = RECORDS_ADDRESS_BASE | 1 << 62;
-/// How far a resource ID of the high range is shifted past [`RECORDS_HIGH_BASE`]: each such ID's
-/// records have 2^31 bytes (2 GiB) to themselves.
-pub(crate) const RECORDS_HIGH_SHIFT: u32 = 31;
+/// How far an indirect command buffer's resource ID is shifted to give the guest address its
+/// records start at past [`RECORDS_ADDRESS_BASE`] ([`records_address`]): 2^31 bytes from one ID's
+/// start to the next's. Records of more bytes run past the next IDs' starts, which a search for
+/// those IDs' records still tells apart: it finds an ID's records only at their start.
+pub(crate) const RECORDS_ADDRESS_SHIFT: u32 = 31;
 /// The first resource ID whose records [`records_address`] cannot place, 2^31: the IDs of indirect
 /// command buffers run from 1 below it, as Metal's do (on an M3 Max, a reservation of 2^31 - 2
-/// handed out 2^31 - 1 next, and one of 2^31 to 2^32 - 1 never returned).
-pub const RECORDS_ID_LIMIT: u64 = 1 << (62 - RECORDS_HIGH_SHIFT);
+/// handed out 2^31 - 1 next, and one of 2^31 to 2^32 - 1 never returned). The last ID's records
+/// start 2^62 bytes below 2^64, so records of any length a device holds fit after any ID's start.
+pub const RECORDS_ID_LIMIT: u64 = 1 << 31;
 
-/// The guest address of the records of the indirect command buffer whose resource ID is `id`
-/// (below [`RECORDS_ID_LIMIT`]): `2^63 + id * 2^36` for an ID below 2^26, else
-/// `2^63 + 2^62 + id * 2^31`, each ID's records in a range of [`records_span`] bytes of their own.
-/// An argument buffer's command-buffer member holds the ID, as Metal's `gpuResourceID` and
-/// `setIndirectCommandBuffer:atIndex:` give it (small integers from 1, measured on an M3 Max and
-/// an M4, or the ID a reservation leaves next, up to 2^31 - 1 on an M3 Max), and a translated
-/// kernel that encodes through it reaches the records at this address of its resident set. So a
-/// consumer that makes an indirect command buffer with ID `id` makes its record buffer resident at
-/// `records_address(id)`, a range no Metal buffer reaches (each lies below 2^63). The null ID 0
-/// gives an address no records lie at, so an encoder operation through it is contained as a record
-/// buffer outside the resident set is.
+/// The guest address the records of the indirect command buffer whose resource ID is `id` (below
+/// [`RECORDS_ID_LIMIT`]) start at: `2^63 + id * 2^31`. An argument buffer's command-buffer member
+/// holds the ID, as Metal's `gpuResourceID` and `setIndirectCommandBuffer:atIndex:` give it (small
+/// integers from 1, measured on an M3 Max and an M4, or the IDs a reservation leaves next, up to
+/// 2^31 - 1 on an M3 Max), and a translated kernel that encodes through it reaches the records
+/// that start at this address in its resident set, and no other: records of more than 2^31 bytes
+/// run past the next IDs' starts, and the resident set keeps each records range whole
+/// (`ResidentSet`). So a consumer that makes an indirect command buffer with ID `id` makes its
+/// record buffer resident at `records_address(id)`, a range no Metal buffer reaches (each lies
+/// below 2^63). The null ID 0 gives an address no records start at, so an encoder operation
+/// through it is contained as one through an ID whose records are not resident is.
 pub const fn records_address(id: u64) -> u64 {
-    if id < RECORDS_HIGH_ID {
-        RECORDS_ADDRESS_BASE | (id << RECORDS_ADDRESS_SHIFT)
-    } else {
-        RECORDS_HIGH_BASE | (id << RECORDS_HIGH_SHIFT)
-    }
-}
-
-/// The most bytes the records of the indirect command buffer whose resource ID is `id` may take at
-/// [`records_address`] of it: 2^36 for an ID below 2^26, which holds the records of any buffer
-/// Metal makes, and 2^31 for a higher one (at most 955,286 commands of [`COMMAND_BYTES`] past the header).
-pub const fn records_span(id: u64) -> u64 {
-    if id < RECORDS_HIGH_ID {
-        1 << RECORDS_ADDRESS_SHIFT
-    } else {
-        1 << RECORDS_HIGH_SHIFT
-    }
+    RECORDS_ADDRESS_BASE | (id << RECORDS_ADDRESS_SHIFT)
 }
 
 /// The byte offsets the lowering of the encoder operations writes through device addresses

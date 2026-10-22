@@ -115,10 +115,9 @@
 //!   Metal ended the process at the first allocation after a reservation of 2^30 + 5 to 2^31 - 1,
 //!   which the M3 Max, of the same GPU family (Apple9), made and ran: the runtime follows the M3
 //!   Max. A placement of one at [`RECORDS_PLACEMENT_LIMIT`] (16384) or more, past Metal's table
-//!   of them, is refused `Invalid`. A buffer's records lie at its ID's records address, which
-//!   holds the records of any buffer Metal makes below ID 2^26 and 2 GiB of them from it
-//!   (`records_span`): a buffer of more records at such an ID is refused `OutOfMemory` as it is
-//!   made, as one is once every ID below 2^31 is held. Pipeline state IDs, measured to 1,000,000, are refused nowhere. The texture table
+//!   of them, is refused `Invalid`. A buffer's records start at its ID's records address, at any
+//!   length (Metal made and ran 2^22 commands at 2^26 + 6 and 2^23 + 6); a buffer is refused
+//!   `OutOfMemory` only once every ID below 2^31 is held. Pipeline state IDs, measured to 1,000,000, are refused nowhere. The texture table
 //!   reaches every ID a heap array can (`heap_sets.rs`), so a texture Metal numbers past its
 //!   placement limit is reached as any other. A texture's ID indexes every set-1 array its usage
 //!   can bind it through (sampled where it reads, storage where it writes), so an ID past the least
@@ -947,11 +946,8 @@ impl Device {
     /// Metal's process (`Invalid`, `Problem::ResourceId`); an indirect command buffer ID of 2^31
     /// or more, at which Metal's reservation never returns (`Invalid`,
     /// `Problem::ReservationHangs`); and a texture ID no set-1 array of the device can hold
-    /// (`Unsupported`, naming the limit). Plain indirect command buffer IDs
-    /// past a reservation are Metal's, to 2^31 - 1; a buffer at an ID of 2^26 or more whose
-    /// records pass
-    /// [`records_span`](metal2vulkan::bind::indirect_commands::records_span) of it (2 GiB) is
-    /// refused `OutOfMemory` as it is made: its records would have no address.
+    /// (`Unsupported`, naming the limit). Plain indirect command buffer IDs past a reservation
+    /// are Metal's, to 2^31 - 1, each buffer made at any length.
     pub fn reserve_resource_ids(
         &self,
         kind: ResourceIdKind,

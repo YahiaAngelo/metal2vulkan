@@ -7,7 +7,7 @@ use crate::address::{
 };
 use crate::error::Error;
 use crate::range::RangeAllocator;
-use metal2vulkan::bind::indirect_commands::{records_address, records_span, RECORDS_ID_LIMIT};
+use metal2vulkan::bind::indirect_commands::{records_address, RECORDS_ID_LIMIT};
 
 #[test]
 fn spans_are_whole_pages() {
@@ -551,23 +551,23 @@ fn records_take_the_lowest_free_id_and_leave_the_spaces_alone() {
         space.place(Place::Records(RECORDS_ID_LIMIT), PAGE).is_err(),
         "no records address"
     );
-    assert!(
-        space.place(Place::Records(1), records_span(1) + 1).is_err(),
-        "past one ID's records"
-    );
-    // From 2^26, each ID's records hold 2 GiB, at their own address.
-    let high = 1 << 26;
-    assert_eq!(records_span(high - 1), 1 << 36);
-    assert_eq!(records_span(high), 1 << 31);
-    for id in [high, RECORDS_ID_LIMIT - 1] {
-        let (at, records) = space.place(Place::Records(id), 1 << 31).unwrap();
+    // Records of any length start at their ID's address, past later IDs' starts too, and end
+    // below 2^64 (2^62 bytes past the last ID's start).
+    for (id, length) in [
+        (1, (1 << 31) + 1),
+        (1 << 26, 1 << 36),
+        (RECORDS_ID_LIMIT - 1, 1 << 62),
+    ] {
+        let (at, records) = space.place(Place::Records(id), length).unwrap();
         assert_eq!(at.0, records_address(id));
         space.free(records);
-        assert!(
-            space.place(Place::Records(id), (1 << 31) + 1).is_err(),
-            "past {id}'s records"
-        );
     }
+    assert!(
+        space
+            .place(Place::Records(RECORDS_ID_LIMIT - 1), (1 << 62) + (1 << 31))
+            .is_err(),
+        "past 2^64"
+    );
     assert!(space.is_empty());
 }
 

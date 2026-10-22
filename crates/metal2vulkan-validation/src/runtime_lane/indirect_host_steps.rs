@@ -20,8 +20,8 @@
 //!   records may name may encode, and never where none may;
 //! - the blit encoder's copy, reset and optimize act on the commands as they run;
 //! - a kernel reaches the buffer made last with the ID it encodes through, placed or not, and
-//!   none once that one is gone, and the buffer at an ID a reservation leaves next, in either
-//!   range of records addresses;
+//!   none once that one is gone, the buffer at an ID a reservation leaves next, and an ID's
+//!   records where an earlier ID's run past their start;
 //! - a command buffer's executed-commands handler sees each execution where its records are read:
 //!   in `commit` for the CPU's, in the host step (or on the GPU alone) for the kernel's, with each
 //!   command's state's ability to encode indirect commands and the buffers made resident for
@@ -252,13 +252,18 @@ impl Setup {
 /// A buffer of `COMMANDS` commands of both dispatch kinds with `bind_count` kernel buffers and
 /// one threadgroup length.
 fn commands_buffer(device: &Device, bind_count: u32) -> IndirectCommandBuffer {
+    commands_buffer_of(device, bind_count, COMMANDS)
+}
+
+/// [`commands_buffer`] of `count` commands.
+fn commands_buffer_of(device: &Device, bind_count: u32, count: u64) -> IndirectCommandBuffer {
     let mut descriptor = IndirectCommandBufferDescriptor::new();
     descriptor.command_types = IndirectCommandType::CONCURRENT_DISPATCH
         .union(IndirectCommandType::CONCURRENT_DISPATCH_THREADS);
     descriptor.max_kernel_buffer_bind_count = bind_count;
     descriptor.max_kernel_threadgroup_memory_bind_count = 1;
     device
-        .new_indirect_command_buffer(&descriptor, COMMANDS, ResourceOptions::shared())
+        .new_indirect_command_buffer(&descriptor, count, ResourceOptions::shared())
         .unwrap()
 }
 
@@ -685,9 +690,8 @@ fn a_kernel_reaches_the_buffer_made_last_with_its_id() {
 
 /// A kernel encoding through the ID a reservation leaves next reaches its buffer's records, and
 /// the commands it writes run, as Metal's do (on an M3 Max, each buffer made past a reservation
-/// of 2^23 + 5, 2^30 + 5 or 2^31 - 2 ran): at an ID below 2^26, whose records lie at
-/// `2^63 + id * 2^36`, the last such ID among them, and from 2^26, at `2^63 + 2^62 + id * 2^31`,
-/// the last ID, 2^31 - 1, among them.
+/// of 2^23 + 5, 2^30 + 5 or 2^31 - 2 ran), up to the last ID, 2^31 - 1, whose records start 2^62
+/// bytes below 2^64.
 #[test]
 fn a_kernel_reaches_the_records_of_a_buffer_past_a_reservation() {
     for reserved in [(1 << 23) + 5, (1 << 26) - 2, (1 << 26) + 5, (1 << 31) - 2] {
@@ -710,6 +714,78 @@ fn a_kernel_reaches_the_records_of_a_buffer_past_a_reservation() {
             assert_eq!(setup.output(), expected(), "{reserved}");
         });
     }
+}
+
+/// A kernel reaches each ID's records at their start, however far an earlier ID's run, as Metal
+/// makes and runs buffers of any length past a reservation (on an M3 Max, 2^22 commands at
+/// 2^26 + 6): the records of ID r + 1, 955,300 commands (past 2^31 bytes), run past ID r + 2's
+/// start. Through r + 2 the kernel writes r + 2's commands, which run, and r + 1's stay fresh;
+/// with r + 2's buffer not resident, its writes miss, which the execution report counts, and
+/// reach none of r + 1's records where r + 2's would start.
+#[test]
+fn a_kernel_reaches_an_id_s_records_where_an_earlier_id_s_run_past_them() {
+    on_device(|device| {
+        let reserved = (1 << 26) + 5;
+        device
+            .reserve_resource_ids(
+                ResourceIdKind::IndirectCommandBuffer,
+                &[ResourceId(reserved)],
+            )
+            .unwrap();
+        let count = 955_300;
+        let long = commands_buffer_of(device, 2, count);
+        assert_eq!(long.gpu_resource_id(), ResourceId(reserved + 1));
+        let setup = Setup::new(device, 2);
+        assert_eq!(setup.icb.gpu_resource_id(), ResourceId(reserved + 2));
+        let queue = device.new_command_queue().unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        encoder
+            .use_resource(long.as_resource(), ResourceUsage::WRITE)
+            .unwrap();
+        setup.write(&mut encoder);
+        setup.execute(&mut encoder);
+        encoder.end_encoding().unwrap();
+        complete(&command_buffer);
+        assert_eq!(setup.output(), expected(), "through r + 2");
+        // The records about r + 2's start, 2^31 bytes into r + 1's, and r + 1's first: fresh.
+        let fresh = format!(
+            "{:?}",
+            commands_buffer(device, 2).commands(0..1).unwrap()[0]
+        );
+        let first = (1 << 31) / 2248 - 2;
+        let around = (first..first + 6).chain(0..COMMANDS);
+        let fresh_all = |what: &str| {
+            for index in around.clone() {
+                let command = long.commands(index..index + 1).unwrap();
+                assert_eq!(
+                    format!("{:?}", command[0]),
+                    fresh,
+                    "{what}: command {index}"
+                );
+            }
+        };
+        fresh_all("written through r + 2");
+        // r + 2's buffer not resident: the writes miss.
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        encoder
+            .use_resource(long.as_resource(), ResourceUsage::WRITE)
+            .unwrap();
+        encoder.set_compute_pipeline_state(&setup.writer).unwrap();
+        encoder.set_buffer(Some(&setup.arguments), 0, 0).unwrap();
+        encoder.set_buffer(Some(&setup.params), 0, 1).unwrap();
+        encoder.set_buffer(Some(&setup.out), 0, 2).unwrap();
+        let commands = Size::new(COMMANDS, 1, 1);
+        encoder.dispatch_threads(commands, commands).unwrap();
+        encoder.end_encoding().unwrap();
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+        let report = command_buffer.execution_report().unwrap();
+        assert!(report.resident_miss, "the writes miss: {report:?}");
+        fresh_all("with r + 2's records not resident");
+    });
 }
 
 /// The commands run on another queue after an event the writer signals, the executing command
