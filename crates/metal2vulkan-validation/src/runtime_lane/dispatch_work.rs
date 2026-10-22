@@ -401,3 +401,124 @@ fn dispatches_take_what_they_settled_only_with_the_same_residency() {
         },
     );
 }
+
+/// What one dispatch of [`dispatches_take_what_their_state_planned_for_the_same_shape`] changed
+/// before it ran, where it writes, and whether it took what its state's last dispatch that planned
+/// planned (`WorkCounts::dispatches_planned_as_before`) or what the encoder's last dispatch
+/// settled (`dispatches_settled_as_before`).
+struct Planning {
+    change: &'static str,
+    at: u64,
+    threads: u64,
+    planned: bool,
+    settled: bool,
+}
+
+/// A dispatch whose bind state has the shape its pipeline state's last direct dispatch planned,
+/// of the same grid, takes that one's variant, plan and made pipelines: one whose buffer's offset
+/// alone moved, and another encoder's first dispatch of the state. A grid or a resource made
+/// resident plans again, and the next dispatch of the new shape takes that. Every dispatch writes
+/// its words. Both ways ([`on_device_both_ways`]).
+#[test]
+fn dispatches_take_what_their_state_planned_for_the_same_shape() {
+    on_device_both_ways(|device| {
+        let kernel = state(device, "a4_index_word", false);
+        let input: Vec<u8> = (0..3 * 2 * THREADS as u32)
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        let input = buffer_with(device, &input).unwrap();
+        const WORDS: u64 = 12 * THREADS;
+        let out = buffer_with(device, &vec![0; (4 * WORDS) as usize]).unwrap();
+        let queue = device.new_command_queue().unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        let step = |change, at, threads, (planned, settled)| Planning {
+            change,
+            at,
+            threads,
+            planned,
+            settled,
+        };
+        let encoders = [
+            vec![
+                step("the first", 0, THREADS, (false, false)),
+                step("out's offset", THREADS, THREADS, (true, false)),
+                step("the grid", 2 * THREADS, 2 * THREADS, (false, false)),
+                step(
+                    "out's offset again",
+                    4 * THREADS,
+                    2 * THREADS,
+                    (true, false),
+                ),
+            ],
+            vec![
+                step("another encoder", 6 * THREADS, 2 * THREADS, (true, false)),
+                step(
+                    "a buffer made resident",
+                    8 * THREADS,
+                    2 * THREADS,
+                    (false, false),
+                ),
+                step(
+                    "out's offset, resident",
+                    10 * THREADS,
+                    2 * THREADS,
+                    (true, false),
+                ),
+                step("nothing", 10 * THREADS, 2 * THREADS, (false, true)),
+            ],
+        ];
+        let mut seen = Vec::new();
+        for steps in &encoders {
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            encoder.set_compute_pipeline_state(&kernel).unwrap();
+            encoder.set_buffer(Some(&input), 0, 0).unwrap();
+            let mut bound = None;
+            for step in steps {
+                // Bound again only where it moved: a call that binds draws a new table stamp.
+                if bound != Some(step.at) {
+                    encoder.set_buffer(Some(&out), 4 * step.at, 1).unwrap();
+                    bound = Some(step.at);
+                }
+                if step.change == "a buffer made resident" {
+                    encoder
+                        .use_resource(ResourceRef::Buffer(&input), ResourceUsage::READ)
+                        .unwrap();
+                }
+                let before = device.work_counts();
+                encoder
+                    .dispatch_threads(Size::new(step.threads, 1, 1), Size::new(THREADS, 1, 1))
+                    .unwrap();
+                let after = device.work_counts();
+                let planned = grew(&before, &after, |c| c.dispatches_planned_as_before);
+                let settled = grew(&before, &after, |c| c.dispatches_settled_as_before);
+                seen.push((step.change, planned, settled));
+            }
+            encoder.end_encoding().unwrap();
+        }
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+        let steps: Vec<&Planning> = encoders.iter().flatten().collect();
+        let want: Vec<_> = (steps.iter())
+            .map(|step| {
+                let (planned, settled) = (u64::from(step.planned), u64::from(step.settled));
+                (step.change, planned, settled)
+            })
+            .collect();
+        assert_eq!(seen, want);
+        let words: Vec<u32> = read_buffer(&out, 0, 4 * WORDS)
+            .unwrap()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|word| u32::from_le_bytes(*word))
+            .collect();
+        let mut expected = vec![0u32; WORDS as usize];
+        for step in &steps {
+            for t in 0..step.threads {
+                expected[(step.at + t) as usize] = 3 * t as u32 + 1;
+            }
+        }
+        assert_eq!(words, expected);
+    });
+}

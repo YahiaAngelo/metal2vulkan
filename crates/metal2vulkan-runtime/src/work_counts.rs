@@ -206,6 +206,7 @@ pub(crate) struct Counters {
     set_zero_sets_found: AtomicU64,
     draw_shapes_reused: AtomicU64,
     dispatches_settled_as_before: AtomicU64,
+    dispatches_planned_as_before: AtomicU64,
     baked_sampler_dispatches_apart: AtomicU64,
     host_deallocators_delayed: AtomicU64,
     host_import_releases_posted: AtomicU64,
@@ -1485,6 +1486,13 @@ impl Counters {
     /// (`compute::DispatchMemo`).
     pub(crate) fn dispatch_settled_as_before(&self) {
         self.dispatches_settled_as_before
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A direct dispatch that settled a bind state of the shape its state's last direct dispatch
+    /// planned and took what that one planned (`pipeline::Planned`).
+    pub(crate) fn dispatch_planned_as_before(&self) {
+        self.dispatches_planned_as_before
             .fetch_add(1, Ordering::Relaxed);
     }
 
@@ -3239,6 +3247,14 @@ pub struct WorkCounts {
     /// visible-function table, while no no-copy buffer moved, no sampler state was made or went
     /// and no buffer took a resident indirect command buffer's ID (`compute::DispatchMemo`).
     pub dispatches_settled_as_before: u64,
+    /// Direct dispatches that settled their bind state again (another table, another residency,
+    /// another encoder) into one of the shape their pipeline state's last direct dispatch that
+    /// planned planned, of the same dispatch and buffer forms, and took that one's variant and
+    /// plan rather than planning them again, and its regions' made `VkPipeline`s where their keys
+    /// are the same (`pipeline::Planned`): a dispatch whose buffers' offsets alone moved, and an
+    /// encoder's first dispatch of a state dispatched before, for two. Not counted in
+    /// `dispatches_settled_as_before`.
+    pub dispatches_planned_as_before: u64,
     /// Dispatches of a kernel's variant whose layout bakes immutable samplers (constexpr
     /// samplers'), their pipelines made, recorded in a `VkCommandBuffer` of their own, as a
     /// dispatch whose pipeline is still being made is (`pending_dispatch.rs`): on a device whose
@@ -4090,6 +4106,8 @@ impl Device {
             set_zero_sets_found: counters.set_zero_sets_found.load(Ordering::Relaxed),
             draw_shapes_reused: counters.draw_shapes_reused.load(Ordering::Relaxed),
             dispatches_settled_as_before: (counters.dispatches_settled_as_before)
+                .load(Ordering::Relaxed),
+            dispatches_planned_as_before: (counters.dispatches_planned_as_before)
                 .load(Ordering::Relaxed),
             baked_sampler_dispatches_apart: (counters.baked_sampler_dispatches_apart)
                 .load(Ordering::Relaxed),

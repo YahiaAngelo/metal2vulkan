@@ -123,7 +123,7 @@ use metal2vulkan::reflection::ComputePipelineReflection;
 use sources::Sources;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 /// `imageblockMemoryLengthForDimensions:` for an explicit imageblock of `cell_bytes` a cell (the
 /// compile's), none without an imageblock or at a width or height of 0. Otherwise each side rounds
@@ -284,6 +284,39 @@ pub(super) struct Program {
     /// Its buffer slots whose bind offset class tells the device's view base alignment apart
     /// (`argument_table::AtBindViews`), of its base's interface.
     at_bind_views: AtBindViews,
+    /// What its last direct dispatch that planned planned ([`Planned`]).
+    planned: Mutex<Option<Arc<Planned>>>,
+}
+
+/// What a direct dispatch of a compute state planned (`compute::settle_dispatch`): the variant
+/// `dispatch` of a bind state of `shape` runs on in `forms`, and its plan for `shape`, as
+/// [`ComputePipelineState::settle`] answers them, a function of those three alone; and the
+/// `VkPipeline`s of its regions of those keys, where all were found made. A later dispatch of the
+/// same dispatch and forms whose bind state has the shape takes them, from any encoder, rather
+/// than settling them again (`WorkCounts::dispatches_planned_as_before`).
+pub(crate) struct Planned {
+    pub(crate) shape: Arc<BindShape>,
+    pub(crate) dispatch: Dispatch,
+    pub(crate) forms: BufferForms,
+    pub(crate) variant: Arc<Variant>,
+    pub(crate) plan: Arc<BindingPlan>,
+    /// Each region's key and its made `VkPipeline`, where all were found made, each its key's own
+    /// (none a residual form's, `dispatch_making.rs`).
+    pub(crate) made: OnceLock<(Vec<RegionKey>, Vec<Arc<RawPipeline>>)>,
+}
+
+impl Planned {
+    /// The made `VkPipeline`s of `commands`' regions, where they are as many, each of the key of
+    /// one found made.
+    pub(crate) fn made_for(&self, commands: &DispatchCommands) -> Option<&Vec<Arc<RawPipeline>>> {
+        let (keys, made) = self.made.get()?;
+        let same = keys.len() == commands.regions.len()
+            && keys
+                .iter()
+                .zip(&commands.regions)
+                .all(|(key, region)| key.is_of(region));
+        same.then_some(made)
+    }
 }
 
 /// The program's release returns at once: a piece not started stops, and a piece running gives
@@ -670,6 +703,7 @@ impl ComputePipelineState {
                 label: options.label.clone(),
                 pieces: piece_holds::PieceHolds::new(),
                 at_bind_views,
+                planned: Mutex::new(None),
             };
             StateShared {
                 id,
@@ -1017,6 +1051,16 @@ impl ComputePipelineState {
     /// What the state runs, held without its ID (`ComputeProgram`).
     pub(crate) fn program(&self) -> ComputeProgram {
         ComputeProgram(Arc::clone(&self.0.program))
+    }
+
+    /// What its last direct dispatch that planned planned ([`Planned`]).
+    pub(super) fn planned(&self) -> Option<Arc<Planned>> {
+        lock(&self.0.planned).clone()
+    }
+
+    /// Keep `planned`, a direct dispatch's, in place of what the last planned.
+    pub(super) fn keep_planned(&self, planned: Arc<Planned>) {
+        *lock(&self.0.planned) = Some(planned);
     }
 
     /// The variant `dispatch` of a bind state of `shape` runs on in `forms`, and its plan for
