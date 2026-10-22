@@ -286,6 +286,8 @@ impl BlitCommandEncoder {
         if at == 0 {
             return Ok(());
         }
+        let counts = &self.core().device().shared().counts;
+        counts.compressed_rows_rewritten(rows.len() as u64);
         let out_of = RowsCopy::new(rows, &tight);
         let back = RowsCopy::new(&tight, rows);
         let rewrite = self.rewrite(at, texel, rules)?;
