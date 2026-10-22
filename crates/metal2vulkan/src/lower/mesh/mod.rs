@@ -396,6 +396,21 @@ pub fn emulates(p: &DeviceProfile) -> bool {
         || !enabled.features.contains(&VkFeature::MeshShader)
 }
 
+/// Whether profile `p` compiles an object function folded (`LoweringInputs::folded_groups`), so
+/// that its draws run any object grid Metal runs in pieces within the task stage's limits
+/// (`bind::mesh_arguments`): it runs mesh functions natively, and has device addresses (the
+/// region record), 64-bit integers (the threadgroup's number), `multiDrawIndirect` (a direct draw's
+/// pieces, and `maxDrawIndirectCount` at least 65,535) and `drawIndirectCount` (an indirect
+/// draw's).
+pub fn folds_object_grids(p: &DeviceProfile) -> bool {
+    let features = &p.enabled().features;
+    !emulates(p)
+        && p.fields().buffer_access == crate::device::profile::BufferAccess::Addressed
+        && features.contains(&VkFeature::ShaderInt64)
+        && features.contains(&VkFeature::MultiDrawIndirect)
+        && features.contains(&VkFeature::DrawIndirectCount)
+}
+
 /// The bytes of the entry's payload (`air.payload`'s `air.arg_type_size`), if it has one.
 pub fn payload_size(e: &Entry) -> Option<u64> {
     e.ep.params.iter().find_map(|b| match b.role {

@@ -1627,12 +1627,15 @@ pub enum CommandBufferError {
     /// the device's budget, so nothing is drawn short silently. The first records fault of the
     /// command buffer, where it is a tessellation draw's, as its scan saw it.
     TessellationRecordsOverflow(TessellationRecordsOverflow),
-    /// An indirect mesh draw's object grid, as the GPU wrote it, lay past the device's task
-    /// stage limits (`maxTaskWorkGroupCount`, `maxTaskWorkGroupTotalCount`): such draws drew
-    /// nothing. Metal draws every object grid measured (16,777,216 threadgroups along `x` on an M3
-    /// Max), and Vulkan cannot launch one past the limits, so nothing is drawn short silently. A
-    /// direct draw of such a grid is refused as it is encoded (`Unsupported{MeshShading}` naming
-    /// the limit).
+    /// A mesh draw's object grid lay past what runs, and such draws drew nothing: 2^29 or more
+    /// threadgroups, whose draw Metal's GPU fails after its watchdog's 5 seconds
+    /// (`MTLCommandBufferErrorInternal`, measured on an M3 Max: 2^28 completes in 2.5 seconds),
+    /// so the code is Metal's. On a device that does not fold object grids (without device
+    /// addresses, `shaderInt64`, `multiDrawIndirect` or `drawIndirectCount`), an indirect draw's
+    /// grid, as the GPU wrote it, past the task stage's limits (`maxTaskWorkGroupCount`,
+    /// `maxTaskWorkGroupTotalCount`) too, which Metal draws: nothing is drawn short silently. A
+    /// direct draw of such a grid there is refused as it is encoded (`Unsupported{MeshShading}`
+    /// naming the limit).
     MeshGridPastLimits,
     /// A host step refused a command it recorded from an indirect command buffer's records
     /// (`Degradation::HostReplayedIndirectCommands`): what `commit` refuses where the CPU wrote

@@ -1022,6 +1022,7 @@ members! {
         Some(F::DescriptorBindingVariableDescriptorCount);
     V12.v12.runtime_descriptor_array => Some(F::RuntimeDescriptorArray);
     V12.v12.sampler_filter_minmax => Some(F::SamplerFilterMinmax);
+    V12.v12.draw_indirect_count => Some(F::DrawIndirectCount);
     V12.v12.scalar_block_layout => Some(F::ScalarBlockLayout);
     V12.v12.uniform_buffer_standard_layout => Some(F::UniformBufferStandardLayout);
     V12.v12.shader_subgroup_extended_types => Some(F::ShaderSubgroupExtendedTypes);

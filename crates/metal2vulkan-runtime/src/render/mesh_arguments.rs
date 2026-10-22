@@ -1,5 +1,6 @@
 //! The arguments pass of an indirect mesh draw on a device with `VK_EXT_mesh_shader`
-//! (`DrawCommands::mesh_arguments`; the module and its rule are `bind::MeshArguments`'s).
+//! (`DrawCommands::mesh_arguments`; the module and its rule are `bind::MeshArguments`'s), and a
+//! folded object function's direct draw's fold (`DrawCommands::object_fold`).
 //!
 //! `vkCmdDrawMeshTasksIndirectEXT` requires every group count within the device's limits for the
 //! draw's first stage, which Metal's GPU-written arguments need not be, and Metal draws nothing
@@ -7,17 +8,24 @@
 //!
 //! - **Before the pass** (hoisted, as an emulated mesh draw's dispatches are, `render/mesh.rs`):
 //!   one invocation of the device's module of the draw's form reads Metal's arguments and writes
-//!   the draw's counts into 12 bytes of the command buffer's upload arena: Metal's where Metal
-//!   draws them and the device launches them, else zero. A barrier from everything before, and
-//!   one to everything after.
-//! - **In the pass**, the draw's `vkCmdDrawMeshTasksIndirectEXT` from those bytes.
+//!   the draw's scratch in the command buffer's upload arena: the mesh form's 12 bytes of counts,
+//!   Metal's where Metal draws them and the device launches them, else zero; or a folded object
+//!   function's region record, pieces and commands (`bind::fold_object_grid`). A barrier from
+//!   everything before, and one to everything after.
+//! - **In the pass**, the draw's `vkCmdDrawMeshTasksIndirectEXT` from those bytes, or a folded
+//!   object function's `vkCmdDrawMeshTasksIndirectCountEXT` of its pieces, its object stage reading
+//!   the record at the scratch's address (`binding::Tables::region_record`).
 //! - **Where it records**: as an emulated mesh draw's steps (`render.rs`): before the render pass,
 //!   or, where an earlier draw or tile dispatch of the encoder wrote the arguments behind a memory
 //!   barrier, before the draw's own render pass instance, after the writer's. A write since the
 //!   last barrier, which Metal does not order before the draw, is read as it was before the pass.
-//! - **An object grid past the device's task limits**, which Metal draws (every count measured,
-//!   16,777,216 along `x`), draws nothing and fails the command buffer
-//!   (`CommandBufferError::MeshGridPastLimits`): nothing is drawn short silently.
+//! - **A folded object function's direct draw** uploads its fold ([`FoldUpload`]): the record its
+//!   object stage reads, and its pieces' commands where it has more than one.
+//! - **An object grid past what runs**: one of 2^29 threadgroups or more (whose draw Metal's GPU
+//!   fails after its watchdog's 5 seconds, `MTLCommandBufferErrorInternal`), and, on a device that
+//!   does not fold object grids, an indirect one past the device's task limits. It draws nothing
+//!   and fails the command buffer (`CommandBufferError::MeshGridPastLimits`, Metal's code):
+//!   nothing is drawn short silently.
 
 use crate::device::functions::Vk;
 use crate::draw_source::DrawSource;
@@ -29,25 +37,28 @@ use crate::tracker::{Access, Barrier, Use, UseRange};
 use crate::upload::Upload;
 use ash::vk;
 use metal2vulkan::bind::{
-    ExecutionStatus, IndirectRef, MeshArguments, MeshArgumentsForm, MeshArgumentsModule,
+    ExecutionStatus, IndirectRef, MeshArguments, MeshArgumentsForm, MeshArgumentsModule, ObjectFold,
 };
 
 /// One draw's pass, planned: its scratch, kernel and set, and its read of Metal's arguments.
 pub(crate) struct ArgumentsPass {
     scratch: Upload,
+    form: MeshArgumentsForm,
     kernel: OwnedKernel,
     sets: OwnedSets,
-    push: [u8; 4],
+    push: [u8; 8],
     uses: Vec<Use<ResourceKey>>,
 }
 
 impl ArgumentsPass {
-    /// The pass of the indirect mesh draw of `form` that reads its arguments from `indirect`, in
-    /// `core`'s command buffer. Refused as uploads, kernels and descriptor sets are.
+    /// The pass of the indirect mesh draw of `form`, of `threads` threads per object threadgroup,
+    /// that reads its arguments from `indirect`, in `core`'s command buffer. Refused as uploads,
+    /// kernels and descriptor sets are.
     pub(crate) fn new(
         core: &mut EncoderCore,
         indirect: &DrawSource<'_>,
         form: MeshArgumentsForm,
+        threads: [u32; 3],
     ) -> Result<ArgumentsPass, Error> {
         let device = core.device().clone();
         let alignment = device
@@ -55,15 +66,15 @@ impl ArgumentsPass {
             .description
             .limits
             .min_storage_buffer_offset_alignment;
-        let pass = MeshArguments::new(IndirectRef::new(0, indirect.at), form, alignment)
-            .ok_or_else(|| internal("a mesh arguments pass at an offset not a multiple of 4"))?;
+        let pass = MeshArguments::new(IndirectRef::new(0, indirect.at), form, alignment, threads)
+            .ok_or_else(|| {
+            internal("a mesh arguments pass at an offset not a multiple of 4")
+        })?;
         let kernel = device.owned_kernel(OwnedModule::MeshArguments(form))?;
         let (scratch, status) = {
             let mut state = core.command_buffer().state();
-            let scratch =
-                state
-                    .uploads
-                    .upload(&device, &[], u64::from(MeshArguments::SCRATCH_BYTES))?;
+            let bytes = u64::from(MeshArguments::scratch_bytes(form));
+            let scratch = state.uploads.upload(&device, &[], bytes)?;
             (scratch, state.status_words(&device)?)
         };
         let mut set = [(vk::Buffer::null(), 0, 0); 3];
@@ -79,6 +90,7 @@ impl ArgumentsPass {
         let sets = OwnedSets::write(&device, &kernel, &[set.to_vec()])?;
         Ok(ArgumentsPass {
             scratch,
+            form,
             kernel,
             sets,
             push: pass.push_constants,
@@ -89,6 +101,19 @@ impl ArgumentsPass {
     /// The scratch's `VkBuffer` and offset: the draw's arguments.
     pub(crate) fn scratch(&self) -> (vk::Buffer, u64) {
         (self.scratch.raw(), self.scratch.offset())
+    }
+
+    /// The device address of a folded object function's region record in the scratch, which its
+    /// object stage reads; `None` for every other form.
+    pub(crate) fn record(&self) -> Result<Option<u64>, Error> {
+        if self.form != MeshArgumentsForm::FoldedObject {
+            return Ok(None);
+        }
+        let address = self
+            .scratch
+            .device_address()
+            .ok_or_else(|| internal("a folded object grid without device addresses"))?;
+        Ok(Some(address + u64::from(MeshArguments::OBJECT_RECORD)))
     }
 
     /// Hold the pass's set in `core`'s command buffer until it completes; what is left records
@@ -126,7 +151,7 @@ fn reads(indirect: &DrawSource<'_>) -> Vec<Use<ResourceKey>> {
 pub(crate) struct ArgumentsSteps {
     kernel: OwnedKernel,
     sets: Vec<vk::DescriptorSet>,
-    push: [u8; 4],
+    push: [u8; 8],
     uses: Vec<Use<ResourceKey>>,
 }
 
@@ -200,5 +225,36 @@ impl ArgumentsSteps {
             );
             raw.cmd_dispatch(command_buffer, 1, 1, 1);
         }
+    }
+}
+
+/// A folded object function's direct draw's fold, uploaded into `core`'s command buffer's arena
+/// (`DrawCommands::object_fold`): the record its object stage reads, and its pieces' commands.
+pub(crate) struct FoldUpload {
+    upload: Upload,
+}
+
+impl FoldUpload {
+    /// The upload of `fold`. Refused as uploads are.
+    pub(crate) fn new(core: &mut EncoderCore, fold: &ObjectFold) -> Result<FoldUpload, Error> {
+        let device = core.device().clone();
+        let mut state = core.command_buffer().state();
+        let bytes = fold.bytes();
+        let upload = state.uploads.upload(&device, &bytes, bytes.len() as u64)?;
+        Ok(FoldUpload { upload })
+    }
+
+    /// The device address of the record its object stage reads.
+    pub(crate) fn record(&self) -> Result<u64, Error> {
+        let address = self
+            .upload
+            .device_address()
+            .ok_or_else(|| internal("a folded object grid without device addresses"))?;
+        Ok(address + u64::from(MeshArguments::OBJECT_RECORD))
+    }
+
+    /// The upload's `VkBuffer` and offset: its pieces' commands, at the draw's offset past it.
+    pub(crate) fn commands(&self) -> (vk::Buffer, u64) {
+        (self.upload.raw(), self.upload.offset())
     }
 }

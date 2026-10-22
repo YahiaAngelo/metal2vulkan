@@ -7390,6 +7390,11 @@ impl RenderLowering {
             || commands.mesh_dispatch.as_ref().is_some_and(|dispatch| {
                 matches!(dispatch.mesh, MeshGroups::Direct(groups) if groups.contains(&0))
             });
+        // A folded object function's direct draw of a grid past what runs draws nothing and fails
+        // the command buffer, as Metal's GPU fails it (`render/mesh_arguments.rs`).
+        if commands.object_fold.is_some_and(|fold| fold.past) && !culled {
+            self.core.command_buffer().state().mesh_grid_past_limits();
+        }
         // Set 1, the heap: its writes at the elements of their resource IDs, and the device's
         // texture and sampler tables at the handle tables.
         let compiled = variant.pipeline();
@@ -7937,6 +7942,45 @@ impl RenderLowering {
                 })
             }
         };
+        // An indirect mesh draw's arguments pass, whose scratch its draw reads, and a folded
+        // object function's direct draw's uploaded fold (`render/mesh_arguments.rs`).
+        let arguments = match (
+            commands.mesh_arguments,
+            buffers.indirect.as_ref(),
+            empty || culled,
+        ) {
+            (Some(form), Some(source), false) => {
+                let threads = match draw {
+                    DrawCall::MeshThreadgroupsIndirect {
+                        threads_per_object_group,
+                        ..
+                    } => threads_per_object_group,
+                    _ => [1; 3],
+                };
+                Some(mesh_arguments::ArgumentsPass::new(
+                    &mut self.core,
+                    source,
+                    form,
+                    threads,
+                )?)
+            }
+            (Some(_), None, false) => {
+                return Err(internal("a mesh arguments pass without its arguments"))
+            }
+            _ => None,
+        };
+        // Uploaded for a draw that launches nothing too: its object stage's hole takes the
+        // record's address all the same.
+        let fold = match &commands.object_fold {
+            Some(fold) => Some(mesh_arguments::FoldUpload::new(&mut self.core, fold)?),
+            None => None,
+        };
+        // A folded object function reads its region record at its scratch's address.
+        let region_record = match (&arguments, &fold) {
+            (Some(pass), _) => pass.record()?,
+            (None, Some(fold)) => Some(fold.record()?),
+            (None, None) => None,
+        };
         let stages = [
             (Stage::Vertex, pass_start.or(Stage::Vertex, &self.vertex)),
             (Stage::Fragment, &self.fragment),
@@ -8019,6 +8063,7 @@ impl RenderLowering {
         if let Some((buffer, offset)) = buffers.control_point_indices {
             tables = tables.with_control_point_indices(buffer, offset);
         }
+        tables.region_record = region_record;
         // An emulated mesh draw's work buffer and records (`render/mesh.rs`), and an emulated
         // tessellation draw's (`render/tessellation_scan.rs`).
         let mesh_work = commands
@@ -8486,19 +8531,6 @@ impl RenderLowering {
                 (self.core.set_zero(&objects, (&mut writes, offsets))?, &[])
             }
         };
-        // An indirect mesh draw's arguments pass, whose scratch its draw reads
-        // (`render/mesh_arguments.rs`).
-        let arguments = match (commands.mesh_arguments, indirect, empty || culled) {
-            (Some(form), Some(source), false) => Some(mesh_arguments::ArgumentsPass::new(
-                &mut self.core,
-                source,
-                form,
-            )?),
-            (Some(_), None, false) => {
-                return Err(internal("a mesh arguments pass without its arguments"))
-            }
-            _ => None,
-        };
         // The Vulkan draws: the binder's, the index bounds pass's two, or the index rewrite
         // pass's one.
         let sized = device.shared().sized_index_bind;
@@ -8520,6 +8552,61 @@ impl RenderLowering {
             }
             (Some(pass), ..) => one(pass.draw(sized)),
             (_, Some(pass), Some(source), _, _) => (pass.draws(source, commands.draw, sized)?, 2),
+            // A folded object function's direct draw's pieces are its uploaded fold's.
+            (
+                _,
+                _,
+                _,
+                _,
+                metal2vulkan::vk::DrawCommand::DrawMeshTasksIndirect {
+                    offset,
+                    draw_count,
+                    stride,
+                },
+            ) if fold.is_some() => {
+                let (raw, at) = fold
+                    .as_ref()
+                    .map(mesh_arguments::FoldUpload::commands)
+                    .ok_or_else(|| internal("a folded object grid's upload gone"))?;
+                one((
+                    None,
+                    Some(raw),
+                    metal2vulkan::vk::DrawCommand::DrawMeshTasksIndirect {
+                        offset: at + offset,
+                        draw_count,
+                        stride,
+                    },
+                ))
+            }
+            // A folded object function's indirect draw's pieces are its arguments pass's, both
+            // offsets into its scratch.
+            (
+                _,
+                _,
+                _,
+                _,
+                metal2vulkan::vk::DrawCommand::DrawMeshTasksIndirectCount {
+                    offset,
+                    count_offset,
+                    max_draw_count,
+                    stride,
+                },
+            ) if arguments.is_some() => {
+                let (raw, at) = arguments
+                    .as_ref()
+                    .map(mesh_arguments::ArgumentsPass::scratch)
+                    .ok_or_else(|| internal("a mesh arguments pass gone"))?;
+                one((
+                    None,
+                    Some(raw),
+                    metal2vulkan::vk::DrawCommand::DrawMeshTasksIndirectCount {
+                        offset: at + offset,
+                        count_offset: at + count_offset,
+                        max_draw_count,
+                        stride,
+                    },
+                ))
+            }
             // An indirect mesh draw's counts are its arguments pass's.
             (
                 _,
@@ -10981,6 +11068,22 @@ impl Recording<'_> {
                 } => {
                     if let (Some(mesh), Some(buffer)) = (self.mesh, self.indirect) {
                         mesh.cmd_draw_mesh_tasks_indirect(cb, buffer, offset, draw_count, stride);
+                    }
+                }
+                metal2vulkan::vk::DrawCommand::DrawMeshTasksIndirectCount {
+                    offset,
+                    count_offset,
+                    max_draw_count,
+                    stride,
+                } => {
+                    if let (Some(mesh), Some(buffer)) = (self.mesh, self.indirect) {
+                        mesh.cmd_draw_mesh_tasks_indirect_count(
+                            cb,
+                            buffer,
+                            (offset, count_offset),
+                            max_draw_count,
+                            stride,
+                        );
                     }
                 }
             }

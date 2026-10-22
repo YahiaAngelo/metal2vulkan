@@ -405,6 +405,16 @@ commands! {
         CmdDrawMeshTasks cmd_draw_mesh_tasks c"vkCmdDrawMeshTasksEXT" (x: u32, y: u32, z: u32);
         CmdDrawMeshTasksIndirect cmd_draw_mesh_tasks_indirect c"vkCmdDrawMeshTasksIndirectEXT"
             (buffer: vk::Buffer, offset: vk::DeviceSize, count: u32, stride: u32);
+        CmdDrawMeshTasksIndirectCount cmd_draw_mesh_tasks_indirect_count
+            c"vkCmdDrawMeshTasksIndirectCountEXT"
+            (
+                buffer: vk::Buffer,
+                offset: vk::DeviceSize,
+                count_buffer: vk::Buffer,
+                count_offset: vk::DeviceSize,
+                max_count: u32,
+                stride: u32
+            );
         CmdExecuteGeneratedCommands cmd_execute_generated_commands
             c"vkCmdExecuteGeneratedCommandsEXT"
             (preprocessed: vk::Bool32, info: *const GeneratedCommandsInfo);

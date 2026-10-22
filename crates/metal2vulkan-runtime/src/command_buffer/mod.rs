@@ -605,6 +605,9 @@ pub(super) struct State {
     pub(super) descriptors: DescriptorArena,
     /// The execution status words the commands share, once a command reaches them.
     status_words: Option<Upload>,
+    /// A direct mesh draw's object grid lay past what runs (`render/mesh_arguments.rs`): the
+    /// command buffer fails as for `ExecutionStatus`'s `MESH_GRID_PAST_LIMITS`.
+    mesh_grid_past: bool,
     /// The captured passes' tile masks, which its completion counts (`render/capture.rs`).
     pub(super) capture_tallies: Vec<CaptureTally>,
     /// The index pool of the commands' index bounds and rewrite passes (`index_bounds.rs`,
@@ -1565,6 +1568,12 @@ impl State {
         Ok(self.status_words(device)?.device_address())
     }
 
+    /// A direct mesh draw's object grid lies past what runs (`render/mesh_arguments.rs`): the
+    /// command buffer fails as Metal's GPU fails it.
+    pub(crate) fn mesh_grid_past_limits(&mut self) {
+        self.mesh_grid_past = true;
+    }
+
     /// The command buffer's execution status words, uploaded (all zero, `ExecutionStatus::initial`)
     /// when a command first reaches them.
     pub(super) fn status_words(&mut self, device: &Device) -> Result<Upload, Error> {
@@ -1710,6 +1719,7 @@ impl CommandBuffer {
                 shadows_copied_in: Vec::new(),
                 descriptors: DescriptorArena::default(),
                 status_words: None,
+                mesh_grid_past: false,
                 capture_tallies: Vec::new(),
                 index_pool: None,
                 mesh_pool: None,
@@ -4062,9 +4072,11 @@ impl CommandBufferShared {
                             CommandBufferError::PREDICATION_OPEN_AT_UNIT_END_DESCRIPTION.to_owned(),
                         );
                     }
-                    // An indirect mesh draw's object grid lay past the device's task limits
-                    // (`render/mesh_arguments.rs`): the command buffer failed.
-                    if report.mesh_grid_past_limits && state.error.is_none() {
+                    // A mesh draw's object grid lay past what runs (`render/mesh_arguments.rs`):
+                    // the command buffer failed, as Metal's GPU fails it.
+                    if (report.mesh_grid_past_limits || state.mesh_grid_past)
+                        && state.error.is_none()
+                    {
                         state.status = CommandBufferStatus::Error;
                         state.error = Some(CommandBufferError::MeshGridPastLimits);
                     }

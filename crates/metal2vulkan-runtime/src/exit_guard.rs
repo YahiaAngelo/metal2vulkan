@@ -502,6 +502,7 @@ calls! {
     // ([`UNPRIMED`](crate::device::prime::UNPRIMED)).
     CmdDrawMeshTasks => c"vkCmdDrawMeshTasksEXT",
     CmdDrawMeshTasksIndirect => c"vkCmdDrawMeshTasksIndirectEXT",
+    CmdDrawMeshTasksIndirectCount => c"vkCmdDrawMeshTasksIndirectCountEXT",
     CmdExecuteGeneratedCommands => c"vkCmdExecuteGeneratedCommandsEXT",
     CmdPreprocessGeneratedCommands => c"vkCmdPreprocessGeneratedCommandsEXT",
 }

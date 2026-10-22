@@ -1321,6 +1321,56 @@ fn object_draws(dev: &crate::device::Device, p: &crate::pipeline::RenderPipeline
         [Some(8), Some(1), Some(1)],
         "{what}"
     );
+    // Where the device folds object grids, the object function reads its region record, and a
+    // grid past the task stage's limits runs in pieces (`bind::mesh_arguments`).
+    let folds = crate::lower::mesh::folds_object_grids(dev.profile());
+    assert_eq!(
+        p.dependencies
+            .iter()
+            .any(|d| d.fact == crate::pipeline::facts::RuntimeFact::FoldedGroups),
+        folds,
+        "{what}"
+    );
+    if !folds {
+        return;
+    }
+    let hole = |c: &crate::bind::DrawCommands| {
+        c.push_holes.iter().any(|h| {
+            matches!(h, crate::bind::PushHole::ReplayRegionAddress { stages, .. }
+                if *stages == vk::ShaderStageFlags::TASK_EXT)
+        })
+    };
+    assert!(hole(&cmds) && cmds.object_fold.is_some(), "{what}");
+    let task = dev.profile().fields().limits.mesh.max_task_work_group_count;
+    let draw = DrawCall::MeshThreadgroups {
+        groups: [task[0].saturating_add(1), 100, 1],
+        threads_per_object_group: [4, 1, 1],
+        threads_per_mesh_group: [8, 1, 1],
+    };
+    let cmds = plan
+        .instantiate_draw(&state, &draw)
+        .unwrap_or_else(|e| panic!("{what}: a folded object draw: {e}"));
+    let fold = cmds.object_fold.expect("a fold");
+    assert!(
+        fold.pieces >= 1 && !fold.past && hole(&cmds),
+        "{what}: {fold:?}"
+    );
+    let indirect = DrawCall::MeshThreadgroupsIndirect {
+        indirect: crate::bind::IndirectRef::new(1, 0),
+        threads_per_object_group: [4, 1, 1],
+        threads_per_mesh_group: [8, 1, 1],
+    };
+    let cmds = plan
+        .instantiate_draw(&state, &indirect)
+        .unwrap_or_else(|e| panic!("{what}: a folded indirect object draw: {e}"));
+    assert!(
+        matches!(
+            cmds.draw,
+            vk::DrawCommand::DrawMeshTasksIndirectCount { .. }
+        ) && hole(&cmds),
+        "{what}: {:?}",
+        cmds.draw
+    );
 }
 
 /// The binder's plan of mesh pipeline `p` on `dev` and its mesh draws: the plan leaves the mesh

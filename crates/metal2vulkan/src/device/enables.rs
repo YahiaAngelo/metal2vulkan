@@ -226,7 +226,7 @@ exposures! {
         DescriptorBindingStorageBufferUpdateAfterBind,
         DescriptorBindingUniformTexelBufferUpdateAfterBind,
         DescriptorBindingStorageTexelBufferUpdateAfterBind,
-        DescriptorBindingUpdateUnusedWhilePending,
+        DescriptorBindingUpdateUnusedWhilePending, DrawIndirectCount,
         ShaderSampledImageArrayNonUniformIndexing, ShaderStorageImageArrayNonUniformIndexing,
         ShaderStorageBufferArrayNonUniformIndexing,
         ShaderUniformTexelBufferArrayNonUniformIndexing,

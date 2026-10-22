@@ -1444,6 +1444,7 @@ pub(super) const FEATURE_MEMBERS: &[(&str, VkFeature)] = {
         ("shaderResourceResidency", F::ShaderResourceResidency),
         ("samplerAnisotropy", F::SamplerAnisotropy),
         ("samplerFilterMinmax", F::SamplerFilterMinmax),
+        ("drawIndirectCount", F::DrawIndirectCount),
         ("samplerMirrorClampToEdge", F::SamplerMirrorClampToEdge),
         (
             "shaderStorageImageMultisample",

@@ -678,6 +678,18 @@ surface! {
         enum ChromaDecode N;
         fn mesh_scan_module;
         struct MeshScanModule N;
+        fn mesh_arguments_module;
+        fn fold_object_grid;
+        fn metal_object_grid;
+        struct MeshArguments N;
+        enum MeshArgumentsForm E;
+        struct MeshArgumentsModule N;
+        struct MeshGridLimits N;
+        struct MeshGridRule N;
+        struct ObjectFold N;
+        const METAL_MESH_GRID_AXIS;
+        const METAL_MESH_GRID_TOTAL;
+        const METAL_OBJECT_GRID_TOTAL;
         fn tessellation_scan_module;
         struct TessellationScanKernel N;
         struct TessellationScanModule N;

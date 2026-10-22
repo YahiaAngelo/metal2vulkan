@@ -260,6 +260,11 @@ pub(crate) struct MeshTemplate {
     pub mesh: GroupLimits,
     /// The task stage's limits (`maxTaskWorkGroup*`), of a pipeline with an object function.
     pub object: Option<GroupLimits>,
+    /// The object function is compiled folded (`RuntimeFact::FoldedGroups`,
+    /// `lower::mesh::folds_object_grids`): each draw runs its object grid in pieces within the task
+    /// stage's limits (`bind::mesh_arguments`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub folded: bool,
     /// An emulated mesh function's records: each draw dispatches its mesh threadgroups and
     /// draws their primitives (`DrawCommands::mesh_dispatch`).
     #[cfg_attr(feature = "serde", serde(default))]

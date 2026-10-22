@@ -756,6 +756,11 @@ impl Deriver<'_> {
                 _ => {}
             }
         }
+        // A task or mesh entry's `DrawIndex` is enabled by `MeshShadingEXT` (as the grammar lists
+        // it), which the entry declared: it needs no `DrawParameters`.
+        if b == B::DrawIndex && matches!(self.model, ExecModel::TaskEXT | ExecModel::MeshEXT) {
+            return Ok(());
+        }
         // A geometry stage's point size, input or output, is `GeometryPointSize`'s.
         if b == B::PointSize && self.model == ExecModel::Geometry {
             self.cap(Cap::GeometryPointSize);

@@ -1278,6 +1278,7 @@ mod bind_serde_round_trips {
             },
             indirect_needs_arguments: false,
             mesh_arguments: None,
+            object_fold: None,
             index_bounds_pass: false,
             extents: Vec::new(),
             push_holes: Vec::new(),
@@ -1345,6 +1346,12 @@ mod bind_serde_round_trips {
         round_trip(&vk::DrawCommand::DrawMeshTasksIndirect {
             offset: 12,
             draw_count: 1,
+            stride: 12,
+        });
+        round_trip(&vk::DrawCommand::DrawMeshTasksIndirectCount {
+            offset: 36,
+            count_offset: 32,
+            max_draw_count: 128,
             stride: 12,
         });
     }

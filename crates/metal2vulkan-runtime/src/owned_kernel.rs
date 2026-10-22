@@ -112,7 +112,8 @@ pub(super) enum OwnedModule {
     /// draw (`render/mesh.rs`).
     MeshScan,
     /// `bind::mesh_arguments_module` of one form: an indirect mesh draw's group counts, as Metal
-    /// draws them within the device's limits (`render/mesh_arguments.rs`).
+    /// draws them within the device's limits, or a folded object function's pieces
+    /// (`render/mesh_arguments.rs`).
     MeshArguments(metal2vulkan::bind::MeshArgumentsForm),
     /// `bind::plane_words_module`: a blit's color words of a two-plane extended-range texture
     /// moved between its texels and a buffer (`two_planes.rs`).
@@ -523,6 +524,7 @@ pub(super) struct OwnedKernels {
     mesh_scan: Option<OwnedKernel>,
     mesh_arguments_mesh: Option<OwnedKernel>,
     mesh_arguments_object: Option<OwnedKernel>,
+    mesh_arguments_folded: Option<OwnedKernel>,
     plane_words: Option<OwnedKernel>,
     plane_copy: Option<OwnedKernel>,
     index_rewrites: HashMap<(RewriteProgram, RewritePhase), OwnedKernel>,
@@ -565,6 +567,7 @@ impl OwnedKernels {
             self.mesh_scan,
             self.mesh_arguments_mesh,
             self.mesh_arguments_object,
+            self.mesh_arguments_folded,
             self.plane_words,
             self.plane_copy,
             self.rotate_texels,
@@ -711,6 +714,9 @@ impl OwnedKernels {
             }
             OwnedModule::MeshArguments(metal2vulkan::bind::MeshArgumentsForm::Object) => {
                 &mut self.mesh_arguments_object
+            }
+            OwnedModule::MeshArguments(metal2vulkan::bind::MeshArgumentsForm::FoldedObject) => {
+                &mut self.mesh_arguments_folded
             }
             OwnedModule::PlaneWords => &mut self.plane_words,
             OwnedModule::PlaneCopy => &mut self.plane_copy,
