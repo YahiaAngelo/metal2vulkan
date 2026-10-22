@@ -1433,13 +1433,25 @@ degradations! {
              under the exact tile store, a signed normalized minimum code raised and an \
              RGB9E5Float word normalized; the tiles a draw reaches are Metal's";
         /// A draw in a render pass over a rasterization-rate map of no layers that was made after
-        /// the device released a map of one or more layers (`rate_mapped_pass.rs`). The draw
+        /// the device released a map of one or more layers, or reset from one of layers
+        /// (`rate_mapped_pass.rs`). The draw
         /// writes nothing, where Metal draws: an Apple M4 and an Apple M3 Max drew a 64-pixel
         /// map's physical rows 0 to 15 over a 64-pixel target at the positions of a pass with no
         /// map, whatever map was released. Announced at the draw.
         ZeroLayerMapAfterRelease = "zero-layer-map-after-release", Precision,
             "the draws write nothing, where Metal draws rows of the pass (a 64-pixel map's rows 0 \
              to 15, at the positions of a pass with no map)";
+        /// A render pass over a rasterization-rate map that was reset
+        /// (`RasterizationRateMap::reset_using_descriptor`) after the pass took it and before
+        /// its command buffer was submitted, in an encoder the runtime could not encode again
+        /// (it kept no log: a command predication's command buffer, a render encoder opened
+        /// while a buffer of the device was detached, or one that left work for a host step;
+        /// `rate_mapped_pass.rs`). The pass draws by the map as it took it, where Metal's GPU
+        /// reads the map as it runs the pass (the M3 Max under macOS 27.0.1). Announced at the
+        /// commit, or at the reset where the command buffer was committed.
+        RateMapResetUnencoded = "rate-map-reset-unencoded", Precision,
+            "the pass draws by the map as it took it, where Metal's GPU draws by the map as \
+             reset";
         /// A texture made in a heap over host pages (`new_heap_with_bytes_no_copy`), or a depth
         /// or stencil texture made in any heap as a shadow of Metal's tiles (on a driver that
         /// lays such images apart from their memory or keeps them GPU-optimized: MoltenVK), that

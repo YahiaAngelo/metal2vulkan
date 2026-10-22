@@ -157,6 +157,7 @@ metal2vulkan-degrade-quads-counted-before-discard
 metal2vulkan-degrade-quads-split-by-clipping
 metal2vulkan-degrade-rasterization-rate-map
 metal2vulkan-degrade-rate-map-parameter-data
+metal2vulkan-degrade-rate-map-reset-unencoded
 metal2vulkan-degrade-read-only-pages-written
 metal2vulkan-degrade-reduction-order
 metal2vulkan-degrade-reissued-resource-id

@@ -2114,7 +2114,7 @@ impl Counters {
             .fetch_add(bytes as u64, Ordering::Relaxed);
     }
 
-    /// A rebind encoded an ended encoder again (`command_buffer/reencode.rs`).
+    /// A rebind or a map's reset encoded an ended encoder again (`command_buffer/reencode.rs`).
     pub(crate) fn encoder_reencoded(&self) {
         self.encoders_reencoded.fetch_add(1, Ordering::Relaxed);
     }
@@ -3789,7 +3789,8 @@ pub struct WorkCounts {
     pub replay_logs_kept: u64,
     /// The bytes of the logs counted in `replay_logs_kept`.
     pub replay_log_bytes: u64,
-    /// Ended encoders a rebind encoded again before their command buffer's first submission
+    /// Ended encoders a rebind, or a reset of a rasterization-rate map a render pass took,
+    /// encoded again before their command buffer's first submission
     /// (`command_buffer/reencode.rs`).
     pub encoders_reencoded: u64,
     /// Work a command buffer's commit recorded on the GPU alone (a GPU-written execution's) that

@@ -70,6 +70,7 @@ use super::heap::Heap;
 use super::host_memory::{Deallocator, HostMemory, HostRelease, KeepAlive};
 use super::key_hash::KeyMap;
 use super::program_objects;
+use super::rate_map::{MapState, RasterizationRateMap};
 use super::resource::{ObjectId, ResourceKey};
 use super::Device;
 use std::any::Any;
@@ -130,6 +131,10 @@ pub(super) struct Rebinds {
 #[derive(Default)]
 struct Waiting {
     buffers: Vec<(Weak<CommandBufferShared>, Box<[ResourceKey]>)>,
+    /// The command buffers waiting so whose encoders' passes are over rasterization-rate maps,
+    /// with the maps' identities (`RasterizationRateMap::id`): a reset of one has those encoders
+    /// encoded again ([`Rebinds::reset_map`]).
+    maps: Vec<(Weak<CommandBufferShared>, Box<[usize]>)>,
     /// The length past which the next registration first lets go of the entries whose command
     /// buffer went or was submitted.
     prune_at: usize,
@@ -144,7 +149,8 @@ impl Waiting {
             return;
         }
         self.buffers.retain(|(buffer, _)| buffer.strong_count() > 0);
-        self.prune_at = (2 * self.buffers.len()).max(16);
+        self.maps.retain(|(buffer, _)| buffer.strong_count() > 0);
+        self.prune_at = (2 * self.buffers.len().max(self.maps.len())).max(16);
     }
 }
 
@@ -265,10 +271,16 @@ impl Rebinds {
         &self,
         buffer: &Arc<CommandBufferShared>,
         keys: Box<[ResourceKey]>,
+        maps: Box<[usize]>,
     ) {
         let mut waiting = lock(&self.waiting);
         waiting.prune();
-        waiting.buffers.push((Arc::downgrade(buffer), keys));
+        if !keys.is_empty() {
+            waiting.buffers.push((Arc::downgrade(buffer), keys));
+        }
+        if !maps.is_empty() {
+            waiting.maps.push((Arc::downgrade(buffer), maps));
+        }
     }
 
     /// `buffer` waits for no rebind's replay from here: its last event group was submitted, or
@@ -278,6 +290,41 @@ impl Rebinds {
         waiting
             .buffers
             .retain(|(waiting, _)| !std::ptr::eq(Weak::as_ptr(waiting), buffer));
+        waiting
+            .maps
+            .retain(|(waiting, _)| !std::ptr::eq(Weak::as_ptr(waiting), buffer));
+    }
+
+    /// Reset the rasterization-rate map of identity `map` by `swap`, which puts its new state in
+    /// place, under the lock a group's submission reads its mark under: the command buffers
+    /// waiting for the submission of an event group whose encoders' passes are over it
+    /// ([`Rebinds::wait_for_replay`]) are each marked to encode those encoders again before that
+    /// submission (`CommandBufferShared::reencode`), which the caller runs. So a group's
+    /// submission came either before the reset (and draws by the map as its passes took it, as
+    /// Metal's GPU, under way, read it) or waits for its passes encoded again.
+    pub(super) fn reset_map(
+        &self,
+        map: usize,
+        swap: impl FnOnce(),
+    ) -> Vec<Arc<CommandBufferShared>> {
+        let _submitting = lock(&self.buffers);
+        swap();
+        let waiting = lock(&self.waiting);
+        let mut again: Vec<Arc<CommandBufferShared>> = Vec::new();
+        let over = (waiting.maps.iter())
+            .filter(|(_, maps)| maps.contains(&map))
+            .map(|(buffer, _)| buffer);
+        for buffer in over {
+            let Some(buffer) = buffer.upgrade() else {
+                continue;
+            };
+            if again.iter().any(|had| Arc::ptr_eq(had, &buffer)) {
+                continue;
+            }
+            buffer.mark_reencode();
+            again.push(buffer);
+        }
+        again
     }
 
     /// Whether a buffer of the device is detached now (`detach.rs`): a render encoder logs no call
@@ -681,6 +728,10 @@ pub(super) struct Taken {
     /// A command named a detached buffer, and the encoder recorded nothing from it on
     /// (`EncoderCore::skips`): its submission never runs.
     dead: bool,
+    /// The rasterization-rate map its render pass is over, and the map as the pass took it,
+    /// which its draws were planned by: a reset of the map before the submission of its event
+    /// group has the encoder encoded again (`rate_mapped_pass.rs`).
+    rate_map: Option<(RasterizationRateMap, Arc<MapState>)>,
 }
 
 /// The objects of a releasable import a blit's command took (`Buffer::blit_at`,
@@ -761,6 +812,33 @@ impl Taken {
         self.pins.extend(other.pins);
         self.named.extend(other.named);
         self.dead |= other.dead;
+        if self.rate_map.is_none() {
+            self.rate_map = other.rate_map;
+        }
+    }
+
+    /// Note that the encoder's render pass is over `map`, which it took as `state`.
+    pub(super) fn take_rate_map(&mut self, map: RasterizationRateMap, state: Arc<MapState>) {
+        self.rate_map = Some((map, state));
+    }
+
+    /// Whether a rebind or a reset may have the encoder encoded again: a command named a buffer
+    /// over host pages, or its pass is over a rasterization-rate map.
+    pub(super) fn encodes_again(&self) -> bool {
+        self.names_a_pin() || self.rate_map.is_some()
+    }
+
+    /// The identity of the rasterization-rate map its pass is over (`Rebinds::reset_map`).
+    pub(super) fn rate_map_id(&self) -> Option<usize> {
+        self.rate_map.as_ref().map(|(map, _)| map.id())
+    }
+
+    /// Whether its pass took a rasterization-rate map since reset: its draws were planned by a
+    /// map Metal's GPU no longer reads (`rate_mapped_pass.rs`).
+    pub(super) fn rate_map_reset(&self) -> bool {
+        self.rate_map
+            .as_ref()
+            .is_some_and(|(map, state)| !map.holds(state))
     }
 
     /// The encoder records nothing more: a command named a detached buffer.

@@ -200,8 +200,10 @@ pub fn tile_line(
 
 /// Write one axis's tables: tiles `(screen extent, physical extent)` from screen 0, every one but
 /// the last [`GRANULARITY`] physical pixels wide and at least as many screen pixels, into
-/// `to_screen` and `to_physical` (each a table's [`TABLE_WORDS`] words, zero on entry). Entries
-/// past a table's words are not written.
+/// `to_screen` and `to_physical` (each a table's [`TABLE_WORDS`] words). It writes both words of
+/// each entry the axis has and no other word, so a table that held another axis keeps that axis's
+/// entries past this one's, as Metal's reset of a map leaves them. Entries past a table's words
+/// are not written.
 pub fn encode_axis(tiles: &[(u32, u32)], to_screen: &mut [u32], to_physical: &mut [u32]) {
     let mut starts = Vec::with_capacity(tiles.len());
     let (mut s, mut p) = (0u32, 0u32);

@@ -2552,7 +2552,7 @@ impl CommandBuffer {
             .filter(|(_, prepared)| prepared.pipelines)
             .map(|((work, _), _)| work.clone())
             .collect();
-        let (waits, away, reaches, unreplayable) = {
+        let (waits, away, reaches, unreplayable, reset) = {
             let mut state = self.state();
             state.committing = false;
             if let Some(failure) = failure {
@@ -2601,10 +2601,20 @@ impl CommandBuffer {
             }
             // A rebind before its first submission of a buffer its replayable encoders, or its
             // work on the GPU alone, named encodes or records them again (`reencode.rs`): noted
-            // while their holds still refuse one.
-            let (unreplayable, keys) = state.keep_replays();
-            if !keys.is_empty() {
-                device.shared().rebinds.wait_for_replay(&self.0, keys);
+            // while their holds still refuse one. So does a reset of a rasterization-rate map
+            // their passes are over (`rate_mapped_pass.rs`): noted first, then a reset before the
+            // commit found here, marked before the scheduler sees the command buffer.
+            let kept = state.keep_replays();
+            if !kept.keys.is_empty() || !kept.maps.is_empty() {
+                device
+                    .shared()
+                    .rebinds
+                    .wait_for_replay(&self.0, kept.keys, kept.maps);
+            }
+            let unreplayable = kept.gone;
+            let reset = state.rate_maps_reset();
+            if reset.0 {
+                self.0.mark_reencode();
             }
             if let Some(slot) = &mut state.slot {
                 slot.committed();
@@ -2677,7 +2687,7 @@ impl CommandBuffer {
                 .find(|image| image.rests_out_of_general());
             // Its commands may reach every texture through its resource ID where one bound a
             // heap set.
-            (waits, away, state.heaps.bound(), unreplayable)
+            (waits, away, state.heaps.bound(), unreplayable, reset)
         };
         // Each making the batches wait for wakes the scheduler as it finishes, with no lock
         // held (`render/pending.rs`), registered before the scheduler first looks at the batches:
@@ -2703,6 +2713,16 @@ impl CommandBuffer {
             .shared()
             .scheduler
             .commit(&self.0, self.0.queue.id(), waits);
+        // Its passes that took a rasterization-rate map since reset, encoded again in this call
+        // as a reset's are; its first submission waits for them (marked above). Those it cannot
+        // encode again are announced.
+        let (again, unencoded) = reset;
+        if again {
+            self.0.reencode();
+        }
+        for unlogged in unencoded {
+            crate::rate_mapped_pass::degrade_unencoded(device, unlogged);
+        }
         if let Some(image) = away {
             device.degrade(Degradation::WrappedImageLayoutTransitions, || {
                 image.notice()

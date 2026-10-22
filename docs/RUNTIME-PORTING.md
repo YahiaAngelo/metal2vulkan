@@ -345,8 +345,10 @@ narrow refusal that the call's rustdoc describes.
 |---|---|---|
 | `copy_parameter_data` | `copyParameterDataToBuffer:offset:` | `RasterizationRateMap::copy_parameter_data_to_buffer` |
 | `layer_count` | `layerCount` | `RasterizationRateMap::layer_count` |
-| `physical_to_screen` | `mapPhysicalToScreenCoordinates:forLayer:` | `RasterizationRateMap::map_physical_to_screen_coordinates` |
-| `screen_to_physical` | `mapScreenToPhysicalCoordinates:forLayer:` | `RasterizationRateMap::map_screen_to_physical_coordinates` |
+| `mutability` | `mutability` (SPI) | `RasterizationRateMap::mutability` |
+| `physical_to_screen` | `mapPhysicalToScreenCoordinates:forLayer:` | `RasterizationRateMap::map_physical_to_screen_coordinates`; a map of no layers, and a mutable map not yet reset, are refused (Metal's process ends) |
+| `reset` | `resetUsingDescriptor:` (SPI) | `RasterizationRateMap::reset_using_descriptor`; a pass not yet submitted draws by the map as reset |
+| `screen_to_physical` | `mapScreenToPhysicalCoordinates:forLayer:` | `RasterizationRateMap::map_screen_to_physical_coordinates`; a map of no layers is refused (Metal's process ends) |
 | `parameter_buffer_size_and_align` | `parameterBufferSizeAndAlign` | `RasterizationRateMap::parameter_buffer_size_and_align` |
 | `physical_granularity` | `physicalGranularity` | `RasterizationRateMap::physical_granularity` |
 | `physical_size` | `physicalSizeForLayer:` | `RasterizationRateMap::physical_size_for_layer` |
@@ -356,6 +358,7 @@ narrow refusal that the call's rustdoc describes.
 | Item | Metal | Runtime |
 |---|---|---|
 | `set_layer` | `setLayer:atIndex:` | field `metal2vulkan::bind::RateMapDescriptor::layers` |
+| `set_mutability` | `setMutability:` (SPI) | field `metal2vulkan::bind::RateMapDescriptor::mutability` |
 | `layer_count` | `layerCount` | `layers.len()` |
 | `layer` |  | `layers[i]` |
 
@@ -578,7 +581,6 @@ These items have no single runtime call. The consumer builds them from the calls
 | Item | How |
 |---|---|
 | `BlitCmd::CopyTextureRegionOptions` | options 0 is `BlitCommandEncoder::copy_from_texture_to_texture`; a public `BlitOption` goes through a buffer (`copy_from_texture_to_buffer`, then `copy_from_buffer_to_texture`) |
-| `RateMap::reset` | a new map: `Device::new_rasterization_rate_map` |
 | `RenderCmd::SetDepthClipModeSpi` | the public `RenderCommandEncoder::set_depth_clip_mode` |
 | `RenderCmd::SetPrimitiveRestartEnabled` | `RenderCommandEncoder::set_primitive_restart_enabled`: indexed strips restart at the index as Metal takes it for their index type, and only there |
 | `GpuDevice::allow_foreign_libraries` | nothing to call: `Device::new_library_with_data` reads a metallib of any Apple platform |
@@ -607,6 +609,5 @@ what only a paravirtualized device needs belongs to its consumer.
 - **Apple's serialized pipeline descriptors:** the three `deserialize_*_pipeline_descriptor`
   items.
 - **Apple's descriptions of formats and devices:** `GpuDevice::pixel_format_info` (Apple's flag
-  words; `metal2vulkan::metal::format` holds the block facts), `DeviceCaps::gpu_core_count`, the
-  private limits and flags no measurement covers, and
-  `RateMap::mutability`, which only Apple's private headers declare.
+  words; `metal2vulkan::metal::format` holds the block facts), `DeviceCaps::gpu_core_count`, and
+  the private limits and flags no measurement covers.

@@ -1985,8 +1985,16 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   RGB9E5Float word normalized; the tiles a draw reaches are Metal's.
 - `metal2vulkan-degrade-zero-layer-map-after-release` (precision). `ZeroLayerMapAfterRelease`: A
   draw in a render pass over a rasterization-rate map of no layers that was made after the device
-  released a map of one or more layers. Cost: the draws write nothing, where Metal draws rows of the
-  pass (a 64-pixel map's rows 0 to 15, at the positions of a pass with no map).
+  released a map of one or more layers, or reset from one of layers. Cost: the draws write nothing,
+  where Metal draws rows of the pass (a 64-pixel map's rows 0 to 15, at the positions of a pass
+  with no map).
+- `metal2vulkan-degrade-rate-map-reset-unencoded` (precision). `RateMapResetUnencoded`: A render
+  pass over a rasterization-rate map reset (`RasterizationRateMap::reset_using_descriptor`) after
+  the pass took it and before its command buffer was submitted, in an encoder the runtime could not
+  encode again (it kept no log: a command predication's command buffer, a render encoder opened
+  while a buffer of the device was detached, or one that left work for a host step). Announced at
+  the commit, or at the reset where the command buffer was committed. Cost: the pass draws by the
+  map as it took it, where Metal's GPU draws by the map as reset.
 - `metal2vulkan-degrade-heap-texture-lossless-layout` (precision). `HeapTextureLosslessLayout`: A
   texture made in a heap over host pages (`new_heap_with_bytes_no_copy`), or a depth or stencil
   texture made in any heap as a shadow of Metal's tiles (on a driver that lays such images apart from
@@ -3166,10 +3174,18 @@ each item named states the rule in full.
 
 **Rasterization-rate maps**
 
-- **A map of no layers answers its coordinate maps**, where Metal ends the process.
+- **A map of no layers refuses its coordinate maps, and a mutable map not yet reset its
+  physical-to-screen map**, where Metal ends the process.
 - **A screen past 16384 pixels a side is refused**, where Apple's compile crashes or returns a
   corrupt size.
 - **A parameter-data copy Metal makes unsafely is refused**: into a `Private` buffer, or past the
   buffer's length.
-- **A physical size past the map's layers has width 0.**
+- **A physical size past the map's layers has width 0**, but after a reset to fewer layers, which
+  keeps the earlier layers' widths, as Metal does. Past layer 1 Metal reads the map's other fields and the
+  memory after them (an M3 Max: at layer 2 the vertical extent, at 3 and 4 the screen's sides), and
+  a layer near the top of the range ends the process.
+- **A mutable map's pass stops at the physical size**, where Metal rasterizes past the screen edge
+  (an M3 Max: a 64-pixel half-rate map's pass to 49 by 49 pixels); announced with
+  `rasterization-rate-map`.
+- **A pass of no draws over a mutable map stores its clear**, where Metal's GPU hangs.
 - **A rate-mapped pass draws region by region, and refuses a cutting scissor.**

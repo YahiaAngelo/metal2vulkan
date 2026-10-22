@@ -91,6 +91,9 @@ impl CommandBufferShared {
         let device = &self.device;
         // The encoders of its event groups not submitted yet: those before were judged, and run
         // over the pages they took.
+        // So are those whose pass took a rasterization-rate map since reset; one that kept no
+        // log draws by the map as it took it, announced (`rate_mapped_pass.rs`).
+        let mut unencoded = Vec::new();
         let moved: Vec<(usize, Arc<Replay>)> = {
             let state = lock(&self.state);
             match state.finished() {
@@ -103,15 +106,23 @@ impl CommandBufferShared {
                     (state.ended.iter().enumerate())
                         .filter(|(at, _)| open.contains(at))
                         .filter_map(|(at, record)| {
-                            let replay = record.replay.as_ref()?;
-                            submitting
-                                .rebound(&record.taken)
-                                .then(|| (at, Arc::clone(replay)))
+                            let reset = record.taken.rate_map_reset();
+                            let Some(replay) = record.replay.as_ref() else {
+                                if reset {
+                                    unencoded.push(record.unlogged);
+                                }
+                                return None;
+                            };
+                            let moved = submitting.rebound(&record.taken) || reset;
+                            moved.then(|| (at, Arc::clone(replay)))
                         })
                         .collect()
                 }
             }
         };
+        for unlogged in unencoded {
+            crate::rate_mapped_pass::degrade_unencoded(device, unlogged);
+        }
         let handle = CommandBuffer(Arc::clone(self));
         // The encoders encoded again, whose segments the encoding again recorded.
         let mut spliced = Vec::new();
@@ -123,7 +134,14 @@ impl CommandBufferShared {
                 Ok(replayed) => replayed,
                 Err(error) => {
                     counts.reencode_refused();
-                    lock(&self.state).ended[at].refused = Some(error.to_string());
+                    let reset = {
+                        let mut state = lock(&self.state);
+                        state.ended[at].refused = Some(error.to_string());
+                        state.ended[at].taken.rate_map_reset()
+                    };
+                    if reset {
+                        crate::rate_mapped_pass::degrade_unencoded(device, None);
+                    }
                     continue;
                 }
             };
@@ -138,8 +156,15 @@ impl CommandBufferShared {
                 Err(unspliced) => {
                     counts.reencode_refused();
                     let refusal = "its place holds other parts or work than its encoding again's";
-                    lock(&self.state).ended[at].refused = Some(refusal.to_owned());
+                    let reset = {
+                        let mut state = lock(&self.state);
+                        state.ended[at].refused = Some(refusal.to_owned());
+                        state.ended[at].taken.rate_map_reset()
+                    };
                     drop(unspliced);
+                    if reset {
+                        crate::rate_mapped_pass::degrade_unencoded(device, None);
+                    }
                 }
             }
         }
@@ -396,16 +421,20 @@ impl State {
     /// of without this lock: every log where an encoder used command predication, and those of
     /// encoders the commit's failure fails (they run nothing). The keys of buffers over host pages
     /// the encoders whose logs stay named, and the work its commit recorded on the GPU alone,
-    /// sorted, each once (`Rebinds::wait_for_replay`).
-    pub(super) fn keep_replays(&mut self) -> (Vec<Arc<Replay>>, Box<[ResourceKey]>) {
+    /// sorted, each once, and the identities of the rasterization-rate maps its encoders' passes
+    /// are over, logged or not (a reset encodes the one again, or announces the other:
+    /// `Rebinds::wait_for_replay`).
+    pub(super) fn keep_replays(&mut self) -> KeptReplays {
         let mut gone = Vec::new();
         let mut keys = Vec::new();
+        let mut maps = Vec::new();
         let predicated = self.predicated;
         for (at, record) in self.ended.iter_mut().enumerate() {
             let fails = self
                 .failed_at_commit
                 .as_ref()
                 .is_some_and(|failed| failed.fails(at));
+            maps.extend(record.taken.rate_map_id());
             if predicated || fails {
                 if let Some(log) = record.replay.take() {
                     gone.push(log);
@@ -429,6 +458,42 @@ impl State {
         }
         keys.sort_unstable();
         keys.dedup();
-        (gone, keys.into_boxed_slice())
+        maps.sort_unstable();
+        maps.dedup();
+        KeptReplays {
+            gone,
+            keys: keys.into_boxed_slice(),
+            maps: maps.into_boxed_slice(),
+        }
     }
+
+    /// As it commits, once its replays are kept ([`State::keep_replays`]): whether an encoder
+    /// whose pass took a rasterization-rate map since reset, before the commit, is to be encoded
+    /// again before its first submission, its log kept (`rate_mapped_pass.rs`); and why each that
+    /// kept no log did not, which draws by the map as it took it, for the caller to announce
+    /// without this lock (`rate-map-reset-unencoded`).
+    pub(super) fn rate_maps_reset(&self) -> (bool, Vec<Option<Unlogged>>) {
+        let mut again = false;
+        let mut unencoded = Vec::new();
+        for record in &self.ended {
+            if !record.taken.rate_map_reset() {
+                continue;
+            }
+            match record.replay {
+                Some(_) => again = true,
+                None => unencoded.push(record.unlogged),
+            }
+        }
+        (again, unencoded)
+    }
+}
+
+/// What [`State::keep_replays`] keeps and lets go of.
+pub(super) struct KeptReplays {
+    /// The logs no rebind encodes again, for the caller to let go of without the lock.
+    pub(super) gone: Vec<Arc<Replay>>,
+    /// The keys of the buffers over host pages the kept logs' encoders named.
+    pub(super) keys: Box<[ResourceKey]>,
+    /// The identities of the rasterization-rate maps its encoders' passes are over.
+    pub(super) maps: Box<[usize]>,
 }
