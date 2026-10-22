@@ -354,9 +354,10 @@ fn a_write_lands_on_its_level_alone() {
     assert!(ran > 0 && refused > 0, "ran {ran}, refused {refused}");
 }
 
-/// `txt_level_queries`: `get_num_mip_levels` of a storage texture reads the pushed count (of a
-/// level-view slot and of a plain cube slot), and `get_width`/`get_height` at a level read that
-/// level's view, the last level's past the count.
+/// `txt_level_queries`: `get_num_mip_levels` of a storage texture reads the pushed count (of a 2D
+/// slot and of a cube slot), and `get_width`/`get_height` at a level answer Metal's
+/// `max(1, e >> (l & 255))` of the first level's extent `e` (`emit::level_extent`), past the count
+/// too; a slot bound to nothing answers its neutral's.
 #[test]
 fn storage_level_queries_read_the_bound_levels() {
     let Some(bc) = fixture("txt_level_queries") else {
@@ -385,9 +386,10 @@ fn storage_level_queries_read_the_bound_levels() {
         assert_eq!(at(2, (8, 3), 1), [3, 2, 1, 1], "{stem} lod 2");
         assert_eq!(
             at(7, (8, 3), 2),
-            [3, 2, 1, 2],
-            "{stem} lod 7 takes the last level"
+            [3, 1, 1, 2],
+            "{stem} lod 7, past the count"
         );
+        assert_eq!(at(257, (8, 3), 2), [3, 4, 2, 2], "{stem} lod 257, as lod 1");
         assert_eq!(
             at(1, (1, 0), 0),
             [0, 1, 1, 0],
@@ -1140,18 +1142,55 @@ fn a_read_at_a_missing_level_is_metals_out_of_bounds_texel() {
 
 // ---- Declarations, facts, and refusals ----
 
-/// A level-view slot declares one storage descriptor per level the device's largest texture of
-/// its type has, with both facts and the level-count push field; a slot whose level count alone
-/// is read keeps one descriptor and has the count. Profiles that cannot index storage arrays by
-/// a non-uniform value refuse a dynamic level, typed.
+/// A level-view slot (`txt_level_write`, written at a level from a buffer) declares one storage
+/// descriptor per level the device's largest texture of its type has, with both facts and the
+/// level-count push field; profiles that cannot index storage arrays by a non-uniform value refuse
+/// its dynamic level, typed. A slot whose level count alone is read, or whose size is queried at a
+/// level (`txt_level_queries`), keeps one descriptor and has the count, on every profile: the
+/// query answers from the first level.
 #[test]
 fn level_views_declare_every_level_of_the_largest_texture() {
-    let Some(bc) = fixture("txt_level_queries") else {
+    let (Some(write), Some(queries)) = (fixture("txt_level_write"), fixture("txt_level_queries"))
+    else {
         return;
     };
     let (mut ok, mut refused) = (0, 0);
     for (stem, p) in committed_profiles().expect("profiles") {
-        let a = match compile(&bc, "txt_level_queries", &p) {
+        let has_push = |a: &FunctionArtifact, s: u32| {
+            a.interface
+                .push
+                .fields
+                .iter()
+                .any(|f| f.field == PushField::TextureLevels(tslot(s)))
+        };
+        let count = |a: &FunctionArtifact, index: u32| {
+            a.interface
+                .descriptors
+                .iter()
+                .find(|d| d.slot == texture(index))
+                .map(|d| d.count)
+        };
+        match compile(&queries, "txt_level_queries", &p) {
+            Ok(a) => {
+                for s in [0, 1] {
+                    assert_eq!(count(&a, s), Some(1), "{stem}: slot {s}");
+                    assert!(
+                        a.facts
+                            .contains(&RuntimeFact::StorageTextureLevels { slot: tslot(s) }),
+                        "{stem}: slot {s}"
+                    );
+                    assert!(
+                        !a.facts
+                            .contains(&RuntimeFact::StorageTextureLevelViews { slot: tslot(s) }),
+                        "{stem}: slot {s}"
+                    );
+                    assert!(has_push(&a, s), "{stem}: slot {s}");
+                }
+            }
+            Err(Error::NeedsInput(_)) => {}
+            Err(e) => panic!("{stem}: the queries: {e}"),
+        }
+        let a = match compile(&write, "txt_level_write", &p) {
             Ok(a) => a,
             Err(e) if !non_uniform(&p) => {
                 assert!(is(&e, &no_non_uniform()), "{stem}: {e}");
@@ -1165,15 +1204,7 @@ fn level_views_declare_every_level_of_the_largest_texture() {
             non_uniform(&p),
             "{stem}: compiled without non-uniform indexing"
         );
-        let count = |index: u32| {
-            a.interface
-                .descriptors
-                .iter()
-                .find(|d| d.slot == texture(index))
-                .map(|d| d.count)
-        };
-        assert_eq!(count(0), Some(max_levels(&p, ImageDim::D2)), "{stem}");
-        assert_eq!(count(1), Some(1), "{stem}");
+        assert_eq!(count(&a, 0), Some(max_levels(&p, ImageDim::D2)), "{stem}");
         let has = |f: RuntimeFact| a.facts.contains(&f);
         assert!(
             has(RuntimeFact::StorageTextureLevels { slot: tslot(0) }),
@@ -1183,24 +1214,7 @@ fn level_views_declare_every_level_of_the_largest_texture() {
             has(RuntimeFact::StorageTextureLevelViews { slot: tslot(0) }),
             "{stem}"
         );
-        assert!(
-            has(RuntimeFact::StorageTextureLevels { slot: tslot(1) }),
-            "{stem}"
-        );
-        assert!(
-            !has(RuntimeFact::StorageTextureLevelViews { slot: tslot(1) }),
-            "{stem}"
-        );
-        for s in [0, 1] {
-            assert!(
-                a.interface
-                    .push
-                    .fields
-                    .iter()
-                    .any(|f| f.field == PushField::TextureLevels(tslot(s))),
-                "{stem}: slot {s}"
-            );
-        }
+        assert!(has_push(&a, 0), "{stem}");
         ok += 1;
     }
     assert!(ok > 0 && refused > 0, "ok {ok}, refused {refused}");

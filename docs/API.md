@@ -2019,8 +2019,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   copies go by draws), in memory of its own. Also a texture made in any
   other heap (over the device's memory) whose bytes there are not Metal's layout: its image bound
   there in the driver's layout, on a driver whose colour images are not measured to lie as Metal's
-  heap textures (`DriverFact::ColorImagesLieAsMetalHeapTextures`) or of a depth or stencil texture
-  there; its image a shadow of the bytes in rows; a multisample texture; or a layout not measured.
+  heap textures (`DriverFact::ColorImagesLieAsMetalHeapTextures`, and
+  `DriverFact::MultisampleColorImagesLieAsMetalHeapTextures` for a multisample one) or of a depth or
+  stencil texture there; its image a shadow of the bytes in rows; or a layout not measured.
   Cost: the texture's reads, writes and copies are Metal's, but its texels lie in the heap's bytes
   in the runtime's layout, where Metal tiles them: a buffer or texture over them meets the texels at
   other bytes than on Metal.
