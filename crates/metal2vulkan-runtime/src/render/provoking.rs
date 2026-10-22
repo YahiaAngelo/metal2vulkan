@@ -21,9 +21,11 @@
 //! - The mode is the encoder's: the last call wins, before or after its pipeline state is set,
 //!   and a new encoder starts at the first vertex.
 //!
-//! A draw at the first vertex, and one of a pipeline whose primitives' vertex order nothing reads
+//! A draw at the first vertex, one of a pipeline whose primitives' vertex order nothing reads
 //! (its fragment function reads no flat input and no `[[barycentric_coord]]`, and its vertex
-//! function selects no slice or viewport), draws as it is ([`Provoking::AsIs`]). Otherwise:
+//! function selects no slice or viewport), and one that makes no primitive (too few vertices or
+//! indices for one, which Metal draws as nothing), draws as it is ([`Provoking::AsIs`]),
+//! announcing nothing. Otherwise:
 //!
 //! - **Native**: on a device that enables `VK_EXT_provoking_vertex`'s `provokingVertexLast` and
 //!   whose pipelines of one render pass instance may differ in mode
@@ -70,7 +72,7 @@ use crate::degradation::Degradation;
 use crate::pipeline::GraphicsState as DrawingState;
 use crate::render_state::EncoderState;
 use crate::Device;
-use metal2vulkan::bind::RewriteOrder;
+use metal2vulkan::bind::{DrawCall, RewriteOrder};
 use metal2vulkan::device::{VkFeature, VkProperty};
 use metal2vulkan::metal::PrimitiveType;
 
@@ -162,6 +164,21 @@ pub(super) fn natively_last(
     state.provoking_last() && (flat || weights) && native(device)
 }
 
+/// Whether `draw` of `assembly` makes no primitive: a direct or indexed draw of too few vertices
+/// or indices for one of its primitives (a line of one vertex, quads of three), which Metal draws
+/// as nothing. An indirect draw's counts are the GPU's, and a draw of points, patches or meshes
+/// that is not empty makes some (an empty draw records nothing before it asks).
+fn makes_none(assembly: Assembly, draw: &DrawCall) -> bool {
+    let count = match *draw {
+        DrawCall::Primitives { vertex_count, .. } => vertex_count,
+        DrawCall::Indexed { index_count, .. } => index_count,
+        _ => return false,
+    };
+    assembly
+        .program()
+        .is_some_and(|program| program.capacity(u64::from(count)) == 0)
+}
+
 /// The classes of primitives a draw assembles, as the provoking vertex treats them.
 enum Class {
     Points,
@@ -216,16 +233,18 @@ impl RenderLowering {
         }
     }
 
-    /// How `call`'s draw of `pipeline` as `assembly` takes the encoder's provoking vertex (the
-    /// module docs), announcing what a listed draw cannot draw as Metal does.
+    /// How `call`'s `draw` of `pipeline` as `assembly` takes the encoder's provoking vertex (the
+    /// module docs), announcing what a listed draw cannot draw as Metal does. A draw that makes
+    /// no primitive draws nothing, as on Metal, and announces nothing ([`makes_none`]).
     pub(super) fn provoking(
         &self,
         call: &'static str,
         pipeline: &DrawingState,
         assembly: Assembly,
+        draw: &DrawCall,
     ) -> Provoking {
         let (flat, weights) = reads(pipeline);
-        if !self.state.provoking_last() || !(flat || weights) {
+        if !self.state.provoking_last() || !(flat || weights) || makes_none(assembly, draw) {
             return Provoking::AsIs;
         }
         let device = self.core.device();

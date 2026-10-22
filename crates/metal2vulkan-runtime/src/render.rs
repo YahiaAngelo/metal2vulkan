@@ -640,6 +640,23 @@ impl Assembly {
             DrawPrimitiveType::Nine => return None,
         })
     }
+
+    /// The program that lists the assembly's primitives in Metal's order
+    /// (`index_rewrite::RewriteProgram`): a line or triangle type's, or a private type's own.
+    /// `None` for points, patches and meshes, which no list holds.
+    fn program(self) -> Option<RewriteProgram> {
+        Some(match self {
+            Assembly::Primitives(primitive) => match primitive {
+                PrimitiveType::LineStrip => RewriteProgram::LineStrip,
+                PrimitiveType::TriangleStrip => RewriteProgram::TriangleStrip,
+                PrimitiveType::Line => RewriteProgram::LineList,
+                PrimitiveType::Triangle => RewriteProgram::TriangleList,
+                PrimitiveType::Point => return None,
+            },
+            Assembly::Private(program) => program,
+            Assembly::Patches | Assembly::Meshes => return None,
+        })
+    }
 }
 
 /// How a draw of primitive type 9 fails its command buffer, as Metal's GPU fails it
@@ -7044,7 +7061,7 @@ impl RenderLowering {
         // (`render/restart.rs`).
         // A draw under the last provoking vertex is drawn as a list on a device without it
         // (`render/provoking.rs`).
-        let provoking = self.provoking(call, &pipeline, assembly);
+        let provoking = self.provoking(call, &pipeline, assembly, &draw);
         let rotated_weights = provoking.rotates_weights(assembly, &pipeline);
         let restarted = self.restarted(assembly, &draw, provoking);
         let quad_primitive_ids = match assembly {

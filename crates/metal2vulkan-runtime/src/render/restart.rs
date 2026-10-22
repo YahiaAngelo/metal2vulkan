@@ -133,17 +133,10 @@ impl RenderLowering {
                 gap,
             })
         };
-        let program = match assembly {
-            Assembly::Private(program) => return listed(program, ListGap::PrivatePrimitives),
-            Assembly::Primitives(primitive) => match primitive {
-                PrimitiveType::LineStrip => RewriteProgram::LineStrip,
-                PrimitiveType::TriangleStrip => RewriteProgram::TriangleStrip,
-                PrimitiveType::Line => RewriteProgram::LineList,
-                PrimitiveType::Triangle => RewriteProgram::TriangleList,
-                PrimitiveType::Point => return None,
-            },
-            Assembly::Patches | Assembly::Meshes => return None,
-        };
+        if let Assembly::Private(program) = assembly {
+            return listed(program, ListGap::PrivatePrimitives);
+        }
+        let program = assembly.program()?;
         if let Provoking::Listed(_) = provoking {
             return listed(program, ListGap::ProvokingVertex);
         }

@@ -921,6 +921,68 @@ fn the_third_way_is_drawn_as_mode_1_announced() {
     );
 }
 
+/// A draw that makes no primitive, too few vertices or indices for one (a line of one vertex,
+/// quads of three), draws nothing at mode 1, as Metal's does, and announces nothing: through the
+/// device's last vertex and with it withheld, of a pipeline that reads flat inputs and weights,
+/// on the cfg's device.
+#[test]
+fn draws_of_no_primitive_announce_nothing() {
+    use DrawPrimitiveType::{LineLoop, Public, QuadStrip, Quads, TriangleFan};
+    for withheld in [false, true] {
+        let cache = ScratchCache::new().unwrap();
+        let messages = Messages::default();
+        {
+            let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), |options| {
+                if withheld {
+                    options
+                        .withheld_features
+                        .insert(VkFeature::ProvokingVertexLast);
+                }
+            })
+            .unwrap();
+            let name = device.name().to_owned();
+            let lane = Lane::new(device);
+            // `pv_bare`: the flat vertex ID and the weights, no primitive ID.
+            let pipeline = lane.pipeline(FRAGMENTS[4]);
+            let short = [
+                (Public(PrimitiveType::Line), 1),
+                (Public(PrimitiveType::LineStrip), 1),
+                (Public(PrimitiveType::Triangle), 2),
+                (Public(PrimitiveType::TriangleStrip), 2),
+                (LineLoop, 1),
+                (TriangleFan, 2),
+                (Quads, 3),
+                (QuadStrip, 3),
+            ];
+            for (primitive, count) in short {
+                let indices = (0..count).collect();
+                for case in [
+                    Case::direct(primitive, Form::Direct, count, 1),
+                    Case::indexed(primitive, Form::Indexed(IndexType::UInt16), indices),
+                ] {
+                    let texels = lane.draw(&pipeline, &case, 1).unwrap();
+                    assert!(
+                        texels[2].iter().all(|t| t[3] != 1),
+                        "{case:?} on {name}: drew"
+                    );
+                }
+            }
+            let kinds: Vec<Degradation> = messages
+                .take_notices()
+                .iter()
+                .filter_map(|m| m.degradation.as_ref())
+                .map(|notice| notice.degradation)
+                .collect();
+            assert!(kinds.is_empty(), "{name} (withheld {withheld}): {kinds:?}");
+        }
+        let reported = messages.take();
+        assert!(
+            reported.is_empty(),
+            "the validation layer reported: {reported:#?}"
+        );
+    }
+}
+
 /// An execution of indirect render commands takes the first vertex at mode 1, as Metal's does: its
 /// command draws, bit for bit, what the encoder's own draw does at mode 0, and not at mode 1; on
 /// the cfg's device.
