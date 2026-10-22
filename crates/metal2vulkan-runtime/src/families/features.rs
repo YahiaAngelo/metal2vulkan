@@ -32,7 +32,7 @@ use super::formats::{FormatRow, Missing};
 use super::{Column, Facts, FormatCapability, Framework, Refusal, RowState};
 use crate::capabilities::Query;
 use crate::error::RuntimeGap;
-use crate::framebuffer_fetch::through_inputs;
+use crate::framebuffer_fetch::{through_inputs, through_storage};
 use crate::rate_mapped_pass::RegionRefusal;
 use metal2vulkan::device::{OpBits, StageSimd, SubgroupOp, VkExtension, VkFeature, VkProperty};
 use metal2vulkan::error::{Capability, Feature, LowerFamily, Unsupported};
@@ -1000,15 +1000,24 @@ impl FeatureRow {
 
             // ---- Render passes and attachments ----
             // Framebuffer fetch (the compile layer's color inputs, the runtime's
-            // `framebuffer_fetch`): exact through input attachments in rasterization order. The
-            // pixel interlock's storage form keeps no blended or sRGB fetched attachment exact
-            // (`lower::fragment::fetch`).
-            F::ProgrammableBlending => first([(!through_inputs(f.profile)).then(|| {
-                refused(Unsupported::needs(
-                    Feature::FramebufferFetch,
-                    Capability::Feature(VkFeature::RasterizationOrderColorAttachmentAccess),
-                ))
-            })]),
+            // `framebuffer_fetch`): exact through input attachments in rasterization order. A
+            // device with the ordered pixel interlock but not that access (MoltenVK, whose
+            // interlock is Metal's raster order groups, and RADV and ANV) fetches through the
+            // interlock's storage form (`lower::fragment::fetch`), exact for a fetch and for an
+            // unblended write; its blend of an attachment of another format than an
+            // extended-range, a 16-bit float, an 8-bit unorm or a packed 16-bit one, and its
+            // fetch of a one- or two-channel sRGB attachment, are not built, refused per pipeline:
+            // the row's gap. A device with neither has no ordered fetch.
+            F::ProgrammableBlending => first([
+                match (through_inputs(f.profile), through_storage(f.profile)) {
+                    (true, _) => None,
+                    (false, true) => not_implemented(Feature::FramebufferFetch),
+                    (false, false) => Some(refused(Unsupported::needs(
+                        Feature::FramebufferFetch,
+                        Capability::Feature(VkFeature::RasterizationOrderColorAttachmentAccess),
+                    ))),
+                },
+            ]),
             // Separate depth and stencil textures of one pass: their resolve of a stencil drawn
             // after the pass (`DepthResolvedSample` after `Min` or `Max`) is not built.
             F::SeparateDepthStencilAttachments => first([gap(G::DepthStencilResolve)]),
