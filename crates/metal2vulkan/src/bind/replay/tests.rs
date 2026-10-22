@@ -1881,6 +1881,18 @@ fn step_run(
     metal_word: Option<u32>,
     gates: &[[u32; 3]],
 ) -> (u32, Vec<[u32; 3]>) {
+    let (counter, outs, _) = step_out(step, counter, metal_word, gates);
+    (counter, outs)
+}
+
+/// [`step_run`], and Metal's word as the step left it (a [`PredicationOp::UnitEnd`] writes its
+/// check word there where the step names it).
+fn step_out(
+    step: PredicationStep,
+    counter: u32,
+    metal_word: Option<u32>,
+    gates: &[[u32; 3]],
+) -> (u32, Vec<[u32; 3]>, Option<u32>) {
     let mut record = step.record(STEP_RECORD).to_vec();
     let gate_bytes = PredicationStep::GATE_BYTES as usize;
     let addresses: Vec<u64> = (0..gates.len())
@@ -1950,7 +1962,8 @@ fn step_run(
             "a gate's command is only read"
         );
     }
-    (word(&out[1], 0), outs)
+    let metal_word = metal_word.map(|_| word(&out[4], 0));
+    (word(&out[1], 0), outs, metal_word)
 }
 
 /// The predication step module is valid on every committed profile with device addresses and
@@ -2039,6 +2052,48 @@ fn a_predication_step_moves_its_counter_as_metals_blocks_nest() {
             "EndDead at {c}"
         );
     }
+}
+
+/// The steps of a range an unbalanced record dropped: a Drop sets the counter to 1, a Hold leaves
+/// it, and a Resume sets it to 0, from 0, 1, 2 and 5, reading only their own record; a Drop's gates
+/// run nothing and a Resume's run. A UnitEnd leaves the counter and writes 1 into its check word
+/// where the counter is above 0, else 0.
+#[test]
+fn a_predication_step_drops_holds_resumes_and_checks_a_units_end() {
+    let step = |op| PredicationStep::new(STEP_COUNTER, op);
+    for c in [0, 1, 2, 5] {
+        assert_eq!(
+            step_run(step(PredicationOp::Drop), c, None, &[]).0,
+            1,
+            "Drop at {c}"
+        );
+        assert_eq!(
+            step_run(step(PredicationOp::Hold), c, None, &[]).0,
+            c,
+            "Hold at {c}"
+        );
+        assert_eq!(
+            step_run(step(PredicationOp::Resume), c, None, &[]).0,
+            0,
+            "Resume at {c}"
+        );
+        let check = step(PredicationOp::UnitEnd).checking(STEP_WORD);
+        let (after, _, word) = step_out(check, c, Some(0xEE), &[]);
+        assert_eq!(
+            (after, word),
+            (c, Some(u32::from(c != 0))),
+            "UnitEnd at {c}"
+        );
+    }
+    let gates = [[3, 2, 1], [1, 1, 1]];
+    assert_eq!(
+        step_run(step(PredicationOp::Drop), 0, None, &gates).1,
+        vec![[0; 3]; 2]
+    );
+    assert_eq!(
+        step_run(step(PredicationOp::Resume), 1, None, &gates).1,
+        gates.to_vec()
+    );
 }
 
 /// Metal's six comparison codes compare the word with the reference unsigned, the word on the left,

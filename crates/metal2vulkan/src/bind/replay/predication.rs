@@ -11,7 +11,12 @@
 //!   leaves 0 where its condition holds and sets 1 where not; an Else turns 0 into 1 and 1 into 0,
 //!   leaving a deeper count alone; an End takes 1 off a count above 0. A block a misused record
 //!   killed ([`PredicationOp::Dead`]) adds 2 at its start, so its own Else (which sees 2 or more)
-//!   turns nothing back on, and takes 2 off at its End ([`PredicationOp::EndDead`]).
+//!   turns nothing back on, and takes 2 off at its End ([`PredicationOp::EndDead`]). The steps of
+//!   a range an unbalanced record dropped are rewritten: the range's first as
+//!   [`PredicationOp::Drop`] (the counter becomes 1), every later one as
+//!   [`PredicationOp::Hold`] (the counter stays), and a [`PredicationOp::Resume`] (the counter
+//!   becomes 0) goes before the record that ends the range. [`PredicationOp::UnitEnd`] leaves the
+//!   counter and writes whether it is above 0 into its check word.
 //! - **The condition** (an If's): `word OP reference`, unsigned, the word on the left
 //!   ([`PredicationCompare`], Metal's codes 0 to 5; any other code compares `==`, as Metal's do).
 //!   The word is the `u32` at the record's word address, which the consumer points at Metal's
@@ -101,6 +106,17 @@ pub enum PredicationOp {
     /// After a DoWhile loop's last copy: where the loop would run another (the counter 0, the
     /// flag clear), the overflow word is set; the counter stays.
     DoPast,
+    /// The first step of a range an unbalanced record dropped: the counter becomes 1, so nothing
+    /// up to the range's end runs.
+    Drop,
+    /// A later step of a dropped range: the counter stays.
+    Hold,
+    /// The end of a dropped range, before the record after it: the counter becomes 0.
+    Resume,
+    /// The end of a compute encoder whose unit has a block open: the counter stays, and the check
+    /// word (the record's overflow word, [`PredicationStep::checking`]) becomes 1 where the
+    /// counter is above 0 (the unit's commands skip there), else 0.
+    UnitEnd,
 }
 
 impl PredicationOp {
@@ -121,6 +137,10 @@ impl PredicationOp {
             PredicationOp::DoEnd => OP_DO_END,
             PredicationOp::WhilePast => OP_WHILE_PAST,
             PredicationOp::DoPast => OP_DO_PAST,
+            PredicationOp::Drop => OP_DROP,
+            PredicationOp::Hold => OP_HOLD,
+            PredicationOp::Resume => OP_RESUME,
+            PredicationOp::UnitEnd => OP_UNIT_END,
         }
     }
 
@@ -135,7 +155,8 @@ impl PredicationOp {
         )
     }
 
-    /// Whether the step reads and writes its loop's flag and the overflow word.
+    /// Whether the step reads and writes its loop's flag and the overflow word (a
+    /// [`UnitEnd`](Self::UnitEnd)'s check word).
     fn loops(self) -> bool {
         matches!(
             self,
@@ -144,6 +165,7 @@ impl PredicationOp {
                 | PredicationOp::DoEnd
                 | PredicationOp::WhilePast
                 | PredicationOp::DoPast
+                | PredicationOp::UnitEnd
         )
     }
 }
@@ -158,6 +180,10 @@ const OP_DO: u32 = 6;
 const OP_DO_END: u32 = 7;
 const OP_WHILE_PAST: u32 = 8;
 const OP_DO_PAST: u32 = 9;
+const OP_DROP: u32 = 10;
+const OP_HOLD: u32 = 11;
+const OP_RESUME: u32 = 12;
+const OP_UNIT_END: u32 = 13;
 
 /// An If's comparison of Metal's word with its reference, unsigned, the word on the left: Metal's
 /// `comparison` argument, which is not an `MTLCompareFunction` (measured on an M4).
@@ -326,6 +352,15 @@ impl PredicationStep {
         }
     }
 
+    /// This [`UnitEnd`](PredicationOp::UnitEnd) step writing its check word (a `u32`) at device
+    /// address `word`. Its flag is the record's own word.
+    pub fn checking(self, word: u64) -> Self {
+        PredicationStep {
+            overflow: word,
+            ..self
+        }
+    }
+
     /// The record's bytes where it lies at device address `at`, its table its own empty one; a
     /// step that tests no word names the record itself as its word, and one not of a loop a word
     /// of its own as its flag and overflow word, so no step reads or writes address 0.
@@ -338,9 +373,10 @@ impl PredicationStep {
         put(R_COUNTER, &self.counter.to_le_bytes());
         let word = if self.op.tests() { self.word } else { at };
         put(R_WORD, &word.to_le_bytes());
-        let (flag, overflow) = match self.op.loops() {
-            true => (self.flag, self.overflow),
-            false => (at + R_SCRATCH, at + R_SCRATCH),
+        let (flag, overflow) = match self.op {
+            PredicationOp::UnitEnd => (at + R_SCRATCH, self.overflow),
+            op if op.loops() => (self.flag, self.overflow),
+            _ => (at + R_SCRATCH, at + R_SCRATCH),
         };
         put(R_FLAG, &flag.to_le_bytes());
         put(R_OVERFLOW, &overflow.to_le_bytes());
@@ -544,6 +580,8 @@ pub(super) fn typed_module() -> BResult<TypedModule> {
     let past_while = fb.binary(BinOp::LogicalAnd, live, holds)?;
     let overflow_while = fb.select(past_while, one, overflow)?;
     let overflow_do = fb.select(live, one, overflow)?;
+    // UnitEnd: the check word says whether the unit's commands skip where it ends.
+    let check = fb.select(skipping, one, zero)?;
 
     let mut next = c;
     let mut flag_next = flag;
@@ -559,6 +597,10 @@ pub(super) fn typed_module() -> BResult<TypedModule> {
         (OP_DO_END, after_end, flag_do_end, overflow),
         (OP_WHILE_PAST, c, flag, overflow_while),
         (OP_DO_PAST, c, flag, overflow_do),
+        (OP_DROP, one, flag, overflow),
+        (OP_HOLD, c, flag, overflow),
+        (OP_RESUME, zero, flag, overflow),
+        (OP_UNIT_END, c, flag, check),
     ] {
         let k = k32(fb, code)?;
         let is = fb.binary(BinOp::IEqual, op, k)?;
