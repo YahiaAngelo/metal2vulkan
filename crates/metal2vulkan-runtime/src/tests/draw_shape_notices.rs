@@ -9,7 +9,7 @@
 //! `m2v_cpu_icd`), on the kind of device the cfg selects. The functions are the owned fixture
 //! `validation/fixtures/public/engine/tob_renders.ll` (`llvm-as`).
 
-use super::blit_holds::{Scratch, WAIT};
+use super::blit_holds::{until, Scratch, WAIT};
 use super::encoder_holds::{bytes_of, library, pass};
 use crate::{
     CommandBufferStatus, Degradation, DegradeNotice, DepthStencilState, Device, DeviceKind,
@@ -183,10 +183,11 @@ impl Draws<'_> {
 type Counts = BTreeMap<Degradation, usize>;
 
 /// On a new device announcing the kinds of `each` at every occurrence, [`Draws`] of points where
-/// `points` and against a `Depth16Unorm` depth tested `Less` and written where `depth`, run twice:
-/// the second run's reused draws and notices. Every draw of the second finds its pipeline made by
-/// the first, so the first draw of each assembly derives its shape and every later one may reuse
-/// it.
+/// `points` and against a `Depth16Unorm` depth tested `Less` and written where `depth`, run until
+/// a run draws no key's residual form, then once more: that run's reused draws and notices. Every
+/// draw of it finds its key's own pipeline made (a draw whose key's own is still made on the pool
+/// draws its residual form, `pipeline/render/residual.rs`, which keeps no shape), so the first
+/// draw of each assembly derives its shape and every later one may reuse it.
 fn second_run(each: &[Degradation], points: bool, depth: bool) -> (u64, Counts) {
     let scratch = Scratch::new("draw-shape-notices");
     let heard = Heard::default();
@@ -202,7 +203,11 @@ fn second_run(each: &[Degradation], points: bool, depth: bool) -> (u64, Counts) 
         points,
         depth: depth.then_some((&texture, &depth_stencil)),
     };
-    draws.run(&device);
+    until("every key's own pipeline made", || {
+        let residual = device.work_counts().residual_form_draws;
+        draws.run(&device);
+        device.work_counts().residual_form_draws == residual
+    });
     counts(&heard);
     let reused = draws.run(&device);
     (reused, counts(&heard))
