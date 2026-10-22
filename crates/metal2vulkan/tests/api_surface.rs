@@ -759,6 +759,7 @@ surface! {
         fn index_rewrite_module;
         struct IndexRewriteModule N;
         struct IndexRewritePass N;
+        enum RewriteOrder N;
         enum RewriteOutput N;
         enum RewritePhase N;
         enum RewriteProgram N;

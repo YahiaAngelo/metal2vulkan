@@ -48,7 +48,7 @@ use crate::device::functions::Vk;
 use ash::vk;
 use metal2vulkan::bind::{
     ExecutionStatus, IndexBufferRef, IndexRewriteModule, IndexRewritePass, IndirectRef,
-    RewriteOutput, RewritePhase, RewriteProgram, RewriteSource,
+    RewriteOrder, RewriteOutput, RewritePhase, RewriteProgram, RewriteSource,
 };
 use metal2vulkan::device::VkFeature;
 
@@ -399,7 +399,7 @@ impl WrittenList {
         let indices = u32::try_from(program.capacity(u64::from(count))).map_err(|_| gap())?;
         let device = core.device().clone();
         let bytes: Vec<u8> = program
-            .sequential_list(count)
+            .sequential_list(count, RewriteOrder::First)
             .into_iter()
             .flat_map(u32::to_le_bytes)
             .collect();

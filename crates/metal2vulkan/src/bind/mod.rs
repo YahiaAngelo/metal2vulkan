@@ -229,8 +229,8 @@ pub use index_bounds::{
     IndexBoundsPlanModule,
 };
 pub use index_rewrite::{
-    index_rewrite_module, IndexRewriteModule, IndexRewritePass, RewriteOutput, RewritePhase,
-    RewriteProgram, RewriteSource,
+    index_rewrite_module, IndexRewriteModule, IndexRewritePass, RewriteOrder, RewriteOutput,
+    RewritePhase, RewriteProgram, RewriteSource,
 };
 pub use indirect_clamp::{indirect_clamp_module, IndirectClamp, IndirectClampModule};
 pub use instantiate::{

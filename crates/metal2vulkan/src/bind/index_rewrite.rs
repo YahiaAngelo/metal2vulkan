@@ -23,6 +23,17 @@
 //!   restarts as the strips do, at `k'` (the consumer's restart index: the index type's all-ones
 //!   index where the encoder made no call), each piece pairing from its own start. Metal counts
 //!   one `primitive_id` per quad, where the list has two triangles: that count is the consumer's.
+//! - a line or triangle list ([`RewriteProgram::LineList`], [`RewriteProgram::TriangleList`]),
+//!   which never restarts: its primitives in their own order, which a draw under Apple's
+//!   `setProvokingVertexMode:` with the last vertex writes in [`RewriteOrder::LastFirst`].
+//!
+//! **The order** ([`RewriteOrder`], parameter word 14): each primitive in Metal's order at
+//! provoking vertex mode 0, the first vertex (the default); in Metal's order at mode 1, the last
+//! vertex, which differs only for a triangle strip's odd triangle, `(i + 1, i, i + 2)` where mode 0
+//! gives `(i, i + 2, i + 1)` (Metal probes on the M3 Max, macOS 27.0.1: the Vulkan
+//! specification's last-vertex strip order); or in Metal's order at mode 1 with the last vertex
+//! moved first, `(c, a, b)` of a triangle `(a, b, c)` and `(b, a)` of a line `(a, b)`, so a
+//! first-vertex pipeline takes its flat inputs from Metal's provoking vertex.
 //!
 //! - **Three dispatches** ([`RewritePhase`]) of workgroups of [`IndexRewriteModule::LOCAL_SIZE`]
 //!   invocations. The draw's positions are split into one run per invocation of
@@ -70,6 +81,7 @@
 //! | 0 to 7 | the consumer | [`IndexRewritePass::parameters`]: the arguments' first word in the bound arguments range plus 1 (0 for a direct draw), the index offset's byte in the bound indices range, the whole indices from the offset (saturated to `u32`), 1 for 32-bit indices, `k'`, the output's capacity in indices (owned) or the pool's index bytes (pooled), 1 where pooled, the groups |
 //! | 8 to 12 | the consumer | a direct draw's Metal arguments (`MTLDrawIndexedPrimitivesIndirectArguments`: count, instances, first index 0, base vertex, base instance); 0 for an indirect draw, whose arguments are read from the Metal buffer |
 //! | 13 | the consumer | 1 for a draw without indices, whose arguments are `MTLDrawPrimitivesIndirectArguments` (count, instances, vertex start, base instance), else 0 |
+//! | 14 | the consumer | the order ([`RewriteOrder::word`]): 0 first, 1 last, 2 last first |
 //! | 16 to 20 | the place dispatch | the draw's `VkDrawIndexedIndirectCommand` ([`IndexRewritePass::DRAW_OFFSET`]) |
 //! | 21 | the place dispatch | the primitives written |
 //! | 22 to 25 | the place dispatch | the output's first word, 1 where the draw is written, the primitives before those past the walk, and those past it |
@@ -135,23 +147,30 @@ pub enum RewriteProgram {
     /// `(a, b, d)` and `(c, a, d)`, an odd last position none. It restarts at `k'` alone, as the
     /// strips do, each piece pairing from its own start.
     QuadStrip,
+    /// A line list: each two positions a segment, an odd last position none. It never restarts.
+    LineList,
+    /// A triangle list: each three positions a triangle, the positions past the last whole three
+    /// none. It never restarts.
+    TriangleList,
 }
 
 impl RewriteProgram {
     /// Every program.
-    pub const ALL: [RewriteProgram; 6] = [
+    pub const ALL: [RewriteProgram; 8] = [
         RewriteProgram::LineStrip,
         RewriteProgram::TriangleStrip,
         RewriteProgram::LineLoop,
         RewriteProgram::TriangleFan,
         RewriteProgram::Quads,
         RewriteProgram::QuadStrip,
+        RewriteProgram::LineList,
+        RewriteProgram::TriangleList,
     ];
 
     /// The indices of one primitive of the output list: 2 for lines, 3 for triangles.
     pub fn vertices(self) -> u32 {
         match self {
-            RewriteProgram::LineStrip | RewriteProgram::LineLoop => 2,
+            RewriteProgram::LineStrip | RewriteProgram::LineLoop | RewriteProgram::LineList => 2,
             _ => 3,
         }
     }
@@ -160,8 +179,10 @@ impl RewriteProgram {
     /// piece, through the one that completes them.
     pub fn span(self) -> u32 {
         match self {
-            RewriteProgram::LineStrip | RewriteProgram::LineLoop => 2,
-            RewriteProgram::TriangleStrip | RewriteProgram::TriangleFan => 3,
+            RewriteProgram::LineStrip | RewriteProgram::LineLoop | RewriteProgram::LineList => 2,
+            RewriteProgram::TriangleStrip
+            | RewriteProgram::TriangleFan
+            | RewriteProgram::TriangleList => 3,
             RewriteProgram::Quads | RewriteProgram::QuadStrip => 4,
         }
     }
@@ -192,22 +213,26 @@ impl RewriteProgram {
             RewriteProgram::LineLoop if count >= 2 => count,
             RewriteProgram::Quads => count / 4 * 2,
             RewriteProgram::QuadStrip if count >= 4 => (count - 2) / 2 * 2,
+            RewriteProgram::LineList => count / 2,
+            RewriteProgram::TriangleList => count / 3,
             RewriteProgram::LineLoop | RewriteProgram::QuadStrip => 0,
         };
         primitives * u64::from(self.vertices())
     }
 
     /// The list Metal draws of `values` (each position's index, as the fetch reads it) under
-    /// this program, restarting at `restart` where the program restarts: what the pass writes,
-    /// on the CPU (a direct draw without indices, whose positions are its vertices from 0).
-    pub fn list(self, values: &[u32], restart: u32) -> Vec<u32> {
+    /// this program, restarting at `restart` where the program restarts, each primitive in
+    /// `order`: what the pass writes, on the CPU (a direct draw without indices, whose positions
+    /// are its vertices from 0).
+    pub fn list(self, values: &[u32], restart: u32, order: RewriteOrder) -> Vec<u32> {
         let mut out = Vec::with_capacity(self.capacity(values.len() as u64) as usize);
+        let mut put = |first: &[u32], last: &[u32]| out.extend(order.arrange(first, last));
         if self == RewriteProgram::LineLoop {
             if let [first, .., last] = values {
                 for pair in values.windows(2) {
-                    out.extend_from_slice(pair);
+                    put(pair, pair);
                 }
-                out.extend([*last, *first]);
+                put(&[*last, *first], &[*last, *first]);
             }
             return out;
         }
@@ -220,24 +245,38 @@ impl RewriteProgram {
             piece.push(x);
             let n = piece.len();
             match self {
-                RewriteProgram::LineStrip if n >= 2 => out.extend([piece[n - 2], piece[n - 1]]),
+                RewriteProgram::LineStrip if n >= 2 => {
+                    let line = [piece[n - 2], piece[n - 1]];
+                    put(&line, &line);
+                }
                 RewriteProgram::TriangleStrip if n >= 3 => {
                     let (a, b, c) = (piece[n - 3], piece[n - 2], piece[n - 1]);
                     match (n - 3).is_multiple_of(2) {
-                        true => out.extend([a, b, c]),
-                        false => out.extend([a, c, b]),
+                        true => put(&[a, b, c], &[a, b, c]),
+                        false => put(&[a, c, b], &[b, a, c]),
                     }
                 }
                 RewriteProgram::TriangleFan if n >= 3 => {
-                    out.extend([piece[0], piece[n - 2], piece[n - 1]]);
+                    let triangle = [piece[0], piece[n - 2], piece[n - 1]];
+                    put(&triangle, &triangle);
                 }
                 RewriteProgram::Quads if n.is_multiple_of(4) => {
                     let (a, b, c, d) = (piece[n - 4], piece[n - 3], piece[n - 2], piece[n - 1]);
-                    out.extend([a, b, d, b, c, d]);
+                    put(&[a, b, d], &[a, b, d]);
+                    put(&[b, c, d], &[b, c, d]);
                 }
                 RewriteProgram::QuadStrip if n >= 4 && n.is_multiple_of(2) => {
                     let (a, b, c, d) = (piece[n - 4], piece[n - 3], piece[n - 2], piece[n - 1]);
-                    out.extend([a, b, d, c, a, d]);
+                    put(&[a, b, d], &[a, b, d]);
+                    put(&[c, a, d], &[c, a, d]);
+                }
+                RewriteProgram::LineList if n.is_multiple_of(2) => {
+                    let line = [piece[n - 2], piece[n - 1]];
+                    put(&line, &line);
+                }
+                RewriteProgram::TriangleList if n.is_multiple_of(3) => {
+                    let triangle = [piece[n - 3], piece[n - 2], piece[n - 1]];
+                    put(&triangle, &triangle);
                 }
                 _ => {}
             }
@@ -246,30 +285,88 @@ impl RewriteProgram {
     }
 
     /// [`list`](Self::list) of a draw without indices of `count` positions: of the positions
-    /// themselves, `0..count`, none of which restarts.
-    pub fn sequential_list(self, count: u32) -> Vec<u32> {
+    /// themselves, `0..count`, none of which restarts, each primitive in `order`.
+    pub fn sequential_list(self, count: u32, order: RewriteOrder) -> Vec<u32> {
         let mut out = Vec::with_capacity(self.capacity(u64::from(count)) as usize);
+        let mut put = |first: &[u32], last: &[u32]| out.extend(order.arrange(first, last));
         let n = count;
         match self {
-            RewriteProgram::LineStrip => (1..n).for_each(|q| out.extend([q - 1, q])),
+            RewriteProgram::LineStrip => (1..n).for_each(|q| put(&[q - 1, q], &[q - 1, q])),
             RewriteProgram::TriangleStrip => (2..n).for_each(|q| match q % 2 {
-                0 => out.extend([q - 2, q - 1, q]),
-                _ => out.extend([q - 2, q, q - 1]),
+                0 => put(&[q - 2, q - 1, q], &[q - 2, q - 1, q]),
+                _ => put(&[q - 2, q, q - 1], &[q - 1, q - 2, q]),
             }),
             RewriteProgram::LineLoop if n >= 2 => {
-                (1..n).for_each(|q| out.extend([q - 1, q]));
-                out.extend([n - 1, 0]);
+                (1..n).for_each(|q| put(&[q - 1, q], &[q - 1, q]));
+                put(&[n - 1, 0], &[n - 1, 0]);
             }
-            RewriteProgram::TriangleFan => (2..n).for_each(|q| out.extend([0, q - 1, q])),
+            RewriteProgram::TriangleFan => (2..n).for_each(|q| put(&[0, q - 1, q], &[0, q - 1, q])),
             RewriteProgram::Quads => (0..n / 4).map(|k| 4 * k).for_each(|a| {
-                out.extend([a, a + 1, a + 3, a + 1, a + 2, a + 3]);
+                put(&[a, a + 1, a + 3], &[a, a + 1, a + 3]);
+                put(&[a + 1, a + 2, a + 3], &[a + 1, a + 2, a + 3]);
             }),
             RewriteProgram::QuadStrip if n >= 4 => (0..(n - 2) / 2).map(|k| 2 * k).for_each(|a| {
-                out.extend([a, a + 1, a + 3, a + 2, a, a + 3]);
+                put(&[a, a + 1, a + 3], &[a, a + 1, a + 3]);
+                put(&[a + 2, a, a + 3], &[a + 2, a, a + 3]);
+            }),
+            RewriteProgram::LineList => (0..n / 2).map(|k| 2 * k).for_each(|a| {
+                put(&[a, a + 1], &[a, a + 1]);
+            }),
+            RewriteProgram::TriangleList => (0..n / 3).map(|k| 3 * k).for_each(|a| {
+                put(&[a, a + 1, a + 2], &[a, a + 1, a + 2]);
             }),
             RewriteProgram::LineLoop | RewriteProgram::QuadStrip => {}
         }
         out
+    }
+}
+
+/// The vertex order the pass writes each primitive in (the module docs say why): Metal's at
+/// provoking vertex mode 0 ([`First`](Self::First), the default), Metal's at mode 1
+/// ([`Last`](Self::Last)), or Metal's at mode 1 with the last vertex first
+/// ([`LastFirst`](Self::LastFirst)). A draw of a pipeline whose provoking vertex is the first
+/// takes its flat inputs from each primitive's first vertex, and one of a pipeline whose provoking
+/// vertex is the last (`VK_EXT_provoking_vertex`) from its last; each takes its barycentric order
+/// from the order its vertices are listed in (the Vulkan specification's primitive topologies and
+/// barycentric interpolation).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum RewriteOrder {
+    /// Metal's order at provoking vertex mode 0: its flat inputs from the first vertex.
+    #[default]
+    First,
+    /// Metal's order at provoking vertex mode 1: its flat inputs from the last vertex. A
+    /// triangle strip's odd triangle is `(i + 1, i, i + 2)`, every other primitive as in
+    /// [`First`](Self::First).
+    Last,
+    /// [`Last`](Self::Last) with each primitive's last vertex moved first: a triangle `(a, b, c)`
+    /// as `(c, a, b)`, which keeps its winding, and a line `(a, b)` as `(b, a)`, which runs the
+    /// other way.
+    LastFirst,
+}
+
+impl RewriteOrder {
+    /// The order's parameter word (14).
+    pub const fn word(self) -> u32 {
+        match self {
+            RewriteOrder::First => 0,
+            RewriteOrder::Last => 1,
+            RewriteOrder::LastFirst => 2,
+        }
+    }
+
+    /// A primitive whose vertices are `first` in Metal's order at mode 0 and `last` at mode 1,
+    /// in this order.
+    pub fn arrange<T: Copy>(self, first: &[T], last: &[T]) -> Vec<T> {
+        match self {
+            RewriteOrder::First => first.to_vec(),
+            RewriteOrder::Last => last.to_vec(),
+            RewriteOrder::LastFirst => match last.split_last() {
+                Some((lead, rest)) => std::iter::once(*lead).chain(rest.iter().copied()).collect(),
+                None => Vec::new(),
+            },
+        }
     }
 }
 
@@ -499,6 +596,13 @@ impl IndexRewritePass {
         })
     }
 
+    /// The pass writing each primitive in `order` (the pass [`new`](Self::new) makes writes
+    /// [`RewriteOrder::First`]).
+    pub fn with_order(mut self, order: RewriteOrder) -> IndexRewritePass {
+        self.parameters[Parameter::Order as usize] = order.word();
+        self
+    }
+
     /// The parameters as the bytes to upload at the rewrite words' start.
     pub fn parameter_bytes(&self) -> Vec<u8> {
         self.parameters
@@ -522,6 +626,8 @@ enum Parameter {
     Arguments = 8,
     /// 1 for a draw without indices ([`RewriteSource::IndirectVertices`]).
     Sequential = 13,
+    /// The order ([`RewriteOrder::word`]).
+    Order = 14,
 }
 
 /// The pass's words in the rewrite words, by index.
@@ -988,6 +1094,8 @@ struct DrawWalk {
     pooled: Value,
     /// The groups, from 1 to `MAX_GROUPS`.
     groups: Value,
+    /// The order's word ([`RewriteOrder::word`]).
+    order: Value,
     program: RewriteProgram,
 }
 
@@ -1004,6 +1112,7 @@ impl DrawWalk {
         let pooled = load_at(f, g.words, Parameter::Pooled as u32)?;
         let groups = load_at(f, g.words, Parameter::Groups as u32)?;
         let sequential = load_at(f, g.words, Parameter::Sequential as u32)?;
+        let order = load_at(f, g.words, Parameter::Order as u32)?;
         let most = k(f, IndexRewritePass::MAX_GROUPS)?;
         let groups = f.glsl(GlslOp::UMin, &[groups, most])?;
         let groups = f.glsl(GlslOp::UMax, &[groups, one])?;
@@ -1064,8 +1173,30 @@ impl DrawWalk {
             capacity,
             pooled,
             groups,
+            order,
             program,
         })
+    }
+
+    /// A primitive whose vertices are `first` in Metal's order at mode 0 and `last` at mode 1, in
+    /// the draw's order ([`RewriteOrder::arrange`]).
+    fn ordered(
+        self,
+        f: &mut FunctionBuilder<'_>,
+        first: &[Value],
+        last: &[Value],
+    ) -> BResult<Vec<Value>> {
+        let n = last.len();
+        let first_word = k(f, RewriteOrder::First.word())?;
+        let last_word = k(f, RewriteOrder::Last.word())?;
+        let is_first = f.binary(BinOp::IEqual, self.order, first_word)?;
+        let is_last = f.binary(BinOp::IEqual, self.order, last_word)?;
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            let led = f.select(is_last, last[i], last[(i + n - 1) % n])?;
+            out.push(f.select(is_first, first[i], led)?);
+        }
+        Ok(out)
     }
 
     /// Whether a position of index `value` restarts: where the program restarts, the draw has
@@ -1150,10 +1281,11 @@ impl DrawWalk {
         f.store(streak, s, MemAccess::default())?;
         let spanned = f.binary(BinOp::UGreaterThanEqual, s, span)?;
         let completes = match self.program {
-            RewriteProgram::Quads => {
-                let three = k(f, 3)?;
-                let phase = f.binary(BinOp::BitwiseAnd, q, three)?;
-                f.binary(BinOp::IEqual, phase, three)?
+            RewriteProgram::Quads | RewriteProgram::LineList | RewriteProgram::TriangleList => {
+                // Every `span`th position of the draw, which never restarts.
+                let last = k(f, self.program.span() - 1)?;
+                let phase = f.binary(BinOp::UMod, q, span)?;
+                f.binary(BinOp::IEqual, phase, last)?
             }
             RewriteProgram::QuadStrip => {
                 let into = f.binary(BinOp::ISub, q, piece)?;
@@ -1380,8 +1512,9 @@ fn count_phase(
 /// The primitives past the walk, every position there reading 0, after the walk's last piece,
 /// which starts at `last`: none where `k'` is 0 and the program restarts (each restarts); else a
 /// strip's, line loop's and fan's one at each position, quads' two at every fourth position of
-/// the draw, and a quad strip's two at every second position of its piece (the walk ends the
-/// span past the buffer, so the span reaches back from each).
+/// the draw, a list's one at every second or third, and a quad strip's two at every second
+/// position of its piece (the walk ends the span past the buffer, so the span reaches back from
+/// each).
 fn tail_primitives(f: &mut FunctionBuilder<'_>, d: DrawWalk, last: Value) -> BResult<Value> {
     let zero = k(f, 0)?;
     let two = k(f, 2)?;
@@ -1389,16 +1522,15 @@ fn tail_primitives(f: &mut FunctionBuilder<'_>, d: DrawWalk, last: Value) -> BRe
     match d.program {
         RewriteProgram::LineStrip | RewriteProgram::TriangleStrip => f.select(some, d.tail, zero),
         RewriteProgram::LineLoop | RewriteProgram::TriangleFan => Ok(d.tail),
-        RewriteProgram::Quads => {
-            // The positions `q` in `[walked, count)` with `q mod 4 = 3`.
-            let fours = |f: &mut FunctionBuilder<'_>, n: Value| -> BResult<Value> {
-                let two = k(f, 2)?;
-                f.binary(BinOp::ShiftRightLogical, n, two)
-            };
-            let to = fours(f, d.count)?;
-            let from = fours(f, d.walked)?;
-            let quads = f.binary(BinOp::ISub, to, from)?;
-            f.binary(BinOp::IMul, quads, two)
+        RewriteProgram::Quads | RewriteProgram::LineList | RewriteProgram::TriangleList => {
+            // The positions `q` in `[walked, count)` with `q mod span = span - 1`, each of
+            // `per_step` primitives.
+            let span = k(f, d.program.span())?;
+            let to = f.binary(BinOp::UDiv, d.count, span)?;
+            let from = f.binary(BinOp::UDiv, d.walked, span)?;
+            let steps = f.binary(BinOp::ISub, to, from)?;
+            let per = k(f, d.program.per_step())?;
+            f.binary(BinOp::IMul, steps, per)
         }
         RewriteProgram::QuadStrip => {
             // The positions `q` in `[walked, count)` with `q - last` odd.
@@ -1529,18 +1661,23 @@ fn place_phase(f: &mut FunctionBuilder<'_>, g: Globals, d: DrawWalk, lin: Value)
 }
 
 /// The list primitives a completing position `q` writes, from the indices at `q - 3` to `q`
-/// (`a`, `b`, `c`, `value`), a fan's first index `hub`, and the start of its piece `piece`.
+/// (`a`, `b`, `c`, `value`), a fan's first index `hub`, and the start of its piece `piece`, each
+/// in the draw's order ([`DrawWalk::ordered`]).
 fn primitives(
     f: &mut FunctionBuilder<'_>,
-    program: RewriteProgram,
+    d: DrawWalk,
     (a, b, c, value): (Value, Value, Value, Value),
     (hub, q, piece): (Value, Value, Value),
 ) -> BResult<Vec<Vec<Value>>> {
-    Ok(match program {
-        RewriteProgram::LineStrip | RewriteProgram::LineLoop => vec![vec![c, value]],
+    let same = |f: &mut FunctionBuilder<'_>, p: &[Value]| d.ordered(f, p, p);
+    Ok(match d.program {
+        RewriteProgram::LineStrip | RewriteProgram::LineLoop | RewriteProgram::LineList => {
+            vec![same(f, &[c, value])?]
+        }
         RewriteProgram::TriangleStrip => {
-            // Vulkan's strip order: the piece's `i`th triangle (`q - piece - 2`) takes
-            // `(a, b, c)` where `i` is even, `(a, c, b)` where it is odd.
+            // Vulkan's strip orders: the piece's `i`th triangle (`q - piece - 2`) of positions
+            // `(i, i + 1, i + 2)` takes them so where `i` is even; where it is odd, `(i, i + 2,
+            // i + 1)` at mode 0 and `(i + 1, i, i + 2)` at mode 1.
             let zero = k(f, 0)?;
             let one = k(f, 1)?;
             let i = f.binary(BinOp::ISub, q, piece)?;
@@ -1548,11 +1685,14 @@ fn primitives(
             let odd = f.binary(BinOp::INotEqual, parity, zero)?;
             let second = f.select(odd, value, c)?;
             let third = f.select(odd, c, value)?;
-            vec![vec![b, second, third]]
+            let led = f.select(odd, c, b)?;
+            let then = f.select(odd, b, c)?;
+            vec![d.ordered(f, &[b, second, third], &[led, then, value])?]
         }
-        RewriteProgram::TriangleFan => vec![vec![hub, c, value]],
-        RewriteProgram::Quads => vec![vec![a, b, value], vec![b, c, value]],
-        RewriteProgram::QuadStrip => vec![vec![a, b, value], vec![c, a, value]],
+        RewriteProgram::TriangleFan => vec![same(f, &[hub, c, value])?],
+        RewriteProgram::Quads => vec![same(f, &[a, b, value])?, same(f, &[b, c, value])?],
+        RewriteProgram::QuadStrip => vec![same(f, &[a, b, value])?, same(f, &[c, a, value])?],
+        RewriteProgram::TriangleList => vec![same(f, &[b, c, value])?],
     })
 }
 
@@ -1630,7 +1770,7 @@ fn write_phase(
             let c = f.load(old, MemAccess::default())?;
             when(f, completes, move |f| {
                 let w = f.load(next_word, MemAccess::default())?;
-                let written = primitives(f, program, (a, b, c, value), (hub, q, p))?;
+                let written = primitives(f, d, (a, b, c, value), (hub, q, p))?;
                 let mut slot = 0;
                 for primitive in written {
                     for index in primitive {
@@ -1657,12 +1797,15 @@ fn write_phase(
             let primitive = f.binary(BinOp::IAdd, tail_at, j)?;
             let into = f.binary(BinOp::IMul, primitive, vk_)?;
             let w = f.binary(BinOp::IAdd, base_word, into)?;
-            for i in 0..v {
-                let index = match (program, i) {
+            let indices: Vec<Value> = (0..v)
+                .map(|i| match (program, i) {
                     (RewriteProgram::TriangleFan, 0) => hub,
                     _ => zero,
-                };
-                let i = k(f, i)?;
+                })
+                .collect();
+            let indices = d.ordered(f, &indices, &indices)?;
+            for (i, index) in indices.into_iter().enumerate() {
+                let i = k(f, i as u32)?;
                 let slot = f.binary(BinOp::IAdd, w, i)?;
                 contained_store(f, g.output, slot, index)?;
             }
@@ -1682,12 +1825,13 @@ fn write_phase(
                 let last = f.binary(BinOp::ISub, d.count, one)?;
                 let from = d.fetch.at(f, last)?;
                 let to = d.fetch.at(f, zero)?;
+                let segment = d.ordered(f, &[from, to], &[from, to])?;
                 let primitive = f.binary(BinOp::IAdd, tail_at, tail)?;
                 let into = f.binary(BinOp::IMul, primitive, two)?;
                 let w = f.binary(BinOp::IAdd, base_word, into)?;
-                contained_store(f, g.output, w, from)?;
+                contained_store(f, g.output, w, segment[0])?;
                 let w = f.binary(BinOp::IAdd, w, one)?;
-                contained_store(f, g.output, w, to)
+                contained_store(f, g.output, w, segment[1])
             })?;
         }
         Ok(())

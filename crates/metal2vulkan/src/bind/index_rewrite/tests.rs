@@ -6,7 +6,8 @@
 //! lists); positions past the buffer's whole indices read 0, restart included; the draw's
 //! arguments carry Metal's instances and bases; a draw without indices reads its positions as
 //! its indices; a pooled draw reserves whole words from the pool's counter, and a draw its output
-//! cannot hold draws nothing and sets `INDEX_POOL_OVERFLOW`.
+//! cannot hold draws nothing and sets `INDEX_POOL_OVERFLOW`; each primitive is written in the
+//! pass's order, Metal's at either provoking vertex mode, or with Metal's last vertex first.
 
 use super::*;
 use crate::bind::status::{ExecutionStatus, StatusReport};
@@ -46,10 +47,10 @@ fn index_bytes(indices: &[u32], wide: bool) -> Vec<u8> {
 }
 
 /// Metal's primitives of `program` over `values` (each position's index, as the fetch reads it)
-/// restarting at `restart` where the program restarts: [`RewriteProgram::list`], which the
-/// probes' lists check below.
+/// restarting at `restart` where the program restarts, in Metal's order at provoking vertex mode
+/// 0: [`RewriteProgram::list`], which the probes' lists check below.
 fn metal(program: RewriteProgram, values: &[u32], restart: u32) -> Vec<u32> {
-    program.list(values, restart)
+    program.list(values, restart, RewriteOrder::First)
 }
 
 /// Each position's index: position `start + q` at its index where it lies among the buffer's
@@ -83,6 +84,8 @@ struct Draw {
     /// An indirect draw without indices, its arguments the first four (count, instances, vertex
     /// start, base instance).
     vertices: bool,
+    /// The order each primitive is written in.
+    order: RewriteOrder,
 }
 
 /// What a pass left: the words, the output's indices (from the pool's index region where
@@ -107,6 +110,7 @@ impl Draw {
             counter: None,
             groups: None,
             vertices: false,
+            order: RewriteOrder::First,
         }
     }
 
@@ -168,7 +172,8 @@ impl Draw {
             false => (size, self.offset, end),
         };
         let pass = IndexRewritePass::new(source, self.restart, terms, output, ALIGNMENT, u32::MAX)
-            .expect("pass");
+            .expect("pass")
+            .with_order(self.order);
         let mut pass = pass;
         if let Some(groups) = self.groups {
             pass.groups = groups;
@@ -654,21 +659,25 @@ fn the_private_lists_are_the_probes() {
     for &(program, count, list) in drawn {
         let positions: Vec<u32> = (0..count).collect();
         assert_eq!(
-            program.list(&positions, u32::MAX),
+            program.list(&positions, u32::MAX, RewriteOrder::First),
             list,
             "{program:?} {count}"
         );
-        assert_eq!(program.sequential_list(count), list, "{program:?} {count}");
+        assert_eq!(
+            program.sequential_list(count, RewriteOrder::First),
+            list,
+            "{program:?} {count}"
+        );
         assert!(list.len() as u64 <= program.capacity(u64::from(count)));
     }
     // Every count from 0 to 40: the CPU's list of positions is the general one's.
     for program in RewriteProgram::ALL {
         for count in 0..40 {
             let positions: Vec<u32> = (0..count).collect();
-            let list = program.sequential_list(count);
+            let list = program.sequential_list(count, RewriteOrder::First);
             assert_eq!(
                 list,
-                program.list(&positions, u32::MAX),
+                program.list(&positions, u32::MAX, RewriteOrder::First),
                 "{program:?} {count}"
             );
             assert_eq!(list.len() as u64, program.capacity(u64::from(count)));
@@ -680,15 +689,21 @@ fn the_private_lists_are_the_probes() {
     let mut values: Vec<u32> = (0..12).map(|i| 40 + 2 * i).collect();
     values[5] = 0xFFFF;
     assert_eq!(
-        Quads.list(&values, 0xFFFF),
+        Quads.list(&values, 0xFFFF, RewriteOrder::First),
         [40, 42, 46, 42, 44, 46, 48, 0xFFFF, 54, 0xFFFF, 52, 54, 56, 58, 62, 58, 60, 62]
     );
     assert_eq!(
-        QuadStrip.list(&values, 0xFFFF),
+        QuadStrip.list(&values, 0xFFFF, RewriteOrder::First),
         [40, 42, 46, 44, 40, 46, 52, 54, 58, 56, 52, 58, 56, 58, 62, 60, 56, 62]
     );
-    assert_eq!(TriangleFan.list(&values, 0xFFFF)[9..12], [40, 48, 0xFFFF]);
-    assert_eq!(LineLoop.list(&values, 0xFFFF).len(), 24);
+    assert_eq!(
+        TriangleFan.list(&values, 0xFFFF, RewriteOrder::First)[9..12],
+        [40, 48, 0xFFFF]
+    );
+    assert_eq!(
+        LineLoop.list(&values, 0xFFFF, RewriteOrder::First).len(),
+        24
+    );
 }
 
 /// An indirect draw without indices writes the list of its positions from 0, whatever its count,
@@ -719,7 +734,7 @@ fn a_draw_without_indices_lists_its_positions() {
             ..Draw::vertices(program, [count, 2, 0xFFFF, 7])
         };
         let (list, command, r) = draw.drawn();
-        let expected = program.sequential_list(count);
+        let expected = program.sequential_list(count, RewriteOrder::First);
         assert_eq!(list, expected, "{program:?} {count}");
         assert_eq!(command[1..], [2, 3, 0xFFFF, 7], "{program:?} {count}");
         assert_eq!(r.counter, Some(12 + 4 * expected.len() as u32));
@@ -765,6 +780,150 @@ fn a_quad_strip_pairs_from_each_piece_s_start() {
                 list,
                 metal(RewriteProgram::QuadStrip, &indices, 7),
                 "{len} {rate} {groups:?} {wide}"
+            );
+        }
+    }
+}
+
+/// The orders of a primitive: Metal's at mode 0, at mode 1 (a triangle strip's odd triangle
+/// `(i + 1, i, i + 2)`, its even one and every other primitive as at mode 0), and Metal's at mode
+/// 1 with the last vertex first, so a first-vertex pipeline reads each primitive's flat inputs
+/// from the vertex Metal's mode 1 reads them from (Metal probes on the M3 Max, macOS 27.0.1: line
+/// list `2j + 1`, line strip `j + 1`, triangle list `3j + 2`, strip `j + 2`, line loop the
+/// segment's second, fan `j + 2`, quads and quad strip `d`), each triangle keeping its winding.
+#[test]
+fn the_orders_are_metal_s_at_either_mode() {
+    use RewriteOrder::{First, Last, LastFirst};
+    use RewriteProgram::{LineList, LineStrip, TriangleList, TriangleStrip};
+    assert_eq!(
+        TriangleStrip.sequential_list(5, First),
+        [0, 1, 2, 1, 3, 2, 2, 3, 4]
+    );
+    assert_eq!(
+        TriangleStrip.sequential_list(5, Last),
+        [0, 1, 2, 2, 1, 3, 2, 3, 4]
+    );
+    assert_eq!(
+        TriangleStrip.sequential_list(5, LastFirst),
+        [2, 0, 1, 3, 2, 1, 4, 2, 3]
+    );
+    assert_eq!(LineStrip.sequential_list(3, LastFirst), [1, 0, 2, 1]);
+    assert_eq!(LineList.sequential_list(5, First), [0, 1, 2, 3]);
+    assert_eq!(LineList.sequential_list(5, LastFirst), [1, 0, 3, 2]);
+    assert_eq!(TriangleList.sequential_list(7, First), [0, 1, 2, 3, 4, 5]);
+    assert_eq!(
+        TriangleList.sequential_list(7, LastFirst),
+        [2, 0, 1, 5, 3, 4]
+    );
+    // Metal's mode-1 flat vertex of each list primitive, by program, of the positions `0..n`.
+    let flat = |program: RewriteProgram, n: u32| -> Vec<u32> {
+        let list = program.sequential_list(n, Last);
+        let v = program.vertices() as usize;
+        list.chunks(v).map(|p| p[v - 1]).collect()
+    };
+    assert_eq!(flat(LineList, 6), [1, 3, 5]);
+    assert_eq!(flat(LineStrip, 4), [1, 2, 3]);
+    assert_eq!(flat(TriangleList, 6), [2, 5]);
+    assert_eq!(flat(TriangleStrip, 6), [2, 3, 4, 5]);
+    assert_eq!(flat(RewriteProgram::LineLoop, 4), [1, 2, 3, 0]);
+    assert_eq!(flat(RewriteProgram::TriangleFan, 5), [2, 3, 4]);
+    assert_eq!(flat(RewriteProgram::Quads, 4), [3, 3]);
+    assert_eq!(flat(RewriteProgram::QuadStrip, 6), [3, 3, 5, 5]);
+    // The winding: a signed area of positions on a convex curve, so each position's point is
+    // distinct and no three are collinear.
+    let point = |i: u32| {
+        let t = f64::from(i) * 0.37;
+        (t.cos() * (1.0 + 0.1 * t), t.sin() * (1.0 + 0.1 * t))
+    };
+    let area = |t: &[u32]| {
+        let (a, b, c) = (point(t[0]), point(t[1]), point(t[2]));
+        (b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1)
+    };
+    for program in RewriteProgram::ALL {
+        for n in 0..24 {
+            let first = program.sequential_list(n, First);
+            let last = program.sequential_list(n, Last);
+            let led = program.sequential_list(n, LastFirst);
+            let v = program.vertices() as usize;
+            assert_eq!(first.len(), last.len(), "{program:?} {n}");
+            assert_eq!(first.len(), led.len(), "{program:?} {n}");
+            for ((f, l), r) in first.chunks(v).zip(last.chunks(v)).zip(led.chunks(v)) {
+                // The last-first order leads with Metal's mode-1 flat vertex, then the rest in
+                // their order.
+                assert_eq!(r[0], l[v - 1], "{program:?} {n}");
+                assert_eq!(r[1..], l[..v - 1], "{program:?} {n}");
+                if v == 3 {
+                    assert!(area(f) * area(l) > 0.0, "{program:?} {n} {f:?} {l:?}");
+                    assert!(area(f) * area(r) > 0.0, "{program:?} {n} {f:?} {r:?}");
+                } else if program != TriangleStrip {
+                    assert_eq!(f, l, "{program:?} {n}");
+                }
+            }
+            if program != TriangleStrip {
+                assert_eq!(first, last, "{program:?} {n}");
+            }
+        }
+    }
+}
+
+/// The pass writes each order as the CPU's list does, for every program: restarting draws,
+/// a fan's first index and a loop's closing segment over groups, the primitives past the walk,
+/// and an indirect draw without indices.
+#[test]
+fn the_pass_writes_each_order() {
+    let mut state = 0x0BAD_5EEDu32;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        state
+    };
+    let long: Vec<u32> = (0..700)
+        .map(|_| {
+            let r = next();
+            if r % 9 == 0 {
+                0
+            } else {
+                1 + r % 50
+            }
+        })
+        .collect();
+    let short = vec![1, 2, 3, 0, 4, 5, 6, 0xFFFF, 7, 8, 9];
+    for order in [RewriteOrder::Last, RewriteOrder::LastFirst] {
+        for program in RewriteProgram::ALL {
+            let draws = [
+                Draw::strip(program, false, &short, 0),
+                Draw {
+                    groups: Some(3),
+                    ..Draw::strip(program, true, &long, 0)
+                },
+                // Nine positions past five indices: the primitives past the walk.
+                Draw {
+                    arguments: [40, 1, 0, 0, 0],
+                    ..Draw::strip(program, true, &[5, 6, 7, 8, 9], 3)
+                },
+            ];
+            for draw in draws {
+                let draw = Draw { order, ..draw };
+                let (list, _, _) = draw.drawn();
+                let count = draw.arguments[0];
+                let values = fetched(&draw.indices, 0, count);
+                assert_eq!(
+                    list,
+                    program.list(&values, draw.restart, order),
+                    "{program:?} {order:?} {count}"
+                );
+            }
+            let draw = Draw {
+                groups: Some(3),
+                order,
+                ..Draw::vertices(program, [130, 1, 4, 0])
+            };
+            let (list, _, _) = draw.drawn();
+            assert_eq!(
+                list,
+                program.sequential_list(130, order),
+                "{program:?} {order:?} without indices"
             );
         }
     }
