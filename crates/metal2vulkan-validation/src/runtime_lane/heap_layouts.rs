@@ -64,7 +64,8 @@ pub(super) const HEAP_LAYOUTS: [Degradation; 3] = [
 /// Where each texture lies in its heap: a multiple of every alignment Metal answers.
 const OFFSET: u64 = 64 << 10;
 
-/// Metal's largest tile of `unit`-byte elements, 16 KiB.
+/// Metal's largest tile of `unit`-byte elements, 16 KiB. Elements of 32 and 64 bytes are a
+/// multisample texture's pixels.
 fn largest_tile(unit: u64) -> [u64; 2] {
     match unit {
         1 => [128, 128],
@@ -72,6 +73,8 @@ fn largest_tile(unit: u64) -> [u64; 2] {
         4 => [64, 64],
         8 => [64, 32],
         16 => [32, 32],
+        32 => [32, 16],
+        64 => [16, 16],
         _ => panic!("no tile of {unit}-byte elements"),
     }
 }

@@ -1657,6 +1657,15 @@ pub enum DriverFact {
     /// only where Metal's layout is not the image's (a texture Metal may keep losslessly
     /// compressed, `heap-texture-lossless-layout`; a multisample one, a layout not measured).
     ColorImagesLieAsMetalHeapTextures,
+    /// A multisample colour image bound to memory lies in it as Metal lays out a multisample heap
+    /// texture it keeps uncompressed: a buffer over the memory meets sample `s` of pixel `(x, y)`
+    /// at the byte Metal's tiles of `samples · B`-byte elements place the pixel, plus `s · B`
+    /// (`B` the format's bytes). On a driver without it the runtime announces
+    /// `heap-texture-untiled-layout` for a multisample colour texture of a heap over the device's
+    /// memory whose image lies in the heap's bytes (`texture/heap.rs`); on one with it, only
+    /// where Metal's layout is not the image's (a texture Metal keeps losslessly compressed,
+    /// `heap-texture-lossless-layout`; a layout not measured).
+    MultisampleColorImagesLieAsMetalHeapTextures,
 }
 
 impl DriverFact {
@@ -2147,6 +2156,19 @@ const DYNAMIC_RESTART_WARNING: DriverDiagnostic = DriverDiagnostic {
 /// macOS 27.0.1, every texel at the byte Metal's tiles place it (the lane's restatement of the
 /// tiled layout measured on Metal's own heap textures there, `heap_layouts::tiled_offset`). It
 /// decides a notice, not an answer, so the M4 is not measured. Every other driver is unmeasured.
+///
+/// `MultisampleColorImagesLieAsMetalHeapTextures`, measured by
+/// `runtime_lane::heap_device_samples::device_heap_multisample_colour_textures_lie_where_announced`
+/// (multisample textures of `ShaderRead | RenderTarget` usage with `allowGPUOptimizedContents`
+/// off, which Metal keeps uncompressed, in a `Private` placement heap: `R8Uint`, `R16Uint`,
+/// `R32Uint`, `RGBA8Unorm`, `RG32Uint`, `RGBA16Uint` and `RGBA32Uint` ones of 37 x 5, 33 x 33,
+/// 64 x 64 and 100 x 70 pixels, 2 and 4 samples; each sample written by a blit naming it and
+/// found through a buffer over the heap, and the heap's bytes written there read back by a blit):
+/// MoltenVK 1.4.2 on the M3 Max under macOS 27.0.1, every sample of the 56 at the byte Metal's
+/// tiles place it each way (the lane's restatement of the layout measured on Metal's own heap
+/// textures there, 98 shapes of those formats and of 8 x 8, 16 x 16 and 300 x 200 pixels, drawn
+/// per sample or blitted, every sample there). It decides a notice, not an answer, so the M4 is
+/// not measured. Every other driver is unmeasured.
 ///
 /// MoltenVK 1.4.2 on the M3 Max under macOS 27.0.1 ([`moltenvk_142`]; 2026-10-21, the runtime
 /// lanes in release builds under `--cfg m2v_gpu`, each fact taken):
@@ -2772,6 +2794,7 @@ pub(crate) const MEASURED: &[Measured<DriverFact>] = &[
     moltenvk_142(DriverFact::Bc7BlockDecodeIsMetals),
     moltenvk_142(DriverFact::TileStoreIsMetals),
     moltenvk_142(DriverFact::ColorImagesLieAsMetalHeapTextures),
+    moltenvk_142(DriverFact::MultisampleColorImagesLieAsMetalHeapTextures),
 ];
 
 /// Intel's `vendorID`.

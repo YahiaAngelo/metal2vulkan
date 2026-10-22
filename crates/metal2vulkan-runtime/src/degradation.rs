@@ -1487,9 +1487,10 @@ degradations! {
         /// memory) whose bytes there are not Metal's layout (`texture/heap.rs`): its image bound
         /// there in the driver's layout, on a driver whose colour images are not measured to lie as
         /// Metal's heap textures
-        /// ([`metal2vulkan::device::DriverFact::ColorImagesLieAsMetalHeapTextures`]) or of a depth
-        /// or stencil texture there; its image a shadow of the bytes in rows; a multisample
-        /// texture; or a layout not measured. The notice's reason names which (the first
+        /// ([`metal2vulkan::device::DriverFact::ColorImagesLieAsMetalHeapTextures`], and
+        /// [`metal2vulkan::device::DriverFact::MultisampleColorImagesLieAsMetalHeapTextures`] for
+        /// a multisample one) or of a depth or stencil texture there; its image a shadow of the
+        /// bytes in rows; or a layout not measured. The notice's reason names which (the first
         /// texture's). Announced once per device, in the call that made the first such texture,
         /// with its ID ([`DegradeNotice::object_id`]), or for each texture where
         /// `DeviceOptions::announce_each` asks; each texture counted

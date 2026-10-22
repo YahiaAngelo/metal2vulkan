@@ -138,8 +138,10 @@
 //! - **Heaps over the device's memory**. A texture whose image is bound in such a heap's memory
 //!   lies there in the driver's layout. On a driver whose single-sample colour images lie as Metal
 //!   lays out a heap texture of the image's usage
-//!   ([`DriverFact::ColorImagesLieAsMetalHeapTextures`]: MoltenVK 1.4.2 on the M3 Max, measured)
-//!   such a texture Metal tiles is Metal's bytes there. Every other texture whose bytes there are
+//!   ([`DriverFact::ColorImagesLieAsMetalHeapTextures`]: MoltenVK 1.4.2 on the M3 Max, measured),
+//!   and whose multisample colour images lie as Metal lays out one it keeps uncompressed
+//!   ([`DriverFact::MultisampleColorImagesLieAsMetalHeapTextures`]: likewise), such a texture
+//!   Metal tiles is Metal's bytes there. Every other texture whose bytes there are
 //!   not Metal's layout is counted (`Device::degraded_objects`), each kind announced at its first
 //!   texture, with its ID: its image in the driver's layout on any other driver, or of a depth or
 //!   stencil texture, `heap-texture-untiled-layout`; its image a shadow of the bytes in rows,
@@ -2361,11 +2363,12 @@ impl Device {
     /// would hold; `Untiled::LOSSLESS_BOUND_SAMPLES` for a multisample one Metal keeps
     /// compressed, its image in the heap's bytes), a multisample texture's samples
     /// (`Untiled::MULTISAMPLE`), its image a shadow of the bytes in rows (`Untiled::ROWS`), or its
-    /// image bound there in the driver's layout (`Untiled::DRIVER`; not a single-sample colour
-    /// image bound there on a driver whose such images lie as Metal's heap textures,
-    /// `DriverFact::ColorImagesLieAsMetalHeapTextures`, where Metal tiles the texture). `None` for
-    /// a route whose own notice says where it lies (apart, a two-plane texture's planes) and a
-    /// layout a measured route holds.
+    /// image bound there in the driver's layout (`Untiled::DRIVER`). Not a colour image bound there
+    /// on a driver whose such images lie as Metal's heap textures where Metal tiles the texture
+    /// (`DriverFact::ColorImagesLieAsMetalHeapTextures` of one sample,
+    /// `DriverFact::MultisampleColorImagesLieAsMetalHeapTextures` of more). `None` for a route
+    /// whose own notice says where it lies (apart, a two-plane texture's planes) and a layout a
+    /// measured route holds.
     fn device_heap_layout(
         &self,
         layout: &TextureLayout,
@@ -2388,15 +2391,16 @@ impl Device {
             HeapLayout::Uncompressed(_) => return Some(Untiled::LOSSLESS),
             HeapLayout::Tiled(_) => {}
         }
-        if layout.samples > 1 {
-            return Some(Untiled::MULTISAMPLE);
-        }
-        let facts = &self.properties().driver_facts;
+        let fact = match layout.samples {
+            1 => DriverFact::ColorImagesLieAsMetalHeapTextures,
+            _ => DriverFact::MultisampleColorImagesLieAsMetalHeapTextures,
+        };
         let as_metal = route == AliasRoute::Direct
             && !is_depth_stencil(layout.pixel_format)
-            && facts.contains(&DriverFact::ColorImagesLieAsMetalHeapTextures);
+            && self.properties().driver_facts.contains(&fact);
         match route {
             _ if as_metal => None,
+            _ if layout.samples > 1 => Some(Untiled::MULTISAMPLE),
             AliasRoute::Shadow | AliasRoute::MemoryShadow => Some(Untiled::ROWS),
             _ => Some(Untiled::DRIVER),
         }

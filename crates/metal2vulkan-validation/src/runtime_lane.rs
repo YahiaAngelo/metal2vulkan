@@ -483,6 +483,8 @@ mod handler_waits;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod handles;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod heap_device_samples;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod heap_extended_reads;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod heap_layouts;

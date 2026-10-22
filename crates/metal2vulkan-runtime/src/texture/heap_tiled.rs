@@ -979,7 +979,8 @@ impl Untiled {
     /// (`heap-texture-untiled-layout`, `heap.rs`).
     pub(crate) const MULTISAMPLE: Untiled = Untiled::other(
         "its image lies in the heap's bytes in the device driver's layout, where Metal lays the \
-         multisample texture's samples out in its tiles",
+         multisample texture's samples out in its tiles, which no driver fact measures as Metal's \
+         for it (DriverFact::MultisampleColorImagesLieAsMetalHeapTextures, of a colour one)",
     );
     /// A block-compressed texture whose placement the device's Metal level does not measure
     /// (`heap-texture-block-compressed-layout`).
