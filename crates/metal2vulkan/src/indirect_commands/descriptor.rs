@@ -173,13 +173,15 @@ impl CommandDescriptor {
                 max_threadgroup_memory_bind_count,
                 support_dynamic_attribute_stride,
             ),
+            // A mesh draw's object threadgroup lengths, at any index the record holds: Metal
+            // keeps one at or past the descriptor's count.
             Self::Render {
+                draws,
                 max_vertex_buffer_bind_count,
                 max_fragment_buffer_bind_count,
                 max_object_buffer_bind_count,
                 max_mesh_buffer_bind_count,
                 support_dynamic_attribute_stride,
-                ..
             } => (
                 [
                     max_mesh_buffer_bind_count,
@@ -187,7 +189,10 @@ impl CommandDescriptor {
                     max_fragment_buffer_bind_count,
                     max_object_buffer_bind_count,
                 ],
-                0,
+                match draws.mesh_threadgroups || draws.mesh_threads {
+                    true => super::THREADGROUP_COUNT as u32,
+                    false => 0,
+                },
                 support_dynamic_attribute_stride,
             ),
         };

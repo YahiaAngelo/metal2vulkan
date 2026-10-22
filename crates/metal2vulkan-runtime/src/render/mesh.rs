@@ -102,24 +102,6 @@ use metal2vulkan::bind::{
 };
 use std::sync::Arc;
 
-/// Whether `state`'s object function has threadgroup memory arguments, whose lengths a draw
-/// specializes (`RuntimeFact::ObjectThreadgroupArena`).
-pub(super) fn reads_object_threadgroup_memory(
-    state: &crate::pipeline::RenderPipelineState,
-) -> bool {
-    match state.kind() {
-        super::RenderStateKind::Graphics(graphics) => {
-            graphics.base().dependencies.iter().any(|d| {
-                matches!(
-                    d.fact,
-                    metal2vulkan::pipeline::RuntimeFact::ObjectThreadgroupArena { .. }
-                )
-            })
-        }
-        super::RenderStateKind::Tile(_) => false,
-    }
-}
-
 /// Metal's most threads of an object or mesh threadgroup (`maxTotalThreadsPerObjectThreadgroup`,
 /// `maxTotalThreadsPerMeshThreadgroup`, measured).
 const METAL_THREADGROUP_THREADS: u64 = 1024;
@@ -675,8 +657,8 @@ impl RenderCommandEncoder {
     /// table (`Invalid`). The object function's arena with these lengths must fit the device's
     /// workgroup memory for the object stage, checked at the draw
     /// (`Unsupported{ThreadgroupMemorySize}` naming the limit). An indirect command's mesh draw
-    /// takes none of these: one whose object function reads them is
-    /// `NotImplemented(IndirectRenderCommands)`.
+    /// takes none of these, as Metal's takes the command's own
+    /// (`IndirectRenderCommand::set_object_threadgroup_memory_length`).
     pub fn set_object_threadgroup_memory_length(
         &mut self,
         length: u32,

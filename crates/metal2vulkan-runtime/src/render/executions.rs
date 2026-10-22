@@ -1733,6 +1733,15 @@ fn reads_vertex_stride(pipeline: &RenderPipelineState, index: u32) -> bool {
         })
 }
 
+/// The object threadgroup memory lengths `record`'s mesh draw runs with: each it set, by index
+/// (`IndirectRenderCommand::set_object_threadgroup_memory_length`); one it set none of is 0.
+fn object_threadgroup_lengths(record: &CommandRecord) -> BTreeMap<u32, u32> {
+    (0u32..)
+        .zip(record.threadgroup_memory_lengths)
+        .filter(|&(_, length)| length != 0)
+        .collect()
+}
+
 /// What an execution's settle at commit made for its host step's draw of one primitive type: the
 /// variant, and the draw's `VkPipeline` in the execution's instance where the settle could make
 /// it. The command buffer holds them until it completes.
@@ -2051,11 +2060,12 @@ impl RenderExecution {
             };
             encoder.factors.scale = scale;
             encoder.shape_inputs().check_pipeline(CALL, &pipeline)?;
-            // An object function's threadgroup memory arguments: which lengths a command's mesh
-            // draw takes, its own or the encoder's, is not measured.
-            if super::mesh::reads_object_threadgroup_memory(&pipeline) {
-                return Err(Error::NotImplemented(RuntimeGap::IndirectRenderCommands));
-            }
+            // A mesh draw's object function takes the command's threadgroup memory lengths, 0
+            // where it set none, never the encoder's (the M3 Max); a patch draw's take none.
+            encoder.object_threadgroup_lengths = match &draw {
+                Draw::Mesh(..) => object_threadgroup_lengths(&record),
+                Draw::Primitives(..) | Draw::Indexed(..) | Draw::Patches { .. } => BTreeMap::new(),
+            };
             let control_points = pipeline_control_points(&pipeline);
             encoder.pipeline = Some(pipeline);
             if !inherited {
@@ -2301,7 +2311,7 @@ impl RenderExecution {
             fragment: snapshot.fragment.clone(),
             object: snapshot.object.clone(),
             mesh: snapshot.mesh.clone(),
-            // No command's draw takes them: one whose object function reads them is refused.
+            // Each command's mesh draw takes its own (`object_threadgroup_lengths`).
             object_threadgroup_lengths: BTreeMap::new(),
             visibility,
             tile: ArgumentTable::default(),
