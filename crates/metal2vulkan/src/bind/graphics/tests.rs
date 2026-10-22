@@ -1710,6 +1710,28 @@ fn object_draws_specialize_each_stage_within_its_limits() {
     ] {
         assert_eq!(instantiate(&t, &state, &draw).err(), refusal, "{draw:?}");
     }
+    // Threads per grid wrapped to 32 bits: the threadgroups they fill, rounded up (Metal's), none
+    // where they wrap to 0, held to the task limits; the region reports them, read (`MultiRegion`
+    // 1) where they leave a partial threadgroup.
+    for (counts, lo, runs, reported, multi_region) in [
+        ([33_554_433, 1, 1], [128, 1, 1], [1, 1, 1], [128, 1, 1], 0),
+        ([44_739_243, 1, 1], [96, 1, 1], [1, 1, 1], [32, 1, 1], 1),
+        ([33_554_432, 1, 1], [128, 1, 1], [0, 0, 0], [0, 1, 1], 0),
+    ] {
+        let cmds = instantiate(&t, &state, &groups(counts, lo, [2, 1, 1])).expect("wraps");
+        let [x, y, z] = runs;
+        assert_eq!(cmds.draw, tasks(x, y, z), "{counts:?}");
+        if runs[0] == 0 {
+            continue;
+        }
+        let key = cmds.specialization.as_ref().expect("a mesh draw's key");
+        assert!(values(key).contains(&(8, multi_region)), "{counts:?}");
+        assert_eq!(
+            cmds.push_constants[0].bytes,
+            region(reported, lo),
+            "{counts:?}"
+        );
+    }
     // Indirect: its object threadgroups' counts, through the object form of the arguments pass;
     // an object threadgroup Metal draws nothing for reads none.
     let indirect = |lo| DrawCall::MeshThreadgroupsIndirect {

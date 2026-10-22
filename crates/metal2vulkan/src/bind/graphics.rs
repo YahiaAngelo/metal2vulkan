@@ -317,8 +317,8 @@ use crate::bind::instantiate::{
     RangeError, RootTable,
 };
 use crate::bind::mesh_arguments::{
-    fold_object_grid, metal_mesh_grid_draws_nothing, MeshArguments, MeshArgumentsForm,
-    MeshGridLimits, ObjectFold,
+    fold_object_grid, metal_mesh_grid_draws_nothing, metal_object_grid, MeshArguments,
+    MeshArgumentsForm, MeshGridLimits, ObjectFold,
 };
 use crate::bind::neutral::{zero_buffer_bytes, NeutralResource};
 use crate::bind::plan::compute::{internal, not_implemented, spec_key, tile_memory};
@@ -3215,7 +3215,10 @@ fn size_value(keys: &DispatchKeys, key: SpecKey, l: [u32; 3]) -> Option<u64> {
 /// partial object threadgroup is not implemented (Metal runs that threadgroup with the threads
 /// left, probe 4, and splitting the draw by the regions would reorder its primitives in two
 /// dimensions); a draw whose object threadgroup Metal draws nothing for (no thread, or past 1024)
-/// launches nothing.
+/// launches nothing. A direct draw's object grid is Metal's ([`metal_object_grid`], measured): each
+/// axis's threads per grid wrap at 2^32, the draw runs the threadgroups the wrapped threads fill,
+/// and the builtins report the wrapped threads, from the object stage's region (`MultiRegion` 1)
+/// where they leave a partial threadgroup.
 ///
 /// A draw that launches threadgroups has each stage's threadgroup checked against the device's
 /// limits for it ([`check_group`]: the mesh stage's `maxMeshWorkGroup*`, the task stage's
@@ -3261,6 +3264,22 @@ fn mesh_draw(
         }
         (Some(_), _) => command,
     };
+    let folded = t.folded && t.object.is_some();
+    // An unfolded object stage's direct grid as Metal runs it (`metal_object_grid`): each axis's
+    // threads per grid wrap at 2^32, the draw runs the threadgroups the wrapped threads fill, and
+    // the builtins report the wrapped threads.
+    let (command, wrapped) = match command {
+        vk::DrawCommand::DrawMeshTasks {
+            group_count_x: x,
+            group_count_y: y,
+            group_count_z: z,
+        } if t.object.is_some() && !folded => {
+            let (runs, threads) = metal_object_grid([x, y, z], lo, true).unwrap_or_default();
+            let runs = if runs.contains(&0) { [0; 3] } else { runs };
+            (mesh_tasks(runs, lo), Some((threads, runs)))
+        }
+        other => (other, None),
+    };
     let groups = match command {
         vk::DrawCommand::DrawMeshTasks {
             group_count_x,
@@ -3271,7 +3290,12 @@ fn mesh_draw(
         other => return Err(internal(format!("a mesh draw of {other:?}"))),
     };
     let launches = groups.is_none_or(|g| !g.contains(&0));
-    let folded = t.folded && t.object.is_some();
+    // Where the wrapped threads leave a partial threadgroup, `NumWorkgroups · L` passes them: the
+    // object stage reads its grid from its region (`MultiRegion` 1).
+    let partial = launches
+        && wrapped.is_some_and(|(threads, runs)| {
+            (0..3).any(|i| u64::from(runs[i]) * u64::from(lo[i]) != u64::from(threads[i]))
+        });
     // The multiples are subgroup sizes, powers of two, so their largest is a multiple of each.
     let smallest = t.multiples.iter().copied().max().unwrap_or(1).max(1);
     let size = |l: [u32; 3]| if launches { l } else { [smallest, 1, 1] };
@@ -3303,10 +3327,11 @@ fn mesh_draw(
         }
     };
     let object = t.object.is_some();
-    // A folded object function reads every grid builtin from its region record (`MultiRegion` 1).
+    // A folded object function reads every grid builtin from its region record, and an unfolded
+    // one whose wrapped grid leaves a partial threadgroup from its region (`MultiRegion` 1).
     let specialization = spec_key(&t.spec, |k| {
         size_value(&mesh_keys, k, lm)
-            .or_else(|| (folded && k == object_keys.multi_region).then_some(1))
+            .or_else(|| ((folded || partial) && k == object_keys.multi_region).then_some(1))
             .or_else(|| object.then(|| size_value(&object_keys, k, lo)).flatten())
             .or_else(|| t.fixed.iter().find(|(key, _)| *key == k).map(|f| f.1))
     });
@@ -3347,17 +3372,20 @@ fn mesh_draw(
     };
     // The grid Metal reports of the first stage's threadgroups (`MultiRegion` 0 reads
     // `NumWorkgroups` instead): 0 for an indirect draw, whose counts only the GPU knows, and for
-    // the mesh stage under an object function, whose grid the object function sets; a folded
-    // object function reads its record instead.
+    // the mesh stage under an object function, whose grid the object function sets; an unfolded
+    // object function's wrapped threads; a folded one reads its record instead.
     let first = if object { lo } else { lm };
     let mut grid = [0u32; 3];
     let counted = groups.filter(|_| !folded).unwrap_or_default();
     for (i, g) in counted.into_iter().enumerate() {
-        grid[i] = g.checked_mul(first[i]).ok_or_else(|| {
-            BindError::Unsupported(Unsupported::not_representable(Feature::GroupCount {
-                axis: Some([Axis::X, Axis::Y, Axis::Z][i]),
-            }))
-        })?;
+        grid[i] = match wrapped {
+            Some((threads, _)) => threads[i],
+            None => g.checked_mul(first[i]).ok_or_else(|| {
+                BindError::Unsupported(Unsupported::not_representable(Feature::GroupCount {
+                    axis: Some([Axis::X, Axis::Y, Axis::Z][i]),
+                }))
+            })?,
+        };
     }
     let region = |grid, l: [u32; 3]| {
         region_bytes([0; 3], grid, l)
