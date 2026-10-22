@@ -78,7 +78,11 @@ fn floats() -> Form {
 /// channel order, red first; `BGR10_XR`'s alpha is the code of 1, and `BGRA10_XR`'s is clamped
 /// to `[384, 894]`, the codes of `[0, 1]`. A two-plane texel's alpha is its alpha byte (the
 /// second component), an 8-bit unorm code.
-fn codes(fb: &mut FunctionBuilder<'_>, form: ExtendedRange, raw: Value) -> BResult<Value> {
+pub(crate) fn codes(
+    fb: &mut FunctionBuilder<'_>,
+    form: ExtendedRange,
+    raw: Value,
+) -> BResult<Value> {
     let u = words();
     let ut = crate::lower::arith::ops::ty(fb, u)?;
     match form {
@@ -456,37 +460,10 @@ pub fn encode(
     // rounded to nearest (every value of a grid and around every midpoint), in
     // its word's top 10 bits, the low 6 bits zero.
     if form.padded() {
-        let (u, f) = (words(), floats());
-        let zero = fsplat(fb, f, 0.0)?;
-        let nan = fb.unary(crate::spirv::ir::UnOp::IsNan, v)?;
-        let v = fb.select(nan, zero, v)?;
-        let one = fsplat(fb, f, 1.0)?;
-        let v = fb.glsl(GlslOp::FClamp, &[v, zero, one])?;
-        let scales: &[u32] = match form {
-            ExtendedRange::Rgb10A2Srgb => &[1023, 1023, 1023, 3],
-            _ => &[1023],
-        };
-        let k = round_exact_product_lanes(fb, f, v, scales, false)?;
-        let k = match form {
-            ExtendedRange::R10X6Srgb | ExtendedRange::Rg10X12Srgb | ExtendedRange::Rgb10A2Srgb => {
-                let table = table.ok_or_else(missing_table)?;
-                padded_srgb_codes(fb, form, table, v, k)?
-            }
-            _ => k,
-        };
-        // `RGB10A2Unorm_sRGB`'s fields from bit 0, alpha in bits 30 and 31.
+        let u = words();
+        let k = padded_codes(fb, form, v, table)?;
         if form == ExtendedRange::Rgb10A2Srgb {
-            let shifts = per_lane(fb, [0, 10, 20, 30])?;
-            let k = fb.binary(BinOp::ShiftLeftLogical, k, shifts)?;
-            let mut w = fb.composite_extract(k, &[0])?;
-            for lane in 1..4u32 {
-                let x = fb.composite_extract(k, &[lane])?;
-                w = fb.binary(BinOp::BitwiseOr, w, x)?;
-            }
-            let z = fb.u32_const(0)?;
-            let z = fb.module().const_value(z)?;
-            let ut = crate::lower::arith::ops::ty(fb, u)?;
-            return fb.composite_construct(ut, &[w, z, z, z]);
+            return pack(fb, form, k);
         }
         let six = splat(fb, u, 6)?;
         let w = fb.binary(BinOp::ShiftLeftLogical, k, six)?;
@@ -498,6 +475,50 @@ pub fn encode(
     }
     let code = linear_codes(fb, form, v, table)?;
     pack(fb, form, code)
+}
+
+/// The codes a write of `v` (a `vec4` of `f32`, red first) to a slot of a padded form stores
+/// ([`encode`]): the exact product of the value, clamped to `[0, 1]` (a NaN 0), with 1023 (alpha's
+/// with 3), rounded to nearest, an `_sRGB` form's color codes through its `table`.
+fn padded_codes(
+    fb: &mut FunctionBuilder<'_>,
+    form: ExtendedRange,
+    v: Value,
+    table: Option<GlobalId>,
+) -> BResult<Value> {
+    let f = floats();
+    let zero = fsplat(fb, f, 0.0)?;
+    let nan = fb.unary(crate::spirv::ir::UnOp::IsNan, v)?;
+    let v = fb.select(nan, zero, v)?;
+    let one = fsplat(fb, f, 1.0)?;
+    let v = fb.glsl(GlslOp::FClamp, &[v, zero, one])?;
+    let scales: &[u32] = match form {
+        ExtendedRange::Rgb10A2Srgb => &[1023, 1023, 1023, 3],
+        _ => &[1023],
+    };
+    let k = round_exact_product_lanes(fb, f, v, scales, false)?;
+    match form {
+        ExtendedRange::R10X6Srgb | ExtendedRange::Rg10X12Srgb | ExtendedRange::Rgb10A2Srgb => {
+            let table = table.ok_or_else(missing_table)?;
+            padded_srgb_codes(fb, form, table, v, k)
+        }
+        _ => Ok(k),
+    }
+}
+
+/// The codes (red first) a write of `v` (a `vec4` of `f32`, red first) to a slot of `form` stores,
+/// as [`encode`] packs them: a linear or `_sRGB` form's color codes and alpha's, or a padded
+/// form's. `table` is the form's ([`declare`], [`declare_padded`]) where it has one.
+pub(crate) fn write_codes(
+    fb: &mut FunctionBuilder<'_>,
+    form: ExtendedRange,
+    v: Value,
+    table: Option<GlobalId>,
+) -> BResult<Value> {
+    match form.padded() {
+        true => padded_codes(fb, form, v, table),
+        false => linear_codes(fb, form, v, table),
+    }
 }
 
 /// The lanes a bfloat form keeps of a first vector, the rest taken from a second: red; red and
@@ -718,8 +739,12 @@ fn linear_codes(
 }
 
 /// The raw texel (the raw format's `uvec4`) of the codes `code` (red first; a two-plane form's
-/// alpha its byte) of a linear or `_sRGB` form.
-fn pack(fb: &mut FunctionBuilder<'_>, form: ExtendedRange, code: Value) -> BResult<Value> {
+/// alpha its byte) of a linear or `_sRGB` form, or of `RGB10A2Unorm_sRGB`.
+pub(crate) fn pack(
+    fb: &mut FunctionBuilder<'_>,
+    form: ExtendedRange,
+    code: Value,
+) -> BResult<Value> {
     let u = words();
     let ut = crate::lower::arith::ops::ty(fb, u)?;
     let planes = matches!(form, ExtendedRange::Planes { .. });
@@ -753,12 +778,24 @@ fn pack(fb: &mut FunctionBuilder<'_>, form: ExtendedRange, code: Value) -> BResu
             let six = splat(fb, u, 6)?;
             fb.binary(BinOp::ShiftLeftLogical, c, six)
         }
-        // A padded form's words are [`encode`]'s own, and a bfloat form's.
+        // `RGB10A2Unorm_sRGB`'s fields from bit 0, alpha in bits 30 and 31.
+        ExtendedRange::Rgb10A2Srgb => {
+            let shifts = per_lane(fb, [0, 10, 20, 30])?;
+            let k = fb.binary(BinOp::ShiftLeftLogical, code, shifts)?;
+            let mut w = fb.composite_extract(k, &[0])?;
+            for lane in 1..4u32 {
+                let x = fb.composite_extract(k, &[lane])?;
+                w = fb.binary(BinOp::BitwiseOr, w, x)?;
+            }
+            let z = fb.u32_const(0)?;
+            let z = fb.module().const_value(z)?;
+            fb.composite_construct(ut, &[w, z, z, z])
+        }
+        // Another padded form's words are [`encode`]'s own, and a bfloat form's.
         ExtendedRange::R10X6
         | ExtendedRange::Rg10X12
         | ExtendedRange::R10X6Srgb
         | ExtendedRange::Rg10X12Srgb
-        | ExtendedRange::Rgb10A2Srgb
         | ExtendedRange::R16Bfloat
         | ExtendedRange::Rg16Bfloat
         | ExtendedRange::Rgba16Bfloat => Err(crate::spirv::error::BuildError::Type(

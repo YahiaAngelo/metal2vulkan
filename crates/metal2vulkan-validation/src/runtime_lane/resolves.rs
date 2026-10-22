@@ -1502,36 +1502,6 @@ fn a_resolve_into_the_srgb_twin_keeps_the_attachment_s_encoding() {
     quiet(lane, &messages);
 }
 
-/// A multisampled extended-range attachment's resolve into its own format, which the runtime does
-/// not build, is refused at the pass naming the format (`RuntimeGap::ExtendedRangeResolve`), by
-/// both resolving store actions.
-#[test]
-fn an_extended_range_resolve_is_refused_naming_its_format() {
-    let (messages, _cache, lane) = lane();
-    for pf in [
-        PixelFormat::BGRA10XR,
-        PixelFormat::BGRA10XRSRGB,
-        PixelFormat::BGR10XR,
-        PixelFormat::BGR10XRSRGB,
-    ] {
-        for store in [
-            StoreAction::MultisampleResolve,
-            StoreAction::StoreAndMultisampleResolve,
-        ] {
-            let msaa = lane.msaa(pf);
-            let resolve = lane.single(pf);
-            let pass = color_pass(&msaa, Some(&resolve), store, (0, 0));
-            match lane.run(&pass, |_, _, _| {}) {
-                Err(Error::NotImplemented(RuntimeGap::ExtendedRangeResolve { pixel_format })) => {
-                    assert_eq!(pixel_format, pf, "{store:?}")
-                }
-                other => panic!("{pf:?} {store:?}: {other:?}"),
-            }
-        }
-    }
-    quiet(lane, &messages);
-}
-
 /// A multisampled color attachment's resolve into a texture of a pixel format Metal does not store
 /// its tile into, which Metal's validation stops, as plain Metal runs it (our probe `xres`, the M3
 /// Max under macOS 27.0.1, 2 and 4 samples): the resolve texture keeps its texels (each byte 0x5a

@@ -36,8 +36,9 @@
 //!   format: the attachment the pass resolves into, or its scratch image (`resolve.rs`). Integer
 //!   color formats are no resolve source in Metal, measured, and no stencil view of a combined
 //!   format (`X32Stencil8`) answers one, as no column of Apple's tables lists it. Depth and
-//!   stencil resolve through `SAMPLE_ZERO`, which every Vulkan 1.2 device has. An extended-range format answers the
-//!   render pass's refusal of its resolve, which the runtime does not model.
+//!   stencil resolve through `SAMPLE_ZERO`, which every Vulkan 1.2 device has. A private form held
+//!   in raw codes that Metal makes no multisampled texture of answers the render pass's refusal of
+//!   its resolve.
 //! - **Atomic**: a 2D `ShaderAtomic` texture with a storage view of a format a texture atomic
 //!   updates. `R32Uint` and `R32Sint` need their format's `StorageImageAtomic`. `RG32Uint` is
 //!   Metal's `ulong` texture: it needs its `R64_UINT` view's 64-bit image atomics. No other format
@@ -402,7 +403,8 @@ pub(crate) fn answers(
     let resolve = if integer || single.as_ref().is_ok_and(stencil_view) {
         Err(not_metal())
     } else if let Some(unsupported) = unmodelled_resolve(pf) {
-        // The resolve the render pass refuses (`resolve.rs`), as an extended-range format's.
+        // The resolve the render pass refuses (`resolve.rs`): a private form's codes, of which
+        // Metal makes no multisampled texture.
         Err(Missing::Refused(unsupported))
     } else {
         msaa.clone().and(single.clone()).map(drop)

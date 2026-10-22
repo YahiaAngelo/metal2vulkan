@@ -110,7 +110,10 @@ compile does. `DevicePolicy::default()` is `DevicePolicy::UNTRUSTED`:
   format has Metal's rule at its sample count by that rule in one more render pass instance after
   the pass (`shader-resolve`). On MoltenVK the device's resolve is Metal's own under either value,
   and an attachment a fetching pass's sample planes hold as it ends resolves from them by Metal's
-  rule under either.
+  rule under either. An extended-range attachment (`BGR10_XR`, `BGRA10_XR`, their sRGB twins,
+  `RGB10A2Unorm_sRGB`), held in raw codes no device averages, resolves after the pass under either
+  value, on every device: a linear form's colors by Metal's rule, its alpha and an sRGB form's
+  colors by a near-equivalent (`extended-range-resolve`).
 - **Batches of a queue ordered by their ends** (`BatchOrderPolicy::Ends`, the runtime's choice; no
   pipeline differs). On ANV, RADV and NVIDIA's driver, each measured to start no kernel submission
   of a `VkQueue` before the one before it completed, each batch of command buffers ends with a
@@ -1511,6 +1514,19 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   equal depths is measured at 2 and 4 samples. Cost: the resolve applies the rules Metal's resolve
   follows at 2 and 4 samples (or the device's average, for a format without them), which no Metal
   answer confirms at this count.
+- `metal2vulkan-degrade-extended-range-resolve` (precision). `ExtendedRangeResolve`: A multisample
+  resolve of an extended-range color attachment whose resolve Metal averages from values finer than
+  the codes the attachment holds (`BGRA10_XR`'s alpha, an `_sRGB` twin's color,
+  `RGB10A2Unorm_sRGB`'s channels): the crate-owned resolve writes a near-equivalent from the codes
+  where a pixel's samples differ, and Metal's code where they hold one. Measured against Metal's
+  resolve on the M3 Max under macOS 27.0.1 (4096 texels per format at 2 and 4 samples, each sample
+  its own value): `BGRA10_XR`'s alpha Metal's in 84% and 88% of texels and within a code in every
+  one; an `_sRGB` twin's color in 81% and 85% of channels and within a code in 99.5%, at most 7
+  codes off where the samples' values nearly cancel; `RGB10A2Unorm_sRGB`'s colors in 83% and 87%,
+  within 2, and its alpha in 94% and 97%, within one. A linear form's color is Metal's rule, every
+  texel. Cost: where a pixel's samples differ, a resolved alpha, or an sRGB color, can differ from
+  Metal's by a code (an sRGB color by a few where the samples' values nearly cancel): Metal averages
+  values finer than the codes the attachment holds.
 - `metal2vulkan-degrade-dont-care-store` (precision). `DontCareStore`: An attachment stored with
   `DontCare` (or the multisampled attachment of `MultisampleResolve`) is Vulkan's `DONT_CARE`, where
   Apple's GPU keeps the earlier texels unless its tiler overflows. Not a texture over a buffer: Metal

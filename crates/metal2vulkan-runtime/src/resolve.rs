@@ -58,6 +58,12 @@
 //!   another one each run, and a 32-bit channel takes such a value even where the samples
 //!   agree; only an 8- or 16-bit channel (`RGB10A2Uint`'s too) whose samples agree resolves to
 //!   their value. No rule that holds for every pixel: refused.
+//! - An extended-range attachment (`BGR10_XR`, `BGRA10_XR`, their `_sRGB` twins and
+//!   `RGB10A2Unorm_sRGB`; our probe `xr`, the M3 Max under macOS 27.0.1) resolves a linear form's
+//!   colors to the average of the samples' codes rounded half up; its alpha and an sRGB form's
+//!   colors average values finer than the codes. The runtime holds the codes and resolves by the
+//!   crate-owned resolve at every count (`color_resolve.rs`), Metal's rule where the codes give
+//!   it and a near-equivalent elsewhere, announced as `extended-range-resolve`.
 //! - A packed 16-bit attachment the device renders through the view of its word
 //!   (`metal::format::WordAttachment`) holds each sample's stored codes, while Metal's resolve
 //!   averages its tile's values, finer than the codes: not modelled, refused
@@ -402,11 +408,14 @@ impl<'a> Wanted<'a> {
     }
 }
 
-/// The refusal of a resolve from or into a texture of `pf` that the runtime does not build: an
-/// extended-range format's (`RuntimeGap::ExtendedRangeResolve` states Metal's rule). The format's
-/// Resolve capability answers it too (`families::formats`).
+/// The refusal of a resolve of a multisampled attachment of `pf` that no resolve reads: one of
+/// Apple's private forms held in raw codes of which Metal makes no multisampled texture (bfloat,
+/// padded and two-plane ones; our probe `xrms`, the M3 Max under macOS 27.0.1), whose codes the
+/// crate-owned resolve has no rule for (`color_resolve::extended`). The format's Resolve capability
+/// answers it too (`families::formats`).
 pub(crate) fn unmodelled_resolve(pf: PixelFormat) -> Option<Unsupported> {
-    ExtendedRange::of(pf).map(|_| Unsupported::not_implemented(Feature::Format))
+    (ExtendedRange::of(pf).is_some() && super::color_resolve::extended(pf).is_none())
+        .then(|| Unsupported::not_implemented(Feature::Format))
 }
 
 /// What Apple's GPU holds of a multisampled color attachment of a pixel format as its resolve
@@ -596,14 +605,9 @@ pub(super) fn color(
     ) {
         return Err(problem(call, RenderPassProblem::ResolveFormat(which)));
     }
-    // An extended-range attachment's resolve, not built. A resolve texture of such a format is
-    // the attachment's own or its twin, so of such an attachment, or of another format, which a
-    // resolve leaves untouched or `destination` refuses.
-    let pixel_format = source.texture.pixel_format();
-    if unmodelled_resolve(pixel_format).is_some() {
-        return Err(Error::NotImplemented(RuntimeGap::ExtendedRangeResolve {
-            pixel_format,
-        }));
+    // A private form's codes no resolve reads (Metal makes no multisampled texture of it).
+    if let Some(unsupported) = unmodelled_resolve(source.texture.pixel_format()) {
+        return Err(Error::Unsupported(unsupported));
     }
     // An attachment rendered through the view of its word (`metal::format::WordAttachment`) holds
     // each sample's stored codes, while Metal resolves its tile's values: not modelled.

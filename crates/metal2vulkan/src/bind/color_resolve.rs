@@ -87,6 +87,35 @@
 //! its input attachment 0, and for [`ResolveSource::RawInputAttachment`] a view of it in its raw
 //! twin.
 //!
+//! **Extended-range forms** ([`ColorResolveFormat::extended_range`]): Metal makes multisampled
+//! textures of `BGR10_XR`, `BGRA10_XR`, their `_sRGB` twins and `RGB10A2Unorm_sRGB`, and of none of
+//! Apple's other private forms (our probe `xrms`, the M3 Max under macOS 27.0.1). Such an attachment
+//! is held in its raw format's codes (`metal::format::ExtendedRange`), so these modules read the
+//! source in that unsigned format (sample planes of a bits copy, a two-word texel split into
+//! `BGRA10_XR`'s four fields) and write the resolved raw texel, a `uvec4`, to `Location` 0 of a
+//! resolve attachment in that format. Metal's resolve, measured by our probe `xr` on the M3 Max
+//! under macOS 27.0.1 (4096 texels per form at 2 and at 4 samples, each sample its own value): a
+//! linear form's color channel is the average of the samples' codes rounded half up, every texel,
+//! which the modules apply. Metal's other channels average values the stored codes do not keep,
+//! so the modules write a near-equivalent where a pixel's samples differ:
+//!
+//! - `BGRA10_XR`'s alpha (and its twin's): Metal averages `floor(4080 a)` over the samples'
+//!   alphas `a` (each the written value as a `half`, clamped to `[0, 1]`) and rounds half up to a
+//!   code, three bits finer than the code; the modules average the codes with a tie rounded down
+//!   (Metal's code in 84% of the probe's texels at 2 samples and 88% at 4, every one within a code);
+//! - an `_sRGB` twin's color and `RGB10A2Unorm_sRGB`'s: Metal encodes an average of the samples'
+//!   linear values (near that of the written values as `half`s, clamped to the codes' range),
+//!   which lies within the samples' codes; the modules average the codes' decoded values in `f32`,
+//!   encode it as a kernel's write does, and hold the code within the samples' (81% and 85% of the
+//!   twins' channels, 99.5% within a code and at most 7 codes off where the samples' values nearly
+//!   cancel; 83% and 87% of `RGB10A2Unorm_sRGB`'s, within 2);
+//! - `RGB10A2Unorm_sRGB`'s 2-bit alpha: the average of the codes rounded half up (94% and 97%,
+//!   within a code).
+//!
+//! A pixel whose samples hold one code resolves to it, as Metal's does, without the decode and the
+//! encode. The rules apply at every count; Apple's GPUs have no texture past 4 samples.
+//! [`ColorResolveFormat::exact`] says which forms are Metal's at every texel.
+//!
 //! **Synchronization** (consumer): the samples' writes before the draw's reads, and the resolve
 //! texture's earlier accesses before its color writes.
 
@@ -96,6 +125,8 @@ use crate::budget::{Budget, Meter};
 use crate::device::requirements::Requirements;
 use crate::device::Device;
 use crate::error::{Error, Feature, InternalError, InternalKind, Unsupported};
+use crate::lower::arith::extended_range as xr;
+use crate::metal::format::ExtendedRange;
 use crate::pipeline::sym::{ResourceKind, ResourceSlot, Stage, Symbol};
 use crate::spirv::builder::constructs::{ArmEnd, ArmFn};
 use crate::spirv::builder::{FunctionBuilder, ModuleBuilder};
@@ -220,6 +251,9 @@ pub struct ColorResolveFormat {
     /// Whether the result is written through the raw twin's view
     /// ([`ColorResolveFormat::written_raw`]).
     written_raw: bool,
+    /// The extended-range form whose raw codes the format holds
+    /// ([`ColorResolveFormat::extended_range`]).
+    extended: Option<ExtendedRange>,
 }
 
 /// A channel of `rule` at bit `offset`.
@@ -293,7 +327,45 @@ impl ColorResolveFormat {
             format,
             channels,
             written_raw: false,
+            extended: None,
         })
+    }
+
+    /// The resolve of a multisampled color attachment of the extended-range `form`, held in its
+    /// raw format's codes (`metal::format::ExtendedRange::raw_format`): `BGR10_XR`, `BGRA10_XR`,
+    /// their `_sRGB` twins and `RGB10A2Unorm_sRGB`, the forms Metal makes multisampled textures
+    /// of. `None` for another form, of which Metal makes none (the module docs). It has no
+    /// [`channels`](Self::channels): the modules read and write the raw codes by the rules the
+    /// module docs state for these forms, at every sample count.
+    pub fn extended_range(form: ExtendedRange) -> Option<ColorResolveFormat> {
+        match form {
+            ExtendedRange::Bgr10 { .. }
+            | ExtendedRange::Bgra10 { .. }
+            | ExtendedRange::Rgb10A2Srgb => Some(ColorResolveFormat {
+                format: form.raw_format(),
+                channels: [None; 4],
+                written_raw: false,
+                extended: Some(form),
+            }),
+            _ => None,
+        }
+    }
+
+    /// The extended-range form whose raw codes the format holds
+    /// ([`extended_range`](Self::extended_range)), if any.
+    pub fn extended(self) -> Option<ExtendedRange> {
+        self.extended
+    }
+
+    /// Whether the resolve writes Metal's resolve at every texel: every format's but an
+    /// extended-range form's whose resolve averages values its codes do not keep (`BGRA10_XR`'s
+    /// alpha, an `_sRGB` twin's color, `RGB10A2Unorm_sRGB`'s channels), which the modules write a
+    /// near-equivalent of where a pixel's samples differ (the module docs).
+    pub fn exact(self) -> bool {
+        matches!(
+            self.extended,
+            None | Some(ExtendedRange::Bgr10 { srgb: false })
+        )
     }
 
     /// The Vulkan format.
@@ -1339,33 +1411,14 @@ fn alike(
         elem: t.u32_,
         len: 4,
     })?;
-    let words = |f: &mut FunctionBuilder<'_>, texel: Value| -> BResult<Value> {
-        match source.reads_bits() {
-            true => Ok(texel),
-            false => f.convert(ConvOp::Bitcast, texel, uvec4),
-        }
-    };
-    let (&first, rest) = texels
-        .split_first()
-        .ok_or(crate::spirv::error::BuildError::IdSpaceExhausted)?;
-    let first = words(f, first)?;
-    let mut differ: Option<Value> = None;
-    for &texel in rest {
-        let other = words(f, texel)?;
-        let bits = f.binary(BinOp::BitwiseXor, first, other)?;
-        differ = Some(match differ {
-            None => bits,
-            Some(d) => f.binary(BinOp::BitwiseOr, d, bits)?,
+    let mut words = Vec::with_capacity(texels.len());
+    for &texel in texels {
+        words.push(match source.reads_bits() {
+            true => texel,
+            false => f.convert(ConvOp::Bitcast, texel, uvec4)?,
         });
     }
-    let differ = differ.ok_or(crate::spirv::error::BuildError::IdSpaceExhausted)?;
-    let mut any = f.composite_extract(differ, &[0])?;
-    for lane in 1..4 {
-        let word = f.composite_extract(differ, &[lane])?;
-        any = f.binary(BinOp::BitwiseOr, any, word)?;
-    }
-    let zero = uint(f, t, 0)?;
-    f.binary(BinOp::IEqual, any, zero)
+    all_equal(f, t, &words)
 }
 
 /// The resolved output floats (R, G, B, A; 0 where the format has no channel) of `format` from
@@ -1443,6 +1496,9 @@ pub fn fragment_typed_module(
     samples: u32,
     source: ResolveSource,
 ) -> BResult<TypedModule> {
+    if let Some(form) = format.extended {
+        return extended_fragment(form, samples, source);
+    }
     let mut b = ModuleBuilder::new();
     let t = Types::new(&mut b)?;
     let srgb = if format.srgb() {
@@ -1450,10 +1506,38 @@ pub fn fragment_typed_module(
     } else {
         None
     };
-    let (image, coord) = match source {
+    let sampled = match source {
+        ResolveSource::Planes(copy) if copy.moves_bits() => t.u32_,
+        _ => t.f32_,
+    };
+    let (image, coord) = declare_source(&mut b, t, source, sampled)?;
+    let output = b.fixed_io(0, IoDir::Output, t.vec4, false)?;
+    let void = b.ty(Type::Void)?;
+    let mut f = b.function(void)?;
+    let texels = read_samples(&mut f, t, (image, coord), samples)?;
+    let lanes = resolve_texel(&mut f, t, srgb, format, &texels, source)?;
+    let value = f.composite_construct(t.vec4, &lanes)?;
+    let output = f.module().global_value(output)?;
+    f.store(output, value, MemAccess::default())?;
+    f.ret(None)?;
+    let id = f.finish()?;
+    b.entry(ExecModel::Fragment, id, vec![ExecMode::OriginUpperLeft])?;
+    b.finalize()
+}
+
+/// The source binding of `source`, whose texels are `sampled` (`u32` or `f32`) lanes: the
+/// multisampled input attachment, or the planes' sampled 2D-array image and the `FragCoord`
+/// input it is fetched at.
+fn declare_source(
+    b: &mut ModuleBuilder,
+    t: Types,
+    source: ResolveSource,
+    sampled: TypeId,
+) -> BResult<(GlobalId, Option<GlobalId>)> {
+    Ok(match source {
         ResolveSource::InputAttachment | ResolveSource::RawInputAttachment => {
             let ty = b.ty(Type::Image(ImageType {
-                sampled_type: t.f32_,
+                sampled_type: sampled,
                 dim: Dim::SubpassData,
                 depth: false,
                 arrayed: false,
@@ -1466,12 +1550,9 @@ pub fn fragment_typed_module(
                 None,
             )
         }
-        ResolveSource::Planes(copy) => {
+        ResolveSource::Planes(_) => {
             let ty = b.ty(Type::Image(ImageType {
-                sampled_type: match copy.moves_bits() {
-                    true => t.u32_,
-                    false => t.f32_,
-                },
+                sampled_type: sampled,
                 dim: Dim::D2,
                 depth: false,
                 arrayed: true,
@@ -1485,10 +1566,17 @@ pub fn fragment_typed_module(
                 Some(coord),
             )
         }
-    };
-    let output = b.fixed_io(0, IoDir::Output, t.vec4, false)?;
-    let void = b.ty(Type::Void)?;
-    let mut f = b.function(void)?;
+    })
+}
+
+/// Each of the `samples` texels of the pixel the invocation shades, from the source `image`
+/// ([`declare_source`]): the input attachment's samples, or the planes' layers at `coord`.
+fn read_samples(
+    f: &mut FunctionBuilder<'_>,
+    t: Types,
+    (image, coord): (GlobalId, Option<GlobalId>),
+    samples: u32,
+) -> BResult<Vec<Value>> {
     let image = f.module().global_value(image)?;
     let image = f.load(image, MemAccess::default())?;
     let ivec2 = f.module().ty(Type::Vector {
@@ -1518,7 +1606,7 @@ pub fn fragment_typed_module(
             None => {
                 let origin = f.module().constant(Constant::Null { ty: ivec2 })?;
                 let origin = f.module().const_value(origin)?;
-                let sample = int(&mut f, t, s as i32)?;
+                let sample = int(f, t, s as i32)?;
                 let ops = ImageOperands {
                     sample: Some(sample),
                     ..ImageOperands::default()
@@ -1526,9 +1614,9 @@ pub fn fragment_typed_module(
                 f.read(image, origin, &ops, TexelMemory::PRIVATE)?
             }
             Some((x, y)) => {
-                let layer = uint(&mut f, t, s)?;
+                let layer = uint(f, t, s)?;
                 let at = f.composite_construct(uvec3, &[x, y, layer])?;
-                let level = uint(&mut f, t, 0)?;
+                let level = uint(f, t, 0)?;
                 let ops = ImageOperands {
                     lod: Some(level),
                     ..ImageOperands::default()
@@ -1538,14 +1626,206 @@ pub fn fragment_typed_module(
         };
         texels.push(texel);
     }
-    let lanes = resolve_texel(&mut f, t, srgb, format, &texels, source)?;
-    let value = f.composite_construct(t.vec4, &lanes)?;
+    Ok(texels)
+}
+
+/// The fragment stage of the extended-range `form` at `samples` reading `source` (the module
+/// docs): the samples' raw texels in, the resolve's raw texel out, a `uvec4` at `Location` 0.
+fn extended_fragment(
+    form: ExtendedRange,
+    samples: u32,
+    source: ResolveSource,
+) -> BResult<TypedModule> {
+    // The planes hold the codes only where their copy moves the texels' bits.
+    if matches!(source, ResolveSource::Planes(copy) if !copy.moves_bits()) {
+        return Err(crate::spirv::error::BuildError::Type(
+            crate::spirv::error::TypeRule::FunctionSignature,
+        ));
+    }
+    let mut b = ModuleBuilder::new();
+    let t = Types::new(&mut b)?;
+    let table = match form {
+        ExtendedRange::Rgb10A2Srgb => xr::declare_padded(&mut b, form)?,
+        _ if form.srgb() => Some(xr::declare(&mut b)?),
+        _ => None,
+    };
+    let uvec4 = b.ty(Type::Vector {
+        elem: t.u32_,
+        len: 4,
+    })?;
+    let read = declare_source(&mut b, t, source, t.u32_)?;
+    let output = b.fixed_io(0, IoDir::Output, uvec4, false)?;
+    let void = b.ty(Type::Void)?;
+    let mut f = b.function(void)?;
+    let mut raws = Vec::with_capacity(samples as usize);
+    for texel in read_samples(&mut f, t, read, samples)? {
+        raws.push(extended_texel(&mut f, t, form, texel, source)?);
+    }
+    let value = resolve_extended(&mut f, t, form, table, &raws)?;
     let output = f.module().global_value(output)?;
     f.store(output, value, MemAccess::default())?;
     f.ret(None)?;
     let id = f.finish()?;
     b.entry(ExecModel::Fragment, id, vec![ExecMode::OriginUpperLeft])?;
     b.finalize()
+}
+
+/// The `uvec4` of `lanes`, each a `u32` constant.
+fn uvec4_const(f: &mut FunctionBuilder<'_>, t: Types, lanes: [u32; 4]) -> BResult<Value> {
+    let uvec4 = f.module().ty(Type::Vector {
+        elem: t.u32_,
+        len: 4,
+    })?;
+    let mut v = Vec::with_capacity(4);
+    for lane in lanes {
+        v.push(uint(f, t, lane)?);
+    }
+    f.composite_construct(uvec4, &v)
+}
+
+/// Whether the `uvec4`s `words` all hold the first's bits, as a `bool`.
+fn all_equal(f: &mut FunctionBuilder<'_>, t: Types, words: &[Value]) -> BResult<Value> {
+    let (&first, rest) = words
+        .split_first()
+        .ok_or(crate::spirv::error::BuildError::IdSpaceExhausted)?;
+    let mut differ: Option<Value> = None;
+    for &other in rest {
+        let bits = f.binary(BinOp::BitwiseXor, first, other)?;
+        differ = Some(match differ {
+            None => bits,
+            Some(d) => f.binary(BinOp::BitwiseOr, d, bits)?,
+        });
+    }
+    let differ = differ.ok_or(crate::spirv::error::BuildError::IdSpaceExhausted)?;
+    let mut any = f.composite_extract(differ, &[0])?;
+    for lane in 1..4 {
+        let word = f.composite_extract(differ, &[lane])?;
+        any = f.binary(BinOp::BitwiseOr, any, word)?;
+    }
+    let zero = uint(f, t, 0)?;
+    f.binary(BinOp::IEqual, any, zero)
+}
+
+/// The raw texel (the raw format's `uvec4`, as an input attachment of it reads) of `form` in a
+/// sample's `texel` read from `source`: the texel itself, or, from sample planes of 8-byte texels
+/// (`PlanesCopy::Rg32`, two words), `BGRA10_XR`'s four 16-bit fields, the lowest first.
+fn extended_texel(
+    f: &mut FunctionBuilder<'_>,
+    t: Types,
+    form: ExtendedRange,
+    texel: Value,
+    source: ResolveSource,
+) -> BResult<Value> {
+    if !(matches!(source, ResolveSource::Planes(PlanesCopy::Rg32))
+        && matches!(form, ExtendedRange::Bgra10 { .. }))
+    {
+        return Ok(texel);
+    }
+    let uvec4 = f.module().ty(Type::Vector {
+        elem: t.u32_,
+        len: 4,
+    })?;
+    let low = uint(f, t, 0xffff)?;
+    let sixteen = uint(f, t, 16)?;
+    let mut fields = Vec::with_capacity(4);
+    for word in 0..2 {
+        let w = f.composite_extract(texel, &[word])?;
+        fields.push(f.binary(BinOp::BitwiseAnd, w, low)?);
+        fields.push(f.binary(BinOp::ShiftRightLogical, w, sixteen)?);
+    }
+    f.composite_construct(uvec4, &fields)
+}
+
+/// The codes (red first) of `form` averaged over `codes`, each sample's, as Metal's resolve or its
+/// near-equivalent takes them (the module docs): the sum plus `bias` per lane, shifted down by
+/// the count's power of two.
+fn averaged_codes(
+    f: &mut FunctionBuilder<'_>,
+    t: Types,
+    codes: &[Value],
+    bias: [u32; 4],
+) -> BResult<Value> {
+    let (&first, rest) = codes
+        .split_first()
+        .ok_or(crate::spirv::error::BuildError::IdSpaceExhausted)?;
+    let mut sum = first;
+    for &c in rest {
+        sum = f.binary(BinOp::IAdd, sum, c)?;
+    }
+    let bias = uvec4_const(f, t, bias)?;
+    let sum = f.binary(BinOp::IAdd, sum, bias)?;
+    let n = codes.len() as u32;
+    let shift = uvec4_const(f, t, [n.trailing_zeros(); 4])?;
+    f.binary(BinOp::ShiftRightLogical, sum, shift)
+}
+
+/// The raw texel the resolve of `form` writes from each sample's raw texel `raws` (the module
+/// docs), `table` the form's sRGB table where it has one.
+fn resolve_extended(
+    f: &mut FunctionBuilder<'_>,
+    t: Types,
+    form: ExtendedRange,
+    table: Option<GlobalId>,
+    raws: &[Value],
+) -> BResult<Value> {
+    let n = raws.len() as u32;
+    let mut codes = Vec::with_capacity(raws.len());
+    for &raw in raws {
+        codes.push(xr::codes(f, form, raw)?);
+    }
+    let &first = codes
+        .first()
+        .ok_or(crate::spirv::error::BuildError::IdSpaceExhausted)?;
+    // A color code rounds a tie up; `BGRA10_XR`'s alpha down, and `RGB10A2Unorm_sRGB`'s up.
+    let half = n / 2;
+    let alpha = match form {
+        ExtendedRange::Bgra10 { .. } => half - 1,
+        _ => half,
+    };
+    let bias = [half, half, half, alpha];
+    if matches!(
+        form,
+        ExtendedRange::Bgr10 { srgb: false } | ExtendedRange::Bgra10 { srgb: false }
+    ) {
+        let code = averaged_codes(f, t, &codes, bias)?;
+        return xr::pack(f, form, code);
+    }
+    // The decode, the average and the encode run only where the samples' codes differ.
+    let same = all_equal(f, t, &codes)?;
+    let kept: ArmFn<'_, ()> =
+        Box::new(|f, _| Ok(ArmEnd::FallThrough(vec![xr::pack(f, form, first)?])));
+    let average: ArmFn<'_, ()> = Box::new(|f, _| {
+        let mut sum: Option<Value> = None;
+        for &raw in raws {
+            let v = xr::decode(f, form, raw, table, false)?;
+            sum = Some(match sum {
+                None => v,
+                Some(s) => f.binary_no_contraction(BinOp::FAdd, s, v)?,
+            });
+        }
+        let sum = sum.ok_or(crate::spirv::error::BuildError::IdSpaceExhausted)?;
+        // `1 / n` of a power of two: the product is exact.
+        let scale = float(f, t, 1.0 / n as f32)?;
+        let scale = f.composite_construct(t.vec4, &[scale; 4])?;
+        let mean = f.binary_no_contraction(BinOp::FMul, sum, scale)?;
+        let alpha_code = averaged_codes(f, t, &codes, bias)?;
+        let colors = xr::write_codes(f, form, mean, table)?;
+        // Within the samples' codes, where Metal's encode of an average of values that encode to
+        // them lies: a decoded code's encode can fall below it where codes share a decode step
+        // (`RGB10A2Unorm_sRGB`'s darkest).
+        let (mut lo, mut hi) = (first, first);
+        for &c in &codes[1..] {
+            lo = f.glsl(GlslOp::UMin, &[lo, c])?;
+            hi = f.glsl(GlslOp::UMax, &[hi, c])?;
+        }
+        let colors = f.glsl(GlslOp::UClamp, &[colors, lo, hi])?;
+        let code = f.vector_shuffle(colors, alpha_code, &[0, 1, 2, 7])?;
+        Ok(ArmEnd::FallThrough(vec![xr::pack(f, form, code)?]))
+    });
+    let out = f.if_(&mut (), same, kept, Some(average))?.0;
+    out.first()
+        .copied()
+        .ok_or(crate::spirv::error::BuildError::IdSpaceExhausted)
 }
 
 /// The fixed binding numbers of the modules' symbols.
@@ -1631,5 +1911,7 @@ pub fn color_resolve_modules(
     })
 }
 
+#[cfg(test)]
+mod extended_tests;
 #[cfg(test)]
 mod tests;
