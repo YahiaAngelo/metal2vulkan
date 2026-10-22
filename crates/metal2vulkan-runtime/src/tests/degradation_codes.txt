@@ -202,6 +202,7 @@ metal2vulkan-degrade-tessellation-winding
 metal2vulkan-degrade-texture-buffer-fill-leftover
 metal2vulkan-degrade-tile-dispatch-scratch
 metal2vulkan-degrade-two-plane-buffer-blit
+metal2vulkan-degrade-two-plane-buffer-blit-order
 metal2vulkan-degrade-two-plane-texture-copy
 metal2vulkan-degrade-unadvertised-vertex-simdgroups
 metal2vulkan-degrade-uncalibrated-gpu-times

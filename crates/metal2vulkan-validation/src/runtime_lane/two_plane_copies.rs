@@ -53,10 +53,12 @@ const H: u64 = 20;
 const BIG: usize = 16 * (W * H) as usize + 1024;
 
 /// The kinds a blit between two such textures, and one between a buffer and such a texture at
-/// a width that is not a multiple of 4, announce.
-pub(super) const TWO_PLANE_COPIES: [Degradation; 2] = [
+/// a width that is not a multiple of 4, announce: a wide one's, and a narrower one's whose rows
+/// meet between Metal's groups of 32 rows.
+pub(super) const TWO_PLANE_COPIES: [Degradation; 3] = [
     Degradation::TwoPlaneTextureCopy,
     Degradation::TwoPlaneBufferBlit,
+    Degradation::TwoPlaneBufferBlitOrder,
 ];
 
 /// Metal's outputs: the probe's case, the output, and the SHA-256 of its bytes.
@@ -949,8 +951,9 @@ const ROW_BLITS: [RowBlit; 22] = [
 ];
 
 /// Metal's blits that the runtime announces: into the texture with rows that meet where Metal's
-/// order varies from run to run, 32 texels wide or wider and between groups of 32 rows (each
-/// answered as Metal's in three runs here, where the earlier row's bytes stood).
+/// order varies from run to run, 32 texels wide or wider (`two-plane-buffer-blit`) and between
+/// groups of 32 rows (`two-plane-buffer-blit-order`), each answered as Metal's in three runs here,
+/// where the earlier row's bytes stood.
 const ANNOUNCED_ROW_BLITS: [RowBlit; 2] = [
     row_blit(([41, 2, 1], OWN, 0), None, (IN, [0, 0, 41, 2]),
         "b0000000 b0000001 b0000002 b0000003 b0000004 b0000005 b0000006 b0000007 b0000008 b0000009 b000000a b000000b b000000c b000000d b000000e b000000f b0000010 b0000011 b0000012 b0000013 b0000014 b0000015 b0000016 b0000017 b0000018 b0000019 b000001a b000001b b000001c b000001d b000001e b000001f b0000020 b0000021 b0000022 b0000023 b0000024 b0000025 b0000026 b0000027 b0000028 | b0000104 b0000105 b0000106 b0000107 b0000108 b0000109 b000010a b000010b b000010c b000010d b000010e b000010f b0000110 b0000111 b0000112 b0000113 b0000114 b0000115 b0000116 b0000117 b0000118 b0000119 b000011a b000011b b000011c b000011d b000011e b000011f b0000120 b0000121 b0000122 b0000123 b0000124 b0000125 b0000126 b0000127 b0000128 t78 t79 t80 t81"),
@@ -1093,8 +1096,8 @@ fn row_blit_words(device: &Device, queue: &CommandQueue, blit: &RowBlit) -> Vec<
 /// memory or a heap's, moves Metal's words at Metal's rows: out of the texture the bytes between
 /// rows too (0 in a new texture, as a fill left them, held apart in a texture of the device's
 /// memory), and below a width of 4 only the first row; into it, where rows meet, the row whose
-/// bytes Metal's GPU leaves; announced (`two-plane-buffer-blit`) only where rows meet in a blit
-/// into it where Metal's order varies from run to run.
+/// bytes Metal's GPU leaves; announced only where rows meet in a blit into it where Metal's order
+/// varies from run to run.
 #[test]
 fn buffer_blits_at_widths_off_4_take_metal_s_rows() {
     on_device(|device, messages| {
@@ -1112,15 +1115,15 @@ fn buffer_blits_at_widths_off_4_take_metal_s_rows() {
         }
         let notices = counts(&messages.take_notices());
         assert_eq!(notices.get(&TWO_PLANE_COPIES[1]), None, "{notices:?}");
+        assert_eq!(notices.get(&TWO_PLANE_COPIES[2]), None, "{notices:?}");
         for (n, blit) in ANNOUNCED_ROW_BLITS.iter().enumerate() {
             check(100 + n, blit, blit.metal);
         }
+        // The wide blit's kind and the one across groups of 32 rows', each once.
         let notices = counts(&messages.take_notices());
-        assert_eq!(
-            notices.get(&TWO_PLANE_COPIES[1]).copied(),
-            Some(1),
-            "{notices:?}"
-        );
+        for kind in &TWO_PLANE_COPIES[1..] {
+            assert_eq!(notices.get(kind).copied(), Some(1), "{notices:?}");
+        }
         assert!(wrong.is_empty(), "blits unlike Metal's: {wrong:?}");
     });
 }

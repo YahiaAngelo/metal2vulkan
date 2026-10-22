@@ -74,6 +74,10 @@ impl Degradation {
                 | D::AbsentArgumentRead
                 | D::UnpackedFillColor
                 | D::TextureBufferFillLeftover
+                // Rows of a two-plane buffer blit meeting between Metal's groups of 32 rows: Metal
+                // leaves either row's bytes from run to run, the runtime its most frequent whole
+                // outcome.
+                | D::TwoPlaneBufferBlitOrder
                 // Points Metal sizes none of: what it draws is undefined, mostly nothing, and the
                 // runtime draws nothing.
                 | D::UnsizedPoints => Exactness::OneOfMetals,

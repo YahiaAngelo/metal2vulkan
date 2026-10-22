@@ -1235,23 +1235,33 @@ degradations! {
         /// `⌊4 w / 16⌋ · 16` bytes apart, short of where they lie, and so moves texels into and
         /// out of other rows and the bytes between them. A 2D texture or array of one level is
         /// blitted at Metal's rows (`two_planes/buffer_rows.rs`), the row whose bytes Metal's GPU
-        /// leaves where two meet standing; announced there are a blit into it whose rows meet
-        /// between Metal's groups of 32 rows or 32 texels wide or wider, which keeps the earlier
-        /// row's bytes where Metal's GPU writes the two in an order that varies from run to run,
+        /// leaves where two meet standing; announced here are a blit into a texture 32 texels wide
+        /// or wider whose rows meet, which keeps the earlier row's bytes where Metal's GPU writes
+        /// the two in an order that varies from run to run (narrower, `two-plane-buffer-blit-order`),
         /// and a blit out of a texture of the
         /// device's memory that reads bytes between its rows after a copy from another texture
         /// wrote some there, which reads them as its fills and blits with a buffer left them (held
         /// apart, `Texture::between_rows`). Any other such texture (more levels, a view, 1D, 3D,
         /// a surface's) moves the texels at the rows the texture holds them in, announced.
         TwoPlaneBufferBlit = "two-plane-buffer-blit", Precision,
-            "where rows meet in a blit into the texture between groups of 32 rows or 32 texels \
-             wide or wider the earlier row's bytes stand, where Metal's GPU writes them in an \
-             order that varies from run to run; a blit out of a \
+            "where rows meet in a blit into a texture 32 texels wide or wider the earlier row's \
+             bytes stand, where Metal's GPU writes them in an order that varies from run to run, \
+             at some sizes never all the earlier row's; a blit out of a \
              texture of the device's memory reads the bytes between its rows that a copy from \
              another texture wrote as its fills and blits with a buffer left them, where Metal's \
              reads the copy's back; and a texture of more than one level, a \
              view, a 1D or 3D texture or a surface's moves its texels at the rows it holds them in, \
              where Metal's blit addresses its rows floor(4w/16)*16 bytes apart";
+        /// A blit from a buffer into a level of `RGB10A8_2P_XR10` or its sRGB twin narrower than 32
+        /// texels, at a width not a multiple of 4, whose rows meet between Metal's groups of 32
+        /// rows of the region (`two_planes/buffer_rows.rs`): Metal's GPU writes the two rows there
+        /// in an order that varies from run to run (the earlier row's bytes at 556 of 560 such
+        /// meetings in our probes), and in its fixed order at every other meeting. The runtime
+        /// keeps the earlier row's bytes there and Metal's order elsewhere: Metal's most frequent
+        /// whole outcome.
+        TwoPlaneBufferBlitOrder = "two-plane-buffer-blit-order", Precision,
+            "where the rows of two of Metal's groups of 32 meet the earlier row's bytes stand, \
+             where Metal's GPU leaves either row's from run to run";
         /// A render pipeline state whose vertex function runs simdgroup functions on a driver
         /// measured to run a vertex function's subgroup operations as Metal does though its
         /// `subgroupSupportedStages` leaves the vertex stage out

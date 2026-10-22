@@ -35,8 +35,10 @@
 //! there (`blit_fill.rs`), write them, and the scratch of a blit out of it starts from them. A
 //! copy from another texture that writes bytes there does not (`two_planes.rs`): it notes them
 //! (`Texture::keep_outside`), and a later blit out of the texture that reads them reads them as
-//! the held bytes, announced (`two-plane-buffer-blit`), as is a blit into it whose rows meet where
-//! Metal's order varies.
+//! the held bytes, announced (`two-plane-buffer-blit`), as is a blit into it 32 texels wide or
+//! wider whose rows meet; one narrower whose rows meet between groups of 32 rows announces
+//! `two-plane-buffer-blit-order`, the earlier row's bytes there, with Metal's order elsewhere, being
+//! Metal's most frequent whole outcome.
 
 use super::super::blit::{reads, writes, BlitCommandEncoder};
 use super::super::blit_plan::BufferLayout;
@@ -192,8 +194,8 @@ impl BlitCommandEncoder {
             }
         }
         let pf = texture.pixel_format();
-        let announce = |reason: &'static str| {
-            device.degrade(Degradation::TwoPlaneBufferBlit, || {
+        let announce_as = |kind: Degradation, reason: &'static str| {
+            device.degrade(kind, || {
                 let object = format!(
                     "a blit between a buffer and a {} texture {width} texels wide",
                     pf.name()
@@ -201,6 +203,7 @@ impl BlitCommandEncoder {
                 (object, reason.to_owned())
             });
         };
+        let announce = |reason| announce_as(Degradation::TwoPlaneBufferBlit, reason);
         let reaches_between = spans.iter().flatten().any(|s| between_rows(s, width));
         if !into_texture {
             let copies: Vec<(u64, u64, u64)> = spans
@@ -268,11 +271,18 @@ impl BlitCommandEncoder {
                 }
             }
         }
-        if varies {
+        if varies && width >= 32 {
             announce(
-                "into the texture, where its rows meet between Metal's groups of 32 rows or 32 \
-                 texels wide or wider, the earlier row's bytes stand; Metal's GPU writes such \
-                 rows in an order that varies from run to run",
+                "into the texture, where its rows meet, the earlier row's bytes stand; Metal's GPU \
+                 writes such rows of a texture 32 texels wide or wider in an order that varies \
+                 from run to run",
+            );
+        } else if varies {
+            announce_as(
+                Degradation::TwoPlaneBufferBlitOrder,
+                "into the texture, where its rows meet between Metal's groups of 32 rows, the \
+                 earlier row's bytes stand, Metal's most frequent; Metal's GPU writes such rows \
+                 in an order that varies from run to run",
             );
         }
         Ok(())
