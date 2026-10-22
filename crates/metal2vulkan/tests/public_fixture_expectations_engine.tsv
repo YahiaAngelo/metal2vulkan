@@ -1237,6 +1237,12 @@ engine/icb_mesh_template.air.ll	icb_mesh_triangle	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	
 engine/icb_mesh_template.ll	icb_object_reader	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/icb_mesh_template.ll	icb_mesh_marks	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/icb_mesh_template.ll	icb_mesh_triangle	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/icb_object_threadgroup.air.ll	icb_object_threadgroup_fragment	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/icb_object_threadgroup.air.ll	icb_object_threadgroup_object	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/icb_object_threadgroup.air.ll	icb_object_threadgroup_mesh	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/icb_object_threadgroup.ll	icb_object_threadgroup_fragment	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/icb_object_threadgroup.ll	icb_object_threadgroup_object	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/icb_object_threadgroup.ll	icb_object_threadgroup_mesh	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/icb_render_indexed_encode.air.ll	icb_render_indexed_encode	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}	ok	ok	ok	ok	ok	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}
 engine/icb_render_indexed_encode.ll	icb_render_indexed_encode	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}	ok	ok	ok	ok	ok	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}
 engine/icb_render_ipatch_encode.air.ll	icb_render_ipatch_encode	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}	ok	ok	ok	ok	ok	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(ShaderInt64)]]}	Unsupported{GpuEncodedIndirectCommands; AnyOf[[Feature(BufferDeviceAddress), Feature(ShaderInt64)]]}
