@@ -5126,7 +5126,7 @@ impl Texture {
             return Ok(());
         };
         self.refuse_detached_texels()?;
-        if (bytes.len() as u64) < host.host_len() {
+        if host.host_len().is_none_or(|len| (bytes.len() as u64) < len) {
             return Err(invalid(CALL, Problem::Copy(CopyProblem::BufferRange)));
         }
         // A PVRTC level's blocks in Metal's CPU order, as the rows the copy packs.
@@ -5303,7 +5303,7 @@ impl Texture {
             return Ok(());
         };
         self.refuse_detached_texels()?;
-        if (bytes.len() as u64) < host.host_len() {
+        if host.host_len().is_none_or(|len| (bytes.len() as u64) < len) {
             return Err(invalid(CALL, Problem::Copy(CopyProblem::BufferRange)));
         }
         // A two-plane texture's color words, each texel's first word.

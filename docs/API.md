@@ -1255,8 +1255,8 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   each end copied from a 1-KiB pattern buffer the encoder makes once.
 - `metal2vulkan-degrade-staged-texture-copy` (performance). `StagedTextureCopy`: A blit copies
   between a buffer and a texture in a layout Vulkan cannot state. Cost: the rows go through a
-  tightly packed scratch buffer, which its creation clears by a fill it waits for: two copies
-  instead of one.
+  tightly packed scratch buffer: two copies instead of one, and for a single-sample texture the
+  scratch's creation clears it by a fill it waits for.
 - `metal2vulkan-degrade-overlapping-texel-copy` (performance). `OverlappingTexelCopy`: A blit copies
   texel rows of a texture over a buffer to or from bytes of the same buffer that they share, which
   Vulkan's copy forbids. Cost: the rows go through a tightly packed scratch buffer, which its

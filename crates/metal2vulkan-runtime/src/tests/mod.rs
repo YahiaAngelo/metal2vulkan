@@ -37,8 +37,12 @@ mod completion;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod completion_here;
 mod completion_seen;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod compressed_rows_out;
 mod compute;
 mod contexts;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod copy_bounds;
 mod copy_plan;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod deferred_calls;
@@ -120,6 +124,8 @@ mod mipmap_scratch;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod multisample_buffer_copy;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod multisample_buffer_layouts;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod nan_signs;
 mod noted_apart;
 mod numbered_samplers;
@@ -146,6 +152,7 @@ mod replays;
 mod resource;
 mod resource_ids;
 mod rotated;
+mod sample_interleave;
 mod sample_planes;
 mod sampler;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]

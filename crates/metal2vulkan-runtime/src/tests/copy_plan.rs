@@ -249,7 +249,7 @@ fn host_copies_follow_metals_measured_verdicts_and_pack_rows() {
     for bpi in [0, 3, 4, 16, 18] {
         let host = plan(&rgba, full, 8, bpi, false, false).unwrap().unwrap();
         assert_eq!(host.rows().map(|(h, _)| h).collect::<Vec<_>>(), [0, 8]);
-        assert_eq!(host.host_len(), 16, "{bpi}");
+        assert_eq!(host.host_len(), Some(16), "{bpi}");
     }
     // More than one image are exactly `bytesPerImage` apart, off the pixel and below an image
     // too (`rp.3d.bpi0`, `bpi4`, `bpi12`, `bpi18`), ...
@@ -260,7 +260,7 @@ fn host_copies_follow_metals_measured_verdicts_and_pack_rows() {
         let rows: Vec<usize> = host.rows().map(|(h, _)| h).collect();
         let bpi = bpi as usize;
         assert_eq!(rows, [0, 8, bpi, bpi + 8]);
-        assert_eq!(host.host_len(), len, "{bpi}");
+        assert_eq!(host.host_len(), Some(len), "{bpi}");
     }
     // ... and `getBytes` writes them in turn, a later image's bytes over an earlier one's
     // (`gb.3d.bpi12`: `00..0b`, then the second image's `10..1f` from 12).
@@ -274,7 +274,7 @@ fn host_copies_follow_metals_measured_verdicts_and_pack_rows() {
     let one_row = plan(&rgba, region([0, 1, 0], [2, 1, 1]), 0, 0, false, false)
         .unwrap()
         .unwrap();
-    assert_eq!((one_row.host_len(), one_row.packed_len()), (8, 8));
+    assert_eq!((one_row.host_len(), one_row.packed_len()), (Some(8), 8));
     // Plain Metal's pitches off its rules: a pitch of a row or more exactly, off the pixel too; 0,
     // every row at the first byte; between 0 and a row, nothing copied, one row or more.
     let odd = plan(&rgba, full, 10, 0, false, false).unwrap().unwrap();
@@ -326,7 +326,7 @@ fn host_copies_follow_metals_measured_verdicts_and_pack_rows() {
     assert_eq!(image.size, [8, 8, 1]);
     // Padded rows and images pack and unpack exactly, leaving the padding alone.
     let host = plan(&volume, whole, 12, 32, false, false).unwrap().unwrap();
-    assert_eq!((host.host_len(), host.packed_len()), (52, 32));
+    assert_eq!((host.host_len(), host.packed_len()), (Some(52), 32));
     let src: Vec<u8> = (0..52).collect();
     let mut packed = vec![0u8; 32];
     host.pack(&src, &mut packed);
@@ -515,4 +515,38 @@ fn a_host_upload_holds_a_negative_or_nan_depth_only_in_its_rows() {
             "between rows at {at}"
         );
     }
+}
+
+/// A guest's `bytesPerRow` and `bytesPerImage` reach `replaceRegion` and `getBytes` as they are:
+/// a layout whose last row ends past `u64::MAX` holds more bytes than any slice
+/// (`HostLayout::host_len` is `None`, which the texture refuses as a slice too short,
+/// `BufferRange`), never a wrapped length a short slice passes.
+#[test]
+fn host_layouts_past_u64_max_hold_more_than_any_slice() {
+    let wraps = 0x5555_5555_5555_5560u64;
+    let flat = tex(PixelFormat::BGRA8Unorm, TextureType::Type2D, [16, 16, 1]);
+    let u = unit(&flat, BlitOption::None).unwrap();
+    let r = region([0, 0, 0], [4, 4, 1]);
+    let plan = |t: &Texture, r, bpr, bpi| {
+        plan_host_copy(&t.record, &r, &u, bpr, bpi, false, false)
+            .unwrap()
+            .unwrap()
+            .1
+    };
+    for bpr in [u64::MAX, u64::MAX - 3, 1 << 63, wraps] {
+        assert_eq!(plan(&flat, r, bpr, 0).host_len(), None, "{bpr}");
+    }
+    // One image ignores `bytesPerImage`, any value.
+    assert_eq!(plan(&flat, r, 16, u64::MAX).host_len(), Some(64));
+    let volume = tex(PixelFormat::BGRA8Unorm, TextureType::Type3D, [16, 16, 4]);
+    let r = region([0, 0, 0], [4, 4, 4]);
+    for bpi in [u64::MAX, 1 << 63, wraps] {
+        assert_eq!(plan(&volume, r, 16, bpi).host_len(), None, "{bpi}");
+    }
+    // The last byte at `u64::MAX` itself is a length of `u64::MAX`.
+    let row = region([0, 0, 0], [4, 2, 1]);
+    assert_eq!(
+        plan(&flat, row, u64::MAX - 16, 0).host_len(),
+        Some(u64::MAX)
+    );
 }
