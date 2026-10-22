@@ -447,9 +447,16 @@ fn before_round(buffer: &CommandBufferShared) -> Option<Round> {
 fn run_again(check: &LoopCheck, buffer: Hold<CommandBufferShared>) {
     let device = &buffer.device;
     let waker = device.shared().scheduler.waker();
-    // Outside a section, where a spare of the device's is taken.
+    // A new one, made inside a section as every Vulkan call of the runtime's threads is (a spare
+    // of the device's is taken outside one alone), given to the device's spares at the end.
     let family = device.shared().queue_family_of(buffer.queue.vk_queue());
-    let pool = command_pool(device, family).map(|pool| Arc::new(Mutex::new(pool)));
+    let pool = {
+        let Some(_busy) = exit_guard::enter() else {
+            // What it holds stays held to the process's end, as the scheduler's does.
+            return std::mem::forget(buffer);
+        };
+        command_pool(device, family).map(|pool| Arc::new(Mutex::new(pool)))
+    };
     let (failure, settled) = match &pool {
         Ok(pool) => loop {
             let round = before_round(&buffer).unwrap_or_else(|| check.run_once(&buffer, pool));
