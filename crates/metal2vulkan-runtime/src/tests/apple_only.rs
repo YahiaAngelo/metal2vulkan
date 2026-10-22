@@ -9,7 +9,7 @@ use crate::{AppleOnly, AppleOnlyCall, DEFAULT_PROTECTION_OPTIONS};
 #[test]
 fn every_apple_only_call_answers_typed() {
     use AppleOnlyCall as C;
-    let table: [(&str, AppleOnlyCall, Result<(), AppleOnly>); 21] = [
+    let table: [(&str, AppleOnlyCall, Result<(), AppleOnly>); 25] = [
         // Compressed-texture controls: no compression is visible on Vulkan.
         (
             "invalidateCompressedTexture:",
@@ -65,6 +65,26 @@ fn every_apple_only_call_answers_typed() {
         (
             "setProvokingVertexMode:",
             C::SetProvokingVertexMode(1),
+            Ok(()),
+        ),
+        (
+            "setProvokingVertexMode:",
+            C::SetProvokingVertexMode(u64::MAX),
+            Ok(()),
+        ),
+        (
+            "setProvokingVertexMode:",
+            C::SetProvokingVertexMode(1 << 63),
+            Ok(()),
+        ),
+        (
+            "setProvokingVertexMode:",
+            C::SetProvokingVertexMode(2),
+            Ok(()),
+        ),
+        (
+            "setProvokingVertexMode:",
+            C::SetProvokingVertexMode(i64::MAX as u64),
             Err(AppleOnly::ProvokingVertexMode),
         ),
         (
@@ -127,16 +147,13 @@ fn no_getter_answers_off_metals_default() {
 }
 
 /// Each refused Apple-only feature names why ([`AppleOnly::gap`]), and none is a device's gap:
-/// a color fill packed where Metal's answer differs between processes has no one answer; the
-/// provoking vertex mode, measured, is not built; every other refusal's answer on Metal is not
-/// measured. The error's text names the gap.
+/// each refusal's answer on Metal is not measured. The error's text names the gap.
 #[test]
 fn each_apple_only_refusal_names_its_gap() {
-    use crate::AppleOnlyGap::{NotBuilt, Unmeasured};
+    use crate::AppleOnlyGap::Unmeasured;
     let table = [
         (AppleOnly::ProtectedContent, Unmeasured),
         (AppleOnly::LineWidth, Unmeasured),
-        (AppleOnly::ProvokingVertexMode, NotBuilt),
         (AppleOnly::ViewportTransformDisabled, Unmeasured),
         (AppleOnly::VertexAmplificationMode, Unmeasured),
         (AppleOnly::DepthCleared, Unmeasured),

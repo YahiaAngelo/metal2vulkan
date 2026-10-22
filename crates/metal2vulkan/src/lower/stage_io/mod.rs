@@ -35,7 +35,9 @@
 //!   without a geometry, tessellation or mesh stage "the provoking vertex is determined by the
 //!   primitive topology": "the provoking vertex for p_i is v_3i" in a triangle list, "v_2i" in a
 //!   line list, and "v_i" in a strip and of points (the Vulkan specification's flat shading and
-//!   primitive topologies; no pipeline enables `VK_EXT_provoking_vertex`'s last vertex). So each
+//!   primitive topologies, in a pipeline of the first provoking vertex, Vulkan's default; under
+//!   `VK_EXT_provoking_vertex`'s last vertex a list's primitive `i` reads `(n i + n - 1) / n`, `i`
+//!   too, and a strip's `i` plus its primitives' vertices less one). So each
 //!   fragment reads `i`, its primitive's index among the draw's primitives of its instance, which
 //!   is Metal's `[[primitive_id]]`: restarted in each instance, moved by no vertex start, base
 //!   vertex or base instance, a flat varying taking the first vertex (Metal probes on the M3 Max,
@@ -488,8 +490,8 @@ pub(super) const MERGED_WORDS: u64 = 600;
 /// `PrimitiveId`: at each return, `(VertexIndex - first) / n` (`vertex` is the input builtin's
 /// object), in wrapping `u32` arithmetic, `first` the draw's first vertex ([`FirstVertex`]) and
 /// `n` `PushField::VerticesPerPrimitive`, to its `IoRole::PrimitiveId` varying (`object`). A
-/// primitive's flat inputs read its provoking vertex, its first, so each of its fragments reads
-/// the index of the primitive in its instance.
+/// primitive's flat inputs read its provoking vertex, its first in a pipeline of Vulkan's default
+/// provoking vertex, so each of its fragments reads the index of the primitive in its instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PrimitiveIdStore {
     pub vertex: usize,

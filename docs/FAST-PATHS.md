@@ -277,6 +277,14 @@ recorded here.
 Open differences from Metal that no note announces yet, and runtime costs still above the
 driver's. Each is open work.
 
+- **A draw under Apple's last provoking vertex on a device without it** (MoltenVK), whose pipeline
+  state reads flat inputs or selects a slice or viewport (or a strip's whose fragment function
+  reads barycentrics): it draws the list of its primitives led by their last vertices
+  (`render/provoking.rs`), which a GPU pass of three dispatches between barriers writes before
+  its render pass for an indexed or indirect draw, and the CPU writes into the upload arena (4
+  bytes an index) for a direct draw without indices, where Metal's mode costs nothing. Not
+  measured.
+
 - **A no-copy buffer imported by its pointer follows a remap of its pages** on a driver whose
   pointer imports follow their address (`DriverFact::PointerImportsFollowTheirAddress`: ANV on
   i915, RADV, lavapipe): pages mapped over the buffer's addresses after it was made (`mmap` with

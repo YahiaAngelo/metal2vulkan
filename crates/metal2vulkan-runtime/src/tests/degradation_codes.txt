@@ -149,6 +149,8 @@ metal2vulkan-degrade-point-guard-band
 metal2vulkan-degrade-positions-through-scratch
 metal2vulkan-degrade-private-properties-unknown
 metal2vulkan-degrade-private-resource-option
+metal2vulkan-degrade-provoking-vertex-lines
+metal2vulkan-degrade-provoking-vertex-unmatched
 metal2vulkan-degrade-quads-counted-before-discard
 metal2vulkan-degrade-quads-split-by-clipping
 metal2vulkan-degrade-rasterization-rate-map

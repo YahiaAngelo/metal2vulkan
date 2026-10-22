@@ -399,6 +399,7 @@ mod pass_start_reads;
 mod pass_steps;
 mod pending;
 mod pending_tile;
+mod provoking;
 mod queued_commits;
 mod replay;
 mod reroute;
@@ -726,6 +727,9 @@ struct DrawSettings {
     depth16_pass: Option<bool>,
     /// The side of its depth bias (`BindState::depth16_bias_raises`).
     depth16_bias_raises: Option<bool>,
+    /// Its `VkPipeline` takes the last provoking vertex (`render/provoking.rs`,
+    /// `FixedState::provoking_last`).
+    provoking_last: bool,
 }
 
 /// The render encoder state one draw takes, statically or as dynamic state, in Vulkan's terms
@@ -7038,7 +7042,10 @@ impl RenderLowering {
         // An indexed strip the encoder's call restarts at another index than Vulkan's, and a draw
         // of one of Metal's private types, is drawn as a list, of its class's list topology
         // (`render/restart.rs`).
-        let restarted = self.restarted(assembly, &draw);
+        // A draw under the last provoking vertex is drawn as a list on a device without it
+        // (`render/provoking.rs`).
+        let provoking = self.provoking(call, &pipeline, assembly);
+        let restarted = self.restarted(assembly, &draw, provoking);
         let quad_primitive_ids = match assembly {
             Assembly::Private(program) => private_primitive_ids(&pipeline, program)?,
             _ => false,
@@ -7130,6 +7137,18 @@ impl RenderLowering {
         let planes = |form: &ExtendedRange| matches!(form, ExtendedRange::Planes { .. });
         if plan.variant.extended_range.values().any(planes) {
             self.core.device().shared().counts.two_plane_draw();
+        }
+        match provoking {
+            provoking::Provoking::AsIs => {}
+            provoking::Provoking::Native => self
+                .core
+                .device()
+                .shared()
+                .counts
+                .provoking_last_pipeline_draw(),
+            provoking::Provoking::Listed(_) => {
+                self.core.device().shared().counts.provoking_listed_draw()
+            }
         }
         self.give_up_extended_shadows(&pipeline, &live.state);
         // The draw's primitive type: an indexed capture draw's layout says whether its strip
@@ -7323,7 +7342,7 @@ impl RenderLowering {
                 ) => {
                     let list = WrittenList::new(
                         &mut self.core,
-                        restarted.program,
+                        ((restarted.program, restarted.order), restarted.gap.gap()),
                         (vertex_start, vertex_count),
                     )?;
                     (None, Some(list))
@@ -7366,13 +7385,14 @@ impl RenderLowering {
                     let reads = index_rewrite::reads(index, &arguments, size);
                     let in_place = index_rewrite::in_place(index, &arguments, size);
                     if self.unordered.written(&in_place) {
-                        return Err(Error::NotImplemented(index_rewrite::gap_of(
-                            restarted.program,
-                        )));
+                        return Err(Error::NotImplemented(restarted.gap.gap()));
                     }
                     let pass = RewritePass::new(
                         &mut self.core,
-                        (restarted.program, restarted.restart),
+                        (
+                            (restarted.program, restarted.restart, restarted.order),
+                            restarted.gap.gap(),
+                        ),
                         index,
                         &arguments,
                         size,

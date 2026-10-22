@@ -640,7 +640,6 @@ def plain_table(tables):
 # Why each Apple-only refusal is refused, from `AppleOnly::gap`.
 APPLE_GAP_WORDS = {
     "Unmeasured": "Metal's answer not measured",
-    "NotBuilt": "not built",
 }
 
 

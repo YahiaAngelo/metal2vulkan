@@ -195,6 +195,9 @@ pub(super) struct EncoderState {
     blend_color: [f32; 4],
     fill_mode: TriangleFillMode,
     clip_mode: DepthClipMode,
+    /// Apple's `setProvokingVertexMode:` at 1: a primitive's flat inputs read its last vertex
+    /// (`render/provoking.rs`). Metal's default, and every new encoder's, is the first.
+    provoking_last: bool,
 }
 
 impl EncoderState {
@@ -229,6 +232,7 @@ impl EncoderState {
             blend_color: [0.0; 4],
             fill_mode: TriangleFillMode::Fill,
             clip_mode: DepthClipMode::Clip,
+            provoking_last: false,
         }
     }
 
@@ -305,6 +309,17 @@ impl EncoderState {
 
     pub(super) fn set_cull_mode(&mut self, mode: CullMode) {
         self.cull_mode = mode;
+    }
+
+    /// `setProvokingVertexMode:`: the last vertex where `last`, else the first
+    /// (`render/provoking.rs`).
+    pub(super) fn set_provoking_last(&mut self, last: bool) {
+        self.provoking_last = last;
+    }
+
+    /// Whether a primitive's flat inputs read its last vertex (`setProvokingVertexMode:` 1).
+    pub(super) fn provoking_last(&self) -> bool {
+        self.provoking_last
     }
 
     pub(super) fn set_winding(&mut self, winding: Winding) {
@@ -1112,6 +1127,7 @@ impl EncoderState {
             viewports,
             depth_range: None,
             masks_color: false,
+            provoking_last: false,
         })
     }
 }

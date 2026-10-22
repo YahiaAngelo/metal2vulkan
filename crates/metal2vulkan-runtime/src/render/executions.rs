@@ -628,9 +628,13 @@ impl RenderLowering {
         // Nor do its positions run again before the pass (`render/capture.rs`).
         self.keeping = super::capture::Keeping::Stopped;
         let inherited = icb.descriptor().inherit_buffers;
+        // An execution's commands take their flat inputs from the first vertex whatever the
+        // encoder's provoking vertex mode (Metal probes on the M3 Max, macOS 27.0.1).
+        let mut state = (*self.state).clone();
+        state.set_provoking_last(false);
         let snapshot = Snapshot {
             layout: self.layout.clone(),
-            state: self.state.clone(),
+            state,
             vertex: if inherited {
                 self.vertex.clone()
             } else {
@@ -1831,6 +1835,7 @@ impl RenderLowering {
         let mut fixed =
             self.shape_inputs()
                 .draw_fixed(graphics, failing.as_ref(), (false, false))?;
+        fixed.provoking_last = settings.provoking_last;
         let clamp = (
             settings.native,
             settings.written_clamp,

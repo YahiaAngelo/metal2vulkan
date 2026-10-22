@@ -36,6 +36,7 @@
 //!   `WorkCounts::draw_shapes_reused` counts the draws that reused all three.
 
 use super::draw_problem;
+use super::provoking;
 use super::{Assembly, DrawSettings, DrawState, Routed, RoutedColors};
 use crate::amplification::Amplification;
 use crate::color_reformat::{self, Routing};
@@ -432,6 +433,7 @@ impl ShapeInputs<'_> {
             bias,
             compensation,
         );
+        let provoking_last = provoking::natively_last(device, self.state, pipeline);
         Ok(DrawSettings {
             unsized_points,
             topology,
@@ -448,6 +450,7 @@ impl ShapeInputs<'_> {
             routed_colors,
             depth16_pass,
             depth16_bias_raises,
+            provoking_last,
         })
     }
 
@@ -543,6 +546,7 @@ impl ShapeInputs<'_> {
         let (native, compensation) = (settings.native, settings.compensation);
         let bias_effect = settings.bias;
         let mut fixed = self.draw_fixed(graphics, failing, (shadow, tests))?;
+        fixed.provoking_last = settings.provoking_last;
         // The depth the draw renders against: the pass's attachment's, or the hidden one's,
         // which Metal biases as the 32-bit float depth it is.
         let depth_format = self

@@ -1,7 +1,9 @@
-//! The index rewrite pass of an indexed strip that restarts where Vulkan does not, and of a draw
-//! of one of Metal's private primitive types over indices or from indirect arguments (the
-//! modules and their contract are `bind::index_rewrite`); and the list the CPU writes for a direct
-//! draw of a private type without indices ([`WrittenList`]).
+//! The index rewrite pass of an indexed strip that restarts where Vulkan does not, of a draw of
+//! one of Metal's private primitive types over indices or from indirect arguments, and of a draw
+//! under Apple's last provoking vertex that a device without it draws as a list led by each
+//! primitive's last vertex (`render/provoking.rs`) (the modules and their contract are
+//! `bind::index_rewrite`); and the list the CPU writes for such a direct draw without indices
+//! ([`WrittenList`]). Each list is written in the draw's `RewriteOrder`.
 //!
 //! After `RenderCommandEncoder::set_primitive_restart_enabled` (Apple's
 //! `setPrimitiveRestartEnabled:index:`), Metal restarts an indexed line or triangle strip at the
@@ -68,15 +70,6 @@ pub(super) enum Arguments<'a> {
     IndirectVertices(&'a DrawSource<'a>),
 }
 
-/// The gap a list of `program` reports where it cannot be drawn as Metal draws it: a restarted
-/// strip's, or a private primitive type's.
-pub(super) fn gap_of(program: RewriteProgram) -> RuntimeGap {
-    match program {
-        RewriteProgram::LineStrip | RewriteProgram::TriangleStrip => RuntimeGap::RestartedStrip,
-        _ => RuntimeGap::PrivatePrimitives,
-    }
-}
-
 /// Where a pass writes its list.
 enum Output {
     /// A direct draw's own buffer.
@@ -104,17 +97,18 @@ pub(super) struct RewritePass {
 }
 
 impl RewritePass {
-    /// The pass of `program` restarting at `restart` (`k'`) over the `index_size`-byte indices of
-    /// `index` (`None` for a draw without indices), with `arguments`, in `core`'s command buffer,
-    /// whose reads of the Metal buffers are `uses` ([`reads`]). Refused
-    /// (`NotImplemented(RestartedStrip)`, or `PrivatePrimitives` for a private type's list) where a
-    /// direct draw's list is past what one storage range binds or a `u32` counts, or carries a base
-    /// instance the device's indirect draws cannot (`drawIndirectFirstInstance`), and where the
-    /// binding layer cannot bind the pass's ranges; and as buffers, uploads, kernels and descriptor
-    /// sets are refused.
+    /// The pass of `program` restarting at `restart` (`k'`) in `order` over the `index_size`-byte
+    /// indices of `index` (`None` for a draw without indices), with `arguments`, in `core`'s
+    /// command buffer, whose reads of the Metal buffers are `uses` ([`reads`]). Refused
+    /// (`NotImplemented(gap)`: `RestartedStrip`, `PrivatePrimitives` for a private type's list,
+    /// `ProvokingVertex` for a list of the last provoking vertex) where a direct draw's list is
+    /// past what one storage range binds or a `u32` counts, or carries a base instance the
+    /// device's indirect draws cannot (`drawIndirectFirstInstance`), and where the binding layer
+    /// cannot bind the pass's ranges; and as buffers, uploads, kernels and descriptor sets are
+    /// refused.
     pub(super) fn new(
         core: &mut EncoderCore,
-        (program, restart): (RewriteProgram, u32),
+        ((program, restart, order), refused): ((RewriteProgram, u32, RewriteOrder), RuntimeGap),
         index: Option<&DrawSource<'_>>,
         arguments: &Arguments<'_>,
         index_size: u64,
@@ -122,7 +116,7 @@ impl RewritePass {
     ) -> Result<RewritePass, Error> {
         let device = core.device().clone();
         let limits = &device.properties().description.limits;
-        let gap = || Error::NotImplemented(gap_of(program));
+        let gap = || Error::NotImplemented(refused.clone());
         let (source, owned) = match *arguments {
             Arguments::Direct {
                 count,
@@ -186,7 +180,8 @@ impl RewritePass {
             limits.min_storage_buffer_offset_alignment,
             limits.max_storage_buffer_range,
         )
-        .ok_or_else(gap)?;
+        .ok_or_else(gap)?
+        .with_order(order);
         let kernel = |phase| device.owned_kernel(OwnedModule::IndexRewrite(program, phase));
         let kernels = [
             kernel(RewritePhase::Count)?,
@@ -373,33 +368,34 @@ impl RewritePass {
     }
 }
 
-/// The list of a direct draw without indices of one of Metal's private primitive types, which the
-/// CPU writes into the command buffer's upload arena while the draw is encoded: its positions are
-/// its vertices, so the list follows from its count alone ([`RewriteProgram::sequential_list`],
-/// relative to its first vertex), and the draw draws it from its vertex start as base vertex. The
-/// arena holds it until the command buffer completes, and the host writes it before the draw's
-/// batch is submitted (`upload.rs`).
+/// The list of a direct draw without indices of one of Metal's private primitive types, or under
+/// the last provoking vertex on a device without it, which the CPU writes into the command
+/// buffer's upload arena while the draw is encoded: its positions are its vertices, so the list
+/// follows from its count alone ([`RewriteProgram::sequential_list`] in the draw's order, relative
+/// to its first vertex), and the draw draws it from its vertex start as base vertex. The arena
+/// holds it until the command buffer completes, and the host writes it before the draw's batch is
+/// submitted (`upload.rs`).
 pub(super) struct WrittenList {
     upload: Upload,
     indices: u32,
 }
 
 impl WrittenList {
-    /// The list of `program` for a draw of `count` vertices from `vertex_start`, in `core`'s
-    /// command buffer. Refused (`NotImplemented(PrivatePrimitives)`) from a vertex start past
-    /// `i32::MAX`, which a list's base vertex cannot carry, and for a list of more indices than a
-    /// `u32` counts; and as uploads are refused.
+    /// The list of `program` in `order` for a draw of `count` vertices from `vertex_start`, in
+    /// `core`'s command buffer. Refused (`NotImplemented(gap)`: `PrivatePrimitives`, or
+    /// `ProvokingVertex`) from a vertex start past `i32::MAX`, which a list's base vertex cannot
+    /// carry, and for a list of more indices than a `u32` counts; and as uploads are refused.
     pub(super) fn new(
         core: &mut EncoderCore,
-        program: RewriteProgram,
+        ((program, order), refused): ((RewriteProgram, RewriteOrder), RuntimeGap),
         (vertex_start, count): (u32, u32),
     ) -> Result<WrittenList, Error> {
-        let gap = || Error::NotImplemented(gap_of(program));
+        let gap = || Error::NotImplemented(refused.clone());
         i32::try_from(vertex_start).map_err(|_| gap())?;
         let indices = u32::try_from(program.capacity(u64::from(count))).map_err(|_| gap())?;
         let device = core.device().clone();
         let bytes: Vec<u8> = program
-            .sequential_list(count, RewriteOrder::First)
+            .sequential_list(count, order)
             .into_iter()
             .flat_map(u32::to_le_bytes)
             .collect();

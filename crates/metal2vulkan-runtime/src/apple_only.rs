@@ -5,9 +5,9 @@
 //!
 //! Exact means one of:
 //! - the call states Metal's default, which every runtime object already has: a line width of
-//!   1, the viewport transform on, no protection options, provoking vertex mode 0
-//!   (the first vertex, as Vulkan's default and every runtime draw: a Metal probe drew a flat
-//!   varying from the first vertex without the call and after mode 0, from the last after mode 1);
+//!   1, the viewport transform on, no protection options;
+//! - the call sets encoder state the runtime draws as Metal does: a provoking vertex mode of 0
+//!   or 1, or one whose top bit is set (which Metal draws as 0), `render/provoking.rs`;
 //! - the call acts on state no runtime object has: Vulkan shows no texture compression, so a
 //!   reinterpretation flush has nothing to flush, and after an invalidation Metal leaves the
 //!   contents undefined, so keeping them is one of the outcomes Metal allows; and no pipeline the
@@ -23,9 +23,9 @@
 //! - a line width other than 1 (Apple's wide-line rule is unmeasured, where Vulkan has
 //!   `wideLines`), and vertex amplification mode, and depth or stencil "cleared", whose meaning
 //!   or raw values are unmeasured;
-//! - a provoking vertex mode other than 0: SPI outside the public SDK, measured (mode 1 draws a
-//!   flat varying from a primitive's last vertex) but not built (no `VK_EXT_provoking_vertex`
-//!   path);
+//! - a provoking vertex mode from 2 to `2^63 - 1`: SPI outside the public SDK, measured (a
+//!   triangle's flat inputs from its last vertex, an odd strip triangle's from its first, every
+//!   line's flat inputs and `[[primitive_id]]` 0) but not built;
 //! - turning the viewport transform off, which Vulkan has no switch for and whose meaning on
 //!   Metal is not measured;
 //! - a texture over an IOSurface made with `kIOSurfaceClientDirection`, a key in no header of the
@@ -61,10 +61,6 @@ pub enum AppleOnly {
     ProtectedContent,
     /// A line width other than 1 (`setLineWidth:`).
     LineWidth,
-    /// `setProvokingVertexMode:` other than 0: SPI, outside the public SDK, and outside the
-    /// runtime's scope (no `VK_EXT_provoking_vertex` path). Mode 1 draws a flat varying from a
-    /// primitive's last vertex (a Metal probe, an M4).
-    ProvokingVertexMode,
     /// The viewport transform turned off (`setViewportTransformEnabled:NO`).
     ViewportTransformDisabled,
     /// `setVertexAmplificationMode:value:`.
@@ -93,24 +89,21 @@ pub enum AppleOnly {
 }
 
 /// Why the runtime refuses an [`AppleOnly`] feature. None is a device's gap: no measured Vulkan
-/// device lacks what an exact form would need. Each is the runtime's own, and a measurement or a
-/// build can lift it. A color fill whose bytes Metal leaves undefined, once refused as having no
-/// one answer, is built: the runtime gives one of Metal's answers.
+/// device lacks what an exact form would need. Each is the runtime's own, and a measurement can
+/// lift it. A color fill whose bytes Metal leaves undefined, once refused as having no one
+/// answer, is built: the runtime gives one of Metal's answers.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AppleOnlyGap {
     /// What Metal does on Apple's GPU is not measured, so the runtime does not guess it: the
     /// runtime's gap, which a measurement would let it build.
     Unmeasured,
-    /// Metal's answer is measured, and Vulkan has a form for it, but the runtime has not built it.
-    NotBuilt,
 }
 
 impl AppleOnly {
     /// Why the runtime refuses the feature ([`AppleOnlyGap`]).
     pub const fn gap(self) -> AppleOnlyGap {
         match self {
-            Self::ProvokingVertexMode => AppleOnlyGap::NotBuilt,
             Self::ProtectedContent
             | Self::LineWidth
             | Self::ViewportTransformDisabled
@@ -185,16 +178,18 @@ impl AppleOnlyCall {
         }
     }
 
-    /// The runtime's answer: `Ok` where the call is exact on Vulkan (it states Metal's default,
-    /// or acts on state no runtime object has, so it records nothing), else the refusal naming
-    /// the missing feature.
+    /// The runtime's answer: `Ok` where it takes the call (it states Metal's default, acts on
+    /// state no runtime object has, so it records nothing, or sets the encoder's provoking
+    /// vertex, [`RenderCommandEncoder::set_provoking_vertex_mode`]), else the refusal naming the
+    /// missing feature.
     pub fn check(self) -> Result<(), AppleOnly> {
         match self {
             AppleOnlyCall::InvalidateCompressedTexture
             | AppleOnlyCall::InvalidateCompressedTextureSlice
             | AppleOnlyCall::CompressedTextureReinterpretationFlush
             | AppleOnlyCall::SetAlphaTestReferenceValue(_)
-            | AppleOnlyCall::SetPointSize(_) => Ok(()),
+            | AppleOnlyCall::SetPointSize(_)
+            | AppleOnlyCall::SetProvokingVertexMode(_) => Ok(()),
             AppleOnlyCall::SetProtectionOptions(options) => default_or(
                 options == DEFAULT_PROTECTION_OPTIONS,
                 AppleOnly::ProtectedContent,
@@ -202,9 +197,6 @@ impl AppleOnlyCall {
             AppleOnlyCall::SetLineWidth(width) => default_or(width == 1.0, AppleOnly::LineWidth),
             AppleOnlyCall::SetViewportTransformEnabled(enabled) => {
                 default_or(enabled, AppleOnly::ViewportTransformDisabled)
-            }
-            AppleOnlyCall::SetProvokingVertexMode(mode) => {
-                default_or(mode == 0, AppleOnly::ProvokingVertexMode)
             }
             AppleOnlyCall::SetVertexAmplificationMode { .. } => {
                 Err(AppleOnly::VertexAmplificationMode)
@@ -304,7 +296,8 @@ impl RenderLowering {
     /// The lowering of [`RenderCommandEncoder::set_provoking_vertex_mode`].
     pub(crate) fn set_provoking_vertex_mode(&mut self, mode: u64) -> Result<(), Error> {
         self.log(|_| RenderCall::ProvokingVertexMode(mode));
-        answer(AppleOnlyCall::SetProvokingVertexMode(mode))
+        self.set_provoking_vertex(mode);
+        Ok(())
     }
 
     /// The lowering of [`RenderCommandEncoder::set_viewport_transform_enabled`].
@@ -366,9 +359,21 @@ impl RenderCommandEncoder {
         }
     }
 
-    /// `setProvokingVertexMode:` (SPI): accepted at Metal's default, mode 0, the first vertex,
-    /// from which every runtime draw takes a flat varying; any other mode is refused
-    /// ([`AppleOnly::ProvokingVertexMode`]).
+    /// `setProvokingVertexMode:` (SPI): the vertex the encoder's draws after the call take each
+    /// primitive's flat inputs from, until the next call or the encoder's end, as Metal draws it
+    /// (the M3 Max, macOS 27.0.1): mode 0, Metal's default, and every mode whose top bit is set,
+    /// the first vertex; mode 1 the last, a triangle strip's odd triangle then in Vulkan's
+    /// last-vertex order for its barycentric weights too. An execution of indirect render
+    /// commands takes the first vertex whatever the mode, as on Metal. Mode 1 runs a pipeline of
+    /// the last vertex where the device enables `VK_EXT_provoking_vertex`'s
+    /// `provokingVertexLast` with `provokingVertexModePerPipeline`, and elsewhere draws each
+    /// primitive whose vertex order a pipeline state reads from a list led by its last vertex,
+    /// which a GPU pass writes (the CPU for a direct draw without indices); what that list
+    /// draws otherwise than Metal is announced (`provoking-vertex-lines`,
+    /// `provoking-vertex-unmatched`). Metal draws a mode from 2 to `2^63 - 1` a third way (a
+    /// triangle from its last vertex, but an odd strip triangle `(i + 2, i + 1, i)` from `i`,
+    /// and every line's flat inputs and `[[primitive_id]]` as 0), which the runtime draws as
+    /// mode 1, announced at the call (`provoking-vertex-unmatched`). No mode is refused.
     pub fn set_provoking_vertex_mode(&mut self, mode: u64) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| lowering.set_provoking_vertex_mode(mode)),

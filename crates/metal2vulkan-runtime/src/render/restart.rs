@@ -29,21 +29,50 @@
 //! list follows from its count), and a draw over indices or from indirect arguments as the list
 //! the index rewrite pass writes. Of them only the quad strip restarts, at the all-ones index of
 //! its index type where the encoder made no call, at `k'` after one.
+//!
+//! Under Apple's last provoking vertex, a device without it draws a line or triangle draw whose
+//! pipeline reads its primitives' vertex order as a list too, of a strip's pieces as above
+//! (`render/provoking.rs`). Every list is written in the draw's order: Metal's at the encoder's
+//! provoking vertex mode, or led by each primitive's last vertex.
 
+use super::provoking::Provoking;
 use super::RenderCall;
 use super::RenderCommandEncoder;
 use super::{Assembly, RenderLowering};
-use metal2vulkan::bind::{DrawCall, RewriteProgram};
+use crate::error::RuntimeGap;
+use metal2vulkan::bind::{DrawCall, RewriteOrder, RewriteProgram};
 use metal2vulkan::metal::PrimitiveType;
 
-/// A draw drawn as a list: its program, `k'`, and its index size (`None` for a draw without
-/// indices, whose positions are its vertices). A direct draw without indices draws the list the
-/// CPU writes; any other the list the index rewrite pass writes.
+/// A draw drawn as a list: its program, `k'`, its index size (`None` for a draw without indices,
+/// whose positions are its vertices), the order of each primitive's vertices, and the gap a list
+/// the runtime cannot draw as Metal draws refuses with. A direct draw without indices draws the
+/// list the CPU writes; any other the list the index rewrite pass writes.
 #[derive(Clone, Copy)]
 pub(super) struct Restarted {
     pub(super) program: RewriteProgram,
     pub(super) restart: u32,
     pub(super) index_size: Option<u64>,
+    pub(super) order: RewriteOrder,
+    pub(super) gap: ListGap,
+}
+
+/// Why a draw is drawn as a list: the gap that refuses one the runtime cannot draw so.
+#[derive(Clone, Copy)]
+pub(super) enum ListGap {
+    RestartedStrip,
+    PrivatePrimitives,
+    ProvokingVertex,
+}
+
+impl ListGap {
+    /// The gap a list the runtime cannot draw as Metal draws refuses with.
+    pub(super) fn gap(self) -> RuntimeGap {
+        match self {
+            ListGap::RestartedStrip => RuntimeGap::RestartedStrip,
+            ListGap::PrivatePrimitives => RuntimeGap::PrivatePrimitives,
+            ListGap::ProvokingVertex => RuntimeGap::ProvokingVertex,
+        }
+    }
 }
 
 impl Restarted {
@@ -64,11 +93,18 @@ impl RenderLowering {
         self.restart = Some(index);
     }
 
-    /// Where `draw` of `assembly` is drawn as a list: a draw of a private type, which restarts
-    /// (a quad strip over indices) at the encoder's `k'`, or its index type's all-ones index
-    /// without a call; and an indexed strip the encoder's call restarts at another index than
-    /// Vulkan would, `k'` not its index type's all-ones index. `None` for every other draw.
-    pub(super) fn restarted(&self, assembly: Assembly, draw: &DrawCall) -> Option<Restarted> {
+    /// Where `draw` of `assembly`, which takes the encoder's provoking vertex as `provoking`
+    /// says, is drawn as a list: a draw of a private type, which restarts (a quad strip over
+    /// indices) at the encoder's `k'`, or its index type's all-ones index without a call; an
+    /// indexed strip the encoder's call restarts at another index than Vulkan would, `k'` not its
+    /// index type's all-ones index; and a draw of lines or triangles `provoking` lists. `None` for
+    /// every other draw.
+    pub(super) fn restarted(
+        &self,
+        assembly: Assembly,
+        draw: &DrawCall,
+        provoking: Provoking,
+    ) -> Option<Restarted> {
         let wide = match *draw {
             DrawCall::Indexed { index_type, .. }
             | DrawCall::Indirect {
@@ -78,32 +114,47 @@ impl RenderLowering {
             _ => None,
         };
         let index_size = wide.map(|wide| if wide { 4 } else { 2 });
-        let program = match assembly {
-            Assembly::Private(program) => {
-                let restart = match wide {
-                    Some(wide) => match self.restart {
-                        Some(k) => restart_index(k, wide).0,
-                        None => restart_index(u64::MAX, wide).1,
-                    },
-                    None => 0,
-                };
-                return Some(Restarted {
-                    program,
-                    restart,
-                    index_size,
-                });
-            }
-            Assembly::Primitives(PrimitiveType::LineStrip) => RewriteProgram::LineStrip,
-            Assembly::Primitives(PrimitiveType::TriangleStrip) => RewriteProgram::TriangleStrip,
-            _ => return None,
+        let order = provoking.order();
+        // Where a restarting program over indices restarts: at `k'` after a call, else at its
+        // index type's all-ones index.
+        let restart = match wide {
+            Some(wide) => match self.restart {
+                Some(k) => restart_index(k, wide).0,
+                None => restart_index(u64::MAX, wide).1,
+            },
+            None => 0,
         };
+        let listed = |program, gap| {
+            Some(Restarted {
+                program,
+                restart,
+                index_size,
+                order,
+                gap,
+            })
+        };
+        let program = match assembly {
+            Assembly::Private(program) => return listed(program, ListGap::PrivatePrimitives),
+            Assembly::Primitives(primitive) => match primitive {
+                PrimitiveType::LineStrip => RewriteProgram::LineStrip,
+                PrimitiveType::TriangleStrip => RewriteProgram::TriangleStrip,
+                PrimitiveType::Line => RewriteProgram::LineList,
+                PrimitiveType::Triangle => RewriteProgram::TriangleList,
+                PrimitiveType::Point => return None,
+            },
+            Assembly::Patches | Assembly::Meshes => return None,
+        };
+        if let Provoking::Listed(_) = provoking {
+            return listed(program, ListGap::ProvokingVertex);
+        }
+        if !program.restarts() {
+            return None;
+        }
         let (k, wide) = (self.restart?, wide?);
-        let (restart, all_ones) = restart_index(k, wide);
-        (restart != all_ones).then_some(Restarted {
-            program,
-            restart,
-            index_size,
-        })
+        if restart == restart_index(k, wide).1 {
+            return None;
+        }
+        listed(program, ListGap::RestartedStrip)
     }
 }
 

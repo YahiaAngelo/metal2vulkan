@@ -246,8 +246,9 @@ pub struct LoweringInputs {
     /// vertex (Vulkan's base vertex of a draw without indices, read as `[[base_vertex]]` is) and
     /// `n` its vertices per primitive, `PushField::VerticesPerPrimitive` (3 for a triangle list,
     /// 2 for a line list, 1 for a strip or points). A primitive's flat inputs read its provoking
-    /// vertex, its first, at stream position `n · i` of a list's primitive `i` and `i` of a
-    /// strip's, so every fragment reads its primitive's index in its instance, Metal's
+    /// vertex, its first in a pipeline of Vulkan's default provoking vertex, at stream position
+    /// `n · i` of a list's primitive `i` and `i` of a strip's, so every fragment reads its
+    /// primitive's index in its instance, Metal's
     /// `[[primitive_id]]` (Metal probes on the M3 Max, macOS 27.0.1). An emulated
     /// post-tessellation one writes its patch's position in the draw, `patchStart + i`, at every
     /// vertex of the patch: Metal's primitive id behind the tessellator (measured on the M3 Max,
