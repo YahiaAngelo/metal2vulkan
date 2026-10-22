@@ -358,12 +358,14 @@ fn color_writes_are_the_pipelines() {
 
 /// Under `TextureWriteRoundingMode::NearestEven` a half-float attachment's channels round to
 /// nearest even in the function on every profile, MoltenVK's included, where they store the output
-/// as written (no blend, or factors one and zero), alpha-to-coverage's alpha included, which a
-/// function rounding it announces as `CoverageReadsRoundedAlpha` in a pipeline covering by alpha;
-/// after another blend, one and one included, the device rounds the blend's result
-/// (`HALF_BLENDED`, announced as `BlendedWriteRounding`). Another format's writes are the default
-/// mode's. A fragment compiled under the default mode does not link into such a pipeline
-/// (`NeedsInput(ColorWrites)`), and one compiled under the pipeline's mode does.
+/// as written (no blend, or factors one and zero), alpha-to-coverage's alpha included where the
+/// attachment stores it, which a function rounding it announces as `CoverageReadsRoundedAlpha` in
+/// a pipeline covering by alpha (an alpha the write mask does not store keeps the default mode's
+/// rule, read by the coverage as computed); after another blend, one and one included, the device
+/// rounds the blend's result (`HALF_BLENDED`, announced as `BlendedWriteRounding`). Another
+/// format's writes are the default mode's. A fragment compiled under the default mode does not
+/// link into such a pipeline (`NeedsInput(ColorWrites)`), and one compiled under the pipeline's
+/// mode does.
 #[test]
 fn half_colors_round_to_nearest_even_under_mode_two() {
     use crate::error::RuntimeInput;
@@ -392,6 +394,11 @@ fn half_colors_round_to_nearest_even_under_mode_two() {
     let mut add = replace;
     add.destination_rgb_blend_factor = BlendFactor::One;
     add.destination_alpha_blend_factor = BlendFactor::One;
+    // Stores no alpha: alpha to coverage reads the alpha as computed, as Metal's does.
+    let mut rgb = half;
+    rgb.write_mask = crate::metal::ColorWriteMask::RED
+        .union(crate::metal::ColorWriteMask::GREEN)
+        .union(crate::metal::ColorWriteMask::BLUE);
     let nearest = Some(HALF_NEAREST);
     let blended = Some(HALF_BLENDED);
     for stem in ["moltenvk-m3", "lavapipe", "amd-780m-radv"] {
@@ -407,6 +414,14 @@ fn half_colors_round_to_nearest_even_under_mode_two() {
             .copied(),
             _ => unreachable!(),
         };
+        // The default mode's own rule of the alpha the coverage reads: the output as written.
+        let unstored = crate::pipeline::color_writes::exact_writes(
+            [0],
+            &[Some(rgb)],
+            (true, Mode::TowardZero),
+            &p,
+        )[&0][3];
+        assert_ne!(unstored, nearest, "{stem}");
         for (c, coverage, want) in [
             (half, false, [nearest; 4]),
             (replace, false, [nearest; 4]),
@@ -415,6 +430,8 @@ fn half_colors_round_to_nearest_even_under_mode_two() {
             (blend, true, [blended; 4]),
             (half, true, [nearest; 4]),
             (replace, true, [nearest; 4]),
+            (rgb, false, [nearest; 4]),
+            (rgb, true, [nearest, nearest, nearest, unstored]),
         ] {
             let inputs = render(c, coverage, Mode::NearestEven);
             assert_eq!(writes(&inputs), Some(want), "{stem} {c:?} {coverage}");
