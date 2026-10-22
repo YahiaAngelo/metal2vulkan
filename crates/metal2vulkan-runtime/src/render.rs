@@ -7551,24 +7551,69 @@ impl RenderLowering {
                     if self.unordered.written(&in_place) {
                         return Err(Error::NotImplemented(restarted.gap.gap()));
                     }
-                    let pass = RewritePass::new(
-                        &mut self.core,
-                        (
-                            (restarted.program, restarted.restart, restarted.order),
-                            restarted.gap.gap(),
-                            private.private_list,
-                        ),
-                        index,
-                        &arguments,
-                        size,
-                        reads,
-                    )?;
-                    (Some(pass), None)
+                    // An indirect draw of a program whose list follows from its positions,
+                    // reading its arguments and indices in place, joins an indirect run of the
+                    // index gather pass, which plans its list on the GPU; where an earlier draw
+                    // or tile dispatch of the encoder wrote them behind a memory barrier, the
+                    // index rewrite pass's step before the draw's render pass instance writes it.
+                    let gathers = match arguments {
+                        index_rewrite::Arguments::Indirect(_) => restarted.program.gathers(),
+                        index_rewrite::Arguments::IndirectVertices(_) => {
+                            restarted.program.gathers_without_indices()
+                        }
+                        index_rewrite::Arguments::Direct { .. } => false,
+                    };
+                    let pooled = match (
+                        indirect,
+                        gathers && !self.replaying && !private.private_list,
+                    ) {
+                        (Some(source), true)
+                            if source.in_place()
+                                && index.is_none_or(DrawSource::in_place)
+                                && !self.core.uses().written(&reads) =>
+                        {
+                            self.core.gather_indirect(
+                                index_rewrite::IndirectGatherRequest {
+                                    program: restarted.program,
+                                    order: restarted.order,
+                                    arguments: source,
+                                    index,
+                                    wide: size == 4,
+                                },
+                                &reads,
+                            )?
+                        }
+                        _ => None,
+                    };
+                    match pooled {
+                        Some(list) => {
+                            if let Some(index) = index {
+                                index_rewrite::announce_past_length(self.core.device(), index);
+                            }
+                            (None, Some(Listed::Pooled(list)))
+                        }
+                        None => {
+                            let pass = RewritePass::new(
+                                &mut self.core,
+                                (
+                                    (restarted.program, restarted.restart, restarted.order),
+                                    restarted.gap.gap(),
+                                    private.private_list,
+                                ),
+                                index,
+                                &arguments,
+                                size,
+                                reads,
+                            )?;
+                            (Some(pass), None)
+                        }
+                    }
                 }
             },
         };
+        // A rewritten draw's list, and an indirect gathered draw's, holds its indices bounded.
         let pass = match (commands.indirect_needs_arguments, &buffers) {
-            _ if rewrite.is_some() => None,
+            _ if rewrite.is_some() || matches!(listed, Some(Listed::Pooled(_))) => None,
             (
                 needs,
                 DrawBuffers {
@@ -8469,8 +8514,9 @@ impl RenderLowering {
         };
         let (vk_draws, count) = match (&rewrite, &bounds, index, &mesh_work, commands.draw) {
             _ if listed_draw.is_some() => {
-                let (bind, draw) = listed_draw.ok_or_else(|| internal("a written list's draw"))?;
-                one((Some(bind), None, draw))
+                let (bind, arguments, draw) =
+                    listed_draw.ok_or_else(|| internal("a written list's draw"))?;
+                one((Some(bind), arguments, draw))
             }
             (Some(pass), ..) => one(pass.draw(sized)),
             (_, Some(pass), Some(source), _, _) => (pass.draws(source, commands.draw, sized)?, 2),

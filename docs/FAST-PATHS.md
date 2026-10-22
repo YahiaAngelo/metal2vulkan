@@ -283,18 +283,18 @@ driver's. Each is open work.
   shader here reads its first texel, as of a one-level one (`lower::texture::emit::planes_volume`).
 
 - **A draw under Apple's last provoking vertex on a device without it** (MoltenVK), whose pipeline
-  state reads flat inputs or selects a slice or viewport (or a strip's whose fragment function
-  reads barycentrics): it draws the list of its primitives led by their last vertices
-  (`render/provoking.rs`), where Metal's mode costs nothing. A direct draw without indices draws
-  the list the CPU writes into the upload arena (4 bytes an index), and a direct indexed draw of
-  lines or triangles the list a run of the index gather pass writes, one dispatch for a run of
-  draws over one index buffer (`index_rewrite.rs`): on MoltenVK on the M3 Max, 0.15 and 0.26 us
-  more frame time per draw of two triangles than at mode 0 (1.57 and 1.72 us; host_ab's
-  `provoking`, 2000 draws, 3 rounds). A strip's indexed draw, and every indirect draw, takes the
-  index rewrite pass's three dispatches between barriers per draw before its render pass:
-  there 78 us per indexed draw against 1.7, 106 per indirect draw against 1.7, and 86 per
-  indexed indirect draw against 54 (whose index bounds pass mode 0 takes already). Those forms
-  are not batched yet.
+  state reads flat inputs or selects a slice or viewport (or a strip's whose fragment function reads
+  barycentrics): it draws the list of its primitives led by their last vertices
+  (`render/provoking.rs`), where Metal's mode costs nothing. A direct draw without indices draws the
+  list the CPU writes into the upload arena (4 bytes an index); a direct indexed draw of lines or
+  triangles, and an indirect draw but an indexed strip's, the list a run of the index gather pass
+  writes, one dispatch for a run of draws over one index buffer, an indirect run's after one plan
+  dispatch (`index_rewrite.rs`). On MoltenVK on the M3 Max that is 0.15, 0.23 and 0.64 us more frame
+  time per direct, indexed and indirect draw of two triangles than at mode 0 (1.56, 1.71 and 1.65
+  us; host_ab's `provoking`, 2000 draws, 3 rounds), and 2.2 us per indexed indirect draw against
+  mode 0's 56 (the index bounds pass's, which a gathered list does not need). A strip's indexed draw
+  takes the index rewrite pass's three dispatches between barriers per draw before its render pass:
+  there 78 us per draw against 1.7. That form is not batched.
 
 - **A no-copy buffer imported by its pointer follows a remap of its pages** on a driver whose
   pointer imports follow their address (`DriverFact::PointerImportsFollowTheirAddress`: ANV on

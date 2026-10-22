@@ -37,7 +37,9 @@ use super::error::{internal, invalid, vulkan, CommandBufferError, Error, Problem
 use super::execution::Execution;
 use super::fresh_unwritten::FreshRead;
 use super::heap::Heap;
-use super::index_rewrite::{self, GatherRequest, GatherRuns, GatheredList};
+use super::index_rewrite::{
+    self, GatherHeld, GatherRequest, GatherRuns, GatheredList, IndirectGatherRequest, PooledList,
+};
 use super::noted_apart::{NotedApart, NotedInto};
 use super::pending_dispatch::PendingDispatch;
 use super::pipeline::VariantObjects;
@@ -711,19 +713,57 @@ impl EncoderCore {
         let Some((list, held)) = joined else {
             return Ok(None);
         };
-        if let Some(held) = held {
-            self.retain(held.output);
-            self.retain(held.sets);
+        self.joined(held, uses);
+        Ok(Some(list))
+    }
+
+    /// `request`'s indirect draw joins an open indirect run of the index gather pass, which
+    /// records before the encoder's next command (`index_rewrite.rs`): where its list and command
+    /// lie, or `None` where no run takes it. Its reads `uses` are tracked here, the run's barriers
+    /// before and after it ordering them. Refused as the run's objects, the command buffer's
+    /// index pool and its status words are refused.
+    pub(super) fn gather_indirect(
+        &mut self,
+        request: IndirectGatherRequest<'_>,
+        uses: &[Use<ResourceKey>],
+    ) -> Result<Option<PooledList>, Error> {
+        if self.gathers.full() {
+            self.flush_gathers();
         }
-        // The run's barrier from everything before orders its reads: the one tracking returns
-        // goes unrecorded.
+        let device = self.device().clone();
+        let queue = self.open.command_buffer.command_queue().id();
+        let joined = {
+            let mut state = self.open.command_buffer.state();
+            let pool = state.index_pool(&device, queue)?;
+            let status = state.status_words(&device)?;
+            self.gathers
+                .join_indirect(&device, (&mut state.uploads, &status, &pool), request)?
+        };
+        let Some((list, held)) = joined else {
+            return Ok(None);
+        };
+        self.joined(held, uses);
+        Ok(Some(list))
+    }
+
+    /// A draw joined a gather run: hold what a new run's command buffer holds, track the draw's
+    /// reads `uses` (the run's barrier from everything before orders them: the one tracking
+    /// returns goes unrecorded), and count the draw.
+    fn joined(&mut self, held: Option<GatherHeld>, uses: &[Use<ResourceKey>]) {
+        if let Some(held) = held {
+            if let Some(output) = held.output {
+                self.retain(output);
+            }
+            for sets in held.sets {
+                self.retain(sets);
+            }
+        }
         let _ = self.command_later(
             vk::PipelineStageFlags2::COMPUTE_SHADER,
             uses,
             &BTreeSet::new(),
         );
-        device.shared().counts.gathered_draw();
-        Ok(Some(list))
+        self.device().shared().counts.gathered_draw();
     }
 
     /// Record the open gather runs, where any is open, into the encoder's `VkCommandBuffer`.
