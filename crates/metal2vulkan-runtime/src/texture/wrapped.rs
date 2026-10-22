@@ -47,7 +47,7 @@ use metal2vulkan::vk::{
     ImageUsageFlags, SampleCountFlags,
 };
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// No Metal counterpart (an interop hook): the layouts of an image the caller owns around the
 /// runtime's work on it. The runtime finds the image in `initial` at the first batch that uses it,
@@ -623,6 +623,7 @@ impl Device {
             second: std::sync::OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
             first_move: Mutex::new(None),

@@ -22,10 +22,13 @@
 //! the scratch at Metal's addresses into the buffer (a row Metal reads as 0 from the scratch's
 //! zeroed tail). Into it, the buffer's rows are copied into the scratch at Metal's addresses, the
 //! earlier row's bytes where two meet, and the scratch back into the texels (or the heap's
-//! bytes). A texture of the device's memory holds no bytes between its rows: a blit or a fill
-//! that writes some there notes it (`Texture::keep_outside`), and a later blit out of the texture
-//! that reads them reads 0, announced (`two-plane-buffer-blit`), as is a blit into it whose rows
-//! meet.
+//! bytes). A texture of the device's memory holds the bytes between its rows apart
+//! (`Texture::between_rows`, plane 0 of each slice as Metal lays it out, made zeroed at the first
+//! write there): a blit into the texture whose rows reach them, and a fill whose words land
+//! there (`blit_fill.rs`), write them, and the scratch of a blit out of it starts from them. A
+//! copy from another texture that writes bytes there does not (`two_planes.rs`): it notes them
+//! (`Texture::keep_outside`), and a later blit out of the texture that reads them reads them as
+//! the held bytes, announced (`two-plane-buffer-blit`), as is a blit into it whose rows meet.
 
 use super::super::blit::{reads, writes, BlitCommandEncoder};
 use super::super::blit_plan::BufferLayout;
@@ -135,9 +138,16 @@ impl BlitCommandEncoder {
             unsafe { device.cmd_fill_buffer(raw, raw_scratch, at, total, 0) };
         })?;
         self.core().retain(scratch.clone());
-        // Plane 0's bytes in a heap's, where they lie there; else the image's texels.
+        // Plane 0's bytes in a heap's, where they lie there; else the image's texels, over the
+        // bytes between its rows that fills and blits wrote (held from the slice's plane 0 on,
+        // `Texture::between_rows`).
         let level = [width, height].map(|v| v as u32);
         let planes = BytePlanes::of(texture, level).filter(|planes| !planes.surface);
+        let slice_at = u64::from(region.layer) * height * pitch + first * pitch;
+        if let (None, Some(held), true) = (&planes, texture.between_rows(), rows > 0) {
+            let held = held.clone();
+            self.byte_copies(&held, &scratch, &[(slice_at, 0, bytes)])?;
+        }
         let level_rows = ImageRegion {
             origin: [0, first as u32, 0],
             size: [width as u32, rows as u32, 1],
@@ -187,8 +197,8 @@ impl BlitCommandEncoder {
             self.byte_copies(&scratch, buffer, &copies)?;
             if planes.is_none() && reaches_between && texture.kept_outside() {
                 announce(
-                    "out of the texture it reads the bytes between the texture's rows, which a \
-                     fill or a blit wrote, as 0; Metal's blit reads them back",
+                    "out of the texture it reads the bytes between the texture's rows that a \
+                     copy from another texture wrote as 0; Metal's blit reads them back",
                 );
             }
             return Ok(());
@@ -216,7 +226,8 @@ impl BlitCommandEncoder {
             None => {
                 self.plane_words_copy(&scratch, texture, &level_rows, &scratch_layout, true)?;
                 if reaches_between {
-                    texture.keep_outside();
+                    let held = self.held_between_rows(texture, [width, height])?;
+                    self.byte_copies(&scratch, &held, &[(0, slice_at, bytes)])?;
                 }
             }
         }
@@ -229,9 +240,35 @@ impl BlitCommandEncoder {
         Ok(())
     }
 
+    /// The bytes between the rows of plane 0 of every slice of `texture`, a two-plane
+    /// extended-range texture of one level `level` (width, height) texels ([`rows_held`]), laid
+    /// out as Metal's plane 0 (`Texture::between_rows`): made, and zeroed in the command buffer,
+    /// at the first write that lands there.
+    pub(in super::super) fn held_between_rows(
+        &mut self,
+        texture: &Texture,
+        [width, height]: [u64; 2],
+    ) -> Result<Buffer, Error> {
+        let pitch = (4 * width).next_multiple_of(16);
+        let length = u64::from(texture.record().layer_count) * height * pitch;
+        let device = self.core().device().clone();
+        let (held, made) =
+            texture.hold_between_rows(|| device.own_buffer(length, ResourceOptions::private()))?;
+        if made {
+            let (raw, at) = held.at(0);
+            self.command(&[writes(&held, 0..length)], |device, command_buffer| {
+                // SAFETY: the command buffer is recording, outside a render pass; the buffer is
+                // the texture's, live while it is; the fill covers its bytes, a multiple of 16.
+                unsafe { device.cmd_fill_buffer(command_buffer, raw, at, length, 0) };
+            })?;
+        }
+        self.core().retain(held.clone());
+        Ok(held)
+    }
+
     /// Copy each `(from, to, bytes)` of `regions` from `source`'s bytes into `destination`'s, in
     /// one command (the destinations disjoint; `source` and `destination` other buffers).
-    fn byte_copies(
+    pub(in super::super) fn byte_copies(
         &mut self,
         source: &Buffer,
         destination: &Buffer,

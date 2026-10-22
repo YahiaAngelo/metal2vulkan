@@ -1237,14 +1237,16 @@ degradations! {
         /// blitted at Metal's rows (`two_planes/buffer_rows.rs`); announced there are a blit into
         /// it whose rows meet, which keeps the earlier row's bytes where Metal's GPU writes the two
         /// in an order that depends on the copy's size, and a blit out of a texture of the
-        /// device's memory that reads bytes between its rows after a fill or a blit wrote some,
-        /// which reads them as 0. Any other such texture (more levels, a view, 1D, 3D, a
-        /// surface's) moves the texels at the rows the texture holds them in, announced.
+        /// device's memory that reads bytes between its rows after a copy from another texture
+        /// wrote some there, which reads them as its fills and blits with a buffer left them (held
+        /// apart, `Texture::between_rows`). Any other such texture (more levels, a view, 1D, 3D,
+        /// a surface's) moves the texels at the rows the texture holds them in, announced.
         TwoPlaneBufferBlit = "two-plane-buffer-blit", Precision,
             "where rows meet in a blit into the texture the earlier row's bytes stand, where \
              Metal's GPU writes them in an order that depends on the copy's size; a blit out of a \
-             texture of the device's memory reads the bytes between its rows that a fill or a blit \
-             wrote as 0, where Metal's reads them back; and a texture of more than one level, a \
+             texture of the device's memory reads the bytes between its rows that a copy from \
+             another texture wrote as its fills and blits with a buffer left them, where Metal's \
+             reads the copy's back; and a texture of more than one level, a \
              view, a 1D or 3D texture or a surface's moves its texels at the rows it holds them in, \
              where Metal's blit addresses its rows floor(4w/16)*16 bytes apart";
         /// A render pipeline state whose vertex function runs simdgroup functions on a driver

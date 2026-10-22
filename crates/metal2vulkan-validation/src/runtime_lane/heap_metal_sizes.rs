@@ -126,7 +126,10 @@ fn pattern(n: u64, seed: u8) -> Vec<u8> {
 }
 
 /// Two textures of `descriptor` (2D, `extent`, `texel` bytes a texel), side by side at its
-/// `answer` in a placement heap: each keeps its own texels, the second's written first.
+/// `answer` in a placement heap: each keeps its own texels, the second's written first, reading
+/// back what one texture of the descriptor alone reads back after the same blits (its bytes, but
+/// where Metal's blits address other rows: a two-plane texture's at a width off 4,
+/// `two_plane_copies.rs`).
 fn side_by_side(
     device: &Device,
     descriptor: &TextureDescriptor,
@@ -150,14 +153,19 @@ fn side_by_side(
     let (a, b) = (pattern(row * extent[1], 3), pattern(row * extent[1], 101));
     upload(&queue, &second, &b, row, extent);
     upload(&queue, &first, &a, row, extent);
+    let alone = |bytes: &[u8]| {
+        let texture = device.new_texture(descriptor).unwrap();
+        upload(&queue, &texture, bytes, row, extent);
+        download(&queue, &texture, row, extent)
+    };
     assert_eq!(
         download(&queue, &first, row, extent),
-        a,
+        alone(&a),
         "{what}: the first"
     );
     assert_eq!(
         download(&queue, &second, row, extent),
-        b,
+        alone(&b),
         "{what}: the second"
     );
 }

@@ -528,6 +528,11 @@ struct Image {
     /// Whether a blit wrote bytes outside the image's texels, which Metal's blit of a two-plane
     /// extended-range texture keeps and the runtime does not hold (`two_planes.rs`).
     kept_outside: AtomicBool,
+    /// A two-plane extended-range texture's bytes between the rows of plane 0, which Metal's
+    /// fills and blits with a buffer write and its blits read back, and the image does not hold
+    /// (`two_planes/buffer_rows.rs`): plane 0 of each slice laid out as Metal lays it, made at
+    /// the first such write.
+    between: OnceLock<Buffer>,
     /// Its 32-bit float depth may hold a value whose magnitude stand-in is not itself (a negative
     /// value, a NaN, or, where the device's depth test compares a denormal as zero, a denormal),
     /// which a write that may store one set: a pass that loads it renders over its magnitude
@@ -1781,6 +1786,7 @@ impl Device {
             second: OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
             first_move: Mutex::new(Some(first)),
@@ -1908,6 +1914,7 @@ impl Device {
             second: OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
             first_move: Mutex::new(Some(first)),
@@ -2530,6 +2537,7 @@ impl Device {
             second: OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
             first_move: Mutex::new(None),
@@ -2577,6 +2585,7 @@ impl Device {
             second: OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
             first_move: Mutex::new(None),
@@ -2973,6 +2982,7 @@ impl Device {
             second: OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
             first_move: Mutex::new(None),
@@ -4117,6 +4127,42 @@ impl Texture {
     pub(super) fn keep_outside(&self) {
         if let Some(image) = self.kept_image() {
             image.kept_outside.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Whether bytes outside the texels of the texture's image were written: ones the runtime
+    /// holds ([`Texture::between_rows`]) or not ([`Texture::kept_outside`]).
+    pub(super) fn outside_written(&self) -> bool {
+        self.kept_outside() || self.between_rows().is_some()
+    }
+
+    /// The bytes between the rows of a two-plane extended-range texture's plane 0 that its fills
+    /// and blits with a buffer wrote (`two_planes/buffer_rows.rs`); `None` before the first.
+    pub(super) fn between_rows(&self) -> Option<&Buffer> {
+        self.kept_image()?.between.get()
+    }
+
+    /// [`Texture::between_rows`], made by `make` where none is yet: the buffer, and whether
+    /// `make` made it (its bytes, then, the caller's to zero).
+    pub(super) fn hold_between_rows(
+        &self,
+        make: impl FnOnce() -> Result<Buffer, Error>,
+    ) -> Result<(Buffer, bool), Error> {
+        let image = self
+            .kept_image()
+            .ok_or_else(|| internal("bytes between the rows of a texture without an image"))?;
+        if let Some(held) = image.between.get() {
+            return Ok((held.clone(), false));
+        }
+        let made = make()?;
+        match image.between.set(made.clone()) {
+            Ok(()) => Ok((made, true)),
+            Err(_) => image
+                .between
+                .get()
+                .cloned()
+                .map(|held| (held, false))
+                .ok_or_else(|| internal("bytes between rows neither made nor held")),
         }
     }
 

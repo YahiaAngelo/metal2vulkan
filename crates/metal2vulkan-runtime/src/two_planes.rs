@@ -536,7 +536,7 @@ impl BlitCommandEncoder {
             if let Some(planes) = BytePlanes::of(destination, to) {
                 if self.plane_bytes_copy(source, destination, &planes, from, copy)? {
                     if outside_texels(from, [sx, sy], size)
-                        && source.kept_outside()
+                        && source.outside_written()
                         && BytePlanes::of(source, from).is_none()
                     {
                         announce_texture_copy(
@@ -563,7 +563,7 @@ impl BlitCommandEncoder {
             // A source over a surface's planes is read as its bytes lie (`plane_texture_copy`).
             if !surfaces[0]
                 && outside_texels(from, [sx, sy], size)
-                && (source.kept_outside() || source.heap().is_some())
+                && (source.outside_written() || source.heap().is_some())
             {
                 announce_texture_copy(
                     &device,

@@ -192,7 +192,7 @@ use metal2vulkan::vk::{
 };
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// The alignment of a heap's memory: a heap texture whose answered alignment exceeds it is
 /// refused (`RuntimeGap::HeapTextureAlignment`, [`check_heap_base`]). It is the largest image
@@ -2289,6 +2289,7 @@ impl Device {
             second: std::sync::OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(None),
             first_move: Mutex::new(None),
@@ -2330,6 +2331,7 @@ impl Device {
             second: std::sync::OnceLock::new(),
             form: Default::default(),
             kept_outside: AtomicBool::new(false),
+            between: OnceLock::new(),
             signed_depth: AtomicBool::new(false),
             detached: Mutex::new(Some(DetachedImage {
                 stand_in,

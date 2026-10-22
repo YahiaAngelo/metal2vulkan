@@ -33,7 +33,8 @@
 //!   or slices, which the runtime holds apart from the heap's bytes, takes the same bytes of
 //!   level 0 of the slice at any level, the region cut at the level's extent (3D: image 0): each
 //!   word lands on the texel of level 0's rows (`align(4 w, 16)` bytes apart) it meets, or between
-//!   them, which the runtime does not hold (`getBytes` of every texel after fills of 1 to 37
+//!   them, which Metal's blits with a buffer read back and the runtime holds apart for a texture
+//!   of one level (`two_planes/buffer_rows.rs`; of more, not) (`getBytes` of every texel after fills of 1 to 37
 //!   texels wide, 1 to 3 levels, arrays of 2, 1D and 3D, of its own memory and a heap's; a
 //!   texture's levels and slices past the first lie in bytes that overlap, which Metal's own
 //!   copies show and the runtime holds apart). A texture over a surface's planes is written at
@@ -150,7 +151,7 @@ pub(super) enum FillUnit {
 }
 
 /// The fill unit of `pf`, `None` for a format the runtime makes no texture of (`Invalid`, the
-/// 24-bit depth formats, which Apple GPUs make none of).
+/// private formats it holds none of, the 24-bit depth formats, which Apple GPUs make none of).
 pub(super) fn fill_unit(pf: PixelFormat) -> Option<FillUnit> {
     use PixelFormat as P;
     let texels = |bytes, option| Some(FillUnit::Texels { bytes, option });
@@ -810,10 +811,12 @@ impl BlitCommandEncoder {
         (x, y): (Range<u64>, Range<u64>),
         word: &[u8],
     ) -> Result<(), Error> {
-        let width = u64::from(level_extent(texture.record(), 0)[0]);
+        let [width, height, _] = level_extent(texture.record(), 0).map(u64::from);
         let layer = u32::try_from(slice).map_err(|_| internal("a fill's slice"))?;
-        // The bytes between the level's rows a fill writes are not held: noted, so a blit that
-        // reads them back announces it (`two_planes.rs`).
+        // The words a fill writes between the level's rows: held where its blits with a buffer
+        // read them back (one level, `two_planes::rows_held`), as the rows of plane 0 Metal's
+        // fill writes, rows that meet merged; else not held, noted, so a blit that reads them
+        // back announces it (`two_planes.rs`).
         let size = [x.end - x.start, y.end - y.start];
         let spans = two_planes::row_spans(width, [x.start, y.start], size, true);
         if spans
@@ -821,7 +824,21 @@ impl BlitCommandEncoder {
             .flatten()
             .any(|span| two_planes::between_rows(span, width))
         {
-            texture.keep_outside();
+            if two_planes::rows_held(texture) {
+                let held = self.held_between_rows(texture, [width, height])?;
+                let base = slice * height * (4 * width).next_multiple_of(16);
+                let mut merged: Vec<Range<u64>> = Vec::new();
+                for span in spans.into_iter().flatten() {
+                    let span = base + span.start..base + span.end;
+                    match merged.last_mut() {
+                        Some(last) if span.start <= last.end => last.end = last.end.max(span.end),
+                        _ => merged.push(span),
+                    }
+                }
+                self.fill_spans(&held, &merged, word)?;
+            } else {
+                texture.keep_outside();
+            }
         }
         for (columns, rows) in plane_rectangles(width, x, y) {
             let w = columns.end - columns.start;
