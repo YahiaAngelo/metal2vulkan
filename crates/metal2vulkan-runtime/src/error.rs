@@ -1400,6 +1400,17 @@ pub enum RuntimeGap {
     /// barrier, which Metal does not order before the draw's fetch, read in place; and an
     /// argument or index range the binding layer cannot bind.
     RestartedStrip,
+    /// A draw of one of Metal's private primitive types (`DrawPrimitiveType`: a line loop, a
+    /// triangle fan, quads, a quad strip), which the runtime draws as the list Metal draws, where
+    /// that list cannot be drawn as Metal draws: a direct draw without indices from a vertex start
+    /// past `i32::MAX`, which the list's base vertex cannot carry, or whose list a `u32` cannot
+    /// count; a draw over indices or from indirect arguments the index rewrite pass cannot draw,
+    /// as for `RestartedStrip`; and a pipeline whose `[[primitive_id]]` would read other than
+    /// Metal's: one whose vertex function computes it into a varying (a device whose fragment
+    /// stage cannot declare it), from vertex indices the list's are not, and quads or a quad strip
+    /// under a fragment function that reads it, which Metal counts once a quad where the list
+    /// draws two triangles.
+    PrivatePrimitives,
     /// An indexed draw (`drawIndexedPrimitives:`) of a pipeline whose fragment function reads
     /// `[[primitive_id]]` on a device whose fragment stage cannot declare it (neither
     /// `geometryShader` nor `tessellationShader`), which draws its indices as vertices from 0 in

@@ -644,6 +644,7 @@ mod serde_round_trips {
             clip_distances: 2,
             writes_depth: true,
             reads_barycentric_coord: true,
+            reads_primitive_id: true,
             reads_position_depth: true,
             fragment_writes_memory: true,
             color_outputs: 0b101,

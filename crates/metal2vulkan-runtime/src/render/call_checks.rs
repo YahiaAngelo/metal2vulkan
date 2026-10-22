@@ -320,12 +320,7 @@ impl CallChecks {
             }
             C::DrawPrimitives(primitive, _, vertices, instances, _) => {
                 let empty = *vertices == 0 || *instances == 0;
-                self.draw(
-                    device,
-                    "draw_primitives",
-                    Assembly::Primitives(*primitive),
-                    empty,
-                )
+                self.draw(device, "draw_primitives", Assembly::of(*primitive), empty)
             }
             C::DrawIndexedPrimitives(at) => {
                 let draw = indexed
@@ -334,18 +329,13 @@ impl CallChecks {
                 let call = "draw_indexed_primitives";
                 check_device(device, call, log.buffer(draw.index_buffer).device())?;
                 let empty = draw.index_count == 0 || draw.instance_count == 0;
-                self.draw(
-                    device,
-                    call,
-                    Assembly::Primitives(draw.primitive_type),
-                    empty,
-                )
+                self.draw(device, call, Assembly::of(draw.primitive_type), empty)
             }
             C::DrawPrimitivesIndirect(primitive, buffer, offset) => {
                 let call = "draw_primitives_indirect";
                 check_device(device, call, buffer.device())?;
                 check_arguments(call, buffer.length(), *offset, 16)?;
-                self.draw(device, call, Assembly::Primitives(*primitive), false)
+                self.draw(device, call, Assembly::of(*primitive), false)
             }
             C::DrawIndexedPrimitivesIndirect(draw) => {
                 let call = "draw_indexed_primitives_indirect";
@@ -353,12 +343,7 @@ impl CallChecks {
                 check_device(device, call, draw.indirect_buffer.device())?;
                 let indirect = &draw.indirect_buffer;
                 check_arguments(call, indirect.length(), draw.indirect_buffer_offset, 20)?;
-                self.draw(
-                    device,
-                    call,
-                    Assembly::Primitives(draw.primitive_type),
-                    false,
-                )
+                self.draw(device, call, Assembly::of(draw.primitive_type), false)
             }
             C::UseResource(resource, ..) => {
                 check_device(device, "use_resource", resource.as_ref().device())?;

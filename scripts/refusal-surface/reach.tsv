@@ -218,6 +218,7 @@ ratemap	SampleCount	rare	a rate map axis of more distinct samples than measured 
 budget	Time	none	a translation past its deadline: a defect of ours to fix on any supported input (AGENTS.md: 20 seconds)
 gap	LibrarySource	app	a library compiled from Metal source (newLibraryWithSource:); the runtime takes metallibs and AIR
 gap	RestartedStrip	none	a strip after the Apple-private setPrimitiveRestartEnabled:index: whose rewrite pass cannot run as Metal draws
+gap	PrivatePrimitives	none	a draw of an Apple-private primitive type (OpenGL on Metal's quads and kin) whose list cannot draw as Metal draws: quads under a fragment that reads primitive_id, a primitive_id varying, a vertex start past 2^31
 gap	PrimitiveIdIndices	rare	an indexed draw of a primitive_id pipeline, on a device without geometry or tessellation shaders, whose indices the encoder wrote since its last barrier
 feature	PrivateRenderState	none	Apple-private pipeline fields of OpenGL on Metal (no public header)
 gap	SurfaceDepthStencil	rare	a blit of the stencil of a Depth32Float_Stencil8 texture over a plane of an IOSurface with planes, or a pass on an X32_Stencil8 one's view as Depth32Float_Stencil8

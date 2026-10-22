@@ -7,6 +7,7 @@
 //! compile-and-plan layer never reads them.
 
 use super::error::{invalid, Error, Problem};
+use metal2vulkan::metal::PrimitiveType;
 
 /// `MTLLoadAction`.
 #[non_exhaustive]
@@ -312,6 +313,71 @@ impl ScissorRect {
     }
 }
 
+/// A draw's primitive type: Metal's `MTLPrimitiveType`, whose header names the values 0 to 4
+/// ([`PrimitiveType`]), and the four values past them its draws take besides, which Apple's GL
+/// sends. Measured on the M3 Max (macOS 27.0.1): plain Metal draws each private value as the list
+/// its variant states, in that order, which the runtime draws as that list; Metal's API
+/// validation stops the process at any draw of one, empty ones included. Each list primitive's
+/// barycentric order is the list's, its flat inputs come from its first vertex under provoking
+/// vertex mode 0 and its last under the last-vertex mode, and `[[vertex_id]]`,
+/// `[[base_vertex]]`, `[[instance_id]]` and `[[base_instance]]` are those of the public draw
+/// of the same arguments. Value 9, at which Metal's GPU hangs, and the values past it are
+/// undefined.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DrawPrimitiveType {
+    /// A type `MTLPrimitiveType`'s header names.
+    Public(PrimitiveType),
+    /// 5, a line loop: the segments `(i, i + 1)` of its vertices, then `(last, first)` where it
+    /// has two vertices or more. It never restarts: every index is a vertex.
+    LineLoop,
+    /// 6, a triangle fan: the triangles `(first, i + 1, i + 2)`. It never restarts.
+    TriangleFan,
+    /// 7, quads: each four vertices `a, b, c, d` the triangles `(a, b, d)` then `(b, c, d)`, one
+    /// `[[primitive_id]]` for both; the vertices past the last whole four draw nothing. It never
+    /// restarts.
+    Quads,
+    /// 8, a quad strip: each pair `c, d` after a pair `a, b` the triangles `(a, b, d)` then
+    /// `(c, a, d)`, one `[[primitive_id]]` for both; an odd last vertex draws nothing. An indexed
+    /// one restarts as a strip does (at its index type's all-ones index, or at the index
+    /// `RenderCommandEncoder::set_primitive_restart_enabled` set), each piece pairing from its
+    /// own start, and `[[primitive_id]]` counts on across the restart.
+    QuadStrip,
+}
+
+impl DrawPrimitiveType {
+    /// Metal's raw value.
+    pub fn raw(self) -> u64 {
+        match self {
+            DrawPrimitiveType::Public(p) => u64::from(p.as_raw()),
+            DrawPrimitiveType::LineLoop => 5,
+            DrawPrimitiveType::TriangleFan => 6,
+            DrawPrimitiveType::Quads => 7,
+            DrawPrimitiveType::QuadStrip => 8,
+        }
+    }
+
+    /// The type of Metal's raw value `raw`, 0 to 8.
+    pub fn from_raw(raw: u64) -> Result<DrawPrimitiveType, Error> {
+        Ok(match raw {
+            5 => DrawPrimitiveType::LineLoop,
+            6 => DrawPrimitiveType::TriangleFan,
+            7 => DrawPrimitiveType::Quads,
+            8 => DrawPrimitiveType::QuadStrip,
+            raw => match u32::try_from(raw).ok().map(PrimitiveType::try_from) {
+                Some(Ok(p)) => DrawPrimitiveType::Public(p),
+                _ => return Err(undefined("MTLPrimitiveType", raw)),
+            },
+        })
+    }
+}
+
+impl From<PrimitiveType> for DrawPrimitiveType {
+    fn from(p: PrimitiveType) -> DrawPrimitiveType {
+        DrawPrimitiveType::Public(p)
+    }
+}
+
 fn undefined(ty: &'static str, raw: u64) -> Error {
     invalid("from_raw", Problem::UndefinedValue { ty, raw })
 }
@@ -347,6 +413,15 @@ mod tests {
         assert!(StoreActionOptions::from_raw(2).is_err());
         assert!(MultisampleDepthResolveFilter::from_raw(3).is_err());
         assert!(MultisampleStencilResolveFilter::from_raw(2).is_err());
+        for raw in 0..9 {
+            assert_eq!(DrawPrimitiveType::from_raw(raw).unwrap().raw(), raw);
+        }
+        assert_eq!(
+            DrawPrimitiveType::from_raw(3).unwrap(),
+            DrawPrimitiveType::Public(PrimitiveType::Triangle)
+        );
+        assert!(DrawPrimitiveType::from_raw(9).is_err());
+        assert!(DrawPrimitiveType::from_raw(1 << 32).is_err());
     }
 
     /// Metal's defaults (probe 1 on an M4): opaque black, and the store action of a color

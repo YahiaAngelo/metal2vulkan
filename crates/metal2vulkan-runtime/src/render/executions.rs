@@ -1443,7 +1443,7 @@ impl Asked {
                     return Asked::Nothing;
                 }
                 let draw = IndexedDraw {
-                    primitive_type,
+                    primitive_type: primitive_type.into(),
                     index_count,
                     index_type,
                     instance_count,

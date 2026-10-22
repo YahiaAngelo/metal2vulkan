@@ -321,8 +321,9 @@ pub use render_pass::{
 };
 pub use render_state::RenderStateProblem;
 pub use render_values::{
-    ClearColor, LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter,
-    SamplePosition, ScissorRect, StoreAction, StoreActionOptions, Viewport,
+    ClearColor, DrawPrimitiveType, LoadAction, MultisampleDepthResolveFilter,
+    MultisampleStencilResolveFilter, SamplePosition, ScissorRect, StoreAction, StoreActionOptions,
+    Viewport,
 };
 pub use resource::{ObjectId, ResourceRef};
 pub use resource_ids::{IdPlacement, ResourceId, ResourceIdKind};

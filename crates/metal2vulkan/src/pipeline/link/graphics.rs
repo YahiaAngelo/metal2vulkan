@@ -690,6 +690,7 @@ pub fn graphics_state(
                 .any(|b| matches!(b, StageBuiltin::FragDepth(_)))
         }),
         reads_barycentric_coord: fs.is_some_and(|fs| reads_barycentric_coord(&fs.io)),
+        reads_primitive_id: fs.is_some_and(|fs| reads_primitive_id(&fs.io)),
         reads_position_depth: fs.is_some_and(|fs| {
             fs.io.builtins.contains(&StageBuiltin::FragCoord) && fs.io.position_depth
         }),
@@ -720,6 +721,14 @@ fn reads_barycentric_coord(io: &StageIo) -> bool {
             .inputs
             .iter()
             .any(|v| matches!(v.role, IoRole::Barycentric { .. }))
+}
+
+/// Whether a fragment stage of interface `io` reads `[[primitive_id]]`
+/// (`GraphicsState::reads_primitive_id`): the `PrimitiveId` builtin, or its varying
+/// (`IoRole::PrimitiveId`).
+fn reads_primitive_id(io: &StageIo) -> bool {
+    io.builtins.contains(&StageBuiltin::PrimitiveId)
+        || io.inputs.iter().any(|v| v.role == IoRole::PrimitiveId)
 }
 
 /// Whether a fragment stage of interface `io` reads a flat input

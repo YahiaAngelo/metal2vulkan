@@ -234,6 +234,10 @@ Calls Metal does not have, for a consumer that emulates a Metal device:
 - `RenderCommandEncoder::set_color_resolve_target`, `set_depth_resolve_target` and
   `set_stencil_resolve_target` change where a pass resolves until it ends (the last target set
   wins), as Metal's private calls do.
+- The four draw calls take a `DrawPrimitiveType`, which every `PrimitiveType` converts into, and
+  whose `LineLoop`, `TriangleFan`, `Quads` and `QuadStrip` are the values 5 to 8 Metal's draws take
+  besides its header's (`DrawPrimitiveType::from_raw`): each draws as the list plain Metal draws,
+  in Metal's vertex order, direct, indexed and indirect.
 - `TextureDescriptor::address_mode_map` presents a texture as sampling by other address modes than
   its sampler's.
 - Resource ID reservations, placements and counts (`Device::reserve_resource_ids`,
