@@ -61,7 +61,7 @@ use super::error::{
     FailedPipeline, MeshRecordsOverflow, PipelineCreationCause, Problem,
     TessellationRecordsOverflow, TimedOut,
 };
-use super::event::{EventRef, EventShared};
+use super::event::{EventRef, EventShared, SharedEvent};
 use super::execution::Execution;
 use super::exit_guard::{self, Call};
 use super::function_table::TableSnapshot;
@@ -500,6 +500,9 @@ pub(super) struct State {
     pub(super) prefix: Option<vk::CommandBuffer>,
     /// The encoders split at the event and binary semaphore waits and signals.
     batches: Batches<Arc<EventShared>, vk::Semaphore>,
+    /// Its scheduled signals, in the order encoded
+    /// ([`CommandBuffer::encode_signal_event_scheduled`]).
+    scheduled_signals: Vec<(Arc<EventShared>, u64)>,
     scheduled: VecDeque<Handler>,
     /// Its submission handlers ([`CommandBuffer::add_submission_handler`]): run on the thread
     /// that takes its last batch for its queue (submits it, or holds it in a group), before its
@@ -1527,6 +1530,7 @@ impl CommandBuffer {
                 folds: Vec::new(),
                 prefix: None,
                 batches: Batches::default(),
+                scheduled_signals: Vec::new(),
                 scheduled: VecDeque::new(),
                 submission: VecDeque::new(),
                 submitting: false,
@@ -1851,6 +1855,41 @@ impl CommandBuffer {
         self.event_command("encode_signal_event", event, |batches, event| {
             batches.signal(event, value);
         })
+    }
+
+    /// `encodeSignalEventScheduled:value:`, private: once the command buffer is scheduled, the
+    /// event's value becomes at least `value`, set as [`SharedEvent::set_signaled_value`] sets it:
+    /// before its status reads `Scheduled`, before any of its scheduled handlers runs (one added
+    /// before this call too) and before [`wait_until_scheduled`](Self::wait_until_scheduled)
+    /// returns, as Metal's (an M3 Max, macOS 27.0.1); several in the order encoded. No handler
+    /// thread is woken for it: a command buffer whose transition to `Scheduled` has nothing else
+    /// to run makes it on the thread that submitted its last batch. One that fails before it is
+    /// scheduled sets nothing, as it runs no scheduled handler.
+    ///
+    /// Called once the command buffer is committed, it does nothing, as Metal's (measured before
+    /// and after the command buffer was scheduled). Refused while an encoder is open (Metal
+    /// asserts), after an abandoned encoder, and for another device's event, as
+    /// [`encode_signal_event`](Self::encode_signal_event) is. Metal ends the process for an
+    /// `MTLEvent`, which this call does not take.
+    pub fn encode_signal_event_scheduled(
+        &self,
+        event: &SharedEvent,
+        value: u64,
+    ) -> Result<(), Error> {
+        const CALL: &str = "encode_signal_event_scheduled";
+        let event = EventRef::Shared(event);
+        let event = event.shared();
+        if !event.device().same(&self.0.device) {
+            return Err(invalid(CALL, Problem::ForeignObject));
+        }
+        self.settle_end();
+        let mut state = self.state();
+        match state.refusal() {
+            None => state.scheduled_signals.push((Arc::clone(event), value)),
+            Some(Problem::AlreadyCommitted) => {}
+            Some(problem) => return Err(invalid(CALL, problem)),
+        }
+        Ok(())
     }
 
     /// `encodeWaitForEvent:value:`: the work encoded after it starts once the event's value
@@ -3453,10 +3492,12 @@ impl CommandBufferShared {
     }
 
     /// The scheduler submitted the last batch, or held it in a group (`group.rs`): in the queue's
-    /// context, once the submitting thread ran its submission handlers, become `Scheduled`, then run the scheduled handlers on
+    /// context, once the submitting thread ran its submission handlers, set the scheduled signals'
+    /// values, in the order encoded, then become `Scheduled`, then run the scheduled handlers on
     /// this thread, in the order added, then let `wait_until_scheduled` return. Metal's status
     /// reads `Scheduled` just before its first scheduled handler starts, and its wait returns
-    /// once the last returned (an M4, macOS 27.0.1).
+    /// once the last returned (an M4, macOS 27.0.1); its scheduled signals' values show before
+    /// its status reads `Scheduled` (an M3 Max, macOS 27.0.1).
     fn run_scheduled(self: &Arc<Self>) {
         {
             let mut state = lock(&self.state);
@@ -3473,6 +3514,16 @@ impl CommandBufferShared {
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .0;
                 state.parked -= 1;
+            }
+            if !state.scheduled_signals.is_empty() {
+                // Set without the command buffer's lock: a set wakes the scheduler, whose lock
+                // comes first.
+                let signals = std::mem::take(&mut state.scheduled_signals);
+                drop(state);
+                for (event, value) in signals {
+                    event.set(value);
+                }
+                state = lock(&self.state);
             }
             state.status = CommandBufferStatus::Scheduled;
             self.answer(&state);

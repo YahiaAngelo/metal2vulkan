@@ -253,8 +253,9 @@ impl EventShared {
         lock(&self.state).timeline.value()
     }
 
-    /// The host set `value`.
-    fn set(self: &Arc<Self>, value: u64) {
+    /// The host set `value`: [`SharedEvent::set_signaled_value`]'s, and a command buffer's
+    /// scheduled signal's (`CommandBuffer::encode_signal_event_scheduled`).
+    pub(super) fn set(self: &Arc<Self>, value: u64) {
         let due = {
             let mut state = lock(&self.state);
             if !state.timeline.set(value) {
