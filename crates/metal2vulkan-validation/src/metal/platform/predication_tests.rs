@@ -7,7 +7,7 @@
 
 use crate::gpu::compile;
 use crate::gpu::wait::metal::commit_and_wait;
-use crate::runtime_lane::predication::{cmp_rows, measured_streams, CMP_BRANCHES};
+use crate::runtime_lane::predication::{cmp_rows, measured_streams, CMP_BRANCHES, PAST};
 use core::ffi::c_void;
 use core::ptr::NonNull;
 use objc2::msg_send;
@@ -233,10 +233,11 @@ impl Probe {
                 }
                 "E" => Some(msg_send![e, encodeEndIf]),
                 "V" => Some(msg_send![e, encodeEndWhile]),
-                "Z0" | "Zn" => {
+                "Z0" | "Zn" | "Zp" => {
                     let buffer = if token == "Zn" { none } else { word };
+                    let offset = if token == "Zp" { PAST as usize } else { 0 };
                     Some(
-                        msg_send![e, encodeEndDoWhile: buffer, offset: 0usize, comparison: 0usize, referenceValue: 0u32],
+                        msg_send![e, encodeEndDoWhile: buffer, offset: offset, comparison: 0usize, referenceValue: 0u32],
                     )
                 }
                 "U" => {

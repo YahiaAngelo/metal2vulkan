@@ -58,7 +58,9 @@
 //!   buffer ran varies run to run.
 //! - **A word past its buffer's end** reads whatever memory lies there (zero past a lone
 //!   buffer; the next buffer's bytes in a heap): refused
-//!   ([`RuntimeGap::PredicationWordPastBuffer`]).
+//!   ([`RuntimeGap::PredicationWordPastBuffer`]) where the record reads it: an
+//!   `encodeEndDoWhile:...` that is unbalanced, misused or closes a killed DoWhile reads no word,
+//!   and answers as on any word.
 //!
 //! # What the runtime builds
 //!
@@ -190,6 +192,24 @@ impl Test {
     /// `step` testing this condition.
     fn of(&self, step: PredicationStep) -> PredicationStep {
         step.testing(self.address, self.compare, self.reference)
+    }
+}
+
+/// A record's condition as called: the word at `offset` of `buffer`, compared by Metal's
+/// `comparison` code with `reference`, read (made a [`Test`]) only where the record tests it, as
+/// Metal reads it only there.
+#[derive(Clone, Copy)]
+pub(super) struct Condition<'a> {
+    buffer: &'a Buffer,
+    offset: u64,
+    comparison: u64,
+    reference: u32,
+}
+
+impl Condition<'_> {
+    /// Its [`Test`], refused as [`Test::new`] refuses.
+    fn test(self) -> Result<Test, Error> {
+        Test::new(self.buffer, self.offset, self.comparison, self.reference)
     }
 }
 
@@ -785,14 +805,16 @@ impl Predication {
         self.loop_step(uploads, device, looping, (op, test))
     }
 
-    /// `encodeEndWhile` (`None`) or `encodeEndDoWhile:...` of `test`: Metal's answer, the step
-    /// to record, if any, and the loop to lay further copies of where it is live. An End of
+    /// `encodeEndWhile` (`None`) or `encodeEndDoWhile:...` of `condition`: Metal's answer, the
+    /// step to record, if any, and the loop to lay further copies of where it is live. An End of
     /// another block kills and answers NO; with no block open it is unbalanced, answering NO.
+    /// Only an End that closes a live DoWhile reads its condition (refused as [`Test::new`]
+    /// refuses).
     fn end_loop(
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
-        test: Option<&Test>,
+        condition: Option<Condition<'_>>,
     ) -> Result<LoopEnd, Error> {
         let unit = self.unit()?;
         let Some(top) = unit.stack.last() else {
@@ -804,7 +826,7 @@ impl Predication {
             });
         };
         let looping = match &top.kind {
-            Kind::Loop(looping) if looping.test.is_some() == test.is_none() => looping.clone(),
+            Kind::Loop(looping) if looping.test.is_some() == condition.is_none() => looping.clone(),
             _ => {
                 unit.kill();
                 return Ok(LoopEnd {
@@ -824,12 +846,14 @@ impl Predication {
                 copies: None,
             });
         }
-        let record = self.copy_end(uploads, device, &looping, test)?;
+        // Only a live DoWhile's End reads its word.
+        let test = condition.map(Condition::test).transpose()?;
+        let record = self.copy_end(uploads, device, &looping, test.as_ref())?;
         Ok(LoopEnd {
             answer: true,
             record: Some(record),
             closed: true,
-            copies: Some((looping, test.cloned())),
+            copies: Some((looping, test)),
         })
     }
 
@@ -1145,23 +1169,25 @@ impl ComputeCommandEncoder {
 
     /// The condition of a record of `call` on `buffer` (`None`: a nil buffer), with the step
     /// kernel. Refused: a buffer of another device (`Invalid`), a device without device
-    /// addresses (`Unsupported{CommandPredication}`), a word past the buffer's end
-    /// (`NotImplemented(PredicationWordPastBuffer)`).
-    fn condition(
+    /// addresses (`Unsupported{CommandPredication}`).
+    fn condition<'a>(
         &mut self,
         call: &'static str,
-        buffer: Option<&Buffer>,
+        buffer: Option<&'a Buffer>,
         offset: u64,
         (comparison, reference): (u64, u32),
-    ) -> Result<(OwnedKernel, Option<Test>), Error> {
+    ) -> Result<(OwnedKernel, Option<Condition<'a>>), Error> {
         if let Some(buffer) = buffer {
             self.core().check_device(call, buffer.device())?;
         }
         let kernel = self.predication_kernel()?;
-        let test = buffer
-            .map(|buffer| Test::new(buffer, offset, comparison, reference))
-            .transpose()?;
-        Ok((kernel, test))
+        let condition = buffer.map(|buffer| Condition {
+            buffer,
+            offset,
+            comparison,
+            reference,
+        });
+        Ok((kernel, condition))
     }
 
     /// Note `event`, encoded now, in the captures of the open loops' bodies above the floor.
@@ -1237,16 +1263,17 @@ impl ComputeCommandEncoder {
         Ok(())
     }
 
-    /// Close the open loop by `encodeEndWhile` or `encodeEndDoWhile:...` of `test`: its first
-    /// copy's end, then, where it is live, its further copies (`lay_copies`). Metal's answer.
+    /// Close the open loop by `encodeEndWhile` or `encodeEndDoWhile:...` of `condition`: its
+    /// first copy's end, then, where it is live, its further copies (`lay_copies`). Metal's
+    /// answer.
     fn close_loop(
         &mut self,
         kernel: OwnedKernel,
-        test: Option<&Test>,
+        condition: Option<Condition<'_>>,
         event: impl FnOnce() -> Event,
     ) -> Result<bool, Error> {
         let end = self.predication(|predication, uploads, device| {
-            predication.end_loop(uploads, device, test)
+            predication.end_loop(uploads, device, condition)
         })?;
         let Some((looping, test)) = end.copies else {
             // A killed loop's End, a misused or an unbalanced one: no copies.
@@ -1359,8 +1386,8 @@ impl ComputeCommandEncoder {
         reference_value: u32,
     ) -> Result<(), Error> {
         let arguments = (comparison, reference_value);
-        let (kernel, test) = self.condition("encode_start_if", buffer, offset, arguments)?;
-        match &test {
+        let (kernel, condition) = self.condition("encode_start_if", buffer, offset, arguments)?;
+        match &condition.map(Condition::test).transpose()? {
             Some(test) => {
                 let (resume, record) = self.predication(|predication, uploads, device| {
                     predication.start_if(uploads, device, test)
@@ -1463,9 +1490,10 @@ impl ComputeCommandEncoder {
         reference_value: u32,
     ) -> Result<(), Error> {
         let arguments = (comparison, reference_value);
-        let (kernel, test) = self.condition("encode_start_while", buffer, offset, arguments)?;
+        let (kernel, condition) =
+            self.condition("encode_start_while", buffer, offset, arguments)?;
         let event = || Event::StartWhile(buffer.cloned(), offset, comparison, reference_value);
-        match &test {
+        match &condition.map(Condition::test).transpose()? {
             Some(test) => self.open_loop(kernel, Some(test), event),
             None => {
                 let record = self
@@ -1514,7 +1542,9 @@ impl ComputeCommandEncoder {
     /// outermost open block and answers `NO`; with no block open it is an unbalanced record,
     /// answering `NO` (the module docs).
     ///
-    /// Refused, recording nothing: as [`encode_start_if`](Self::encode_start_if) refuses.
+    /// Refused, recording nothing: as [`encode_start_if`](Self::encode_start_if) refuses, a word
+    /// past the buffer's end only where the call closes a live DoWhile, as only there Metal reads
+    /// it.
     pub fn encode_end_do_while(
         &mut self,
         buffer: Option<&Buffer>,
@@ -1536,10 +1566,11 @@ impl ComputeCommandEncoder {
         reference_value: u32,
     ) -> Result<bool, Error> {
         let arguments = (comparison, reference_value);
-        let (kernel, test) = self.condition("encode_end_do_while", buffer, offset, arguments)?;
+        let (kernel, condition) =
+            self.condition("encode_end_do_while", buffer, offset, arguments)?;
         let event = || Event::EndDoWhile(buffer.cloned(), offset, comparison, reference_value);
-        match &test {
-            Some(test) => self.close_loop(kernel, Some(test), event),
+        match condition {
+            Some(condition) => self.close_loop(kernel, Some(condition), event),
             None => {
                 let record = self
                     .predication(|predication, uploads, device| predication.nil(uploads, device))?;

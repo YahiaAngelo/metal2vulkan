@@ -97,6 +97,10 @@ const LOG_WORDS: usize = 128;
 /// other code).
 const EQUAL: u64 = 0;
 
+/// An offset past the end of a stream's condition words: Metal reads no word there for an
+/// `encodeEndDoWhile:...` that closes no live DoWhile.
+pub(crate) const PAST: u64 = 0x3f00;
+
 /// Metal's comparison codes `!=` and `<`.
 const NOT_EQUAL: u64 = 1;
 const LESS: u64 = 4;
@@ -261,9 +265,10 @@ impl Streams {
 /// `dispatchThreadsWithIndirectBuffer`, `bn` sets what `Tn` sets and dispatches nothing, `t`
 /// dispatches with the state set; `I1` and `I0` start an If holding and failing (word 0 is 1,
 /// compared `==` with 1 and with 0), `In` one on a nil buffer; `L` is an Else; `W1`, `W0` and
-/// `Wn` start a While holding, failing and on a nil buffer, `D` a DoWhile; `E`, `V`, `Z0` and
-/// `Zn` are an `encodeEndIf`, an `encodeEndWhile`, an `encodeEndDoWhile` failing and one on a nil
-/// buffer, whose answers are kept; `U` makes the log resident, `Fu` and `Fw` update and wait for a
+/// `Wn` start a While holding, failing and on a nil buffer, `D` a DoWhile; `E`, `V`, `Z0`, `Zn`
+/// and `Zp` are an `encodeEndIf`, an `encodeEndWhile`, an `encodeEndDoWhile` failing, one on a nil
+/// buffer and one at an offset past the words' buffer ([`PAST`]), whose answers are kept; `U`
+/// makes the log resident, `Fu` and `Fw` update and wait for a
 /// fence; `|` and `%` go on in a new serial and concurrent encoder, `B` ends the encoder and
 /// encodes a blit (the next command opens a serial encoder, as one with no encoder open does).
 /// The tags that ran, and the answers.
@@ -322,6 +327,9 @@ pub(crate) fn run(streams: &Streams, script: &str) -> (Vec<u32>, String) {
             )),
             "Zn" => answers.push(answer(
                 encoder.encode_end_do_while(None, 0, EQUAL, 0).unwrap(),
+            )),
+            "Zp" => answers.push(answer(
+                encoder.encode_end_do_while(word, PAST, EQUAL, 0).unwrap(),
             )),
             "U" => encoder
                 .use_resource(
@@ -671,7 +679,8 @@ fn every_dispatch_form_runs_as_its_block_says() {
 }
 
 /// What the runtime refuses, recording nothing, where it cannot give Metal's answer: a word past
-/// its buffer's end, a fourth loop open, and an unbalanced record that is its unit's first after
+/// its buffer's end where the record reads it (a Start's, a live DoWhile's End's), a fourth loop
+/// open, and an unbalanced record that is its unit's first after
 /// dispatches of the unit, in its encoder or an earlier one of the unit (Metal drops those, which
 /// ran ungated); the work around them runs. After a blit the next encoder starts a unit, whose
 /// unbalanced record drops nothing earlier, and an unbalanced record after a block drops what
@@ -723,6 +732,14 @@ fn what_the_runtime_refuses() {
             Ok(true)
         );
         assert_eq!(encoder.encode_end_while(), Ok(true));
+        // A live DoWhile's End reads its word.
+        encoder.encode_start_do_while().unwrap();
+        let end = encoder.encode_end_do_while(Some(word), PAST, EQUAL, 0);
+        assert_eq!(end.map(drop), past);
+        assert_eq!(
+            encoder.encode_end_do_while(Some(word), 0, EQUAL, 0),
+            Ok(true)
+        );
         // The last word of the buffer, at an offset Metal rounds down to it.
         encoder.encode_start_if(Some(word), 15, EQUAL, 0).unwrap();
         marks.mark(&mut encoder, 2);
