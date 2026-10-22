@@ -598,8 +598,7 @@ fn object_grids_past_the_task_limits_fail_typed() {
             .device
             .compile_device()
             .profile()
-            .fields()
-            .limits
+            .limits()
             .mesh
             .max_task_work_group_count;
         let targets = [0, 1].map(|_| texture(&lane.device, PixelFormat::RGBA32Uint, SIDE));
