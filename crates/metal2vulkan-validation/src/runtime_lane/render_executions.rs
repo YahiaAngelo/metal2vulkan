@@ -58,10 +58,11 @@ use metal2vulkan::metal::{
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RuntimeFact};
 use metal2vulkan_runtime::{
     Attachment, Buffer, CommandBuffer, CommandBufferError, CommandBufferStatus, Degradation,
-    Device, DrawProblem, Error, EventRef, ExecutedPipeline, Execution, Heap, HeapDescriptor,
-    HeapType, IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectCommandBufferProblem,
-    IndirectRenderCommand, Invalid, PipelineOptions, Problem, Region, RenderCommandEncoder,
-    RenderPassDescriptor, RenderPipelineState, ResourceOptions, RuntimeGap, Size,
+    Device, DrawPrimitiveType, DrawProblem, Error, EventRef, ExecutedPipeline, Execution, Heap,
+    HeapDescriptor, HeapType, IndirectCommandBuffer, IndirectCommandBufferDescriptor,
+    IndirectCommandBufferProblem, IndirectRenderCommand, Invalid, PipelineOptions, Problem, Region,
+    RenderCommandEncoder, RenderPassDescriptor, RenderPipelineState, ResourceOptions, RuntimeGap,
+    Size,
 };
 use metal2vulkan_runtime::{LoadAction, StoreAction, TextureDescriptor};
 
@@ -506,6 +507,205 @@ fn an_execution_under_a_state_without_support_faults_its_encoder() {
             "on {}",
             device.name()
         );
+    });
+}
+
+/// Metal's private primitive types 5 to 8, and how many of six vertices (`0..6`, or the indices
+/// [`PERMUTED`]) each type's list reaches: every one of a line loop, a fan and a quad strip, the
+/// first four of quads.
+const PRIVATE: [(DrawPrimitiveType, usize); 4] = [
+    (DrawPrimitiveType::LineLoop, 6),
+    (DrawPrimitiveType::TriangleFan, 6),
+    (DrawPrimitiveType::Quads, 4),
+    (DrawPrimitiveType::QuadStrip, 6),
+];
+
+/// Six 16-bit indices: a permutation of `0..6`.
+const PERMUTED: [u16; 6] = [5, 3, 0, 1, 4, 2];
+
+/// A shared buffer of [`PERMUTED`].
+fn permuted(device: &Device) -> Buffer {
+    let halves: Vec<u8> = PERMUTED.iter().flat_map(|h| h.to_le_bytes()).collect();
+    buffer_with(device, &halves).unwrap()
+}
+
+/// Draw commands of both kinds, of two vertex buffers and one fragment buffer, nothing inherited.
+fn both_draws() -> IndirectCommandBufferDescriptor {
+    let mut both = descriptor();
+    both.command_types = IndirectCommandType::DRAW.union(IndirectCommandType::DRAW_INDEXED);
+    both
+}
+
+/// Commands of Metal's private primitive types 5 to 8 draw as the encoder's draws of them do, the
+/// vertices of the list each type's program writes, direct and indexed (Metal's: on the M3 Max,
+/// macOS 27.0.1, each drew the same texels through an indirect command buffer as the encoder's
+/// draw). Windows 0 and 1 are the commands', 2 and 3 the encoder's own draws after them.
+#[test]
+fn commands_of_private_types_draw_as_the_encoder_s_draws() {
+    on_device(|device, _| {
+        let indices = permuted(device);
+        for (primitive_type, reached) in PRIVATE {
+            let setup = Setup::new(device);
+            let icb = icb(device, &both_draws(), 2);
+            setup
+                .command(&icb, 0, 0)
+                .draw_primitives(primitive_type, 0, 6, 1, 0)
+                .unwrap();
+            setup
+                .command(&icb, 1, 1)
+                .draw_indexed_primitives(primitive_type, 6, IndexType::UInt16, &indices, 0, 1, 0, 0)
+                .unwrap();
+            let queue = device.new_command_queue().unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.render_command_encoder(&pass()).unwrap();
+            setup.resident(&mut encoder);
+            encoder
+                .use_resource(
+                    indices.as_resource(),
+                    ResourceUsage::READ,
+                    RenderStages::VERTEX,
+                )
+                .unwrap();
+            encoder.set_render_pipeline_state(&setup.state).unwrap();
+            encoder.execute_commands_in_buffer(&icb, 0..2).unwrap();
+            setup.bind(&mut encoder, 2);
+            encoder.draw_primitives(primitive_type, 0, 6, 1, 0).unwrap();
+            setup.bind(&mut encoder, 3);
+            encoder
+                .draw_indexed_primitives(primitive_type, 6, IndexType::UInt16, &indices, 0, 1, 0, 0)
+                .unwrap();
+            encoder.end_encoding().unwrap();
+            complete(&command_buffer);
+            let direct: Vec<usize> = (0..reached).collect();
+            let indexed: Vec<usize> = PERMUTED[..reached]
+                .iter()
+                .map(|&i| usize::from(i))
+                .collect();
+            let drawn = expected_vertices(&[
+                (0, &direct, 0..1),
+                (1, &indexed, 0..1),
+                (2, &direct, 0..1),
+                (3, &indexed, 0..1),
+            ]);
+            assert_eq!(
+                setup.output(),
+                drawn,
+                "{primitive_type:?} on {}",
+                device.name()
+            );
+        }
+    });
+}
+
+/// A command of primitive type 9 among a range given at the call fails its command buffer as the
+/// encoder's draw of it does (Metal's: on the M3 Max, macOS 27.0.1, through an indirect command
+/// buffer as directly): a direct one of 3 vertices hangs it (`GpuHang`), an indexed one of any
+/// count faults it (`PageFault`), its encoder and every one after it running nothing, the command
+/// before it included, and the encoder before running; a direct one of 2 vertices draws nothing,
+/// and the rest runs. Window 3 is the encoder's before, 0 the command before the draw, 1 the
+/// draw's, 2 the encoder's after; each on a queue of its own (a queue's second fault revokes it).
+#[test]
+fn a_command_of_type_nine_fails_its_command_buffer_as_the_encoder_s_draw_does() {
+    on_device(|device, _| {
+        let indices = permuted(device);
+        let nine = DrawPrimitiveType::Nine;
+        let cases = [
+            (
+                "a direct draw of 3",
+                None,
+                Some(CommandBufferError::GpuHang),
+            ),
+            (
+                "an indexed draw of 3",
+                Some(3),
+                Some(CommandBufferError::PageFault),
+            ),
+            (
+                "an indexed draw of none",
+                Some(0),
+                Some(CommandBufferError::PageFault),
+            ),
+            ("a direct draw of 2", None, None),
+        ];
+        for (label, indexed, error) in cases {
+            let setup = Setup::new(device);
+            let icb = icb(device, &both_draws(), 2);
+            setup
+                .command(&icb, 0, 0)
+                .draw_primitives(PrimitiveType::Point, 0, 4, 1, 0)
+                .unwrap();
+            let command = setup.command(&icb, 1, 1);
+            match (indexed, error) {
+                (Some(count), _) => command.draw_indexed_primitives(
+                    nine,
+                    count,
+                    IndexType::UInt16,
+                    &indices,
+                    0,
+                    1,
+                    0,
+                    0,
+                ),
+                (None, Some(_)) => command.draw_primitives(nine, 0, 3, 1, 0),
+                (None, None) => command.draw_primitives(nine, 0, 2, 1, 0),
+            }
+            .unwrap();
+            let queue = device.new_command_queue().unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            let points = |window: usize, execute: bool| {
+                let mut encoder = command_buffer.render_command_encoder(&pass()).unwrap();
+                setup.resident(&mut encoder);
+                encoder
+                    .use_resource(
+                        indices.as_resource(),
+                        ResourceUsage::READ,
+                        RenderStages::VERTEX,
+                    )
+                    .unwrap();
+                encoder.set_render_pipeline_state(&setup.state).unwrap();
+                if execute {
+                    encoder.execute_commands_in_buffer(&icb, 0..2).unwrap();
+                }
+                setup.bind(&mut encoder, window);
+                encoder
+                    .draw_primitives(PrimitiveType::Point, 0, 2, 1, 0)
+                    .unwrap();
+                encoder.end_encoding().unwrap();
+            };
+            points(3, false);
+            points(2, true);
+            points(2, false);
+            command_buffer.commit().unwrap();
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            let label = format!("{label} on {}", device.name());
+            assert_eq!(command_buffer.error(), error, "{label}");
+            let window = |window, count| Drawn {
+                window,
+                start: 0,
+                count,
+                instances: 1,
+                base: 0,
+            };
+            let drawn = match error {
+                Some(_) => {
+                    assert_eq!(
+                        command_buffer.status(),
+                        CommandBufferStatus::Error,
+                        "{label}"
+                    );
+                    expected(&[window(3, 2)])
+                }
+                None => {
+                    assert_eq!(
+                        command_buffer.status(),
+                        CommandBufferStatus::Completed,
+                        "{label}"
+                    );
+                    expected(&[window(3, 2), window(0, 4), window(2, 2)])
+                }
+            };
+            assert_eq!(setup.output(), drawn, "{label}");
+        }
     });
 }
 

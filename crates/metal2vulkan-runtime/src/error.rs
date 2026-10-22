@@ -1511,13 +1511,6 @@ pub enum RuntimeGap {
         /// The attachment's pixel format.
         pixel_format: PixelFormat,
     },
-    /// An unbalanced command-predication record (`ComputeCommandEncoder::encode_end_if` and the
-    /// other ends, or `encode_start_else`, with no block open; `encode_start_if` on a nil buffer
-    /// with none) that is its unit's first record, after dispatches of the unit (of this encoder,
-    /// or of an earlier one of its unit). Metal answers NO and drops those dispatches, which have
-    /// run nothing; the runtime recorded them ungated, before any record, so it cannot drop them.
-    /// Every other unbalanced record runs as Metal's does.
-    PredicationDropsUngatedWork,
     /// A blit copy between a buffer and a multisampled texture (`copyFromBuffer:...toTexture:`
     /// into, or `copyFromTexture:...toBuffer:` out of, a texture of more than one sample).
     /// Vulkan copies no multisampled image to or from a buffer (its `vkCmdCopyBufferToImage` and
@@ -1649,7 +1642,9 @@ pub enum CommandBufferError {
     /// `commit`'s would be.
     Refused,
     /// The program committed the command buffer as failed, with this `MTLCommandBufferError`
-    /// code ([`CommandBuffer::commit_failed`](crate::CommandBuffer::commit_failed)).
+    /// code ([`CommandBuffer::commit_failed`](crate::CommandBuffer::commit_failed)). Of Metal's
+    /// codes of a page fault (3) and a hang (2), it counts against its queue as the error it
+    /// stands for does ([`AccessRevoked`](Self::AccessRevoked)); of any other code, not.
     Injected(u64),
     /// The command buffer encoded a render pass without attachments whose
     /// `renderTargetWidth` or `renderTargetHeight` is past 16384, which Metal's encoder takes:
@@ -1718,7 +1713,8 @@ pub enum CommandBufferError {
     /// count against its queue.
     GpuRecoveryVictim,
     /// Metal ignored the command buffer, committed on a queue whose second command buffer with a
-    /// GPU error it caused ([`PageFault`](Self::PageFault), [`GpuHang`](Self::GpuHang); not a
+    /// GPU error it caused ([`PageFault`](Self::PageFault), [`GpuHang`](Self::GpuHang), or
+    /// [`Injected`](Self::Injected) of Metal's code of either; not a
     /// [`GpuRecoveryVictim`](Self::GpuRecoveryVictim)) had completed:
     /// `MTLCommandBufferErrorAccessRevoked` (4, "Ignored (for causing prior/excessive GPU errors)
     /// (00000004:kIOGPUCommandBufferCallbackErrorSubmissionsIgnored)" on the M3 Max, macOS

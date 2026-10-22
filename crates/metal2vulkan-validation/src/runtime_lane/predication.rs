@@ -6,8 +6,9 @@
 //!
 //! - streams of records and marks ([`run`]'s notation, the table `predication_streams.tsv`):
 //!   blocks nested, with Elses, spanning a unit's encoders, killed by misused records, and
-//!   unbalanced records dropping their ranges, with fences, setters and indirect dispatches among
-//!   them, run the marks Metal ran and answer what Metal answered;
+//!   unbalanced records dropping their ranges (the unit's dispatches before its first record
+//!   included, in its encoder and the unit's earlier ones), with fences, setters and indirect
+//!   dispatches among them, run the marks Metal ran and answer what Metal answered;
 //! - the condition compares as Metal's codes say, reads the word at the offset rounded down to a
 //!   multiple of 4, and reads what a dispatch of the encoder wrote just before, with no barrier,
 //!   in a serial and a concurrent encoder;
@@ -24,9 +25,7 @@
 //!   as Metal's GPU recovery does, and is harmless where they run;
 //! - a word past its buffer reads as Metal reads it: zero within the 256 bytes Metal rounds a lone
 //!   buffer up to, the heap's bytes past a buffer placed in a heap, and zero, announced, where
-//!   Metal reads memory unrelated to the buffer;
-//! - what the runtime refuses: an unbalanced record that is its unit's first after dispatches of
-//!   the unit.
+//!   Metal reads memory unrelated to the buffer.
 
 use super::{
     buffer_with, read_buffer, validated_device, validated_device_with, Messages, ScratchCache, WAIT,
@@ -45,7 +44,7 @@ use metal2vulkan_runtime::{
     ComputeCommandEncoder, ComputePipelineState, Degradation, Device, Error, EventRef,
     HeapDescriptor, HeapType, IndirectCommandBuffer, IndirectCommandBufferDescriptor, Invalid,
     LoadAction, MetalLevel, Origin, PipelineOptions, Problem, RenderPassDescriptor,
-    ResourceOptions, RuntimeGap, Size, StoreAction, TextureDescriptor,
+    ResourceOptions, Size, StoreAction, TextureDescriptor,
 };
 
 /// The kernels: `prd_mark` adds 1 to word `t[0]` of `log`; `prd_put` writes `v[0]` into word 0
@@ -496,7 +495,7 @@ pub(crate) fn loop_cases() -> Vec<LoopCase> {
             "1",
         ));
     }
-    let fixed: [FixedLoopCase; 25] = [
+    let fixed: [FixedLoopCase; 28] = [
         // Past the copies laid down, the laying run again: 128 passes, a DoWhile of 65, and inner
         // loops of 17 and 40 passes in a While of 2, with marks after.
         ("w128 T0 V T1", &[(0, 128), (1, 1)], "1"),
@@ -536,6 +535,11 @@ pub(crate) fn loop_cases() -> Vec<LoopCase> {
         ),
         ("% w3 T0 % T5 V T6", &[(0, 3), (5, 3), (6, 1)], "1"),
         ("w3 T0 % T5 V T6", &[(0, 1)], "0"),
+        // An unbalanced End drops the unit's dispatches before it, in its encoder and the unit's
+        // earlier one, and a loop after it runs, past its copies too.
+        ("T1 E D T2 z3@2 T4", &[(2, 3), (4, 1)], "01"),
+        ("T1 E D T2 z100@2 T4", &[(2, 100), (4, 1)], "01"),
+        ("T1 | T3 E w70 T0 V T4", &[(0, 70), (4, 1)], "01"),
         (
             "D T0 | I1 T5 | E T7 z3 T6",
             &[(0, 3), (5, 3), (7, 3), (6, 1)],
@@ -973,68 +977,6 @@ fn noted(messages: &Messages) -> usize {
         .count()
 }
 
-/// What the runtime refuses, recording nothing, where it cannot give Metal's answer: an
-/// unbalanced record that is its unit's first after dispatches of the unit, in its encoder or an earlier one of the unit (Metal drops those, which
-/// ran ungated); the work around them runs. After a blit the next encoder starts a unit, whose
-/// unbalanced record drops nothing earlier, and an unbalanced record after a block drops what
-/// it gated, both as Metal's do.
-#[test]
-fn what_the_runtime_refuses() {
-    on_device(|device| {
-        let marks = Marks::new(device);
-        let queue = device.new_command_queue().unwrap();
-        let ungated = Err(Error::NotImplemented(
-            RuntimeGap::PredicationDropsUngatedWork,
-        ));
-        let command_buffer = queue.command_buffer().unwrap();
-        let mut encoder = command_buffer.compute_command_encoder().unwrap();
-        marks.mark(&mut encoder, 1);
-        assert_eq!(encoder.encode_end_if().map(drop), ungated);
-        assert_eq!(encoder.encode_start_else(), ungated);
-        assert_eq!(encoder.encode_end_while().map(drop), ungated);
-        assert_eq!(
-            encoder.encode_end_do_while(None, 0, EQUAL, 0).map(drop),
-            ungated
-        );
-        assert_eq!(encoder.encode_start_if(None, 0, EQUAL, 0), ungated);
-        assert_eq!(encoder.encode_start_while(None, 0, EQUAL, 0), ungated);
-        let word = &marks.word;
-        assert_eq!(
-            encoder
-                .encode_end_do_while(Some(word), 0, EQUAL, 0)
-                .map(drop),
-            ungated
-        );
-        // The last word of the buffer, at an offset Metal rounds down to it.
-        encoder.encode_start_if(Some(word), 15, EQUAL, 0).unwrap();
-        marks.mark(&mut encoder, 2);
-        assert_eq!(encoder.encode_end_if(), Ok(true));
-        marks.mark(&mut encoder, 3);
-        encoder.end_encoding().unwrap();
-        let blit = || {
-            let mut blit = command_buffer.blit_command_encoder().unwrap();
-            blit.fill_buffer(word, 8..12, 1).unwrap();
-            blit.end_encoding().unwrap();
-        };
-        // The unit's dispatches in an earlier encoder: refused there too.
-        blit();
-        let mut encoder = command_buffer.compute_command_encoder().unwrap();
-        marks.mark(&mut encoder, 6);
-        encoder.end_encoding().unwrap();
-        let mut encoder = command_buffer.compute_command_encoder().unwrap();
-        assert_eq!(encoder.encode_end_if().map(drop), ungated);
-        encoder.end_encoding().unwrap();
-        // A blit ends the unit: the next one's unbalanced record drops its own work only.
-        blit();
-        let mut encoder = command_buffer.compute_command_encoder().unwrap();
-        assert_eq!(encoder.encode_end_if(), Ok(false));
-        marks.mark(&mut encoder, 5);
-        encoder.end_encoding().unwrap();
-        complete(&command_buffer);
-        assert_eq!(marks.ran(), [1, 2, 3, 6]);
-    });
-}
-
 /// A block open where its unit ends, as Metal answers it on an M3 Max under macOS 27.0.1: where
 /// the unit's commands skip there (a failed If, a failed While, a held If's Else, a failing If
 /// inside a held one) Metal's GPU recovery fails the command buffer, `Internal`, code 1, with
@@ -1458,12 +1400,11 @@ fn loops_run_as_metal_ran() {
 
 /// The loops Metal ran ([`loop_cases`]) run its passes, answer what its Ends answered and
 /// complete, those that run past the copies the runtime lays down among them (their laying run
-/// again, counted), but one whose unbalanced End would drop the unit's ungated dispatches, refused
-/// (`RuntimeGap::PredicationDropsUngatedWork`).
+/// again, counted).
 #[test]
 fn loop_streams_run_as_metal_ran() {
     // Past the copies laid down: 2 x 2 x ... six deep, its laying cut at 64, 16, 16 and 1 copies.
-    const PAST_COPIES: [&str; 11] = [
+    const PAST_COPIES: [&str; 13] = [
         "w128 T0 V T1",
         "D T0 z65 T1",
         "w2 T0 Q1 w17@1 T1 T2 V V T3",
@@ -1475,22 +1416,15 @@ fn loop_streams_run_as_metal_ran() {
         "D T0 z100000 T2",
         "w2@1 T1 Q2 w17@2 T2 T50 V V",
         "w3@1 T1 Q2 w100@2 T2 T50 V V",
+        "T1 E D T2 z100@2 T4",
+        "T1 | T3 E w70 T0 V T4",
     ];
-    // Its unbalanced End drops the dispatches the unit ran before its first record.
-    const DROPS_UNGATED: &str = "w3 T0 % T5 V T6";
     on_device(|device| {
         let streams = Streams::new(device);
         let mut wrong = Vec::new();
         let mut ran_again = device.work_counts().predicated_loop_runs_again;
         for (script, want, answers) in loop_cases() {
             let got = run_counted(&streams, &script);
-            if script == DROPS_UNGATED {
-                let ungated = Error::NotImplemented(RuntimeGap::PredicationDropsUngatedWork);
-                if got.refused != Some(ungated) {
-                    wrong.push(format!("{script}: refused {:?}", got.refused));
-                }
-                continue;
-            }
             if let Some(error) = got.refused {
                 wrong.push(format!("{script}: refused {error:?}"));
                 continue;

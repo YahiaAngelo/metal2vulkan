@@ -3011,9 +3011,9 @@ each item named states the rule in full.
   run, after another round trip to the host where its first recording waited for the work
   before it. A condition word past its buffer reads
   as Metal reads it (the heap's bytes, or zero), and as zero where Metal reads memory unrelated to
-  the buffer (`predication-word-past-buffer`). Refused where Metal runs on (`RuntimeGap`): an
-  unbalanced record that is its unit's first after dispatches of the unit
-  (`PredicationDropsUngatedWork`).
+  the buffer (`predication-word-past-buffer`). An unbalanced record that is its unit's first
+  drops the unit's dispatches before it as Metal's does: what the unit's encoders recorded before
+  it is never submitted.
 - **A GPU-written indirect command naming a placed ID runs that ID's live holder**, the state made
   last; once it is released, nothing.
 - **An indirect render command keeps a draw's values to 32 bits**, as Metal's records keep most of
@@ -3097,8 +3097,11 @@ each item named states the rule in full.
   running nothing and firing none of its event signals, for good (two seconds on too), while one
   committed before it runs; the device's other queues, new ones too, run on. The runtime counts the
   faults and hangs it makes Metal's answer for (primitive type 9, an execution of indirect
-  commands under a state it cannot inherit), not the ones the driver relays, and decides at the
-  commit: a command buffer committed before the revocation runs whatever its event waits.
+  commands under a state it cannot inherit) and those a program commits as failed in their place
+  (`commit_failed` with Metal's code 3 or 2, `CommandBufferError::Injected`), not the ones the
+  driver relays, and decides at the commit: a command buffer committed before the revocation runs
+  whatever its event waits, a predicated loop's runs again included (on the M3 Max a loop
+  committed before the revocation ran all its passes after it, with no error).
 
 **Heaps and memory**
 

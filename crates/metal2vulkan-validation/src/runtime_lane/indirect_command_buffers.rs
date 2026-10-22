@@ -1871,7 +1871,7 @@ fn render_commands_read_back_what_was_set() {
         assert_eq!(
             read.draw,
             Some(IndirectDraw::Primitives {
-                primitive_type: PrimitiveType::TriangleStrip,
+                primitive_type: PrimitiveType::TriangleStrip.into(),
                 vertex_start: 5,
                 vertex_count: 3,
                 instance_count: 2,
@@ -2164,7 +2164,7 @@ fn indexed_and_patch_draws_read_back_what_was_set() {
         assert_eq!(
             render_command(&made, 0).draw,
             Some(IndirectDraw::IndexedPrimitives {
-                primitive_type: PrimitiveType::LineStrip,
+                primitive_type: PrimitiveType::LineStrip.into(),
                 index_count: 6,
                 index_type: IndexType::UInt16,
                 index_buffer: at(&indices, 8),

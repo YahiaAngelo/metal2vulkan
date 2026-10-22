@@ -78,6 +78,7 @@ use super::pipeline::{
 };
 use super::released_programs::{KeptProgram, KeptPrograms};
 use super::render::{index_size, DrawProblem};
+use super::render_values::DrawPrimitiveType;
 use super::resource_ids::{records_placement, HolderThen, IdPlacement, ResourceId, StateKind};
 use super::unique_identifier::{degrade_identifier, state_value_degradation, UniqueIdentifier};
 use super::values::{Origin, Region, Size};
@@ -596,6 +597,7 @@ impl Device {
             unforeseen: Mutex::new(Vec::new()),
             cpu_writes: AtomicU64::new(0),
             barriers: AtomicBool::new(false),
+            nines: AtomicBool::new(false),
             overflow,
             tail: Mutex::default(),
             gpu_writes: Arc::default(),
@@ -960,6 +962,9 @@ struct IcbShared {
     /// The CPU set a render command's barrier: an execution's render pass instance may split at
     /// it (`render/executions.rs`), for good.
     barriers: AtomicBool,
+    /// The CPU drew primitive type 9 in a render command: an execution looks for it among the
+    /// commands it runs ([`nine_among`](IndirectCommandBuffer::nine_among)), for good.
+    nines: AtomicBool,
     /// The buffer slots past the record's, where the descriptor counts more, and a compute
     /// buffer's threadgroup lengths 31 to 37 ([`Overflow`]).
     overflow: Option<Overflow>,
@@ -2401,6 +2406,35 @@ impl IndirectCommandBuffer {
         self.0.barriers.load(Ordering::Acquire)
     }
 
+    /// How the first draw of primitive type 9 among commands `range` (inside the size), as their
+    /// records stand, fails the command buffer that executes them, as Metal's GPU fails it there
+    /// (`DrawPrimitiveType::Nine`; measured through indirect command buffers too): `None` where
+    /// none draws one that fails it, and at once where the CPU never drew one. A kernel writes no
+    /// such draw (it writes points).
+    pub(super) fn nine_among(&self, range: Range<u32>) -> Result<Option<NineDraw>, Error> {
+        if !self.0.nines.load(Ordering::Acquire) {
+            return Ok(None);
+        }
+        let nine = DrawPrimitiveType::Nine.raw() as u32;
+        for index in range {
+            match self.record(index)?.action {
+                Action::DrawPrimitives {
+                    primitive_type,
+                    vertex_count,
+                    instance_count,
+                    ..
+                } if primitive_type == nine && vertex_count >= 3 && instance_count > 0 => {
+                    return Ok(Some(NineDraw::Hangs));
+                }
+                Action::DrawIndexedPrimitives { primitive_type, .. } if primitive_type == nine => {
+                    return Ok(Some(NineDraw::Faults));
+                }
+                _ => {}
+            }
+        }
+        Ok(None)
+    }
+
     /// Whether a render command's record may hold a barrier: the CPU set one
     /// ([`held_a_barrier`](Self::held_a_barrier)), or the GPU may have written the records (a
     /// kernel's `set_barrier`, or a blit copy of a command that holds one).
@@ -3046,7 +3080,7 @@ fn dispatch_of(action: &Action) -> Option<IndirectDispatch> {
 }
 
 /// A record's draw, of `action`: none for an action that draws nothing, and for a draw of a
-/// primitive type or an index type Metal has no value for (a kernel's write), which runs nothing.
+/// primitive type or an index type Metal has no value for, which runs nothing.
 fn draw_of(action: &Action) -> Option<IndirectDraw> {
     let size =
         |[width, height, depth]: [u32; 3]| Size::new(width.into(), height.into(), depth.into());
@@ -3057,7 +3091,7 @@ fn draw_of(action: &Action) -> Option<IndirectDraw> {
             vertex_count,
             instance_count,
             base_instance,
-        } => PrimitiveType::try_from(primitive_type)
+        } => DrawPrimitiveType::from_raw(primitive_type.into())
             .ok()
             .map(|primitive_type| IndirectDraw::Primitives {
                 primitive_type,
@@ -3074,7 +3108,7 @@ fn draw_of(action: &Action) -> Option<IndirectDraw> {
             instance_count,
             base_vertex,
             base_instance,
-        } => PrimitiveType::try_from(primitive_type)
+        } => DrawPrimitiveType::from_raw(primitive_type.into())
             .ok()
             .zip(IndexType::try_from(index_type).ok())
             .map(
@@ -3939,9 +3973,13 @@ impl IndirectRenderCommand {
     /// `drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:`: the command draws
     /// `vertex_count` vertices of `primitive_type` from `vertex_start`, `instance_count` times
     /// from `base_instance`, each value's low 32 bits, which the record holds (Metal takes larger
-    /// values; what it keeps of them is not measured: its getter answers an object). A draw of no
-    /// vertices or no instances runs nothing, as plain Metal runs it where its validation stops
-    /// the call ("instanceCount(0) must be non-zero"). The records of every render buffer but one
+    /// values; what it keeps of them is not measured: its getter answers an object). A type is a
+    /// public one or one of Metal's private ones ([`DrawPrimitiveType`]), which an execution draws
+    /// as an encoder's draw of it draws, type 9 failing the command buffer so where an execution
+    /// of a range given at its call finds it there (the M3 Max, macOS 27.0.1: types 5 to 9 drew
+    /// and failed as the encoder's draws of them, direct and indexed). A draw of no vertices or
+    /// no instances runs nothing, as plain Metal runs it where its validation stops the call
+    /// ("instanceCount(0) must be non-zero"). The records of every render buffer but one
     /// of mesh draws alone hold it: on a buffer whose command types lack `DRAW` it runs as on its
     /// own, as plain Metal runs it, where Metal's validation stops the call ("drawPrimitives is not
     /// enabled on this indirect command buffer"). Refused (`Invalid`): a buffer of mesh draws alone
@@ -3949,7 +3987,7 @@ impl IndirectRenderCommand {
     /// of either mesh kind and of both, the encoder's pipeline inherited).
     pub fn draw_primitives(
         &self,
-        primitive_type: PrimitiveType,
+        primitive_type: impl Into<DrawPrimitiveType>,
         vertex_start: u64,
         vertex_count: u64,
         instance_count: u64,
@@ -3959,39 +3997,44 @@ impl IndirectRenderCommand {
         if self.of_compute() {
             return Ok(());
         }
+        let primitive_type = primitive_type.into();
         let action = Action::DrawPrimitives {
-            primitive_type: primitive_type.as_raw(),
+            primitive_type: primitive_type.raw() as u32,
             vertex_start: vertex_start as u32,
             vertex_count: vertex_count as u32,
             instance_count: instance_count as u32,
             base_instance: base_instance as u32,
         };
         self.check_draw(CALL, IndirectCommandType::DRAW, &action)?;
-        self.edit(CALL, RecordField::Action(action), None)
+        self.edit(CALL, RecordField::Action(action), None)?;
+        self.drew(primitive_type);
+        Ok(())
     }
 
     /// `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:
     /// baseVertex:baseInstance:`: the command draws `index_count` indices of `index_type` from
     /// `index_buffer_offset` of `index_buffer`, `instance_count` times from `base_instance`, each
-    /// index plus `base_vertex`. The record holds the buffer as one address (its `gpu_address`
-    /// plus the offset's low 32 bits, as Metal keeps it; its validation checks the whole offset, as
-    /// the refusal below does), which an execution resolves against the encoder's resident
-    /// resources (`render/executions.rs`), and each value's low 32 bits, `base_vertex` as a signed
-    /// one: Metal keeps a base vertex's so (a count past 32 bits always runs past the buffer, which
-    /// is refused). It runs as on its own on a buffer of patch draws, whose records hold it, as
-    /// plain Metal runs it, where Metal's validation stops a buffer whose command types lack
-    /// `DRAW_INDEXED`. A draw of no indices or no instances runs nothing, and the indices are read
-    /// from the offset rounded down to a multiple of the index size, as plain Metal runs them where
-    /// its validation stops the call (`idx_count_zero`, `idx_instances_zero`; 32-bit indices at
-    /// offset 2 and 16-bit ones at 1 drew those at 0). Refused (`Invalid`): a buffer of draws of
-    /// primitives alone, whose records cannot hold it (`CommandType`; plain Metal's GPU faults), or
-    /// of mesh draws alone (`CommandType`; Metal's process ends), and, as Metal's
-    /// validation stops it, indices past the buffer's length from that offset (`IndexBufferRange`,
-    /// of the whole count; plain Metal draws from whatever memory follows), and an index buffer of
-    /// another device.
+    /// index plus `base_vertex`, of a public primitive type or a private one, as
+    /// [`draw_primitives`](Self::draw_primitives) says (type 9 faults the command buffer, of any
+    /// index or instance count, as the encoder's draw does). The record holds the buffer as one
+    /// address (its `gpu_address` plus the offset's low 32 bits, as Metal keeps it; its validation
+    /// checks the whole offset, as the refusal below does), which an execution resolves against
+    /// the encoder's resident resources (`render/executions.rs`), and each value's low 32 bits,
+    /// `base_vertex` as a signed one: Metal keeps a base vertex's so (a count past 32 bits always
+    /// runs past the buffer, which is refused). It runs as on its own on a buffer of patch draws,
+    /// whose records hold it, as plain Metal runs it, where Metal's validation stops a buffer
+    /// whose command types lack `DRAW_INDEXED`. A draw of no indices or no instances runs nothing
+    /// (but type 9's), and the indices are read from the offset rounded down to a multiple of the
+    /// index size, as plain Metal runs them where its validation stops the call
+    /// (`idx_count_zero`, `idx_instances_zero`; 32-bit indices at offset 2 and 16-bit ones at 1
+    /// drew those at 0). Refused (`Invalid`): a buffer of draws of primitives alone, whose records
+    /// cannot hold it (`CommandType`; plain Metal's GPU faults), or of mesh draws alone
+    /// (`CommandType`; Metal's process ends), and, as Metal's validation stops it, indices past
+    /// the buffer's length from that offset (`IndexBufferRange`, of the whole count; plain Metal
+    /// draws from whatever memory follows), and an index buffer of another device.
     pub fn draw_indexed_primitives(
         &self,
-        primitive_type: PrimitiveType,
+        primitive_type: impl Into<DrawPrimitiveType>,
         index_count: u64,
         index_type: IndexType,
         index_buffer: &Buffer,
@@ -4001,8 +4044,9 @@ impl IndirectRenderCommand {
         base_instance: u64,
     ) -> Result<(), Error> {
         const CALL: &str = "draw_indexed_primitives";
+        let primitive_type = primitive_type.into();
         let action = Action::DrawIndexedPrimitives {
-            primitive_type: primitive_type.as_raw(),
+            primitive_type: primitive_type.raw() as u32,
             index_count: index_count as u32,
             index_type: index_type.as_raw(),
             index_buffer: index_buffer.gpu_address().0 + u64::from(index_buffer_offset as u32),
@@ -4030,7 +4074,17 @@ impl IndirectRenderCommand {
                 }),
             ));
         }
-        self.edit(CALL, RecordField::Action(action), None)
+        self.edit(CALL, RecordField::Action(action), None)?;
+        self.drew(primitive_type);
+        Ok(())
+    }
+
+    /// The command now draws `primitive_type`: a draw of type 9 marks its buffer for the
+    /// executions that look for one ([`IndirectCommandBuffer::nine_among`]).
+    fn drew(&self, primitive_type: DrawPrimitiveType) {
+        if primitive_type == DrawPrimitiveType::Nine {
+            self.icb.0.nines.store(true, Ordering::Release);
+        }
     }
 
     /// `drawPatches:patchStart:patchCount:patchIndexBuffer:patchIndexBufferOffset:instanceCount:
@@ -4627,14 +4681,24 @@ impl EncodedRenderCommand {
     }
 }
 
+/// How a draw of primitive type 9 among an execution's commands fails its command buffer
+/// ([`IndirectCommandBuffer::nine_among`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NineDraw {
+    /// A direct draw of 3 vertices or more: Metal's GPU hangs at it.
+    Hangs,
+    /// An indexed draw: Metal's GPU faults at it.
+    Faults,
+}
+
 /// A render command's draw.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IndirectDraw {
     /// `drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:`.
     Primitives {
-        /// `primitiveType`.
-        primitive_type: PrimitiveType,
+        /// `primitiveType`: a public type or one of Metal's private ones.
+        primitive_type: DrawPrimitiveType,
         /// `vertexStart`.
         vertex_start: u64,
         /// `vertexCount`.
@@ -4647,8 +4711,8 @@ pub enum IndirectDraw {
     /// `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:
     /// baseVertex:baseInstance:`: the index buffer as the address of its first index.
     IndexedPrimitives {
-        /// `primitiveType`.
-        primitive_type: PrimitiveType,
+        /// `primitiveType`: a public type or one of Metal's private ones.
+        primitive_type: DrawPrimitiveType,
         /// `indexCount`.
         index_count: u64,
         /// `indexType`.

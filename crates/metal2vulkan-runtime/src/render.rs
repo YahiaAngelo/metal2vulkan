@@ -6937,8 +6937,8 @@ impl RenderLowering {
 
     /// A draw of primitive type 9 (`DrawPrimitiveType::Nine`), by `call`, `empty` where it has
     /// no vertices, indices or instances: it records nothing, and fails the command buffer as
-    /// `failure` says, as Metal's GPU does: a hang fails it from the encoder on and holds it
-    /// (`command_buffer/hang.rs`), a fault fails the encoder alone. Checked as a draw of a public
+    /// `failure` says, as Metal's GPU does: a hang or a fault fails it from the encoder on and
+    /// holds it (`command_buffer/hang.rs`). Checked as a draw of a public
     /// type is (a pipeline state set, a draw kind it takes); under a tessellation pipeline it
     /// draws nothing, as a public type's draw does there.
     fn draw_nine(

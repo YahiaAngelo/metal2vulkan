@@ -28,8 +28,12 @@
 //! making that Metal's GPU causes: [`CommandBufferError::PageFault`] as the runtime fails an
 //! encoder Metal's GPU faults (a draw of primitive type 9 over indices, a render encoder's
 //! execution of an indirect command buffer under a state it cannot inherit), and
-//! [`CommandBufferError::GpuHang`]. A failure the driver relays is the driver's own queue's,
-//! which Metal counts itself under MoltenVK. From the completion of the second one, before its
+//! [`CommandBufferError::GpuHang`]; and one a program commits as failed in their place
+//! (`CommandBuffer::commit_failed`, [`CommandBufferError::Injected`] of Metal's code of either,
+//! 3 or 2), which stands for what Metal's GPU caused. Of the other codes it counts none: a
+//! victim's (1) does not count on Metal, and the rest are not caused GPU errors or not measured.
+//! A failure the driver relays is the driver's own queue's, which Metal counts itself under
+//! MoltenVK. From the completion of the second one, before its
 //! status reads final, the queue is revoked: a command buffer committed on it then fails with
 //! [`CommandBufferError::AccessRevoked`] as its commit's work, from its first encoder, its event
 //! signals dropped (`commit_now`). One committed before runs as committed, whatever its event
@@ -50,12 +54,9 @@ pub(crate) struct QueueErrors {
 
 impl QueueErrors {
     /// A command buffer of the queue completes with `error` (`None` for none), before its status
-    /// reads final: counted where the GPU caused it.
+    /// reads final: counted where the GPU caused it ([`caused`]).
     pub(super) fn completed(&self, error: Option<CommandBufferError>) {
-        if matches!(
-            error,
-            Some(CommandBufferError::PageFault | CommandBufferError::GpuHang)
-        ) {
+        if error.is_some_and(caused) {
             self.caused.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -64,5 +65,19 @@ impl QueueErrors {
     /// with a caused error completed.
     pub(super) fn revoked(&self) -> bool {
         self.caused.load(Ordering::SeqCst) >= REVOKING
+    }
+}
+
+/// Whether a command buffer that completed with `error` counts against its queue (the module
+/// docs): a page fault or a hang, the runtime's or one a program injected in its place by its
+/// Metal code.
+pub(crate) fn caused(error: CommandBufferError) -> bool {
+    let of = |caused: CommandBufferError| caused.metal_code();
+    match error {
+        CommandBufferError::PageFault | CommandBufferError::GpuHang => true,
+        CommandBufferError::Injected(code) => {
+            code == of(CommandBufferError::PageFault) || code == of(CommandBufferError::GpuHang)
+        }
+        _ => false,
     }
 }

@@ -322,7 +322,12 @@ impl ScissorRect {
 /// vertex mode 0 and its last under the last-vertex mode, and `[[vertex_id]]`,
 /// `[[base_vertex]]`, `[[instance_id]]` and `[[base_instance]]` are those of the public draw
 /// of the same arguments. Value 9 ([`DrawPrimitiveType::Nine`]) draws nothing and fails its
-/// command buffer as Metal's GPU does; the values past it are undefined.
+/// command buffer as Metal's GPU does; the values past it are undefined. The CPU's draws of an
+/// indirect render command take each value too, and an execution draws or fails it as the
+/// encoder's draw does ([`IndirectRenderCommand::draw_primitives`]); a kernel's draw of a value
+/// past the header's draws points, as Metal's encoding writes it so (the M3 Max, macOS 27.0.1).
+///
+/// [`IndirectRenderCommand::draw_primitives`]: crate::IndirectRenderCommand::draw_primitives
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DrawPrimitiveType {

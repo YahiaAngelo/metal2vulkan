@@ -93,9 +93,14 @@
 //! - **A dropped range** rewrites its anchor's step as `PredicationOp::Drop` and every step since
 //!   as `PredicationOp::Hold` (or, anchored at the unit's start, records a `Drop` step at the
 //!   record), so its gated dispatches run nothing; the next record first records a
-//!   `PredicationOp::Resume`. A range anchored at the unit's start whose work the runtime ran
-//!   ungated (the unit's dispatches before its first record) cannot be dropped: refused
-//!   ([`RuntimeGap::PredicationDropsUngatedWork`]).
+//!   `PredicationOp::Resume`. The unit's dispatches before its first record run ungated, so a
+//!   program that never records pays nothing for predication; where that first record is
+//!   unbalanced and such dispatches came before it, what the unit's encoders recorded before the
+//!   record is left out of the command buffer's work instead: its earlier encoders' parts and
+//!   what the open encoder recorded so far (its `VkCommandBuffer`s and the work it left apart)
+//!   are never submitted, as a failed encoder's are, their fences' waits kept, and the open
+//!   encoder forgets the textures it shadows unread and goes on, from the record's `Drop` step,
+//!   in a part of its own (`EncoderCore::leave_out_recorded`).
 //! - **A block open where its unit ends**: each compute encoder that ends with a live block open
 //!   records a `PredicationOp::UnitEnd` step, which writes whether the counter skips into the
 //!   unit's check word; where the unit ended so, a set word fails the command buffer at its
@@ -134,7 +139,7 @@ use super::compute::{ComputeCommandEncoder, EncoderState};
 use super::deferred::Deferred;
 use super::degradation::Degradation;
 use super::encoder::EncoderCore;
-use super::error::{internal, Error, RuntimeGap};
+use super::error::{internal, Error};
 use super::indirect_command_buffer::IndirectCommandBuffer;
 use super::owned_kernel::{OwnedBinds, OwnedKernel, OwnedModule, OwnedSet};
 use super::residency::Residency;
@@ -178,6 +183,10 @@ pub(super) struct Predication {
     /// The steps and gated dispatches recorded so far: what a loop's copies lay down is counted
     /// from it ([`copies_of`]).
     laid: u64,
+    /// An unbalanced record just dropped what its unit's encoders recorded before it, from the
+    /// encoder at this place among the command buffer's ended encoders on, which the open encoder
+    /// leaves out of the command buffer's work ([`take_left_out`](Self::take_left_out)).
+    left_out: Option<usize>,
 }
 
 /// The laying of a unit's outermost loop: its pieces in encoding order (`command_buffer/rerun.rs`),
@@ -413,6 +422,8 @@ struct IndirectRun {
 
 /// One unit of predication.
 struct Unit {
+    /// The place among the command buffer's ended encoders its first compute encoder takes.
+    first: usize,
     /// The place among the command buffer's ended encoders its last compute encoder takes.
     place: usize,
     /// The event waits and signals encoded before it.
@@ -506,6 +517,7 @@ struct Run {
 impl Unit {
     fn new(place: usize, events: (usize, usize), dispatch_type: DispatchType) -> Unit {
         Unit {
+            first: place,
             place,
             events,
             dispatch_type,
@@ -723,9 +735,9 @@ impl Predication {
     }
 
     /// An unbalanced record (the module docs): its range drops from the anchor on; the step to
-    /// record, where the range starts at the unit's start. Refused, changing nothing: a range from
-    /// the unit's start over dispatches the runtime ran ungated
-    /// ([`RuntimeGap::PredicationDropsUngatedWork`]).
+    /// record, where the range starts at the unit's start. Where the unit's dispatches before the
+    /// record ran ungated, what its encoders recorded so far is left out
+    /// ([`take_left_out`](Self::take_left_out)).
     fn unbalanced(
         &mut self,
         uploads: &mut Uploads,
@@ -743,16 +755,23 @@ impl Predication {
             range.dropping = true;
             return Ok(None);
         }
-        if range.work {
-            return Err(Error::NotImplemented(
-                RuntimeGap::PredicationDropsUngatedWork,
-            ));
-        }
         let record = self.step(uploads, device, (None, None), |counter| {
             PredicationStep::new(counter, PredicationOp::Drop)
         })?;
-        self.unit()?.range.dropping = true;
+        let unit = self.unit()?;
+        unit.range.dropping = true;
+        let left_out = unit.range.work.then_some(unit.first);
+        self.left_out = left_out.or(self.left_out);
         Ok(Some(record))
+    }
+
+    /// Where the last record dropped what its unit's encoders recorded before it, dispatches the
+    /// runtime ran ungated among it (the module docs): the place of the unit's first encoder
+    /// among the command buffer's ended encoders. The open encoder leaves out of the command
+    /// buffer's work every part of those encoders and what it recorded itself so far, before the
+    /// record's step.
+    pub(super) fn take_left_out(&mut self) -> Option<usize> {
+        self.left_out.take()
     }
 
     /// A Start with no block open, before its own step: where a range is dropping, the `Resume`
@@ -1412,7 +1431,9 @@ impl ComputeCommandEncoder {
     }
 
     /// Run `record` on the command buffer's predication with its arena, under its lock, the
-    /// encoder's dispatches since its last record noted first.
+    /// encoder's dispatches since its last record noted first. Where it dropped what the unit's
+    /// encoders recorded before it, dispatches that ran ungated among it, that is left out of the
+    /// command buffer's work (`Predication::take_left_out`), before what it returns is recorded.
     fn predication<T>(
         &mut self,
         record: impl FnOnce(&mut Predication, &mut Uploads, &Device) -> Result<T, Error>,
@@ -1424,13 +1445,24 @@ impl ComputeCommandEncoder {
         self.captures().worked = false;
         let core = self.core();
         let device = core.device().clone();
-        let mut state = core.command_buffer().state();
-        let state = &mut *state;
-        state.predicated = true;
-        if let Some(unit) = &mut state.predication.unit {
-            unit.note_work(worked);
+        let (recorded, left_out) = {
+            let mut state = core.command_buffer().state();
+            let state = &mut *state;
+            state.predicated = true;
+            if let Some(unit) = &mut state.predication.unit {
+                unit.note_work(worked);
+            }
+            let recorded = record(&mut state.predication, &mut state.uploads, &device)?;
+            let left_out = state.predication.take_left_out();
+            if let Some(first) = left_out {
+                state.leave_out_ended(first);
+            }
+            (recorded, left_out.is_some())
+        };
+        if left_out {
+            self.core().leave_out_recorded()?;
         }
-        record(&mut state.predication, &mut state.uploads, &device)
+        Ok(recorded)
     }
 
     /// The encoder dispatched, or executed an indirect command buffer's commands: work Metal
@@ -1726,9 +1758,7 @@ impl ComputeCommandEncoder {
     /// Metal reads memory unrelated to the buffer, which the runtime reads as zero, announced
     /// (`Degradation::PredicationWordPastBuffer`).
     ///
-    /// Refused, recording nothing: a buffer of another device (`Invalid`); a nil buffer with no
-    /// block open whose range holds the unit's dispatches from before its first record
-    /// (`NotImplemented(PredicationDropsUngatedWork)`).
+    /// Refused, recording nothing: a buffer of another device (`Invalid`).
     pub fn encode_start_if(
         &mut self,
         buffer: Option<&Buffer>,
@@ -1778,9 +1808,6 @@ impl ComputeCommandEncoder {
     /// `encodeEndIf`, run where its condition failed (the module docs). A second Else in one If, or
     /// an Else on a loop, kills the outermost open block, as Metal's does; with no block open it is
     /// an unbalanced record, as Metal's is.
-    ///
-    /// Refused, recording nothing: no block open where its range holds the unit's dispatches from
-    /// before its first record (`NotImplemented(PredicationDropsUngatedWork)`).
     pub fn encode_start_else(&mut self) -> Result<(), Error> {
         let result = self.encode_start_else_uncounted();
         self.counted(result)
@@ -1802,8 +1829,6 @@ impl ComputeCommandEncoder {
     /// outermost open block and answers `NO`; inside a block a misused record killed, `NO` but
     /// for the End that closes that block; with no block open it is an unbalanced record,
     /// answering `NO` (the module docs).
-    ///
-    /// Refused, recording nothing: as [`encode_start_else`](Self::encode_start_else) refuses.
     pub fn encode_end_if(&mut self) -> Result<bool, Error> {
         let result = self.encode_end_if_uncounted();
         self.counted(result)
@@ -1875,7 +1900,7 @@ impl ComputeCommandEncoder {
 
     /// `encodeStartDoWhile` (SPI): the commands encoded after it, up to its `encodeEndDoWhile`,
     /// run, and again while that End's condition holds after each run, as
-    /// [`encode_start_while`](Self::encode_start_while)'s run, laid down and refused as there.
+    /// [`encode_start_while`](Self::encode_start_while)'s run, laid down as there.
     pub fn encode_start_do_while(&mut self) -> Result<(), Error> {
         let result = self.encode_start_do_while_uncounted();
         self.counted(result)
@@ -1890,8 +1915,6 @@ impl ComputeCommandEncoder {
     /// `encodeEndWhile` (SPI): closes the open While loop, answering Metal's `YES`; on another
     /// block it kills the outermost open block and answers `NO`; with no block open it is an
     /// unbalanced record, answering `NO` (the module docs).
-    ///
-    /// Refused, recording nothing: as [`encode_start_else`](Self::encode_start_else) refuses.
     pub fn encode_end_while(&mut self) -> Result<bool, Error> {
         let result = self.encode_end_while_uncounted();
         self.counted(result)

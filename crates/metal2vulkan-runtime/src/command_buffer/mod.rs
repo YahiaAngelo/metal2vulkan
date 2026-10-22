@@ -1394,6 +1394,18 @@ impl State {
         self.failed_at_commit = Some(failure.encoders);
     }
 
+    /// A command-predication record dropped what the ended encoders from `first` on recorded,
+    /// its unit's earlier encoders (`predication.rs`): each of their parts runs nothing, as a
+    /// failed encoder's ([`fail_part`](Self::fail_part)).
+    pub(super) fn leave_out_ended(&mut self, first: usize) {
+        let State {
+            recorded, retained, ..
+        } = self;
+        for part in recorded.iter_mut().filter(|part| part.encoder >= first) {
+            State::fail_part(part, retained);
+        }
+    }
+
     /// A failed encoder's recorded `part` runs nothing: its segments (with their recordings),
     /// sparse updates and writes into ASTC carriers go to `retained`, released with what the
     /// command buffer retained without this lock, its `VkCommandBuffer`s are left unsubmitted,
