@@ -24,7 +24,7 @@
 //! ([`UNPACKED_FILL`]), texture buffers' fills reading bytes past their pattern's copies in
 //! `texture_buffer_fills` ([`TEXTURE_BUFFER_FILL`]), draws of points no state sizes in
 //! `topology_classes` ([`UNSIZED_POINTS`]),
-//! resource IDs ([`RESOURCE_IDS`], [`UNLISTED`]),
+//! resource IDs ([`UNLISTED`]),
 //! indirect command buffers' commands naming a released state ([`RELEASED_STATES`]) and their host
 //! steps ([`HOST_STEPS`]), indirect dispatches' host reads ([`INDIRECT_DISPATCHES`]), indexed draws
 //! past their index buffer ([`INDEX_FETCHES`]), depth twins ([`TWINS`]) and uploads into depth
@@ -193,7 +193,7 @@ use super::rate_mapped_passes::ZERO_LAYER_AFTER_RELEASE;
 use super::rebind_reach::REBOUND_USES;
 use super::resolves::{color_pass, lane, quiet, MIXED_RESOLVES, ONE};
 use super::resource_ids::{
-    DELAYED_DEALLOCATORS, OWN_COPIES, PAST_CAPACITY, PAST_LAYOUT_SUPPORT, RESOURCE_IDS, UNLISTED,
+    DELAYED_DEALLOCATORS, OWN_COPIES, PAST_CAPACITY, PAST_LAYOUT_SUPPORT, UNLISTED,
     UNNAMED_SHADOWS, UNVIEWABLE,
 };
 use super::rotated_textures::ROTATED_LOADS;
@@ -471,7 +471,6 @@ fn every_kind_has_a_site_a_lane_test_takes() {
         &UNPACKED_FILL,
         &TEXTURE_BUFFER_FILL,
         &FROM_HOST,
-        &RESOURCE_IDS,
         &UNLISTED,
         &RELEASED_STATES,
         &HOST_STEPS,

@@ -489,16 +489,6 @@ impl Device {
                 )
             });
         }
-        if shared.sampler_tables.load(Ordering::Acquire) > 0 {
-            self.degrade(Degradation::ResourceIdTakeover, || {
-                (
-                    format!("sampler state made at resource ID {id}"),
-                    "a committed command buffer that has not completed lists the argument \
-                     samplers as it committed, which this state is not among"
-                        .to_owned(),
-                )
-            });
-        }
         Ok(state)
     }
 

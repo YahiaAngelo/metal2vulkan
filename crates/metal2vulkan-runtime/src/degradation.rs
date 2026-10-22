@@ -793,22 +793,15 @@ degradations! {
         ImplementationDefinedReconvergence = "implementation-defined-reconvergence", Precision,
             "simdgroup operations after divergent control flow can see other lanes active than \
              Metal's";
-        /// A function can read a resource ID whose holder the runtime cannot give it as Metal's
-        /// command buffer reads it (`resource_ids.rs`, `sampler.rs`): a sampler state was made
-        /// while a committed command buffer not yet completed lists the argument samplers as it
-        /// committed. A texture's ID reaches its holder as the command buffer runs
-        /// (`heap_sets.rs`); a state live as a command buffer commits that its command's plan
-        /// cannot list fails it (`UnlistedArgumentSampler`).
-        ResourceIdTakeover = "resource-id-takeover", Precision,
-            "a function reading the ID can see an earlier holder of it, or the neutral \
-             resource, where Metal's sees the resource holding it as the command buffer runs";
         /// A sampler state whose element no set-1 sampler array can hold, as more states live
         /// than it holds (each takes the lowest element no live state holds, `resource_ids.rs`):
         /// the device's, as the state is made, or a pipeline's, as a command lists the argument
-        /// samplers or its command buffer lists them again as it commits (`sampler.rs`,
-        /// `compute.rs`, `sampler_listing.rs`). Or, as a command buffer commits, more states live
-        /// than a command's plan's sampler tables hold, or one of a shape its checks refuse
-        /// (`sampler_listing.rs`). A command buffer whose command lists the argument samplers then
+        /// samplers or its command buffer lists them again as it commits or as the command's batch
+        /// is submitted (`sampler.rs`, `compute.rs`, `sampler_listing.rs`). Or, as a command
+        /// buffer commits or the batch is submitted, more states live than a command's plan's
+        /// sampler tables hold, or one of a shape its checks refuse (`sampler_listing.rs`): at the
+        /// submission, announced on the device's scheduler thread, outside any program call. A
+        /// command buffer whose command lists the argument samplers then
         /// fails (`CommandBufferError::UnlistedArgumentSampler`), whether or not its functions
         /// reach the state; each is counted (`WorkCounts::unlisted_argument_sampler_failures`).
         UnlistedArgumentSampler = "unlisted-argument-sampler", Precision,
@@ -2316,6 +2309,16 @@ impl Degradation {
             "metal2vulkan-degrade-unrestored-first-move-bytes",
             "none: a texture over a no-copy buffer's host pages is a shadow, which takes no first \
              move over them",
+        ),
+        (
+            // A sampler state made while a committed command buffer that listed the argument
+            // samplers had not completed announced it. Each batch's submission lists the states
+            // live then, so a state made before the wait that orders its ID's write is the one
+            // its function reads, as Metal's.
+            "metal2vulkan-degrade-resource-id-takeover",
+            "none: a command reads the sampler states live as its batch is submitted, so a state \
+             made before the event wait that orders its ID's write is the one its function reads, \
+             as on Metal",
         ),
     ];
 

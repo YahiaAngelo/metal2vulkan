@@ -70,7 +70,7 @@ use super::function_table::TableSnapshot;
 use super::gpu_pools::{IndexPool, PoolKind, PoolLease};
 use super::gpu_time::{self, KernelTimes, Life, Placement, Stamped, Times};
 use super::heap::Heap;
-use super::heap_sets::HeapUse;
+use super::heap_sets::{self, HeapUse};
 use super::live_buffers::LiveTable;
 use super::pipeline::budget::Urgency;
 use super::pipeline::kept::StepNumbers;
@@ -83,7 +83,7 @@ use super::render::EndInFlight;
 use super::replay::Replay;
 use super::residency::Residency;
 use super::resource::{ObjectId, ResourceKey};
-use super::sampler_listing::SamplerListing;
+use super::sampler_listing::{Relisted, SamplerListing};
 use super::scheduler::{BatchSync, StepWaits};
 use super::spares::CommandPool;
 use super::sparse::encoder::SparseUpdate;
@@ -562,7 +562,8 @@ pub(super) struct State {
     pub(super) heaps: HeapUse,
     /// Its commands' function-table snapshots, written again as it commits.
     table_snapshots: Vec<TableSnapshot>,
-    /// Its commands' sampler tables, listed again as it commits (`sampler_listing.rs`).
+    /// Its commands' sampler tables, listed again as it commits and as the batch holding each
+    /// command's encoder is submitted, until then (`sampler_listing.rs`).
     sampler_listings: Vec<SamplerListing>,
     /// As it committed, some command's plan could not list the sampler states live then
     /// (`sampler_listing.rs`), or a command a host step recorded after the commit left a live
@@ -1102,14 +1103,72 @@ impl State {
         }
     }
 
-    /// Keep a command's sampler tables to list the argument samplers again as the command buffer
-    /// commits (`sampler_listing.rs`). A command a host step records after the commit lists the
+    /// Keep a command's sampler tables, of the open encoder's command, to list the argument
+    /// samplers again as the command buffer commits and as the batch holding the encoder is
+    /// submitted (`sampler_listing.rs`). A command a host step records after the commit lists the
     /// states as they stand then, and one that leaves a live state out fails the command buffer
     /// (`State::unlisted_argument_sampler`).
-    pub(super) fn list_samplers(&mut self, listing: SamplerListing) {
+    pub(super) fn list_samplers(&mut self, mut listing: SamplerListing) {
         if self.status == CommandBufferStatus::NotEnqueued {
+            listing.at_encoder(self.open_encoder_place());
             self.sampler_listings.push(listing);
         }
+    }
+
+    /// The sampler tables kept from the `from`th on are of commands of the ended encoder at place
+    /// `encoder`: a segment recorded at the commit, from its encoder's logged work.
+    fn place_listings(&mut self, from: usize, encoder: usize) {
+        for listing in self.sampler_listings.iter_mut().skip(from) {
+            listing.at_encoder(encoder);
+        }
+    }
+
+    /// As the batch holding parts `range` of the ended encoders is submitted, before its
+    /// `vkQueueSubmit`: its commands' argument samplers listed again where a state was made or
+    /// went since they were (`sampler_listing.rs`), on a device whose heap sets take writes while
+    /// command buffers that bind them are pending; a command whose plan cannot list them fails
+    /// the command buffer as it completes (`CommandBufferError::UnlistedArgumentSampler`), and the
+    /// first such command's `unlisted-argument-sampler` notice comes back, for the caller to
+    /// announce once with no lock of the command buffer's held.
+    pub(super) fn list_samplers_at_submission(
+        &mut self,
+        device: &Device,
+        range: Range<usize>,
+    ) -> Result<Option<(String, String)>, Error> {
+        if self.sampler_listings.is_empty() {
+            return Ok(None);
+        }
+        let Some(last) = range.end.checked_sub(1).map(|at| self.recorded[at].encoder) else {
+            return Ok(None);
+        };
+        let due: Vec<SamplerListing> = self
+            .sampler_listings
+            .extract_if(.., |listing| listing.encoder() <= last)
+            .collect();
+        if !heap_sets::unused_while_pending(device) {
+            return Ok(None);
+        }
+        let changed = device.sampler_slots_changed();
+        let mut live = None;
+        let mut notice = None;
+        for mut listing in due.into_iter().filter(|listing| listing.stale(changed)) {
+            let live = live.get_or_insert_with(|| device.argument_samplers_at());
+            let at = (live.0, &live.1[..]);
+            match listing.relist(device, at, &mut self.heaps)? {
+                Relisted::Listed(samplers) if !samplers.is_empty() => {
+                    self.retained.push(Box::new(samplers));
+                }
+                Relisted::Listed(_) => {}
+                Relisted::Unlisted(unlisted) => {
+                    notice.get_or_insert(unlisted);
+                }
+            }
+        }
+        if notice.is_some() && !self.unlisted_argument_samplers {
+            self.unlisted_argument_samplers = true;
+            device.shared().counts.unlisted_argument_sampler_failure();
+        }
+        Ok(notice)
     }
 
     /// A command left a live sampler state out of its argument samplers, its variant's set-1
@@ -2298,7 +2357,7 @@ impl CommandBuffer {
     ) -> Result<(), Error> {
         let device = &self.0.device;
         let committed = Instant::now();
-        let (segments, failure, reached, hangs): (Vec<(Deferred, bool)>, _, _, _) = {
+        let (segments, places, failure, reached, hangs): (Vec<(Deferred, bool)>, Vec<usize>, _, _, _) = {
             let mut state = self.state();
             let refusal = match run {
                 CommitRun::AtCall => state.refusal(),
@@ -2362,17 +2421,17 @@ impl CommandBuffer {
             if let Some(residency) = &mut state.residency {
                 residency.sync_heaps();
             }
-            let segments = state
+            let (segments, places) = state
                 .recorded
                 .iter()
                 .filter(|recorded| runs(recorded.encoder))
-                .flat_map(|encoder| &encoder.segments)
-                .map(|segment| (segment.work.clone(), segment.needs_step()))
-                .collect();
+                .flat_map(|recorded| (recorded.segments.iter()).map(|at| (at, recorded.encoder)))
+                .map(|(segment, encoder)| ((segment.work.clone(), segment.needs_step()), encoder))
+                .unzip();
             // What of it the live buffers list once used, held weakly: the device's registries'
             // locks, which take no other, inside this one.
             let reached = state.reached(device.shared(), runs);
-            (segments, failure, reached, hangs)
+            (segments, places, failure, reached, hangs)
         };
         // What the commands of its encoders that run use is resident from its commit on, as
         // Metal's is: a no-copy buffer or a heap among it is reached unnamed from here, by its
@@ -2389,7 +2448,14 @@ impl CommandBuffer {
         // and announce degradations.
         let prepared: Result<Vec<_>, Error> = segments
             .iter()
-            .map(|(work, host)| work.prepare(self, *host))
+            .zip(&places)
+            .map(|((work, host), &encoder)| {
+                // The sampler tables its commands keep are its encoder's (`sampler_listing.rs`).
+                let before = self.state().sampler_listings.len();
+                let prepared = work.prepare(self, *host);
+                self.state().place_listings(before, encoder);
+                prepared
+            })
             .collect();
         let prepared = match prepared {
             Ok(prepared) => prepared,
@@ -2443,21 +2509,24 @@ impl CommandBuffer {
             }
             state.table_snapshots.clear();
             // Its commands' argument samplers, the states live now, before its heap sets stop
-            // taking its writes (`sampler_listing.rs`).
+            // taking its writes; each batch's submission lists them again where a state was made
+            // or went since (`sampler_listing.rs`).
             if !state.sampler_listings.is_empty() {
-                let live = device.argument_samplers();
+                let (changed, live) = device.argument_samplers_at();
                 let held = &mut *state;
-                for listing in &held.sampler_listings {
-                    match listing.relist(device, &live, &mut held.heaps)? {
-                        Some(samplers) if !samplers.is_empty() => {
+                for listing in &mut held.sampler_listings {
+                    match listing.relist(device, (changed, &live), &mut held.heaps)? {
+                        Relisted::Listed(samplers) if !samplers.is_empty() => {
                             held.retained.push(Box::new(samplers));
                         }
-                        Some(_) => {}
+                        Relisted::Listed(_) => {}
                         // Its plan cannot list them: the command buffer fails as it completes.
-                        None => held.unlisted_argument_samplers = true,
+                        Relisted::Unlisted(unlisted) => {
+                            device.degrade(Degradation::UnlistedArgumentSampler, || unlisted);
+                            held.unlisted_argument_samplers = true;
+                        }
                     }
                 }
-                held.sampler_listings.clear();
                 if held.unlisted_argument_samplers {
                     device.shared().counts.unlisted_argument_sampler_failure();
                 }

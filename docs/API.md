@@ -1505,15 +1505,10 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   implementation-defined on the device, where Metal's is maximal
   (`Reconvergence::ImplementationDefined`). Cost: simdgroup operations after divergent control flow
   can see other lanes active than Metal's.
-- `metal2vulkan-degrade-resource-id-takeover` (precision). `ResourceIdTakeover`: A function can read
-  a resource ID whose holder the runtime cannot give it as Metal's command buffer reads it: a
-  sampler state was made while a committed command buffer not yet completed lists the argument
-  samplers as it committed. Cost: a function reading the ID can see an earlier holder of it, or the
-  neutral resource, where Metal's sees the resource holding it as the command buffer runs.
 - `metal2vulkan-degrade-unlisted-argument-sampler` (precision). `UnlistedArgumentSampler`: A sampler
   state whose element no set-1 sampler array can hold, as more states live than it holds: the
   device's, as the state is made, or a pipeline's, as a command lists the argument samplers or its
-  command buffer lists them again as it commits. Cost: a command buffer whose commands list the
+  command buffer lists them again as it commits or as the command's batch is submitted. Cost: a command buffer whose commands list the
   argument samplers while the state lives fails (UnlistedArgumentSampler), where Metal's function
   reads the state through its ID.
 - `metal2vulkan-degrade-depth-twin` (performance). `DepthTwin`: A `Depth32Float` texture the program
@@ -2817,6 +2812,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   (Unsupported FramebufferFetch).
 - `metal2vulkan-degrade-unrestored-first-move-bytes` (retired). No replacement: a texture over a
   no-copy buffer's host pages is a shadow, which takes no first move over them.
+- `metal2vulkan-degrade-resource-id-takeover` (retired). No replacement: a command reads the
+  sampler states live as its batch is submitted, so a state made before the event wait that orders
+  its ID's write is the one its function reads, as on Metal.
 
 ## 10. Accepted differences
 

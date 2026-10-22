@@ -91,7 +91,7 @@ use metal2vulkan::error::RuntimeDriverDefect;
 use metal2vulkan::vk::DriverId;
 use relay::Flights;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::Instant;
 use submit::{Internal, OwnTimeline};
@@ -242,9 +242,6 @@ pub(super) struct DeviceShared {
     /// The immutable sampler sets of the variants' layouts, by their samplers
     /// (`pipeline/objects.rs`, `pipeline/content_keyed.rs`).
     pub(crate) sampler_sets: Mutex<crate::pipeline::objects::SamplerSets>,
-    /// The command buffers, not yet completed, whose dispatches list the argument samplers
-    /// (`heap_sets.rs`): a sampler state made under a new ID then is a degradation.
-    pub(super) sampler_tables: Arc<AtomicUsize>,
     /// The heap sets and the texture table every command buffer shares (`heap_sets.rs`). Its
     /// lock is taken before `resource_ids`', never under it.
     pub(super) heaps: Mutex<DeviceHeaps>,
@@ -1641,7 +1638,6 @@ impl Device {
             samplers: Mutex::default(),
             sampler_count: SamplerCount::new(limits.max_sampler_allocation_count),
             sampler_sets: Mutex::default(),
-            sampler_tables: Arc::default(),
             heaps: Mutex::default(),
             heap_nan_residue: NanResidue::default(),
             function_tables: Mutex::default(),

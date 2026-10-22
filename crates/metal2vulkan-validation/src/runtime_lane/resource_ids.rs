@@ -6,7 +6,7 @@
 //! M4 probe, residency part C), a heap's and a sparse heap's alike, and the neutral
 //! texture once that holder went. The kernel samples a 2-by-2 `RGBA32Uint` texture through a
 //! sampler held beside it, so its output is the texels it reached (a float twin of the case reads
-//! `RGBA16Float` linearly). Each degradation site of the kinds ([`RESOURCE_IDS`] and the device
+//! `RGBA16Float` linearly). Each degradation site of the kinds (the device
 //! heap's: [`UNVIEWABLE`], [`UNNAMED_SHADOWS`], [`PAST_CAPACITY`], [`PAST_LAYOUT_SUPPORT`],
 //! [`OWN_COPIES`]) is taken on a device of its own and announced once.
 
@@ -51,9 +51,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
-/// The kind this module's takeover tests take: one site per test, each on a device of its own.
-pub(super) const RESOURCE_IDS: [Degradation; 1] = [Degradation::ResourceIdTakeover];
 
 /// The kind [`a_sampler_state_at_any_id_is_listed`] takes where more sampler states live than
 /// the device's or the pipeline's sampler arrays hold (and expects absent elsewhere).
@@ -1745,30 +1742,53 @@ fn a_device_without_pending_writes_binds_a_copy_per_command_buffer() {
     );
 }
 
-/// A sampler state made to support argument buffers while a committed command buffer that lists
-/// the argument samplers waits is announced: its sampler table lists the states of its
-/// encoding.
+/// A sampler state that takes the ID a dispatch's argument buffer names, made after its command
+/// buffer committed and before the event it waits for is signalled, is reached through that ID, as
+/// Metal's function reaches it (the M3 Max under macOS 27.0.1: a state made after the commit,
+/// its ID written into the argument buffer before the signal, is the one sampled): the batch's
+/// submission lists the states live then. Nothing is announced. (On a device without
+/// `descriptorBindingUpdateUnusedWhilePending`, which no venue is, the commit's listing stands:
+/// `sampler_listing.rs`.)
 #[test]
-fn a_sampler_state_made_while_samplers_are_listed_degrades() {
+fn a_sampler_state_made_after_the_commit_before_its_wait_is_reached_by_its_id() {
     on_device(|device, messages| {
-        let sampling = Sampling::new(device);
-        let texture = sampling.texture();
+        let mut sampling = Sampling::new(device);
+        let key = *sampling
+            .case
+            .compute
+            .argument_buffer_samplers
+            .keys()
+            .next()
+            .unwrap();
+        let resource = &sampling.case.compute.argument_buffer_samplers[&key];
+        let mut descriptor = argument_sampler_descriptor(resource);
+        descriptor.normalized_coordinates = false;
+        assert_ne!(corner(), sampling.case.metal_output);
+        let texture = sampling.texture().clone();
         let event = device.new_shared_event().unwrap();
         let wait = EventRef::from(&event);
-        let (command_buffer, buffers) = sampling.encode(device, texture, Some(texture), Some(wait));
+        let (command_buffer, buffers) =
+            sampling.encode(device, &texture, Some(&texture), Some(wait));
         command_buffer.commit().unwrap();
+        let own = sampling.base.argument_samplers.remove(&key).unwrap();
+        let id = own.gpu_resource_id();
+        drop(own);
         let mut options = SamplerStateOptions::default();
         options.support_argument_buffers = true;
-        let mut descriptor = SamplerDescriptor::new();
-        descriptor.min_filter = SamplerMinMagFilter::Linear;
+        options.placement = IdPlacement::At(id);
         let state = device
             .new_sampler_state_with_options(&descriptor, options)
             .unwrap();
+        assert_eq!(state.gpu_resource_id(), id);
         event.set_signaled_value(1);
-        let output = sampling.output(&command_buffer, &buffers);
-        assert_eq!(output, sampling.case.metal_output);
+        assert_eq!(
+            sampling.output(&command_buffer, &buffers),
+            corner(),
+            "through ID {} after the commit",
+            id.0
+        );
+        sampling.announced(device, messages, &[]);
         drop(state);
-        sampling.announced(device, messages, &RESOURCE_IDS);
     });
 }
 
