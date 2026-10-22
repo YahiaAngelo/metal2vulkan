@@ -267,6 +267,50 @@ fn view_formats_follow_metals_measured_verdicts() {
     }
 }
 
+/// The one depth or stencil view of another format than its texture's that a texture of a format
+/// Metal makes takes is the stencil view of a combined texture (`X32Stencil8` of
+/// `Depth32FloatStencil8`), and its reverse, which `Texture::new_texture_view` stops: so the
+/// blits' and the CPU copies' refusal of another (`NotImplemented(Textures)`) meets no view.
+#[test]
+fn the_only_depth_view_of_another_format_is_the_stencil_view_of_a_combined_texture() {
+    use metal2vulkan::metal::format::is_depth_stencil;
+    use PixelFormat as P;
+    let (_, device) = lavapipe();
+    let depth: Vec<P> = P::ALL
+        .iter()
+        .copied()
+        .filter(|&pf| is_depth_stencil(pf))
+        .collect();
+    let mut made = Vec::new();
+    for &format in &depth {
+        let usage = TextureUsage::SHADER_READ | TextureUsage::PIXEL_FORMAT_VIEW;
+        let descriptor = TextureDescriptor {
+            pixel_format: format,
+            width: 8,
+            height: 8,
+            usage,
+            ..TextureDescriptor::default()
+        };
+        let Ok(layout) = descriptor.check(APPLE) else {
+            continue;
+        };
+        let source = ViewRecord::of_texture(&layout, usage, descriptor.swizzle);
+        for view in P::ALL.iter().copied().filter(|&pf| pf != format) {
+            let request = ViewRequest::of_format(&source, view);
+            if check_view(&source, &request, device.profile()).is_ok() {
+                made.push((format, view));
+            }
+        }
+    }
+    assert_eq!(
+        made,
+        [
+            (P::Depth32FloatStencil8, P::X32Stencil8),
+            (P::X32Stencil8, P::Depth32FloatStencil8),
+        ]
+    );
+}
+
 /// The texture-type pairs probe 2 measured.
 #[test]
 fn view_types_follow_metals_measured_verdicts() {

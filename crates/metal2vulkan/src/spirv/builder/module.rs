@@ -1562,6 +1562,7 @@ fn mode_contract(m: ExecMode) -> (u8, Option<u8>, &'static [ExecModel]) {
         ExecMode::OutputLines | ExecMode::OutputTriangles => (18, None, MESH),
         ExecMode::OutputLineStrip | ExecMode::OutputTriangleStrip => (18, None, GEOMETRY),
         ExecMode::RequireFullQuads => (19, None, FRAG),
+        ExecMode::PostDepthCoverage => (21, None, FRAG),
         ExecMode::Invocations { .. } => (20, None, GEOMETRY),
     }
 }

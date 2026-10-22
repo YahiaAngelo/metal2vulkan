@@ -543,7 +543,6 @@ fn the_version_193_fields_round_trip() {
     let fact = RuntimeFact::FragmentImageblock {
         words: 3,
         writes: true,
-        early_tests: false,
         master: [5; 32],
         data_size: 11,
         alignment: 2,

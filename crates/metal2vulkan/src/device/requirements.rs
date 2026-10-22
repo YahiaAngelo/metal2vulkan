@@ -448,6 +448,9 @@ pub enum VkExtension {
     /// `VK_EXT_provoking_vertex` (never promoted): [`VkFeature::ProvokingVertexLast`] and
     /// [`VkProperty::ProvokingVertexModePerPipeline`].
     ExtProvokingVertex,
+    /// `VK_EXT_post_depth_coverage` (never promoted, no feature member): a fragment shader's
+    /// `SampleMask` input read after the early depth and stencil tests (`PostDepthCoverage`).
+    ExtPostDepthCoverage,
 }
 
 /// One subgroup operation class (`VkSubgroupFeatureFlagBits`).
@@ -1120,6 +1123,8 @@ pub enum SpirvExtension {
     ExtMeshShader,
     // Appended.
     KhrQuadControl,
+    // Appended.
+    KhrPostDepthCoverage,
 }
 
 /// The SPIR-V capabilities a module's [`Requirements`] list without the feature that enables them,

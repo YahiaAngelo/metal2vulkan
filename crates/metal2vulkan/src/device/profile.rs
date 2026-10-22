@@ -1229,7 +1229,11 @@ pub enum DriverWorkaround {
     /// to exactly that attribute, so it has the defect. The per-sample storage form of a
     /// framebuffer fetch writes the attachment's samples through a storage image under early tests
     /// where the pipeline has a depth or stencil attachment (or Metal's function declares them), so
-    /// there it is refused (`lower::fragment`'s `storage_form`).
+    /// there it is refused (`lower::fragment`'s `storage_form`). An explicit imageblock's storage
+    /// image, whose writes Metal keeps under early tests at every sample count, declares none
+    /// there: its draws run the tests in the shader before the write, and a function declaring
+    /// them that discards, returns depth, stencil or a mask, or writes other memory, which the
+    /// tests' place would change, is refused (`lower::fragment::imageblock`).
     EarlyTestsDropMultisampledImageWrites,
     /// The driver rasterizes a triangle it clips as several triangles, so in a pass of more
     /// than one sample a fragment shader that runs once per pixel runs once per piece in each

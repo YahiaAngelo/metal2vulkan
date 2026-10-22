@@ -64,6 +64,7 @@ use crate::air::abi::{ImageblockArg, ImageblockKind, Member, OutputRole, StructI
 use crate::air::container::Hash256;
 use crate::air::ir::{ArgIdx, Type, TypeId as AirTypeId, Value};
 use crate::device::requirements::VkFeature;
+use crate::device::DriverWorkaround;
 use crate::error::{Capability, Error, Feature, Unsupported};
 use crate::lower::emit::EmitCx;
 use crate::lower::select::SelectCx;
@@ -140,8 +141,19 @@ pub struct ImageblockPlan {
     /// (`fingerprint`; the first planned of equal size).
     pub master: Option<Hash256>,
     /// The returned struct's field holding the `[[sample_mask]]` the function returns beside an
-    /// output view: the write is kept only where the mask covers the pixel's sample.
+    /// output view: the write is kept only where the mask covers the invocation's sample.
     pub mask: Option<u32>,
+    /// The stage interface's `SampleId` object of a function compiled for a multisampled
+    /// pipeline (`LoweringInputs::multisampled`), which runs once per covered sample and reaches
+    /// its own sample's cell: words `sample * words` on.
+    pub sample: Option<usize>,
+    /// The module declares early fragment tests, which the function does not, so that a depth or
+    /// stencil test the fragment fails drops its write as Metal's does ([`plan_tests`]).
+    pub early_tests: bool,
+    /// The module declares no early fragment tests, which the function does: its draws test
+    /// before its write as each one's plan chooses, on a driver that would drop its writes under
+    /// early tests ([`plan_tests`]).
+    pub late_tests: bool,
 }
 
 /// An upper estimate of the words one view's members add (each leaf read or written, and a
@@ -393,6 +405,20 @@ fn reach(cx: &mut SelectCx<'_>, cell: Reached) -> Result<(), Error> {
     }
     let known = cx.families.fragment.imageblock.is_some();
     let coord = stage_io::frag_coord(cx);
+    // Metal keeps a multisampled pass's imageblock per sample, and runs a function that reaches
+    // it once per covered sample, each run its own sample's cell (measured on the M3 Max).
+    let sample = if cx.inputs.multisampled {
+        if !cx.profile.fields().fragment.sample_rate_shading {
+            return Err(Unsupported::needs(
+                Feature::Imageblocks,
+                Capability::Feature(VkFeature::SampleRateShading),
+            )
+            .into());
+        }
+        Some(stage_io::sample_id(cx))
+    } else {
+        None
+    };
     let ib = cx
         .families
         .fragment
@@ -402,6 +428,7 @@ fn reach(cx: &mut SelectCx<'_>, cell: Reached) -> Result<(), Error> {
         ib.master = Some(cell.master);
     }
     ib.coord = coord;
+    ib.sample = sample;
     ib.words = ib.words.max(cell.data_size.div_ceil(4));
     ib.data_size = ib.data_size.max(cell.data_size);
     ib.alignment = ib.alignment.max(cell.alignment);
@@ -460,7 +487,108 @@ pub fn select_output(
         return Err(not_implemented());
     }
     plan.output = Some((field, view));
+    let early = plan_tests(cx)?;
+    if let Some(plan) = cx.families.fragment.imageblock.as_mut() {
+        plan.early_tests = early;
+    }
     Ok(())
+}
+
+/// The entry declares `[[early_fragment_tests]]`.
+fn declared_early(cx: &SelectCx<'_>) -> bool {
+    matches!(
+        cx.entry.ep.stage,
+        crate::air::abi::Stage::Fragment {
+            early_fragment_tests: true
+        }
+    )
+}
+
+/// Plan how the depth and stencil tests bear on the imageblock write of a function that writes
+/// one, before the stage interface is complete; whether the module declares early fragment tests
+/// that the function does not.
+///
+/// A fragment its depth or stencil test fails drops its imageblock write, as does one alpha to
+/// coverage drops (measured on the M3 Max, at one sample and at four). Tested early, a fragment
+/// that fails never writes; tested late, the storage already holds its write. So:
+///
+/// - a function whose only effects are its outputs and its imageblock write, which neither
+///   discards nor returns depth, stencil or a sample mask, leaves the attachments under early
+///   tests as Metal's late tests leave them: the module declares them;
+/// - any other writes before Vulkan's tests and states `RuntimeFact::TestedStorageWrites`, as the
+///   framebuffer fetch's storage form does: a draw whose tests drop no fragment runs it as
+///   compiled, one whose tests drop some but write and count nothing the variant that declares
+///   early tests (where only a discard kept them away, `early_variant`), and one whose depth test
+///   acts the variant that runs the draw's depth test itself, before the write
+///   (`depth_test`), and its stencil test too where that acts (`bind::graphics`).
+///
+/// A driver that drops every image write of an early-tests fragment shader in a pass of more than
+/// one sample (`DriverWorkaround::EarlyTestsDropMultisampledImageWrites`, MoltenVK on Apple's
+/// GPU) takes no early tests at more than one sample: the function's draws test in the shader
+/// there, and one that declares early tests itself is refused as that defect.
+fn plan_tests(cx: &mut SelectCx<'_>) -> Result<bool, Error> {
+    let defect = DriverWorkaround::EarlyTestsDropMultisampledImageWrites;
+    let drops = cx.inputs.multisampled && cx.profile.fields().workarounds.contains(&defect);
+    let declared = declared_early(cx);
+    if declared && !drops {
+        return Ok(false);
+    }
+    let outputs = &cx.entry.ep.outputs;
+    let field =
+        |role: fn(&OutputRole) -> bool| outputs.iter().find(|o| role(&o.role)).map(|o| o.field);
+    let exports = super::depth_test::Exports {
+        depth: field(|r| matches!(r, OutputRole::Depth(_))),
+        stencil: field(|r| matches!(r, OutputRole::Stencil)),
+        mask: field(|r| matches!(r, OutputRole::SampleMask)),
+    };
+    let exported = exports.depth.is_some() || exports.stencil.is_some() || exports.mask.is_some();
+    let body = super::fetch::body_facts(cx);
+    let only_outputs = !exported && !body.side_effects;
+    if declared {
+        // Metal tests such a function early. One whose only effects are its outputs and its
+        // write, which does not discard, leaves the attachments under late tests as under early
+        // ones, so where the driver's defect would drop its writes the module declares none and
+        // its draws test before the write as below. Another (a discard, an export, or other
+        // memory writes after its early tests) has no form here.
+        if !only_outputs || body.discards {
+            return Err(Unsupported::driver_defect(Feature::Imageblocks, defect).into());
+        }
+        if let Some(plan) = cx.families.fragment.imageblock.as_mut() {
+            plan.late_tests = true;
+        }
+    }
+    let only_outputs = only_outputs && !drops;
+    let fp = &cx.families.fragment;
+    // A framebuffer fetch's storage form that declares early tests holds the function to them,
+    // which keeps the write Metal's: it declares them only where the function would here.
+    if fp.fetch_early_tests {
+        return Ok(false);
+    }
+    if only_outputs && !body.discards {
+        return Ok(true);
+    }
+    let stated = cx.facts.iter().find_map(|f| match *f {
+        RuntimeFact::TestedStorageWrites { early_variant, .. } => Some(early_variant),
+        _ => None,
+    });
+    match stated {
+        // The storage form's early-tests variant (whose function writes no other memory and
+        // exports nothing) would lose this write to the driver's defect.
+        Some(true) if drops => {
+            return Err(Unsupported::driver_defect(Feature::Imageblocks, defect).into());
+        }
+        Some(_) => {}
+        None => {
+            cx.facts.insert(RuntimeFact::TestedStorageWrites {
+                early_tests: only_outputs && cx.inputs.read_only_tests,
+                early_variant: only_outputs,
+            });
+            if cx.inputs.shader_tests && cx.families.fragment.depth_test.is_none() {
+                super::depth_test::plan(cx, exports)?;
+            }
+        }
+    }
+    Ok(stated.is_none() && only_outputs && cx.inputs.read_only_tests)
 }
 
 fn invariant_error(detail: &str) -> Error {
@@ -470,19 +598,11 @@ fn invariant_error(detail: &str) -> Error {
     ))
 }
 
-/// Complete the imageblock plan once the function is selected: its fact, and the refusals of
-/// the module docs.
+/// Complete the imageblock plan once the function is selected: its fact.
 pub(super) fn finish(cx: &mut SelectCx<'_>) -> Result<(), Error> {
-    let early = matches!(
-        cx.entry.ep.stage,
-        crate::air::abi::Stage::Fragment {
-            early_fragment_tests: true
-        }
-    );
-    // A sample mask the function returns that does not cover the pixel's sample drops its
-    // imageblock write with the fragment (measured on the M3 Max and an M4): the write is guarded
-    // by the mask's bit 0, the one sample of the pass (link refuses a multisampled imageblock
-    // pipeline).
+    // A sample mask the function returns that does not cover the invocation's sample drops its
+    // imageblock write with the fragment (measured on the M3 Max and an M4 at one sample, and on
+    // the M3 Max at four, where each sample's run writes where the mask has its bit).
     let mask = cx
         .entry
         .ep
@@ -501,7 +621,6 @@ pub(super) fn finish(cx: &mut SelectCx<'_>) -> Result<(), Error> {
     let fact = RuntimeFact::FragmentImageblock {
         words: plan.words,
         writes,
-        early_tests: early,
         master,
         data_size: plan.data_size,
         alignment: plan.alignment,
@@ -540,12 +659,15 @@ pub(super) fn declare(
         .map(Some)
 }
 
-/// The cell of one pixel as a word memory: word `w` is texel `(x, y, w)` of the image, accessed
-/// with the function's coherence (`sync::memory_model`).
+/// The cell of one pixel as a word memory: word `w` is texel `(x, y, w)` of the image, and
+/// in a function that runs once per sample texel `(x, y, sample * words + w)`, accessed with the
+/// function's coherence (`sync::memory_model`).
 struct Cell {
     image: SValue,
     x: SValue,
     y: SValue,
+    /// The first layer of the invocation's sample's cell, in a function that runs per sample.
+    base: Option<SValue>,
     coherence: Coherence,
 }
 
@@ -555,7 +677,7 @@ impl Cell {
         let Some(plan) = &cx.plan.families.fragment.imageblock else {
             return Err(cx.fail("an imageblock access without its plan"));
         };
-        let coord = plan.coord;
+        let (coord, words) = (plan.coord, plan.words);
         let Some(g) = cx.decl.families.fragment.imageblock else {
             return Err(cx.fail("the imageblock storage is not declared"));
         };
@@ -574,10 +696,18 @@ impl Cell {
         let fy = fb.composite_extract(frag, &[1])?;
         let x = fb.convert(ConvOp::ConvertFToU, fx, u32_)?;
         let y = fb.convert(ConvOp::ConvertFToU, fy, u32_)?;
+        let base = match sample_of(cx, fb)? {
+            Some(sample) => {
+                let words = k32(fb, words)?;
+                Some(fb.binary(BinOp::IMul, sample, words)?)
+            }
+            None => None,
+        };
         Ok(Cell {
             image,
             x,
             y,
+            base,
             coherence: memory_model::coherence(cx.plan),
         })
     }
@@ -588,8 +718,29 @@ impl Cell {
             signed: false,
         })?;
         let uvec3 = fb.module().ty(SType::Vector { elem: u32_, len: 3 })?;
-        fb.composite_construct(uvec3, &[self.x, self.y, word])
+        let layer = match self.base {
+            Some(base) => fb.binary(BinOp::IAdd, base, word)?,
+            None => word,
+        };
+        fb.composite_construct(uvec3, &[self.x, self.y, layer])
     }
+}
+
+/// The invocation's sample (`SampleId`) in a function that runs once per sample.
+fn sample_of(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>) -> BResult<Option<SValue>> {
+    let Some(object) = cx
+        .plan
+        .families
+        .fragment
+        .imageblock
+        .as_ref()
+        .and_then(|p| p.sample)
+    else {
+        return Ok(None);
+    };
+    let g = stage_io::object_global(cx, object)?;
+    let p = fb.module().global_value(g)?;
+    fb.load(p, MemAccess::default()).map(Some)
 }
 
 impl WordMem for Cell {
@@ -699,6 +850,11 @@ pub(super) fn emit_return(
             let covered = match mask {
                 Some(m) => {
                     let m = fb.composite_extract(whole, &[m])?;
+                    // The invocation's own sample's bit; bit 0 at one sample.
+                    let m = match sample_of(cx, fb)? {
+                        Some(sample) => fb.binary(BinOp::ShiftRightLogical, m, sample)?,
+                        None => m,
+                    };
                     let one = k32(fb, 1)?;
                     let zero = k32(fb, 0)?;
                     let bit = fb.binary(BinOp::BitwiseAnd, m, one)?;

@@ -470,9 +470,14 @@ pub fn declare(
     if let Some(m) = fp.interlock.or(snapshot::mode(&fp.snapshot)) {
         modes.push(m);
     }
-    // The storage form's writes are Metal's under early tests.
-    if fp.fetch_early_tests {
+    // The storage form's writes, and the imageblock's, are Metal's under early tests.
+    let imageblock_early = fp.imageblock.as_ref().is_some_and(|p| p.early_tests);
+    if fp.fetch_early_tests || imageblock_early {
         modes.push(ExecMode::EarlyFragmentTests);
+    }
+    // The function's own early tests, where the imageblock's write tests late instead.
+    if fp.imageblock.as_ref().is_some_and(|p| p.late_tests) {
+        modes.retain(|m| *m != ExecMode::EarlyFragmentTests);
     }
     if fp.records_discards() {
         let bool_ = mb.ty(SType::Bool)?;

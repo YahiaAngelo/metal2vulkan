@@ -638,8 +638,9 @@ degradations! {
         /// read and write in a storage image of the render area (`fragment_imageblock.rs`).
         FragmentImageblockStorage = "fragment-imageblock-storage", Performance,
             "an R32Uint array image per pass over the render area, a layer per 4 bytes of a \
-             pixel's imageblock, cleared before the pass, which the draws read and write in the \
-             pixel interlock: memory and bandwidth that Metal's tile memory does not spend";
+             pixel's imageblock and per sample, cleared before the pass, which the draws read \
+             and write in the pixel interlock: memory and bandwidth that Metal's tile memory \
+             does not spend";
         /// A command buffer uses a texture over the caller's image whose home layout is not
         /// `GENERAL` (`Device::new_texture_with_vk_image`): every image the runtime uses rests in
         /// `GENERAL`.

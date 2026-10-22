@@ -1456,6 +1456,11 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
         });
     let tested_attachments =
         p.graphics.depth_format.is_some() || p.graphics.stencil_format.is_some();
+    // What stores before the tests: the storage form's colors, or else the imageblock.
+    let tested_feature = match p.graphics.fragment_imageblock {
+        Some(_) if p.graphics.storage_attachments.is_empty() => Feature::Imageblocks,
+        _ => Feature::FramebufferFetch,
+    };
     // Where only the depth test can drop a fragment, the stencil test does nothing and nothing
     // is counted, the variant whose function runs the depth test itself (`shader_tests`), where
     // the device ships it at the pipeline's samples; a draw whose tests write nothing keeps the
@@ -1471,7 +1476,7 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
         );
         if !float {
             return Err(BindError::Unsupported(
-                Unsupported::not_implemented(Feature::FramebufferFetch)
+                Unsupported::not_implemented(tested_feature.clone())
                     .at_attachment(Attachment::Depth),
             ));
         }
@@ -1508,7 +1513,7 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
             }
             (Some(_), FragmentTests::Drop | FragmentTests::Stencil) if stencil => {
                 return Err(BindError::Unsupported(
-                    Unsupported::not_implemented(Feature::FramebufferFetch)
+                    Unsupported::not_implemented(tested_feature.clone())
                         .at_attachment(Attachment::Stencil),
                 ));
             }
@@ -1527,11 +1532,11 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
                     None => Attachment::Stencil,
                 };
                 return Err(BindError::Unsupported(
-                    Unsupported::not_implemented(Feature::FramebufferFetch).at_attachment(at),
+                    Unsupported::not_implemented(tested_feature.clone()).at_attachment(at),
                 ));
             }
             (Some(_), FragmentTests::Any | FragmentTests::Stencil) if tested_attachments => {
-                return Err(not_implemented(Feature::FramebufferFetch));
+                return Err(not_implemented(tested_feature.clone()));
             }
             _ => (false, false, false, false),
         };

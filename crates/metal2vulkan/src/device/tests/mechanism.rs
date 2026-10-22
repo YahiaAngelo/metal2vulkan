@@ -78,7 +78,6 @@ fn every_fact() -> Vec<RuntimeFact> {
         RuntimeFact::FragmentImageblock {
             words: 4,
             writes: true,
-            early_tests: false,
             master: [7; 32],
             data_size: 16,
             alignment: 16,

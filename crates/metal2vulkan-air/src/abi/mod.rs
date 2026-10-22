@@ -923,6 +923,10 @@ pub enum Builtin {
     SampleId,
     /// `[[sample_mask]]` as an input (`air.sample_mask_in`): the fragment's coverage mask.
     SampleMaskIn,
+    /// `[[sample_mask, post_depth_coverage]]` (`air.sample_mask_in` with
+    /// `air.post_depth_coverage`): the fragment's coverage mask after the depth and stencil tests,
+    /// in a function Metal's compiler requires to declare `[[early_fragment_tests]]`.
+    PostDepthCoverage,
     /// `[[barycentric_coord]]`: the fragment's barycentric coordinates, with their
     /// interpolation.
     BarycentricCoord(Interpolation),

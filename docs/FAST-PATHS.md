@@ -425,6 +425,16 @@ driver's. Each is open work.
   Xe, the UHD 770 and the RTX 5080 Laptop GPU, 128 KiB on the RTX 3090, 192 KiB on the M3 Max and
   M4 under MoltenVK, 48 KiB on lavapipe; 16 KiB elsewhere. An exact form for compute, private memory
   in a runtime buffer with a slot per resident threadgroup, is not built.
+- **A fragment function's imageblock write that its draw's tests may drop after it, where no
+  form tests first.** Such a draw runs the tests before the write, early or in the shader against a
+  depth stand-in. Refused as not implemented: a writing function under alpha to coverage; where
+  the tests act, a draw under a visibility result mode, a depth format other than `Depth32Float`,
+  a stencil attachment alone, and at more than one sample a stencil test on a device without
+  multisampled storage images (MoltenVK) or a depth test where `FragCoord.z` is unmeasured (ANV);
+  and on MoltenVK at more than one sample, whose early tests drop image writes
+  (`DriverWorkaround::EarlyTestsDropMultisampledImageWrites`), a function declaring early tests
+  that discards, returns depth, stencil or a sample mask, or writes other memory. A form testing
+  at the function's entry against the stand-in is not built.
 - **A vertex function that selects its slice, on a device without `shaderOutputLayer` and
   `geometryShader`.** Metal renders each primitive into the slice its first vertex selects. Vulkan
   stores `Layer` from a vertex function only with `shaderOutputLayer`, and the generated geometry

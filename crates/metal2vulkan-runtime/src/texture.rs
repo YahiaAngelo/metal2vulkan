@@ -51,8 +51,7 @@
 //!   present. Every copy
 //!   into the texture writes both (`replace_region`, the blit encoder's copies), and reads come
 //!   from its image; the twin shares the image's resource identity.
-//! - **Not yet:** CPU access through a stencil view of a combined depth/stencil texture, and
-//!   blits of textures over buffers, are refused `NotImplemented`.
+//! - **Not yet:** blits of textures over buffers are refused `NotImplemented`.
 
 use super::address::{ObjectsToken, RangeToken};
 use super::address_map::AddressModeMap;
@@ -5189,12 +5188,13 @@ impl Texture {
     /// exactly, 0 as every row at the image's first byte, and one between 0 and a row writes
     /// nothing. A `bytes_per_image` off Metal's rules, off the pixel or below the region's rows, is
     /// taken exactly, as plain Metal takes it. A combined depth/stencil format writes its depth, 4
-    /// bytes a texel, its stencil left as it is, as plain Metal does. Refused: what Metal stops
-    /// (`Invalid`: with a [`CopyProblem`], a private texture but an IOSurface plane's over a buffer
-    /// the CPU reaches, whose bytes it reads and writes as plain Metal does, a region outside the
-    /// level, a `bytes_per_row` off Metal's rules of a texture over a buffer or of 0 for more than
-    /// one row and image (not measured), `bytes` shorter than the layout reads); a stencil view of
-    /// a combined depth/stencil texture (`NotImplemented`, unmeasured).
+    /// bytes a texel, its stencil left as it is, and its stencil view (`X32Stencil8`) the
+    /// stencil, a byte a texel, its depth left as it is, as plain Metal does (its validation stops
+    /// both). Refused: what Metal stops (`Invalid`: with a [`CopyProblem`], a private texture but
+    /// an IOSurface plane's over a buffer the CPU reaches, whose bytes it reads and writes as plain
+    /// Metal does, a region outside the level, a `bytes_per_row` off Metal's rules of a texture
+    /// over a buffer or of 0 for more than one row and image (not measured), `bytes` shorter than
+    /// the layout reads).
     ///
     /// A PVRTC texture's whole level takes its blocks in plain Metal's CPU order, Z order with
     /// the y bit lowest, with a `bytes_per_row` of 0 or of the level's row of blocks
@@ -5394,8 +5394,9 @@ impl Texture {
     /// between rows and images are left as they are; with a `bytes_per_row` of 0 each row is
     /// written at the image's first byte in turn, so the last one stays, as plain Metal writes
     /// them, and images closer than a region's rows are written in turn, the later image's bytes
-    /// staying. A combined depth/stencil format reads its depth. A PVRTC texture's whole level
-    /// gives its blocks in plain Metal's CPU order.
+    /// staying. A combined depth/stencil format reads its depth, and its stencil view
+    /// (`X32Stencil8`) the stencil, a byte a texel. A PVRTC texture's whole level gives its blocks
+    /// in plain Metal's CPU order.
     ///
     /// Refused as [`replace_region`](Self::replace_region) is.
     pub fn get_bytes(
@@ -5626,12 +5627,20 @@ impl Texture {
                 (two_planes::UNIT, false)
             }
             Storage::Image(image) => {
+                // The stencil view of a combined depth/stencil texture (`X32Stencil8` of
+                // `Depth32FloatStencil8`, the one `new_texture_view` makes) moves the stencil, a
+                // byte a texel, its depth kept, as its blits do (`copy_unit`): plain Metal's
+                // answer on an M3 Max under macOS 27.0.1 (a probe; its validation stops the
+                // CPU access). Another depth or stencil view of a combined texture is not
+                // measured.
+                let of = image.plan().pixel_format;
+                let stencil_view = record.pixel_format == PixelFormat::X32Stencil8
+                    && of == PixelFormat::Depth32FloatStencil8;
                 if is_depth_stencil(record.pixel_format)
                     && !combined(record.pixel_format)
-                    && combined(image.plan().pixel_format)
+                    && combined(of)
+                    && !stencil_view
                 {
-                    // A stencil view of a combined depth/stencil texture: Metal's answer is not
-                    // measured.
                     return Err(Error::NotImplemented(RuntimeGap::Textures));
                 }
                 // A combined depth/stencil format copies its depth, as a blit without an option

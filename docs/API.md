@@ -565,8 +565,9 @@ render pass's color attachment formats) into a `ComputePipeline` that stands in 
 `dispatchThreadsPerTile:`. Dispatch it as `Dispatch::Threadgroups` over the render area, one
 threadgroup per tile, with `BindState::imageblock_size` and `BindState::render_area` set, and bind
 each attachment it reaches as a storage image where the plan writes `WriteSource::TileAttachment`.
-Its threads are numbered as Metal's tile dispatch numbers them, for the threadgroup layouts that
-were measured; others are refused. A tile function runs on a single-sample pass: a multisample
+Its threads are numbered as Metal's tile dispatch numbers them, for every threadgroup of even sides
+up to 32x32 and the single thread; a threadgroup with an odd side, whose quads Metal leaves partly
+empty, is refused. A tile function runs on a single-sample pass: a multisample
 imageblock's operations (its sample count, the colors a pixel holds and their coverage masks, a
 store to the samples a coverage mask selects) are refused as not implemented
 (`Feature::Imageblocks`, naming the intrinsic).
@@ -1384,8 +1385,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-fragment-imageblock-storage` (performance). `FragmentImageblockStorage`: A
   render pass's draws' fragment functions declare an explicit imageblock, which they read and write
   in a storage image of the render area. Cost: an R32Uint array image per pass over the render area,
-  a layer per 4 bytes of a pixel's imageblock, cleared before the pass, which the draws read and
-  write in the pixel interlock: memory and bandwidth that Metal's tile memory does not spend.
+  a layer per 4 bytes of a pixel's imageblock and per sample, cleared before the pass, which the
+  draws read and write in the pixel interlock: memory and bandwidth that Metal's tile memory does
+  not spend.
 - `metal2vulkan-degrade-wrapped-image-layout-transitions` (performance).
   `WrappedImageLayoutTransitions`: A command buffer uses a texture over the caller's image whose
   home layout is not `GENERAL`: every image the runtime uses rests in `GENERAL`. Cost: two

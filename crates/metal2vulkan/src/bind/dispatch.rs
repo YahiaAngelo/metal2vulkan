@@ -415,29 +415,23 @@ pub(crate) struct Planned {
 /// The widest tile threadgroup, and the tallest: Metal's largest tile, 32x32.
 pub(crate) const TILE_THREADGROUP_SIDE: u32 = 32;
 
-/// Whether Metal's tile-dispatch layout of a `width x height x 1` threadgroup is the one the
-/// lowering reproduces (`lower::dispatch`'s `tile_pos` and `tile_index`), as measured on Apple
-/// silicon: both sides powers of two from 2 to 32, or the single thread, where
-/// each simdgroup is a whole block of its column (`b x 32 / b` positions, `b` the column's width up
-/// to 8, the column the threadgroup's width up to 16) or the threadgroup is one simdgroup at most 8
-/// wide. Metal lays out the others another way (a 16x2 threadgroup's one simdgroup, a 1xN
-/// threadgroup's thread indices), or they are not measured.
+/// Whether the lowering runs a `width x height x 1` tile threadgroup in Metal's layout
+/// (`lower::dispatch`'s `tile_pos` and `tile_index`, the order measured on an Apple M3 Max for every
+/// side from 1 to 32): both sides even from 2 to 32, where every quad is whole so `sg · 32 + lane`
+/// numbers the threads densely, or the single thread. A threadgroup with an odd side leaves the
+/// lanes of the threads past it empty in its quads, which no Vulkan workgroup leaves.
 fn tile_layout_measured(width: u32, height: u32) -> bool {
     if (width, height) == (1, 1) {
         return true;
     }
-    let side = |n: u32| n.is_power_of_two() && (2..=TILE_THREADGROUP_SIDE).contains(&n);
-    if !side(width) || !side(height) {
-        return false;
-    }
-    // A simdgroup's block is `min(width, 8)` wide (its column's width capped at 8).
-    let block = width.min(8);
-    height >= 32 / block || (width * height <= 32 && width <= 8)
+    let side = |n: u32| n % 2 == 0 && (2..=TILE_THREADGROUP_SIDE).contains(&n);
+    side(width) && side(height)
 }
 
 /// A tile function's dispatch: one threadgroup per tile, `Dispatch::Threadgroups`, of a threadgroup
-/// whose layout is measured ([`tile_layout_measured`]); any other is `Unsupported{TileShading,
-/// NotImplemented}`, its threads' layout not being read.
+/// the lowering lays out as Metal does ([`tile_layout_measured`]); any other is
+/// `Unsupported{TileShading, NotImplemented}`: a threadgroup with an odd side, whose empty lanes
+/// are not built, or one deeper than 1.
 fn check_tile_dispatch(dispatch: &Dispatch) -> Result<(), BindError> {
     match *dispatch {
         Dispatch::Threadgroups {

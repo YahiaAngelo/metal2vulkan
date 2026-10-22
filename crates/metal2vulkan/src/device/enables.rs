@@ -355,6 +355,7 @@ fn facts(ext: VkExtension) -> ExtensionFacts {
         | E::ExtProvokingVertex
         | E::ExtAttachmentFeedbackLoopLayout
         | E::ExtExtendedDynamicState3
+        | E::ExtPostDepthCoverage
         | E::ImgFormatPvrtc
         | E::KhrPortabilitySubset
         | E::ExtShaderAtomicFloat => fact(true, None, &[]),

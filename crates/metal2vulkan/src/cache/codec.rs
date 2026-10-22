@@ -955,7 +955,7 @@ codec_enum! {
         KhrShaderQuadControl,
         ExtAttachmentFeedbackLoopLayout, ExtExtendedDynamicState3,
         KhrFormatFeatureFlags2,
-        ExtProvokingVertex,
+        ExtProvokingVertex, ExtPostDepthCoverage,
     }
     SubgroupOp { Basic, Vote, Arithmetic, Ballot, Shuffle, ShuffleRelative, Clustered, Quad }
     FloatWidth { F16, F32, F64 }
@@ -1041,6 +1041,7 @@ codec_enum! {
         ExtDescriptorIndexing, ExtShaderAtomicFloat16Add, KhrSubgroupRotate, KhrRayQuery, KhrFma,
         ExtMeshShader,
         KhrQuadControl,
+        KhrPostDepthCoverage,
     }
     StageCreateFlag { RequireFullSubgroups, AllowVaryingSubgroupSize }
     Independence { Only32Bit, All, None }
@@ -1164,7 +1165,7 @@ codec_enum! {
         RenderTargetArrayLength { layer_dropped }, StageInRegion,
         StageInStride { layout },
         UniformViewRange { slot, choice }, UniformViewAliasing { slot },
-        FragmentImageblock { words, writes, early_tests, master, data_size, alignment },
+        FragmentImageblock { words, writes, master, data_size, alignment },
         TileFunction, TileAttachmentFormat { color, format },
         StorageTextureNumericType { slot },
         OutOfBoundsAlpha { slot },

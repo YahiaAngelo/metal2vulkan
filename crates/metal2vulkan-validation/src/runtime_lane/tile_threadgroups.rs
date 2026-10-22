@@ -281,6 +281,115 @@ fn a_32x32_tile_threadgroup_takes_metals_layout() {
     });
 }
 
+/// Metal's quad order of a tile threadgroup of `qw` by `qh` 2x2 quads (measured on an Apple M3 Max
+/// for every threadgroup of 1 to 32 threads a side): columns 8 quads wide, within a column its rows
+/// of 2 quads, within a row its blocks 4 quads wide, within a block its quads row-major. Quad `k`
+/// of the order is lanes `4 (k mod 8)` to `4 (k mod 8) + 3` of simdgroup `k / 8`, its threads in
+/// rows.
+fn quad_order(qw: u64, qh: u64) -> Vec<(u64, u64)> {
+    let mut order = Vec::new();
+    for c0 in (0..qw).step_by(8) {
+        let c1 = (c0 + 8).min(qw);
+        for r0 in (0..qh).step_by(2) {
+            let r1 = (r0 + 2).min(qh);
+            for b0 in (c0..c1).step_by(4) {
+                let b1 = (b0 + 4).min(c1);
+                for qy in r0..r1 {
+                    for qx in b0..b1 {
+                        order.push((qx, qy));
+                    }
+                }
+            }
+        }
+    }
+    order
+}
+
+/// Threadgroups of even sides other than squares and power-of-two rectangles run each thread at
+/// Metal's place in a 32x32 tile: `k10ts_tile_order`'s record at each thread index (its position,
+/// lane and simdgroup, and its simdgroup's first lane's position) and each cell of the
+/// threadgroup, added 1 once, the cells past it kept. Among them the shapes whose simdgroup is a
+/// whole row of quads (16x2, 32x2) and whose columns, rows and blocks end partly (6x6, 10x10,
+/// 30x30, 24x8, 2x18, 14x4).
+#[test]
+fn even_tile_threadgroups_take_metals_layout() {
+    on_device(|device| {
+        let state = state(device, "k10ts_tile_order", &[PixelFormat::R32Float]);
+        let area = [SIDE, SIDE];
+        let start: Vec<u8> = (0..SIDE * SIDE)
+            .flat_map(|i| (i as f32).to_le_bytes())
+            .collect();
+        let place = |(x, y): (u64, u64)| (x | (y << 8)) as u32;
+        for [w, h] in [
+            [16, 2],
+            [32, 2],
+            [6, 6],
+            [10, 10],
+            [30, 30],
+            [24, 8],
+            [2, 18],
+            [14, 4],
+        ] {
+            let target = texture(
+                device,
+                PixelFormat::R32Float,
+                area,
+                TextureUsage::RENDER_TARGET,
+                &start,
+                SIDE * 4,
+            );
+            let records = SIDE * SIDE * 8;
+            let out = device
+                .new_buffer(records, ResourceOptions::shared())
+                .unwrap();
+            run(device, &[&target], |encoder| {
+                encoder.set_render_pipeline_state(&state).unwrap();
+                encoder.set_tile_buffer(Some(&out), 0, 0).unwrap();
+                encoder
+                    .dispatch_threads_per_tile(Size::new(w, h, 1))
+                    .unwrap();
+            });
+            let words: Vec<u32> = read_buffer(&out, 0, records)
+                .unwrap()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|w| u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+                .collect();
+            let order = quad_order(w / 2, h / 2);
+            let at = |k: usize, within: u64| {
+                let (qx, qy) = order[k];
+                (qx * 2 + within % 2, qy * 2 + within / 2)
+            };
+            for (k, &(qx, qy)) in order.iter().enumerate() {
+                let (simdgroup, first) = (k / 8, at(k / 8 * 8, 0));
+                for within in 0..4 {
+                    let (x, y) = at(k, within);
+                    let lane = (k % 8) as u64 * 4 + within;
+                    let index = (((qy * (w / 2) + qx) * 4) + within) as usize;
+                    assert_eq!(
+                        words[2 * index],
+                        place((x, y)) | ((lane as u32) << 16) | ((simdgroup as u32) << 24),
+                        "{w}x{h}: thread ({x}, {y})"
+                    );
+                    assert_eq!(
+                        words[2 * index + 1],
+                        place(first),
+                        "{w}x{h}: thread ({x}, {y}), its first lane"
+                    );
+                }
+            }
+            let cells = texels(&target, area, 4);
+            for (i, cell) in cells.as_chunks::<4>().0.iter().enumerate() {
+                let (x, y) = (i as u64 % SIDE, i as u64 / SIDE);
+                let f = f32::from_le_bytes([cell[0], cell[1], cell[2], cell[3]]);
+                let added = if x < w && y < h { 1.0 } else { 0.0 };
+                assert_eq!(f, i as f32 + added, "{w}x{h}: cell ({x}, {y})");
+            }
+        }
+    });
+}
+
 /// The blur's source texel at (`x`, `y`): small integers, so every sum is exact in `half`.
 fn source_texel(x: u64, y: u64) -> [u64; 4] {
     [(x + 2 * y) % 8, (3 * x + y) % 8, (x * y) % 8, (x ^ y) % 8]

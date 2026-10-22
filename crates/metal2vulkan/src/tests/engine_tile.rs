@@ -1010,6 +1010,12 @@ fn a_tile_pipeline_binds_its_attachments() {
             [32, 4],
             [16, 32],
             [32, 16],
+            [16, 2],
+            [32, 2],
+            [6, 6],
+            [24, 24],
+            [30, 2],
+            [2, 14],
         ] {
             match plan.dispatch_variant(&tiles([w, h, 1])) {
                 Ok(_) => {}
@@ -1022,16 +1028,15 @@ fn a_tile_pipeline_binds_its_attachments() {
                 Err(e) => panic!("{stem} {w}x{h}: {e}"),
             }
         }
-        // Metal lays out these another way (a 16x2 threadgroup's one simdgroup, 1xN's thread
-        // indices), or their layout is not measured.
+        // A threadgroup with an odd side leaves the lanes of its missing threads empty, which
+        // is not built, and a tile threadgroup is one deep.
         for refused in [
-            tiles([16, 2, 1]),
-            tiles([32, 2, 1]),
             tiles([16, 1, 1]),
             tiles([8, 1, 1]),
             tiles([1, 8, 1]),
-            tiles([6, 6, 1]),
-            tiles([24, 24, 1]),
+            tiles([3, 3, 1]),
+            tiles([5, 2, 1]),
+            tiles([2, 31, 1]),
             tiles([8, 8, 2]),
             tiles([64, 16, 1]),
             Dispatch::Threads {
@@ -1270,37 +1275,56 @@ fn the_authored_tile_fixtures_compile() {
     }
 }
 
-/// Metal's tile-dispatch layout of a `w x h` threadgroup (measured on Apple silicon by
-/// `k10ts_tile_order`'s cases for squares to 16; on an M4 for every shape below):
-/// the position of `thread_index_in_threadgroup` `index` (the threadgroup's 2x2 quads in rows of `w
-/// / 2`, each quad's threads in rows), and the simdgroup and lane of the thread at a position. The
-/// threadgroup is columns `min(w, 16)` wide, each holding its share of the simdgroups in order, and
-/// a column's simdgroups are `b x 32 / b` blocks of it in rows, `b = min(w, 8)`, each lane a thread
-/// of the block's quads in rows.
+/// Metal's quad order of a tile threadgroup of `qw` by `qh` 2x2 quads (measured on an Apple M3 Max
+/// for every threadgroup of 1 to 32 threads a side): columns 8 quads wide, within a column its rows
+/// of 2 quads, within a row its blocks 4 quads wide, within a block its quads row-major.
+fn metal_quad_order(qw: u32, qh: u32) -> Vec<[u32; 2]> {
+    let mut order = Vec::new();
+    for c0 in (0..qw).step_by(8) {
+        let c1 = (c0 + 8).min(qw);
+        for r0 in (0..qh).step_by(2) {
+            let r1 = (r0 + 2).min(qh);
+            for b0 in (c0..c1).step_by(4) {
+                let b1 = (b0 + 4).min(c1);
+                for qy in r0..r1 {
+                    for qx in b0..b1 {
+                        order.push([qx, qy]);
+                    }
+                }
+            }
+        }
+    }
+    order
+}
+
+/// Metal's tile-dispatch layout of a `w x h` threadgroup of even sides (or the single thread):
+/// the position of `thread_index_in_threadgroup` `index` (the threadgroup's 2x2 quads in rows of
+/// `w / 2`, each quad's threads in rows).
 fn metal_tile_position(index: u32, [w, _]: [u32; 2]) -> [u32; 2] {
     let (quad, within) = (index / 4, index % 4);
-    let quads = (w / 2).max(1);
+    let quads = w.div_ceil(2);
     [
         (quad % quads) * 2 + within % 2,
         (quad / quads) * 2 + within / 2,
     ]
 }
 
+/// The simdgroup and lane Metal gives the thread at `pos` of a `w x h` threadgroup: its quad's
+/// place `k` in [`metal_quad_order`] is lanes `4 (k mod 8)` to `4 (k mod 8) + 3` of simdgroup
+/// `k / 8`, its place in the quad (row-major) the lane among them.
 fn metal_tile_simd(pos: [u32; 2], [w, h]: [u32; 2]) -> (u32, u32) {
-    let column = w.min(16);
-    let b = w.min(8);
-    let height = 32 / b;
-    let per_column = (column * h / 32).max(1);
-    let x = pos[0] % column;
-    let sg = (pos[0] / column) * per_column + (pos[1] / height) * (column / b) + x / b;
-    let (lx, ly) = (x % b, pos[1] % height);
-    let lane = ((ly / 2) * (b / 2).max(1) + lx / 2) * 4 + (ly % 2) * 2 + lx % 2;
-    (sg, lane)
+    let quad = [pos[0] / 2, pos[1] / 2];
+    let k = metal_quad_order(w.div_ceil(2), h.div_ceil(2))
+        .iter()
+        .position(|&q| q == quad)
+        .expect("a quad of the threadgroup") as u32;
+    (k / 8, (k % 8) * 4 + (pos[1] % 2) * 2 + pos[0] % 2)
 }
 
-/// A tile function's threads take Metal's tile-dispatch layout for every measured threadgroup the
-/// binder runs (squares of 1 to 32 threads a side, in a 16x16 or 32x32 tile, and rectangles to
-/// 32x32): each thread records, at its `thread_index_in_threadgroup`, the position, lane, and
+/// A tile function's threads take Metal's tile-dispatch layout for the threadgroups the binder runs
+/// (squares of 1 to 32 threads a side, in a 16x16 or 32x32 tile, and rectangles of even sides to
+/// 32x32, among them the shapes whose simdgroups span a whole row of quads or a column's partial
+/// rows and blocks): each thread records, at its `thread_index_in_threadgroup`, the position, lane, and
 /// simdgroup Metal gives that index and the position of its simdgroup's first lane
 /// (`simd_broadcast_first`), and adds one to its own cell. Runs on the `Direct` tier at 32 lanes
 /// and on every committed profile whose simdgroups are emulated.
@@ -1337,6 +1361,14 @@ fn every_tile_thread_takes_its_measured_place() {
             (16, [8, 2]),
             (16, [4, 2]),
             (16, [16, 4]),
+            (32, [16, 2]),
+            (32, [32, 2]),
+            (16, [6, 6]),
+            (16, [10, 10]),
+            (32, [24, 8]),
+            (32, [2, 18]),
+            (32, [32, 6]),
+            (16, [14, 4]),
         ] {
             let n = w * h;
             let f0: Vec<u32> = (0..tile * tile).map(|i| (i as f32).to_bits()).collect();

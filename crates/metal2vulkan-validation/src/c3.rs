@@ -382,7 +382,9 @@ impl AnswerGap {
                             && !param.binding.unused
                             && matches!(
                                 param.binding.role,
-                                ParamRole::Builtin(Builtin::SampleMaskIn)
+                                ParamRole::Builtin(
+                                    Builtin::SampleMaskIn | Builtin::PostDepthCoverage
+                                )
                             )
                     })
             }

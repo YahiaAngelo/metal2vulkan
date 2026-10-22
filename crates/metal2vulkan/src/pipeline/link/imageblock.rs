@@ -2,18 +2,19 @@
 //! stage's `RuntimeFact::FragmentImageblock`.
 //!
 //! The fragment function reads and writes the pass's imageblock storage, one plane of cells per
-//! pixel (`ImageblockMechanism::StorageImageInterlock`), and writes it inside its body. Link
-//! refuses, as not implemented, the pipelines whose Metal imageblock that plane does not model
-//! exactly:
+//! pixel, and per sample in a multisampled pass (`ImageblockMechanism::StorageImageInterlock`),
+//! and writes it inside its body. Its depth and stencil tests run before its write: its module
+//! declares early tests, or each draw's plan checks them (`RuntimeFact::TestedStorageWrites`,
+//! `lower::fragment::imageblock`). Link refuses:
 //!
-//! - a multisampled pipeline (`rasterSampleCount` above 1): Metal's imageblock is per sample
-//!   there;
-//! - a pipeline whose fixed function can drop a fragment after the function wrote its imageblock:
-//!   alpha to coverage, or a depth or stencil attachment when the function does not declare
-//!   `[[early_fragment_tests]]`. The storage already holds the write, and whether Metal keeps an
-//!   imageblock write of a fragment its tests or coverage drop is not read yet.
+//! - a function compiled for another sample count than the pipeline's (`NeedsInput(Multisampled)`):
+//!   one compiled for a multisampled pipeline reaches its own sample's cell, one compiled for one
+//!   sample the pixel's;
+//! - as not implemented, a pipeline whose alpha to coverage can drop a fragment after the function
+//!   wrote its imageblock: Metal drops the write with the fragment (measured on the M3 Max, at one
+//!   sample and at four), and the storage already holds it.
 
-use crate::error::{Error, Feature, Unsupported};
+use crate::error::{Error, Feature, RuntimeInput, Unsupported};
 use crate::library::FunctionArtifact;
 use crate::pipeline::facts::RuntimeFact;
 use crate::pipeline::graphics::{FragmentImageblock, ImageblockMechanism};
@@ -25,24 +26,27 @@ pub fn fragment_imageblock(
     r: &RenderLinkInputs,
     fragment: Option<&FunctionArtifact>,
 ) -> Result<Option<FragmentImageblock>, Error> {
-    let Some((words, writes, early_tests, master, data_size, alignment)) = fragment.and_then(|f| {
-        f.facts.iter().find_map(|fact| match *fact {
+    let Some(fragment) = fragment else {
+        return Ok(None);
+    };
+    let Some((words, writes, master, data_size, alignment)) =
+        fragment.facts.iter().find_map(|fact| match *fact {
             RuntimeFact::FragmentImageblock {
                 words,
                 writes,
-                early_tests,
                 master,
                 data_size,
                 alignment,
-            } => Some((words, writes, early_tests, master, data_size, alignment)),
+            } => Some((words, writes, master, data_size, alignment)),
             _ => None,
         })
-    }) else {
+    else {
         return Ok(None);
     };
-    let tested = r.depth_format.is_some() || r.stencil_format.is_some();
-    let dropped_after_write = writes && (r.alpha_to_coverage || (tested && !early_tests));
-    if r.raster_sample_count > 1 || dropped_after_write {
+    if fragment.interface.io.multisampled != (r.raster_sample_count > 1) {
+        return Err(Error::NeedsInput(RuntimeInput::Multisampled));
+    }
+    if writes && r.alpha_to_coverage {
         return Err(Unsupported::not_implemented(Feature::Imageblocks).into());
     }
     Ok(Some(FragmentImageblock {

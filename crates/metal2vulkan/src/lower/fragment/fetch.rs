@@ -1199,11 +1199,13 @@ pub(crate) fn extended_range_blend(
 
 /// What the function's body holds that the storage form depends on, from one walk.
 #[derive(Default)]
-struct BodyFacts {
+pub(super) struct BodyFacts {
     /// The LLVM parameters the body reads.
-    used: BTreeSet<u32>,
-    discards: bool,
-    side_effects: bool,
+    pub(super) used: BTreeSet<u32>,
+    /// The body discards the fragment.
+    pub(super) discards: bool,
+    /// The body writes memory (`discard::side_effect`).
+    pub(super) side_effects: bool,
 }
 
 /// How the depth and stencil tests bear on the function's storage writes, which it makes before
@@ -1235,7 +1237,7 @@ fn stored_before_tests(
     }
 }
 
-fn body_facts(cx: &SelectCx<'_>) -> BodyFacts {
+pub(super) fn body_facts(cx: &SelectCx<'_>) -> BodyFacts {
     let mut out = BodyFacts::default();
     for (id, inst) in cx.body.insts.iter() {
         inst.kind.for_each_value(|v| {

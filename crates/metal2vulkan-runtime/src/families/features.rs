@@ -34,7 +34,9 @@ use crate::capabilities::Query;
 use crate::error::RuntimeGap;
 use crate::framebuffer_fetch::{through_inputs, through_storage};
 use crate::rate_mapped_pass::RegionRefusal;
-use metal2vulkan::device::{OpBits, StageSimd, SubgroupOp, VkExtension, VkFeature, VkProperty};
+use metal2vulkan::device::{
+    DriverWorkaround, OpBits, StageSimd, SubgroupOp, VkExtension, VkFeature, VkProperty,
+};
 use metal2vulkan::error::{Capability, Feature, LowerFamily, Unsupported};
 use metal2vulkan::metal::format::storage_image_choice;
 use metal2vulkan::metal::{ArgumentBuffersTier, PixelFormat, ReadWriteTextureTier};
@@ -920,12 +922,11 @@ impl FeatureRow {
             // (`buffer_texture::view_usage`), and a texture over a buffer whose image no copy can
             // write (`texture.rs`).
             F::LinearTextures => first([gap(G::Textures)]),
-            // A stencil view of a depth/stencil texture (`Texture::new_texture_view`): sampled,
-            // read and blitted where the view is `X32Stencil8` of `Depth32FloatStencil8`
-            // (probes). A blit through a depth or stencil view of another format than its
-            // texture's, and a stencil view's host access, are refused
-            // (`NotImplemented(Textures)`): Metal's answers are not measured.
-            F::StencilTextureViews => first([gap(G::Textures)]),
+            // The stencil view of a combined depth/stencil texture (`X32Stencil8` of
+            // `Depth32FloatStencil8`, `Texture::new_texture_view`), the one depth or stencil view
+            // of another format Metal makes: sampled, read, blitted and copied by the CPU as
+            // plain Metal does (probes).
+            F::StencilTextureViews => RowState::Exact,
             // Arrays of textures and samplers indexed by a value the function computes: the
             // compile layer's descriptor arrays, which `shader*ArrayDynamicIndexing` lets it index.
             F::ArrayOfTexturesRead => first([needs_features(
@@ -1201,9 +1202,27 @@ impl FeatureRow {
             F::Tessellation | F::IndirectTessellationArguments => {
                 first([not_implemented(Feature::Tessellation)])
             }
-            // Coverage after the depth test (`[[post_depth_coverage]]`): not lowered.
+            // Coverage after the depth test (`[[sample_mask, post_depth_coverage]]`): `SampleMask`
+            // under the `PostDepthCoverage` mode, which `VK_EXT_post_depth_coverage` provides. A
+            // driver that splits a clipped triangle's pixel-rate fragments refuses every coverage
+            // read of a multisampled pipeline (`pipeline::link`), the only one where it differs.
             F::PostDepthCoverage => {
-                first([not_implemented(Feature::Lowering(LowerFamily::Fragment))])
+                let split = DriverWorkaround::ClippedTrianglesSplitPixelFragments;
+                first([
+                    (!f.profile
+                        .enabled()
+                        .extensions
+                        .contains(&VkExtension::ExtPostDepthCoverage))
+                    .then(|| {
+                        refused(Unsupported::needs(
+                            Feature::PostDepthCoverage,
+                            Capability::Extension(VkExtension::ExtPostDepthCoverage),
+                        ))
+                    }),
+                    f.profile.workarounds().contains(&split).then(|| {
+                        refused(Unsupported::driver_defect(Feature::PixelCoverage, split))
+                    }),
+                ])
             }
             // Pre-raster per-vertex values, and global built-ins and bindings: not lowered.
             F::PreRasterVertexValues | F::GlobalBuiltinsAndBindings => {
@@ -1325,8 +1344,15 @@ impl FeatureRow {
             // sharing the pass's storage with its tile functions' explicit imageblocks. The runtime
             // refuses a pass whose draws view imageblocks of different masters or sizes
             // (`ImageblockMasters`), and one with a tile function's explicit imageblock aliased
-            // onto the attachments beside them (`TileAndFragmentImageblocks`); the compile layer
-            // refuses a multisampled pass's, and one a test may drop after it wrote.
+            // onto the attachments beside them (`TileAndFragmentImageblocks`). A multisampled
+            // pass's function reaches each sample's block, once per sample, and a write the tests
+            // may drop runs the tests first, early or in the shader (`TestedStorageWrites`); the
+            // compile layer and the binder refuse, as not implemented, a writing function under
+            // alpha to coverage, and where its tests act in a counted draw, over a depth format
+            // other than 32-bit float or a stencil attachment alone; and, on MoltenVK at more
+            // than one sample, whose early tests drop image writes
+            // (`EarlyTestsDropMultisampledImageWrites`), one declaring early tests that discards,
+            // returns depth, stencil or a mask, or writes other memory.
             F::Imageblocks => first([
                 needs_features(
                     f,
@@ -1340,12 +1366,12 @@ impl FeatureRow {
                 not_implemented(Feature::Imageblocks),
             ]),
             // Tile dispatches run in the render encoder: a tile function over the pass's tiles, in
-            // a single-sampled pass of one layer, in threadgroups of a measured layout (squares to
-            // 32x32 and power-of-two rectangles). The compile layer and the binder refuse the rest
-            // of what Metal takes (`NotImplemented(TileShading)`): a multisampled pass's tile
-            // function, and so its sample coverage, a threadgroup of another shape (odd sides,
-            // 16x2), and a layered pass. Threadgroup memory that persists through the pass is
-            // built.
+            // a single-sampled pass of one layer, in threadgroups of even sides to 32x32 (and the
+            // single thread), each thread at Metal's place. The compile layer and the binder
+            // refuse the rest of what Metal takes (`NotImplemented(TileShading)`): a multisampled
+            // pass's tile function, and so its sample coverage, a threadgroup with an odd side,
+            // whose quads leave lanes empty, and a layered pass. Threadgroup memory that persists
+            // through the pass is built.
             F::TileShaders | F::ImageblockSampleCoverageControl | F::NonsquareTileDispatch => {
                 first([not_implemented(Feature::TileShading)])
             }

@@ -5729,6 +5729,7 @@ pub enum ExecutionMode {
     #[cfg(test)]
     ContractionOff = 31,
     SubgroupUniformControlFlowKHR = 4421,
+    PostDepthCoverage = 4446,
     DenormPreserve = 4459,
     SignedZeroInfNanPreserve = 4461,
     RoundingModeRTE = 4462,

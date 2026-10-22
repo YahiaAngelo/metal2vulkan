@@ -130,15 +130,15 @@ pub enum RuntimeFact {
     /// consumer binds the pass's imageblock storage (`SyntheticBinding::Imageblock`), which
     /// `GraphicsState::fragment_imageblock` describes. `writes`: the function writes the
     /// imageblock, so the storage holds its write before the pipeline's coverage (alpha to
-    /// coverage) could drop the fragment; `early_tests`: it declares `[[early_fragment_tests]]`, so
-    /// the depth and stencil tests run before its body; `master`: the fingerprint of the master
+    /// coverage) could drop the fragment (the depth and stencil tests run before its write: its
+    /// module declares early tests, or it states [`TestedStorageWrites`](Self::TestedStorageWrites));
+    /// `master`: the fingerprint of the master
     /// layout its views view (`FragmentImageblock::master`); `data_size`: the cell's bytes
     /// (`air.imageblock_data_size`); `alignment`: the alignment Metal states for its views
     /// (`air.arg_type_align_size`, `FragmentImageblock::alignment`).
     FragmentImageblock {
         words: u32,
         writes: bool,
-        early_tests: bool,
         master: Hash256,
         data_size: u32,
         alignment: u32,

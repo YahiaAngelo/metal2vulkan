@@ -736,6 +736,59 @@ fn vertex_and_fragment_interfaces_decode() {
     );
 }
 
+/// A fragment function reading `uint` input `mask` with the sample-mask keys `keys`, declaring
+/// `[[early_fragment_tests]]` where `early`.
+fn fragment_mask(keys: &[&'static str], early: bool) -> Result<AirAbi, Error> {
+    let mut b = ModuleBuilder::new();
+    let f32t = b.float();
+    let v4 = b.vector(f32t, 4);
+    let i32t = b.int(32);
+    let fs = entry_fn(&mut b, "fs", v4, &[i32t]);
+    let rt = node(&mut b, &[S("air.render_target"), I(0), I(0)]);
+    let fs_out = node(&mut b, &[N(rt)]);
+    let mut ops = vec![I(0)];
+    ops.extend(keys.iter().map(|&k| S(k)));
+    ops.extend([
+        S("air.arg_type_name"),
+        S("uint"),
+        S("air.arg_name"),
+        S("mask"),
+    ]);
+    let mask = node(&mut b, &ops);
+    let fs_in = node(&mut b, &[N(mask)]);
+    let mut entry = vec![F(fs), N(fs_out), N(fs_in)];
+    if early {
+        entry.push(S("early_fragment_tests"));
+    }
+    let e = node(&mut b, &entry);
+    b.named_md("air.fragment", &[e]);
+    let m = b.finish().unwrap();
+    decode(&m, &PointeeTable::default(), &mut meter())
+}
+
+/// `[[sample_mask, post_depth_coverage]]` (`air.sample_mask_in` with `air.post_depth_coverage`,
+/// as Apple's compiler writes it) decodes as the coverage after the depth test, in a function that
+/// declares `[[early_fragment_tests]]`, which Metal's compiler requires of it; without them, and
+/// on another builtin, the key is refused.
+#[test]
+fn post_depth_coverage_decodes_with_early_tests() {
+    let role = |abi: AirAbi| abi.entries[0].params[0].role.clone();
+    assert_eq!(
+        role(fragment_mask(&["air.sample_mask_in"], false).unwrap()),
+        ParamRole::Builtin(Builtin::SampleMaskIn)
+    );
+    let post = ["air.sample_mask_in", "air.post_depth_coverage"];
+    assert_eq!(
+        role(fragment_mask(&post, true).unwrap()),
+        ParamRole::Builtin(Builtin::PostDepthCoverage)
+    );
+    expect_abi(fragment_mask(&post, false), AbiError::MissingKey);
+    expect_abi(
+        fragment_mask(&["air.sample_id", "air.post_depth_coverage"], true),
+        AbiError::UnknownKey,
+    );
+}
+
 #[test]
 fn outputs_must_match_the_return_value() {
     expect_abi(graphics(true), AbiError::SignatureMismatch);

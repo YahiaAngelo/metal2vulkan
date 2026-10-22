@@ -92,6 +92,7 @@ struct Attrs {
     invariant: bool,
     clip_array_size: Option<u32>,
     depth: Option<DepthQualifier>,
+    post_depth_coverage: bool,
 }
 
 impl Attrs {
@@ -431,6 +432,7 @@ impl<'m> Cx<'m, '_> {
                 Key::Shared => a.shared = true,
                 Key::Invariant => a.invariant = true,
                 Key::ClipDistanceArraySize => a.clip_array_size = Some(ops.u32(name)?),
+                Key::PostDepthCoverage => a.post_depth_coverage = true,
                 Key::DepthQualifier => {
                     a.depth = Some(match key(ops)? {
                         Key::Any => DepthQualifier::Any,
@@ -718,6 +720,10 @@ impl<'m> Cx<'m, '_> {
             Key::PointCoord => builtin(self.meter, Builtin::PointCoord)?,
             Key::PrimitiveId => builtin(self.meter, Builtin::PrimitiveId)?,
             Key::SampleId => builtin(self.meter, Builtin::SampleId)?,
+            Key::SampleMaskIn if a.post_depth_coverage && !indirect => {
+                a.allow(self.meter, site, &[&[Key::PostDepthCoverage]])?;
+                ParamRole::Builtin(Builtin::PostDepthCoverage)
+            }
             Key::SampleMaskIn => builtin(self.meter, Builtin::SampleMaskIn)?,
             Key::RenderTargetArrayIndex => builtin(self.meter, Builtin::RenderTargetArrayIndex)?,
             Key::ViewportArrayIndex => builtin(self.meter, Builtin::ViewportArrayIndex)?,
@@ -1036,6 +1042,7 @@ fn input_in_stage(role: &ParamRole, stage: &Stage) -> bool {
             | Builtin::PrimitiveId
             | Builtin::SampleId
             | Builtin::SampleMaskIn
+            | Builtin::PostDepthCoverage
             | Builtin::BarycentricCoord(_) => FRAGMENT,
             Builtin::RenderTargetArrayIndex | Builtin::ViewportArrayIndex => KERNEL | FRAGMENT,
         },
