@@ -89,7 +89,7 @@ use metal2vulkan::error::RuntimeDriverDefect;
 use metal2vulkan::vk::{Format, FormatFeatureFlags2, ImageCreateFlags, SampleCountFlags};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::ptr::NonNull;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 /// A runtime extension (Metal has none): makes dma-bufs of the host pages a no-copy import
@@ -186,16 +186,25 @@ pub(super) struct DmaBufPages {
     /// imported, as the descriptors to import it again did not fit (`host_residency.rs`):
     /// counted in `WorkCounts::host_imports_kept_for_fds` while the pages live.
     kept_for_fds: bool,
+    /// What waits for the imports' free ([`DmaBufPages::after_free`]): the caller's keep-alive
+    /// and the deallocators of the pages that went, let go of once the imports are freed.
+    after_free: Mutex<Vec<Box<dyn Send>>>,
 }
 
 impl Drop for DmaBufPages {
     fn drop(&mut self) {
         // The Vulkan teardown is a section of the exit guard.
+        let after_free: Vec<Box<dyn Send>> = (self.after_free.get_mut())
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain(..)
+            .collect();
         let Some(busy) = exit_guard::enter() else {
-            // The process is exiting: the imports stay to its end, and the source with them.
+            // The process is exiting: the imports stay to its end, and the source and what waits
+            // for their free with them.
             if let Some(source) = self.source.take() {
                 std::mem::forget(source);
             }
+            std::mem::forget(after_free);
             return;
         };
         let shared = self.device.shared();
@@ -226,6 +235,8 @@ impl Drop for DmaBufPages {
         if let Some(source) = self.source.take() {
             exit_guard::program_release(move || drop(source));
         }
+        // Freed: what waited for it goes, the keep-alive that kept the pages mapped among it.
+        drop(after_free);
     }
 }
 
@@ -247,7 +258,15 @@ impl DmaBufPages {
             length: request.length,
             bound: None,
             kept_for_fds: false,
+            after_free: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Let `after` go once the imports are freed: as their last holder lets go of them, which
+    /// may be a moment after the caller (an import going, `buffer.rs`'s `Imported`) lets go of
+    /// its own hold.
+    pub(super) fn after_free(&self, after: Box<dyn Send>) {
+        lock(&self.after_free).push(after);
     }
 
     /// Hold `memory`, imported from one of the source's dma-bufs, until the pages go; counted

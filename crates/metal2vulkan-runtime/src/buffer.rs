@@ -1297,8 +1297,9 @@ impl Drop for Imported {
         // (`HostImport::drop`), a releasable import's as the last command buffer whose blit read
         // them completed, and no other read reached them (`host_residency.rs`).
         match unsafe { self.pages.release_import(&self.device, after) } {
-            // Freed now: what waited goes here.
-            Some(after) => drop(after),
+            // Freed now: what waited goes here, or, for imports of the caller's dma-bufs, once
+            // their last holder (these pages' placement, as it drops after this) frees them.
+            Some(after) => self.pages.after_free(after),
             // Its memory waits for the batches in flight (`freed_memory.rs`), and what the import
             // left with it, past Metal's release.
             None => {
@@ -1425,8 +1426,8 @@ impl Pages {
     /// Destroy the `VkBuffer` of a host import's pages and free their memory, on `device`, once
     /// their sparse binding completed, and note it (`Device::note_import_freed`): an import's
     /// last hold lets go. Left to the process's end while it exits. `after` goes once the memory
-    /// is freed: given back for the caller to let go of, unless it waits with the memory for the
-    /// batches in flight (`freed_memory.rs`).
+    /// is freed: given back for the caller to let go of ([`after_free`](Self::after_free)),
+    /// unless it waits with the memory for the batches in flight (`freed_memory.rs`).
     ///
     /// # Safety
     ///
@@ -1450,6 +1451,19 @@ impl Pages {
         drop(busy);
         device.note_import_freed(self.memory.placement.size());
         after
+    }
+
+    /// Let `after` go once the pages' memory is freed, their import released
+    /// ([`release_import`](Self::release_import)): at once, but where the memory is imports of
+    /// the caller's dma-bufs (`dma_buf.rs`), which the placement holds and are freed as their
+    /// last holder lets go of them, then.
+    fn after_free(&self, after: Box<dyn Send>) {
+        #[cfg(unix)]
+        if let Some(imports) = self.memory.placement.dma_buf_pages() {
+            imports.after_free(after);
+            return;
+        }
+        drop(after);
     }
 }
 

@@ -28,6 +28,7 @@ use super::host_memory::READ_ONLY_PAGES;
 use super::host_memory::{
     counting, gpu_fill, gpu_read, host_page, not_importable, on_device, run, Mapping,
 };
+use super::keep_alives::eventually;
 use super::no_copy_heaps::{
     blit_into, blit_texels, encode_texels_in, encode_texels_out, shared, staged,
 };
@@ -36,9 +37,10 @@ use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
 use metal2vulkan::vk::DriverId;
 use metal2vulkan_runtime::{
-    BlitOption, Buffer, CommandBuffer, CommandQueue, DebugMessage, Degradation, Device,
-    DmaBufChunk, DmaBufRequest, DmaBufSource, Error, EventRef, Heap, HeapDescriptor, HeapType,
-    HostMemory, Origin, Problem, ResourceOptions, RuntimeGap, Size, TextureDescriptor,
+    BlitOption, Buffer, BufferContents, BufferDescriptor, CommandBuffer, CommandQueue,
+    DebugMessage, Degradation, Device, DmaBufChunk, DmaBufRequest, DmaBufSource, Error, EventRef,
+    Heap, HeapDescriptor, HeapType, HostMemory, KeepAlive, Origin, Problem, ResourceOptions,
+    RuntimeGap, Size, TextureDescriptor,
 };
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::ptr::NonNull;
@@ -833,6 +835,79 @@ fn read_only_pages_are_made_from_the_source() {
             device.name()
         );
         drop(made);
+    });
+}
+
+/// A keep-alive that records, as it drops, the device's live dma-buf imports
+/// (`WorkCounts::dma_buf_memories_live`).
+struct LiveAtDrop {
+    device: Device,
+    seen: Arc<Mutex<Option<u64>>>,
+}
+
+impl Drop for LiveAtDrop {
+    fn drop(&mut self) {
+        let live = self.device.work_counts().dma_buf_memories_live;
+        *self.seen.lock().unwrap() = Some(live);
+    }
+}
+
+/// A no-copy buffer's keep-alive goes once the imports of its pages are freed, as
+/// `HostMemory`'s contract has it (the pages must stay mapped until then): a buffer over two
+/// pages the process maps read-only, made from the source's dma-bufs on any device that imports
+/// them, with a keep-alive and no deallocator, released; as the keep-alive drops, every import the
+/// buffer made is freed (the live dma-buf imports are back to their count before it).
+#[test]
+fn a_keep_alive_goes_after_the_imports_of_its_pages() {
+    const TEST: &str = "dma-buf keep-alive order";
+    if !udmabuf_openable(TEST) {
+        return;
+    }
+    degrade_notices::on_device(|device, _| {
+        if !device.enables_extension(c"VK_EXT_external_memory_dma_buf") {
+            eprintln!("{TEST}: on {}: no dma-buf route", device.name());
+            return;
+        }
+        let page = host_page();
+        let ram = Memfd::new(4 * page);
+        let view = ram.view(&[(page, 2 * page)]);
+        view.protect_read_only();
+        let live = || device.work_counts().dma_buf_memories_live;
+        let before = live();
+        let seen = Arc::new(Mutex::new(None));
+        let keep_alive: KeepAlive = Box::new(LiveAtDrop {
+            device: device.clone(),
+            seen: Arc::clone(&seen),
+        });
+        let calls = Calls::default();
+        let source = ram.source(&view, &calls);
+        // SAFETY: the view outlives the buffer and its keep-alive, and the source makes dma-bufs
+        // of its pages.
+        let memory = unsafe { HostMemory::with_dma_buf(view.pointer(0), source) };
+        let contents = BufferContents::NoCopy {
+            memory,
+            deallocator: None,
+            keep_alive: Some(keep_alive),
+        };
+        let length = (2 * page) as u64;
+        let descriptor = BufferDescriptor::new(length, ResourceOptions::default(), contents);
+        let buffer = device.new_buffer_with_descriptor(descriptor).unwrap();
+        let imported = live() - before;
+        assert!(imported > 0, "{TEST}: no import made: {calls:?}");
+        drop(buffer);
+        assert!(
+            eventually(|| seen.lock().unwrap().is_some()),
+            "{TEST}: the keep-alive never went"
+        );
+        let at_drop = seen.lock().unwrap().unwrap();
+        assert_eq!(
+            at_drop, before,
+            "{TEST}: dma-buf imports live as the keep-alive went ({imported} made)"
+        );
+        eprintln!(
+            "{TEST}: on {}: {imported} imports freed before the keep-alive went",
+            device.name()
+        );
     });
 }
 
