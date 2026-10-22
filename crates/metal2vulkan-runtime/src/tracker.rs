@@ -624,9 +624,11 @@ struct Needs {
     waits: Vec<Wait>,
 }
 
-/// A short list kept one per `VkQueue` (an entry's writers and reads, a writer's waits), its first
-/// value inline: on a device of one `VkQueue` it never allocates, and copying it allocates nothing
-/// (the module docs). It keeps the order values were pushed in, as a `Vec` would.
+/// A short list, its first value inline: of one value it allocates nothing, nor does a copy of it
+/// (the module docs). Kept one per `VkQueue` (an entry's writers and reads, a writer's waits), so
+/// on a device of one `VkQueue` those never allocate; and one per range (a resource's uses in an
+/// encoder's part) and per part (an encoder's parts, one but where it splits). It keeps the order
+/// values were pushed in, as a `Vec` would.
 #[derive(Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 struct Few<T> {
@@ -645,6 +647,19 @@ impl<T> Default for Few<T> {
 }
 
 impl<T> Few<T> {
+    /// A list of `value` alone.
+    fn of(value: T) -> Few<T> {
+        Few {
+            first: Some(value),
+            rest: Vec::new(),
+        }
+    }
+
+    /// The last value, to change.
+    fn last_mut(&mut self) -> Option<&mut T> {
+        self.rest.last_mut().or(self.first.as_mut())
+    }
+
     fn is_empty(&self) -> bool {
         self.first.is_none()
     }
@@ -1072,8 +1087,9 @@ pub(super) struct EncoderUses<K> {
     ordered: bool,
     /// The accesses of the current part's commands so far, for that order.
     inside: KeyMap<Class<K>, Vec<Entry>>,
-    /// The parts, in order: the last is the current one. Never empty.
-    parts: Vec<Part<K>>,
+    /// The parts, in order: the last is the current one. Never empty; the first held in place, so
+    /// an encoder of one part allocates none for them.
+    parts: Few<Part<K>>,
     /// The fences waited for: before the encoder's first part.
     waits: Vec<FenceUse<K>>,
     /// The fences updated: after its last part.
@@ -1148,7 +1164,7 @@ impl<K: Copy + Ord + Hash> EncoderUses<K> {
         EncoderUses {
             ordered,
             inside: KeyMap::default(),
-            parts: vec![Part::new()],
+            parts: Few::of(Part::new()),
             waits: Vec::new(),
             updates: Vec::new(),
             held: Vec::new(),
@@ -1346,8 +1362,7 @@ impl<K: Copy + Ord + Hash> EncoderUses<K> {
 
     /// The part commands are recorded into now.
     fn current(&mut self) -> &mut Part<K> {
-        let last = self.parts.len() - 1;
-        &mut self.parts[last]
+        self.parts.last_mut().expect("an encoder has a part")
     }
 
     /// End the current part: the commands after this run in a part of their own, after
@@ -1816,7 +1831,7 @@ impl<K: Copy + Ord + Hash> EncoderUses<K> {
     /// The room its current part's list of `key`'s uses has past the first, where it tracks it.
     #[cfg(test)]
     pub(super) fn range_room(&self, key: K) -> Option<usize> {
-        let part = self.parts.last()?;
+        let part = self.parts.iter().last()?;
         part.tracked.get(&key).map(|few| few.rest.capacity())
     }
 }
