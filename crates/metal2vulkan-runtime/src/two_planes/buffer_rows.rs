@@ -11,9 +11,16 @@
 //!   between the rows, 0 in a new texture and what a fill or a blit wrote there after. Below a
 //!   width of 4 the level's first row reads as it lies and every later row as 0.
 //! - Into the texture, row `r` writes from `(y + r) · max(16, ⌊4 W / 16⌋ · 16) + 4 x`, the rows
-//!   a fill addresses (`blit_fill.rs`). Where two rows meet, Metal's GPU writes them in an order
-//!   that depends on the copy's size (the earlier row's bytes stood at 32 of 39 meetings 37
-//!   texels wide, and at every other meeting 5 and 6 texels wide), not a rule a program can hold.
+//!   a fill addresses (`blit_fill.rs`). Rows `r` and `r + 1` of the region meet where `w`
+//!   passes `⌊4 W / 16⌋ · 4` texels (probe `bpm.m`: 5 to 101 texels wide, 2 to 128 rows, origins
+//!   0 to 2 across and 0 to 64 down, every meeting, run 2 to 5 times; alike for a buffer of
+//!   other rows and offsets, a slice of an array, a heap's texture, a `Private` one and the sRGB
+//!   twin). Below a width of 32 Metal's GPU writes the region's rows in groups of 32, and in each
+//!   in pairs where the origin's `x` and `y` are even, else in fours: within a pair or four the
+//!   earlier row's bytes stand where two meet, and between them the later row's, alike in every
+//!   run. Between groups of 32 rows, and at every meeting 32 texels wide or wider, the order
+//!   varies from run to run (the earlier row's bytes at 556 of 560 meetings between groups, and
+//!   at most meetings of the wider ones, the later row's at most meetings 3 or 5 rows high).
 //!
 //! **Held:** the level's rows the blit reaches go through a scratch buffer of the encoder laid
 //! out as Metal's plane 0, rows `align(4 W, 16)` apart, one blit command a step: the scratch
@@ -21,14 +28,15 @@
 //! lie in the heap's bytes, those bytes). Out of the texture, the region's rows are copied from
 //! the scratch at Metal's addresses into the buffer (a row Metal reads as 0 from the scratch's
 //! zeroed tail). Into it, the buffer's rows are copied into the scratch at Metal's addresses, the
-//! earlier row's bytes where two meet, and the scratch back into the texels (or the heap's
-//! bytes). A texture of the device's memory holds the bytes between its rows apart
+//! row whose bytes Metal's stand where two meet ([`later_row_stands`]; the earlier row's where
+//! Metal's order varies), and the scratch back into the texels (or the heap's bytes). A texture of the device's memory holds the bytes between its rows apart
 //! (`Texture::between_rows`, plane 0 of each slice as Metal lays it out, made zeroed at the first
 //! write there): a blit into the texture whose rows reach them, and a fill whose words land
 //! there (`blit_fill.rs`), write them, and the scratch of a blit out of it starts from them. A
 //! copy from another texture that writes bytes there does not (`two_planes.rs`): it notes them
 //! (`Texture::keep_outside`), and a later blit out of the texture that reads them reads them as
-//! the held bytes, announced (`two-plane-buffer-blit`), as is a blit into it whose rows meet.
+//! the held bytes, announced (`two-plane-buffer-blit`), as is a blit into it whose rows meet where
+//! Metal's order varies.
 
 use super::super::blit::{reads, writes, BlitCommandEncoder};
 use super::super::blit_plan::BufferLayout;
@@ -69,6 +77,19 @@ pub(in super::super) fn row_spans(
             (rows > 0 || row == 0).then_some(start..start + 4 * w)
         })
         .collect()
+}
+
+/// Where rows `r` and `r + 1` of a blit into a level `width` texels wide from `origin` (`x`, `y`)
+/// meet, whether the later row's bytes stand as Metal's GPU writes them (the module docs):
+/// `Some(true)` between pairs of rows (an even origin) or fours (another) in a group of 32 rows,
+/// `Some(false)` within them, `None` where Metal's order varies from run to run (between groups,
+/// or 32 texels wide or wider).
+pub(in super::super) fn later_row_stands(width: u64, [x, y]: [u64; 2], r: u64) -> Option<bool> {
+    if width >= 32 || r % 32 == 31 {
+        return None;
+    }
+    let rows = if x % 2 == 0 && y % 2 == 0 { 2 } else { 4 };
+    Some(r % rows == rows - 1)
 }
 
 /// Whether `span` of plane 0 of a level `width` texels wide holds bytes between its rows, which
@@ -203,19 +224,35 @@ impl BlitCommandEncoder {
             }
             return Ok(());
         }
-        // Each row from where the row before it ends: the earlier row's bytes where two meet.
+        // Each row cut where it meets the next and the later row's bytes stand, and from where
+        // the row before it ends where the earlier row's do (the earlier row's where Metal's
+        // order varies). Into the texture every row has a span, and only neighbours meet.
+        let spans: Vec<Range<u64>> = spans.into_iter().flatten().collect();
+        let stands = |r: usize| {
+            let meets = spans
+                .get(r + 1)
+                .is_some_and(|next| next.start < spans[r].end);
+            meets.then(|| later_row_stands(width, [x, y], r as u64))
+        };
         let mut copies = Vec::with_capacity(spans.len());
-        let mut end = 0;
-        let mut meet = false;
+        let mut varies = false;
         for (r, span) in spans.iter().enumerate() {
-            let Some(span) = span else { continue };
-            let start = span.start.max(end);
-            meet |= start > span.start;
-            if start < span.end {
+            let start = match r.checked_sub(1).and_then(stands) {
+                Some(Some(true)) | None => span.start,
+                Some(Some(false) | None) => span.start.max(spans[r - 1].end),
+            };
+            let end = match stands(r) {
+                Some(Some(true)) => span.end.min(spans[r + 1].start),
+                Some(None) => {
+                    varies = true;
+                    span.end
+                }
+                Some(Some(false)) | None => span.end,
+            };
+            if start < end {
                 let from = layout.offset + r as u64 * layout.bytes_per_row + (start - span.start);
-                copies.push((from, start - first * pitch, span.end - start));
+                copies.push((from, start - first * pitch, end - start));
             }
-            end = end.max(span.end);
         }
         self.byte_copies(buffer, &scratch, &copies)?;
         match &planes {
@@ -231,10 +268,11 @@ impl BlitCommandEncoder {
                 }
             }
         }
-        if meet {
+        if varies {
             announce(
-                "into the texture, where its rows meet, the earlier row's bytes stand; Metal's GPU \
-                 writes such rows in an order that depends on the copy's size",
+                "into the texture, where its rows meet between Metal's groups of 32 rows or 32 \
+                 texels wide or wider, the earlier row's bytes stand; Metal's GPU writes such \
+                 rows in an order that varies from run to run",
             );
         }
         Ok(())

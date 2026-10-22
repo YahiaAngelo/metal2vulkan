@@ -88,6 +88,8 @@ use std::ops::Range;
 mod buffer_rows;
 mod heap_bytes;
 
+#[cfg(test)]
+pub(super) use buffer_rows::later_row_stands;
 pub(super) use buffer_rows::{between_rows, buffer_blit_rows, row_spans, rows_held};
 
 use heap_bytes::{stage_planes, BytePlanes, Staged};

@@ -204,6 +204,7 @@ mod tracker;
 mod trails;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod twin_flights;
+mod two_plane_rows;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod uniform_bind_offsets;
 mod unique_identifier;

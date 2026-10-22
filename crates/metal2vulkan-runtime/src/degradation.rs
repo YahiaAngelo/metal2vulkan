@@ -1234,16 +1234,19 @@ degradations! {
         /// is not a multiple of 4 (`two_planes.rs`), where Metal's blit addresses the level's rows
         /// `⌊4 w / 16⌋ · 16` bytes apart, short of where they lie, and so moves texels into and
         /// out of other rows and the bytes between them. A 2D texture or array of one level is
-        /// blitted at Metal's rows (`two_planes/buffer_rows.rs`); announced there are a blit into
-        /// it whose rows meet, which keeps the earlier row's bytes where Metal's GPU writes the two
-        /// in an order that depends on the copy's size, and a blit out of a texture of the
+        /// blitted at Metal's rows (`two_planes/buffer_rows.rs`), the row whose bytes Metal's GPU
+        /// leaves where two meet standing; announced there are a blit into it whose rows meet
+        /// between Metal's groups of 32 rows or 32 texels wide or wider, which keeps the earlier
+        /// row's bytes where Metal's GPU writes the two in an order that varies from run to run,
+        /// and a blit out of a texture of the
         /// device's memory that reads bytes between its rows after a copy from another texture
         /// wrote some there, which reads them as its fills and blits with a buffer left them (held
         /// apart, `Texture::between_rows`). Any other such texture (more levels, a view, 1D, 3D,
         /// a surface's) moves the texels at the rows the texture holds them in, announced.
         TwoPlaneBufferBlit = "two-plane-buffer-blit", Precision,
-            "where rows meet in a blit into the texture the earlier row's bytes stand, where \
-             Metal's GPU writes them in an order that depends on the copy's size; a blit out of a \
+            "where rows meet in a blit into the texture between groups of 32 rows or 32 texels \
+             wide or wider the earlier row's bytes stand, where Metal's GPU writes them in an \
+             order that varies from run to run; a blit out of a \
              texture of the device's memory reads the bytes between its rows that a copy from \
              another texture wrote as its fills and blits with a buffer left them, where Metal's \
              reads the copy's back; and a texture of more than one level, a \

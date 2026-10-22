@@ -25,8 +25,9 @@
 //! (`bind::plane_copy`, which Metal's measured copies pin), at 48 x 20 and at widths that are not a
 //! multiple of 4; a copy whose rows overlap in the destination is announced once
 //! (`two-plane-texture-copy`). A buffer blit at a width off 4 is checked against `bp.m`'s words
-//! (an Apple M3 Max under macOS 27.0.1, `ROW_BLITS`): Metal's rows, announced
-//! (`two-plane-buffer-blit`) where rows meet in a blit into the texture; and a fill read back by
+//! (an Apple M3 Max under macOS 27.0.1, `ROW_BLITS`): Metal's rows, and where rows meet in a blit
+//! into the texture the row whose bytes Metal's stand, announced (`two-plane-buffer-blit`) where
+//! Metal's order varies from run to run; and a fill read back by
 //! such a blit against `pad.m`'s bytes (`PAD_CASES`), the bytes between rows included.
 //! A differing output is printed whole, on one `XR-TWO-PLANE-COPIES-DIFFERS` line.
 
@@ -899,8 +900,10 @@ const OWN: bool = false;
 const OUT: bool = true;
 const IN: bool = false;
 
-/// Metal's blits that the runtime answers alike and announces nothing for.
-const ROW_BLITS: [RowBlit; 14] = [
+/// Metal's blits that the runtime answers alike and announces nothing for, rows that meet into
+/// the texture below a width of 32 among them (in pairs of rows from an even origin, in fours
+/// from another).
+const ROW_BLITS: [RowBlit; 22] = [
     row_blit(([5, 3, 1], OWN, 0), None, (OUT, [0, 0, 5, 3]),
         "t0 t1 t2 t3 t4 | t4 00000000 00000000 00000000 t5 | t5 t6 t7 t8 t9"),
     row_blit(([5, 3, 1], OWN, 0), None, (OUT, [1, 1, 3, 2]), "00000000 00000000 00000000 | t6 t7 t8"),
@@ -927,18 +930,32 @@ const ROW_BLITS: [RowBlit; 14] = [
     row_blit(([3, 4, 1], true, 0), None, (OUT, [0, 0, 3, 4]),
         "t0 t1 t2 | 00000000 00000000 00000000 | 00000000 00000000 00000000 | 00000000 00000000 00000000"),
     row_blit(([5, 3, 1], OWN, 0), Some([1, 1, 2, 1]), (OUT, [0, 0, 5, 3]),
-        "t0 t1 t2 t3 t4 | t4 a4a3a2a1 a4a3a2a1 00000000 t5 | t5 t6 t7 t8 t9"),
-];
-
-/// Metal's blits that the runtime announces: into the texture with rows that meet (each answered
-/// as Metal's here, where the earlier row's bytes stood).
-const ANNOUNCED_ROW_BLITS: [RowBlit; 3] = [
-    row_blit(([5, 6, 1], OWN, 0), None, (IN, [0, 1, 5, 4]),
+        "t0 t1 t2 t3 t4 | t4 a4a3a2a1 a4a3a2a1 00000000 t5 | t5 t6 t7 t8 t9"),    row_blit(([5, 6, 1], OWN, 0), None, (IN, [0, 1, 5, 4]),
         "t0 t1 t2 t3 b0000000 | b0000004 b0000101 b0000102 b0000103 b0000104 | b0000204 b0000301 b0000302 b0000303 b0000304 | t15 t16 t17 t18 t19 | t20 t21 t22 t23 t24 | t25 t26 t27 t28 t29"),
     row_blit(([5, 6, 1], true, 0), None, (IN, [0, 1, 5, 4]),
         "t0 t1 t2 t3 b0000000 | b0000004 b0000101 b0000102 b0000103 b0000104 | b0000204 b0000301 b0000302 b0000303 b0000304 | t15 t16 t17 t18 t19 | t20 t21 t22 t23 t24 | t25 t26 t27 t28 t29"),
     row_blit(([7, 4, 3], OWN, 2), None, (IN, [1, 1, 5, 3]),
         "t2.0 t2.1 t2.2 t2.3 t2.4 b0000000 b0000001 | b0000003 b0000004 b0000101 b0000102 b0000103 b0000104 b0000201 | b0000203 b0000204 t2.16 t2.17 t2.18 t2.19 t2.20 | t2.21 t2.22 t2.23 t2.24 t2.25 t2.26 t2.27"),
+    row_blit(([7, 3, 1], OWN, 0), None, (IN, [0, 0, 7, 3]),
+        "b0000000 b0000001 b0000002 b0000003 b0000004 b0000005 b0000006 | b0000200 b0000201 b0000202 b0000203 b0000204 b0000205 b0000206 | t14 t15 t16 t17 t18 t19 t20"),
+    row_blit(([5, 8, 1], OWN, 0), None, (IN, [0, 1, 5, 6]),
+        "t0 t1 t2 t3 b0000000 | b0000004 b0000101 b0000102 b0000103 b0000104 | b0000204 b0000301 b0000302 b0000303 b0000400 | b0000404 b0000501 b0000502 b0000503 b0000504 | t20 t21 t22 t23 t24 | t25 t26 t27 t28 t29 | t30 t31 t32 t33 t34 | t35 t36 t37 t38 t39"),
+    row_blit(([5, 6, 1], OWN, 0), None, (IN, [0, 0, 5, 6]),
+        "b0000000 b0000001 b0000002 b0000003 b0000004 | b0000200 b0000201 b0000202 b0000203 b0000204 | b0000400 b0000401 b0000402 b0000403 b0000404 | b0000504 t16 t17 t18 t19 | t20 t21 t22 t23 t24 | t25 t26 t27 t28 t29"),
+    row_blit(([6, 5, 1], OWN, 0), None, (IN, [0, 0, 6, 5]),
+        "b0000000 b0000001 b0000002 b0000003 b0000004 b0000005 | b0000200 b0000201 b0000202 b0000203 b0000204 b0000205 | b0000400 b0000401 b0000402 b0000403 b0000404 b0000405 | t18 t19 t20 t21 t22 t23 | t24 t25 t26 t27 t28 t29"),
+    row_blit(([9, 4, 1], OWN, 0), None, (IN, [0, 0, 9, 4]),
+        "b0000000 b0000001 b0000002 b0000003 b0000004 b0000005 b0000006 b0000007 b0000008 | b0000104 b0000105 b0000106 b0000107 b0000200 b0000201 b0000202 b0000203 b0000204 | b0000208 b0000301 b0000302 b0000303 b0000304 b0000305 b0000306 b0000307 b0000308 | t27 t28 t29 t30 t31 t32 t33 t34 t35"),
+];
+
+/// Metal's blits that the runtime announces: into the texture with rows that meet where Metal's
+/// order varies from run to run, 32 texels wide or wider and between groups of 32 rows (each
+/// answered as Metal's in three runs here, where the earlier row's bytes stood).
+const ANNOUNCED_ROW_BLITS: [RowBlit; 2] = [
+    row_blit(([41, 2, 1], OWN, 0), None, (IN, [0, 0, 41, 2]),
+        "b0000000 b0000001 b0000002 b0000003 b0000004 b0000005 b0000006 b0000007 b0000008 b0000009 b000000a b000000b b000000c b000000d b000000e b000000f b0000010 b0000011 b0000012 b0000013 b0000014 b0000015 b0000016 b0000017 b0000018 b0000019 b000001a b000001b b000001c b000001d b000001e b000001f b0000020 b0000021 b0000022 b0000023 b0000024 b0000025 b0000026 b0000027 b0000028 | b0000104 b0000105 b0000106 b0000107 b0000108 b0000109 b000010a b000010b b000010c b000010d b000010e b000010f b0000110 b0000111 b0000112 b0000113 b0000114 b0000115 b0000116 b0000117 b0000118 b0000119 b000011a b000011b b000011c b000011d b000011e b000011f b0000120 b0000121 b0000122 b0000123 b0000124 b0000125 b0000126 b0000127 b0000128 t78 t79 t80 t81"),
+    row_blit(([5, 33, 1], OWN, 0), None, (IN, [0, 0, 5, 33]),
+        "b0000000 b0000001 b0000002 b0000003 b0000004 | b0000200 b0000201 b0000202 b0000203 b0000204 | b0000400 b0000401 b0000402 b0000403 b0000404 | b0000600 b0000601 b0000602 b0000603 b0000604 | b0000800 b0000801 b0000802 b0000803 b0000804 | b0000a00 b0000a01 b0000a02 b0000a03 b0000a04 | b0000c00 b0000c01 b0000c02 b0000c03 b0000c04 | b0000e00 b0000e01 b0000e02 b0000e03 b0000e04 | b0001000 b0001001 b0001002 b0001003 b0001004 | b0001200 b0001201 b0001202 b0001203 b0001204 | b0001400 b0001401 b0001402 b0001403 b0001404 | b0001600 b0001601 b0001602 b0001603 b0001604 | b0001800 b0001801 b0001802 b0001803 b0001804 | b0001a00 b0001a01 b0001a02 b0001a03 b0001a04 | b0001c00 b0001c01 b0001c02 b0001c03 b0001c04 | b0001e00 b0001e01 b0001e02 b0001e03 b0001e04 | b0001f04 b0002001 b0002002 b0002003 b0002004 | t85 t86 t87 t88 t89 | t90 t91 t92 t93 t94 | t95 t96 t97 t98 t99 | t100 t101 t102 t103 t104 | t105 t106 t107 t108 t109 | t110 t111 t112 t113 t114 | t115 t116 t117 t118 t119 | t120 t121 t122 t123 t124 | t125 t126 t127 t128 t129 | t130 t131 t132 t133 t134 | t135 t136 t137 t138 t139 | t140 t141 t142 t143 t144 | t145 t146 t147 t148 t149 | t150 t151 t152 t153 t154 | t155 t156 t157 t158 t159 | t160 t161 t162 t163 t164"),
 ];
 
 /// The words `printed` names, as `bp.m` printed them.
@@ -1075,8 +1092,9 @@ fn row_blit_words(device: &Device, queue: &CommandQueue, blit: &RowBlit) -> Vec<
 /// A blit between a buffer and a two-plane texture of one level at a width off 4, of its own
 /// memory or a heap's, moves Metal's words at Metal's rows: out of the texture the bytes between
 /// rows too (0 in a new texture, as a fill left them, held apart in a texture of the device's
-/// memory), and below a width of 4 only the first row; announced (`two-plane-buffer-blit`) only
-/// where rows meet in a blit into it.
+/// memory), and below a width of 4 only the first row; into it, where rows meet, the row whose
+/// bytes Metal's GPU leaves; announced (`two-plane-buffer-blit`) only where rows meet in a blit
+/// into it where Metal's order varies from run to run.
 #[test]
 fn buffer_blits_at_widths_off_4_take_metal_s_rows() {
     on_device(|device, messages| {
