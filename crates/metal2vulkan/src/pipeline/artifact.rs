@@ -1743,6 +1743,20 @@ pub enum PrecisionNote {
     /// another filter, than Metal's near a boundary, and the query answers the device's level.
     /// Validation derives no tolerance from it.
     DeviceSampleLevel,
+    /// A render pipeline covers by alpha (`alphaToCoverageEnabled`) under
+    /// `TextureWriteRoundingMode::NearestEven`, and its fragment function writes a `float` alpha
+    /// to a half-float attachment 0 that stores it as written: Metal stores the alpha rounded to
+    /// the nearest-even half and reads the coverage from the alpha before rounding (the coverage
+    /// of 16,384 alphas the same under either mode on an Apple M3 Max), which no device
+    /// separates, so the function rounds the alpha and the coverage reads the rounded one. The
+    /// stored alpha is Metal's; a fragment whose alpha lies within half a `half` step of a
+    /// coverage threshold may cover one sample more or fewer (2 of the 16,384 alphas on the
+    /// M3 Max, each just past the midpoint between two halves). The exact path, Metal's coverage
+    /// computed in the function, needs Metal's coverage pattern, which is not modelled.
+    ///
+    /// Validation derives no tolerance and no explanation from it: a difference stays a
+    /// mismatch for review, deferred in C3 until an exact path exists.
+    CoverageReadsRoundedAlpha,
 }
 
 /// The math mode of an entry's module, which decides, on a device whose `float` functions are

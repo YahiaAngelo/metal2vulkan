@@ -196,6 +196,7 @@ fn notes() -> Vec<(&'static str, Ledger)> {
             VertexSimdgroupGrouping,
             FragmentSimdgroupGrouping,
             BlendedWriteRounding,
+            CoverageReadsRoundedAlpha,
             RotatedBlendRounding,
             LinkedSamplerNumbering,
             ComputedSampleDepth,

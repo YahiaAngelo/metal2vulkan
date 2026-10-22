@@ -1001,11 +1001,11 @@ fn a_half_output_without_fast_math_is_noted_where_its_attachment_blends() {
                 mask,
                 b,
             ))];
-            let (notes, _) = pipeline_writes(&f, &rules, &colors).expect(what);
+            let (notes, _) = pipeline_writes(&f, &rules, &colors, false).expect(what);
             assert_eq!(notes.contains(&note), want, "{stem}: {what}: {notes:?}");
         }
         // A pipeline without the attachment's state (none listed) records none.
-        let (notes, _) = pipeline_writes(&f, &rules, &[]).expect("no attachments");
+        let (notes, _) = pipeline_writes(&f, &rules, &[], false).expect("no attachments");
         assert!(!notes.contains(&note), "{stem}: no attachments");
     }
 }
@@ -1060,11 +1060,11 @@ fn a_half_output_with_fast_math_is_noted_where_its_attachment_stores() {
                 mask,
                 b,
             ))];
-            let (notes, _) = pipeline_writes(&f, &rules, &colors).expect(what);
+            let (notes, _) = pipeline_writes(&f, &rules, &colors, false).expect(what);
             assert_eq!(notes.contains(&note), want, "{stem}: {what}: {notes:?}");
         }
         // A pipeline without the attachment's state (none listed) records none.
-        let (notes, _) = pipeline_writes(&f, &rules, &[]).expect("no attachments");
+        let (notes, _) = pipeline_writes(&f, &rules, &[], false).expect("no attachments");
         assert!(!notes.contains(&note), "{stem}: no attachments");
     }
 }

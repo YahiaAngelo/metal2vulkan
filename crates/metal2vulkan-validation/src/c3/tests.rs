@@ -1478,6 +1478,16 @@ fn a_blended_write_rounding_row_is_deferred_and_never_a_reviewed_reading() {
     );
 }
 
+/// A pipeline covering by alpha under `textureWriteRoundingMode` 2 whose coverage reads the
+/// rounded alpha (`CoverageReadsRoundedAlpha`) is deferred the same way.
+#[test]
+fn a_coverage_reads_rounded_alpha_row_is_deferred_and_never_a_reviewed_reading() {
+    deferred_and_never_reviewed(
+        PrecisionNote::CoverageReadsRoundedAlpha,
+        "CoverageReadsRoundedAlpha:a pipeline covering by alpha",
+    );
+}
+
 /// An `ARGB8Unorm` attachment blended in none of the measured forms (`RotatedBlendRounding`) is
 /// deferred the same way.
 #[test]

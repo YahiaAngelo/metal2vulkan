@@ -148,8 +148,13 @@ fn a_safe_one_zero_blend_of_a_sixteen_bit_float_attachment_blends() {
             .expect("links")
             .graphics
             .expect("graphics");
-        let (notes, _) = pipeline_writes(&fragment, &g.color_write_rules, &g.color_attachments)
-            .expect("the rule words");
+        let (notes, _) = pipeline_writes(
+            &fragment,
+            &g.color_write_rules,
+            &g.color_attachments,
+            g.alpha_to_coverage,
+        )
+        .expect("the rule words");
         let noted = notes.contains(&crate::pipeline::PrecisionNote::HalfOutputPrecision);
         (
             g.color_attachments[0]
@@ -353,21 +358,25 @@ fn color_writes_are_the_pipelines() {
 
 /// Under `TextureWriteRoundingMode::NearestEven` a half-float attachment's channels round to
 /// nearest even in the function on every profile, MoltenVK's included, where they store the output
-/// as written (no blend, or factors one and zero, and not alpha-to-coverage's alpha); after another
-/// blend, one and one included, the device rounds the blend's result (`HALF_BLENDED`, announced as
-/// `BlendedWriteRounding`), and alpha-to-coverage's alpha is the device's. Another format's writes
-/// are the default mode's. A fragment compiled under the default mode does not link into such a
-/// pipeline (`NeedsInput(ColorWrites)`), and one compiled under the pipeline's mode does.
+/// as written (no blend, or factors one and zero), alpha-to-coverage's alpha included, which a
+/// function rounding it announces as `CoverageReadsRoundedAlpha` in a pipeline covering by alpha;
+/// after another blend, one and one included, the device rounds the blend's result
+/// (`HALF_BLENDED`, announced as `BlendedWriteRounding`). Another format's writes are the default
+/// mode's. A fragment compiled under the default mode does not link into such a pipeline
+/// (`NeedsInput(ColorWrites)`), and one compiled under the pipeline's mode does.
 #[test]
 fn half_colors_round_to_nearest_even_under_mode_two() {
     use crate::error::RuntimeInput;
     use crate::metal::{BlendFactor, TextureWriteRoundingMode as Mode};
-    use crate::pipeline::color_writes::{HALF_BLENDED, HALF_NEAREST};
+    use crate::pipeline::color_writes::{pipeline_writes, HALF_BLENDED, HALF_NEAREST};
     use crate::pipeline::descriptor::ColorAttachmentDescriptor;
-    use crate::pipeline::lower_inputs::ChannelWrite as C;
+    use crate::pipeline::PrecisionNote;
     let f4 = io_ty(IoNumeric::Float, 4);
     let va = artifact(iface(Stage::Vertex, vec![], vec![]), None);
     let fa = io_stage(Stage::Fragment, stage_io(vec![], vec![color(0, 0, f4)]));
+    // A `float` output, which rounds where its channels take a rule.
+    let mut rounding = fa.clone();
+    rounding.interface.io.rounded_colors = vec![0];
     let render = |c: ColorAttachmentDescriptor, coverage: bool, mode: Mode| {
         let mut r = RenderLinkInputs::new();
         r.color_attachments[0] = Some(c);
@@ -385,7 +394,6 @@ fn half_colors_round_to_nearest_even_under_mode_two() {
     add.destination_alpha_blend_factor = BlendFactor::One;
     let nearest = Some(HALF_NEAREST);
     let blended = Some(HALF_BLENDED);
-    let device = Some(C::Device);
     for stem in ["moltenvk-m3", "lavapipe", "amd-780m-radv"] {
         let p = profile(stem);
         let writes = |inputs: &LinkInputs| match inputs {
@@ -404,12 +412,30 @@ fn half_colors_round_to_nearest_even_under_mode_two() {
             (replace, false, [nearest; 4]),
             (blend, false, [blended; 4]),
             (add, false, [blended; 4]),
-            (blend, true, [blended, blended, blended, device]),
-            (half, true, [nearest, nearest, nearest, device]),
+            (blend, true, [blended; 4]),
+            (half, true, [nearest; 4]),
+            (replace, true, [nearest; 4]),
         ] {
             let inputs = render(c, coverage, Mode::NearestEven);
             assert_eq!(writes(&inputs), Some(want), "{stem} {c:?} {coverage}");
-            link(&[&va, &fa], &inputs, &p).unwrap_or_else(|e| panic!("{stem}: {e}"));
+            let fragment = compiled_for(&rounding, &inputs, &p);
+            let g = crate::pipeline::link::link(&[&va, &fragment], &inputs, &p)
+                .unwrap_or_else(|e| panic!("{stem}: {e}"))
+                .graphics
+                .expect("graphics");
+            assert_eq!(g.alpha_to_coverage, coverage, "{stem} {c:?}");
+            let (notes, _) = pipeline_writes(
+                &fragment,
+                &g.color_write_rules,
+                &g.color_attachments,
+                g.alpha_to_coverage,
+            )
+            .expect("the rule words");
+            assert_eq!(
+                notes.contains(&PrecisionNote::CoverageReadsRoundedAlpha),
+                coverage && want[3] == nearest,
+                "{stem} {c:?} {coverage}: {notes:?}"
+            );
         }
         for format in [PixelFormat::RGBA8Unorm, PixelFormat::RG11B10Float] {
             let c = ColorAttachmentDescriptor::new(format);

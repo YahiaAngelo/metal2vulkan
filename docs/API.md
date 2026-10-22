@@ -2600,6 +2600,15 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   device's blend converts it by its own rounding (MoltenVK's toward zero), so a blended value off
   the half grid may store the neighbouring half; under a constant factor Metal's result is neither
   rule's on 2,376 of 580,508 `RGBA16Float` channels near the half denormals.
+- `metal2vulkan-degrade-coverage-reads-rounded-alpha` (precision).
+  `PrecisionNote::CoverageReadsRoundedAlpha`: A render pipeline covers by alpha
+  (`alphaToCoverageEnabled`) under `TextureWriteRoundingMode::NearestEven`, and its fragment
+  function writes a `float` alpha to a half-float attachment 0 that stores it as written: Metal
+  stores the alpha rounded to the nearest-even half and reads the coverage from the alpha before
+  rounding, which no device separates, so the function rounds the alpha and the coverage reads the
+  rounded one. The stored alpha is Metal's; a fragment whose alpha lies within half a `half` step
+  of a coverage threshold may cover one sample more or fewer (2 of 16,384 alphas on an Apple M3
+  Max).
 - `metal2vulkan-degrade-rotated-blend-rounding` (precision). `PrecisionNote::RotatedBlendRounding`:
   A fragment function writes an attachment held with its channels rotated (`ARGB8Unorm`) whose blend
   is none of the measured forms (`RotatedBlendForm::Unmeasured`), or the premultiplied form through
