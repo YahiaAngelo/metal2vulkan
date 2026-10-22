@@ -106,12 +106,13 @@ struct Early {
     joined: VecDeque<Joined>,
 }
 
-/// A command buffer that joined [`Early`]: the hang it joined under, the command buffer, and its
-/// event waits.
+/// A command buffer that joined [`Early`]: the hang it joined under, its event waits, and what
+/// makes it `Scheduled` ([`behind_scheduled`] of it, held weakly). Held as a closure: a queue's
+/// hangs then name no command buffer's type, which would name the queue's again.
 struct Joined {
     hang: u64,
-    buffer: Weak<CommandBufferShared>,
     waits: Vec<(Arc<EventShared>, u64)>,
+    schedule: Box<dyn FnOnce() + Send>,
 }
 
 /// A command buffer committed with event waits while a hang of its queue was in flight: its
@@ -175,7 +176,7 @@ impl QueueHangs {
                 sleep_until(until);
                 return;
             }
-            behind_scheduled(joined.buffer);
+            (joined.schedule)();
         }
     }
 
@@ -442,10 +443,11 @@ pub(super) fn join(
     let hangs = buffer.queue.hangs();
     let mut early = lock(&hangs.early);
     let hang = early.hang;
+    let buffer = Arc::downgrade(buffer);
     early.joined.push_back(Joined {
         hang,
-        buffer: Arc::downgrade(buffer),
         waits,
+        schedule: Box::new(move || behind_scheduled(buffer)),
     });
     drop(early);
     hangs.joined.notify_all();
