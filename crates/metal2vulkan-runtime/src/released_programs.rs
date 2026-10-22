@@ -15,9 +15,15 @@
 //!   `supportIndirectCommandBuffers` the program releases since ([`Keepers::released`]), and a
 //!   blit's copy of commands keeps in its destination the source's kept programs and those of
 //!   the released states the CPU set on the commands it copies: a record naming the ID runs that
-//!   program where the state held the ID then. A buffer keeps an ID's last [`PIPELINE_HOLDERS`]
-//!   programs, as the device keeps its last holders. Nothing is kept for a buffer the GPU never
-//!   writes, so a program that writes no records on the GPU keeps nothing.
+//!   program where the state held the ID then. Nothing is kept for a buffer the GPU never writes,
+//!   so a program that writes no records on the GPU keeps nothing.
+//! - **Bounded.** A buffer keeps an ID's last [`PIPELINE_HOLDERS`] released programs, as the
+//!   device keeps its last holders: a fifth drops the oldest, whose records then run nothing,
+//!   announced (below). So what the buffers keep is at most four programs per pipeline state ID
+//!   the program used, each one `Arc` the buffers share: with plain allocation, which hands out
+//!   the lowest free ID as Metal does, four times the peak count of live states made with
+//!   `supportIndirectCommandBuffers`, however long the program makes and releases them; each ID a
+//!   placement (`PipelineOptions::placement`) names besides counts four more.
 //! - **Not kept** (`Degradation::ReleasedCommandState`, the command running nothing): the program
 //!   of a state released before any buffer whose records the GPU writes naming its ID could be
 //!   written, which Metal runs where no state took the ID since; and one past an ID's last
@@ -93,6 +99,12 @@ impl KeptPrograms {
     /// The IDs it keeps programs of.
     pub(super) fn ids(&self) -> impl Iterator<Item = u64> + '_ {
         self.0.keys().copied()
+    }
+
+    /// How many programs it keeps.
+    #[cfg(test)]
+    pub(super) fn count(&self) -> usize {
+        self.0.values().map(VecDeque::len).sum()
     }
 }
 

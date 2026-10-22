@@ -2229,6 +2229,12 @@ impl IndirectCommandBuffer {
         lock(&self.device().shared().resource_ids).pipeline_holder_by(named, window)
     }
 
+    /// How many programs of released states the buffer keeps (`released_programs.rs`).
+    #[cfg(test)]
+    pub(super) fn kept_count(&self) -> usize {
+        lock(&self.0.kept).count()
+    }
+
     /// The `uniqueIdentifier` of the state of `kind` that held pipeline state ID `named` as the
     /// GPU last could write the buffer's records ([`window_holder`](Self::window_holder)), as
     /// Metal's record the GPU wrote answers (measured on an M3 Max by the consumer). None where
