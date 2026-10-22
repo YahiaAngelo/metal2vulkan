@@ -18,6 +18,10 @@ use metal2vulkan::pipeline::{
 use metal2vulkan_runtime as rt;
 use std::path::Path;
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// The degradation notices the runtime's device announced.
+pub static NOTICES: AtomicU64 = AtomicU64::new(0);
 
 pub struct Runtime {
     device: rt::Device,
@@ -25,9 +29,16 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Open the device with its shader cache in `cache`.
-    pub fn open(cache: &Path) -> Runtime {
+    /// Open the device with its shader cache in `cache`, announcing the kinds of `announce_each`
+    /// at every occurrence, its notices counted ([`NOTICES`]) as a consumer's sink hears them.
+    pub fn open(cache: &Path, announce_each: &[rt::Degradation]) -> Runtime {
         let mut options = rt::DeviceOptions::default();
+        options.announce_each = announce_each.iter().copied().collect();
+        options.messages = Some(rt::MessageSink::new(|message| {
+            if message.degradation.is_some() {
+                NOTICES.fetch_add(1, Ordering::Relaxed);
+            }
+        }));
         options.gpu_times_from_host = true;
         options.policy.completion = CompletionPolicy::Exact;
         options.policy.heap_compression = HeapCompressionPolicy::Uncompressed;

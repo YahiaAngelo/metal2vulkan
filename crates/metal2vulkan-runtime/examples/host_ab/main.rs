@@ -143,7 +143,10 @@
 //! cache, with `--side`), `--variants a,b,...` (the encode workload's variants alone:
 //! `draw_static`, `draw_bind`, `draw_pipeline`, `draw_passes`, `dispatch_static`,
 //! `dispatch_churn`; for a profile of one; and the memory workload's parts alone: `create`,
-//! `no_copy`, `held_1m`, `held_64m`, `texture`).
+//! `no_copy`, `held_1m`, `held_64m`, `texture`), `--announce-each a,b,...` (the runtime's device
+//! announces these degradation kinds, by code with or without its `metal2vulkan-degrade-` prefix,
+//! at every occurrence, `DeviceOptions::announce_each`, as a consumer that hears some kinds at
+//! each call opens it).
 //!
 //! On a Mac, the runtime's device opens the Vulkan loader (`/opt/homebrew/lib` among the places
 //! it looks) and MoltenVK's `MVK_CONFIG_*` variables apply. Run timings on an otherwise idle GPU.
@@ -191,6 +194,8 @@ struct Options {
     outputs: Option<PathBuf>,
     /// The encode and memory workloads' variants to run (`--variants`); all when empty.
     variants: Vec<String>,
+    /// The kinds the runtime's device announces at every occurrence (`--announce-each`).
+    announce_each: Vec<metal2vulkan_runtime::Degradation>,
     /// Arguments passed on to each child.
     passed: Vec<String>,
 }
@@ -214,6 +219,7 @@ fn options() -> Options {
         cache: None,
         outputs: None,
         variants: vec![],
+        announce_each: vec![],
         passed: vec![],
     };
     let mut args = std::env::args().skip(1);
@@ -250,6 +256,11 @@ fn options() -> Options {
                 options.variants = v.split(',').map(str::to_owned).collect();
                 options.passed.extend(["--variants".to_owned(), v]);
             }
+            "--announce-each" => {
+                let v = value();
+                options.announce_each = v.split(',').map(degradation).collect();
+                options.passed.extend(["--announce-each".to_owned(), v]);
+            }
             "--help" | "-h" => {
                 eprintln!("see the module docs of examples/host_ab/main.rs");
                 std::process::exit(0);
@@ -264,6 +275,16 @@ fn options() -> Options {
         );
     }
     options
+}
+
+/// The degradation kind of `code`, with or without its `metal2vulkan-degrade-` prefix.
+fn degradation(code: &str) -> metal2vulkan_runtime::Degradation {
+    let prefixed = match code.starts_with("metal2vulkan-degrade-") {
+        true => code.to_owned(),
+        false => format!("metal2vulkan-degrade-{code}"),
+    };
+    metal2vulkan_runtime::Degradation::from_code(&prefixed)
+        .unwrap_or_else(|| panic!("--announce-each: no degradation kind {code}"))
 }
 
 fn main() {
@@ -289,7 +310,7 @@ fn child(side: &str, options: &Options) {
                 .cache
                 .clone()
                 .unwrap_or_else(|| scratch_default().join("cache"));
-            let runtime = runtime::Runtime::open(&cache);
+            let runtime = runtime::Runtime::open(&cache, &options.announce_each);
             run(&runtime, t, metallib, options);
             let c = runtime.device().work_counts();
             eprintln!(
@@ -342,6 +363,11 @@ fn child(side: &str, options: &Options) {
                 c.batches_with_four_or_more_pending,
             );
             eprintln!("runtime commands replayed: {:?}", c.commands_replayed);
+            eprintln!(
+                "runtime notices: {} (bound notices made {})",
+                runtime::NOTICES.load(std::sync::atomic::Ordering::Relaxed),
+                c.bound_notices_made
+            );
         }
         other => panic!("--side native|runtime, not {other}"),
     }
