@@ -276,9 +276,11 @@
 //!   object stage's `threadgroup_lengths`, 0 where unset), each rounded up to 16 as a kernel's
 //!   are; its arena with them past the object stage's workgroup memory limit is
 //!   `Unsupported{ThreadgroupMemorySize}` naming it (`RuntimeFact::ObjectThreadgroupArena`). A
-//!   mesh function's arguments, which no encoder sets, are not implemented. An indirect draw asks
-//!   for its arguments on the CPU, since nothing bounds its GPU-written counts by the device's
-//!   limits yet. A mesh function writes `Layer` in every variant: a pass of more layers than
+//!   mesh function's arguments, which no encoder sets, are not implemented. A mesh grid Metal
+//!   draws nothing for (an axis past 65,535, or more than 1,048,575 threadgroups:
+//!   `bind::mesh_arguments`) launches nothing. An indirect draw reads the counts an arguments
+//!   pass writes (`DrawCommands::mesh_arguments`, `MeshArguments`): Metal's where Metal draws
+//!   them and the device's first stage launches them, else none. A mesh function writes `Layer` in every variant: a pass of more layers than
 //!   `maxMeshOutputLayers`, into which a mesh function choosing its slice could render, is
 //!   `Unsupported{MeshShading}` naming it. A view mapping with a viewport offset, or with a slice
 //!   offset where the mesh function chooses its slice, is not implemented: the mesh function does
@@ -309,6 +311,7 @@ use crate::bind::instantiate::{
     DescriptorRange, FieldBytes, IndexBufferRef, IndirectRef, PushConstantWrite, PushHole,
     RangeError, RootTable,
 };
+use crate::bind::mesh_arguments::{metal_mesh_grid_draws_nothing, MeshArgumentsForm};
 use crate::bind::neutral::{zero_buffer_bytes, NeutralResource};
 use crate::bind::plan::compute::{internal, not_implemented, spec_key, tile_memory};
 use crate::bind::plan::resources::{separate_samplers, ResourcePlanner};
@@ -516,6 +519,15 @@ pub struct DrawCommands {
     /// chunk draws that replace `draw` ([`TessellationDispatch`] states the consumer contract).
     /// `None` for every other draw.
     pub tessellation_dispatch: Option<TessellationDispatch>,
+    /// An indirect mesh draw on a device with `VK_EXT_mesh_shader`, whose first stage's group
+    /// counts `vkCmdDrawMeshTasksIndirectEXT` requires within the device's limits: the form of
+    /// the arguments pass the consumer records before the draw
+    /// ([`MeshArguments`](crate::bind::MeshArguments), which it makes with the device's
+    /// `minStorageBufferOffsetAlignment`), whose scratch the draw then reads in place of Metal's
+    /// arguments (`draw` keeps Metal's offset; the consumer substitutes the scratch's buffer and
+    /// offset). Its read of Metal's 12 bytes is among `uses`, in the compute stage. `None` for
+    /// every other draw.
+    pub mesh_arguments: Option<MeshArgumentsForm>,
 }
 
 /// No draw's commands: empty vectors and a draw of no vertices, which
@@ -541,6 +553,7 @@ impl Default for DrawCommands {
             uses: Vec::new(),
             index_overrun: None,
             index_bounds_pass: false,
+            mesh_arguments: None,
             amplifications: Vec::new(),
             specialization: None,
             mesh_dispatch: None,
@@ -3172,8 +3185,8 @@ fn size_value(keys: &DispatchKeys, key: SpecKey, l: [u32; 3]) -> Option<u64> {
 /// `maxTaskWorkGroup*`), and a direct one its grid of the first stage's threadgroups
 /// ([`check_grid`]). A grid the object function sets is bounded in the shader
 /// (`lower::mesh`). Each stage takes its grid from `NumWorkgroups` (`MultiRegion` 0), as does an
-/// indirect draw, whose GPU-written counts the consumer reads on the CPU
-/// (`indirect_needs_arguments`). A draw that launches nothing is made with the smallest
+/// indirect draw, whose counts its arguments pass writes within the device's limits
+/// (`DrawCommands::mesh_arguments`). A draw that launches nothing is made with the smallest
 /// threadgroups its stages can be made with.
 fn mesh_draw(
     t: &MeshTemplate,
@@ -3184,6 +3197,16 @@ fn mesh_draw(
         return Err(internal(format!("a mesh draw of {draw:?}")));
     };
     let command = match (&t.object, *draw) {
+        // A mesh grid Metal draws nothing for (`bind::mesh_arguments`).
+        (None, _)
+            if matches!(command, vk::DrawCommand::DrawMeshTasks {
+            group_count_x: x,
+            group_count_y: y,
+            group_count_z: z,
+        } if metal_mesh_grid_draws_nothing([x, y, z])) =>
+        {
+            mesh_tasks([0; 3], [0; 3])
+        }
         (None, _) => command,
         (Some(_), _) if mesh_draws_nothing(lo) => mesh_tasks([0; 3], [0; 3]),
         (Some(_), DrawCall::MeshThreads { threads, .. }) => {
@@ -4177,6 +4200,7 @@ fn instantiate(
         specialization: specialization_out,
         mesh_dispatch: mesh_dispatch_out,
         tessellation_dispatch: tessellation_dispatch_out,
+        mesh_arguments: mesh_arguments_out,
     } = out;
     let overrun = index_overrun(t.robust_index_fetch, draw);
     let (command, base) = vk_draw(draw, overrun);
@@ -4573,10 +4597,7 @@ fn instantiate(
 
     // The CPU reads the arguments of an indirect draw whose base vertex and instance the profile
     // emulates, of a multiview plan, or without `drawIndirectFirstInstance`, and of an indexed one
-    // whose index fetch nothing bounds, which the GPU pass may bound instead. An indirect mesh
-    // draw's GPU-written group counts must lie within the device's limits
-    // (`VUID-VkDrawMeshTasksIndirectCommandEXT-TaskEXT-07326` and its siblings), which nothing
-    // bounds yet.
+    // whose index fetch nothing bounds, which the GPU pass may bound instead.
     // An emulated tessellation draw's scan reads its arguments (through their copy), and its
     // chunk draws are one instance each, from 0.
     let arguments_elsewhere =
@@ -4585,8 +4606,17 @@ fn instantiate(
                 draw,
                 DrawCall::Indirect { .. } | DrawCall::PatchesIndirect { .. }
             )
-            && tessellation_dispatch.is_none()
-            || matches!(command, vk::DrawCommand::DrawMeshTasksIndirect { .. });
+            && tessellation_dispatch.is_none();
+    // An indirect mesh draw's GPU-written group counts must lie within the device's limits
+    // (`VUID-VkDrawMeshTasksIndirectCommandEXT-TaskEXT-07326` and its siblings): the arguments
+    // pass writes the counts the draw reads.
+    let mesh_arguments = match (command, &t.mesh) {
+        (vk::DrawCommand::DrawMeshTasksIndirect { .. }, Some(m)) => Some(match m.object {
+            Some(_) => MeshArgumentsForm::Object,
+            None => MeshArgumentsForm::Mesh,
+        }),
+        _ => None,
+    };
     let index_unbounded = indirect_indices_unbounded(t.robust_index_fetch, draw);
     let amplifications = amplification_writes(t)?;
     let (mesh_dispatch, specialization) = match mesh {
@@ -4600,15 +4630,12 @@ fn instantiate(
         Some(indices) => uses.push(indices),
         None => draw_uses(uses, draw, overrun, t.tessellation.as_ref()),
     }
-    // A mesh draw that reads its arguments reads 12 bytes; an emulated one's scan reads them in
-    // the compute stage.
-    if let vk::DrawCommand::DrawMeshTasksIndirect { .. } = command {
-        uses.push(indirect_use(12));
-    }
+    // An indirect mesh draw's arguments pass, or an emulated one's scan, reads Metal's 12 bytes
+    // in the compute stage.
     let scanned = mesh_dispatch
         .as_ref()
         .is_some_and(|d| matches!(d.mesh, MeshGroups::Scanned { arguments: Some(_) }));
-    if scanned {
+    if scanned || mesh_arguments.is_some() {
         uses.push(ResourceUse {
             resource: UseTarget::Indirect,
             access: AccessSet::READ,
@@ -4619,6 +4646,7 @@ fn instantiate(
     }
     *indirect_needs_arguments = arguments_elsewhere || index_unbounded;
     *index_bounds_pass = index_unbounded && !arguments_elsewhere;
+    *mesh_arguments_out = mesh_arguments;
     *draw_command = command;
     *overrun_out = overrun;
     *amplifications_out = amplifications;

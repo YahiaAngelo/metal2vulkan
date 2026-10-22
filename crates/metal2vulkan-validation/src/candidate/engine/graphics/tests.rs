@@ -2427,9 +2427,9 @@ fn public_fragment_imageblock_cases_plan_their_storage_image() {
 }
 
 /// A draw whose imageblock the product does not model reaches the render executor's plan as the
-/// product's typed refusal, never as a draw: a layered pass (the binder, the per-layer imageblock)
-/// and a depth attachment behind a writer that does not declare early fragment tests (link: the
-/// late test could drop a fragment after its write).
+/// product's typed refusal, never as a draw: a layered pass (the binder, the per-layer imageblock).
+/// A depth attachment behind a writer that does not declare early fragment tests links and plans:
+/// the write runs after the depth test (the writer under early tests, or its draws testing first).
 #[test]
 fn imageblock_draws_the_product_does_not_model_are_refused_typed() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("corpus");
@@ -2502,14 +2502,11 @@ fn imageblock_draws_the_product_does_not_model_are_refused_typed() {
         ..render.clone()
     };
     let shape = render_shape(&late_depth, true).unwrap();
-    let refused = compile_in_process(&lavapipe, &late_depth, libraries, &shape).err();
-    imageblocks(
-        "a late depth test",
-        match &refused {
-            Some(Error::Unsupported(refusal)) => Some(refusal),
-            _ => None,
-        },
-    );
+    let pipeline = compile_in_process(&lavapipe, &late_depth, libraries, &shape)
+        .unwrap_or_else(|error| panic!("a late depth test links: {error}"));
+    pipeline
+        .plan(&lavapipe, &shape)
+        .unwrap_or_else(|error| panic!("a late depth test plans: {error}"));
 }
 
 /// The graphics state of the public fixture `fragment_rate_map_position` drawn by its generated

@@ -4023,6 +4023,12 @@ impl CommandBufferShared {
                             CommandBufferError::PREDICATION_OPEN_AT_UNIT_END_DESCRIPTION.to_owned(),
                         );
                     }
+                    // An indirect mesh draw's object grid lay past the device's task limits
+                    // (`render/mesh_arguments.rs`): the command buffer failed.
+                    if report.mesh_grid_past_limits && state.error.is_none() {
+                        state.status = CommandBufferStatus::Error;
+                        state.error = Some(CommandBufferError::MeshGridPastLimits);
+                    }
                     // A predicated loop would have run past its copies (`predication.rs`): the
                     // command buffer failed.
                     if state.predication.halted() && state.error.is_none() {

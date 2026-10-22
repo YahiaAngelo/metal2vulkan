@@ -931,27 +931,31 @@ impl LimitRow {
                 },
             ]),
             // Mesh grids: `meshShader`, then the device's group counts, along each axis (a grid
-            // may lie along one) and in all. Object grids: `taskShader` too, then the device's
-            // task group counts likewise. Payloads: `taskShader`, then `maxTaskPayloadSize`.
+            // may lie along one, up to the 65,535 threadgroups an axis past which Metal draws
+            // nothing: `bind::METAL_MESH_GRID_AXIS`, measured on the M3 Max) and in all. Object
+            // grids: `taskShader` too, then the device's task group counts likewise. Payloads:
+            // `taskShader`, then `maxTaskPayloadSize`.
             L::MeshThreadgroupsPerGrid => {
                 let counts = l.mesh.max_mesh_work_group_count;
+                let axis = match need {
+                    Need::AtLeast(n) => {
+                        Need::AtLeast(n.min(u64::from(metal2vulkan::bind::METAL_MESH_GRID_AXIS)))
+                    }
+                    other => other,
+                };
+                let along = |i: u8| {
+                    self::at_least(
+                        axis,
+                        Feature::MeshShading,
+                        VkLimit::MaxMeshWorkGroupCount(i),
+                        u64::from(counts[usize::from(i)]),
+                    )
+                };
                 first([
                     needs_features(f, Feature::MeshShading, &[VkFeature::MeshShader]),
-                    at_least(
-                        Feature::MeshShading,
-                        VkLimit::MaxMeshWorkGroupCount(0),
-                        counts[0],
-                    ),
-                    at_least(
-                        Feature::MeshShading,
-                        VkLimit::MaxMeshWorkGroupCount(1),
-                        counts[1],
-                    ),
-                    at_least(
-                        Feature::MeshShading,
-                        VkLimit::MaxMeshWorkGroupCount(2),
-                        counts[2],
-                    ),
+                    along(0),
+                    along(1),
+                    along(2),
                     at_least(
                         Feature::MeshShading,
                         VkLimit::MaxMeshWorkGroupTotalCount,

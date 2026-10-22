@@ -1709,8 +1709,8 @@ fn object_draws_specialize_each_stage_within_its_limits() {
     ] {
         assert_eq!(instantiate(&t, &state, &draw).err(), refusal, "{draw:?}");
     }
-    // Indirect: its object threadgroups' counts, read on the CPU; an object threadgroup Metal
-    // draws nothing for reads none.
+    // Indirect: its object threadgroups' counts, through the object form of the arguments pass;
+    // an object threadgroup Metal draws nothing for reads none.
     let indirect = |lo| DrawCall::MeshThreadgroupsIndirect {
         indirect: IndirectRef::new(1, 12),
         threads_per_object_group: lo,
@@ -1721,19 +1721,21 @@ fn object_draws_specialize_each_stage_within_its_limits() {
         cmds.draw,
         vk::DrawCommand::DrawMeshTasksIndirect { offset: 12, .. }
     ));
-    assert!(cmds.indirect_needs_arguments && cmds.uses.len() == 1);
+    assert!(!cmds.indirect_needs_arguments && cmds.uses.len() == 1);
+    assert_eq!(cmds.mesh_arguments, Some(MeshArgumentsForm::Object));
     let cmds = instantiate(&t, &state, &indirect([0, 1, 1])).expect("indirect nothing");
     assert_eq!(cmds.draw, tasks(0, 0, 0));
-    assert!(cmds.uses.is_empty() && !cmds.indirect_needs_arguments);
+    assert!(cmds.uses.is_empty() && cmds.mesh_arguments.is_none());
 }
 
 /// A mesh draw is `vkCmdDrawMeshTasksEXT` of its threadgroups, made with its threadgroup's size as
 /// its specialization (`MultiRegion` 0 beside the plan's constants) and writing its grid in
 /// `DispatchRegion`; `drawMeshThreads` launches the whole threadgroups its threads fill, and writes
 /// their threads as its grid where the threads leave a partial threadgroup (Metal's builtins report
-/// them, a probe); what Metal draws nothing for launches nothing; the device's mesh limits refuse
-/// typed; an indirect draw reads 12 bytes of arguments, on the CPU; and a mesh draw of any other
-/// pipeline, or another draw of a mesh pipeline, is `InvalidMeshDraw`.
+/// them, a probe); what Metal draws nothing for launches nothing, a grid with an axis past 65,535
+/// or of more than 1,048,575 threadgroups among it; the device's mesh limits refuse typed; an
+/// indirect draw's arguments pass reads 12 bytes of arguments in the compute stage; and a mesh
+/// draw of any other pipeline, or another draw of a mesh pipeline, is `InvalidMeshDraw`.
 #[test]
 fn mesh_draws_specialize_their_threadgroup_within_the_device() {
     let state = BindState::default();
@@ -1799,13 +1801,16 @@ fn mesh_draws_specialize_their_threadgroup_within_the_device() {
             .expect("region")
             .to_vec()
     );
-    // Metal draws nothing: no thread, past 1024 threads, no threadgroup. Past the device's 256
-    // threads but within Metal's 1024 is the device's limit.
+    // Metal draws nothing: no thread, past 1024 threads, no threadgroup, a grid past Metal's
+    // (`bind::mesh_arguments`). Past the device's 256 threads but within Metal's 1024 is the
+    // device's limit.
     for (draw, what) in [
         (mesh([3, 1, 1], [0, 1, 1]), "no thread"),
         (mesh([3, 1, 1], [1025, 1, 1]), "past 1024"),
         (mesh([3, 0, 1], [512, 1, 1]), "no threadgroup"),
         (threads([15, 1, 1], [16, 1, 1]), "no whole threadgroup"),
+        (mesh([1, 65536, 1], [1; 3]), "65,536 along y"),
+        (mesh([65535, 65535, 1], [1; 3]), "past Metal's total"),
     ] {
         let cmds = instantiate(&t, &state, &draw).expect(what);
         let vk::DrawCommand::DrawMeshTasks {
@@ -1846,14 +1851,6 @@ fn mesh_draws_specialize_their_threadgroup_within_the_device() {
             mesh([1; 3], [16, 32, 1]),
             limit(VkLimit::MaxMeshWorkGroupInvocations, 512, 256),
         ),
-        (
-            mesh([1, 65536, 1], [1; 3]),
-            limit(VkLimit::MaxMeshWorkGroupCount(1), 65536, 65535),
-        ),
-        (
-            mesh([65535, 65535, 1], [1; 3]),
-            limit(VkLimit::MaxMeshWorkGroupTotalCount, 65535 * 65535, 1 << 22),
-        ),
     ] {
         assert_eq!(instantiate(&t, &state, &draw).err(), refusal, "{draw:?}");
     }
@@ -1872,8 +1869,13 @@ fn mesh_draws_specialize_their_threadgroup_within_the_device() {
     // A draw that launches nothing takes a threadgroup the stage can be made with.
     let cmds = instantiate(&flat, &state, &mesh([1; 3], [0, 1, 1])).expect("nothing");
     assert!(values(cmds.specialization.as_ref().expect("key")).contains(&(5, 32)));
-    // Indirect: 12 bytes of arguments, read on the CPU; at an offset that is not a multiple of 4,
-    // nothing.
+    // A grid Metal draws nothing for launches nothing, past the device's limits too.
+    for groups in [[65536, 1, 1], [1024, 1024, 1], [1, 1, 70000]] {
+        let cmds = instantiate(&t, &state, &mesh(groups, [32, 1, 1])).expect("nothing");
+        assert_eq!(cmds.draw, tasks(0, 0, 0), "{groups:?}");
+    }
+    // Indirect: 12 bytes of arguments, read by the mesh form of the arguments pass; at an offset
+    // that is not a multiple of 4, nothing.
     let indirect = |offset| DrawCall::MeshThreadgroupsIndirect {
         indirect: IndirectRef::new(1, offset),
         threads_per_object_group: [1; 3],
@@ -1888,20 +1890,21 @@ fn mesh_draws_specialize_their_threadgroup_within_the_device() {
             stride: 12,
         }
     );
-    assert!(cmds.indirect_needs_arguments && !cmds.index_bounds_pass);
+    assert!(!cmds.indirect_needs_arguments && !cmds.index_bounds_pass);
+    assert_eq!(cmds.mesh_arguments, Some(MeshArgumentsForm::Mesh));
     assert_eq!(
         cmds.uses,
         [ResourceUse {
             resource: UseTarget::Indirect,
             access: AccessSet::READ,
-            class: AccessClass::Indirect,
-            stages: vk::PipelineStageFlags2::DRAW_INDIRECT,
+            class: AccessClass::Storage,
+            stages: vk::PipelineStageFlags2::COMPUTE_SHADER,
             range: Some(ByteRange { offset: 0, len: 12 }),
         }]
     );
     let cmds = instantiate(&t, &state, &indirect(2)).expect("misaligned");
     assert_eq!(cmds.draw, tasks(0, 0, 0));
-    assert!(cmds.uses.is_empty() && !cmds.indirect_needs_arguments);
+    assert!(cmds.uses.is_empty() && cmds.mesh_arguments.is_none());
     // A draw of primitives with a mesh pipeline, and a mesh draw with another.
     assert_eq!(
         instantiate(&t, &state, &primitives(0, 3, (0, 1))).err(),

@@ -1639,6 +1639,13 @@ pub enum CommandBufferError {
     /// the device's budget, so nothing is drawn short silently. The first records fault of the
     /// command buffer, where it is a tessellation draw's, as its scan saw it.
     TessellationRecordsOverflow(TessellationRecordsOverflow),
+    /// An indirect mesh draw's object grid, as the GPU wrote it, lay past the device's task
+    /// stage limits (`maxTaskWorkGroupCount`, `maxTaskWorkGroupTotalCount`): such draws drew
+    /// nothing. Metal draws every object grid measured (16,777,216 threadgroups along `x` on an M3
+    /// Max), and Vulkan cannot launch one past the limits, so nothing is drawn short silently. A
+    /// direct draw of such a grid is refused as it is encoded (`Unsupported{MeshShading}` naming
+    /// the limit).
+    MeshGridPastLimits,
     /// A host step refused a command it recorded from an indirect command buffer's records
     /// (`Degradation::HostReplayedIndirectCommands`): what `commit` refuses where the CPU wrote
     /// the records, such as a command's pipeline state of other color formats than the pass's.
@@ -1988,7 +1995,8 @@ impl CommandBufferError {
     /// revoked queue's, `PageFault` (3), and
     /// `Internal` (1), also for the runtime's refusals (a cubic argument sampler's reach among
     /// them, a sampler state left out of an argument-sampler listing, a host step's object nothing
-    /// made, a named use rebound before the submission, and a predicated loop past its copies); a
+    /// made, a named use rebound before the submission, a predicated loop past its copies, and a
+    /// mesh grid past the device's limits); a
     /// command buffer committed as failed, the code the program chose; a pipeline's failed making,
     /// its cause's; a failure the driver relayed, Metal's.
     ///
@@ -2005,6 +2013,7 @@ impl CommandBufferError {
             | CommandBufferError::TessellationRecordsOverflow(_)
             | CommandBufferError::DetachedBacking => 8,
             CommandBufferError::Internal(_)
+            | CommandBufferError::MeshGridPastLimits
             | CommandBufferError::SparseHeapSplit
             | CommandBufferError::SparseMappingArguments(_)
             | CommandBufferError::SparseMappingSplit
@@ -2062,6 +2071,7 @@ impl CommandBufferError {
             | CommandBufferError::CubicArgumentSampler
             | CommandBufferError::MeshRecordsOverflow(_)
             | CommandBufferError::TessellationRecordsOverflow(_)
+            | CommandBufferError::MeshGridPastLimits
             | CommandBufferError::Refused
             | CommandBufferError::PipelineCreation(_)
             | CommandBufferError::EncodedUseRebound

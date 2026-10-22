@@ -188,6 +188,15 @@ fn modules() -> Vec<Build> {
             );
         }
     }
+    for form in [
+        bind::MeshArgumentsForm::Mesh,
+        bind::MeshArgumentsForm::Object,
+    ] {
+        push(
+            format!("mesh_arguments_module({form:?})"),
+            Box::new(move |d| Ok(bind::mesh_arguments_module(d, form)?.spirv)),
+        );
+    }
     push(
         "stencil_split_module".into(),
         Box::new(|d| Ok(bind::stencil_split_module(d, Feature::Format)?.spirv)),
