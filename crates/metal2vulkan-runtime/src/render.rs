@@ -1096,8 +1096,10 @@ enum Standing {
 /// or unbound before any draw used it, and one bound after the last draw, too.
 pub struct RenderCommandEncoder {
     /// Its lowering, which runs its calls, where it lowers each inside the call
-    /// (`RenderLoweringPolicy::AtCall`): no slot, no lock (`render/deferral.rs`).
-    own: Option<RenderLowering>,
+    /// (`RenderLoweringPolicy::AtCall`): no slot, no lock (`render/deferral.rs`). Boxed where
+    /// it is made ([`RenderLowering::assemble`]), so neither the encoder's return nor a caller's
+    /// move of it copies the lowering's state, thousands of bytes.
+    own: Option<Box<RenderLowering>>,
     /// Else its slot of the device's, which holds its lowering, its checks at the call and its
     /// calls not yet lowered.
     logged: Option<Logged>,
@@ -1106,6 +1108,10 @@ pub struct RenderCommandEncoder {
     /// Not `Sync`, as every encoder.
     unshared: PhantomData<std::cell::Cell<()>>,
 }
+
+// A program's encoder is a handle, moved by every return and by each of the program's own moves
+// of it, so it holds its lowering in a box: the lowering's state is thousands of bytes.
+const _: () = assert!(std::mem::size_of::<RenderCommandEncoder>() <= 128);
 
 impl std::fmt::Debug for RenderCommandEncoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1517,7 +1523,7 @@ impl CommandBuffer {
         &self,
         given: &RenderPassDescriptor,
         again: Option<Residency>,
-    ) -> Result<RenderLowering, Error> {
+    ) -> Result<Box<RenderLowering>, Error> {
         const CALL: &str = "render_command_encoder";
         let device = self.device();
         rate_mapped_pass::check_descriptor(CALL, device, given)?;
@@ -1686,8 +1692,8 @@ impl Opening {
 
 impl RenderLowering {
     /// An encoder over `core` of the pass `opening` describes, its first instance's draws
-    /// recording into `draws` (null where it records inline).
-    fn assemble(core: EncoderCore, draws: vk::CommandBuffer, opening: Opening) -> Self {
+    /// recording into `draws` (null where it records inline), made in its box.
+    fn assemble(core: EncoderCore, draws: vk::CommandBuffer, opening: Opening) -> Box<Self> {
         let Opening {
             layout,
             render_target_array_length,
@@ -1707,7 +1713,7 @@ impl RenderLowering {
         let live = core.device().shared().live_binds.take();
         // The views and sampler descriptions its binds made or found (`binding::BindMemo`).
         let bind_memo = core.device().shared().bind_memos.take();
-        RenderLowering {
+        Box::new(RenderLowering {
             core,
             earlier: Vec::new(),
             current: Instance {
@@ -1818,7 +1824,7 @@ impl RenderLowering {
             },
             held_bound: Bound::default(),
             grouped,
-        }
+        })
     }
 }
 
@@ -3629,7 +3635,7 @@ impl RenderLowering {
     }
 
     /// The lowering of [`RenderCommandEncoder::end_encoding`].
-    pub(crate) fn end_encoding(self) -> Result<(), Error> {
+    pub(crate) fn end_encoding(self: Box<Self>) -> Result<(), Error> {
         self.core.device().shared().counts.render_encoder_ended();
         // And the pass's later color groups, where it draws in groups (`render/color_groups.rs`).
         let (mut core, residency, log) = self.end_pass()?.with_later_groups()?;
@@ -3649,7 +3655,7 @@ impl RenderLowering {
     /// An encoder made by `CommandBuffer::open_render` to encode an ended one again
     /// (`render/replay.rs`), ended as [`end_encoding`](Self::end_encoding) ends one, into its
     /// place: what it recorded, and what it made resident.
-    pub(super) fn finish_replay(self) -> Result<(Replayed, Option<Residency>), Error> {
+    pub(super) fn finish_replay(self: Box<Self>) -> Result<(Replayed, Option<Residency>), Error> {
         let (core, residency, _) = self.end_pass()?.with_later_groups()?;
         Ok((core.finish_replay()?, Some(residency)))
     }
@@ -3660,7 +3666,7 @@ impl RenderLowering {
         command_buffer: &CommandBuffer,
         descriptor: &RenderPassDescriptor,
         residency: Residency,
-    ) -> Result<RenderLowering, Error> {
+    ) -> Result<Box<RenderLowering>, Error> {
         command_buffer.open_render(descriptor, Some(residency))
     }
 
@@ -3679,7 +3685,7 @@ impl RenderLowering {
     /// encode it again from it (not where its end captured its draws' tile reach, whose tally
     /// lies in the command buffer), and what its later color groups draw
     /// (`render/color_groups.rs`).
-    fn end_pass(mut self) -> Result<color_groups::Ended, Error> {
+    fn end_pass(mut self: Box<Self>) -> Result<color_groups::Ended, Error> {
         const CALL: &str = "end_encoding";
         // What its tables bind is held until the command buffer completes, as Metal holds what an
         // encoder was handed (`ArgumentTable::let_go_all`).
@@ -3741,7 +3747,7 @@ impl RenderLowering {
             live,
             bind_memo,
             ..
-        } = self;
+        } = *self;
         // The views and sampler descriptions its binds made or found, which the device's next
         // render encoder takes (`binding::BindMemo`).
         core.device().shared().bind_memos.give(bind_memo);
