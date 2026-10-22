@@ -343,9 +343,10 @@ fn the_sample_coverage_keeps_the_samples_metal_keeps() {
 }
 
 /// Under the coverage the fragment function still runs for every rasterized sample and reads the
-/// rasterized coverage (`psc_counter`, which writes memory and reads `[[sample_mask]]`, so Metal
-/// runs it once per sample), its colors keep the covered samples; under early tests the depth and
-/// the count keep every sample; and a pipeline without a fragment function ignores the coverage.
+/// rasterized coverage, and the depth and the count keep the covered samples (`psc_counter`, which
+/// writes memory, reads `[[sample_mask]]` and writes no color, so Metal runs it once per sample
+/// and the colors keep the clear: probe `sc4`'s `seenvoid`); under early tests the depth and the
+/// count keep every sample; and a pipeline without a fragment function ignores the coverage.
 #[test]
 fn the_sample_coverage_applies_after_the_fragment_function() {
     let messages = Messages::default();
@@ -364,7 +365,8 @@ fn the_sample_coverage_applies_after_the_fragment_function() {
         counter.fragment = Some("psc_counter");
         let got = lane.draw(counter);
         let runs = vec![[samples, all]; PIXELS];
-        if got.colors != covered || got.depths != covered || got.count != count || got.runs != runs
+        let cleared = vec![0; PIXELS];
+        if got.colors != cleared || got.depths != covered || got.count != count || got.runs != runs
         {
             wrong.push(format!("{samples} samples, counter: {got:x?}"));
         }

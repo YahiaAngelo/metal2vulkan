@@ -5,8 +5,8 @@ source_filename = "-"
 %t5 = type %t3 (i32)
 %t6 = type float (i32)
 %t7 = type <4 x float> ()
-%t9 = type <4 x float> (<4 x float>, i32, ptr addrspace(1))
-%t10 = type i32 (float)
+%t10 = type void (<4 x float>, i32, ptr addrspace(1))
+%t11 = type i32 (float)
 %t13 = type void (ptr addrspace(1), ptr addrspace(1), <2 x i32>)
 %t15 = type i32 (ptr addrspace(1), i32, i32, i32, i1)
 %t16 = type i32 (ptr addrspace(1))
@@ -51,7 +51,7 @@ bb0:
   ret <4 x float> c47
 }
 
-define %t9 @f3 "psc_counter" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a2( nocapture "air-buffer-no-alias"="" ) {
+define %t10 @f3 "psc_counter" "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" %a2( nocapture "air-buffer-no-alias"="" ) {
 bb0:
   %i0 = extractelement %a0, i64 1
   %i1 = tail call i32 @f4 [air Convert(Convert { dst: NumTy { elem: I32, lanes: 1 }, dst_kind: Unsigned, src: NumTy { elem: F32, lanes: 1 }, src_kind: Float, src_fp8: None })](%i0)
@@ -67,10 +67,10 @@ bb0:
   %i11 = zext %i10 to i64
   %i12 = getelementptr inbounds %t31, %a2, %i11, i32 0
   %i13 = tail call i32 @f11 [air Atomic(Atomic { space: Global, op: Or, sign: Some(Unsigned), ty: NumTy { elem: I32, lanes: 1 }, order: Relaxed, failure: None, scope: Device, volatile: true, fetch: true, flags: None })](%i12, %a1, i32 0, i32 2, i1 1) arg0( nocapture )
-  ret <4 x float> c47
+  ret void
 }
 
-declare %t10 @f4 "air.convert.u.i32.f.f32" memory(NoModRef, NoModRef, NoModRef)
+declare %t11 @f4 "air.convert.u.i32.f.f32" memory(NoModRef, NoModRef, NoModRef)
 
 define %t7 @f5 "psc_early" memory(NoModRef, NoModRef, NoModRef) "approx-func-fp-math"="true" "frame-pointer"="all" "min-legal-vector-width"="128" "no-builtins"="" "no-infs-fp-math"="true" "no-nans-fp-math"="true" "no-signed-zeros-fp-math"="true" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "unsafe-fp-math"="true" {
 bb0:
@@ -293,7 +293,7 @@ declare %t25 @f18 "air.read_depth_2d.f32" memory(Ref, NoModRef, NoModRef) %a0( R
 !md94 = !{!md65, !md58, !md65, !md15, !md27}
 !md95 = !{!md55, !md22, !md23, !md65, !md57, !md24, !md25, !md57, !md26, !md94, !md28, !md58, !md29, !md58, !md10, !md30, !md12, !md31}
 !md96 = !{!md92, !md93, !md95}
-!md97 = !{!md67, !md89, !md96}
+!md97 = !{!md67, !md90, !md96}
 !md98 = !{!md68, !md89, !md90, !md32}
 !md99 = !{!md65, !md33, !md23, !md65, !md57, !md34, !md10, !md35, !md12, !md36}
 !md100 = !{!md57, !md22, !md23, !md57, !md57, !md24, !md25, !md57, !md28, !md58, !md29, !md58, !md10, !md15, !md12, !md37}

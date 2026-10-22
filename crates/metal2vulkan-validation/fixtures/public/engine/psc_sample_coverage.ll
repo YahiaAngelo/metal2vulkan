@@ -32,7 +32,7 @@ define <4 x float> @psc_white() local_unnamed_addr #2 {
 }
 
 ; Function Attrs: mustprogress nounwind willreturn
-define <4 x float> @psc_counter(<4 x float> %0, i32 noundef %1, ptr addrspace(1) noundef captures(none) "air-buffer-no-alias" %2) local_unnamed_addr #3 {
+define void @psc_counter(<4 x float> %0, i32 noundef %1, ptr addrspace(1) noundef captures(none) "air-buffer-no-alias" %2) local_unnamed_addr #3 {
   %4 = extractelement <4 x float> %0, i64 1
   %5 = tail call i32 @air.convert.u.i32.f.f32(float %4) #11
   %6 = shl i32 %5, 4
@@ -47,7 +47,7 @@ define <4 x float> @psc_counter(<4 x float> %0, i32 noundef %1, ptr addrspace(1)
   %15 = zext i32 %14 to i64
   %16 = getelementptr inbounds %"struct.metal::_atomic", ptr addrspace(1) %2, i64 %15, i32 0
   %17 = tail call i32 @air.atomic.global.or.u.i32(ptr addrspace(1) captures(none) %16, i32 %1, i32 0, i32 2, i1 true) #12
-  ret <4 x float> splat (float 1.000000e+00)
+  ret void
 }
 
 ; Function Attrs: mustprogress nofree nosync nounwind willreturn memory(none)
@@ -236,7 +236,7 @@ attributes #14 = { nounwind willreturn memory(inaccessiblemem: read) }
 !15 = !{!16}
 !16 = !{!"air.render_target", i32 0, i32 0, !"air.arg_type_name", !"float4"}
 !17 = !{}
-!18 = !{ptr @psc_counter, !15, !19}
+!18 = !{ptr @psc_counter, !17, !19}
 !19 = !{!20, !21, !22}
 !20 = !{i32 0, !"air.position", !"air.center", !"air.no_perspective", !"air.arg_type_name", !"float4", !"air.arg_name", !"position"}
 !21 = !{i32 1, !"air.sample_mask_in", !"air.arg_type_name", !"uint", !"air.arg_name", !"mask"}

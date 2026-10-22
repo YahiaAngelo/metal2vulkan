@@ -1,8 +1,8 @@
 // The functions of the private sample coverage lane (validation/src/runtime_lane/sample_coverage.rs),
 // our own MSL: a fullscreen triangle at depth 0.5; fragment functions that write white, count their
-// runs and the coverage they read, or declare early fragment tests; and kernels that read every
-// sample of a 16 x 16 color or depth texture into buffer 1, a mask of the samples written per
-// pixel.
+// runs and the coverage they read (writing no color), or declare early fragment tests; and kernels
+// that read every sample of a 16 x 16 color or depth texture into buffer 1, a mask of the samples
+// written per pixel.
 #include <metal_stdlib>
 using namespace metal;
 
@@ -22,13 +22,12 @@ fragment float4 psc_white() {
 }
 
 // Buffer 0 holds two words per pixel of a 16-pixel-wide target: the runs, and the coverage the
-// runs read, ORed.
-fragment float4 psc_counter(Position in [[stage_in]], uint mask [[sample_mask]],
+// runs read, ORed. It writes no color.
+fragment void psc_counter(Position in [[stage_in]], uint mask [[sample_mask]],
                             device atomic_uint *runs [[buffer(0)]]) {
     uint i = (uint(in.position.y) * 16 + uint(in.position.x)) * 2;
     atomic_fetch_add_explicit(&runs[i], 1, memory_order_relaxed);
     atomic_fetch_or_explicit(&runs[i + 1], mask, memory_order_relaxed);
-    return float4(1.0);
 }
 
 [[early_fragment_tests]] fragment float4 psc_early() {
