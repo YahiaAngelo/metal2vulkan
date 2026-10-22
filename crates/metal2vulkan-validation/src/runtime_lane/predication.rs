@@ -20,8 +20,11 @@
 //!   would run past the copies the runtime lays down fails its command buffer;
 //! - a live block open where its unit ends fails the command buffer where its commands skip there,
 //!   as Metal's GPU recovery does, and is harmless where they run;
-//! - what the runtime refuses: a word past its buffer, and an unbalanced record that is its
-//!   unit's first after dispatches of the unit.
+//! - a word past its buffer reads as Metal reads it: zero within the 256 bytes Metal rounds a lone
+//!   buffer up to, the heap's bytes past a buffer placed in a heap, and zero, announced, where
+//!   Metal reads memory unrelated to the buffer;
+//! - what the runtime refuses: an unbalanced record that is its unit's first after dispatches of
+//!   the unit.
 
 use super::{
     buffer_with, read_buffer, validated_device, validated_device_with, Messages, ScratchCache, WAIT,
@@ -35,9 +38,9 @@ use metal2vulkan::pipeline::{ComputePipelineDescriptor, StageSource};
 use metal2vulkan_devtools::llvm_assemble_text;
 use metal2vulkan_runtime::{
     Buffer, CommandBuffer, CommandBufferError, CommandBufferStatus, ComputeCommandEncoder,
-    ComputePipelineState, Device, Error, EventRef, IndirectCommandBuffer,
-    IndirectCommandBufferDescriptor, Invalid, MetalLevel, PipelineOptions, Problem,
-    ResourceOptions, RuntimeGap, Size,
+    ComputePipelineState, Degradation, Device, Error, EventRef, HeapDescriptor, HeapType,
+    IndirectCommandBuffer, IndirectCommandBufferDescriptor, Invalid, MetalLevel, PipelineOptions,
+    Problem, ResourceOptions, RuntimeGap, Size,
 };
 
 /// The kernels: `prd_mark` adds 1 to word `t[0]` of `log`; `prd_put` writes `v[0]` into word 0
@@ -233,13 +236,18 @@ fn on_device_at(level: MetalLevel, test: impl FnOnce(&Device)) {
 /// them (`bufferDeviceAddress` withheld), whose step module binds its places
 /// (`PredicationStepForm::Bound`); after each, require that the layer reported nothing.
 fn on_device(test: impl Fn(&Device)) {
+    on_device_noted(|device, _| test(device));
+}
+
+/// [`on_device`], `test` given the devices' messages too (their degrade notices among them).
+fn on_device_noted(test: impl Fn(&Device, &Messages)) {
     let cache = ScratchCache::new().unwrap();
     let messages = Messages::default();
     let addressed = {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         let form = PredicationStepForm::of(device.compile_device());
         println!("PRD device {} {form:?}", device.name());
-        test(&device);
+        test(&device, &messages);
         form == PredicationStepForm::Addressed
     };
     assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
@@ -255,7 +263,7 @@ fn on_device(test: impl Fn(&Device)) {
         let form = PredicationStepForm::of(device.compile_device());
         assert_eq!(form, PredicationStepForm::Bound, "without device addresses");
         println!("PRD device {} {form:?}", device.name());
-        test(&device);
+        test(&device, &messages);
     }
     assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
 }
@@ -876,10 +884,72 @@ fn every_dispatch_form_runs_as_its_block_says() {
     });
 }
 
-/// What the runtime refuses, recording nothing, where it cannot give Metal's answer: a word past
-/// its buffer's end where the record reads it (a Start's, a live DoWhile's End's), and an
-/// unbalanced record that is its unit's first after
-/// dispatches of the unit, in its encoder or an earlier one of the unit (Metal drops those, which
+/// A condition word past its buffer's end reads as Metal read it on an M3 Max under macOS 27.0.1
+/// (the Metal platform's `metal_reads_a_word_past_its_buffer_as_the_lane_expects` runs the same
+/// records there): zero within the 256 bytes Metal rounds a lone buffer up to (offsets 16 and 252
+/// of a buffer of 16); past a buffer placed at 0 of a placement heap, the bytes of the buffer
+/// placed 65536 bytes on; and zero past the heap's end, at offset 2^32 of a lone buffer (Metal's
+/// offsets do not wrap) and for a live DoWhile's End far past its buffer, which runs its body
+/// once (`!= 0` fails). Those last three are memory unrelated to the buffer, which the device
+/// announces once (`predication-word-past-buffer`); the first two are not.
+#[test]
+fn a_word_past_its_buffer_reads_as_metal_reads_it() {
+    on_device_noted(|device, messages| {
+        let marks = Marks::new(device);
+        let heap_size = 1 << 20;
+        let heap = (device.new_heap(&HeapDescriptor::new(
+            HeapType::Placement,
+            heap_size,
+            ResourceOptions::shared(),
+        )))
+        .unwrap();
+        let first = heap
+            .new_buffer_at_offset(256, ResourceOptions::shared(), 0)
+            .unwrap();
+        let next = (heap.new_buffer_at_offset(256, ResourceOptions::shared(), 65536)).unwrap();
+        write_words(&next, &[0xb0b0_b0b0]);
+        let queue = device.new_command_queue().unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        let mut tag = 0;
+        let mut holds = |encoder: &mut ComputeCommandEncoder, buffer: &Buffer, offset, word| {
+            encoder
+                .encode_start_if(Some(buffer), offset, EQUAL, word)
+                .unwrap();
+            marks.mark(encoder, tag);
+            encoder.encode_start_else().unwrap();
+            marks.mark(encoder, tag + 1);
+            assert_eq!(encoder.encode_end_if(), Ok(true));
+            tag += 2;
+        };
+        holds(&mut encoder, &marks.word, 16, 0);
+        holds(&mut encoder, &marks.word, 252, 0);
+        holds(&mut encoder, &first, 65536, 0xb0b0_b0b0);
+        assert_eq!(noted(messages), 0, "noted before unrelated memory");
+        holds(&mut encoder, &first, heap_size, 0);
+        holds(&mut encoder, &marks.word, 1 << 32, 0);
+        encoder.encode_start_do_while().unwrap();
+        marks.mark(&mut encoder, 20);
+        let end = encoder.encode_end_do_while(Some(&marks.word), PAST, NOT_EQUAL, 0);
+        assert_eq!(end, Ok(true));
+        encoder.end_encoding().unwrap();
+        complete(&command_buffer);
+        assert_eq!(marks.ran(), [0, 2, 4, 6, 8, 20]);
+        assert_eq!(noted(messages), 1);
+    });
+}
+
+/// How many notices of `Degradation::PredicationWordPastBuffer` `messages` delivered since this
+/// was last asked.
+fn noted(messages: &Messages) -> usize {
+    (messages.take_notices().into_iter())
+        .filter_map(|message| message.degradation)
+        .filter(|notice| notice.degradation == Degradation::PredicationWordPastBuffer)
+        .count()
+}
+
+/// What the runtime refuses, recording nothing, where it cannot give Metal's answer: an
+/// unbalanced record that is its unit's first after dispatches of the unit, in its encoder or an earlier one of the unit (Metal drops those, which
 /// ran ungated); the work around them runs. After a blit the next encoder starts a unit, whose
 /// unbalanced record drops nothing earlier, and an unbalanced record after a block drops what
 /// it gated, both as Metal's do.
@@ -891,7 +961,6 @@ fn what_the_runtime_refuses() {
         let ungated = Err(Error::NotImplemented(
             RuntimeGap::PredicationDropsUngatedWork,
         ));
-        let past = Err(Error::NotImplemented(RuntimeGap::PredicationWordPastBuffer));
         let command_buffer = queue.command_buffer().unwrap();
         let mut encoder = command_buffer.compute_command_encoder().unwrap();
         marks.mark(&mut encoder, 1);
@@ -910,19 +979,6 @@ fn what_the_runtime_refuses() {
                 .encode_end_do_while(Some(word), 0, EQUAL, 0)
                 .map(drop),
             ungated
-        );
-        assert_eq!(encoder.encode_start_if(Some(word), 16, EQUAL, 0), past);
-        assert_eq!(
-            encoder.encode_start_if(Some(word), 0x1_0000_0000, EQUAL, 0),
-            past
-        );
-        // A live DoWhile's End reads its word.
-        encoder.encode_start_do_while().unwrap();
-        let end = encoder.encode_end_do_while(Some(word), PAST, EQUAL, 0);
-        assert_eq!(end.map(drop), past);
-        assert_eq!(
-            encoder.encode_end_do_while(Some(word), 0, EQUAL, 0),
-            Ok(true)
         );
         // The last word of the buffer, at an offset Metal rounds down to it.
         encoder.encode_start_if(Some(word), 15, EQUAL, 0).unwrap();

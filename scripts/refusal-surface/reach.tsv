@@ -229,7 +229,6 @@ feature	CommandPredication	none	Apple-private command predication on a device wi
 feature	ProgramScopeBinding	app	MSL 3.2 program-scope buffer bindings (macOS 15 and later)
 feature	SeqCstFence	rare	a seq_cst fence in a vertex or fragment stage without its stores and atomics
 gap	PredicationDropsUngatedWork	none	an unbalanced Apple-private command-predication record as its unit's first, after dispatches of the unit
-gap	PredicationWordPastBuffer	none	an Apple-private predication condition word past its buffer
 gap	MultisampledBufferCopy	rare	a buffer<->multisampled-texture copy on a device without sample-rate shading, an integer multisample attachment at the count, or the copy format's storage; and, where maintenance8's depth/colour copies are missing or wrong, what the sample-rate draws cannot move: a 16-bit depth, or a depth or stencil texture they cannot sample or render to (emulated elsewhere; the consumer's Maps pans and screensaver make the copy)
 gap	MultisampledBufferLayout	rare	a buffer<->multisampled-texture copy at a bytesPerRow of 0 from an offset that is a multiple of 16, or of pixels of 32 bytes or more at a pitch below a row or off the pixel: Metal copies these by rules not yet reduced, and its API validation rejects them
 gap	ColorAttachmentGroups	app	in a render pass of more color attachments than the device draws at once (five or more on a device of four), or one at an index past them: a pipeline state of other colors, a tile state, an execution of render commands, a draw reading another group's attachment

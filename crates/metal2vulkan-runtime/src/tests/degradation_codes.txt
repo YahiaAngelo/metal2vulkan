@@ -147,6 +147,7 @@ metal2vulkan-degrade-pixel-sampler-scaling
 metal2vulkan-degrade-plain-state-unique-identifier
 metal2vulkan-degrade-point-guard-band
 metal2vulkan-degrade-positions-through-scratch
+metal2vulkan-degrade-predication-word-past-buffer
 metal2vulkan-degrade-private-properties-unknown
 metal2vulkan-degrade-private-resource-option
 metal2vulkan-degrade-provoking-vertex-lines

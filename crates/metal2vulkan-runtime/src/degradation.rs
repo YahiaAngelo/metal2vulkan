@@ -973,6 +973,16 @@ degradations! {
             "each execution runs its own range, as Metal documents, where Metal's GPU may run \
              one execution with the other's length, so commands run more or fewer times than \
              the ranges name, differently from run to run";
+        /// A command predication record (`encode_start_if`, a loop's start, a live DoWhile's
+        /// end) whose condition word lies past its buffer's end, past the 256 bytes Metal rounds
+        /// a lone buffer up to, or past the end of the heap the buffer lies in
+        /// (`predication.rs`): Metal reads whatever its own address space holds there, a
+        /// neighbouring buffer's bytes or zero, which depends on where Metal placed memory
+        /// unrelated to the buffer.
+        PredicationWordPastBuffer = "predication-word-past-buffer", Precision,
+            "the record reads its word as zero, where Metal reads what lies at that address in its \
+             own address space: zero where nothing is there, another buffer's bytes where Metal \
+             placed one";
         /// A resource made with `MTLResourceOptions` bit 24, a private option Metal takes
         /// ([`ResourceOptions::PRIVATE_BIT`](crate::ResourceOptions::PRIVATE_BIT)), is
         /// made as without it, and reports its options without it, as Metal's does.

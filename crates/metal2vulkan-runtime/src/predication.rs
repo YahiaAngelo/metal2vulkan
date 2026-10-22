@@ -56,11 +56,12 @@
 //!   While, which then ran once, a DoWhile, a failed If's Else). The failure is Metal's
 //!   `MTLCommandBufferErrorInternal` (`PageFault` in some runs), and how much else of the command
 //!   buffer ran varies run to run.
-//! - **A word past its buffer's end** reads whatever memory lies there (zero past a lone
-//!   buffer; the next buffer's bytes in a heap): refused
-//!   ([`RuntimeGap::PredicationWordPastBuffer`]) where the record reads it: an
-//!   `encodeEndDoWhile:...` that is unbalanced, misused or closes a killed DoWhile reads no word,
-//!   and answers as on any word.
+//! - **A word past its buffer's end** is what Metal's address space holds there (the buffer's
+//!   GPU address plus the offset, which does not wrap past 2^32): zero within the 256 bytes Metal
+//!   rounds a lone buffer up to; past them another buffer's bytes where Metal placed one, else
+//!   zero; the heap's bytes past a buffer placed in a heap, zero past the heap's end. Only a
+//!   record that tests its word reads it: an `encodeEndDoWhile:...` that is unbalanced, misused
+//!   or closes a killed DoWhile reads no word, and answers as on any word.
 //!
 //! # What the runtime builds
 //!
@@ -83,6 +84,10 @@
 //!   preprocess, whose command then stays zero. A dispatch or an execution a host step records reads the counter there, once the
 //!   work before it completed, and records nothing where it is not 0; an execution inside a block
 //!   is always recorded so (`Degradation::HostReplayedIndirectCommands`).
+//! - **A word past its buffer's end** ([`Word`]) is read as Metal reads it: the heap's bytes
+//!   past a buffer placed in a heap, a zero word of the command buffer's within the 256 bytes
+//!   Metal rounds a lone buffer up to; elsewhere, where Metal reads memory unrelated to the
+//!   buffer, the zero word too, announced (`Degradation::PredicationWordPastBuffer`).
 //! - **A kill** rewrites the outermost open block's start step as `PredicationOp::Dead`, whose
 //!   End is then `PredicationOp::EndDead`; this model gives Metal's answers.
 //! - **A dropped range** rewrites its anchor's step as `PredicationOp::Drop` and every step since
@@ -114,6 +119,7 @@
 
 use super::buffer::Buffer;
 use super::compute::{ComputeCommandEncoder, EncoderState};
+use super::degradation::Degradation;
 use super::encoder::EncoderCore;
 use super::error::{internal, Error, RuntimeGap};
 use super::indirect_command_buffer::IndirectCommandBuffer;
@@ -184,51 +190,111 @@ fn copies_of(depth: usize, first: u64) -> u64 {
     (LAID_BUDGET / first.max(1)).clamp(1, most)
 }
 
-/// A record's condition: the `u32` at byte `at` of `buffer` (Metal's offset rounded down to a
-/// multiple of 4), compared so with `reference`: at `place`, its device address, or in the bound
-/// form its byte offset in `binding` (the `VkBuffer`, the offset and the range a step binds it
-/// at, the offset aligned down as the device asks).
+/// A record's condition: the `u32` Metal reads, compared so with `reference`: at `place`, its
+/// device address, or in the bound form its byte offset in `binding` (the `VkBuffer`, the offset
+/// and the range a step binds it at, the offset aligned down as the device asks).
 #[derive(Clone)]
 pub(super) struct Test {
-    buffer: Buffer,
-    at: u64,
+    /// The buffer the word lies in and its byte there: the record's buffer at Metal's offset
+    /// rounded down to a multiple of 4, or past its end the heap it lies in; `None` where the
+    /// step reads a zero word of the command buffer's ([`Word`]).
+    word: Option<(Buffer, u64)>,
     place: u64,
     binding: Option<(vk::Buffer, u64, u64)>,
     compare: PredicationCompare,
     reference: u32,
 }
 
+/// Where Metal reads a record's word: the `u32` at the buffer's GPU address plus its offset rounded
+/// down to a multiple of 4, in Metal's address space (measured on an M3 Max under macOS 27.0.1).
+enum Word {
+    /// In the buffer, or past its end in the heap it lies in: those bytes.
+    In(Buffer, u64),
+    /// Past a lone buffer's end within the 256 bytes Metal rounds its length up to (Metal places
+    /// small buffers 256 bytes apart): zero.
+    Zero,
+    /// Past those, or past its heap's end: what Metal's address space holds there (another
+    /// buffer's bytes, measured, or zero, at offsets up to 2^36 and past 2^32, which do not wrap),
+    /// memory unrelated to the buffer. Zero, announced
+    /// (`Degradation::PredicationWordPastBuffer`).
+    Unrelated,
+}
+
+impl Word {
+    /// Where Metal reads the word at byte `at` of `buffer`.
+    fn of(buffer: &Buffer, at: u64) -> Word {
+        let within = |end: u64| at.checked_add(4).is_some_and(|word| word <= end);
+        if within(buffer.length()) {
+            return Word::In(buffer.clone(), at);
+        }
+        if let Some((heap, start)) = buffer.heap_bytes() {
+            return match start.checked_add(at) {
+                Some(at) if at.checked_add(4).is_some_and(|end| end <= heap.length()) => {
+                    Word::In(heap.clone(), at)
+                }
+                _ => Word::Unrelated,
+            };
+        }
+        match buffer.length().checked_next_multiple_of(256) {
+            Some(slot) if within(slot) => Word::Zero,
+            _ => Word::Unrelated,
+        }
+    }
+}
+
 impl Test {
     /// The condition of a record on `buffer` at `offset`, of Metal's `comparison` code and
-    /// `reference`, on `device`. Refused: a word past the buffer's end
-    /// ([`RuntimeGap::PredicationWordPastBuffer`]).
+    /// `reference`, on `device`: a word past the buffer's end reads as Metal reads it ([`Word`]),
+    /// a zero word made in `uploads` where it reads zero.
     fn new(
         device: &Device,
+        uploads: &mut Uploads,
         buffer: &Buffer,
         offset: u64,
         (comparison, reference): (u64, u32),
     ) -> Result<Test, Error> {
-        let at = offset & !3;
-        if at.checked_add(4).is_none_or(|end| end > buffer.length()) {
-            return Err(Error::NotImplemented(RuntimeGap::PredicationWordPastBuffer));
-        }
-        let (place, binding) = match bound(device) {
-            false => {
-                let address = buffer
-                    .device_address()
-                    .ok_or_else(|| internal("a condition word without a device address"))?;
-                (address + at, None)
+        let word = match Word::of(buffer, offset & !3) {
+            Word::In(buffer, at) => Some((buffer, at)),
+            Word::Zero => None,
+            Word::Unrelated => {
+                let length = buffer.length();
+                device.degrade(Degradation::PredicationWordPastBuffer, || {
+                    (
+                        format!(
+                            "a command predication record's word at offset {offset} of a buffer \
+                             of {length} bytes"
+                        ),
+                        "Metal reads memory unrelated to the buffer there".to_owned(),
+                    )
+                });
+                None
             }
-            true => {
-                let (raw, start) = buffer.at(at);
-                let limits = &device.properties().description.limits;
-                let within = start % limits.min_storage_buffer_offset_alignment.max(4);
-                (within, Some((raw, start - within, within + 4)))
+        };
+        let (place, binding) = match &word {
+            Some((buffer, at)) => match bound(device) {
+                false => {
+                    let address = buffer
+                        .device_address()
+                        .ok_or_else(|| internal("a condition word without a device address"))?;
+                    (address + at, None)
+                }
+                true => {
+                    let (raw, start) = buffer.at(*at);
+                    let limits = &device.properties().description.limits;
+                    let within = start % limits.min_storage_buffer_offset_alignment.max(4);
+                    (within, Some((raw, start - within, within + 4)))
+                }
+            },
+            None => {
+                let zero = uploads.upload(device, &[], 16)?;
+                match bound(device) {
+                    false => (addressed(&zero)?, None),
+                    true => (0, Some((zero.raw(), zero.offset(), 4))),
+                }
             }
         };
         Ok(Test {
-            buffer: buffer.clone(),
-            at,
+            word,
             place,
             binding,
             compare: PredicationCompare::from_metal(comparison),
@@ -291,10 +357,10 @@ pub(super) struct Condition<'a> {
 }
 
 impl Condition<'_> {
-    /// Its [`Test`] on `device`, refused as [`Test::new`] refuses.
-    fn test(self, device: &Device) -> Result<Test, Error> {
+    /// Its [`Test`] on `device`, a zero word made in `uploads` where it reads one.
+    fn test(self, device: &Device, uploads: &mut Uploads) -> Result<Test, Error> {
         let arguments = (self.comparison, self.reference);
-        Test::new(device, self.buffer, self.offset, arguments)
+        Test::new(device, uploads, self.buffer, self.offset, arguments)
     }
 }
 
@@ -967,7 +1033,7 @@ impl Predication {
             });
         }
         // Only a live DoWhile's End reads its word.
-        let test = condition.map(|c| c.test(device)).transpose()?;
+        let test = condition.map(|c| c.test(device, uploads)).transpose()?;
         let record = self.copy_end(uploads, device, &looping, test.as_ref())?;
         Ok(LoopEnd {
             answer: true,
@@ -1139,10 +1205,9 @@ fn record_step(
             (None, Some(OwnedBinds::new(core.device(), &kernel, &[set])?))
         }
     };
-    let uses: Vec<Use<ResourceKey>> = test
-        .iter()
-        .map(|test| {
-            let (identity, range) = test.buffer.tracked(test.at..test.at + 4);
+    let uses: Vec<Use<ResourceKey>> = (test.and_then(|test| test.word.as_ref()).into_iter())
+        .map(|(buffer, at)| {
+            let (identity, range) = buffer.tracked(*at..*at + 4);
             let read = Access::new(
                 vk::PipelineStageFlags2::COMPUTE_SHADER,
                 vk::AccessFlags2::SHADER_STORAGE_READ,
@@ -1184,8 +1249,8 @@ fn record_step(
     if let Some(binds) = binds {
         core.retain(binds);
     }
-    if let Some(test) = test {
-        core.retain(test.buffer.clone());
+    if let Some((buffer, _)) = test.and_then(|test| test.word.as_ref()) {
+        core.retain(buffer.clone());
     }
     Ok(())
 }
@@ -1549,9 +1614,13 @@ impl ComputeCommandEncoder {
     /// outermost open block, as Metal's does; with none open it is an unbalanced record, which
     /// drops its range of the unit's work, as Metal's does.
     ///
-    /// Refused, recording nothing: a buffer of another device (`Invalid`); a word past the
-    /// buffer's end (`NotImplemented(PredicationWordPastBuffer)`); a nil buffer with no block
-    /// open whose range holds the unit's dispatches from before its first record
+    /// A word past the buffer's end reads as Metal reads it: the heap's bytes past a buffer
+    /// placed in a heap, zero within the 256 bytes Metal rounds a lone buffer up to; elsewhere
+    /// Metal reads memory unrelated to the buffer, which the runtime reads as zero, announced
+    /// (`Degradation::PredicationWordPastBuffer`).
+    ///
+    /// Refused, recording nothing: a buffer of another device (`Invalid`); a nil buffer with no
+    /// block open whose range holds the unit's dispatches from before its first record
     /// (`NotImplemented(PredicationDropsUngatedWork)`).
     pub fn encode_start_if(
         &mut self,
@@ -1574,10 +1643,10 @@ impl ComputeCommandEncoder {
     ) -> Result<(), Error> {
         let arguments = (comparison, reference_value);
         let (kernel, condition) = self.condition("encode_start_if", buffer, offset, arguments)?;
-        match &condition
-            .map(|c| c.test(self.core().device()))
-            .transpose()?
-        {
+        let test = self.predication(|_, uploads, device| {
+            condition.map(|c| c.test(device, uploads)).transpose()
+        })?;
+        match &test {
             Some(test) => {
                 let (resume, record) = self.predication(|predication, uploads, device| {
                     predication.start_if(uploads, device, test)
@@ -1682,10 +1751,10 @@ impl ComputeCommandEncoder {
         let (kernel, condition) =
             self.condition("encode_start_while", buffer, offset, arguments)?;
         let event = || Event::StartWhile(buffer.cloned(), offset, comparison, reference_value);
-        match &condition
-            .map(|c| c.test(self.core().device()))
-            .transpose()?
-        {
+        let test = self.predication(|_, uploads, device| {
+            condition.map(|c| c.test(device, uploads)).transpose()
+        })?;
+        match &test {
             Some(test) => self.open_loop(kernel, Some(test), event),
             None => {
                 let record = self
@@ -1734,9 +1803,9 @@ impl ComputeCommandEncoder {
     /// outermost open block and answers `NO`; with no block open it is an unbalanced record,
     /// answering `NO` (the module docs).
     ///
-    /// Refused, recording nothing: as [`encode_start_if`](Self::encode_start_if) refuses, a word
-    /// past the buffer's end only where the call closes a live DoWhile, as only there Metal reads
-    /// it.
+    /// Only an End that closes a live DoWhile reads its word, as only there Metal reads it.
+    ///
+    /// Refused, recording nothing: as [`encode_start_if`](Self::encode_start_if) refuses.
     pub fn encode_end_do_while(
         &mut self,
         buffer: Option<&Buffer>,

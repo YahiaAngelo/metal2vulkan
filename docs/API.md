@@ -1634,6 +1634,14 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   run, on an Apple M3 Max and an Apple M4 alike, so no stable answer exists. Cost: each execution
   runs its own range, as Metal documents, where Metal's GPU may run one execution with the other's
   length, so commands run more or fewer times than the ranges name, differently from run to run.
+- `metal2vulkan-degrade-predication-word-past-buffer` (precision). `PredicationWordPastBuffer`: A
+  command predication record (`encode_start_if`, a loop's start, a live DoWhile's end) whose
+  condition word lies past its buffer's end, past the 256 bytes Metal rounds a lone buffer up to,
+  or past the end of the heap the buffer lies in: Metal reads whatever its own address space holds
+  there, a neighbouring buffer's bytes or zero, which depends on where Metal placed memory
+  unrelated to the buffer. Cost: the record reads its word as zero, where Metal reads what lies at
+  that address in its own address space: zero where nothing is there, another buffer's bytes where
+  Metal placed one.
 - `metal2vulkan-degrade-private-resource-option` (precision). `PrivateResourceOption`: A resource
   made with `MTLResourceOptions` bit 24, a private option Metal takes
   (`ResourceOptions::PRIVATE_BIT`), is made as without it, and reports its options without it, as
@@ -2867,9 +2875,11 @@ each item named states the rule in full.
   does (`PredicationOpenAtUnitEnd`). Loops nest to any depth. A loop is laid down as 64 copies
   (16 inside another loop, fewer where they would lay down more than 16384 steps and gated
   dispatches, and at least one); one that runs past them fails its command buffer
-  (`PredicatedLoopPastCopies`), where Metal runs on. Refused where Metal runs on
-  (`RuntimeGap`): a word past its buffer (`PredicationWordPastBuffer`), and an unbalanced record
-  that is its unit's first after dispatches of the unit (`PredicationDropsUngatedWork`).
+  (`PredicatedLoopPastCopies`), where Metal runs on. A condition word past its buffer reads as
+  Metal reads it (the heap's bytes, or zero), and as zero where Metal reads memory unrelated to the
+  buffer (`predication-word-past-buffer`). Refused where Metal runs on (`RuntimeGap`): an
+  unbalanced record that is its unit's first after dispatches of the unit
+  (`PredicationDropsUngatedWork`).
 - **A GPU-written indirect command naming a placed ID runs that ID's live holder**, the state made
   last; once it is released, nothing.
 - **An indirect render command keeps a draw's values to 32 bits**, as Metal's records keep most of

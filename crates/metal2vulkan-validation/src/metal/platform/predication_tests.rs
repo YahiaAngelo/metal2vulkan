@@ -19,7 +19,8 @@ use objc2_foundation::{NSRange, NSString};
 use objc2_metal::{
     MTLBarrierScope, MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder,
     MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineState, MTLDevice, MTLDispatchType,
-    MTLFence, MTLLibrary, MTLResourceOptions, MTLResourceUsage, MTLSize,
+    MTLFence, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLLibrary, MTLResourceOptions,
+    MTLResourceUsage, MTLSize, MTLStorageMode,
 };
 
 type Buffer = Retained<ProtocolObject<dyn MTLBuffer>>;
@@ -398,6 +399,81 @@ fn metal_runs_loops_as_the_lane_expects() {
         assert_eq!(got.counts, counts, "{script}");
         assert_eq!(got.answers, answers, "{script}");
     }
+}
+
+/// A condition word past its buffer's end, on Metal (the runtime lane's
+/// `a_word_past_its_buffer_reads_as_metal_reads_it`, the same records): zero at offsets 16 and
+/// 252 of a lone buffer of 16 bytes, the next buffer's word past a buffer placed at 0 of a
+/// placement heap, zero past the heap's end and at offset 2^32 of the lone buffer, and a live
+/// DoWhile's End far past its buffer reading zero, so `!= 0` fails and its body runs once.
+#[test]
+fn metal_reads_a_word_past_its_buffer_as_the_lane_expects() {
+    let probe = Probe::new();
+    write(&probe.log, &[0; LOG_WORDS]);
+    write(&probe.word, &[1, 0, 0, 0]);
+    let device = probe.queue.device();
+    let heap_size = 1usize << 20;
+    let descriptor = MTLHeapDescriptor::new();
+    descriptor.setType(MTLHeapType::Placement);
+    descriptor.setStorageMode(MTLStorageMode::Shared);
+    descriptor.setSize(heap_size);
+    let heap = device.newHeapWithDescriptor(&descriptor).expect("a heap");
+    let options = MTLResourceOptions::StorageModeShared;
+    // SAFETY: 256-byte buffers at 256-aligned offsets inside the heap.
+    let (first, next) = unsafe {
+        (
+            heap.newBufferWithLength_options_offset(256, options, 0),
+            heap.newBufferWithLength_options_offset(256, options, 65536),
+        )
+    };
+    let (first, next) = (first.expect("a heap buffer"), next.expect("a heap buffer"));
+    write(&next, &[0xb0b0_b0b0]);
+    let command_buffer: CommandBuffer = probe.queue.commandBuffer().expect("a command buffer");
+    let encoder = command_buffer
+        .computeCommandEncoder()
+        .expect("a compute encoder");
+    let e = &*encoder;
+    let mut tag = 0;
+    let mut holds = |buffer: &ProtocolObject<dyn MTLBuffer>, offset: usize, word: u32| {
+        // SAFETY: the private selectors take these arguments (`v@:@QQI`, `v@:`, `B@:`), on a
+        // live compute encoder; the buffers outlive the command buffer, which the test waits for.
+        unsafe {
+            let _: () = msg_send![e, encodeStartIf: buffer, offset: offset, comparison: 0usize, referenceValue: word];
+            probe.bind(&encoder, tag);
+            encoder.dispatchThreads_threadsPerThreadgroup(one(), one());
+            let _: () = msg_send![e, encodeStartElse];
+            probe.bind(&encoder, tag + 1);
+            encoder.dispatchThreads_threadsPerThreadgroup(one(), one());
+            let end: bool = msg_send![e, encodeEndIf];
+            assert!(end);
+        }
+        tag += 2;
+    };
+    holds(&probe.word, 16, 0);
+    holds(&probe.word, 252, 0);
+    holds(&first, 65536, 0xb0b0_b0b0);
+    holds(&first, heap_size, 0);
+    holds(&probe.word, 1 << 32, 0);
+    // SAFETY: as above (`v@:` and `B@:@QQI`).
+    unsafe {
+        let _: () = msg_send![e, encodeStartDoWhile];
+        probe.bind(&encoder, 20);
+        encoder.dispatchThreads_threadsPerThreadgroup(one(), one());
+        let word = &*probe.word;
+        let end: bool = msg_send![e, encodeEndDoWhile: word, offset: PAST as usize, comparison: 1usize, referenceValue: 0u32];
+        assert!(end);
+    }
+    encoder.endEncoding();
+    commit_and_wait(
+        &command_buffer,
+        "Metal predication words past their buffers",
+    )
+    .expect("the command buffer completes");
+    let contents = probe.log.contents().cast::<u32>();
+    // SAFETY: the Shared log's words, read once the command buffer's work ended.
+    let counts = unsafe { std::slice::from_raw_parts(contents.as_ptr(), LOG_WORDS) };
+    let ran: Vec<usize> = (0..LOG_WORDS).filter(|&t| counts[t] == 1).collect();
+    assert_eq!(ran, [0, 2, 4, 6, 8, 20], "{:?}", &counts[..24]);
 }
 
 /// A block open where its unit ends, on Metal (the runtime lane's
