@@ -2050,8 +2050,8 @@ fn rgb10a2_srgb_reads_and_writes_metals_codes() {
         assert_eq!(*h, want.map(f32::to_bits), "half, word {w:08x}");
     }
     let mut values: Vec<f32> = (0..=16384u32).map(|k| k as f32 / 16384.0).collect();
-    for k in 0..1024usize {
-        let first = f64::from(R10X6_SRGB_ENCODE_FIRST[k]);
+    for &first in &R10X6_SRGB_ENCODE_FIRST {
+        let first = f64::from(first);
         if first > 0.0 {
             let edge = ((first - 0.5) / 8192.0) as f32;
             values.extend((0..5).map(|d| f32::from_bits(edge.to_bits() + d - 2)));

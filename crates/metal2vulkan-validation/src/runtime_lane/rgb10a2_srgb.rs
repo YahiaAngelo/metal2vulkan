@@ -102,8 +102,10 @@ fn words_of(texture: &Texture, (width, height): (u64, u64)) -> Vec<u32> {
 
 fn words(bytes: &[u8]) -> Vec<u32> {
     bytes
-        .chunks_exact(4)
-        .map(|w| u32::from_le_bytes([w[0], w[1], w[2], w[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|w| u32::from_le_bytes(*w))
         .collect()
 }
 
@@ -252,7 +254,7 @@ fn kernels_read_write_and_sample_rgb10a2_srgb_as_metal_does() {
         dispatch(device, &fetch, &t, (None, &[&out, &width]), (1024, 1));
         let got = words(&read_buffer(&out, 0, 1024 * 16).unwrap());
         let mut text = String::new();
-        for (c, w) in got.chunks_exact(4).enumerate() {
+        for (c, w) in got.as_chunks::<4>().0.iter().enumerate() {
             writeln!(
                 text,
                 "read {c} {:08x} {:08x} {:08x} {:08x}",
