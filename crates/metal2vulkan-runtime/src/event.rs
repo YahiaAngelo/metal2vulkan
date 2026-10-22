@@ -273,7 +273,7 @@ impl EventShared {
     /// clock holds (Metal's `UINT64_MAX` milliseconds) has no deadline. Once the process is
     /// exiting, it answers at once from the value last seen: neither a completion turn nor the
     /// counter raises it any more (`exit_guard`).
-    fn wait_until(self: &Arc<Self>, value: u64, timeout: Duration) -> bool {
+    pub(super) fn wait_until(self: &Arc<Self>, value: u64, timeout: Duration) -> bool {
         let deadline = Instant::now().checked_add(timeout);
         loop {
             if self.value() >= value {

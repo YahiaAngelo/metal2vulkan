@@ -264,10 +264,11 @@ pub(super) struct EncoderCore {
     /// `end` says so to the command buffer, whose commit runs nothing from it on
     /// (`State::fails_from`).
     fails_command_buffer: Option<CommandBufferError>,
-    /// Metal's GPU faults this encoder (an execution of commands that inherit a pipeline state
-    /// made without `supportIndirectCommandBuffers`): `end` says so to the command buffer, whose
-    /// commit runs nothing of it (`State::fault`).
-    faults: bool,
+    /// Metal's GPU faults this encoder, with this error (an execution of commands that inherit a
+    /// pipeline state made without `supportIndirectCommandBuffers`, an indexed or indirect draw
+    /// of primitive type 9): `end` says so to the command buffer, whose commit runs nothing of it
+    /// (`State::fault`).
+    faults: Option<CommandBufferError>,
     /// Its writes into ASTC carriers ([`wrote_twin`](Self::wrote_twin)): `end` hands them to the
     /// command buffer with its last part.
     twin_writes: Vec<TwinWrite>,
@@ -433,7 +434,7 @@ impl EncoderCore {
             holds: Holds::new(command_buffer.device()),
             taken: Taken::default(),
             fails_command_buffer: None,
-            faults: false,
+            faults: None,
             twin_writes: Vec::new(),
             unattached_as_called: false,
             aliased_uses: Vec::new(),
@@ -513,7 +514,7 @@ impl EncoderCore {
             holds: Holds::new(command_buffer.device()),
             taken: Taken::default(),
             fails_command_buffer: None,
-            faults: false,
+            faults: None,
             twin_writes: Vec::new(),
             unattached_as_called: false,
             aliased_uses: Vec::new(),
@@ -1519,10 +1520,19 @@ impl EncoderCore {
         self.fails_command_buffer = Some(error);
     }
 
+    /// Metal's GPU hangs at this encoder (a direct draw of primitive type 9), as the command
+    /// buffer commits: it fails from the encoder on with `CommandBufferError::GpuHang`, unless
+    /// the encoder fails it otherwise first, and holds what follows (`State::hang_from`).
+    pub(super) fn hang(&mut self) {
+        self.fails_command_buffer
+            .get_or_insert(CommandBufferError::GpuHang);
+    }
+
     /// Metal's GPU faults this encoder, as the command buffer commits: the encoder runs nothing,
-    /// and the command buffer completes with `CommandBufferError::PageFault` (`State::fault`).
-    pub(super) fn fault(&mut self) {
-        self.faults = true;
+    /// and the command buffer completes with `error` (`CommandBufferError::PageFault`, or
+    /// `GpuRecoveryVictim`), the first faulted encoder's (`State::fault`).
+    pub(super) fn fault(&mut self, error: CommandBufferError) {
+        self.faults.get_or_insert(error);
     }
 
     /// End the encoder, one of `kind` that made `residency` resident (a compute or render
@@ -1561,14 +1571,16 @@ impl EncoderCore {
             Some(_) if !self.segments.iter().all(Segment::records_again) => {
                 Some(Unlogged::Segments)
             }
-            Some(_) if self.fails_command_buffer.is_some() || self.faults => Some(Unlogged::Fails),
+            Some(_) if self.fails_command_buffer.is_some() || self.faults.is_some() => {
+                Some(Unlogged::Fails)
+            }
             Some(_) => None,
         };
         // A log not kept goes back to the device's spares (`replay.rs`).
         let replay = replay.and_then(|log| {
             let keeps = self.segments.iter().all(Segment::records_again)
                 && self.fails_command_buffer.is_none()
-                && !self.faults
+                && self.faults.is_none()
                 && self.taken.names_a_pin();
             if !keeps {
                 self.device().shared().scheduler.spare_logs().give(log);
@@ -1629,11 +1641,15 @@ impl EncoderCore {
             state.encoder_unlogged(encoder, why);
         }
         state.encoder_holds(encoder, uses.held().to_vec());
-        if let Some(error) = fails_command_buffer {
-            state.fail_from(encoder, error);
+        match fails_command_buffer {
+            Some(CommandBufferError::GpuHang) => {
+                state.hang_from(encoder, open.command_buffer.device())?;
+            }
+            Some(error) => state.fail_from(encoder, error),
+            None => {}
         }
-        if faults {
-            state.fault(encoder);
+        if let Some(error) = faults {
+            state.fault(encoder, error);
         }
         let base = state.executions.len();
         // One part, its executions these: a log not kept comes back, to go without the lock.
@@ -1722,7 +1738,7 @@ impl EncoderCore {
             faults,
             ..
         } = self;
-        if fails_command_buffer.is_some() || faults || taken.dead() {
+        if fails_command_buffer.is_some() || faults.is_some() || taken.dead() {
             return Err(internal(
                 "an encoder encoded again differs from its first encoding",
             ));

@@ -10,7 +10,9 @@
 //! - A triangle's winding parity restarts with each piece, and `primitive_id` counts the drawn
 //!   primitives on across a restart, as it does across the all-ones restart.
 //! - Lists and points draw every index as a vertex, and a draw of no indices has none to restart
-//!   at: the call changes none of them.
+//!   at: the call changes none of them. Of Metal's private types, the quad strip restarts as the
+//!   strips do, at `k'` after the call (16-bit, on the M3 Max with macOS 27.0.1); the line loop,
+//!   fan and quads never restart, drawing `k'` and the all-ones index as vertices.
 //! - An indexed indirect draw follows the call; an execution of indirect render commands does
 //!   not, its strips restarting at the all-ones index.
 //! - The call applies to the encoder's draws after it, whether before or after its pipeline
@@ -20,6 +22,13 @@
 //! Where `k'` is the index type's all-ones index, Vulkan's `primitiveRestartEnable` restarts
 //! there as Metal does, and the draw stays as it is. Elsewhere it is drawn as the list the index
 //! rewrite pass writes (`index_rewrite.rs`), with the class's list topology.
+//!
+//! Metal's private primitive types 5 to 8 (`DrawPrimitiveType`), which no Vulkan topology draws as
+//! Metal does, are drawn as lists too, in Metal's order: a direct draw without indices as the list
+//! the CPU writes into the command buffer's upload arena (its positions are its vertices, so the
+//! list follows from its count), and a draw over indices or from indirect arguments as the list
+//! the index rewrite pass writes. Of them only the quad strip restarts, at the all-ones index of
+//! its index type where the encoder made no call, at `k'` after one.
 
 use super::RenderCall;
 use super::RenderCommandEncoder;
@@ -27,12 +36,14 @@ use super::{Assembly, RenderLowering};
 use metal2vulkan::bind::{DrawCall, RewriteProgram};
 use metal2vulkan::metal::PrimitiveType;
 
-/// A draw the index rewrite pass draws as a list: its program, `k'`, and its index size.
+/// A draw drawn as a list: its program, `k'`, and its index size (`None` for a draw without
+/// indices, whose positions are its vertices). A direct draw without indices draws the list the
+/// CPU writes; any other the list the index rewrite pass writes.
 #[derive(Clone, Copy)]
 pub(super) struct Restarted {
     pub(super) program: RewriteProgram,
     pub(super) restart: u32,
-    pub(super) index_size: u64,
+    pub(super) index_size: Option<u64>,
 }
 
 impl Restarted {
@@ -53,40 +64,56 @@ impl RenderLowering {
         self.restart = Some(index);
     }
 
-    /// Where the encoder's call restarts `draw` of `assembly` at another index than Vulkan
-    /// would: an indexed strip, with `k'` not its index type's all-ones index. `None` for every
-    /// other draw.
+    /// Where `draw` of `assembly` is drawn as a list: a draw of a private type, which restarts
+    /// (a quad strip over indices) at the encoder's `k'`, or its index type's all-ones index
+    /// without a call; and an indexed strip the encoder's call restarts at another index than
+    /// Vulkan would, `k'` not its index type's all-ones index. `None` for every other draw.
     pub(super) fn restarted(&self, assembly: Assembly, draw: &DrawCall) -> Option<Restarted> {
-        let k = self.restart?;
+        let wide = match *draw {
+            DrawCall::Indexed { index_type, .. }
+            | DrawCall::Indirect {
+                indexed: Some((index_type, ..)),
+                ..
+            } => Some(index_type == metal2vulkan::vk::IndexType::UINT32),
+            _ => None,
+        };
+        let index_size = wide.map(|wide| if wide { 4 } else { 2 });
         let program = match assembly {
+            Assembly::Private(program) => {
+                let restart = match wide {
+                    Some(wide) => match self.restart {
+                        Some(k) => restart_index(k, wide).0,
+                        None => restart_index(u64::MAX, wide).1,
+                    },
+                    None => 0,
+                };
+                return Some(Restarted {
+                    program,
+                    restart,
+                    index_size,
+                });
+            }
             Assembly::Primitives(PrimitiveType::LineStrip) => RewriteProgram::LineStrip,
             Assembly::Primitives(PrimitiveType::TriangleStrip) => RewriteProgram::TriangleStrip,
             _ => return None,
         };
-        let index_type = match *draw {
-            DrawCall::Indexed { index_type, .. } => index_type,
-            DrawCall::Indirect {
-                indexed: Some((index_type, ..)),
-                ..
-            } => index_type,
-            _ => return None,
-        };
-        let wide = index_type == metal2vulkan::vk::IndexType::UINT32;
+        let (k, wide) = (self.restart?, wide?);
         let (restart, all_ones) = restart_index(k, wide);
         (restart != all_ones).then_some(Restarted {
             program,
             restart,
-            index_size: if wide { 4 } else { 2 },
+            index_size,
         })
     }
 }
 
 impl RenderCommandEncoder {
-    /// `setPrimitiveRestartEnabled:index:` (SPI): the encoder's indexed line and triangle strips
-    /// drawn after the call restart at `index` as Metal takes it for their index type (`k mod
-    /// 2^32` for 32-bit indices, the lesser of that and `0xffff` for 16-bit ones), and only
-    /// there: the all-ones index then draws as a vertex unless it is that index. `_enabled`
-    /// changes nothing, as on Metal. Lists, points, draws without indices and executions of
+    /// `setPrimitiveRestartEnabled:index:` (SPI): the encoder's indexed line and triangle strips,
+    /// and quad strips ([`DrawPrimitiveType::QuadStrip`](crate::DrawPrimitiveType)), drawn after
+    /// the call restart at `index` as Metal takes it for their index type (`k mod 2^32` for 32-bit
+    /// indices, the lesser of that and `0xffff` for 16-bit ones), and only there: the all-ones
+    /// index then draws as a vertex unless it is that index. `_enabled` changes nothing, as on
+    /// Metal. Lists, points, line loops, fans, quads, draws without indices and executions of
     /// indirect render commands are as before; the last call wins until the encoder ends (an M4). A
     /// strip restarting elsewhere than at the all-ones index is drawn as a list a GPU pass writes
     /// before the pass; a draw it cannot draw so is refused (`NotImplemented(RestartedStrip)`).

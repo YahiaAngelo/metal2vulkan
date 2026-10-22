@@ -295,7 +295,7 @@ use super::fresh_unwritten::FreshUnwritten;
 use super::function_table::VisibleFunctionTable;
 use super::heap_sets;
 use super::index_bounds::{self, BoundsPass, BoundsSteps};
-use super::index_rewrite::{self, RewritePass, RewriteSteps};
+use super::index_rewrite::{self, RewritePass, RewriteSteps, WrittenList};
 use super::kept_bytes;
 use super::linear_attachment;
 use super::linear_merge::LinearMerge;
@@ -316,7 +316,9 @@ use super::render_pass::{
 use super::render_state::{self, DepthBiasRecord, EncoderState, ViewportList, MAX_VIEWPORTS};
 use super::render_state::{Compensation, DepthBiasEffect, WrittenDepthClamp};
 use super::render_target::{self, covers, Feedback, PassShape, Position, RenderPassObject};
-use super::render_values::{LoadAction, ScissorRect, StoreAction, StoreActionOptions, Viewport};
+use super::render_values::{
+    DrawPrimitiveType, LoadAction, ScissorRect, StoreAction, StoreActionOptions, Viewport,
+};
 use super::replay::Replay;
 use super::residency::Residency;
 use super::resolve::{DepthStencilResolve, Resolve, ResolveCopies, ResolveMode, ResolveSource};
@@ -352,7 +354,8 @@ use metal2vulkan::bind::BindingPlan;
 use metal2vulkan::bind::VertexAmplification;
 use metal2vulkan::bind::{
     DrawCall, FragmentTests, HeapPlacement, ImageSource, ImageblockSize, IndexBufferRef,
-    IndirectRef, MeshDispatch, MeshGroups, TessellationFactors, ViewSetup, WriteSource,
+    IndirectRef, MeshDispatch, MeshGroups, RewriteProgram, TessellationFactors, ViewSetup,
+    WriteSource,
 };
 use metal2vulkan::cache::SpecializationKey;
 use metal2vulkan::device::{DriverFact, FormatUsage, VkFeature};
@@ -593,7 +596,7 @@ struct DrawBuffers<'a> {
 /// An indexed draw's values but its index buffer and offset (`draw_indexed`).
 #[derive(Clone, Copy)]
 struct IndexedDraw {
-    primitive_type: PrimitiveType,
+    primitive_type: DrawPrimitiveType,
     index_count: u32,
     index_type: IndexType,
     instance_count: u32,
@@ -616,8 +619,34 @@ struct PatchDraw {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Assembly {
     Primitives(PrimitiveType),
+    /// One of Metal's private primitive types, drawn as the list its program writes
+    /// (`render/restart.rs`).
+    Private(RewriteProgram),
     Patches,
     Meshes,
+}
+
+impl Assembly {
+    /// What a draw of primitive type `primitive` assembles; `None` for type 9, which draws
+    /// nothing ([`RenderLowering::draw_nine`]).
+    fn of(primitive: DrawPrimitiveType) -> Option<Assembly> {
+        Some(match primitive {
+            DrawPrimitiveType::Public(p) => Assembly::Primitives(p),
+            DrawPrimitiveType::LineLoop => Assembly::Private(RewriteProgram::LineLoop),
+            DrawPrimitiveType::TriangleFan => Assembly::Private(RewriteProgram::TriangleFan),
+            DrawPrimitiveType::Quads => Assembly::Private(RewriteProgram::Quads),
+            DrawPrimitiveType::QuadStrip => Assembly::Private(RewriteProgram::QuadStrip),
+            DrawPrimitiveType::Nine => return None,
+        })
+    }
+}
+
+/// How a draw of primitive type 9 fails its command buffer, as Metal's GPU fails it
+/// (`DrawPrimitiveType::Nine`): it hangs, or faults the encoder with the error.
+#[derive(Clone, Copy)]
+enum NineFailure {
+    Hang,
+    Fault(CommandBufferError),
 }
 
 /// The index type of `draw` where it is a direct indexed draw of `pipeline` whose vertex function
@@ -625,17 +654,38 @@ enum Assembly {
 /// `PushField::VerticesPerPrimitive`): such a draw runs the variant that draws its indices as
 /// vertices from 0 (`BindState::primitive_id_indices`). `None` for every other draw.
 fn primitive_id_indices(pipeline: &DrawingState, draw: &DrawCall) -> Option<IndexType> {
-    let writes = pipeline.base().interface.push.iter().any(|layout| {
+    match draw {
+        DrawCall::Indexed { .. } if writes_primitive_ids(pipeline) => {
+            capture::form(draw)?.index_type()
+        }
+        _ => None,
+    }
+}
+
+/// Whether `pipeline`'s vertex function writes the primitive ID's varying
+/// (`LoweringInputs::primitive_id_varying`, which reads `PushField::VerticesPerPrimitive`).
+fn writes_primitive_ids(pipeline: &DrawingState) -> bool {
+    pipeline.base().interface.push.iter().any(|layout| {
         layout.stage == Stage::Vertex
             && layout
                 .fields
                 .iter()
                 .any(|f| f.field == PushField::VerticesPerPrimitive)
-    });
-    match draw {
-        DrawCall::Indexed { .. } if writes => capture::form(draw)?.index_type(),
-        _ => None,
+    })
+}
+
+/// Refuses (`NotImplemented(PrivatePrimitives)`) a draw of `pipeline` of a private type drawn as
+/// its program's list where `[[primitive_id]]` would read other than Metal's: under a vertex
+/// function that computes it into its varying, from a vertex index the list's indices are not.
+/// Answers whether the draw is of quads or a quad strip whose fragment function reads it
+/// (`BindState::quad_primitive_ids`), which runs the variant that reads the quad's, as Metal
+/// counts one primitive a quad where the list draws two triangles.
+fn private_primitive_ids(pipeline: &DrawingState, program: RewriteProgram) -> Result<bool, Error> {
+    if writes_primitive_ids(pipeline) {
+        return Err(Error::NotImplemented(RuntimeGap::PrivatePrimitives));
     }
+    let quads = matches!(program, RewriteProgram::Quads | RewriteProgram::QuadStrip);
+    Ok(quads && pipeline.base().graphics.reads_primitive_id)
 }
 
 /// What a draw settles from the encoder's state before its bind state
@@ -2946,7 +2996,7 @@ impl RenderLowering {
     /// The lowering of [`RenderCommandEncoder::draw_primitives`].
     pub(crate) fn draw_primitives(
         &mut self,
-        primitive_type: PrimitiveType,
+        primitive_type: DrawPrimitiveType,
         vertex_start: u32,
         vertex_count: u32,
         instance_count: u32,
@@ -2969,15 +3019,19 @@ impl RenderLowering {
             base_instance,
         };
         let buffers = DrawBuffers::default();
-        let assembly = Assembly::Primitives(primitive_type);
         let empty = vertex_count == 0 || instance_count == 0;
+        let Some(assembly) = Assembly::of(primitive_type) else {
+            // Metal's GPU hangs at 3 vertices or more, and draws 1 or 2 as nothing.
+            let hangs = vertex_count >= 3 && !empty;
+            return self.draw_nine(CALL, empty, hangs.then_some(NineFailure::Hang));
+        };
         self.draw(CALL, assembly, draw, buffers, empty)
     }
 
     /// The lowering of [`RenderCommandEncoder::draw_indexed_primitives`].
     pub(crate) fn draw_indexed_primitives(
         &mut self,
-        primitive_type: PrimitiveType,
+        primitive_type: DrawPrimitiveType,
         index_count: u32,
         index_type: IndexType,
         index_buffer: &Buffer,
@@ -3055,15 +3109,19 @@ impl RenderLowering {
             index: Some(index),
             ..DrawBuffers::default()
         };
-        let assembly = Assembly::Primitives(primitive_type);
         let empty = index_count == 0 || instance_count == 0;
+        let Some(assembly) = Assembly::of(primitive_type) else {
+            // Metal's GPU faults at any indices.
+            let fault = NineFailure::Fault(CommandBufferError::PageFault);
+            return self.draw_nine(call, empty, (!empty).then_some(fault));
+        };
         self.draw(call, assembly, draw, buffers, empty)
     }
 
     /// The lowering of [`RenderCommandEncoder::draw_primitives_indirect`].
     pub(crate) fn draw_primitives_indirect(
         &mut self,
-        primitive_type: PrimitiveType,
+        primitive_type: DrawPrimitiveType,
         indirect_buffer: &Buffer,
         indirect_buffer_offset: u64,
     ) -> Result<(), Error> {
@@ -3088,14 +3146,18 @@ impl RenderLowering {
             indirect: Some(indirect),
             ..DrawBuffers::default()
         };
-        let assembly = Assembly::Primitives(primitive_type);
+        let Some(assembly) = Assembly::of(primitive_type) else {
+            // Metal fails it as a victim of the GPU's recovery, whatever its arguments.
+            let victim = NineFailure::Fault(CommandBufferError::GpuRecoveryVictim);
+            return self.draw_nine(CALL, false, Some(victim));
+        };
         self.draw(CALL, assembly, draw, buffers, false)
     }
 
     /// The lowering of [`RenderCommandEncoder::draw_indexed_primitives_indirect`].
     pub(crate) fn draw_indexed_primitives_indirect(
         &mut self,
-        primitive_type: PrimitiveType,
+        primitive_type: DrawPrimitiveType,
         index_type: IndexType,
         index_buffer: &Buffer,
         index_buffer_offset: u64,
@@ -3181,7 +3243,11 @@ impl RenderLowering {
             indirect: Some(indirect),
             ..DrawBuffers::default()
         };
-        let assembly = Assembly::Primitives(primitive_type);
+        let Some(assembly) = Assembly::of(primitive_type) else {
+            // Metal fails it as a victim of the GPU's recovery, whatever its arguments.
+            let victim = NineFailure::Fault(CommandBufferError::GpuRecoveryVictim);
+            return self.draw_nine(CALL, false, Some(victim));
+        };
         self.draw(CALL, assembly, draw, buffers, false)
     }
 
@@ -6774,6 +6840,30 @@ impl RenderLowering {
         Ok(u32::try_from(kept).ok().filter(|&kept| kept < data_size))
     }
 
+    /// A draw of primitive type 9 (`DrawPrimitiveType::Nine`), by `call`, `empty` where it has
+    /// no vertices, indices or instances: it records nothing, and fails the command buffer as
+    /// `failure` says, as Metal's GPU does: a hang fails it from the encoder on and holds it
+    /// (`command_buffer/hang.rs`), a fault fails the encoder alone. Checked as a draw of a public
+    /// type is (a pipeline state set, a draw kind it takes); under a tessellation pipeline it
+    /// draws nothing, as a public type's draw does there.
+    fn draw_nine(
+        &mut self,
+        call: &'static str,
+        empty: bool,
+        failure: Option<NineFailure>,
+    ) -> Result<(), Error> {
+        let stand_in = Assembly::Primitives(PrimitiveType::Point);
+        let drawn = drawn_by(call, self.pipeline.as_ref(), stand_in, empty)?;
+        match (drawn, failure) {
+            (Some(_), Some(NineFailure::Hang)) => self.core.hang(),
+            (Some(_), Some(NineFailure::Fault(error))) => self.core.fault(error),
+            _ => {}
+        }
+        self.draw_calls += 1;
+        self.called = true;
+        Ok(())
+    }
+
     /// Plan, bind, and record `draw` of `assembly` (the module's steps), with its index and
     /// indirect buffers and offsets; `empty` when it draws no vertex, index, patch, instance or
     /// mesh threadgroup, which records nothing once the checks plain Metal keeps for an empty
@@ -6945,10 +7035,14 @@ impl RenderLowering {
         self.start_extended_shadows(&pipeline)?;
         // What the draw settles from the encoder's state, as an execution's precompile at commit
         // settles it (`draw_settings`).
-        // An indexed strip the encoder's call restarts at another index than Vulkan's is drawn
-        // as the list the index rewrite pass writes, of its class's list topology
+        // An indexed strip the encoder's call restarts at another index than Vulkan's, and a draw
+        // of one of Metal's private types, is drawn as a list, of its class's list topology
         // (`render/restart.rs`).
         let restarted = self.restarted(assembly, &draw);
+        let quad_primitive_ids = match assembly {
+            Assembly::Private(program) => private_primitive_ids(&pipeline, program)?,
+            _ => false,
+        };
         let assembly = restarted.map_or(assembly, |r| r.assembly());
         // Its settings, and the memo entry its draw state and pipeline are found and kept in
         // (`render/draw_shape.rs`).
@@ -7020,7 +7114,12 @@ impl RenderLowering {
             plan,
         } = self.settle_draw(
             live,
-            (&pipeline, &settings, primitive_id_indices),
+            (
+                &pipeline,
+                &settings,
+                primitive_id_indices,
+                quad_primitive_ids,
+            ),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut unlisted),
             (&function_tables, &mut snapshot),
@@ -7208,49 +7307,80 @@ impl RenderLowering {
             self.skipped_draw();
             return Ok(());
         }
-        let rewrite = match (restarted, &buffers.index) {
-            (None, _) => None,
-            (Some(_), None) => return Err(internal("a restarted strip without indices")),
-            (Some(restarted), Some(index)) => {
-                if commands.indirect_needs_arguments && !commands.index_bounds_pass {
-                    return Err(Error::NotImplemented(RuntimeGap::IndirectDrawArguments));
+        // A direct draw of a private type without indices draws the list the CPU writes; every
+        // other draw drawn as a list, the list the index rewrite pass writes.
+        let (rewrite, listed) = match restarted {
+            None => (None, None),
+            Some(restarted) => match (&draw, &buffers.index, &buffers.indirect) {
+                (
+                    &DrawCall::Primitives {
+                        vertex_start,
+                        vertex_count,
+                        ..
+                    },
+                    None,
+                    None,
+                ) => {
+                    let list = WrittenList::new(
+                        &mut self.core,
+                        restarted.program,
+                        (vertex_start, vertex_count),
+                    )?;
+                    (None, Some(list))
                 }
-                let arguments = match (&draw, &buffers.indirect) {
-                    (
-                        &DrawCall::Indexed {
-                            index_count,
-                            instance_count,
+                (draw, index, indirect) => {
+                    if commands.indirect_needs_arguments && !commands.index_bounds_pass {
+                        return Err(Error::NotImplemented(RuntimeGap::IndirectDrawArguments));
+                    }
+                    let arguments = match (draw, index, indirect) {
+                        (
+                            &DrawCall::Indexed {
+                                index_count,
+                                instance_count,
+                                base_vertex,
+                                base_instance,
+                                ..
+                            },
+                            Some(_),
+                            None,
+                        ) => index_rewrite::Arguments::Direct {
+                            count: index_count,
+                            instances: instance_count,
                             base_vertex,
                             base_instance,
-                            ..
                         },
-                        None,
-                    ) => index_rewrite::Arguments::Direct {
-                        count: index_count,
-                        instances: instance_count,
-                        base_vertex,
-                        base_instance,
-                    },
-                    (DrawCall::Indirect { .. }, Some(indirect)) => {
-                        index_rewrite::Arguments::Indirect(indirect)
+                        (
+                            DrawCall::Indirect {
+                                indexed: Some(_), ..
+                            },
+                            Some(_),
+                            Some(indirect),
+                        ) => index_rewrite::Arguments::Indirect(indirect),
+                        (DrawCall::Indirect { indexed: None, .. }, None, Some(indirect)) => {
+                            index_rewrite::Arguments::IndirectVertices(indirect)
+                        }
+                        _ => return Err(internal("a list of another draw")),
+                    };
+                    let index = index.as_ref();
+                    let size = restarted.index_size.unwrap_or(4);
+                    let reads = index_rewrite::reads(index, &arguments, size);
+                    let in_place = index_rewrite::in_place(index, &arguments, size);
+                    if self.unordered.written(&in_place) {
+                        return Err(Error::NotImplemented(index_rewrite::gap_of(
+                            restarted.program,
+                        )));
                     }
-                    _ => return Err(internal("a restarted strip of another draw")),
-                };
-                let size = restarted.index_size;
-                let reads = index_rewrite::reads(index, &arguments, size);
-                let in_place = index_rewrite::in_place(index, &arguments, size);
-                if self.unordered.written(&in_place) {
-                    return Err(Error::NotImplemented(RuntimeGap::RestartedStrip));
+                    let pass = RewritePass::new(
+                        &mut self.core,
+                        (restarted.program, restarted.restart),
+                        index,
+                        &arguments,
+                        size,
+                        reads,
+                    )?;
+                    (Some(pass), None)
                 }
-                Some(RewritePass::new(
-                    &mut self.core,
-                    (restarted.program, restarted.restart),
-                    index,
-                    &arguments,
-                    size,
-                    reads,
-                )?)
-            }
+            },
         };
         let pass = match (commands.indirect_needs_arguments, &buffers) {
             _ if rewrite.is_some() => None,
@@ -8118,7 +8248,20 @@ impl RenderLowering {
         // pass's one.
         let sized = device.shared().sized_index_bind;
         let one = |draw| ([draw; 2], 1);
+        // A list the CPU wrote draws as the indexed draw of it the binder's draw of the vertices
+        // becomes.
+        let listed_draw = match &listed {
+            Some(list) => Some(
+                list.draw(commands.draw, sized)
+                    .ok_or_else(|| internal("a written list of another draw"))?,
+            ),
+            None => None,
+        };
         let (vk_draws, count) = match (&rewrite, &bounds, index, &mesh_work, commands.draw) {
+            _ if listed_draw.is_some() => {
+                let (bind, draw) = listed_draw.ok_or_else(|| internal("a written list's draw"))?;
+                one((Some(bind), None, draw))
+            }
             (Some(pass), ..) => one(pass.draw(sized)),
             (_, Some(pass), Some(source), _, _) => (pass.draws(source, commands.draw, sized)?, 2),
             // A scanned emulated mesh draw's arguments are its work buffer's.
@@ -8431,6 +8574,7 @@ impl RenderLowering {
             && !before_instance
             && bounds.is_none()
             && rewrite.is_none()
+            && listed.is_none()
             && mesh_steps.is_none()
             && tessellation_steps.is_none()
             && draw_shadows.is_empty()
@@ -8456,6 +8600,7 @@ impl RenderLowering {
             && !before_instance
             && bounds.is_none()
             && rewrite.is_none()
+            && listed.is_none()
             && mesh_steps.is_none()
             && tessellation_steps.is_none()
             && draw_shadows.is_empty()
@@ -9095,7 +9240,9 @@ impl RenderLowering {
 
     /// Bring `live`, the encoder's kept bind state, to the bind state a draw of `pipeline` under
     /// `settings` binds in, reading its indices as `primitive_id_indices` says (`BindState::
-    /// primitive_id_indices`, [`primitive_id_indices`]), its vertex, object and mesh tables
+    /// primitive_id_indices`, [`primitive_id_indices`]), its quads' primitive IDs as
+    /// `quad_primitive_ids` says (`BindState::quad_primitive_ids`, [`private_primitive_ids`]),
+    /// its vertex, object and mesh tables
     /// `pass_start`'s or the encoder's
     /// ([`refresh_bind_state`](Self::refresh_bind_state)), its runtime samplers' address modes
     /// `sampler_maps` ([`sampler_maps`](Self::sampler_maps)), and answer the variant it runs on in
@@ -9107,10 +9254,11 @@ impl RenderLowering {
     fn settle_draw(
         &self,
         live: &mut LiveBind,
-        (pipeline, settings, primitive_id_indices): (
+        (pipeline, settings, primitive_id_indices, quad_primitive_ids): (
             &DrawingState,
             &DrawSettings,
             Option<IndexType>,
+            bool,
         ),
         (pass_start, sampler_maps): (&PassStartTables, &SamplerMaps),
         (argument_samplers, unlisted): (&mut ArgumentSamplers, &mut Option<(u64, u64)>),
@@ -9152,6 +9300,7 @@ impl RenderLowering {
             );
             reshape.field(&mut state.depth16_bias_raises, settings.depth16_bias_raises);
             reshape.field(&mut state.primitive_id_indices, primitive_id_indices);
+            reshape.field(&mut state.quad_primitive_ids, quad_primitive_ids);
             reshape.field_from(&mut state.dropped_colors, &colors.dropped);
             reshape.field_from(&mut state.extended_shadows, shadows);
             let snapshots = snapshot.as_ref().map_or(&NO_INDICES, |w| &w.slots);
@@ -9819,16 +9968,19 @@ impl RenderCommandEncoder {
     }
 
     /// `drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:` (Metal's shorter
-    /// forms take one instance and a base instance of 0). A draw of no vertices or no instances
-    /// records nothing (the module docs). Refused as the module docs say.
+    /// forms take one instance and a base instance of 0), of a public primitive type or one of
+    /// Metal's private ones ([`DrawPrimitiveType`]), which draws as the list its variant states,
+    /// written on the CPU. A draw of no vertices or no instances records nothing (the module docs).
+    /// Refused as the module docs say.
     pub fn draw_primitives(
         &mut self,
-        primitive_type: PrimitiveType,
+        primitive_type: impl Into<DrawPrimitiveType>,
         vertex_start: u32,
         vertex_count: u32,
         instance_count: u32,
         base_instance: u32,
     ) -> Result<(), Error> {
+        let primitive_type = primitive_type.into();
         match self.lowers_at_call() {
             true => self.at_call(|lowering| {
                 lowering.draw_primitives(
@@ -9856,11 +10008,13 @@ impl RenderCommandEncoder {
     /// instance of 0). Index positions past the buffer's length draw as the module docs say, and
     /// the indices are read from the offset's low 32 bits rounded down to a multiple of the index
     /// size, as plain Metal reads them (an M4 read an offset of 2^32 + 16 into a buffer past 4 GiB
-    /// at 16). A draw of no indices or no instances records nothing. Refused as the
-    /// module docs say, and for an index buffer of another device.
+    /// at 16). A draw of a private primitive type ([`DrawPrimitiveType`]) draws as the list its
+    /// variant states over the indices, which a GPU pass writes before the render pass. A draw of
+    /// no indices or no instances records nothing. Refused as the module docs say, and for an
+    /// index buffer of another device.
     pub fn draw_indexed_primitives(
         &mut self,
-        primitive_type: PrimitiveType,
+        primitive_type: impl Into<DrawPrimitiveType>,
         index_count: u32,
         index_type: IndexType,
         index_buffer: &Buffer,
@@ -9869,6 +10023,7 @@ impl RenderCommandEncoder {
         base_vertex: i32,
         base_instance: u32,
     ) -> Result<(), Error> {
+        let primitive_type = primitive_type.into();
         match self.lowers_at_call() {
             true => self.at_call(|lowering| {
                 lowering.draw_indexed_primitives(
@@ -9896,14 +10051,17 @@ impl RenderCommandEncoder {
     }
 
     /// `drawPrimitives:indirectBuffer:indirectBufferOffset:`: Metal's
-    /// `MTLDrawPrimitivesIndirectArguments` at `indirect_buffer_offset`. Refused as the module
-    /// docs say, and for an indirect buffer of another device.
+    /// `MTLDrawPrimitivesIndirectArguments` at `indirect_buffer_offset`. A draw of a private
+    /// primitive type ([`DrawPrimitiveType`]) draws as the list its variant states, which a GPU
+    /// pass writes before the render pass from the arguments. Refused as the module docs say, and
+    /// for an indirect buffer of another device.
     pub fn draw_primitives_indirect(
         &mut self,
-        primitive_type: PrimitiveType,
+        primitive_type: impl Into<DrawPrimitiveType>,
         indirect_buffer: &Buffer,
         indirect_buffer_offset: u64,
     ) -> Result<(), Error> {
+        let primitive_type = primitive_type.into();
         match self.lowers_at_call() {
             true => self.at_call(|lowering| {
                 lowering.draw_primitives_indirect(
@@ -9926,17 +10084,20 @@ impl RenderCommandEncoder {
     /// indirectBufferOffset:`: Metal's `MTLDrawIndexedPrimitivesIndirectArguments` at
     /// `indirect_buffer_offset`, drawing `index_type` indices of `index_buffer` from
     /// `index_buffer_offset`, those past the buffer's length as the module docs say, each offset
-    /// rounded down as the direct draws' are. Refused as the module docs say, and for buffers of
+    /// rounded down as the direct draws' are. A draw of a private primitive type
+    /// ([`DrawPrimitiveType`]) draws as the list its variant states over the indices, which a GPU
+    /// pass writes before the render pass. Refused as the module docs say, and for buffers of
     /// another device.
     pub fn draw_indexed_primitives_indirect(
         &mut self,
-        primitive_type: PrimitiveType,
+        primitive_type: impl Into<DrawPrimitiveType>,
         index_type: IndexType,
         index_buffer: &Buffer,
         index_buffer_offset: u64,
         indirect_buffer: &Buffer,
         indirect_buffer_offset: u64,
     ) -> Result<(), Error> {
+        let primitive_type = primitive_type.into();
         match self.lowers_at_call() {
             true => self.at_call(|lowering| {
                 lowering.draw_indexed_primitives_indirect(
@@ -11002,7 +11163,7 @@ fn drawn_by(
     let tessellated = crate::tessellation::patches(&pipeline.base().graphics).is_some();
     if tessellated != matches!(assembly, Assembly::Patches) {
         return match assembly {
-            Assembly::Primitives(_) if tessellated => Ok(None),
+            Assembly::Primitives(_) | Assembly::Private(_) if tessellated => Ok(None),
             _ => Err(draw_problem(call, DrawProblem::DrawKind)),
         };
     }

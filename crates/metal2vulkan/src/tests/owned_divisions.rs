@@ -138,7 +138,7 @@ fn modules() -> Vec<Build> {
             );
         }
     }
-    for program in [RewriteProgram::LineStrip, RewriteProgram::TriangleStrip] {
+    for program in RewriteProgram::ALL {
         for phase in RewritePhase::ALL {
             push(
                 format!("index_rewrite_module({program:?}, {phase:?})"),

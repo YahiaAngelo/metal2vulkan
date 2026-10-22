@@ -274,7 +274,7 @@ use crate::degradation::{Degradation, SplitCauses};
 use crate::device::functions::Vk;
 use crate::device::lock;
 use crate::encoder::{EncoderCore, RecordedSegment};
-use crate::error::{internal, invalid, vulkan, Error, Problem, RuntimeGap};
+use crate::error::{internal, invalid, vulkan, CommandBufferError, Error, Problem, RuntimeGap};
 use crate::executed_commands::{ExecutedCommand, RecordsRead};
 use crate::fragment_imageblock::PassImageblock;
 use crate::indirect_command_buffer::{
@@ -472,7 +472,7 @@ impl RenderLowering {
             (_, false) => Ok(Inherited::Commands),
             (None, true) => Err(invalid(call, Problem::NoPipelineState)),
             (Some(state), true) if !state.support_indirect_command_buffers() => {
-                self.core.fault();
+                self.core.fault(CommandBufferError::PageFault);
                 Ok(Inherited::Faults)
             }
             (Some(state), true) => Ok(Inherited::Encoder(state.clone())),
@@ -1443,7 +1443,7 @@ impl Asked {
                     return Asked::Nothing;
                 }
                 let draw = IndexedDraw {
-                    primitive_type,
+                    primitive_type: primitive_type.into(),
                     index_count,
                     index_type,
                     instance_count,
@@ -1786,7 +1786,7 @@ impl RenderLowering {
         let sampler_maps = self.sampler_maps(state, &pass_start)?;
         let settled = self.settle_draw(
             &mut lock(&live),
-            (state, &settings, None),
+            (state, &settings, None, false),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut None),
             (&function_tables, &mut None),

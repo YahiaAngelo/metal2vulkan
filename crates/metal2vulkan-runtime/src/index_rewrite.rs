@@ -1,5 +1,7 @@
-//! The index rewrite pass of an indexed strip that restarts where Vulkan does not (the modules and
-//! their contract are `bind::index_rewrite`).
+//! The index rewrite pass of an indexed strip that restarts where Vulkan does not, and of a draw
+//! of one of Metal's private primitive types over indices or from indirect arguments (the
+//! modules and their contract are `bind::index_rewrite`); and the list the CPU writes for a direct
+//! draw of a private type without indices ([`WrittenList`]).
 //!
 //! After `RenderCommandEncoder::set_primitive_restart_enabled` (Apple's
 //! `setPrimitiveRestartEnabled:index:`), Metal restarts an indexed line or triangle strip at the
@@ -51,6 +53,7 @@ use metal2vulkan::bind::{
 use metal2vulkan::device::VkFeature;
 
 /// A rewritten draw's Metal arguments: a direct draw's values, or an indirect draw's buffer.
+#[derive(Clone, Copy)]
 pub(super) enum Arguments<'a> {
     /// A direct draw's index count, instances, base vertex and base instance.
     Direct {
@@ -61,6 +64,17 @@ pub(super) enum Arguments<'a> {
     },
     /// An indirect draw's `MTLDrawIndexedPrimitivesIndirectArguments`.
     Indirect(&'a DrawSource<'a>),
+    /// An indirect draw's `MTLDrawPrimitivesIndirectArguments`, of a draw without indices.
+    IndirectVertices(&'a DrawSource<'a>),
+}
+
+/// The gap a list of `program` reports where it cannot be drawn as Metal draws it: a restarted
+/// strip's, or a private primitive type's.
+pub(super) fn gap_of(program: RewriteProgram) -> RuntimeGap {
+    match program {
+        RewriteProgram::LineStrip | RewriteProgram::TriangleStrip => RuntimeGap::RestartedStrip,
+        _ => RuntimeGap::PrivatePrimitives,
+    }
 }
 
 /// Where a pass writes its list.
@@ -91,23 +105,24 @@ pub(super) struct RewritePass {
 
 impl RewritePass {
     /// The pass of `program` restarting at `restart` (`k'`) over the `index_size`-byte indices of
-    /// `index`, with `arguments`, in `core`'s command buffer, whose reads of the Metal buffers are
-    /// `uses` ([`reads`]). Refused (`NotImplemented(RestartedStrip)`) where a direct draw's list
-    /// is past what one storage range binds or a `u32` counts, or carries a base instance the
-    /// device's indirect draws cannot (`drawIndirectFirstInstance`), and where the binding layer
-    /// cannot bind the pass's ranges; and as buffers, uploads, kernels and descriptor sets are
-    /// refused.
+    /// `index` (`None` for a draw without indices), with `arguments`, in `core`'s command buffer,
+    /// whose reads of the Metal buffers are `uses` ([`reads`]). Refused
+    /// (`NotImplemented(RestartedStrip)`, or `PrivatePrimitives` for a private type's list) where a
+    /// direct draw's list is past what one storage range binds or a `u32` counts, or carries a base
+    /// instance the device's indirect draws cannot (`drawIndirectFirstInstance`), and where the
+    /// binding layer cannot bind the pass's ranges; and as buffers, uploads, kernels and descriptor
+    /// sets are refused.
     pub(super) fn new(
         core: &mut EncoderCore,
         (program, restart): (RewriteProgram, u32),
-        index: &DrawSource<'_>,
+        index: Option<&DrawSource<'_>>,
         arguments: &Arguments<'_>,
         index_size: u64,
         uses: Vec<Use<ResourceKey>>,
     ) -> Result<RewritePass, Error> {
         let device = core.device().clone();
         let limits = &device.properties().description.limits;
-        let gap = || Error::NotImplemented(RuntimeGap::RestartedStrip);
+        let gap = || Error::NotImplemented(gap_of(program));
         let (source, owned) = match *arguments {
             Arguments::Direct {
                 count,
@@ -143,6 +158,12 @@ impl RewritePass {
                 };
                 (source, None)
             }
+            Arguments::IndirectVertices(indirect) => {
+                let source = RewriteSource::IndirectVertices {
+                    arguments: IndirectRef::new(0, indirect.at),
+                };
+                (source, None)
+            }
         };
         let output = match owned {
             Some((capacity, _)) => RewriteOutput::Owned { capacity },
@@ -151,12 +172,16 @@ impl RewritePass {
                     .map_err(|_| internal("an index pool past a u32's bytes"))?,
             },
         };
-        // The indices the draw reads before where Metal's fetch stops (the source's bytes).
-        let index_end = index.at + index.bound(index.at);
+        // The indices the draw reads before where Metal's fetch stops (the source's bytes); a draw
+        // without indices reads none.
+        let terms = match index {
+            Some(index) => (index_size, index.at, index.at + index.bound(index.at)),
+            None => (4, 0, 0),
+        };
         let pass = IndexRewritePass::new(
             source,
             restart,
-            (index_size, index.at, index_end),
+            terms,
             output,
             limits.min_storage_buffer_offset_alignment,
             limits.max_storage_buffer_range,
@@ -193,14 +218,15 @@ impl RewritePass {
         // nothing reads the binding, which takes the words.
         set[IndexRewriteModule::ARGUMENTS_BINDING as usize] =
             match (pass.arguments_range, arguments) {
-                (Some(range), Arguments::Indirect(indirect)) => {
-                    (indirect.raw, range.offset, range.range)
-                }
+                (
+                    Some(range),
+                    Arguments::Indirect(indirect) | Arguments::IndirectVertices(indirect),
+                ) => (indirect.raw, range.offset, range.range),
                 _ => words_range,
             };
-        set[IndexRewriteModule::INDICES_BINDING as usize] = match pass.indices_range {
-            Some(range) => (index.raw, range.offset, range.range),
-            None => words_range,
+        set[IndexRewriteModule::INDICES_BINDING as usize] = match (pass.indices_range, index) {
+            (Some(range), Some(index)) => (index.raw, range.offset, range.range),
+            _ => words_range,
         };
         set[IndexRewriteModule::STATUS_BINDING as usize] =
             region(&status, ExecutionStatus::BYTES as u64);
@@ -235,14 +261,14 @@ impl RewritePass {
                 None => None,
             },
         );
-        let past_length = match arguments {
-            Arguments::Indirect(_) => {
+        let past_length = match (arguments, index) {
+            (Arguments::Indirect(_), Some(index)) => {
                 let (buffer, offset) = index.metal();
                 (offset >= buffer.length()).then(|| (offset, buffer.length()))
             }
             // A direct draw's positions past the buffer read a padded copy, which the draw
-            // announces (`render.rs`).
-            Arguments::Direct { .. } => None,
+            // announces (`render.rs`); a draw without indices reads none.
+            _ => None,
         };
         Ok(RewritePass {
             words,
@@ -347,17 +373,113 @@ impl RewritePass {
     }
 }
 
+/// The list of a direct draw without indices of one of Metal's private primitive types, which the
+/// CPU writes into the command buffer's upload arena while the draw is encoded: its positions are
+/// its vertices, so the list follows from its count alone ([`RewriteProgram::sequential_list`],
+/// relative to its first vertex), and the draw draws it from its vertex start as base vertex. The
+/// arena holds it until the command buffer completes, and the host writes it before the draw's
+/// batch is submitted (`upload.rs`).
+pub(super) struct WrittenList {
+    upload: Upload,
+    indices: u32,
+}
+
+impl WrittenList {
+    /// The list of `program` for a draw of `count` vertices from `vertex_start`, in `core`'s
+    /// command buffer. Refused (`NotImplemented(PrivatePrimitives)`) from a vertex start past
+    /// `i32::MAX`, which a list's base vertex cannot carry, and for a list of more indices than a
+    /// `u32` counts; and as uploads are refused.
+    pub(super) fn new(
+        core: &mut EncoderCore,
+        program: RewriteProgram,
+        (vertex_start, count): (u32, u32),
+    ) -> Result<WrittenList, Error> {
+        let gap = || Error::NotImplemented(gap_of(program));
+        i32::try_from(vertex_start).map_err(|_| gap())?;
+        let indices = u32::try_from(program.capacity(u64::from(count))).map_err(|_| gap())?;
+        let device = core.device().clone();
+        let bytes: Vec<u8> = program
+            .sequential_list(count)
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        let len = (bytes.len() as u64).max(4);
+        let upload = core
+            .command_buffer()
+            .state()
+            .uploads
+            .upload(&device, &bytes, len)?;
+        Ok(WrittenList { upload, indices })
+    }
+
+    /// The draw of the list: its index binding, with `sized` the device's index range binding,
+    /// and the binder's draw of the vertices `draw` (`vkCmdDraw`'s), drawn as the indexed draw of
+    /// the list from its first vertex as base vertex, with its instances. `None` for another
+    /// command.
+    pub(super) fn draw(
+        &self,
+        draw: metal2vulkan::vk::DrawCommand,
+        sized: Option<SizedIndexBind>,
+    ) -> Option<(IndexBind, metal2vulkan::vk::DrawCommand)> {
+        let metal2vulkan::vk::DrawCommand::Draw {
+            instance_count,
+            first_vertex,
+            first_instance,
+            ..
+        } = draw
+        else {
+            return None;
+        };
+        let index_type = metal2vulkan::vk::IndexType::UINT32;
+        let offset = self.upload.offset();
+        let draw = metal2vulkan::vk::DrawCommand::DrawIndexed {
+            index_type,
+            index_buffer_offset: offset,
+            index_count: self.indices,
+            instance_count,
+            first_index: 0,
+            vertex_offset: i32::try_from(first_vertex).ok()?,
+            first_instance,
+        };
+        let bind = IndexBind {
+            buffer: self.upload.raw(),
+            offset,
+            index_type: index_type.into(),
+            sized: sized.map(|bind| (bind, (u64::from(self.indices) * 4).max(4))),
+        };
+        Some((bind, draw))
+    }
+}
+
 /// The pass's reads of the Metal buffers: an indirect draw's, as the index bounds pass's
 /// (`index_bounds::reads`); a direct draw's indices from its offset through its count, or to
-/// where Metal's fetch stops, in the compute stage.
+/// where Metal's fetch stops; an indirect draw's arguments alone where it has no indices; in the
+/// compute stage.
 pub(super) fn reads(
-    index: &DrawSource<'_>,
+    index: Option<&DrawSource<'_>>,
     arguments: &Arguments<'_>,
     index_size: u64,
 ) -> Vec<Use<ResourceKey>> {
-    let count = match *arguments {
-        Arguments::Indirect(indirect) => return index_bounds::reads(index, indirect, index_size),
-        Arguments::Direct { count, .. } => u64::from(count),
+    let read = Access::new(
+        vk::PipelineStageFlags2::COMPUTE_SHADER,
+        vk::AccessFlags2::SHADER_STORAGE_READ,
+    );
+    let (index, count) = match (*arguments, index) {
+        (Arguments::Indirect(indirect), Some(index)) => {
+            return index_bounds::reads(index, indirect, index_size)
+        }
+        (Arguments::IndirectVertices(indirect), _) => {
+            let (buffer, offset) = indirect.metal();
+            let (identity, range) = buffer.tracked(offset..offset + 16);
+            return vec![Use::reads(
+                identity.key,
+                identity.tracked,
+                UseRange::Bytes(range),
+                read,
+            )];
+        }
+        (Arguments::Direct { count, .. }, Some(index)) => (index, u64::from(count)),
+        _ => return Vec::new(),
     };
     let (indices, offset) = index.metal();
     let end = IndexBufferRef::new(0, indices.length()).fetch_end(offset);
@@ -366,10 +488,6 @@ pub(super) fn reads(
     if bytes == 0 {
         return Vec::new();
     }
-    let read = Access::new(
-        vk::PipelineStageFlags2::COMPUTE_SHADER,
-        vk::AccessFlags2::SHADER_STORAGE_READ,
-    );
     let (identity, range) = indices.tracked(offset..offset + bytes);
     vec![Use::reads(
         identity.key,
@@ -381,15 +499,19 @@ pub(super) fn reads(
 
 /// Of [`reads`], those of the bytes the pass reads in place, which a write since the encoder's
 /// last memory barrier races: an indirect draw's as the index bounds pass's
-/// (`index_bounds::in_place`); a direct draw's indices all (it copies none for a race).
+/// (`index_bounds::in_place`), its arguments alone where it has no indices unless they were
+/// copied for a race; a direct draw's indices all (it copies none for a race).
 pub(super) fn in_place(
-    index: &DrawSource<'_>,
+    index: Option<&DrawSource<'_>>,
     arguments: &Arguments<'_>,
     index_size: u64,
 ) -> Vec<Use<ResourceKey>> {
-    match *arguments {
-        Arguments::Indirect(indirect) => index_bounds::in_place(index, indirect, index_size),
-        Arguments::Direct { .. } => reads(index, arguments, index_size),
+    match (*arguments, index) {
+        (Arguments::Indirect(indirect), Some(index)) => {
+            index_bounds::in_place(index, indirect, index_size)
+        }
+        (Arguments::IndirectVertices(indirect), _) if indirect.racing() => Vec::new(),
+        _ => reads(index, arguments, index_size),
     }
 }
 

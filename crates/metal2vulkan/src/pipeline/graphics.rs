@@ -195,6 +195,13 @@ pub struct GraphicsState {
     /// or [`flat_fragment_inputs`](GraphicsState::flat_fragment_inputs) is set.
     #[cfg_attr(feature = "serde", serde(default))]
     pub reads_barycentric_coord: bool,
+    /// Whether the fragment function reads `[[primitive_id]]`: Vulkan's `PrimitiveId`, or the
+    /// varying its vertex function computes it into on a device that cannot declare it
+    /// (`IoRole::PrimitiveId`). `false` for a pipeline without a fragment function. A consumer
+    /// that draws one Metal primitive as several Vulkan ones (Metal's quads, one primitive ID a
+    /// quad, as two triangles) changes what a draw shows only where this is set.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub reads_primitive_id: bool,
     /// Whether the fragment function may read its `[[position]]`'s z or w lanes, which Metal
     /// gives as the viewport's depth `n + (f - n) z` unclamped and the clip-space w (the
     /// fragment stage's `StageIo::position_depth` with its `FragCoord` builtin). `false` for a
@@ -406,6 +413,7 @@ impl GraphicsState {
             clip_distances: 0,
             writes_depth: false,
             reads_barycentric_coord: false,
+            reads_primitive_id: false,
             reads_position_depth: false,
             fragment_writes_memory: false,
             color_outputs: 0,

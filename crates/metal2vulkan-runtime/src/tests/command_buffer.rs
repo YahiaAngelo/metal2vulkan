@@ -3,7 +3,7 @@
 
 use crate::command_buffer::{CommitFailure, FailedEncoders, FailedSignals, Failure};
 use crate::error::{CommandBufferError, Problem};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The encoders among `count` that `failure` fails.
 fn failed(failure: &FailedEncoders, count: usize) -> Vec<usize> {
@@ -135,8 +135,9 @@ fn metal_fails_a_command_buffer_from_an_encoder_on() {
 /// the encoders either fails run nothing.
 #[test]
 fn encoders_metal_s_gpu_faults_run_nothing() {
-    let faulted = BTreeSet::from([1, 3]);
-    assert_eq!(Failure::with_faults(None, &BTreeSet::new(), 4), None);
+    let page_fault = CommandBufferError::PageFault;
+    let faulted = BTreeMap::from([(1, page_fault), (3, page_fault)]);
+    assert_eq!(Failure::with_faults(None, &BTreeMap::new(), 4), None);
     assert_eq!(
         Failure::with_faults(None, &faulted, 4),
         Some(Failure {
@@ -204,6 +205,29 @@ fn encoders_metal_s_gpu_faults_run_nothing() {
         .and_then(|f| f.error),
         Some(CommandBufferError::RenderTargetSize)
     );
+    // The first faulted encoder's error: a draw of primitive type 9 faults one as a victim of
+    // the GPU's recovery.
+    let victim = CommandBufferError::GpuRecoveryVictim;
+    let mixed = BTreeMap::from([(1, victim), (2, page_fault)]);
+    assert_eq!(
+        Failure::with_faults(None, &mixed, 4).map(|f| (f.encoders, f.signals, f.error)),
+        Some((
+            FailedEncoders::Set(BTreeSet::from([1, 2])),
+            FailedSignals::Every,
+            Some(victim)
+        ))
+    );
+    // A hang fails from its encoder on, every signal firing.
+    assert_eq!(
+        Failure::of(None, Some((1, CommandBufferError::GpuHang)), 3),
+        Some(Failure {
+            encoders: FailedEncoders::From(1),
+            signals: FailedSignals::Every,
+            error: Some(CommandBufferError::GpuHang),
+        })
+    );
+    assert_eq!(CommandBufferError::GpuHang.metal_code(), 2);
+    assert_eq!(victim.metal_code(), 1);
 }
 
 /// Every command buffer error says whose failure it is: Metal's, whose `metal_code` is the code
@@ -228,6 +252,8 @@ fn a_command_buffer_error_names_whose_failure_it_is() {
         (E::DeviceLost, Metal, 11),
         (E::OutOfMemory, Metal, 8),
         (E::PageFault, Metal, 3),
+        (E::GpuHang, Metal, 2),
+        (E::GpuRecoveryVictim, Metal, 1),
         (E::Execution(1), Metal, 1),
         (E::Execution(12), Metal, 12),
         (E::RenderTargetSize, Metal, 1),

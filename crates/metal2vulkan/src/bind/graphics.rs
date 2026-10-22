@@ -1066,6 +1066,15 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
                 .any(|f| f.field == PushField::VerticesPerPrimitive)
     });
     let primitive_id_indices = shape.primitive_id_indices.filter(|_| writes_primitive_ids);
+    // A draw of Metal's private quads, listed as two triangles a quad, whose fragment function
+    // reads Vulkan's `PrimitiveId` (not the varying a vertex function writes): the variant that
+    // reads the quad's.
+    let quad_primitive_ids =
+        shape.quad_primitive_ids && p.graphics.reads_primitive_id && !writes_primitive_ids;
+    let compiled_quads = p
+        .dependencies
+        .iter()
+        .any(|d| d.fact == RuntimeFact::QuadPrimitiveIds);
     let route = route(
         &shape.vertex_amplification,
         p.graphics.max_vertex_amplification_count,
@@ -2485,6 +2494,7 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
     // bind shape does.
     variant.captured_positions = captured_positions;
     variant.primitive_id_indices = primitive_id_indices;
+    variant.quad_primitive_ids = quad_primitive_ids;
     // Tables that may pass `maxStorageBufferRange`: the variant that reads them at their
     // addresses (and a pipeline compiled so states it).
     variant.addressed_function_tables = crate::bind::heap::addressed_function_tables(
@@ -2521,7 +2531,8 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
                 || compiled_bias_raises != depth16_bias_raises
                 || compiled_tests != read_only_tests
                 || compiled_shader_tests != shader_tests
-                || compiled_shader_stencil != shader_stencil,
+                || compiled_shader_stencil != shader_stencil
+                || compiled_quads != quad_primitive_ids,
             amplifications,
             indirect_first_instance_missing: !profile
                 .fields()

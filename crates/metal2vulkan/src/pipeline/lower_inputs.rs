@@ -280,6 +280,14 @@ pub struct LoweringInputs {
     /// needs them. Any other function compiles as without it.
     #[cfg_attr(feature = "serde", serde(default))]
     pub primitive_id_indices: Option<crate::metal::IndexType>,
+    /// The draw lists Metal's private quads or quad strip as two triangles a quad, the quad's
+    /// triangles adjacent (`VariantKey::quad_primitive_ids`): a fragment function's
+    /// `[[primitive_id]]` read from Vulkan's `PrimitiveId` is that value shifted right by one, the
+    /// quad's, as Metal counts one primitive a quad. The function's pipeline states it
+    /// (`RuntimeFact::QuadPrimitiveIds`). Any other function, and one that reads the primitive
+    /// ID's varying (`primitive_id_varying`), compiles as without it.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub quad_primitive_ids: bool,
     /// The function's render pipeline draws each vertex amplification as a draw of its own
     /// (`VariantKey::amplification_draws`), where Vulkan multiview cannot draw the encoder's
     /// mappings as Metal renders them. Under it a vertex or fragment function reads its

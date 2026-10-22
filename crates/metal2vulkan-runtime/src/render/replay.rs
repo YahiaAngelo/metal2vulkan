@@ -30,14 +30,16 @@ use crate::indirect_command_buffer::{
 };
 use crate::render::ResolveTarget;
 use crate::render_pass::RenderPassDescriptor;
-use crate::render_values::{ScissorRect, StoreAction, StoreActionOptions, Viewport};
+use crate::render_values::{
+    DrawPrimitiveType, ScissorRect, StoreAction, StoreActionOptions, Viewport,
+};
 use crate::replay::{CallLog, Held, Resource, Span, SPARE_LOG_BYTES};
 use crate::residency::Residency;
 use crate::sampler::SamplerState;
 use crate::values::{Region, Size};
 use crate::visibility::VisibilityResultMode;
 use metal2vulkan::metal::{
-    BarrierScope, CullMode, DepthClipMode, IndexType, PrimitiveType, RenderStages, ResourceUsage,
+    BarrierScope, CullMode, DepthClipMode, IndexType, RenderStages, ResourceUsage,
     TriangleFillMode, Winding,
 };
 use std::ops::Range;
@@ -177,10 +179,10 @@ pub(crate) enum RenderCall {
     TessellationFactorBuffer(Option<Buffer>, u64, u64),
     TessellationFactorScale(f32),
     VertexAmplificationCount(u64, Option<Box<[VertexAmplificationViewMapping]>>),
-    DrawPrimitives(PrimitiveType, u32, u32, u32, u32),
+    DrawPrimitives(DrawPrimitiveType, u32, u32, u32, u32),
     /// Its arguments' place in the log's list of them (`RenderLog::indexed`).
     DrawIndexedPrimitives(u32),
-    DrawPrimitivesIndirect(PrimitiveType, Buffer, u64),
+    DrawPrimitivesIndirect(DrawPrimitiveType, Buffer, u64),
     DrawIndexedPrimitivesIndirect(Box<DrawIndexedIndirect>),
     DrawPatches(Box<DrawPatches>),
     DrawPatchesIndirect(Box<DrawPatchesIndirect>),
@@ -553,7 +555,7 @@ impl Samplers {
 
 /// `draw_indexed_primitives`'s arguments.
 pub(crate) struct DrawIndexed {
-    pub(super) primitive_type: PrimitiveType,
+    pub(super) primitive_type: DrawPrimitiveType,
     pub(super) index_count: u32,
     pub(super) index_type: IndexType,
     pub(super) index_buffer: Held,
@@ -565,7 +567,7 @@ pub(crate) struct DrawIndexed {
 
 /// `draw_indexed_primitives_indirect`'s arguments.
 pub(crate) struct DrawIndexedIndirect {
-    pub(super) primitive_type: PrimitiveType,
+    pub(super) primitive_type: DrawPrimitiveType,
     pub(super) index_type: IndexType,
     pub(super) index_buffer: Buffer,
     pub(super) index_buffer_offset: u64,

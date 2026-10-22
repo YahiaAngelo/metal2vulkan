@@ -264,6 +264,10 @@ pub enum Source {
     /// the variable, declared `Flat`, read as Metal's interpolation returns such a value
     /// ([`metal_interpolated_constant`]).
     Uniform(Link),
+    /// A fragment function's `[[primitive_id]]` under `LoweringInputs::quad_primitive_ids`:
+    /// Vulkan's `PrimitiveId` (the variable) shifted right by one, the quad of the list's
+    /// triangle, as Metal counts one primitive a quad of its private quads and quad strip.
+    QuadPrimitive(Link),
 }
 
 /// One used stage-IO parameter.
@@ -1151,7 +1155,8 @@ pub fn emit_entry(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>) -> BResult<
             | Source::CapturedVertex(_)
             | Source::CapturedBaseVertex(_)
             | Source::Merged { .. }
-            | Source::Uniform(_) => None,
+            | Source::Uniform(_)
+            | Source::QuadPrimitive(_) => None,
         })
         .collect();
     for (param, read) in pulled {
@@ -1260,6 +1265,13 @@ pub fn param_value(
             let x = placed(fb, &link, x)?;
             let x = metal_interpolated_constant(fb, link.form, x)?;
             return narrow::round(fb, link.form, x);
+        }
+        Some(Source::QuadPrimitive(link)) => {
+            let p = pointer(cx, fb, &link)?;
+            let x = fb.load(p, MemAccess::default())?;
+            let one = crate::memory::leaf::k32(fb, 1)?;
+            let x = fb.binary(BinOp::ShiftRightLogical, x, one)?;
+            return to_lowered(cx, fb, &link, x);
         }
         None => return Err(cx.fail(format!("parameter {} has no stage-IO value", b.param))),
     };

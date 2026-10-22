@@ -28,6 +28,7 @@
 //! - The limit is the queue's alone: another queue's command buffers are made meanwhile.
 
 use super::attachment_stand_in::BackingPool;
+use super::command_buffer::hang::QueueHangs;
 use super::command_buffer::own::{running, slot_wait, Answer, Context};
 use super::command_buffer::CommandBuffer;
 use super::contexts;
@@ -74,6 +75,9 @@ struct QueueShared {
     /// The kept images its merges' keeps made, kept for its later keeps
     /// (`texture/kept_image.rs`).
     kept_images: KeptImages,
+    /// Its command buffers Metal's GPU hangs at that are in flight, and those committed with an
+    /// event wait meanwhile (`command_buffer/hang.rs`).
+    hangs: Arc<QueueHangs>,
 }
 
 /// A queue's slots: one per uncompleted command buffer, at most `max`.
@@ -247,6 +251,7 @@ impl Device {
             latest_gpu_end: Mutex::new(0),
             memoryless_backings: Mutex::new(BackingPool::default()),
             kept_images: KeptImages::default(),
+            hangs: Arc::default(),
         }))
     }
 }
@@ -356,6 +361,12 @@ impl CommandQueue {
     /// The kept images the queue keeps for its merges' keeps (`texture/kept_image.rs`).
     pub(super) fn kept_images(&self) -> &KeptImages {
         &self.0.kept_images
+    }
+
+    /// Its command buffers Metal's GPU hangs at that are in flight, and those committed with an
+    /// event wait meanwhile (`command_buffer/hang.rs`).
+    pub(super) fn hangs(&self) -> &Arc<QueueHangs> {
+        &self.0.hangs
     }
 
     /// Place a command buffer of the queue that completed after every one placed before: `place`

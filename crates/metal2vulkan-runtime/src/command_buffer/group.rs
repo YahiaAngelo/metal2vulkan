@@ -496,7 +496,7 @@ impl Group {
                 let now = gpu_time::host_nanos();
                 for member in self.members.drain(..) {
                     self.spare.push(member.infos);
-                    if member.submission.ends() && !member.submission.scheduled() {
+                    if member.submission.schedules() && !member.submission.scheduled() {
                         member.submission.buffer().kernel.end_at(now);
                     }
                     self.made.push(member.submission);

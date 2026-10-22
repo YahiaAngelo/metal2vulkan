@@ -1400,6 +1400,15 @@ pub enum RuntimeGap {
     /// barrier, which Metal does not order before the draw's fetch, read in place; and an
     /// argument or index range the binding layer cannot bind.
     RestartedStrip,
+    /// A draw of one of Metal's private primitive types (`DrawPrimitiveType`: a line loop, a
+    /// triangle fan, quads, a quad strip), which the runtime draws as the list Metal draws, where
+    /// that list cannot be drawn as Metal draws: a direct draw without indices from a vertex start
+    /// past `i32::MAX`, which the list's base vertex cannot carry, or whose list a `u32` cannot
+    /// count; a draw over indices or from indirect arguments the index rewrite pass cannot draw,
+    /// as for `RestartedStrip`; and a pipeline whose vertex function computes `[[primitive_id]]`
+    /// into a varying (a device whose fragment stage cannot declare it), from vertex indices the
+    /// list's are not.
+    PrivatePrimitives,
     /// An indexed draw (`drawIndexedPrimitives:`) of a pipeline whose fragment function reads
     /// `[[primitive_id]]` on a device whose fragment stage cannot declare it (neither
     /// `geometryShader` nor `tessellationShader`), which draws its indices as vertices from 0 in
@@ -1663,9 +1672,42 @@ pub enum CommandBufferError {
     /// Metal named the next one `Affected` and ran none of it in the 7th and in both runs of two
     /// passes: the runtime runs them.
     ///
+    /// Also an indexed draw of primitive type 9
+    /// ([`DrawPrimitiveType::Nine`](crate::DrawPrimitiveType::Nine)), of 1 to 3 indices on the M3
+    /// Max (macOS 27.0.1): its render encoder runs nothing, the encoders after it run, every
+    /// event signal fires, and the queue runs on; Metal completed it 16.8 to 19.5 ms after its
+    /// commit, the runtime as its work completes.
+    ///
     /// Also a page fault Metal answers for the command buffer's work under MoltenVK, which the
     /// runtime relays (`CommandBufferError::Execution`).
     PageFault,
+    /// Metal's GPU hung at a direct draw of primitive type 9 of 3 vertices or more
+    /// ([`DrawPrimitiveType::Nine`](crate::DrawPrimitiveType::Nine)) and failed the command buffer
+    /// with `MTLCommandBufferErrorTimeout` (2, "Caused GPU Hang Error
+    /// (00000003:kIOGPUCommandBufferCallbackErrorHang)"). On the M3 Max (macOS 27.0.1, 33 hangs)
+    /// it read `Scheduled` 0.68 to 13.2 ms after its commit and failed 28.3 to 46.2 ms after it,
+    /// mostly 27.5 to 28.9 ms after `Scheduled`: the encoders before the draw's ran; its render
+    /// encoder, not even its pass's load, clear or store actions, and every encoder after it ran
+    /// nothing; its event signals fired. Every command buffer of its queue scheduled while it was
+    /// in flight completed with no error together with it, committed at once, after it read
+    /// `Scheduled`, or 20 ms on, and with an event wait met during the hang, by the host or
+    /// another queue's command buffer; their work ran or not by a race (mostly ran where the hang
+    /// read `Scheduled` within 2 ms, mostly not where later). One whose event wait was met only
+    /// after it completed, one of another queue and one committed later ran. The runtime's hang
+    /// reads `Scheduled` 5.06 ms after its commit (later where the work before the draw is
+    /// submitted later), completes no sooner than 32.7 ms after its commit and 27.5 ms after the
+    /// work before the draw ran, and runs nothing of its queue's others: the outcome of Metal's
+    /// slower submission (`command_buffer/hang.rs`).
+    GpuHang,
+    /// Metal failed the command buffer as a victim of its GPU's recovery, at an indirect draw of
+    /// primitive type 9, indexed or not, whatever its arguments
+    /// ([`DrawPrimitiveType::Nine`](crate::DrawPrimitiveType::Nine)), with
+    /// `MTLCommandBufferErrorInternal` (1, "Discarded (victim of GPU error/recovery)
+    /// (00000005:kIOGPUCommandBufferCallbackErrorInnocentVictim)", its `GPUStartTime` 0), 16.9 to
+    /// 30.0 ms after its commit (the M3 Max, macOS 27.0.1, 5 draws): its render encoder ran
+    /// nothing, the encoders after it ran, every event signal fired, and the queue ran on. The
+    /// runtime completes it as its work completes.
+    GpuRecoveryVictim,
     /// Metal failed the command buffer's work with this `MTLCommandBufferError` code, which the
     /// driver relayed: MoltenVK, which runs each batch as a Metal command buffer, reports a
     /// failed one, and the runtime gives its code to the command buffer whose batch it was
@@ -1950,6 +1992,8 @@ impl CommandBufferError {
             | CommandBufferError::DefaultRasterSampleCount
             | CommandBufferError::CallRefused(_) => 1,
             CommandBufferError::PageFault => 3,
+            CommandBufferError::GpuHang => 2,
+            CommandBufferError::GpuRecoveryVictim => 1,
             CommandBufferError::PipelineCreation(cause) => match cause {
                 PipelineCreationCause::OutOfMemory(_) => 8,
                 PipelineCreationCause::DeviceLost => 11,
@@ -1970,6 +2014,8 @@ impl CommandBufferError {
             | CommandBufferError::DeviceLost
             | CommandBufferError::OutOfMemory
             | CommandBufferError::PageFault
+            | CommandBufferError::GpuHang
+            | CommandBufferError::GpuRecoveryVictim
             | CommandBufferError::Execution(_)
             | CommandBufferError::RenderTargetSize
             | CommandBufferError::DetachedBacking

@@ -489,6 +489,9 @@ Where Metal's rules differ from Vulkan's, the pipeline gives Metal's answer:
   de-indexed (`VariantKey::primitive_id_indices`: needs device addresses, shades every index).
   `NotImplemented(PrimitiveId)`: an indexed strip, an indirect indexed draw, indices past their
   buffer, a vertex function that writes memory in that form, and a mesh pipeline.
+  A draw of Metal's private quads or quad strip, which the consumer lists as two triangles a quad
+  (`BindState::quad_primitive_ids`), runs the fragment variant that reads `PrimitiveId` shifted
+  right by one (`VariantKey::quad_primitive_ids`), as Metal counts one primitive a quad.
   Behind an emulated post-tessellation vertex function the varying carries the patch's position
   in its draw (tessellation, below).
 - A device draws to at most the lesser of its `maxColorAttachments` and
@@ -2888,6 +2891,19 @@ each item named states the rule in full.
   not model the overflow, but where it hands the attachment to Metal's own `DontCare` (MoltenVK),
   which decides it. A pass that renders such a texture in place otherwise announces
   `dont-care-store`.
+
+**GPU hangs and faults** (a draw of private primitive type 9, `DrawPrimitiveType::Nine`)
+
+- **A hang reads `Scheduled` 5.06 ms after its commit and completes no sooner than 32.7 ms after
+  it**, and its queue runs nothing of what it schedules meanwhile: one of Metal's two outcomes. On
+  an M3 Max (macOS 27.0.1, 33 hangs) Metal's hang read `Scheduled` 0.68 to 13.2 ms in and
+  completed about 27.6 ms after; the queue's later command buffers' work mostly ran on the GPU
+  during the hang where it read `Scheduled` within 2 ms (17 of 18), and mostly did not where later
+  (56 of 62 ran nothing or in part). Either way they read `Scheduled` from the hang's on, as they
+  are committed or their event waits are met, and complete with the hang, its signals firing, as
+  the runtime's do (0.04 to 1.5 ms after it on MoltenVK, Metal's 0.01 to 0.03 ms).
+- **A page fault or a victim of the GPU's recovery completes as its work does** (about 1 ms on
+  MoltenVK), where Metal completed it 16.8 to 30.0 ms after its commit.
 
 **Heaps and memory**
 

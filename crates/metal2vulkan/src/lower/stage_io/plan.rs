@@ -430,6 +430,7 @@ pub fn param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<(), Error> {
     let mut at_pixel = false;
     let mut at_loop_sample = false;
     let mut uniform = false;
+    let mut quad_primitive = false;
     let link = match (&b.role, stage) {
         // A merged draw's vertex reads its corner's command's draw values.
         (
@@ -776,6 +777,13 @@ pub fn param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<(), Error> {
             ) {
                 cx.facts.insert(RuntimeFact::BaseVertexInstance);
             }
+            // A draw of Metal's private quads lists two triangles a quad: the fragment function
+            // reads the quad's, Vulkan's `PrimitiveId` shifted right by one
+            // (`LoweringInputs::quad_primitive_ids`).
+            if contract == StageBuiltin::PrimitiveId && cx.inputs.quad_primitive_ids {
+                quad_primitive = true;
+                cx.facts.insert(RuntimeFact::QuadPrimitiveIds);
+            }
             if contract == StageBuiltin::FragCoord {
                 at_pixel = cx.inputs.multisampled;
                 let depth = reads_depth_lanes(cx, b.param);
@@ -808,6 +816,8 @@ pub fn param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<(), Error> {
             Source::PixelCenter(link)
         } else if uniform {
             Source::Uniform(link)
+        } else if quad_primitive {
+            Source::QuadPrimitive(link)
         } else {
             Source::Io(link)
         },
@@ -3071,6 +3081,9 @@ const PIXEL_WORDS: u64 = 24;
 /// The words a use of a [`Source::Uniform`] parameter adds to a load: Metal's reading of an
 /// interpolated constant, nine integer instructions on the bits and their constants.
 const UNIFORM_WORDS: u64 = 64;
+/// The words a use of a [`Source::QuadPrimitive`] parameter adds to a load: the shift and its
+/// constant.
+const QUAD_PRIMITIVE_WORDS: u64 = 8;
 
 /// The per-stage interface limits and the size estimate.
 pub fn finish(cx: &mut SelectCx<'_>) -> Result<(), Error> {
@@ -3371,6 +3384,7 @@ fn param_words(cx: &SelectCx<'_>) -> u64 {
             | Source::CapturedVertex(_)
             | Source::CapturedBaseVertex(_)
             | Source::Merged { .. } => loaded.push((p.param, USE_WORDS)),
+            Source::QuadPrimitive(_) => loaded.push((p.param, USE_WORDS + QUAD_PRIMITIVE_WORDS)),
             Source::PixelCenter(_) | Source::LoopSample(_) | Source::AtLoopSample(_) => {
                 loaded.push((p.param, USE_WORDS + PIXEL_WORDS))
             }

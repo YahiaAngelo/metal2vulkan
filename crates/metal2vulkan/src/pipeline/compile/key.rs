@@ -297,6 +297,10 @@ pub fn function_key(
         h.bytes(b"primitive-id-indices").u64(u64::from(ty.as_raw()));
     }
     // Appended only when set.
+    if inputs.quad_primitive_ids {
+        h.bytes(b"quad-primitive-ids");
+    }
+    // Appended only when set.
     if let Some(d) = inputs.amplification_draws {
         h.bytes(b"amplification-draws")
             .u64(u64::from(d.layered))

@@ -1226,6 +1226,7 @@ codec_enum! {
             half_blend
         },
         MergedDraws,
+        QuadPrimitiveIds,
     }
     UniformViewChoice { Viewed, Spare, Kept }
     Mechanism {
@@ -1313,7 +1314,8 @@ codec_struct! {
         storage_attachments, shadow_stencil, early_fragment_tests, mesh_records,
         emulated_tessellation,
         writes_point_size, flat_fragment_inputs,
-        clip_distances, writes_depth, reads_barycentric_coord, reads_position_depth,
+        clip_distances, writes_depth, reads_barycentric_coord, reads_primitive_id,
+        reads_position_depth,
         fragment_writes_memory, color_outputs, sample_mask, shader_tests, color_write_rules,
         snapshot_reads,
         color_group,

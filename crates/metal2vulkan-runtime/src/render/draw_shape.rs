@@ -249,6 +249,11 @@ impl ShapeInputs<'_> {
             Assembly::Primitives(primitive_type) => {
                 metal2vulkan::metal::state::input_assembly(primitive_type)
             }
+            // A private type draws its program's list, without restart (`render/restart.rs`).
+            Assembly::Private(program) => match program.vertices() {
+                2 => (metal2vulkan::vk::PrimitiveTopology::LINE_LIST, false),
+                _ => (metal2vulkan::vk::PrimitiveTopology::TRIANGLE_LIST, false),
+            },
             // An emulated tessellation pipeline draws the tessellator's triangles as a list,
             // which Vulkan biases as Metal biases them.
             Assembly::Patches => match pipeline.base().graphics.emulated_tessellation {

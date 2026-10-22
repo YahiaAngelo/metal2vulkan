@@ -409,6 +409,14 @@ pub struct VariantKey {
     /// a pipeline compiled under it states it.
     #[cfg_attr(feature = "serde", serde(default))]
     pub primitive_id_indices: Option<crate::metal::IndexType>,
+    /// A draw of Metal's private quads or quad strip, listed as two triangles a quad, of a
+    /// pipeline whose fragment function reads Vulkan's `PrimitiveId` (`BindShape::
+    /// quad_primitive_ids`): the variant's fragment function reads `[[primitive_id]]` as that
+    /// value shifted right by one, the quad's (`LoweringInputs::quad_primitive_ids`). The runtime
+    /// asks for it for such a draw, and the plan of a pipeline compiled under it states it
+    /// (`RuntimeFact::QuadPrimitiveIds`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub quad_primitive_ids: bool,
     /// Extended-range color attachments whose `half` shadow the draw's render pass instance
     /// holds (`BindShape::extended_shadows`): the variant's fragment function reads and writes
     /// each through the interlocked storage form against the shadow as Metal's tile value
@@ -548,6 +556,7 @@ impl VariantKey {
             && self.cubic_samplers.is_empty()
             && self.captured_positions.is_none()
             && self.primitive_id_indices.is_none()
+            && !self.quad_primitive_ids
             && self.extended_shadows.is_empty()
             && self.cross_class.is_empty()
             && self.anisotropic_samplers.is_empty()
@@ -693,6 +702,8 @@ impl VariantKey {
         out.primitive_id_indices = self
             .primitive_id_indices
             .filter(|_| stage == crate::pipeline::sym::Stage::Vertex);
+        out.quad_primitive_ids =
+            self.quad_primitive_ids && stage == crate::pipeline::sym::Stage::Fragment;
         out.kept_imageblock_bytes = self
             .kept_imageblock_bytes
             .filter(|_| stage == crate::pipeline::sym::Stage::Kernel);

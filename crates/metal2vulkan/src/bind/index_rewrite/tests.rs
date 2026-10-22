@@ -1,10 +1,12 @@
 //! The index rewrite pass: its modules valid on every committed profile (L3, `G-val`), and, on
-//! the CPU interpreter, the list it writes is the strip's pieces between the restart index as
-//! Metal draws them: each piece's triangles in Vulkan's strip order with the
-//! parity counted from the piece's start, or its segments, in order; positions past the
-//! buffer's whole indices read 0, restart included; the draw's arguments carry Metal's
-//! instances and bases; a pooled draw reserves whole words from the pool's counter, and a draw
-//! its output cannot hold draws nothing and sets `INDEX_POOL_OVERFLOW`.
+//! the CPU interpreter, the list it writes is the one Metal draws: a strip's pieces between the
+//! restart index, each piece's triangles in Vulkan's strip order with the parity counted from the
+//! piece's start, or its segments, in order; Apple's line loop, fan, quads and quad strip as the
+//! Metal probes on the M3 Max drew them ([`RewriteProgram::list`], checked against the probes'
+//! lists); positions past the buffer's whole indices read 0, restart included; the draw's
+//! arguments carry Metal's instances and bases; a draw without indices reads its positions as
+//! its indices; a pooled draw reserves whole words from the pool's counter, and a draw its output
+//! cannot hold draws nothing and sets `INDEX_POOL_OVERFLOW`.
 
 use super::*;
 use crate::bind::status::{ExecutionStatus, StatusReport};
@@ -43,32 +45,11 @@ fn index_bytes(indices: &[u32], wide: bool) -> Vec<u8> {
         .collect()
 }
 
-/// Metal's primitives of a strip of `program` over `values` (each position's index, as the
-/// fetch reads it) restarting at `restart` alone: each piece's, in order.
+/// Metal's primitives of `program` over `values` (each position's index, as the fetch reads it)
+/// restarting at `restart` where the program restarts: [`RewriteProgram::list`], which the
+/// probes' lists check below.
 fn metal(program: RewriteProgram, values: &[u32], restart: u32) -> Vec<u32> {
-    let mut out = Vec::new();
-    let mut piece: Vec<u32> = Vec::new();
-    for &x in values {
-        if x == restart {
-            piece.clear();
-            continue;
-        }
-        piece.push(x);
-        let n = piece.len();
-        match program {
-            RewriteProgram::LineStrip if n >= 2 => out.extend([piece[n - 2], piece[n - 1]]),
-            RewriteProgram::TriangleStrip if n >= 3 => {
-                let (a, b, c) = (piece[n - 3], piece[n - 2], piece[n - 1]);
-                if (n - 3).is_multiple_of(2) {
-                    out.extend([a, b, c]);
-                } else {
-                    out.extend([a, c, b]);
-                }
-            }
-            _ => {}
-        }
-    }
-    out
+    program.list(values, restart)
 }
 
 /// Each position's index: position `start + q` at its index where it lies among the buffer's
@@ -99,6 +80,9 @@ struct Draw {
     counter: Option<u32>,
     /// The workgroups of the count and write dispatches, where not the pass's own.
     groups: Option<u32>,
+    /// An indirect draw without indices, its arguments the first four (count, instances, vertex
+    /// start, base instance).
+    vertices: bool,
 }
 
 /// What a pass left: the words, the output's indices (from the pool's index region where
@@ -122,6 +106,21 @@ impl Draw {
             indirect: None,
             counter: None,
             groups: None,
+            vertices: false,
+        }
+    }
+
+    /// An indirect draw without indices of `program`: `count` vertices from `start`.
+    fn vertices(
+        program: RewriteProgram,
+        [count, instances, start, base_instance]: [u32; 4],
+    ) -> Draw {
+        Draw {
+            arguments: [count, instances, start, base_instance, 0xEEEE],
+            indirect: Some(8),
+            counter: Some(12),
+            vertices: true,
+            ..Draw::strip(program, true, &[], 0xABCD)
         }
     }
 
@@ -150,6 +149,9 @@ impl Draw {
                 base_vertex: base as i32,
                 base_instance,
             },
+            Some(at) if self.vertices => RewriteSource::IndirectVertices {
+                arguments: IndirectRef::new(0, at),
+            },
             Some(at) => RewriteSource::Indirect {
                 arguments: IndirectRef::new(0, at),
             },
@@ -161,15 +163,12 @@ impl Draw {
                 pool_bytes: POOL_BYTES,
             },
         };
-        let pass = IndexRewritePass::new(
-            source,
-            self.restart,
-            (size, self.offset, end),
-            output,
-            ALIGNMENT,
-            u32::MAX,
-        )
-        .expect("pass");
+        let terms = match self.vertices {
+            true => (4, 0, 0),
+            false => (size, self.offset, end),
+        };
+        let pass = IndexRewritePass::new(source, self.restart, terms, output, ALIGNMENT, u32::MAX)
+            .expect("pass");
         let mut pass = pass;
         if let Some(groups) = self.groups {
             pass.groups = groups;
@@ -279,7 +278,7 @@ impl Draw {
 #[test]
 fn every_program_is_valid_on_every_committed_profile() {
     for (_, p) in committed_profiles().expect("profiles") {
-        for program in [RewriteProgram::LineStrip, RewriteProgram::TriangleStrip] {
+        for program in RewriteProgram::ALL {
             for phase in RewritePhase::ALL {
                 assert_valid(rewrite_typed_module(program, phase).expect("module"), &p);
             }
@@ -385,7 +384,7 @@ fn the_pass_binds_aligned_ranges_and_states_its_parameters() {
 /// vertex where it is not `k'`; 16- and 32-bit alike.
 #[test]
 fn a_strip_restarts_at_its_index_alone() {
-    for program in [RewriteProgram::LineStrip, RewriteProgram::TriangleStrip] {
+    for program in RewriteProgram::ALL {
         for (wide, indices, restart) in [
             (false, vec![1, 2, 3, 0, 4, 5, 6, 0xFFFF, 7, 8, 9], 0),
             (false, vec![0, 1, 2, 3, 4, 5, 6, 0xFFFF, 7, 8, 9], 3),
@@ -424,7 +423,9 @@ fn a_strip_restarts_at_its_index_alone() {
 
 /// A strip longer than a workgroup's invocations, over one workgroup and over several: its runs'
 /// pieces cross between runs and between groups, and each run's first triangles take their
-/// piece's parity from the runs before, its group's and the groups' before it.
+/// piece's parity from the runs before, its group's and the groups' before it. The other programs
+/// draw the same indices over three groups: the fan's first index, and the loop's closing
+/// segment, reach across them.
 #[test]
 fn a_strip_of_many_runs_keeps_each_piece_s_parity() {
     // A deterministic mix: restarts at 0 here and there, long pieces and short ones.
@@ -446,13 +447,23 @@ fn a_strip_of_many_runs_keeps_each_piece_s_parity() {
                 }
             })
             .collect();
-        for program in [RewriteProgram::LineStrip, RewriteProgram::TriangleStrip] {
-            for (wide, groups) in [
-                (false, None),
-                (true, None),
-                (false, Some(3)),
-                (true, Some(2)),
-            ] {
+        for program in RewriteProgram::ALL {
+            // The strips each way; the other programs (the quad strip has a test of its own)
+            // over three groups.
+            let strip = matches!(
+                program,
+                RewriteProgram::LineStrip | RewriteProgram::TriangleStrip
+            );
+            let ways: &[(bool, Option<u32>)] = match strip {
+                true => &[
+                    (false, None),
+                    (true, None),
+                    (false, Some(3)),
+                    (true, Some(2)),
+                ],
+                false => &[(false, Some(3))],
+            };
+            for &(wide, groups) in ways {
                 let draw = Draw {
                     groups,
                     ..Draw::strip(program, wide, &indices, 0)
@@ -469,8 +480,9 @@ fn a_strip_of_many_runs_keeps_each_piece_s_parity() {
 }
 
 /// The count and write dispatches take a workgroup per 4096 positions the walk may take, from 1
-/// to 256: a direct draw's count bounds the walk, and an indirect draw's by the buffer's whole
-/// indices and the program's vertices past them.
+/// to 256: a direct draw's count bounds the walk, an indirect draw's by the buffer's whole
+/// indices and the most positions a step spans past them, and an indirect draw without indices
+/// takes all 256.
 #[test]
 fn the_groups_follow_the_walk() {
     let groups = |source, inside: u64| {
@@ -494,9 +506,13 @@ fn the_groups_follow_the_walk() {
     assert_eq!(groups(direct(1_000_000), 1_000_000), 245);
     assert_eq!(groups(direct(1_000_000), 0), 1);
     assert_eq!(groups(direct(u32::MAX), 1 << 29), 256);
-    assert_eq!(groups(indirect, 4093), 1);
-    assert_eq!(groups(indirect, 4094), 2);
+    assert_eq!(groups(indirect, 4092), 1);
+    assert_eq!(groups(indirect, 4093), 2);
     assert_eq!(groups(indirect, 2_000_000), 256);
+    let vertices = RewriteSource::IndirectVertices {
+        arguments: IndirectRef::new(0, 0),
+    };
+    assert_eq!(groups(vertices, 0), 256);
 }
 
 /// An indirect draw reads Metal's arguments (its first index, instances and bases), reserves
@@ -505,7 +521,7 @@ fn the_groups_follow_the_walk() {
 #[test]
 fn an_indirect_draw_reserves_its_list_in_the_pool() {
     let indices: Vec<u32> = vec![9, 9, 1, 2, 3, 0, 4, 5, 6, 7, 0, 8];
-    for program in [RewriteProgram::LineStrip, RewriteProgram::TriangleStrip] {
+    for program in RewriteProgram::ALL {
         let draw = Draw {
             arguments: [8, 3, 2, 0xFFFF_FFFE, 4],
             indirect: Some(36),
@@ -537,7 +553,7 @@ fn an_indirect_draw_reserves_its_list_in_the_pool() {
 #[test]
 fn positions_past_the_buffer_read_index_0() {
     let indices = vec![5, 6, 7, 8, 9];
-    for program in [RewriteProgram::LineStrip, RewriteProgram::TriangleStrip] {
+    for program in RewriteProgram::ALL {
         for (restart, count) in [(0, 9), (3, 9), (3, 40), (0, 40), (3, 2)] {
             for wide in [false, true] {
                 let draw = Draw {
@@ -575,7 +591,7 @@ fn the_last_index_of_a_partial_word_is_read() {
     let nine: Vec<u32> = vec![0, 1, 2, 3, 4, 5, 6, 7, 8];
     let ten: Vec<u32> = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
     let seven: Vec<u32> = vec![1, 2, 3, 4, 5, 6, 7];
-    for program in [RewriteProgram::LineStrip, RewriteProgram::TriangleStrip] {
+    for program in RewriteProgram::ALL {
         for (indices, offset) in [
             (&nine, 0),
             (&nine, 2),
@@ -603,6 +619,153 @@ fn the_last_index_of_a_partial_word_is_read() {
                     "{program:?} {how}: {count} from byte {offset}"
                 );
             }
+        }
+    }
+}
+
+/// The lists of Apple's private types are those the Metal probes drew on the M3 Max (macOS
+/// 27.0.1, `primtypes` probe: each primitive's vertices in barycentric order, its flat vertex the
+/// first at provoking vertex mode 0 and the last at mode 1), and a draw without indices draws the
+/// list of its positions.
+#[test]
+fn the_private_lists_are_the_probes() {
+    use RewriteProgram::{LineLoop, QuadStrip, Quads, TriangleFan};
+    let drawn: &[(RewriteProgram, u32, &[u32])] = &[
+        (LineLoop, 0, &[]),
+        (LineLoop, 1, &[]),
+        (LineLoop, 2, &[0, 1, 1, 0]),
+        (LineLoop, 5, &[0, 1, 1, 2, 2, 3, 3, 4, 4, 0]),
+        (TriangleFan, 2, &[]),
+        (TriangleFan, 3, &[0, 1, 2]),
+        (TriangleFan, 6, &[0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5]),
+        (Quads, 3, &[]),
+        (Quads, 4, &[0, 1, 3, 1, 2, 3]),
+        (Quads, 7, &[0, 1, 3, 1, 2, 3]),
+        (Quads, 9, &[0, 1, 3, 1, 2, 3, 4, 5, 7, 5, 6, 7]),
+        (QuadStrip, 3, &[]),
+        (QuadStrip, 4, &[0, 1, 3, 2, 0, 3]),
+        (QuadStrip, 5, &[0, 1, 3, 2, 0, 3]),
+        (
+            QuadStrip,
+            8,
+            &[0, 1, 3, 2, 0, 3, 2, 3, 5, 4, 2, 5, 4, 5, 7, 6, 4, 7],
+        ),
+    ];
+    for &(program, count, list) in drawn {
+        let positions: Vec<u32> = (0..count).collect();
+        assert_eq!(
+            program.list(&positions, u32::MAX),
+            list,
+            "{program:?} {count}"
+        );
+        assert_eq!(program.sequential_list(count), list, "{program:?} {count}");
+        assert!(list.len() as u64 <= program.capacity(u64::from(count)));
+    }
+    // Every count from 0 to 40: the CPU's list of positions is the general one's.
+    for program in RewriteProgram::ALL {
+        for count in 0..40 {
+            let positions: Vec<u32> = (0..count).collect();
+            let list = program.sequential_list(count);
+            assert_eq!(
+                list,
+                program.list(&positions, u32::MAX),
+                "{program:?} {count}"
+            );
+            assert_eq!(list.len() as u64, program.capacity(u64::from(count)));
+        }
+    }
+    // The probes' 16-bit draws of `40 + 2i` with the all-ones index at position 5: the line
+    // loop, fan and quads draw it as a vertex; the quad strip restarts there, its second piece
+    // pairing from its own start.
+    let mut values: Vec<u32> = (0..12).map(|i| 40 + 2 * i).collect();
+    values[5] = 0xFFFF;
+    assert_eq!(
+        Quads.list(&values, 0xFFFF),
+        [40, 42, 46, 42, 44, 46, 48, 0xFFFF, 54, 0xFFFF, 52, 54, 56, 58, 62, 58, 60, 62]
+    );
+    assert_eq!(
+        QuadStrip.list(&values, 0xFFFF),
+        [40, 42, 46, 44, 40, 46, 52, 54, 58, 56, 52, 58, 56, 58, 62, 60, 56, 62]
+    );
+    assert_eq!(TriangleFan.list(&values, 0xFFFF)[9..12], [40, 48, 0xFFFF]);
+    assert_eq!(LineLoop.list(&values, 0xFFFF).len(), 24);
+}
+
+/// An indirect draw without indices writes the list of its positions from 0, whatever its count,
+/// into the pool, and draws it from its vertex start as base vertex with Metal's instances and
+/// base instance; none of its positions restarts. Its pass takes every group, as the GPU alone
+/// knows its count (`IndexRewritePass::groups`, which the groups test checks); here one group or
+/// three, the interpreter being slow.
+#[test]
+fn a_draw_without_indices_lists_its_positions() {
+    let mut draws = Vec::new();
+    for program in RewriteProgram::ALL {
+        for (count, groups) in [
+            (0, 1),
+            (1, 1),
+            (2, 3),
+            (3, 1),
+            (4, 3),
+            (5, 1),
+            (9, 3),
+            (130, 3),
+        ] {
+            draws.push((program, count, Some(groups)));
+        }
+    }
+    for (program, count, groups) in draws {
+        let draw = Draw {
+            groups,
+            ..Draw::vertices(program, [count, 2, 0xFFFF, 7])
+        };
+        let (list, command, r) = draw.drawn();
+        let expected = program.sequential_list(count);
+        assert_eq!(list, expected, "{program:?} {count}");
+        assert_eq!(command[1..], [2, 3, 0xFFFF, 7], "{program:?} {count}");
+        assert_eq!(r.counter, Some(12 + 4 * expected.len() as u32));
+        assert!(!r.report.index_pool_overflow);
+    }
+}
+
+/// A quad strip of many runs over several groups, restarting here and there: each piece pairs
+/// from its own start, whichever run or group it began in, so a run's first quads take the
+/// parity of its piece's positions before it.
+#[test]
+fn a_quad_strip_pairs_from_each_piece_s_start() {
+    let mut state = 0x9E37_79B9u32;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        state
+    };
+    for (len, rate) in [(700, 5), (1500, 61), (999, 2), (2048, 333)] {
+        let indices: Vec<u32> = (0..len)
+            .map(|_| {
+                let r = next();
+                if r % rate == 0 {
+                    7
+                } else {
+                    8 + r % 40
+                }
+            })
+            .collect();
+        for (groups, wide) in [
+            (None, false),
+            (Some(1), true),
+            (Some(3), false),
+            (Some(5), true),
+        ] {
+            let draw = Draw {
+                groups,
+                ..Draw::strip(RewriteProgram::QuadStrip, wide, &indices, 7)
+            };
+            let (list, _, _) = draw.drawn();
+            assert_eq!(
+                list,
+                metal(RewriteProgram::QuadStrip, &indices, 7),
+                "{len} {rate} {groups:?} {wide}"
+            );
         }
     }
 }
