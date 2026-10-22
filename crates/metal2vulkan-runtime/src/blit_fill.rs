@@ -27,11 +27,18 @@
 //!   rows;
 //! - a **two-plane extended-range** texel (`RGB10A8_2P_XR10` and its sRGB twin) is its color word
 //!   in plane 0, 4 bytes, its alpha kept. Metal writes row `y` of the region `⌊4 w / 16⌋ · 16`
-//!   bytes apart (16 below a width of 4), its texel `x` at byte `4 x` of it, `w` level 0's width:
-//!   where a heap's bytes hold the planes (a one-level 2D texture), the fill writes those bytes
-//!   there, rows overlapping included. A texture of its own memory, and a heap's of more levels
-//!   or slices, which the runtime holds apart from the heap's bytes, takes the same bytes of
-//!   level 0 of the slice at any level, the region cut at the level's extent (3D: image 0): each
+//!   bytes apart (16 below a width of 4), its texel `x` at byte `4 x` of it, `w` level 0's width,
+//!   at any level, the region cut at the level's extent: where a heap's bytes hold the texture's
+//!   first level (a 1D, 2D, 1D or 2D array or 3D texture of any level count,
+//!   `texture/heap_two_planes.rs`), the fill writes those bytes there, rows overlapping included,
+//!   an array's slice `align(h · align(4 w, 16), 128)` bytes past the texture's first, a 3D
+//!   texture's depth images as its first, but a mipmapped one's past the first not at all (an
+//!   Apple M3 Max under macOS 27.0.1: every level of 2D textures 5 to 255 texels wide of 3 to 6
+//!   levels, whole and inset regions; slices of 1D and 2D arrays; every depth image of 3D
+//!   textures of 1 to 4 levels; a one-level 3D texture's fill past its first depth image wrote
+//!   its first image's bytes, or in some runs none). A texture of its own memory, and a heap's
+//!   the runtime holds apart from the heap's bytes, takes the same bytes of level 0 of the slice
+//!   at any level, the region cut at the level's extent (3D: image 0): each
 //!   word lands on the texel of level 0's rows (`align(4 w, 16)` bytes apart) it meets, or between
 //!   them, which Metal's blits with a buffer read back and the runtime holds apart for a texture
 //!   of one level (`two_planes/buffer_rows.rs`; of more, not) (`getBytes` of every texel after fills of 1 to 37
@@ -682,8 +689,23 @@ impl BlitCommandEncoder {
             return self.packed_code_fill(texture, (x, y));
         }
         if unit == FillUnit::PlaneWords && !texture.over_buffer() {
-            if let Some((heap, at)) = texture.heap_planes() {
-                return self.plane_heap_fill(texture, (heap, at), w, (x, y), &unit_bytes);
+            // Every level's fill writes the heap's bytes of level 0 of the slice, at its rows; a
+            // mipmapped 3D texture's past its first depth image, none (the module docs).
+            if let Some((heap, at, layout)) = texture.heap_two_planes() {
+                if texture.texture_type() == TextureType::Type3D
+                    && layout.levels > 1
+                    && images.start > 0
+                {
+                    return Ok(());
+                }
+                let at = at + slice * layout.color_slice;
+                return self.plane_heap_fill(
+                    texture,
+                    (heap, at),
+                    layout.width,
+                    (x, y),
+                    &unit_bytes,
+                );
             }
             // Every level is filled as level 0, at Metal's fill rows (the module docs).
             return self.plane_texel_fill(texture, slice, (x, y), &unit_bytes);
@@ -813,10 +835,10 @@ impl BlitCommandEncoder {
         Ok(())
     }
 
-    /// Write `word` at each texel `x` by `y` of the one-level two-plane `texture` of `width`
-    /// texels whose planes lie in `heap`'s bytes from byte `at`, at Metal's fill rows: the
-    /// texels' color words, rows that meet merged, in one copy into the heap's bytes. Its alpha
-    /// bytes are not written.
+    /// Write `word` at each texel `x` by `y` of a level of the two-plane `texture` whose first
+    /// level, `width` texels wide, has the slice filled lying in `heap`'s bytes from byte `at`, at
+    /// Metal's fill rows of that first level: the texels' color words, rows that meet merged, in
+    /// one copy into the heap's bytes. Its alpha bytes are not written.
     fn plane_heap_fill(
         &mut self,
         texture: &Texture,

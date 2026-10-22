@@ -3149,6 +3149,7 @@ impl Device {
             layout.texture_type,
             [width, height],
             u64::from(layout.layers),
+            layout.levels,
         );
         (held && HeapPlaneCopies::fit(self, &planes)).then_some(planes)
     }

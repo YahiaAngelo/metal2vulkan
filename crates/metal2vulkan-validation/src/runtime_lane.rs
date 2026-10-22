@@ -821,6 +821,8 @@ mod two_plane_copies;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod two_plane_heap_blits;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod two_plane_heap_fills;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod two_plane_samples;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod uniform_varyings;
