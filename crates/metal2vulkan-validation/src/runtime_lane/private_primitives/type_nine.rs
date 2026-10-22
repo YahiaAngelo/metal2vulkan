@@ -146,7 +146,7 @@ impl Answer {
     }
 
     /// From its scheduled handler to its completed handler.
-    fn from_scheduled(&self) -> Duration {
+    fn since_scheduled(&self) -> Duration {
         self.completed - self.scheduled
     }
 
@@ -481,9 +481,9 @@ fn check(outcome: &Outcome, expected: Expected, label: &str) {
             assert_eq!(drawn.status, CommandBufferStatus::Error, "{label}");
             assert_eq!(drawn.error, Some(CommandBufferError::GpuHang), "{label}");
             assert!(
-                drawn.from_scheduled() >= HANG,
+                drawn.since_scheduled() >= HANG,
                 "{label}: failed {:?} after it read Scheduled",
-                drawn.from_scheduled()
+                drawn.since_scheduled()
             );
             let scheduled = drawn.to_scheduled();
             assert!(
@@ -525,9 +525,9 @@ fn check(outcome: &Outcome, expected: Expected, label: &str) {
             assert_eq!(drawn.status, CommandBufferStatus::Error, "{label}");
             assert_eq!(drawn.error, Some(error), "{label}");
             assert!(
-                drawn.from_scheduled() >= FAULT,
+                drawn.since_scheduled() >= FAULT,
                 "{label}: failed {:?} after it read Scheduled",
-                drawn.from_scheduled()
+                drawn.since_scheduled()
             );
             // The queue's command buffer committed at once reads `Scheduled` during the fault and
             // completes after it.
