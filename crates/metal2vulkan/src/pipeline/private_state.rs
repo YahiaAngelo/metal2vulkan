@@ -417,14 +417,21 @@ pub(crate) fn logic_operated(
 
 /// The text the key of the render pipeline `d` appends for its private state: empty at Metal's
 /// defaults and wherever only properties that change nothing differ, so every other pipeline
-/// keeps its key.
+/// keeps its key. A logic operation's attachments are already in `d` as it draws them
+/// ([`logic_operation`]), so only Vulkan's operation is added: copy and no-op key as the
+/// pipeline of those attachments.
 pub(crate) fn render_key_fields(d: &RenderPipelineDescriptor) -> String {
-    let mask = match applied_sample_mask(d) {
+    let mut fields = match applied_sample_mask(d) {
         Some(mask) => format!(" sample_mask {mask:#x}"),
         None => String::new(),
     };
-    match alpha_test(&d.private) {
-        Ok(Some(function)) => format!("{mask} alpha_test {}", function.as_raw()),
-        _ => mask,
+    if let Ok(Some(function)) = alpha_test(&d.private) {
+        fields.push_str(&format!(" alpha_test {}", function.as_raw()));
     }
+    let op = LOGIC_OPS[(d.private.logic_operation & 15) as usize];
+    let vulkan = !matches!(op, vk::LogicOp::COPY | vk::LogicOp::NO_OP);
+    if d.private.logic_operation_enabled && d.fragment.is_some() && vulkan {
+        fields.push_str(&format!(" logic_op {}", op.as_raw()));
+    }
+    fields
 }

@@ -241,12 +241,16 @@ fn the_logic_operation_stores_metal_s_codes() {
             PixelFormat::RGBA8Snorm => DRAWN_SIGNED,
             _ => DRAWN,
         };
+        let float = layout(pf).is_none();
         for blended in [false, true] {
-            let plain = lane.pipeline(pf, blended, None).unwrap();
-            let without = lane.draw(pf, &plain, drawn);
+            // A float target's draw without the operation (a normalized one's blend is dropped,
+            // and lavapipe blends no snorm format).
+            let without = float.then(|| {
+                let plain = lane.pipeline(pf, blended, None).unwrap();
+                lane.draw(pf, &plain, drawn)
+            });
             for raw in 0..=16u64 {
                 let blendless = matches!(raw & 15, 2 | 4);
-                let float = layout(pf).is_none();
                 let pipeline = match lane.pipeline(pf, blended, Some(raw)) {
                     Ok(p) => p,
                     // A float attachment that blends under an operation Vulkan's turns off.
@@ -277,9 +281,9 @@ fn the_logic_operation_stores_metal_s_codes() {
                     Err(e) => panic!("{name}: {pf:?} blended {blended} operation {raw}: {e}"),
                 };
                 let got = lane.draw(pf, &pipeline, drawn);
-                let want = match float {
-                    true => without.clone(),
-                    false => expected(pf, raw, drawn),
+                let want = match &without {
+                    Some(without) => without.clone(),
+                    None => expected(pf, raw, drawn),
                 };
                 checked += 1;
                 if got != want {
