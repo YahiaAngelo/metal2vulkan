@@ -923,9 +923,9 @@ fn the_third_way_is_drawn_as_mode_1_announced() {
 }
 
 /// A draw that makes no primitive, too few vertices or indices for one (a line of one vertex,
-/// quads of three), draws nothing at mode 1, as Metal's does, and announces nothing: through the
-/// device's last vertex and with it withheld, of a pipeline that reads flat inputs and weights,
-/// on the cfg's device.
+/// quads of three), draws nothing at mode 1, as Metal's does, and announces no provoking kind
+/// ([`PROVOKING`]): through the device's last vertex and with it withheld, of a pipeline that
+/// reads flat inputs and weights, on the cfg's device.
 #[test]
 fn draws_of_no_primitive_announce_nothing() {
     use DrawPrimitiveType::{LineLoop, Public, QuadStrip, Quads, TriangleFan};
@@ -968,11 +968,13 @@ fn draws_of_no_primitive_announce_nothing() {
                     );
                 }
             }
+            // The pipeline's stages' precision notes (a device's interpolation) are its own.
             let kinds: Vec<Degradation> = messages
                 .take_notices()
                 .iter()
                 .filter_map(|m| m.degradation.as_ref())
                 .map(|notice| notice.degradation)
+                .filter(|kind| PROVOKING.contains(kind))
                 .collect();
             assert!(kinds.is_empty(), "{name} (withheld {withheld}): {kinds:?}");
         }
