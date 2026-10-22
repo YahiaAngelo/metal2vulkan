@@ -1526,13 +1526,14 @@ pub enum RuntimeGap {
     /// Xid 32 stall).
     MultisampledBufferCopy,
     /// A blit copy between a buffer and a multisampled texture (as for `MultisampledBufferCopy`)
-    /// in a buffer layout whose rows plain Metal places by a rule the runtime does not hold
-    /// (measured on an Apple M3 Max under macOS 27.0.1): a `bytesPerRow` of 0 from an offset that
-    /// is a multiple of 16 bytes (but for a single row from offset 0), where Metal lays the pixels
-    /// out in a block order from the buffer's byte 0 whatever the offset; and, for a pixel (a
-    /// texel's samples) of 32 bytes or more, a `bytesPerRow` below a row, or off the pixel for
-    /// more than one row, whose rows Metal places by a rule not measured whole. The runtime copies
-    /// every other layout as plain Metal does.
+    /// in one of two buffer layouts that plain Metal copies by rules not yet reduced, and that
+    /// Metal's API validation rejects (`bytesPerRow` must be at least a row and a multiple of the
+    /// pixel, a texel's samples' bytes): a `bytesPerRow` of 0 from an offset that is a multiple of
+    /// 16 bytes (but for a single row from offset 0), where plain Metal copies the texture's
+    /// samples in a block order of its own; and, for a pixel of 32 bytes or more, a
+    /// `bytesPerRow` below a row, or off the pixel for more than one row, where plain Metal places
+    /// the rows by the offset's and the pitch's bits together (measured on an Apple M3 Max under
+    /// macOS 27.0.1). The runtime copies every other layout as plain Metal does.
     MultisampledBufferLayout,
     /// What a render pass the device draws in color groups does not build: a pass of more color
     /// attachments with a texture than the lesser of the device's `maxColorAttachments` and

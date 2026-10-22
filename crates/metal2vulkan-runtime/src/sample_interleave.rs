@@ -781,8 +781,8 @@ fn bands(width: u32, height: u32, samples: u32, bpp: u64, limit: u32) -> Vec<(u3
 /// runtime copies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Unplaced {
-    /// A layout whose rows plain Metal places by a rule the runtime does not hold
-    /// (`RuntimeGap::MultisampledBufferLayout`).
+    /// A layout plain Metal copies by a rule not yet reduced, which Metal's API validation
+    /// rejects (`RuntimeGap::MultisampledBufferLayout`).
     Gap,
     /// A pitch below a row out of the texture, where plain Metal's row writes race, or into it
     /// one below the pixel's placement unit from an offset that is a multiple of 16, from which
@@ -808,10 +808,12 @@ pub(super) enum Unplaced {
 /// Refused (`Unplaced::BytesPerRow`): out of the texture, a pitch below a row of more than one
 /// row; into it, one between 0 and the unit it rounds to from an offset that is a multiple of 16,
 /// from which plain Metal reads bytes the buffer does not hold. The runtime's gap
-/// (`Unplaced::Gap`): a pitch of 0 from an offset that is a multiple of 16 (but for a single row
-/// from 0), where plain Metal lays the pixels out in a block order, from byte 0 whatever the
-/// offset; and a pixel of 32 bytes or more at a pitch below a row, or off the pixel for more than
-/// one row, whose rows plain Metal places by a rule not measured whole. A row past `length`
+/// (`Unplaced::Gap`), layouts plain Metal copies by rules not yet reduced and its API validation
+/// rejects: a pitch of 0 from an offset that is a multiple of 16 (but for a single row from 0),
+/// where plain Metal copies the texture's samples in a block order of its own (2 by 2 pixels,
+/// from byte 0 for an offset below 64); and a pixel of 32 bytes or more at a pitch below a row,
+/// or off the pixel for more than one row, whose rows plain Metal places by the offset's and the
+/// pitch's bits together. A row past `length`
 /// (`Unplaced::BufferRange`) is refused as a single-sample copy's layout past its buffer is. An
 /// empty copy places no rows.
 pub(super) fn placed_rows(

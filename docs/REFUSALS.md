@@ -14,7 +14,7 @@ Columns:
   - `none`: no public API path: malformed or non-Metal input, Apple-private calls, or a cap no valid program of ordinary size meets;
   - `?`: not assessed yet.
 
-Generated at `01df63cb1`.
+Generated at `44228f484`.
 
 ## Totals
 
@@ -229,7 +229,7 @@ Generated at `01df63cb1`.
 | `PredicatedLoopDepth` | A predicated loop started (`ComputeCommandEncoder::encode_start_while`, `encode_start_do_while`) with three loops already open in its unit | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/predication.rs:483` | `none`: an Apple-private predicated loop four deep |
 | `PredicatedLoopAcrossEncoders` | A command buffer one of whose live predicated loops started in one compute encoder and ended in a later one of its unit, refused at... | every device (runtime piece not built) | 2: `crates/metal2vulkan-runtime/src/predication.rs:284`, `crates/metal2vulkan-runtime/src/predication.rs:300` | `none`: a live Apple-private predicated loop spanning compute encoders |
 | `MultisampledBufferCopy` | A blit copy between a buffer and a multisampled texture (`copyFromBuffer:...toTexture:` into, or `copyFromTexture:...toBuffer:` out of, a texture... | every device (runtime piece not built) | 2: `crates/metal2vulkan-runtime/src/blit_texture.rs:489`, `crates/metal2vulkan-runtime/src/blit_texture.rs:635` | `rare`: a buffer<->multisampled-texture copy on a device without sample-rate shading, an integer multisample attachment at the count, or the copy format's storage; and, where maintenance8's depth/colour copies are missing or wrong, what the sample-rate draws cannot move: a 16-bit depth, or a depth or stencil texture they cannot sample or render to (emulated elsewhere; the consumer's Maps pans and screensaver make the copy) |
-| `MultisampledBufferLayout` | A blit copy between a buffer and a multisampled texture (as for `MultisampledBufferCopy`) in a buffer layout whose rows plain Metal places by a... | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/sample_interleave.rs:1018` | `rare`: a buffer<->multisampled-texture copy at a bytesPerRow of 0 from an offset that is a multiple of 16, or of pixels of 32 bytes or more at a pitch below a row or off the pixel, whose rows Metal places by a rule not held |
+| `MultisampledBufferLayout` | A blit copy between a buffer and a multisampled texture (as for `MultisampledBufferCopy`) in one of two buffer layouts that plain Metal copies by... | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/sample_interleave.rs:1018` | `rare`: a buffer<->multisampled-texture copy at a bytesPerRow of 0 from an offset that is a multiple of 16, or of pixels of 32 bytes or more at a pitch below a row or off the pixel: Metal copies these by rules not yet reduced, and its API validation rejects them |
 | `ColorAttachmentGroups` | What a render pass the device draws in color groups does not build | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/render/color_groups.rs:106` | `app`: in a render pass of more color attachments than the device draws at once (five or more on a device of four), or one at an index past them: a pipeline state of other colors, a tile state, an execution of render commands, a draw reading another group's attachment |
 
 ## 3. Apple-only calls (`Error::AppleOnly`)
