@@ -5420,19 +5420,29 @@ impl Texture {
         // A shadowed view's texels are its texture's (`texture/view_shadow.rs`).
         let truth = view_shadow::truth(image);
         let copy = buffer_image_copy(image_region);
+        // Copied on the host into the caller's bytes where they are laid out packed, else into
+        // packed bytes laid out from there.
         if truth.takes_host_copies() {
-            let mut packed = vec![0; host.packed_len() as usize];
-            if truth.host_read(copy, &mut packed)? {
-                host.unpack(&packed, bytes);
+            let read = match host.is_packed() {
+                true => truth.host_read(copy, &mut bytes[..host.packed_len() as usize])?,
+                false => {
+                    let mut packed = vec![0; host.packed_len() as usize];
+                    let read = truth.host_read(copy, &mut packed)?;
+                    if read {
+                        host.unpack(&packed, bytes);
+                    }
+                    read
+                }
+            };
+            if read {
                 return Ok(());
             }
         }
-        if truth.takes_staging_copies() {
-            let mut packed = vec![0; host.packed_len() as usize];
-            if truth.staging_read(copy, &mut packed)? {
-                host.unpack(&packed, bytes);
-                return Ok(());
-            }
+        // Laid out from the staging buffer.
+        if truth.takes_staging_copies()
+            && truth.staging_read(copy, host.packed_len(), |staged| host.unpack(staged, bytes))?
+        {
+            return Ok(());
         }
         let device = self.device();
         let mut staging = Staging::new(device, host.packed_len())?;

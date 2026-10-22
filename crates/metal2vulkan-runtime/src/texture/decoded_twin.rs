@@ -1013,7 +1013,10 @@ impl Image {
         let copy = buffer_image_copy(&rows);
         let read = match self.takes_host_copies() {
             true => self.host_read(copy, &mut bytes)?,
-            false => self.staging_read(copy, &mut bytes)?,
+            false => {
+                let len = bytes.len() as u64;
+                self.staging_read(copy, len, |staged| bytes.copy_from_slice(staged))?
+            }
         };
         if !read {
             return Err(internal(

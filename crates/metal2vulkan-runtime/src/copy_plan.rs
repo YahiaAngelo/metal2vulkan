@@ -466,6 +466,14 @@ impl HostLayout {
         self.row_bytes * self.rows * self.images
     }
 
+    /// Whether the host buffer's layout is the tightly packed one: each row at its packed
+    /// offset, so the packed bytes are the host buffer's first [`packed_len`](Self::packed_len),
+    /// and a copy may read or write them in place.
+    pub(super) fn is_packed(&self) -> bool {
+        (self.rows <= 1 || self.bytes_per_row == self.row_bytes)
+            && (self.images <= 1 || self.bytes_per_image == self.row_bytes * self.rows)
+    }
+
     /// The bytes of the host buffer the layout reads or writes; `None` past `u64::MAX`, more
     /// than any buffer holds. Rows lie in order, so the last ends past every other: a host buffer
     /// of these bytes holds every row [`rows`](Self::rows) gives.

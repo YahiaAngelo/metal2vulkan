@@ -80,6 +80,8 @@ mod fresh_pages;
 mod fresh_unwritten;
 mod function_table;
 mod gate;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod get_bytes_layouts;
 mod gpu_pools;
 mod gpu_time;
 mod heap;

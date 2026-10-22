@@ -550,3 +550,33 @@ fn host_layouts_past_u64_max_hold_more_than_any_slice() {
         Some(u64::MAX)
     );
 }
+
+/// A host layout is packed (`HostLayout::is_packed`, where `getBytes` reads into the caller's
+/// bytes in place) exactly where unpacking any packed bytes into it writes the same bytes as the
+/// packed ones over its first `packed_len` and nothing past them: every layout of up to 3 rows of
+/// up to 3 bytes in up to 3 images, every pitch of rows and images up to 12 bytes, 0 included.
+#[test]
+fn a_host_layout_is_packed_exactly_where_unpacking_moves_nothing() {
+    for (row_bytes, rows, images) in
+        (1..=3).flat_map(|r| (1..=3).flat_map(move |n| (1..=3).map(move |i| (r, n, i))))
+    {
+        for bytes_per_row in 0..=12 {
+            for bytes_per_image in 0..=12 {
+                let layout = HostLayout {
+                    row_bytes,
+                    rows,
+                    images,
+                    bytes_per_row,
+                    bytes_per_image,
+                };
+                let packed: Vec<u8> = (1..=layout.packed_len() as u8).collect();
+                let len = layout.host_len().unwrap().max(layout.packed_len()) as usize;
+                let mut host = vec![0; len];
+                layout.unpack(&packed, &mut host);
+                let mut expected = packed.clone();
+                expected.resize(len, 0);
+                assert_eq!(layout.is_packed(), host == expected, "{layout:?}");
+            }
+        }
+    }
+}

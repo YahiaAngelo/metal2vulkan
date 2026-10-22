@@ -16,7 +16,7 @@
 //!   (`FirstMove::record_alone`): no batch finds its move waiting.
 //! - **Copied.** `replace_region` packs the caller's bytes into a staging buffer and copies them
 //!   into the image on the staging queue; `get_bytes` copies the image's texels into one there
-//!   and lays them out. Each waits for its own submission alone: the copy and one submission's
+//!   and lays them out from it into the caller's bytes. Each waits for its own submission alone: the copy and one submission's
 //!   round trip, whatever the program has in flight. A later batch finds the bytes written (the
 //!   submission completed before the call returned); `get_bytes` reads what every command buffer
 //!   the host saw complete wrote.
@@ -102,19 +102,21 @@ impl Image {
         Ok(true)
     }
 
-    /// Copy the image's texels `copy` reaches into `bytes` on the staging queue, laid out as
-    /// `copy` writes them to a buffer; the image [takes staging
-    /// copies](Self::takes_staging_copies). Whether it did: not while it presents a stand-in.
+    /// Copy the image's texels `copy` reaches, `len` bytes laid out as `copy` writes them to a
+    /// buffer, on the staging queue, and hand them to `take` where they lie, in the staging
+    /// buffer; the image [takes staging copies](Self::takes_staging_copies). Whether it did: not
+    /// while it presents a stand-in.
     pub(super) fn staging_read(
         &self,
         copy: vk::BufferImageCopy,
-        bytes: &mut [u8],
+        len: u64,
+        take: impl FnOnce(&[u8]),
     ) -> Result<bool, Error> {
         let detached = lock(&self.detached);
         if detached.is_some() || !self.nothing_staged() {
             return Ok(false);
         }
-        let mut staging = Staging::new(&self.device, bytes.len() as u64)?;
+        let mut staging = Staging::new(&self.device, len)?;
         let (buffer, image) = (staging.raw, self.raw.get());
         self.device.submit_staging(|raw, command_buffer, _| {
             transfer_barrier(raw, command_buffer, true);
@@ -133,7 +135,7 @@ impl Image {
             transfer_barrier(raw, command_buffer, false);
         })?;
         drop(detached);
-        bytes.copy_from_slice(staging.bytes());
+        take(staging.bytes());
         Ok(true)
     }
 }
