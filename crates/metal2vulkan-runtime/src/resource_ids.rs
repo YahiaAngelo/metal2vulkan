@@ -110,7 +110,8 @@
 //!   `Invalid`. An indirect command buffer ID is reserved to 2^31 - 1, and plain IDs are handed
 //!   out past it, each buffer made and run (an M3 Max, macOS 27.0.1: 2^23 + 5, 2^30 + 5 and
 //!   2^31 - 2 gave 2^23 + 6, 2^30 + 6 and 2^31 - 1 next); one of [`RECORDS_RESERVED_LIMIT`] (2^31)
-//!   to 2^32 - 1 never returned there (Metal's pool spins), and is refused `Invalid`. An M4's
+//!   to 2^32 - 1 never returned there (Metal's pool spins), and is refused `Invalid`
+//!   (`Problem::ReservationHangs`, which says so). An M4's
 //!   Metal ended the process at the first allocation after a reservation of 2^30 + 5 to 2^31 - 1,
 //!   which the M3 Max, of the same GPU family (Apple9), made and ran: the runtime follows the M3
 //!   Max. A placement of one at [`RECORDS_PLACEMENT_LIMIT`] (16384) or more, past Metal's table
@@ -942,10 +943,11 @@ impl Device {
     /// A call holding an ID of 2^32 or more is dropped whole, silently, and leaves the kind's
     /// reservation to a later call, as Metal's is; 0, the null handle, reserves nothing.
     ///
-    /// Refused, reserving nothing (`Invalid`, `Problem::ResourceId`): a texture or sampler state
-    /// ID of 2^28 or more, which ends Metal's process, and an indirect command buffer ID of 2^31
-    /// or more, at which Metal's reservation never returns; and a texture ID no set-1 array of
-    /// the device can hold (`Unsupported`, naming the limit). Plain indirect command buffer IDs
+    /// Refused, reserving nothing: a texture or sampler state ID of 2^28 or more, which ends
+    /// Metal's process (`Invalid`, `Problem::ResourceId`); an indirect command buffer ID of 2^31
+    /// or more, at which Metal's reservation never returns (`Invalid`,
+    /// `Problem::ReservationHangs`); and a texture ID no set-1 array of the device can hold
+    /// (`Unsupported`, naming the limit). Plain indirect command buffer IDs
     /// past a reservation are Metal's, to 2^31 - 1; a buffer at an ID of 2^26 or more whose
     /// records pass
     /// [`records_span`](metal2vulkan::bind::indirect_commands::records_span) of it (2 GiB) is
@@ -968,9 +970,16 @@ impl Device {
                     self.check_capacity(id, sampled.max(storage))?;
                 }
                 ResourceIdKind::SamplerState => check_limit(CALL, id, RESERVED_POOL_LIMIT)?,
-                ResourceIdKind::IndirectCommandBuffer => {
-                    check_limit(CALL, id, RECORDS_RESERVED_LIMIT)?
+                ResourceIdKind::IndirectCommandBuffer if id >= RECORDS_RESERVED_LIMIT => {
+                    return Err(invalid(
+                        CALL,
+                        Problem::ReservationHangs {
+                            id,
+                            limit: RECORDS_RESERVED_LIMIT,
+                        },
+                    ));
                 }
+                ResourceIdKind::IndirectCommandBuffer => {}
                 ResourceIdKind::PipelineState => {}
             }
         }

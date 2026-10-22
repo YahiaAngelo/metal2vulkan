@@ -2381,22 +2381,49 @@ fn plain_ids_after_a_reservation_are_metal_s() {
         assert_eq!(state.gpu_resource_id(), ResourceId(18));
     });
     // Refused, reserving nothing: a texture or sampler state ID of 2^28 or more, which ended
-    // Metal's process (`x_0_2p28p5`, `x_1_2p28p5`), and an indirect command buffer ID of 2^31 or
-    // more, at which Metal's reservation never returned (an M3 Max).
+    // Metal's process (`x_0_2p28p5`, `x_1_2p28p5`), and an indirect command buffer ID of 2^31 to
+    // 2^32 - 1, at which Metal's reservation never returned (an M3 Max), as such.
     on_device(|device, _| {
+        let hangs = |id| Problem::ReservationHangs {
+            id,
+            limit: RECORDS_ID_LIMIT,
+        };
         let refused = [
-            (ResourceIdKind::Texture, 1 << 28),
-            (ResourceIdKind::SamplerState, 1 << 28),
-            (ResourceIdKind::IndirectCommandBuffer, RECORDS_ID_LIMIT),
+            (
+                ResourceIdKind::Texture,
+                1 << 28,
+                Problem::ResourceId {
+                    id: 1 << 28,
+                    limit: 1 << 28,
+                },
+            ),
+            (
+                ResourceIdKind::SamplerState,
+                1 << 28,
+                Problem::ResourceId {
+                    id: 1 << 28,
+                    limit: 1 << 28,
+                },
+            ),
+            (
+                ResourceIdKind::IndirectCommandBuffer,
+                RECORDS_ID_LIMIT,
+                hangs(RECORDS_ID_LIMIT),
+            ),
+            (
+                ResourceIdKind::IndirectCommandBuffer,
+                (1 << 32) - 1,
+                hangs((1 << 32) - 1),
+            ),
         ];
-        for (kind, limit) in refused {
+        for (kind, id, expected) in refused {
             let error = device
-                .reserve_resource_ids(kind, &[ResourceId(limit)])
+                .reserve_resource_ids(kind, &[ResourceId(id)])
                 .unwrap_err();
             let Error::Invalid(Invalid { problem, .. }) = error else {
                 panic!("{kind:?}: {error:?}");
             };
-            assert_eq!(problem, Problem::ResourceId { id: limit, limit });
+            assert_eq!(problem, expected);
         }
         // Nothing was reserved: 10 is the reservation still.
         device

@@ -672,6 +672,16 @@ pub enum Problem {
         /// The first ID past the kind's range.
         limit: u64,
     },
+    /// An indirect command buffer ID of `limit` (2^31) to 2^32 - 1 in a reservation
+    /// (`Device::reserve_resource_ids`): Metal's call never returns there, its pool spinning
+    /// (an M3 Max, macOS 27.0.1), so nothing is reserved. A caller matching Metal treats this as
+    /// that hang, not as an invalid argument.
+    ReservationHangs {
+        /// The first such ID in the call.
+        id: u64,
+        /// The first ID at which Metal's reservation hangs.
+        limit: u64,
+    },
     /// [`IdPlacement::Outside`](crate::IdPlacement::Outside) for anything but a texture
     /// `Device::new_texture` makes: a sampler state, a pipeline state, an indirect command
     /// buffer, a view, or a heap's, a buffer's, a shared or a caller's texture. A runtime
