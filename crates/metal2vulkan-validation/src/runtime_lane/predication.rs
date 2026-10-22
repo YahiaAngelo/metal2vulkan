@@ -961,12 +961,15 @@ fn a_word_past_its_buffer_reads_as_metal_reads_it() {
     });
 }
 
-/// How many notices of `Degradation::PredicationWordPastBuffer` `messages` delivered since this
-/// was last asked.
+/// The kind a word past its buffer that reads memory unrelated to it announces
+/// ([`a_word_past_its_buffer_reads_as_metal_reads_it`], `degrade_notices.rs`).
+pub(super) const WORD_PAST_BUFFER: [Degradation; 1] = [Degradation::PredicationWordPastBuffer];
+
+/// How many notices of [`WORD_PAST_BUFFER`] `messages` delivered since this was last asked.
 fn noted(messages: &Messages) -> usize {
     (messages.take_notices().into_iter())
         .filter_map(|message| message.degradation)
-        .filter(|notice| notice.degradation == Degradation::PredicationWordPastBuffer)
+        .filter(|notice| WORD_PAST_BUFFER.contains(&notice.degradation))
         .count()
 }
 
