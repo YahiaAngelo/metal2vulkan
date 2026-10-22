@@ -93,7 +93,7 @@ const H_BLOCK: u64 = 4;
 const H_BLOCKS: u64 = 8;
 /// The vertices per primitive of the type the commands draw.
 const H_CORNERS: u64 = 12;
-/// The vertices of a chunk: [`MERGED_CHUNK`].
+/// The vertices of a chunk: [`MERGED_CHUNK`] (below `2^31`, as the last pass's division needs).
 const H_CHUNK: u64 = 16;
 /// The whole chunks the first draw draws, which the last pass writes.
 const H_CHUNKS: u64 = 20;
@@ -299,6 +299,53 @@ fn command_corners(
     let whole = wide(fb, t, whole)?;
     let instances = wide(fb, t, instances)?;
     fb.binary(BinOp::IMul, whole, instances)
+}
+
+/// `⌊n / d⌋` and `n mod d` (`u32`s) of the `u64` `n` whose words are `(high, low)`, for a `d`
+/// of 1 to `2^31 - 1` above `high` (so the quotient is below `2^32`): restoring division, a bit
+/// of `low` at a time, in `u32`s alone. The last pass divides so, not by `u64` `OpUDiv` and
+/// `OpUMod`: with those, an RTX 5080 laptop GPU under NVIDIA's 615.71.09 ran the pass with the
+/// chunk as the total's high word (a total of 31 corners drew nothing and reported
+/// `ReplayFaults::VERTICES`), and in `u32` words it runs exact.
+fn divide_words(
+    fb: &mut FunctionBuilder<'_>,
+    t: Types,
+    (high, low): (Value, Value),
+    d: Value,
+) -> BResult<(Value, Value)> {
+    let remainder = fb.local_var(t.u32_, None)?;
+    let remainder = fb.var_ptr(remainder)?;
+    fb.store(remainder, high, MemAccess::default())?;
+    let quotient = fb.local_var(t.u32_, None)?;
+    let quotient = fb.var_ptr(quotient)?;
+    let zero = k32(fb, 0)?;
+    fb.store(quotient, zero, MemAccess::default())?;
+    let bits = k32(fb, 32)?;
+    count_loop(fb, t, bits, move |fb, i| {
+        // Bit `31 - i` of `low`, from the top.
+        let top = k32(fb, 31)?;
+        let at = fb.binary(BinOp::ISub, top, i)?;
+        let bit = fb.binary(BinOp::ShiftRightLogical, low, at)?;
+        let one = k32(fb, 1)?;
+        let bit = fb.binary(BinOp::BitwiseAnd, bit, one)?;
+        // The remainder stays below `d`, below `2^31`: shifted, it fits a `u32`.
+        let r = fb.load(remainder, MemAccess::default())?;
+        let r = fb.binary(BinOp::ShiftLeftLogical, r, one)?;
+        let r = fb.binary(BinOp::BitwiseOr, r, bit)?;
+        let taken = fb.binary(BinOp::UGreaterThanEqual, r, d)?;
+        let less = fb.binary(BinOp::ISub, r, d)?;
+        let r = fb.select(taken, less, r)?;
+        fb.store(remainder, r, MemAccess::default())?;
+        let q = fb.load(quotient, MemAccess::default())?;
+        let q = fb.binary(BinOp::ShiftLeftLogical, q, one)?;
+        let zero = k32(fb, 0)?;
+        let digit = fb.select(taken, one, zero)?;
+        let q = fb.binary(BinOp::BitwiseOr, q, digit)?;
+        fb.store(quotient, q, MemAccess::default())
+    })?;
+    let q = fb.load(quotient, MemAccess::default())?;
+    let r = fb.load(remainder, MemAccess::default())?;
+    Ok((q, r))
 }
 
 /// `vertices - vertices mod corners` (`u32`s): the vertices of a draw's whole primitives.
@@ -564,13 +611,13 @@ pub fn typed_module(phase: MergePhase) -> BResult<TypedModule> {
                 let own = load64(fb, t, sum_at)?;
                 let total = saturating_add(fb, start, own)?;
                 let chunk = word(fb, H_CHUNK)?;
-                let chunk64 = wide(fb, t, chunk)?;
-                let chunks = fb.binary(BinOp::UDiv, total, chunk64)?;
-                let rest = fb.binary(BinOp::UMod, total, chunk64)?;
-                let most = k64(fb, u64::from(u32::MAX))?;
-                let fits = fb.binary(BinOp::ULessThanEqual, chunks, most)?;
-                let chunks32 = fb.convert(ConvOp::UConvert, chunks, u32_)?;
-                let rest32 = fb.convert(ConvOp::UConvert, rest, u32_)?;
+                // The whole chunks fit in a `u32` where the total's high word is below a chunk.
+                let low = fb.convert(ConvOp::UConvert, total, u32_)?;
+                let shift = k64(fb, 32)?;
+                let high = fb.binary(BinOp::ShiftRightLogical, total, shift)?;
+                let high = fb.convert(ConvOp::UConvert, high, u32_)?;
+                let fits = fb.binary(BinOp::ULessThan, high, chunk)?;
+                let (chunks32, rest32) = divide_words(fb, t, (high, low), chunk)?;
                 let zero = k32(fb, 0)?;
                 let one = k32(fb, 1)?;
                 let rest_first = k32(fb, MERGED_REST_FIRST)?;
