@@ -380,3 +380,128 @@ fn a_released_pointer_import_reads_after_a_remap_what_the_kept_one_would() {
         );
     });
 }
+
+/// What a command buffer did, read once it completed or [`FILE_REMAP_WAIT`] passed: `None` where
+/// it completed with no error.
+fn outcome(command_buffer: &crate::CommandBuffer) -> Option<String> {
+    let waited = command_buffer.wait_until_completed_for(FILE_REMAP_WAIT);
+    match (waited, command_buffer.error()) {
+        (Ok(()), None) => None,
+        (Ok(()), Some(error)) => Some(format!("failed: {error:?}")),
+        (Err(timed_out), _) => Some(format!("not completed: {timed_out:?}")),
+    }
+}
+
+/// How long [`a_file_s_pages_mapped_under_a_kept_pointer_import`] waits for each command buffer.
+const FILE_REMAP_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A file's pages (a `memfd`'s, mapped shared) mapped over a no-copy buffer's private anonymous
+/// pages while its pointer import is kept, the device told (`Device::host_range_remapped`): a
+/// remap `HostMemory::new`'s contract forbids under a live buffer (`docs/FAST-PATHS.md`, known
+/// gaps). Then a command buffer that fills another buffer alone, and one that copies the no-copy
+/// buffer. On RADV both fail and the device is lost: amdgpu's userptr takes only pages with no file
+/// behind them and gets each live import's pages again at every submission, whose list holds every
+/// memory the device imported (Mesa 26.2.4). On lavapipe both complete and the copy reads the
+/// file's pages. On any other driver the test prints what each did.
+#[test]
+fn a_file_s_pages_mapped_under_a_kept_pointer_import() {
+    const TEST: &str = "pointer import file remap";
+    on_device(|device| {
+        let page = host_page();
+        let len = 2 * page;
+        let queue = device.new_command_queue().unwrap();
+        let old = counting(len, 13);
+        let new = counting(len, 131);
+        let pages = Pages::private(len);
+        pages.write(0, &old);
+        // SAFETY: the pages outlive the buffer; the remap below is the measurement.
+        let made = unsafe {
+            device.new_buffer_with_bytes_no_copy(
+                HostMemory::new(pages.pointer(0)),
+                len as u64,
+                ResourceOptions::default(),
+                None,
+            )
+        };
+        let buffer = match made {
+            Ok(buffer) => buffer,
+            Err(error) => {
+                eprintln!(
+                    "{TEST}: on {}: private pages refused: {error:?}",
+                    device.name()
+                );
+                return;
+            }
+        };
+        assert!(read(&queue, &buffer, len) == old, "{TEST}");
+
+        // SAFETY: a new anonymous file, owned at once, sized and mapped over the pages' range.
+        unsafe {
+            let fd = libc::memfd_create(c"m2v-file-remap".as_ptr(), libc::MFD_CLOEXEC);
+            assert!(fd >= 0, "memfd_create: {}", std::io::Error::last_os_error());
+            assert_eq!(libc::ftruncate(fd, len as libc::off_t), 0);
+            let at = pages.pointer(0).as_ptr().cast();
+            let flags = libc::MAP_SHARED | libc::MAP_FIXED;
+            let mapped = libc::mmap(at, len, libc::PROT_READ | libc::PROT_WRITE, flags, fd, 0);
+            assert_eq!(mapped, at, "mmap of the file over the pages");
+            libc::close(fd);
+        }
+        pages.write(0, &new);
+        device.host_range_remapped(pages.pointer(0), len as u64);
+
+        let other = device.new_buffer(64, ResourceOptions::shared()).unwrap();
+        let fill = queue.command_buffer().unwrap();
+        let mut blit = fill.blit_command_encoder().unwrap();
+        blit.fill_buffer(&other, 0..64, 0x3c).unwrap();
+        blit.end_encoding().unwrap();
+        let filled = fill
+            .commit()
+            .map_err(|e| format!("{e:?}"))
+            .err()
+            .or_else(|| outcome(&fill));
+
+        let read_back = (|| {
+            let refused = |error: Error| format!("refused: {error:?}");
+            let copy =
+                (device.new_buffer(len as u64, ResourceOptions::shared())).map_err(refused)?;
+            let copied = queue.command_buffer().map_err(refused)?;
+            let mut blit = copied.blit_command_encoder().map_err(refused)?;
+            (blit.copy_from_buffer_to_buffer(&buffer, 0, &copy, 0, len as u64)).map_err(refused)?;
+            blit.end_encoding().map_err(refused)?;
+            copied.commit().map_err(refused)?;
+            if let Some(failed) = outcome(&copied) {
+                return Err(failed);
+            }
+            let at = copy.contents().ok_or("no contents")?;
+            // SAFETY: the copy's own bytes, which its completed command buffer wrote.
+            Ok(unsafe { std::slice::from_raw_parts(at.as_ptr(), len).to_vec() })
+        })();
+        let read_of = match &read_back {
+            Ok(bytes) if *bytes == new => "read the file's pages".to_owned(),
+            Ok(bytes) if *bytes == old => "read the pages it was made over".to_owned(),
+            Ok(_) => "read neither".to_owned(),
+            Err(failed) => failed.clone(),
+        };
+        let lost = device.is_lost();
+        eprintln!(
+            "FILE-REMAP {TEST}: on {} (the fact {}): another buffer's fill {}; the copy {read_of}; \
+             the device lost: {lost}",
+            device.name(),
+            follows(device),
+            filled.as_deref().unwrap_or("completed"),
+        );
+        match device.properties().description.driver_id {
+            Some(metal2vulkan::vk::DriverId::MESA_RADV) => {
+                assert!(filled.is_some(), "{TEST}: another buffer's fill completed");
+                assert!(read_back.is_err(), "{TEST}: the copy {read_of}");
+                assert!(lost, "{TEST}: the device is not lost");
+            }
+            Some(metal2vulkan::vk::DriverId::MESA_LLVMPIPE) => {
+                assert_eq!(filled, None, "{TEST}: another buffer's fill");
+                assert!(read_back == Ok(new), "{TEST}: the copy {read_of}");
+            }
+            _ => {}
+        }
+        drop(buffer);
+    });
+}
