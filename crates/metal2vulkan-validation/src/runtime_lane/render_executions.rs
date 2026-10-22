@@ -815,7 +815,7 @@ fn a_host_step_draws_on_what_its_commit_compiled() {
 /// it, as plain Metal orders it where its validation stops `setBarrier` (an M4): command 0 writes
 /// window 0 of `out`, and command 1, behind its barrier, reads that window as its `params` and
 /// writes window 1, so window 1 holds what command 0's words make. A barrier set after the encoder
-/// that executes it ended, whose pass the encoder made without runs, refuses the commit.
+/// that executes it ended, whose pass the encoder made without runs, orders the draw the same.
 #[test]
 fn a_command_s_barrier_orders_its_draw_after_the_earlier_ones() {
     on_device(|device, _| {
@@ -875,15 +875,16 @@ fn a_command_s_barrier_orders_its_draw_after_the_earlier_ones() {
         }
         assert_eq!(setup.output(), want);
 
+        let contents = setup.out.contents().expect("a Shared buffer");
+        // SAFETY: `out` holds `out.length()` bytes at `contents`, and no command uses them now.
+        unsafe { std::ptr::write_bytes(contents.as_ptr(), 0, setup.out.length() as usize) };
         let late = icb(device, &descriptor(), 2);
         let second = commands(&late);
         let command_buffer = queue.command_buffer().unwrap();
         execute(&command_buffer, &late);
         second.set_barrier().unwrap();
-        assert_eq!(
-            command_buffer.commit().err(),
-            Some(Error::NotImplemented(RuntimeGap::IndirectRenderCommands))
-        );
+        complete(&command_buffer);
+        assert_eq!(setup.output(), want);
     });
 }
 
