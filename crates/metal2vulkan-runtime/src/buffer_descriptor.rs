@@ -18,6 +18,7 @@ use super::device::lock;
 use super::error::MemoryKind;
 use super::error::{internal, invalid, nil, vulkan, Error, Problem, RuntimeGap};
 use super::heap::{Heap, HeapProblem};
+use super::host_bytes::HostBytes;
 use super::host_memory::{
     based_size, binds_in, buffer_base, import_refused, import_window, not_importable,
     refuse_unwritable, refused, Deallocator, HostMemory, HostRelease, ImportWindow, Importer,
@@ -48,6 +49,11 @@ pub enum BufferContents<'a> {
     /// A copy of these bytes (`newBufferWithBytes:length:options:`); their length is the
     /// descriptor's.
     Copy(&'a [u8]),
+    /// A copy of the bytes at a pointer, read once into the buffer's memory (or its staging
+    /// buffer) with no copy of the caller's first (a runtime extension, the same selector:
+    /// [`HostBytes`], memory that may change while it is read); their length is the
+    /// descriptor's.
+    CopyHost(HostBytes<'a>),
     /// The caller's host memory itself (`newBufferWithBytesNoCopy:length:options:deallocator:`),
     /// given back to `deallocator` when the buffer is released.
     NoCopy {
@@ -68,6 +74,7 @@ impl std::fmt::Debug for BufferContents<'_> {
         match self {
             BufferContents::Zero => f.write_str("Zero"),
             BufferContents::Copy(bytes) => write!(f, "Copy({} bytes)", bytes.len()),
+            BufferContents::CopyHost(bytes) => write!(f, "CopyHost({} bytes)", bytes.len()),
             BufferContents::NoCopy {
                 memory,
                 deallocator,
@@ -226,6 +233,13 @@ impl Device {
                 if bytes.len() as u64 != length {
                     return Err(invalid(CALL, Problem::LengthMismatch));
                 }
+                let bytes = HostBytes::from_slice(bytes);
+                self.buffer_with_bytes(CALL, bytes, resource_options, place)
+            }
+            BufferContents::CopyHost(bytes) => {
+                if bytes.len() as u64 != length {
+                    return Err(invalid(CALL, Problem::LengthMismatch));
+                }
                 self.buffer_with_bytes(CALL, bytes, resource_options, place)
             }
             // SAFETY: the `HostMemory` constructor's caller vouched for `length` bytes at the
@@ -264,6 +278,7 @@ impl Device {
         const CALL: &str = "new_buffer_with_bytes";
         self.keep_room();
         let options = self.own_memory_options(CALL, options)?;
+        let bytes = HostBytes::from_slice(bytes);
         let buffer = self.buffer_with_bytes(CALL, bytes, options, AddressPlacement::Any)?;
         Ok(self.visible(buffer))
     }
@@ -386,20 +401,21 @@ impl Device {
     fn buffer_with_bytes(
         &self,
         call: &'static str,
-        bytes: &[u8],
+        bytes: HostBytes<'_>,
         options: ResourceOptions,
         placement: impl Into<Place>,
     ) -> Result<Buffer, Error> {
         let length = bytes.len() as u64;
         let buffer = self.zero_buffer(call, length, options, placement)?;
+        // The bytes, read once, through their pointer, into the buffer's memory.
         let fill = |target: &Buffer| {
             let contents = target
                 .contents()
                 .ok_or_else(|| internal("a host-visible buffer without contents"))?;
-            // SAFETY: the buffer holds `length` bytes at `contents`, and no command uses it yet.
-            unsafe {
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), contents.as_ptr(), bytes.len())
-            };
+            // SAFETY: the buffer holds `length` bytes at `contents`, memory of the runtime's own
+            // that no command uses yet and nothing else reaches.
+            let into = unsafe { std::slice::from_raw_parts_mut(contents.as_ptr(), bytes.len()) };
+            bytes.copy_into(0, into);
             Ok::<(), Error>(())
         };
         if buffer.storage_mode() != StorageMode::Private {
@@ -1046,7 +1062,7 @@ impl Device {
         let (address, held, first) = other.sharable_range().ok_or_else(unshared)?;
         let over = match contents {
             BufferContents::NoCopy { memory, .. } => memory.pointer() == first,
-            BufferContents::Zero | BufferContents::Copy(_) => false,
+            BufferContents::Zero | BufferContents::Copy(_) | BufferContents::CopyHost(_) => false,
         };
         let placed = matches!(placement, AddressPlacement::Any)
             || placement == AddressPlacement::At(address);

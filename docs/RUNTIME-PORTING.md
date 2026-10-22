@@ -264,7 +264,7 @@ narrow refusal that the call's rustdoc describes.
 | `new_texture` | `newTextureWithDescriptor:` | `Device::new_texture` |
 | `reserve_resource_indices` | `reserveResourceIndicesForResourceType:indices:indexCount:` (SPI) | `Device::reserve_resource_ids` |
 | `caps` |  | `Device::properties()`: Metal's public properties (see `DeviceCaps` below) |
-| `new_buffer` | `newBufferWithDescriptor:` (SPI) | `Device::new_buffer_with_descriptor` (`BufferDescriptor` by value, with host contents and an `AddressPlacement`) |
+| `new_buffer` | `newBufferWithDescriptor:` (SPI) | `Device::new_buffer_with_descriptor` (`BufferDescriptor` by value, with host contents and an `AddressPlacement`; contents to copy from memory that may change while it is read as `BufferContents::CopyHost` over a `HostBytes`) |
 | `new_heap` | `newHeapWithDescriptor:` | `Device::new_heap` (`HeapDescriptor::placement` pins its address range) |
 | `reserve_address_pool` | (none: a runtime extension; Metal's own pools of buffers shorter than a page) | `Device::reserve_address_pool` -> `AddressPool`, holding a pin's span; `BufferDescriptor::with_pool_slot(&pool, offset)` places a buffer at the pool's address plus a 256-byte-aligned offset, holding its length rounded up to 256 bytes |
 | `new_heap_over_host_memory` | (none: a runtime extension) | `unsafe Device::new_heap_with_bytes_no_copy`: a heap over the caller's page-aligned memory, a `HostMemory` (`VK_EXT_external_memory_host`, or dma-bufs as for a buffer), the heap twin of `new_buffer_with_bytes_no_copy` |
@@ -498,7 +498,7 @@ narrow refusal that the call's rustdoc describes.
 | `new_texture_subview_at_index` | `newTextureViewWithPixelFormat:textureType:levels:slices:…` | `Texture::new_texture_subview_with_placement` (no swizzle) |
 | `pixel_format` | `pixelFormat` | `Texture::pixel_format` |
 | `protection_options` | `protectionOptions` (SPI) | `Texture::protection_options`: always 0 |
-| `replace_region` | `replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:` | `Texture::replace_region` |
+| `replace_region` | `replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:` | `Texture::replace_region`; from memory that may change while it is read (a guest's), `Texture::replace_region_with_host_bytes` over a `HostBytes`, which the call copies once through the pointer, with no copy of the caller's first |
 | `sample_count` | `sampleCount` | `Texture::sample_count` |
 | `texture_type` | `textureType` | `Texture::texture_type` |
 | `usage` | `usage` | `Texture::usage` |
