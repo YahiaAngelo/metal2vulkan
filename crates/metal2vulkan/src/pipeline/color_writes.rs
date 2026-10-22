@@ -22,11 +22,13 @@
 //! that blends with factors other than one and zero keeps the device's conversion
 //! ([`ChannelWrite::Device`], recorded as `PrecisionNote::DeviceColorConversion`), and so does
 //! the alpha of attachment 0 under alpha-to-coverage at the default rounding mode, which the
-//! coverage reads as computed. Under `NearestEven` that alpha rounds as the other channels do:
-//! Metal stores the nearest-even half and reads the coverage from the alpha before rounding
-//! (probe `a2c` on an Apple M3 Max, macOS 27.0.1: the coverage of 16,384 alphas is the same under
-//! either mode), which no device separates, so the coverage reads the rounded alpha
-//! (`PrecisionNote::CoverageReadsRoundedAlpha`, [`pipeline_writes`]). A format whose conversion
+//! coverage reads as computed. Under `NearestEven` that alpha rounds as the other channels do
+//! where the attachment stores it: Metal stores the nearest-even half and reads the coverage from
+//! the alpha before rounding (probe `a2c` on an Apple M3 Max, macOS 27.0.1: the coverage of 16,384
+//! alphas is the same under either mode), which no device separates, so the coverage reads the
+//! rounded alpha (`PrecisionNote::CoverageReadsRoundedAlpha`, [`pipeline_writes`]). An alpha its
+//! write mask does not store keeps the device's conversion, which stores nothing, so the coverage
+//! reads it as computed, as Metal's does. A format whose conversion
 //! Metal was not measured with keeps the device's conversion too, and so does a 32-bit float
 //! attachment that blends so, whose stored value is the device's blend arithmetic.
 //!
@@ -117,7 +119,9 @@ pub(crate) fn exact_writes(
             false => attachment_write(&c, coverage_alpha),
         };
         let write = match rounding {
-            TextureWriteRoundingMode::NearestEven => write.map(|w| nearest_even(w, &c)),
+            TextureWriteRoundingMode::NearestEven => {
+                write.map(|w| nearest_even(w, &c, coverage_alpha))
+            }
             _ => write,
         };
         if let Some(write) = write {
@@ -330,15 +334,18 @@ pub(crate) const HALF_BLENDED: ChannelWrite = ChannelWrite::BlendedNearestEven {
     signed: true,
 };
 
-/// The channels `rules` of attachment `c` under `TextureWriteRoundingMode::NearestEven`: each
-/// channel the format rounds as a half ([`HALF`], whatever the default map made of it) rounded to
-/// nearest even ([`HALF_NEAREST`]) where it stores the output as written (no blend, or one of
-/// factors one and zero), the alpha alpha-to-coverage reads included (the module docs), and
-/// Metal's rounding of the blend's result ([`HALF_BLENDED`], which the device's blend makes) after
-/// a blend of other factors.
+/// The channels `rules` of attachment `c` (alpha-to-coverage reading its alpha where
+/// `coverage_alpha`) under `TextureWriteRoundingMode::NearestEven`: each channel the format rounds
+/// as a half ([`HALF`], whatever the default map made of it) rounded to nearest even
+/// ([`HALF_NEAREST`]) where it stores the output as written (no blend, or one of factors one and
+/// zero), the alpha alpha-to-coverage reads included where the write mask stores it (the module
+/// docs), and Metal's rounding of the blend's result ([`HALF_BLENDED`], which the device's blend
+/// makes) after a blend of other factors. An alpha the coverage reads and the mask does not store
+/// keeps its rule, the coverage reading it as computed.
 fn nearest_even(
     mut rules: [Option<ChannelWrite>; 4],
     c: &ColorAttachmentDescriptor,
+    coverage_alpha: bool,
 ) -> [Option<ChannelWrite>; 4] {
     let Some(WriteConversion::Rules(format)) = write_conversion(c.pixel_format) else {
         return rules;
@@ -347,8 +354,9 @@ fn nearest_even(
         true => HALF_NEAREST,
         false => HALF_BLENDED,
     };
-    for (rule, own) in rules.iter_mut().zip(format) {
-        if own == Some(HALF) && rule.is_some() {
+    let unstored_coverage = coverage_alpha && !c.write_mask.contains(metal::ColorWriteMask::ALPHA);
+    for (i, (rule, own)) in rules.iter_mut().zip(format).enumerate() {
+        if own == Some(HALF) && rule.is_some() && !(unstored_coverage && i == 3) {
             *rule = Some(rounded);
         }
     }
