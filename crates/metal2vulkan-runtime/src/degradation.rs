@@ -1149,9 +1149,8 @@ degradations! {
             "its texels are copied into an image of its own before each command that binds it \
              beyond its declared usage, and back after each write through it";
         /// A texture of `RGB10A8_2P_XR10` or its sRGB twin made in a heap (`texture/heap.rs`)
-        /// whose planes no shadow of the heap's bytes holds: a 3D texture of more than one depth
-        /// slice (Metal's writes lay its depth slices over one another), or one whose moves pass
-        /// the device's limits (`texture/heap_two_planes.rs`). Its one image holds each texel's
+        /// whose planes no shadow of the heap's bytes holds: one whose moves pass the device's
+        /// limits (`texture/heap_two_planes.rs`). Its one image holds each texel's
         /// colour word and alpha byte side by side, more than Metal's two planes take in the
         /// heap, so it lies in memory of its own.
         HeapTwoPlaneTexture = "heap-two-plane-texture", Precision,

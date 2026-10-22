@@ -651,9 +651,9 @@ fn two_plane_textures_read_and_write_as_metal_does() {
     });
 }
 
-/// The kinds a heap's two-plane texture announces: where it lies apart from the heap's bytes (a 3D
-/// one of more than one depth slice), and where its first level's planes lie in them and its later
-/// levels apart (a mipmapped one).
+/// The kinds a heap's two-plane texture announces: where it lies apart from the heap's bytes (one
+/// whose moves pass the device's limits), and where its first level's planes lie in them and its
+/// later levels apart (a mipmapped one).
 pub(super) const HEAP_PLANES: [Degradation; 2] = [
     Degradation::HeapTwoPlaneTexture,
     Degradation::HeapTwoPlaneLayout,
@@ -663,8 +663,8 @@ pub(super) const HEAP_PLANES: [Degradation; 2] = [
 /// at the size and alignment the device answers, reads back Metal's values in the consumer's
 /// shape as a device texture does: a one-level 2D one and a mipmapped one, shadows of their first
 /// level's planes in the heap's bytes, announce `shadowed-texture`, the mipmapped one
-/// `heap-two-plane-layout` once too; a 3D one of two depth slices, apart from them,
-/// `heap-two-plane-texture` once.
+/// `heap-two-plane-layout` once too; a 3D one of two depth slices, a shadow of its first slice's
+/// planes there, never `heap-two-plane-texture`.
 #[test]
 fn two_plane_heap_textures_read_and_write_as_metal_does() {
     on_device(|device, messages| {
@@ -733,7 +733,8 @@ fn two_plane_heap_textures_read_and_write_as_metal_does() {
             notices.contains_key(&Degradation::ShadowedTexture),
             "{notices:?}"
         );
-        // A 3D texture of two depth slices lies apart from the heap's bytes.
+        // A 3D texture of two depth slices keeps its first slice's planes in the heap's bytes
+        // (`a_two_plane_volume_lies_over_its_first_slice_as_metal_s`).
         let mut volume = TextureDescriptor::texture_2d(PixelFormat::RGB10A82PXR10, 16, 8, false);
         volume.texture_type = TextureType::Type3D;
         volume.depth = 2;
@@ -749,11 +750,354 @@ fn two_plane_heap_textures_read_and_write_as_metal_does() {
             .unwrap();
         heap.new_texture_at_offset(&volume, 0).unwrap();
         let notices = counts(&messages.take_notices());
-        assert_eq!(
-            notices.get(&HEAP_PLANES[0]).copied(),
-            Some(1),
+        assert_eq!(notices.get(&HEAP_PLANES[0]), None, "{notices:?}");
+    });
+}
+
+/// The AIR module of [`a_two_plane_volume_lies_over_its_first_slice_as_metal_s`]'s kernels, over
+/// a `texture3d<float>` at texture 0, a buffer at 0, and the grid's `w` and `h` (`uint`s) at buffer
+/// 1, one thread per texel: `xr2pv_read` reads texel `g` into `out[(g.z h + g.y) w + g.x]`,
+/// `xr2pv_write` writes `in[...]` there, and `xr2pv_queries` stores `get_width(l)`,
+/// `get_height(l)`, `get_depth(l)` and `get_num_mip_levels()` for levels `l` 0 to 3 as `uint4`s.
+const VOLUME_KERNELS: &str = r#"target datalayout = "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v24:32:32-v32:32:32-v48:64:64-v64:64:64-v96:128:128-v128:128:128-v192:256:256-v256:256:256-v512:512:512-v1024:1024:1024-n8:16:32"
+target triple = "air64_v28-apple-macosx26.0.0"
+
+define void @xr2pv_read(ptr addrspace(1) %t, ptr addrspace(1) %out, ptr addrspace(1) %shape, <3 x i32> %g) {
+  %i = call i64 @texel(ptr addrspace(1) %shape, <3 x i32> %g)
+  %rs = call ptr addrspace(2) @air.get_read_sampler()
+  %r = call { <4 x float>, i8 } @air.read_texture_3d.v4f32(ptr addrspace(1) %t, ptr addrspace(2) %rs, <3 x i32> %g, <3 x i32> zeroinitializer, i32 0, i32 1)
+  %v = extractvalue { <4 x float>, i8 } %r, 0
+  %p = getelementptr inbounds <4 x float>, ptr addrspace(1) %out, i64 %i
+  store <4 x float> %v, ptr addrspace(1) %p, align 16
+  ret void
+}
+
+define void @xr2pv_write(ptr addrspace(1) %t, ptr addrspace(1) %in, ptr addrspace(1) %shape, <3 x i32> %g) {
+  %i = call i64 @texel(ptr addrspace(1) %shape, <3 x i32> %g)
+  %p = getelementptr inbounds <4 x float>, ptr addrspace(1) %in, i64 %i
+  %v = load <4 x float>, ptr addrspace(1) %p, align 16
+  call void @air.write_texture_3d.v4f32(ptr addrspace(1) %t, <3 x i32> %g, <4 x float> %v, i32 0, i32 2)
+  ret void
+}
+
+define void @xr2pv_queries(ptr addrspace(1) %t, ptr addrspace(1) %out, ptr addrspace(1) %shape, <3 x i32> %g) {
+  %n = call i32 @air.get_num_mip_levels_texture_3d(ptr addrspace(1) %t)
+  call void @level(ptr addrspace(1) %t, ptr addrspace(1) %out, i32 0, i32 %n)
+  call void @level(ptr addrspace(1) %t, ptr addrspace(1) %out, i32 1, i32 %n)
+  call void @level(ptr addrspace(1) %t, ptr addrspace(1) %out, i32 2, i32 %n)
+  call void @level(ptr addrspace(1) %t, ptr addrspace(1) %out, i32 3, i32 %n)
+  ret void
+}
+
+define internal void @level(ptr addrspace(1) %t, ptr addrspace(1) %out, i32 %l, i32 %n) alwaysinline {
+  %w = call i32 @air.get_width_texture_3d(ptr addrspace(1) %t, i32 %l)
+  %h = call i32 @air.get_height_texture_3d(ptr addrspace(1) %t, i32 %l)
+  %d = call i32 @air.get_depth_texture_3d(ptr addrspace(1) %t, i32 %l)
+  %q0 = insertelement <4 x i32> zeroinitializer, i32 %w, i64 0
+  %q1 = insertelement <4 x i32> %q0, i32 %h, i64 1
+  %q2 = insertelement <4 x i32> %q1, i32 %d, i64 2
+  %q3 = insertelement <4 x i32> %q2, i32 %n, i64 3
+  %li = zext i32 %l to i64
+  %p = getelementptr inbounds <4 x i32>, ptr addrspace(1) %out, i64 %li
+  store <4 x i32> %q3, ptr addrspace(1) %p, align 16
+  ret void
+}
+
+define internal i64 @texel(ptr addrspace(1) %shape, <3 x i32> %g) alwaysinline {
+  %w = load i32, ptr addrspace(1) %shape, align 4
+  %hp = getelementptr inbounds i32, ptr addrspace(1) %shape, i64 1
+  %h = load i32, ptr addrspace(1) %hp, align 4
+  %x = extractelement <3 x i32> %g, i64 0
+  %y = extractelement <3 x i32> %g, i64 1
+  %z = extractelement <3 x i32> %g, i64 2
+  %zh = mul i32 %z, %h
+  %zy = add i32 %zh, %y
+  %row = mul i32 %zy, %w
+  %n = add i32 %row, %x
+  %i = zext i32 %n to i64
+  ret i64 %i
+}
+
+declare ptr addrspace(2) @air.get_read_sampler()
+declare { <4 x float>, i8 } @air.read_texture_3d.v4f32(ptr addrspace(1), ptr addrspace(2), <3 x i32>, <3 x i32>, i32, i32)
+declare void @air.write_texture_3d.v4f32(ptr addrspace(1), <3 x i32>, <4 x float>, i32, i32)
+declare i32 @air.get_width_texture_3d(ptr addrspace(1), i32)
+declare i32 @air.get_height_texture_3d(ptr addrspace(1), i32)
+declare i32 @air.get_depth_texture_3d(ptr addrspace(1), i32)
+declare i32 @air.get_num_mip_levels_texture_3d(ptr addrspace(1))
+
+!air.kernel = !{!0, !10, !20}
+!0 = !{ptr @xr2pv_read, !1, !2}
+!1 = !{}
+!2 = !{!3, !4, !5, !6}
+!3 = !{i32 0, !"air.texture", !"air.location_index", i32 0, i32 1, !"air.read", !"air.arg_type_name", !"texture3d<float, read>", !"air.arg_name", !"t"}
+!4 = !{i32 1, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 16, !"air.arg_type_align_size", i32 16, !"air.arg_type_name", !"float4", !"air.arg_name", !"out"}
+!5 = !{i32 2, !"air.buffer", !"air.location_index", i32 1, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 4, !"air.arg_type_align_size", i32 4, !"air.arg_type_name", !"uint", !"air.arg_name", !"shape"}
+!6 = !{i32 3, !"air.thread_position_in_grid", !"air.arg_type_name", !"uint3", !"air.arg_name", !"g"}
+!10 = !{ptr @xr2pv_write, !1, !12}
+!12 = !{!13, !4, !5, !6}
+!13 = !{i32 0, !"air.texture", !"air.location_index", i32 0, i32 1, !"air.write", !"air.arg_type_name", !"texture3d<float, write>", !"air.arg_name", !"t"}
+!20 = !{ptr @xr2pv_queries, !1, !22}
+!22 = !{!3, !24, !5, !6}
+!24 = !{i32 1, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 16, !"air.arg_type_align_size", i32 16, !"air.arg_type_name", !"uint4", !"air.arg_name", !"out"}
+"#;
+
+/// The pipeline of [`VOLUME_KERNELS`]'s kernel `name`, its module assembled in a scratch
+/// directory removed at once.
+fn volume_state(device: &Device, name: &str) -> ComputePipelineState {
+    let dir = std::env::temp_dir().join(format!(
+        "m2v-two-plane-volumes-{}-{name}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ll = dir.join("volumes.ll");
+    std::fs::write(&ll, VOLUME_KERNELS).unwrap();
+    let bitcode = llvm_assemble(&ll);
+    std::fs::remove_dir_all(&dir).unwrap();
+    let library = device.new_library_with_air(&bitcode.unwrap()).unwrap();
+    let function = library.new_function_with_name(name).unwrap();
+    device
+        .new_compute_pipeline_state(
+            &ComputePipelineDescriptor::new(StageSource::Function(function.function_descriptor())),
+            &PipelineOptions::default(),
+        )
+        .unwrap_or_else(|e| panic!("{name}: {e}"))
+}
+
+/// Runs [`VOLUME_KERNELS`]'s `state` over `texture` with `buffer` at 0, one thread per texel of
+/// `[w, h, d]` (one thread where `one`).
+fn run_volume(
+    device: &Device,
+    queue: &CommandQueue,
+    state: &ComputePipelineState,
+    (texture, buffer): (&Texture, &Buffer),
+    [w, h, d]: [u64; 3],
+    one: bool,
+) {
+    let shape: Vec<u8> = [w as u32, h as u32]
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .collect();
+    let shape = buffer_with(device, &shape).unwrap();
+    let command_buffer = queue.command_buffer().unwrap();
+    let mut encoder = command_buffer.compute_command_encoder().unwrap();
+    encoder.set_compute_pipeline_state(state).unwrap();
+    encoder.set_texture(Some(texture), 0).unwrap();
+    encoder.set_buffer(Some(buffer), 0, 0).unwrap();
+    encoder.set_buffer(Some(&shape), 0, 1).unwrap();
+    let grid = match one {
+        true => Size::new(1, 1, 1),
+        false => Size::new(w, h, d),
+    };
+    encoder.dispatch_threads(grid, Size::new(4, 4, 4)).unwrap();
+    encoder.end_encoding().unwrap();
+    command_buffer.commit().unwrap();
+    command_buffer.wait_until_completed_for(WAIT).unwrap();
+    assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+    assert_eq!(command_buffer.error(), None);
+}
+
+/// A one-level 3D texture of `RGB10A8_2P_XR10` in a `Shared` placement heap lies over its first
+/// slice's planes as Metal's does (an Apple M3 Max under macOS 27.0.1, probes of a 16 x 8 x 4
+/// texture, `Shared` and `Private`, in a heap and of its own memory): Metal answers the 2D
+/// texture's size and alignment; every texel's read is texel `(0, 0, 0)`'s, the read of a 2D
+/// texture over the same bytes at its `(0, 0)`; a write at `(x, y, z)` lands where the 2D
+/// texture's write at `(x, y)` does; a blit of two images from a buffer at `z` 1 leaves the second
+/// in the first slice's words, and one into a buffer reads texel `(0, 0, 0)`'s word at every
+/// texel; `replaceRegion` of two images at `z` 1 writes the first there, and `getBytes` reads it
+/// back into the first image, the second as it was; the queries answer its width and height, a
+/// depth of `max(1, ⌈w / 4⌉ >> l)` at levels 0 to 3 and one level. The device announces
+/// `shadowed-texture`, never `heap-two-plane-texture`.
+#[test]
+fn a_two_plane_volume_lies_over_its_first_slice_as_metal_s() {
+    on_device(|device, messages| {
+        let queue = device.new_command_queue().unwrap();
+        let options = ResourceOptions::shared();
+        let heap = device
+            .new_heap(&HeapDescriptor::new(
+                HeapType::Placement,
+                PLANES_HEAP,
+                options,
+            ))
+            .unwrap();
+        let bytes = heap.new_buffer_at_offset(PLANES_HEAP, options, 0).unwrap();
+        let [w, h, d] = [16u64, 8, 4];
+        let usage = TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE;
+        let mut descriptor = TextureDescriptor::texture_2d(PixelFormat::RGB10A82PXR10, w, h, false);
+        descriptor.usage = usage;
+        descriptor.resource_options = options;
+        let flat_answer = device.heap_texture_size_and_align(&descriptor).unwrap();
+        let flat_at = 0x8000;
+        let flat = heap.new_texture_at_offset(&descriptor, flat_at).unwrap();
+        descriptor.texture_type = TextureType::Type3D;
+        descriptor.depth = d;
+        let answer = device.heap_texture_size_and_align(&descriptor).unwrap();
+        assert_eq!(answer, flat_answer, "the 2D texture's answer");
+        let volume = heap.new_texture_at_offset(&descriptor, 0).unwrap();
+        let span = answer.size as usize;
+        let kernels = Kernels::new(device);
+        let [read, written, queries] =
+            ["xr2pv_read", "xr2pv_write", "xr2pv_queries"].map(|name| volume_state(device, name));
+        let texels = (w * h * d) as usize;
+        // Both textures' planes hold the same bytes; every read of the volume is the flat
+        // texture's read of (0, 0).
+        let mut pattern: Vec<u8> = (0..PLANES_HEAP).map(|i| (i * 89 + 7) as u8).collect();
+        let first: Vec<u8> = pattern[..span].to_vec();
+        pattern[flat_at as usize..flat_at as usize + span].copy_from_slice(&first);
+        put(device, &queue, &bytes, &pattern);
+        let out = buffer_with(device, &vec![0xab; 16 * texels]).unwrap();
+        run_volume(device, &queue, &read, (&volume, &out), [w, h, d], false);
+        let reads = read_buffer(&out, 0, 16 * texels as u64).unwrap();
+        let [_, flat_reads] = super::extended_range_two_planes::reads(
+            device,
+            &queue,
+            &kernels,
+            &flat,
+            Dispatch::Texels(w, h),
+        );
+        for n in 0..texels {
+            assert_eq!(
+                reads[16 * n..16 * n + 16],
+                flat_reads[..16],
+                "texel {n}'s read"
+            );
+        }
+        // A write at (x, y, z) lands as the flat texture's at (x, y).
+        let value = |x: u64, y: u64| -> [f32; 4] {
+            [
+                x as f32 / 16.0 - 0.5,
+                y as f32 / 8.0,
+                0.25,
+                (x + y) as f32 / 32.0,
+            ]
+        };
+        let values = |depth: u64| -> Vec<u8> {
+            (0..w * h * depth)
+                .flat_map(|n| value(n % w, n / w % h))
+                .flat_map(f32::to_le_bytes)
+                .collect()
+        };
+        let input = buffer_with(device, &values(d)).unwrap();
+        run_volume(
+            device,
+            &queue,
+            &written,
+            (&volume, &input),
+            [w, h, d],
+            false,
+        );
+        write(
+            device,
+            &queue,
+            &kernels,
+            &flat,
+            (&values(1), false),
+            Dispatch::Texels(w, h),
+        );
+        let got = get(device, &queue, &bytes, PLANES_HEAP);
+        assert!(
+            got[..span] == got[flat_at as usize..flat_at as usize + span],
+            "the volume's writes land where the flat texture's do"
+        );
+        assert!(
+            got[span..flat_at as usize] == pattern[span..flat_at as usize],
+            "and nowhere past its planes"
+        );
+        // A blit of two images from a buffer at z = 1: the second stays in the first slice.
+        let image = (4 * w * h) as usize;
+        let images: Vec<u8> = (0..2 * image).map(|i| (i * 7 + 3) as u8).collect();
+        let source = buffer_with(device, &images).unwrap();
+        blit_once(&queue, |blit| {
+            blit.copy_from_buffer_to_texture(
+                &source,
+                0,
+                4 * w,
+                4 * w * h,
+                Size::new(w, h, 2),
+                &volume,
+                0,
+                0,
+                Origin::new(0, 0, 1),
+                BlitOption::None,
+            )
+        });
+        let got = get(device, &queue, &bytes, PLANES_HEAP);
+        assert!(got[..image] == images[image..], "the second image's words");
+        // A blit of two images into a buffer at z = 1 reads texel (0, 0, 0)'s word everywhere.
+        let target = buffer_with(device, &vec![0; 2 * image]).unwrap();
+        blit_once(&queue, |blit| {
+            blit.copy_from_texture_to_buffer(
+                &volume,
+                0,
+                0,
+                Origin::new(0, 0, 1),
+                Size::new(w, h, 2),
+                &target,
+                0,
+                4 * w,
+                4 * w * h,
+                BlitOption::None,
+            )
+        });
+        let words = read_buffer(&target, 0, 2 * image as u64).unwrap();
+        for (n, word) in words.chunks(4).enumerate() {
+            assert_eq!(word, &got[..4], "word {n} of the blit out");
+        }
+        // CPU copies of two images at z = 1: the first image alone, at the first slice.
+        let host: Vec<u8> = (0..2 * image).map(|i| (i * 11 + 5) as u8).collect();
+        volume
+            .replace_region(
+                Region::new_3d(0, 0, 1, w, h, 2),
+                0,
+                0,
+                &host,
+                4 * w,
+                4 * w * h,
+            )
+            .unwrap();
+        let got = get(device, &queue, &bytes, PLANES_HEAP);
+        assert!(got[..image] == host[..image], "replaceRegion's first image");
+        let mut back = vec![0xab; 2 * image];
+        volume
+            .get_bytes(
+                &mut back,
+                4 * w,
+                4 * w * h,
+                Region::new_3d(0, 0, 1, w, h, 2),
+                0,
+                0,
+            )
+            .unwrap();
+        assert!(back[..image] == host[..image], "getBytes' first image");
+        assert!(
+            back[image..].iter().all(|&b| b == 0xab),
+            "getBytes' second image as it was"
+        );
+        // The queries.
+        let out = buffer_with(device, &[0xab; 64]).unwrap();
+        run_volume(device, &queue, &queries, (&volume, &out), [w, h, d], true);
+        let words: Vec<u32> = read_buffer(&out, 0, 64)
+            .unwrap()
+            .chunks(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        // A width or height query at a level past the texture's last reads the last level here
+        // (the translator's containment), where Metal halves the extent again: only the depth
+        // and the level count are compared there.
+        assert_eq!(words[..2], [w as u32, h as u32], "width and height");
+        let depths: Vec<[u32; 2]> = (0..4)
+            .map(|l| [words[4 * l + 2], words[4 * l + 3]])
+            .collect();
+        let want: Vec<[u32; 2]> = (0..4)
+            .map(|l| [(w.div_ceil(4) >> l).max(1) as u32, 1])
+            .collect();
+        assert_eq!(depths, want, "depth and levels at levels 0 to 3");
+        let notices = counts(&messages.take_notices());
+        assert!(
+            notices.contains_key(&Degradation::ShadowedTexture),
             "{notices:?}"
         );
+        assert_eq!(notices.get(&HEAP_PLANES[0]), None, "{notices:?}");
     });
 }
 

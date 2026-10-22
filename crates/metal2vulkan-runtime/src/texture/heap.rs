@@ -67,10 +67,12 @@
 //!   meets its texels as on Metal, and the device announces `shadowed-texture`. A mipmapped
 //!   texture's later levels lie in its image alone, and a 1D array's GPU reads read each texel,
 //!   where Metal's paths address those at bytes that differ by path (`heap-two-plane-layout`). A
-//!   3D texture of more than one depth slice, whose depth slices Metal's GPU writes lay over one
-//!   another, and one whose moves pass the device's limits alias none of the heap's bytes
-//!   (`AliasRoute::Unaliased`, `heap-two-plane-texture`). Metal answers a cube or cube array 0
-//!   bytes at 16 and makes neither.
+//!   3D texture's depth slices all lie over its first one's planes on Metal, its reads take its
+//!   first texel and its copies its first slice: its image's first depth slice is the shadow, and
+//!   its accesses keep to it (`lower::texture::emit::planes_volume`, `two_planes.rs`). One whose
+//!   moves pass the device's limits aliases none of the heap's bytes (`AliasRoute::Unaliased`,
+//!   `heap-two-plane-texture`). Metal answers a cube or cube array 0 bytes at 16 and makes
+//!   neither.
 //! - **`allowGPUOptimizedContents`**. A descriptor with it off plans its image as one of
 //!   `PixelFormatView` usage (`TextureDescriptor::image_usage`): Metal lays a color texture out
 //!   alike either way (16384 bytes for the 64x64 `RGBA8Unorm` texture only read), and MoltenVK
@@ -492,9 +494,9 @@ enum AliasRoute {
     /// (`shadowed-texture`).
     MemoryShadow,
     /// A two-plane extended-range texture's image, larger than Metal's answer
-    /// (`two_plane_heap_answer`), in memory of its own, that no shadow of its planes serves (a 3D
-    /// texture of more than one depth slice, or moves past the device's limits): it aliases none
-    /// of the heap's bytes, and no copy moves texels between them (`heap-two-plane-texture`).
+    /// (`two_plane_heap_answer`), in memory of its own, that no shadow of its planes serves (its
+    /// moves past the device's limits): it aliases none of the heap's bytes, and no copy moves
+    /// texels between them (`heap-two-plane-texture`).
     Unaliased,
     /// A two-plane extended-range texture's image, in memory of its own, whose first level's
     /// texels the encoders move from its planes in the heap's bytes, as Metal lays them, and back
@@ -3107,11 +3109,10 @@ impl Device {
 
     /// Metal's layout of the planes of a heap's two-plane texture of `layout` whose image is of
     /// `plan` (its first level's, `heap_two_planes.rs`), where the runtime holds the image as a
-    /// shadow of them: a 1D, 2D, 1D array or 2D array texture of any level count, or a 3D one of
-    /// one depth slice, of one sample, whose image takes copies, whose moves fit the device.
-    /// `None` for any other (a 3D texture of more depth slices, whose depth slices Metal's writes
-    /// lay over one another, or one past the device's limits), which lies apart from the heap's
-    /// bytes.
+    /// shadow of them: a 1D, 2D, 1D array, 2D array or 3D texture of any level count (a 3D one's
+    /// first depth slice, over which Metal lays every other), of one sample, whose image takes
+    /// copies, whose moves fit the device. `None` for any other (one past the device's limits),
+    /// which lies apart from the heap's bytes.
     fn two_plane_heap_layout(
         &self,
         layout: &TextureLayout,
@@ -3119,12 +3120,11 @@ impl Device {
     ) -> Option<TwoPlaneHeapLayout> {
         use TextureType as T;
         let copies = ImageUsageFlags::TRANSFER_SRC | ImageUsageFlags::TRANSFER_DST;
-        let [width, height, depth] = layout.extent.map(u64::from);
-        let shape = match layout.texture_type {
-            T::Type1D | T::Type2D | T::Type1DArray | T::Type2DArray => true,
-            T::Type3D => depth == 1,
-            _ => false,
-        };
+        let [width, height, _] = layout.extent.map(u64::from);
+        let shape = matches!(
+            layout.texture_type,
+            T::Type1D | T::Type2D | T::Type1DArray | T::Type2DArray | T::Type3D
+        );
         let held =
             shape && plan.samples == SampleCountFlags::COUNT_1 && plan.usage.contains(copies);
         let planes = TwoPlaneHeapLayout::of_texture(

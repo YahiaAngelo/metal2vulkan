@@ -777,6 +777,25 @@ impl BlitCommandEncoder {
                     (object, reason)
                 });
         }
+        // A two-plane 3D texture (`two_planes.rs`): Metal's blit into it writes each image of
+        // the region over texel `(x, y)` of its first slice in turn, so the last image stays
+        // there; its blit out of it reads texel `(0, 0, 0)` at every texel of every image.
+        if texture.texture_type() == TextureType::Type3D {
+            let first = ImageRegion {
+                origin: [image.origin[0], image.origin[1], 0],
+                size: [image.size[0], image.size[1], 1],
+                ..image
+            };
+            if !into_texture {
+                return self.plane_first_texel_copy(buffer, texture, &image, layout);
+            }
+            let last = u64::from(image.size[2].saturating_sub(1));
+            let layout = BufferLayout {
+                offset: layout.offset + last * layout.bytes_per_image,
+                ..*layout
+            };
+            return self.plane_words_copy(buffer, texture, &first, &layout, true);
+        }
         self.plane_words_copy(buffer, texture, &image, layout, into_texture)
     }
 
@@ -1249,12 +1268,25 @@ impl BlitCommandEncoder {
             return self.texel_copies(call, source, destination, copies);
         }
         // Two two-plane extended-range textures: their bytes moved as Metal's blit moves them,
-        // where that was measured; else (announced) both words of each texel, below.
+        // where that was measured; else (announced) both words of each texel, below, a 3D one's
+        // at its first depth slice, where its texels lie (`two_planes.rs`).
         if two_planes::holds_planes(source.pixel_format())
             && self.modelled_plane_copies(source, destination, copies)?
         {
             return Ok(());
         }
+        let first_slices: Vec<ImageCopyRegion>;
+        let copies = match two_planes::holds_planes(source.pixel_format())
+            && [source, destination]
+                .iter()
+                .any(|t| t.texture_type() == TextureType::Type3D)
+        {
+            true => {
+                first_slices = copies.iter().map(two_planes::first_slices).collect();
+                &first_slices[..]
+            }
+            false => copies,
+        };
         // A region copied onto itself keeps its texels in whatever order Metal copies them
         // (probes): nothing is recorded for it. Between other overlapping regions of one texture
         // Metal's copy races past a few hundred texels across (probes 7 and 7b). Such a copy goes

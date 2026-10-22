@@ -278,6 +278,10 @@ recorded here.
 Open differences from Metal that no note announces yet, and runtime costs still above the
 driver's. Each is open work.
 
+- **A mipmapped two-plane 3D texture's reads** (`RGB10A8_2P_XR10` and its sRGB twin): Metal's
+  read and sample take bytes within the texture's first 4 KiB that vary from run to run, where a
+  shader here reads its first texel, as of a one-level one (`lower::texture::emit::planes_volume`).
+
 - **A draw under Apple's last provoking vertex on a device without it** (MoltenVK), whose pipeline
   state reads flat inputs or selects a slice or viewport (or a strip's whose fragment function
   reads barycentrics): it draws the list of its primitives led by their last vertices
