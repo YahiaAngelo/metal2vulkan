@@ -5,7 +5,8 @@
 //!
 //! - Each `_with_reflection` creation form returns the state and, under `BINDING_INFO`,
 //!   `BUFFER_TYPE_INFO` or both, the descriptor's reflection; under neither, none, as Metal leaves
-//!   `reflection` nil. Spot checks hold Metal's answers: a false function constant leaves its
+//!   `reflection` nil. The state answers the same after its creation (`compiled_reflection`),
+//!   under any options. Spot checks hold Metal's answers: a false function constant leaves its
 //!   argument out, a stage input or vertex descriptor's buffers come first, and a tile function's
 //!   imageblock is a binding. The tile form is checked over the measured tile fixture, whose
 //!   implicit imageblock is a `float4` over an `RGBA8Unorm` attachment, and over the engine
@@ -125,7 +126,7 @@ fn compute_states_return_their_reflection() {
         );
         assert!(!expected.bindings()[5].is_used());
         for (option, reflects) in options() {
-            let (_state, reflection) = device
+            let (state, reflection) = device
                 .new_compute_pipeline_state_with_reflection(
                     &descriptor,
                     &PipelineOptions::new(option),
@@ -135,7 +136,9 @@ fn compute_states_return_their_reflection() {
             if let Some(r) = reflection {
                 assert_eq!(r, expected, "{option:?}");
             }
-            let (_state, reflection) = device
+            // After the creation too, whatever the options asked.
+            assert_eq!(state.compiled_reflection().unwrap(), expected, "{option:?}");
+            let (state, reflection) = device
                 .new_compute_pipeline_state_with_function_and_reflection(
                     &function,
                     &PipelineOptions::new(option),
@@ -145,6 +148,7 @@ fn compute_states_return_their_reflection() {
             if let Some(r) = reflection {
                 assert_eq!(r, expected, "{option:?}");
             }
+            assert_eq!(state.compiled_reflection().unwrap(), expected, "{option:?}");
         }
 
         let kernel = library(device, "stage_in")
@@ -167,13 +171,14 @@ fn compute_states_return_their_reflection() {
             s.layouts.insert(buffer, layout);
         }
         stage_in.stage_input = Some(s);
-        let (_state, reflection) = device
+        let (state, reflection) = device
             .new_compute_pipeline_state_with_reflection(
                 &stage_in,
                 &PipelineOptions::new(PipelineOption::BINDING_INFO),
             )
             .unwrap();
         let reflection = reflection.unwrap();
+        assert_eq!(state.compiled_reflection().unwrap(), reflection);
         let bindings = reflection.bindings();
         assert_eq!(
             names(bindings),
@@ -236,7 +241,7 @@ fn render_and_tile_states_return_their_reflection() {
         );
         assert!(expected.tile_bindings().is_empty());
         for (option, reflects) in options() {
-            let (_state, reflection) = device
+            let (state, reflection) = device
                 .new_render_pipeline_state_with_reflection(
                     &descriptor,
                     &PipelineOptions::new(option),
@@ -246,6 +251,7 @@ fn render_and_tile_states_return_their_reflection() {
             if let Some(r) = reflection {
                 assert_eq!(r, expected, "{option:?}");
             }
+            assert_eq!(state.compiled_reflection().unwrap(), expected, "{option:?}");
         }
 
         let tile_function = library(device, "tile")
@@ -267,7 +273,7 @@ fn render_and_tile_states_return_their_reflection() {
         // normalized attachment (`air.load.implicit_imageblock.v4f32`): the creation form returns
         // its descriptor's reflection.
         for (option, reflects) in options() {
-            let (_state, reflection) = device
+            let (state, reflection) = device
                 .new_tile_render_pipeline_state_with_reflection(
                     &tile,
                     &PipelineOptions::new(option),
@@ -277,6 +283,7 @@ fn render_and_tile_states_return_their_reflection() {
             if let Some(r) = reflection {
                 assert_eq!(r, expected, "{option:?}");
             }
+            assert_eq!(state.compiled_reflection().unwrap(), expected, "{option:?}");
         }
 
         // A tile function the compile layer takes on every device (`tile_states` makes its
@@ -297,7 +304,7 @@ fn render_and_tile_states_return_their_reflection() {
             BindingType::Imageblock
         );
         for (option, reflects) in options() {
-            let (_state, reflection) = device
+            let (state, reflection) = device
                 .new_tile_render_pipeline_state_with_reflection(
                     &grid,
                     &PipelineOptions::new(option),
@@ -307,6 +314,7 @@ fn render_and_tile_states_return_their_reflection() {
             if let Some(r) = reflection {
                 assert_eq!(r, expected, "{option:?}");
             }
+            assert_eq!(state.compiled_reflection().unwrap(), expected, "{option:?}");
         }
     });
 }

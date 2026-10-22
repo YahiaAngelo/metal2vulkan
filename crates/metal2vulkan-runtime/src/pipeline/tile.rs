@@ -25,7 +25,6 @@ use super::render::RenderPipelineState;
 use super::texture_access::{TextureAccessMemo, TextureAccesses};
 use super::{ComputePipelineState, Kernel, PipelineOptions};
 use crate::binary_archive::Used;
-use crate::device::device_error;
 use crate::error::Error;
 use crate::Device;
 use metal2vulkan::metal::format::{explicit_imageblock_sample_length, imageblock_sample_length};
@@ -81,12 +80,7 @@ impl Device {
         // The descriptor the state was made from, with the dynamic libraries its creation loaded
         // (`dynamic_library.rs`).
         let reflection = match options.options.reflects() {
-            true => Some(
-                state
-                    .descriptor()
-                    .reflection(&options.budget())
-                    .map_err(device_error)?,
-            ),
+            true => Some(state.kernel().tile_reflection(&options.budget())?),
             false => None,
         };
         Ok((RenderPipelineState::of_tile(state), reflection))
@@ -152,11 +146,11 @@ impl TileState {
         &self.0.descriptor
     }
 
-    /// The tile function's texture slots and their accesses, from the descriptor's reflection
-    /// the first time.
+    /// The tile function's texture slots and their accesses, from the pipeline's reflection
+    /// (`ComputePipelineState::tile_reflection`, what its compile kept) the first time.
     pub(crate) fn texture_accesses(&self) -> Result<&TextureAccesses, Error> {
         TextureAccesses::remembered(&self.0.texture_accesses, |budget| {
-            self.0.descriptor.reflection(budget)
+            self.kernel().tile_reflection(budget)
         })
     }
 

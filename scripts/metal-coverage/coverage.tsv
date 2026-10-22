@@ -985,7 +985,7 @@ MTLComputePipeline.h	MTLComputePipelineDescriptor	property	contentionRelief		M		
 MTLComputePipeline.h	MTLComputePipelineDescriptor	property	optimizeForPersistentKernel		M			persistent kernels (macOS 27): forward progress and contention hints, unmeasured	L	persistent
 MTLComputePipeline.h	MTLComputePipelineState	protocol	MTLComputePipelineState		I	runtime	ComputePipelineState			
 MTLComputePipeline.h	MTLComputePipelineState	property	label		I	runtime	ComputePipelineState::label			
-MTLComputePipeline.h	MTLComputePipelineState	property	reflection		M			the state's reflection after creation (macOS 15); the runtime gives it at creation (`new_compute_pipeline_state_with_reflection`)	S	reflection
+MTLComputePipeline.h	MTLComputePipelineState	property	reflection		M			the state's reflection after creation (macOS 26), nil for a state a device made, set only by Metal 4's compiler; the runtime gives the creation's answer at creation (`new_compute_pipeline_state_with_reflection`) and after it (`ComputePipelineState::compiled_reflection`)	S	reflection
 MTLComputePipeline.h	MTLComputePipelineState	method	functionHandleWithName:		M			a handle by function name; the runtime takes the `Function` (`ComputePipelineState::function_handle`)	S	function-handles
 MTLComputePipeline.h	MTLComputePipelineState	method	functionHandleWithBinaryFunction:		I	runtime	ComputePipelineState::function_handle			
 MTLComputePipeline.h	MTLComputePipelineState	method	newComputePipelineStateWithBinaryFunctions:error:		I	runtime	ComputePipelineState::new_compute_pipeline_state_with_additional_binary_functions			
@@ -1799,7 +1799,7 @@ MTLRenderPipeline.h	MTLRenderPipelineFunctionsDescriptor	property	tileAdditional
 MTLRenderPipeline.h	MTLRenderPipelineState	protocol	MTLRenderPipelineState		I	runtime	RenderPipelineState			
 MTLRenderPipeline.h	MTLRenderPipelineState	property	label		I	runtime	RenderPipelineState::label			
 MTLRenderPipeline.h	MTLRenderPipelineState	property	device		I	runtime	RenderPipelineState::device			
-MTLRenderPipeline.h	MTLRenderPipelineState	property	reflection		M			the state's reflection after creation (macOS 15); the runtime gives it at creation (`new_render_pipeline_state_with_reflection`)	S	reflection
+MTLRenderPipeline.h	MTLRenderPipelineState	property	reflection		M			the state's reflection after creation (macOS 26), nil for a state a device made, set only by Metal 4's compiler; the runtime gives the creation's answer at creation (`new_render_pipeline_state_with_reflection`) and after it (`RenderPipelineState::compiled_reflection`)	S	reflection
 MTLRenderPipeline.h	MTLRenderPipelineState	method	functionHandleWithName:stage:		M			a handle by function name; the runtime takes the `Function` (`RenderPipelineState::function_handle`)	S	function-handles
 MTLRenderPipeline.h	MTLRenderPipelineState	method	functionHandleWithBinaryFunction:stage:		I	runtime	RenderPipelineState::function_handle			
 MTLRenderPipeline.h	MTLRenderPipelineState	method	newRenderPipelineStateWithBinaryFunctions:error:		I	runtime	RenderPipelineState::new_render_pipeline_state_with_additional_binary_functions			
