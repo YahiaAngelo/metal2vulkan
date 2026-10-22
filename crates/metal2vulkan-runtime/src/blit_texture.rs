@@ -217,6 +217,35 @@ fn multisampled_texels(region: &TextureRegion) -> Written {
     }
 }
 
+/// The box a multisampled copy of `region` into `texture`'s `aspect` writes, every sample of it.
+fn multisampled_box(
+    texture: &Texture,
+    aspect: ImageAspectFlags,
+    region: &TextureRegion,
+) -> Result<Covered, Error> {
+    let [x, y, z] = region.origin;
+    let [width, height, depth] = region.size;
+    Ok(Covered {
+        image: texture.raw_image()?,
+        subresource: vk::ImageSubresourceLayers {
+            aspect_mask: aspect.into(),
+            mip_level: region.level,
+            base_array_layer: region.slice,
+            layer_count: 1,
+        },
+        offset: vk::Offset3D {
+            x: x as i32,
+            y: y as i32,
+            z: z as i32,
+        },
+        extent: vk::Extent3D {
+            width,
+            height,
+            depth,
+        },
+    })
+}
+
 /// The copy unit of `texture` copied with `option`.
 pub(super) fn unit(
     call: &'static str,
@@ -472,11 +501,15 @@ impl BlitCommandEncoder {
             )?;
             return match planned {
                 Some(copy) => {
-                    self.command_in(copy.stages, &copy.uses, |device, raw| {
+                    // Every sample of the region written: a heap shadow it covers takes no copy
+                    // in.
+                    let covered = [multisampled_box(destination_texture, aspect, &region)?];
+                    let boxes = (&[][..], &covered[..]);
+                    self.command_in_reading(copy.stages, &copy.uses, boxes, |device, raw| {
                         // SAFETY: the encoder's command buffer is recording outside a render
-                        // pass; the buffer (held by `blit_at`), the texture, and the copy's
-                        // images and objects (held by the copy, retained below) are live until
-                        // it completes.
+                        // pass; the buffer (held by `blit_at`), the texture and the copy's
+                        // images and objects (held by the copy; both retained below) are live
+                        // until it completes.
                         unsafe { copy.record(device, raw) };
                     })?;
                     // A depth written as the single-sample path writes one announces as it does.
@@ -486,6 +519,7 @@ impl BlitCommandEncoder {
                     let format = destination_texture.pixel_format();
                     copy.announce_staging(self.core().device(), format, true);
                     self.core().retain(copy);
+                    self.core().retain(destination_texture.clone());
                     // Every sample of the region written, as the single-sample path's.
                     let written = multisampled_texels(&region);
                     self.scrub(destination_texture, vec![(aspect.into(), written)])
@@ -634,6 +668,7 @@ impl BlitCommandEncoder {
                     let format = source_texture.pixel_format();
                     copy.announce_staging(self.core().device(), format, false);
                     self.core().retain(copy);
+                    self.core().retain(source_texture.clone());
                     Ok(())
                 }
                 None => Err(Error::NotImplemented(RuntimeGap::MultisampledBufferCopy)),

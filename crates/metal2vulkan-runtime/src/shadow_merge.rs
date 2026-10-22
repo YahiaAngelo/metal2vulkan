@@ -876,9 +876,10 @@ impl ShadowMerge {
         unsafe {
             match (&self.keep_dispatch, self.kept_in) {
                 (Some(keep), _) => keep.record(device, command_buffer),
-                (None, KeptIn::Part(kept)) => {
-                    self.record_out(device, command_buffer, copies, kept);
-                }
+                (None, KeptIn::Part(kept)) => match self.cut {
+                    Some(_) => self.record_out(device, command_buffer, copies, kept),
+                    None => copies.record_kept(device, command_buffer, kept.raw, kept.at),
+                },
                 (
                     None,
                     KeptIn::Image {

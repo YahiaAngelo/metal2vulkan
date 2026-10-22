@@ -2607,10 +2607,11 @@ pub struct WorkCounts {
     /// bytes meet (`host_aliases.rs`): a use of a range met by no more ranges than the classes of
     /// length that lookup visits reads those its range keeps instead.
     pub host_range_lookups: u64,
-    /// Textures made in heaps laid out as Metal tiles them, each a shadow of its elements in the
-    /// heap's bytes (`texture/heap_tiled.rs`): in a heap over host pages, and a depth or stencil
-    /// texture in any heap on a driver that lays such images apart from their memory or keeps
-    /// them GPU-optimized (MoltenVK).
+    /// Textures made in heaps laid out as Metal tiles them, each a shadow of its elements (a
+    /// multisample texture's samples) in the heap's bytes (`texture/heap_tiled.rs`): in a heap over
+    /// host pages, a depth or stencil texture in any heap on a driver that lays such images apart
+    /// from their memory or keeps them GPU-optimized (MoltenVK), and a multisample texture in any
+    /// heap whose memory takes no image of it.
     pub heap_textures_tiled: u64,
     /// The images heap textures' plans made only to ask their memory requirements, destroyed at
     /// once: none for a plan and tiling asked before on a device that enables `maintenance4`,

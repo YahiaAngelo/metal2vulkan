@@ -143,7 +143,7 @@ impl Texture {
                     size: run.end - run.start,
                 })
                 .collect();
-            let shape = (&planes[..], tight_len);
+            let shape = (&planes[..], tight_len, 1);
             let tiles = HeapTiledCopies::new(device, &staging, tiled, shape, &regions, hazard)?;
             let (truth, tracked) = texels.buffer.tracked(base..end);
             let copies = ShadowCopies {

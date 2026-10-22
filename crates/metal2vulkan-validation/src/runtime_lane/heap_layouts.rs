@@ -29,12 +29,12 @@
 //!   (`Device::degraded_objects`, and its kind's `WorkCounts` field) and usable: the notice is
 //!   not fatal. Each kind is announced once per device, in the call that made its first texture,
 //!   with that texture's ID, and at each texture only where the device's options ask.
-//! - **Multisample textures**. One Metal keeps losslessly compressed lies in memory of its own:
-//!   counted and announced `heap-texture-lossless-layout`, usable (a pass clears and resolves it),
-//!   the heap's bytes keeping every byte they held; the heap's detach is refused while it lives (no
-//!   stand-in zeroes samples). One Metal keeps uncompressed lies in memory of its own too: counted
-//!   and announced `heap-texture-untiled-layout`, usable. The size query answers at least Metal's
-//!   for both.
+//! - **Multisample textures**. One Metal keeps losslessly compressed is a shadow of its samples
+//!   in the tiles Metal lays it in uncompressed: counted and announced
+//!   `heap-texture-lossless-layout`, usable (a pass clears and resolves it); the heap's detach is
+//!   refused while it lives (no stand-in zeroes samples). One Metal keeps uncompressed is a shadow
+//!   of its samples in Metal's tiles: counted tiled, no notice, each sample at Metal's bytes both
+//!   ways. The size query answers at least Metal's for both.
 
 use super::degrade_notices::{counts, on_device, on_device_with};
 use super::host_memory::{not_importable, run, Mapping};
@@ -623,12 +623,12 @@ fn a_command_writing_a_tiled_texture_two_ways_keeps_both_writes() {
 }
 
 /// A texture Metal keeps losslessly compressed (a colour one, a `Depth32Float_Stencil8` one and an
-/// `X32_Stencil8` one), one of a block-compressed format whose placement its device's Metal level
-/// does not measure (PVRTC at macOS 26.7's, `DeviceOptions::metal_level`) and one whose samples
-/// Metal lays out in the heap's bytes (an uncompressed multisample one, which lies apart from
-/// them), each in a heap over host pages, are counted in their kind's field and
-/// `Device::degraded_objects`, and the first of each kind is announced in the call that made it,
-/// with its ID; each is usable after. Four compressed textures, one notice, a count of four.
+/// `X32_Stencil8` one) and one of a block-compressed format whose placement its device's Metal
+/// level does not measure (PVRTC at macOS 26.7's, `DeviceOptions::metal_level`), each in a heap
+/// over host pages, are counted in their kind's field and `Device::degraded_objects`, and the
+/// first of each kind is announced in the call that made it, with its ID; each is usable after.
+/// Four compressed textures, one notice, a count of four. (A multisample texture's samples lie in
+/// Metal's tiles: `a_host_heap_s_multisample_textures_hold_their_samples_in_metal_s_tiles`.)
 #[test]
 fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced_once() {
     let at_26_7 = |options: &mut DeviceOptions| options.metal_level = Some(MetalLevel::MacOS26_7);
@@ -652,12 +652,6 @@ fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced
         let mut stencil = TextureDescriptor::texture_2d(PixelFormat::X32Stencil8, 32, 32, false);
         stencil.resource_options = shared();
         stencil.usage = read;
-        let mut samples = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 32, 32, false);
-        samples.resource_options = shared();
-        samples.texture_type = TextureType::Type2DMultisample;
-        samples.sample_count = 4;
-        samples.usage = TextureUsage::RENDER_TARGET;
-        samples.allow_gpu_optimized_contents = false;
         // Metal's answer for the compressed shape (`heap_textures`): its
         // metadata included.
         let answer = device.heap_texture_size_and_align(&compressed).unwrap();
@@ -668,7 +662,6 @@ fn heap_textures_laid_out_otherwise_than_metal_s_tiles_are_counted_and_announced
             (blocks, Degradation::HeapTextureBlockCompressedLayout, 2),
             (aspects, Degradation::HeapTextureLosslessLayout, 1),
             (stencil, Degradation::HeapTextureLosslessLayout, 1),
-            (samples, Degradation::HeapTextureUntiledLayout, 3),
         ];
         let mut offset = 0u64;
         let mut kept = Vec::new();
@@ -1188,20 +1181,20 @@ fn block_rows_lie_as_their_level_lays_them_out(
     );
 }
 
-/// A 4-sample 64 x 64 `RGBA8Unorm` render target in a heap over host pages: with
-/// `allowGPUOptimizedContents`, which Metal keeps losslessly compressed, made in memory of its own,
-/// counted and announced (`heap-texture-lossless-layout`, the first of its kind, with its ID); the
-/// heap's detach refused while it lives (`NotImplemented(DetachTextures)`); a pass clears it and
-/// resolves it into a texture that reads the clear colour in every texel, and the heap's bytes
-/// keep every byte they held. Without it, which Metal keeps uncompressed (its samples side by side
-/// in Metal's tiles in the heap's bytes), made in memory of its own too, counted and announced
-/// `heap-texture-untiled-layout` with its ID; a pass clears and resolves it alike, the heap's
-/// bytes kept. The size query answers at least Metal's for
-/// each on every device (66048 and 65536 bytes at 128; and measured for the
-/// uncompressed one where the device cannot hold its samples in the heap's bytes, an NVIDIA GPU's:
-/// no optimal image in host-visible memory, no multisample linear image).
+/// 4-sample 64 x 64 render targets in a heap over host pages, each a shadow of its samples in
+/// the heap's bytes. With `allowGPUOptimizedContents`, an `RGBA8Unorm` one, which Metal keeps
+/// losslessly compressed: held in the tiles Metal lays it in uncompressed, counted and announced
+/// (`heap-texture-lossless-layout`, the first of its kind, with its ID); the heap's detach refused
+/// while it lives (`NotImplemented(DetachTextures)`: no stand-in zeroes samples); a pass clears it
+/// and resolves it into a texture that reads the clear colour in every texel. Without it, which
+/// Metal keeps uncompressed: an `RGBA8Unorm` one and a `Depth32Float` one, counted tiled with no
+/// layout notice, each sample of each found in the heap's bytes where Metal's tiles place it after
+/// a blit naming it, and bytes written there read back by a blit
+/// (`heap_textures::sample_round_trip`). The size query answers at least Metal's for each on every
+/// device (66048 and 65536 bytes at 128).
 #[test]
-fn a_host_heap_s_multisample_textures_lie_apart_from_its_bytes() {
+fn a_host_heap_s_multisample_textures_hold_their_samples_in_metal_s_tiles() {
+    use super::heap_textures::sample_round_trip;
     on_device(|device, messages| {
         if device.properties().supports_texture_sample_count(4) != Ok(true) {
             eprintln!("HEAPLAYOUT multisample: the device takes no 4-sample texture");
@@ -1219,14 +1212,14 @@ fn a_host_heap_s_multisample_textures_lie_apart_from_its_bytes() {
         compressed.resource_options = shared();
         let mut plain = compressed;
         plain.allow_gpu_optimized_contents = false;
-        for (descriptor, size) in [(&compressed, 66048), (&plain, 65536)] {
+        let mut depth = plain;
+        depth.pixel_format = PixelFormat::Depth32Float;
+        for (descriptor, size) in [(&compressed, 66048), (&plain, 65536), (&depth, 65536)] {
             match device.heap_texture_size_and_align(descriptor) {
                 Ok(answer) => assert!(answer.size >= size && answer.align >= 128, "{answer:?}"),
                 Err(error) => panic!("the size query: {error:?}"),
             }
         }
-        let before = named(HEAP, 11);
-        mapping.write(0, &before);
         let kind = Degradation::HeapTextureLosslessLayout;
         let objects = device
             .degraded_objects(kind)
@@ -1248,50 +1241,59 @@ fn a_host_heap_s_multisample_textures_lie_apart_from_its_bytes() {
             Err(Error::NotImplemented(RuntimeGap::DetachTextures)) => {}
             other => panic!("a detach with a multisample texture: {other:?}"),
         }
-        // Without it: made apart too, its samples' layout announced.
-        let untiled = Degradation::HeapTextureUntiledLayout;
-        let untiled_objects = device
-            .degraded_objects(untiled)
-            .expect("a kind counted per texture");
-        let uncompressed = heap.new_texture_at_offset(&plain, 3 * OFFSET).unwrap();
-        assert_eq!(
-            layout_notices(messages),
-            [(untiled, Some(uncompressed.object_id()))]
-        );
-        assert_eq!(device.degraded_objects(untiled), Some(untiled_objects + 1));
         let mut target = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 64, 64, false);
         target.usage = TextureUsage::RENDER_TARGET;
         target.resource_options = shared();
         let resolved = device.new_texture(&target).unwrap();
         let queue = device.new_command_queue().unwrap();
-        for source in [&texture, &uncompressed] {
-            let mut pass = RenderPassDescriptor::new();
-            let color = &mut pass.color_attachments[0];
-            color.texture = Some(source.clone());
-            color.load_action = LoadAction::Clear;
-            color.clear_color = ClearColor::new(0.2, 0.4, 0.6, 1.0);
-            color.store_action = StoreAction::MultisampleResolve;
-            color.resolve_texture = Some(resolved.clone());
-            let command_buffer = queue.command_buffer().unwrap();
-            let encoder = command_buffer.render_command_encoder(&pass).unwrap();
-            encoder.end_encoding().unwrap();
-            run(&command_buffer);
-            let mut texels = vec![0u8; 64 * 64 * 4];
-            let region = Region::new_2d(0, 0, 64, 64);
-            resolved
-                .get_bytes(&mut texels, 64 * 4, 0, region, 0, 0)
-                .unwrap();
-            assert!(
-                texels.chunks(4).all(|texel| texel == [51, 102, 153, 255]),
-                "resolved: {:?}",
-                &texels[..16]
+        let mut pass = RenderPassDescriptor::new();
+        let color = &mut pass.color_attachments[0];
+        color.texture = Some(texture.clone());
+        color.load_action = LoadAction::Clear;
+        color.clear_color = ClearColor::new(0.2, 0.4, 0.6, 1.0);
+        color.store_action = StoreAction::MultisampleResolve;
+        color.resolve_texture = Some(resolved.clone());
+        let command_buffer = queue.command_buffer().unwrap();
+        let encoder = command_buffer.render_command_encoder(&pass).unwrap();
+        encoder.end_encoding().unwrap();
+        run(&command_buffer);
+        let mut texels = vec![0u8; 64 * 64 * 4];
+        let region = Region::new_2d(0, 0, 64, 64);
+        resolved
+            .get_bytes(&mut texels, 64 * 4, 0, region, 0, 0)
+            .unwrap();
+        assert!(
+            texels.chunks(4).all(|texel| texel == [51, 102, 153, 255]),
+            "resolved: {:?}",
+            &texels[..16]
+        );
+        // Without it: its samples in Metal's tiles, both ways.
+        use BlitOption::None as WHOLE;
+        for (descriptor, at) in [(&plain, 3 * OFFSET), (&depth, 5 * OFFSET)] {
+            let what = format!("{:?}", descriptor.pixel_format);
+            let size = device.heap_texture_size_and_align(descriptor).unwrap().size;
+            let before = device.work_counts();
+            let samples = heap.new_texture_at_offset(descriptor, at).unwrap();
+            let counted = layouts_counted(&before, &device.work_counts());
+            assert_eq!(counted, [1, 0, 0, 0], "{what}: counted tiled");
+            assert_eq!(layout_notices(messages), [], "{what}");
+            let from = at as usize;
+            let read = || mapping.read(from..from + size as usize);
+            let write = |bytes: &[u8]| mapping.write(from, bytes);
+            let shape = ([64, 64], 4);
+            let round =
+                sample_round_trip(&queue, &samples, shape, &[(4, WHOLE, 0, 0)], &read, &write);
+            let Some((off, read_off)) = round else {
+                panic!("{what}: its blits refused");
+            };
+            eprintln!(
+                "HEAPLAYOUT multisample {what}: {off} samples off Metal's tiles, {read_off} read \
+                 otherwise"
             );
+            assert_eq!((off, read_off), (0, 0), "{what}: samples off Metal's tiles");
         }
-        let after = mapping.read(0..HEAP);
-        let differ = (0..HEAP).filter(|&i| after[i] != before[i]).count();
-        assert_eq!(differ, 0, "the heap's bytes changed");
-        drop((texture, uncompressed, resolved, heap));
+        drop((texture, resolved, heap));
         drop(mapping);
-        eprintln!("HEAPLAYOUT multisample: compressed and uncompressed made apart");
+        eprintln!("HEAPLAYOUT multisample: compressed and uncompressed held in Metal's tiles");
     });
 }

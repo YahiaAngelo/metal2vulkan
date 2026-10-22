@@ -1112,10 +1112,13 @@ degradations! {
              for an output it computes; where Metal's compiler folds the output to a constant that \
              zeroes the factor (an alpha of the literal 1 under `OneMinusSourceAlpha`), Metal \
              stores zero there (measured on an Apple M4)";
-        /// A blit copy into a multisampled 32-bit float depth texture from a colour one, or a
-        /// render pass's separate multisampled 32-bit float depth texture copied to and from its
-        /// scratch image (`depth_stencil_scratch.rs`), by the sample-rate `FragDepth` draw
-        /// (`sample_copy.rs`, `depth_copy.rs`), on a device whose copies go by draws and whose
+        /// A blit copy into a multisampled 32-bit float depth texture from a colour one, a render
+        /// pass's separate multisampled 32-bit float depth texture copied to and from its scratch
+        /// image (`depth_stencil_scratch.rs`), or a heap's such texture held as a shadow of its
+        /// samples in Metal's tiles, which takes the heap's bytes (`texture/heap_tiled.rs`; then a
+        /// value the draw changes is written back to the heap's bytes changed, announced as the
+        /// texture is made), by the sample-rate `FragDepth` draw (`sample_copy.rs`,
+        /// `depth_copy.rs`), on a device whose copies go by draws and whose
         /// driver's fragment depth is not measured to store every value unchanged
         /// (`depth_copy::drawn`): measured to change some values (MoltenVK, NVIDIA's), or not
         /// measured at all (any other driver, and lavapipe releases not measured). Both copies
@@ -1438,19 +1441,21 @@ degradations! {
         /// `PixelFormatView` usage, or a depth or stencil format): its bytes on Metal are no
         /// layout of its texels, so the runtime lays them out as its own, its uncompressed tiles
         /// where it tiles them (`texture/heap_tiled.rs`). A multisample texture so (its sample
-        /// grid's shorter side 16 or more) lies in memory of its own, the heap's bytes keeping
-        /// what they held. Also such a texture whose image lies in a heap over the device's
-        /// memory: the image, of the runtime's usage, need not be compressed as Metal's.
+        /// grid's shorter side 16 or more) holds its samples in its uncompressed tiles, or, where
+        /// the device does not move its samples to and from a buffer, lies in memory of its own,
+        /// the heap's bytes keeping what they held. Also such a texture whose image lies in a heap
+        /// over the device's memory: the image, of the runtime's usage, need not be compressed as
+        /// Metal's.
         /// Announced once per device, in the call that made the first such texture, with its ID
         /// ([`DegradeNotice::object_id`]), or for each texture where `DeviceOptions::announce_each`
         /// asks; each texture counted
         /// ([`Device::degraded_objects`](crate::Device::degraded_objects)).
         HeapTextureLosslessLayout = "heap-texture-lossless-layout", Precision,
             "the texture's reads, writes and copies are Metal's, but its bytes in the heap are \
-             not Metal's compressed bytes (a single-sample texture's texels in the runtime's \
-             layout; a multisample texture's image lies in memory of its own, the heap's bytes \
-             keeping what they held): a buffer or texture over them reads and writes other \
-             bytes than Metal's would";
+             not Metal's compressed bytes (its texels or samples in the runtime's layout, or a \
+             multisample texture's image in memory of its own, the heap's bytes keeping what \
+             they held): a buffer or texture over them reads and writes other bytes than Metal's \
+             would";
         /// A texture of a block-compressed format made in a heap over host pages whose
         /// placement the device's Metal level does not measure: Metal places a format family's
         /// blocks in each level by a rule that differs by family and by release
@@ -1468,8 +1473,10 @@ degradations! {
              over them meets the blocks at other bytes than on Metal";
         /// A texture made in a heap over host pages that Metal lays out tiled where the runtime
         /// does not (`texture/heap_tiled.rs`): a layout not measured (a format whose layout in
-        /// Metal's heaps is not probed), an image that holds other bytes than Metal's elements, or
-        /// moves past the device's limits. Also a texture made in any other heap (over the device's
+        /// Metal's heaps is not probed), an image that holds other bytes than Metal's elements,
+        /// moves past the device's limits, or a multisample texture whose samples the device does
+        /// not move to and from a buffer (a 16-bit depth where its multisampled copies go by
+        /// draws), in memory of its own. Also a texture made in any other heap (over the device's
         /// memory) whose bytes there are not Metal's layout (`texture/heap.rs`): its image bound
         /// there in the driver's layout, on a driver whose colour images are not measured to lie as
         /// Metal's heap textures

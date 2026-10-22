@@ -1041,14 +1041,16 @@ const DEPTH_STENCIL_ROUTES: [Degradation; 3] = [
 /// keeps its layout optimized.
 pub(super) const OPTIMIZED: [Degradation; 1] = [Degradation::OptimizedDepthStencilTexture];
 
-/// A 4-sample depth texture without GPU-optimized contents, sized, made in a placement heap and on
-/// the device, announces `optimized-depth-stencil-texture` once where the driver keeps depth and
-/// stencil images GPU-optimized (`DriverFact::DepthStencilImagesStayGpuOptimized`: MoltenVK on
-/// Apple's GPUs), its answer then Metal's with the property on; elsewhere nothing. Made on the
-/// device first, it announces nothing there: nothing shows a device's own texture's layout. A
-/// single-sample one is a shadow of Metal's tiles there, at Metal's answer (16384 bytes for 64x64
-/// `Depth32Float`, measured on the M3 Max, where it answers 16512 with them), and announces it
-/// nowhere; nor do a color texture without them, and a depth texture with them.
+/// A 4-sample depth texture without GPU-optimized contents, sized and made in a placement heap,
+/// where the driver keeps depth and stencil images GPU-optimized
+/// (`DriverFact::DepthStencilImagesStayGpuOptimized`: MoltenVK on Apple's GPUs): a `Depth32Float`
+/// one is a shadow of its samples in Metal's tiles there, at Metal's answer (65536 bytes for 64x64,
+/// where it answers 66048 with them), announcing nothing, as a single-sample one is (16384, where
+/// it answers 16512 with them); a `Depth16Unorm` one, whose samples the device's draws there do not
+/// move, announces `optimized-depth-stencil-texture` once, its answer then Metal's with the
+/// property on. Elsewhere nothing announces it. Made on the device first, none announces it there:
+/// nothing shows a device's own texture's layout; nor do a color texture without the property, and
+/// a depth texture with it.
 #[test]
 fn a_multisample_depth_texture_without_optimized_contents_is_announced_where_it_stays_optimized() {
     let messages = Messages::default();
@@ -1080,8 +1082,9 @@ fn a_multisample_depth_texture_without_optimized_contents_is_announced_where_it_
         let with = make(PixelFormat::Depth32Float, true, 1);
         let single = make(PixelFormat::Depth32Float, false, 1);
         let with_samples = make(PixelFormat::Depth32Float, true, 4);
+        let without = make(PixelFormat::Depth32Float, false, 4);
         assert!(!counts(&messages.take_notices()).contains_key(&OPTIMIZED[0]));
-        let mut own = TextureDescriptor::texture_2d(PixelFormat::Depth32Float, 64, 64, false);
+        let mut own = TextureDescriptor::texture_2d(PixelFormat::Depth16Unorm, 64, 64, false);
         own.texture_type = TextureType::Type2DMultisample;
         own.sample_count = 4;
         own.usage = target;
@@ -1092,15 +1095,17 @@ fn a_multisample_depth_texture_without_optimized_contents_is_announced_where_it_
             !counts(&messages.take_notices()).contains_key(&OPTIMIZED[0]),
             "a device's own depth texture without optimized contents announced"
         );
-        let without = make(PixelFormat::Depth32Float, false, 4);
+        let short_with = make(PixelFormat::Depth16Unorm, true, 4);
+        let short = make(PixelFormat::Depth16Unorm, false, 4);
         eprintln!(
-            "HEAPTEX optimized depth: {} bytes with, {} without, one sample {} with, {} without \
-             (fact {optimized})",
-            with_samples.size, without.size, with.size, single.size
+            "HEAPTEX optimized depth: {} bytes with, {} without, one sample {} with, {} without; \
+             16-bit {} with, {} without (fact {optimized})",
+            with_samples.size, without.size, with.size, single.size, short_with.size, short.size
         );
         if optimized {
-            assert_eq!(with_samples, without);
+            assert_eq!((without.size, without.align), (65536, 128));
             assert_eq!((single.size, single.align), (16384, 128));
+            assert_eq!(short_with, short);
         }
         optimized
     };
@@ -1984,6 +1989,323 @@ fn heap_depth_textures_keep_their_texels_in_metal_s_tiles() {
     );
 }
 
+/// One aspect of one slice of a multisample texture a lane moves ([`sample_round_trip`]): its
+/// element bytes, its blit option, the slice, and its plane's first byte in that slice from the
+/// texture's.
+pub(super) type SampleAspect = (u64, BlitOption, u64, u64);
+
+/// Each sample of `texture` (`[w, h]` pixels of `samples` samples), each of its `aspects` uploaded
+/// by a blit naming it (a depth of `(i + 1) / 2^23` for sample `i`, exact; a 16-bit unorm of `i +
+/// 1`; a stencil byte of `i + 1`; a colour element of `i + 1`'s low bytes), found in the heap's
+/// bytes, which `read` reads from the texture's first, where Metal's tiles place it: the plane's
+/// first byte, then pixel `(x, y)`'s element of all its samples (`tiled_offset` of `samples · B`
+/// bytes), sample `s` at `s · B`, as the Metal probes on the M3 Max under macOS 27.0.1 found every
+/// sample (`texture/heap_tiled.rs`); and bytes `write` writes there, naming each sample backwards,
+/// read back by a blit as those samples. Metal's blits lay a pixel's samples one after another in
+/// the buffer. The samples off Metal's tiles each way; `None` where the runtime refuses such a
+/// blit (`NotImplemented(MultisampledBufferCopy)`: a 16-bit depth on a device whose multisampled
+/// copies go by draws).
+pub(super) fn sample_round_trip(
+    queue: &CommandQueue,
+    texture: &Texture,
+    ([w, h], samples): ([u64; 2], u64),
+    aspects: &[SampleAspect],
+    read: &dyn Fn() -> Vec<u8>,
+    write: &dyn Fn(&[u8]),
+) -> Option<(usize, usize)> {
+    use super::heap_layouts::tiled_offset;
+    let device = texture.device();
+    let count = w * h * samples;
+    let (mut off, mut read_off) = (0, 0);
+    for &(unit, option, slice, first) in aspects {
+        let element = |i: u64| -> Vec<u8> {
+            match (unit, option) {
+                (4, BlitOption::None | BlitOption::DepthFromDepthStencil)
+                    if is_depth_stencil(texture.pixel_format()) =>
+                {
+                    ((i + 1) as f32 / (1u32 << 23) as f32)
+                        .to_le_bytes()
+                        .to_vec()
+                }
+                _ => (i + 1)
+                    .to_le_bytes()
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(unit as usize)
+                    .collect(),
+            }
+        };
+        let named: Vec<u8> = (0..count).flat_map(element).collect();
+        let row = w * samples * unit;
+        let blit = |into: bool, buffer: &Buffer| {
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut blit = command_buffer.blit_command_encoder().unwrap();
+            let (origin, size) = (Origin::new(0, 0, 0), Size::new(w, h, 1));
+            let copied = match into {
+                true => blit.copy_from_buffer_to_texture(
+                    buffer,
+                    0,
+                    row,
+                    row * h,
+                    size,
+                    texture,
+                    slice,
+                    0,
+                    origin,
+                    option,
+                ),
+                false => blit.copy_from_texture_to_buffer(
+                    texture,
+                    slice,
+                    0,
+                    origin,
+                    size,
+                    buffer,
+                    0,
+                    row,
+                    row * h,
+                    option,
+                ),
+            };
+            blit.end_encoding().unwrap();
+            run(&command_buffer);
+            match copied {
+                Ok(()) => true,
+                Err(Error::NotImplemented(RuntimeGap::MultisampledBufferCopy)) => false,
+                Err(error) => panic!("a multisampled blit: {error:?}"),
+            }
+        };
+        if !blit(true, &staged(device, &named)) {
+            return None;
+        }
+        let bytes = read();
+        // Sample `i` is sample `i % samples` of pixel `i / samples`, in rows of pixels.
+        let at = |i: u64| {
+            let (pixel, s) = (i / samples, i % samples);
+            let (x, y) = (pixel % w, pixel / w);
+            (first + tiled_offset(samples * unit, [w, h], x, y) + s * unit) as usize
+        };
+        off += (0..count)
+            .filter(|&i| bytes.get(at(i)..at(i) + unit as usize) != Some(&element(i)[..]))
+            .count();
+        let mut backwards = bytes;
+        for i in 0..count {
+            let at = at(i);
+            if let Some(bytes) = backwards.get_mut(at..at + unit as usize) {
+                bytes.copy_from_slice(&element(count - 1 - i));
+            }
+        }
+        write(&backwards);
+        let read_back = staged(device, &vec![0; (row * h) as usize]);
+        if !blit(false, &read_back) {
+            return None;
+        }
+        let read_back = read_buffer(&read_back, 0, row * h).unwrap();
+        read_off += (0..count)
+            .filter(|&i| {
+                let at = (i * unit) as usize;
+                read_back[at..at + unit as usize] != element(count - 1 - i)[..]
+            })
+            .count();
+    }
+    Some((off, read_off))
+}
+
+/// A heap's multisample depth, stencil and colour textures keep their samples where Metal's tiles
+/// place them in a `Shared` placement heap's bytes ([`sample_round_trip`]) where the heap's memory
+/// takes no image of them: a shadow of their samples in Metal's tiles there, counted
+/// (`WorkCounts::heap_textures_tiled`), at Metal's answer (MoltenVK: no optimal depth or stencil
+/// image in host-visible memory), a multisample array's slices each its chain from the one before
+/// (an Apple M3 Max under macOS 27.0.1: every sample of 2- and 3-slice `Depth32Float` and
+/// `Stencil8` arrays drawn where the rule names). Every texture counted so, on every device, lies
+/// so both ways; on a driver that lays depth and stencil images apart or keeps them GPU-optimized,
+/// each uncompressed one of a 32-bit float depth or a stencil is counted, and a 64 x 64
+/// `Depth32Float` one with `allowGPUOptimizedContents` on (which Metal keeps compressed) holds its
+/// uncompressed tiles there, announced `heap-texture-lossless-layout` once. A `Depth16Unorm` one,
+/// whose samples the draws there do not move, and a colour one may lie otherwise, and a shape at a
+/// sample count the device takes not (lavapipe: 2 for depth) is left out: `HEAPTEX samples` lines
+/// print which.
+#[test]
+fn heap_multisample_textures_keep_their_samples_in_metal_s_tiles() {
+    use BlitOption::{DepthFromDepthStencil as DEPTH, None as WHOLE, StencilFromDepthStencil};
+    let messages = Messages::default();
+    let cache = ScratchCache::new().unwrap();
+    let tiled = {
+        let device = &validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
+        let facts = &device.properties().driver_facts;
+        let tiled = facts.contains(&DriverFact::DepthStencilImagesLieApart)
+            || facts.contains(&DriverFact::DepthStencilImagesStayGpuOptimized);
+        let queue = device.new_command_queue().unwrap();
+        let options = tracked(StorageMode::Shared);
+        let ds = PixelFormat::Depth32FloatStencil8;
+        // Each shape's format, extent, samples, slices, `allowGPUOptimizedContents` and Metal's
+        // size and alignment, measured, and its aspects of each slice: a slice's chain lies at
+        // its chain's bytes from the one before, at multiples of 16 KiB from a chain of 16 KiB on.
+        type Shape = (
+            PixelFormat,
+            [u64; 2],
+            u64,
+            u64,
+            bool,
+            (u64, u64),
+            Vec<SampleAspect>,
+        );
+        let one = |unit, option| vec![(unit, option, 0, 0)];
+        let slices = |unit, option, count, stride| {
+            (0..count)
+                .map(|slice| (unit, option, slice, slice * stride))
+                .collect()
+        };
+        let (d32, d16, s8) = (
+            PixelFormat::Depth32Float,
+            PixelFormat::Depth16Unorm,
+            PixelFormat::Stencil8,
+        );
+        let shapes: [Shape; 12] = [
+            (d32, [37, 5], 4, 1, false, (0x2000, 128), one(4, WHOLE)),
+            (d32, [100, 70], 2, 1, false, (0x18000, 128), one(4, WHOLE)),
+            (d32, [64, 64], 4, 1, true, (0x10200, 128), one(4, WHOLE)),
+            (
+                d32,
+                [64, 64],
+                2,
+                2,
+                false,
+                (0x10000, 0x4000),
+                slices(4, WHOLE, 2, 0x8000),
+            ),
+            (
+                d32,
+                [37, 5],
+                4,
+                3,
+                false,
+                (0x6000, 128),
+                slices(4, WHOLE, 3, 0x2000),
+            ),
+            (d16, [64, 64], 4, 1, false, (0x8000, 128), one(2, WHOLE)),
+            (s8, [37, 5], 4, 1, false, (0x800, 128), one(1, WHOLE)),
+            (s8, [100, 70], 2, 1, false, (0x8000, 128), one(1, WHOLE)),
+            (
+                s8,
+                [100, 70],
+                4,
+                2,
+                false,
+                (0x20000, 0x4000),
+                slices(1, WHOLE, 2, 0x10000),
+            ),
+            (
+                ds,
+                [64, 64],
+                4,
+                1,
+                false,
+                (0x14000, 128),
+                vec![(4, DEPTH, 0, 0), (1, StencilFromDepthStencil, 0, 0x10000)],
+            ),
+            (
+                PixelFormat::RGBA8Unorm,
+                [33, 33],
+                4,
+                1,
+                false,
+                (0x10000, 128),
+                one(4, WHOLE),
+            ),
+            (
+                PixelFormat::R16Float,
+                [37, 5],
+                2,
+                1,
+                false,
+                (0x800, 128),
+                one(2, WHOLE),
+            ),
+        ];
+        for (format, [w, h], samples, layers, allow, metal, aspects) in shapes {
+            let what = format!("{format:?} {w}x{h} x{samples} {layers} slices allow {allow}");
+            let mut descriptor = TextureDescriptor::texture_2d(format, w, h, false);
+            descriptor.texture_type = match layers {
+                1 => TextureType::Type2DMultisample,
+                _ => TextureType::Type2DMultisampleArray,
+            };
+            descriptor.array_length = layers;
+            descriptor.sample_count = samples;
+            descriptor.resource_options = options;
+            descriptor.usage = TextureUsage::SHADER_READ | TextureUsage::RENDER_TARGET;
+            descriptor.allow_gpu_optimized_contents = allow;
+            let answer = match device.heap_texture_size_and_align(&descriptor) {
+                Err(Error::Unsupported(u)) if u.feature == Feature::TextureSampleCount => {
+                    eprintln!("HEAPTEX samples {what}: the device takes no such sample count");
+                    continue;
+                }
+                answer => answer.unwrap(),
+            };
+            let heap = heap(device, HeapType::Placement, 1 << 20, options);
+            let before = device.work_counts().heap_textures_tiled;
+            let texture = heap.new_texture_at_offset(&descriptor, 0).unwrap();
+            let counted = device.work_counts().heap_textures_tiled - before == 1;
+            let over = heap.new_buffer_at_offset(answer.size, options, 0).unwrap();
+            gpu_fill(&queue, &over, 0..answer.size, 0xee);
+            let read = || gpu_read(&queue, &over, 0..answer.size);
+            let write = |bytes: &[u8]| {
+                let source = staged(device, bytes);
+                let command_buffer = queue.command_buffer().unwrap();
+                let mut copy = command_buffer.blit_command_encoder().unwrap();
+                copy.copy_from_buffer_to_buffer(&source, 0, &over, 0, answer.size)
+                    .unwrap();
+                copy.end_encoding().unwrap();
+                run(&command_buffer);
+            };
+            let shape = ([w, h], samples);
+            let Some((off, read_off)) =
+                sample_round_trip(&queue, &texture, shape, &aspects, &read, &write)
+            else {
+                eprintln!("HEAPTEX samples {what}: counted tiled {counted}; its blits refused");
+                assert!(!counted, "{what}: tiled, but its blits refused");
+                continue;
+            };
+            let total = w * h * samples * aspects.len() as u64;
+            eprintln!(
+                "HEAPTEX samples {what}: size {} align {}, Metal's {metal:?}; counted tiled \
+                 {counted}; {off} of {total} samples off Metal's tiles, {read_off} read otherwise \
+                 from them",
+                answer.size, answer.align
+            );
+            if counted {
+                assert_eq!((answer.size, answer.align), metal, "{what}");
+                assert_eq!((off, read_off), (0, 0), "{what}: samples off Metal's tiles");
+            }
+            let moved = matches!(
+                format,
+                PixelFormat::Depth32Float
+                    | PixelFormat::Stencil8
+                    | PixelFormat::Depth32FloatStencil8
+            );
+            if tiled && moved {
+                assert_eq!((answer.size, answer.align), metal, "{what}");
+                assert_eq!((off, read_off), (0, 0), "{what}: samples off Metal's tiles");
+                assert_eq!(counted, !allow, "{what}: counted tiled");
+            }
+        }
+        tiled
+    };
+    let notices = counts(&messages.take_notices());
+    let count = |kind| notices.get(&kind).copied().unwrap_or(0);
+    eprintln!("HEAPTEX samples: {notices:?}");
+    if tiled {
+        assert_eq!(count(Degradation::HeapTextureLosslessLayout), 1);
+        assert_eq!(count(APART[0]), 0);
+    }
+    let failing = messages.take();
+    assert!(
+        failing.is_empty(),
+        "the validation layer reported: {failing:#?}"
+    );
+}
+
 /// A heap's colour textures that Metal keeps uncompressed, in a `Private` placement heap over the
 /// device's memory, lie where Metal's tiles place each texel (`heap_layouts::tiled_offset`) on a
 /// driver whose colour images lie as Metal's heap textures
@@ -2269,6 +2591,163 @@ fn a_heap_depth_attachment_s_clear_reaches_the_heap_s_bytes() {
                     (kept_depth, kept_stencil),
                     (0, 0),
                     "{what}: texels the fill covered"
+                );
+            }
+        }
+    });
+}
+
+/// A heap's 4-sample 16x16 `Depth32Float` and `Depth32Float_Stencil8` textures a render pass
+/// clears, loads, stores and resolves, in a tracked `Shared` placement heap. Where the heap's memory
+/// takes no image of them, each is a shadow of its samples in Metal's tiles, counted tiled
+/// (MoltenVK): a pass that clears them (depth 0.25, stencil 0x5a) and stores puts the clear in
+/// every sample's bytes of each plane (the depth plane from the texture's first byte, the stencil
+/// plane past the depth plane's answer rounded up to 16 KiB); bytes then written there (depth 0.5,
+/// stencil 0x33) a pass that loads the depth and resolves it (sample 0, Metal's default) reads as
+/// written; and a pass that loads and stores both, drawing nothing, leaves every byte of the
+/// texture's. Every such texture is so where the driver lays depth and stencil images apart from
+/// their memory or keeps them GPU-optimized. Elsewhere `HEAPTEX ms-attach` lines print what the
+/// passes left.
+#[test]
+fn a_heap_multisample_depth_attachment_s_passes_reach_the_heap_s_bytes() {
+    on_device(|device| {
+        if device.properties().supports_texture_sample_count(4) != Ok(true) {
+            eprintln!("HEAPTEX ms-attach: the device takes no 4-sample texture");
+            return;
+        }
+        let queue = device.new_command_queue().unwrap();
+        let options = tracked(StorageMode::Shared);
+        let side = 16u64;
+        let samples = (side * side * 4) as usize;
+        for format in [PixelFormat::Depth32Float, PixelFormat::Depth32FloatStencil8] {
+            let what = format!("{format:?}");
+            let mut descriptor = TextureDescriptor::texture_2d(format, side, side, false);
+            descriptor.texture_type = TextureType::Type2DMultisample;
+            descriptor.sample_count = 4;
+            descriptor.resource_options = options;
+            descriptor.usage = TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ;
+            descriptor.allow_gpu_optimized_contents = false;
+            let size = device
+                .heap_texture_size_and_align(&descriptor)
+                .unwrap()
+                .size;
+            let heap = heap(device, HeapType::Placement, 1 << 20, options);
+            let before = device.work_counts().heap_textures_tiled;
+            let texture = heap.new_texture_at_offset(&descriptor, 0).unwrap();
+            let tiled = device.work_counts().heap_textures_tiled - before == 1;
+            let buffer = heap.new_buffer_at_offset(size, options, 0).unwrap();
+            gpu_fill_zero(&queue, &buffer, size);
+            let stencil = format == PixelFormat::Depth32FloatStencil8;
+            // The stencil plane past the depth plane's answer, rounded up to 16 KiB.
+            let stencil_at = (samples * 4).next_multiple_of(16 << 10);
+            let pass = |load: LoadAction, store: StoreAction, resolve: Option<&Texture>| {
+                let mut pass = RenderPassDescriptor::new();
+                let attachment = &mut pass.depth_attachment;
+                attachment.texture = Some(texture.clone());
+                attachment.load_action = load;
+                attachment.store_action = store;
+                attachment.clear_depth = 0.25;
+                attachment.resolve_texture = resolve.cloned();
+                if stencil {
+                    let attachment = &mut pass.stencil_attachment;
+                    attachment.texture = Some(texture.clone());
+                    attachment.load_action = load;
+                    attachment.store_action = match resolve {
+                        Some(_) => StoreAction::DontCare,
+                        None => store,
+                    };
+                    attachment.clear_stencil = 0x5a;
+                }
+                let command_buffer = queue.command_buffer().unwrap();
+                command_buffer
+                    .render_command_encoder(&pass)
+                    .unwrap()
+                    .end_encoding()
+                    .unwrap();
+                run(&command_buffer);
+            };
+            pass(LoadAction::Clear, StoreAction::Store, None);
+            let bytes = gpu_read(&queue, &buffer, 0..size);
+            let cleared_depth = bytes[..samples * 4]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|sample| **sample == 0.25f32.to_le_bytes())
+                .count();
+            let cleared_stencil = match stencil {
+                true => bytes[stencil_at..stencil_at + samples]
+                    .iter()
+                    .filter(|&&sample| sample == 0x5a)
+                    .count(),
+                false => 0,
+            };
+            // Each sample written through the buffer, then resolved.
+            let mut written = bytes;
+            for sample in written[..samples * 4].as_chunks_mut::<4>().0 {
+                *sample = 0.5f32.to_le_bytes();
+            }
+            if stencil {
+                written[stencil_at..stencil_at + samples].fill(0x33);
+            }
+            let source = staged(device, &written);
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut copy = command_buffer.blit_command_encoder().unwrap();
+            copy.copy_from_buffer_to_buffer(&source, 0, &buffer, 0, size)
+                .unwrap();
+            copy.end_encoding().unwrap();
+            run(&command_buffer);
+            let mut single = TextureDescriptor::texture_2d(format, side, side, false);
+            single.usage = TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ;
+            single.resource_options = ResourceOptions::private();
+            let resolved = device.new_texture(&single).unwrap();
+            pass(
+                LoadAction::Load,
+                StoreAction::MultisampleResolve,
+                Some(&resolved),
+            );
+            let option = match stencil {
+                true => BlitOption::DepthFromDepthStencil,
+                false => BlitOption::None,
+            };
+            let read = aspect_texels(&queue, &resolved, side, 4, option);
+            let resolved_written = read
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|texel| **texel == 0.5f32.to_le_bytes())
+                .count();
+            // A pass that loads and stores, drawing nothing, leaves every byte.
+            let before = gpu_read(&queue, &buffer, 0..size);
+            pass(LoadAction::Load, StoreAction::Store, None);
+            let after = gpu_read(&queue, &buffer, 0..size);
+            let changed = (before.iter().zip(&after))
+                .filter(|(before, after)| before != after)
+                .count();
+            eprintln!(
+                "HEAPTEX ms-attach {what}: tiled {tiled}; the clear in {cleared_depth} depth and \
+                 {cleared_stencil} stencil samples of {samples}; {resolved_written} resolved \
+                 texels read the bytes written; a load and store changed {changed} bytes"
+            );
+            if tiled {
+                assert_eq!(cleared_depth, samples, "{what}: the depth plane's clear");
+                if stencil {
+                    assert_eq!(
+                        cleared_stencil, samples,
+                        "{what}: the stencil plane's clear"
+                    );
+                }
+                assert_eq!(resolved_written, side as usize * side as usize, "{what}");
+                assert_eq!(changed, 0, "{what}: a load and store changed bytes");
+            }
+            // A driver that lays depth images apart or keeps them GPU-optimized holds none in
+            // the heap's memory.
+            let facts = &device.properties().driver_facts;
+            if facts.contains(&DriverFact::DepthStencilImagesLieApart)
+                || facts.contains(&DriverFact::DepthStencilImagesStayGpuOptimized)
+            {
+                assert!(
+                    tiled,
+                    "{what}: not tiled where the driver lays depth images apart"
                 );
             }
         }
