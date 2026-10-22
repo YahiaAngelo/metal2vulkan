@@ -689,9 +689,22 @@ fn a_heap_two_plane_texture_lays_its_planes_out_as_metal_does() {
             (color, alpha, alpha_row, span),
             "{w} x {h}"
         );
-        // A mipmapped texture's first level, and a 3D one's first depth slice, lie alike.
+        // A mipmapped texture's first level, and a 3D one's first depth slice, lie alike; Metal's
+        // blits address a one-level texture's alone at its blit rows.
         for ty in [T::Type2D, T::Type3D] {
-            assert_eq!(TwoPlaneHeapLayout::of_texture(ty, [w, h], 1), layout);
+            assert_eq!(TwoPlaneHeapLayout::of_texture(ty, [w, h], 1, 1), layout);
+            let mipmapped = TwoPlaneHeapLayout::of_texture(ty, [w, h], 1, 3);
+            assert_eq!(
+                TwoPlaneHeapLayout {
+                    levels: 1,
+                    ..mipmapped
+                },
+                layout
+            );
+            assert!(
+                layout.blit_rows() && !mipmapped.blit_rows(),
+                "{ty:?} {w} x {h}"
+            );
         }
         let plane = layout.color_plane();
         assert_eq!((plane.unit, plane.pitch, plane.images), (4, color, 1));
@@ -714,7 +727,7 @@ fn a_heap_two_plane_array_lays_its_slices_out_as_metal_does() {
         (T::Type2DArray, [16, 8], 3, 0x200, 2 * 0x200 + 7 * 64 + 64),
         (T::Type1DArray, [37, 1], 3, 0x100, 2 * 0x100 + 148),
     ] {
-        let layout = TwoPlaneHeapLayout::of_texture(ty, [w, h], slices);
+        let layout = TwoPlaneHeapLayout::of_texture(ty, [w, h], slices, 1);
         assert!(
             !layout.alpha_kept && !layout.blit_rows(),
             "{ty:?} {w} x {h}"
@@ -724,7 +737,7 @@ fn a_heap_two_plane_array_lays_its_slices_out_as_metal_does() {
         assert_eq!((plane.images, plane.image_pitch), (slices, slice));
         assert_eq!(plane.row(slices - 1, h - 1, w - 1), span - 4);
     }
-    let one = TwoPlaneHeapLayout::of_texture(T::Type1D, [37, 1], 1);
+    let one = TwoPlaneHeapLayout::of_texture(T::Type1D, [37, 1], 1, 1);
     assert_eq!(
         (one.alpha_at, one.span(), one.blit_rows()),
         (0x4000, 0x4025, true)

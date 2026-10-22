@@ -91,6 +91,8 @@ pub(crate) struct TwoPlaneHeapLayout {
     /// Whether plane 1 lies in the bytes: not an array's, whose alpha bytes Metal keeps nowhere
     /// and reads as 0.
     pub(crate) alpha_kept: bool,
+    /// The texture's levels: the first lies in the bytes, every later one in the image alone.
+    pub(crate) levels: u32,
 }
 
 impl TwoPlaneHeapLayout {
@@ -106,19 +108,24 @@ impl TwoPlaneHeapLayout {
             slices: 1,
             color_slice: (height * color_pitch).next_multiple_of(SLICE_ALIGNMENT),
             alpha_kept: true,
+            levels: 1,
         }
     }
 
     /// The layout of the first level of a texture of `texture_type`, its level 0 of `[width,
-    /// height]` texels (a 1D texture's height 1) and `layers` slices (the module docs): an
-    /// array's slices `color_slice` apart without plane 1; any other texture's (a mipmapped one's
-    /// first level, a 3D one's first depth slice) as a one-level 2D texture's.
+    /// height]` texels (a 1D texture's height 1), `layers` slices and `levels` levels (the module
+    /// docs): an array's slices `color_slice` apart without plane 1; any other texture's (a
+    /// mipmapped one's first level, a 3D one's first depth slice) as a one-level 2D texture's.
     pub(crate) fn of_texture(
         texture_type: TextureType,
         [width, height]: [u64; 2],
         layers: u64,
+        levels: u32,
     ) -> TwoPlaneHeapLayout {
-        let one = TwoPlaneHeapLayout::of([width, height]);
+        let one = TwoPlaneHeapLayout {
+            levels,
+            ..TwoPlaneHeapLayout::of([width, height])
+        };
         match texture_type {
             TextureType::Type2DArray | TextureType::Type1DArray => TwoPlaneHeapLayout {
                 slices: layers,
@@ -130,9 +137,9 @@ impl TwoPlaneHeapLayout {
     }
 
     /// Whether Metal's blits address the texture's planes as `two_planes/heap_bytes.rs` models
-    /// them: a one-level 2D texture's (one slice, plane 1 kept).
+    /// them: a one-level 2D texture's (one level and slice, plane 1 kept).
     pub(crate) fn blit_rows(&self) -> bool {
-        self.slices == 1 && self.alpha_kept
+        self.levels == 1 && self.slices == 1 && self.alpha_kept
     }
 
     /// Plane 0, its color words, as a heap shadow's CPU copies move them: the first level's
@@ -169,6 +176,7 @@ impl TwoPlaneHeapLayout {
             slices: 1,
             color_slice: height * color_pitch,
             alpha_kept: true,
+            levels: 1,
         }
     }
 

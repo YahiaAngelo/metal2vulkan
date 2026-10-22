@@ -124,6 +124,7 @@ use ash::vk::Handle;
 use decoded_twin::{Decoded, PassScratch};
 use first_move::{FirstMove, Fresh, Pattern, Patterned, TexelCopy, PATTERN_BYTES};
 use heap_tiled::{FreshDepth, FreshPattern};
+use heap_two_planes::TwoPlaneHeapLayout;
 use metal2vulkan::bind::{AstcDecode, EtcDecode, ImageViewDesc, PvrtcDecode, TextureFacts};
 use metal2vulkan::device::{
     DeviceDescription, DeviceProfile, DriverFact, FormatSupport, VkFeature,
@@ -4256,6 +4257,23 @@ impl Texture {
             Storage::Image(image) if self.0.parent.is_none() => match &image.owner {
                 Owner::HeapShadow(shadow) if shadow.copies.holds_blit_rows() => {
                     Some((self.0.heap.as_ref()?, shadow.place.offset))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Where the texture's first level's planes lie in its heap's bytes (a heap's two-plane
+    /// texture of any shape the runtime holds over them, `texture/heap_two_planes.rs`): the heap,
+    /// the texture's first byte in it, and their layout; `None` for any other texture, a view
+    /// among them.
+    pub(super) fn heap_two_planes(&self) -> Option<(&Heap, u64, &TwoPlaneHeapLayout)> {
+        match &self.0.storage {
+            Storage::Image(image) if self.0.parent.is_none() => match &image.owner {
+                Owner::HeapShadow(shadow) => {
+                    let layout = shadow.copies.plane_layout()?;
+                    Some((self.0.heap.as_ref()?, shadow.place.offset, layout))
                 }
                 _ => None,
             },

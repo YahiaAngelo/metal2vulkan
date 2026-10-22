@@ -129,8 +129,8 @@
 //!   serves the planes. A pass's color attachment of such a texture renders into its render shadow,
 //!   a texture whose shadow is one of these over floats: its copy back stores every texel's codes,
 //!   the marks not read.
-//! - **Two planes in a heap** (`texture/heap_two_planes.rs`): a heap's one-level 2D two-plane
-//!   extended-range texture is an image of its texels whose truth is its two planes in the heap's
+//! - **Two planes in a heap** (`texture/heap_two_planes.rs`): a heap's two-plane extended-range
+//!   texture is an image of its texels whose truth is its first level's planes in the heap's
 //!   bytes, as Metal lays them ([`ShadowTarget::Planes`]): its copies go through a staging buffer
 //!   of the bytes as laid out and a tight one of the image's texels, the two-plane kernel moving
 //!   them between the two. The rules above are the same, but for a command writing the bytes two
@@ -152,7 +152,7 @@ use super::shadow_copy_back::{CopyBack, WordView};
 use super::shadow_merge::{ScratchSpares, ShadowMerge, UnormView};
 use super::texture::copy_images::UseMaker;
 use super::texture::heap_tiled::{HeapTiledCopies, SampleMoves};
-use super::texture::heap_two_planes::HeapPlaneCopies;
+use super::texture::heap_two_planes::{HeapPlaneCopies, TwoPlaneHeapLayout};
 use super::texture::Texture;
 use super::tracker::{Access, Barrier, Use, UseRange};
 use super::values::StorageMode;
@@ -583,10 +583,17 @@ impl ShadowCopies {
     /// planes in the heap's bytes ([`ShadowTarget::Planes`]) where Metal's blits address them
     /// (`HeapPlaneCopies::layout`, `TwoPlaneHeapLayout::blit_rows`).
     pub(super) fn holds_blit_rows(&self) -> bool {
-        matches!(
-            self.target(),
-            Some(ShadowTarget::Planes { planes, .. }) if planes.layout().blit_rows()
-        )
+        self.plane_layout()
+            .is_some_and(TwoPlaneHeapLayout::blit_rows)
+    }
+
+    /// Where a heap's two-plane texture's first level lies in the heap's bytes, where the shadow
+    /// is such a texture's ([`ShadowTarget::Planes`]).
+    pub(super) fn plane_layout(&self) -> Option<&TwoPlaneHeapLayout> {
+        match self.target() {
+            Some(ShadowTarget::Planes { planes, .. }) => Some(planes.layout()),
+            _ => None,
+        }
     }
 
     /// The truth's identity and the range of it the shadow copies.
