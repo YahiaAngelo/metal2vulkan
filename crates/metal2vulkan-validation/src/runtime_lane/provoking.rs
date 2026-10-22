@@ -14,7 +14,9 @@
 //! that order, mode 0's but for a triangle strip's odd triangle, `(j + 1, j, j + 2)` where mode 0
 //! gives `(j, j + 2, j + 1)`; indexed draws (a base vertex, the all-ones index and the encoder's
 //! restart index, each piece's parity its own), indirect draws and indexed indirect draws follow
-//! the mode alike.
+//! the mode alike, and so do direct draws from a vertex start past `i32::MAX` (vertex IDs
+//! wrapping past `u32::MAX`), which the device without the last vertex draws in the pulled list
+//! form (`RuntimeFact::PrivateList`): an indexed list's base vertex cannot carry the start.
 //!
 //! So each case draws once at mode 0 and once at mode 1, and checks every pixel the mode-1 draw
 //! covers against Metal's mode-1 primitive its primitive ID names (or, without one, some primitive
@@ -35,7 +37,9 @@ use metal2vulkan::device::VkFeature;
 use metal2vulkan::metal::{
     IndexType, IndirectCommandType, PixelFormat, PrimitiveType, TextureUsage,
 };
-use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
+use metal2vulkan::pipeline::{
+    ColorAttachmentDescriptor, RenderPipelineDescriptor, RuntimeFact, StageSource,
+};
 use metal2vulkan::vk;
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
@@ -305,7 +309,7 @@ impl Case {
     /// indices' position plus its vertex start.
     fn vertex(&self, value: u32) -> u32 {
         match self.form.index_type() {
-            None => value + self.start,
+            None => value.wrapping_add(self.start),
             Some(_) => value.wrapping_add(self.base_vertex as u32),
         }
     }
@@ -337,6 +341,9 @@ fn cases(primitive: DrawPrimitiveType) -> Vec<Case> {
     let mut out = vec![
         Case::direct(primitive, Form::Direct, 13, 3),
         Case::direct(primitive, Form::Indirect, 12, 5),
+        // From a vertex start past `i32::MAX`, its vertex IDs wrapping to 0 at the fourth: those
+        // past 65535 all at vertex 65535's place.
+        Case::direct(primitive, Form::Direct, 10, 0xffff_fffd),
     ];
     // The all-ones index, a restart of the strips, and 7 among the indices.
     let mut with = walk(15, 5);
@@ -381,6 +388,9 @@ struct Lane {
     /// The geometry stages the pipeline of the last draw carries (`None` where it recorded
     /// none).
     geometry_stages: Cell<Option<usize>>,
+    /// Whether the pipeline of the last draw ran the pulled list form
+    /// (`RuntimeFact::PrivateList`).
+    pulled: Cell<bool>,
 }
 
 impl Lane {
@@ -391,6 +401,7 @@ impl Lane {
             library: device.new_library_with_air(&bitcode).unwrap(),
             positions: buffer_with(&device, &positions()).unwrap(),
             geometry_stages: Cell::new(None),
+            pulled: Cell::new(false),
             device,
         }
     }
@@ -536,6 +547,17 @@ impl Lane {
                 _ => None,
             });
         self.geometry_stages.set(stages);
+        let pulled = command_buffer
+            .executions()
+            .iter()
+            .any(|e| match e.pipeline() {
+                ExecutedPipeline::Render(executed) => executed
+                    .dependencies
+                    .iter()
+                    .any(|dependency| dependency.fact == RuntimeFact::PrivateList),
+                _ => false,
+            });
+        self.pulled.set(pulled);
         Ok(targets
             .iter()
             .map(|target| {
@@ -673,6 +695,8 @@ struct Found {
     lines_moved: usize,
     /// Cases of listed triangles whose weights the rotated-weights variant takes back.
     rotated_weights: usize,
+    /// Cases of public draws from vertex starts past `i32::MAX` drawn in the pulled list form.
+    pulled: usize,
 }
 
 /// Every case of every type under every fragment function, at modes 0 and 1, on `device`, whose
@@ -697,7 +721,22 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
                         panic!("{case:?} {fragment:?} at {mode} on {name}: {e}")
                     })
                 };
-                let (first, last) = (at(0), at(1));
+                let first = at(0);
+                let listed_before = lane.device.work_counts().provoking_listed_draws;
+                let last = at(1);
+                let listed_now = lane.device.work_counts().provoking_listed_draws > listed_before;
+                // A public type's direct draw whose last vertex ID passes `i32::MAX`, listed, runs
+                // the pulled list form.
+                let far = case.form == Form::Direct
+                    && matches!(case.primitive, DrawPrimitiveType::Public(_))
+                    && u64::from(case.start) + u64::from(case.count) > 1 << 31;
+                if far && listed_now {
+                    assert!(
+                        lane.pulled.get(),
+                        "{case:?} {fragment:?} on {name}: not drawn in the pulled list form"
+                    );
+                    found.pulled += 1;
+                }
                 if weights == Weights::Withheld && fragment.weights {
                     assert!(
                         lane.geometry_stages.get().is_none_or(|stages| stages > 0),
@@ -780,11 +819,18 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
         "{name} (native {native}, weights {weights:?}): {} cases, {} covered pixels at mode 1 \
          all Metal's; {} pixels of the mode-0 draws not; draws {natively} through last-vertex \
          pipelines, {listed} listed, {gathered} drawn from a run's lists; {} pixels of listed lines \
-         covered otherwise; {} cases of rotated weights checked",
-        found.cases, found.covered, found.told_apart, found.lines_moved, found.rotated_weights
+         covered otherwise; {} cases of rotated weights checked; {} far draws pulled",
+        found.cases,
+        found.covered,
+        found.told_apart,
+        found.lines_moved,
+        found.rotated_weights,
+        found.pulled
     );
-    // The listed path checks rotated triangles' weights; the native one lists none.
+    // The listed path checks rotated triangles' weights and pulls far public draws' lists; the
+    // native one lists none.
     assert_eq!(found.rotated_weights > 0, !native, "{name}");
+    assert_eq!(found.pulled > 0, !native, "{name}");
     found
 }
 

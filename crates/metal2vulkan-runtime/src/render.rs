@@ -719,13 +719,29 @@ impl PrivateForm {
     fn of(pipeline: &DrawingState, program: RewriteProgram, draw: &DrawCall) -> PrivateForm {
         let graphics = &pipeline.base().graphics;
         let quads = matches!(program, RewriteProgram::Quads | RewriteProgram::QuadStrip);
-        let far = matches!(*draw, DrawCall::Primitives { vertex_start, vertex_count, .. }
-            if u64::from(vertex_start) + u64::from(vertex_count) > 1 << 31);
         PrivateForm {
             quad_primitive_ids: quads && graphics.reads_primitive_id,
-            private_list: writes_primitive_ids(pipeline) || graphics.vertex_writes_memory || far,
+            private_list: writes_primitive_ids(pipeline)
+                || graphics.vertex_writes_memory
+                || far(draw),
         }
     }
+
+    /// The form of a public type's `draw` drawn as a list (a strip that restarts where Vulkan does
+    /// not, a draw under the last provoking vertex): the private list form where its last vertex
+    /// ID passes `i32::MAX`, which an indexed list's base vertex cannot carry.
+    fn listed(draw: &DrawCall) -> PrivateForm {
+        PrivateForm {
+            quad_primitive_ids: false,
+            private_list: far(draw),
+        }
+    }
+}
+
+/// Whether `draw` is a direct draw without indices whose last vertex ID passes `i32::MAX`.
+fn far(draw: &DrawCall) -> bool {
+    matches!(*draw, DrawCall::Primitives { vertex_start, vertex_count, .. }
+        if u64::from(vertex_start) + u64::from(vertex_count) > 1 << 31)
 }
 
 /// The draw the binder instantiates for `draw` of a private type in the private list form, of
@@ -7141,9 +7157,10 @@ impl RenderLowering {
         let provoking = self.provoking(call, &pipeline, assembly, &draw);
         let provoking_forms = provoking.forms(assembly, &pipeline);
         let restarted = self.restarted(assembly, &draw, provoking);
-        let private = match assembly {
-            Assembly::Private(program) => PrivateForm::of(&pipeline, program, &draw),
-            _ => PrivateForm::default(),
+        let private = match (assembly, restarted) {
+            (Assembly::Private(program), _) => PrivateForm::of(&pipeline, program, &draw),
+            (_, Some(_)) => PrivateForm::listed(&draw),
+            (_, None) => PrivateForm::default(),
         };
         let assembly = restarted.map_or(assembly, |r| r.assembly());
         // Its settings, and the memo entry its draw state and pipeline are found and kept in
@@ -8045,15 +8062,16 @@ impl RenderLowering {
         if let Some(header) = self.replayed.as_ref().and_then(|r| r.merged_header()) {
             tables = tables.with_merged_header(header);
         }
-        // A private type's list in the private list form is read at its address, which the device
-        // gives the list's memory where it has device addresses, as the form needs.
+        // A list in the private list form is read at its address, which the device gives the
+        // list's memory where it has device addresses, as the form needs.
         if capture.is_none() && variant.key().private_list {
             let address = match (&listed, &rewrite) {
                 (Some(list), _) => list.address(),
                 (_, Some(pass)) => pass.address(),
                 _ => None,
             };
-            let address = address.ok_or(Error::NotImplemented(RuntimeGap::PrivatePrimitives))?;
+            let gap = restarted.map_or(RuntimeGap::PrivatePrimitives, |r| r.gap.gap());
+            let address = address.ok_or(Error::NotImplemented(gap))?;
             tables = tables.with_indices(address);
         }
         // A de-indexed draw's vertex function reads its indices in place, at their address.
