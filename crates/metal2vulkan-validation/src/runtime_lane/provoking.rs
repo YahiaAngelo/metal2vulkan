@@ -738,11 +738,12 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
     let after = lane.device.work_counts();
     let natively = after.provoking_last_pipeline_draws - before.provoking_last_pipeline_draws;
     let listed = after.provoking_listed_draws - before.provoking_listed_draws;
-    // The listed direct indexed draws of lists take the index gather pass.
+    // The listed direct indexed draws of lists take the index gather pass, and so do the private
+    // types' under a last-vertex pipeline, which draws them as lists in Metal's mode-1 order.
     let gathered = after.gathered_draws - before.gathered_draws;
     match native {
         true => assert!(
-            natively > 0 && listed == 0 && gathered == 0,
+            natively > 0 && listed == 0 && gathered > 0,
             "{name}: {natively} {listed} {gathered}"
         ),
         false => assert!(

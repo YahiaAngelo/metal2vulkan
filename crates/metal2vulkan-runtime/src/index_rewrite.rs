@@ -708,7 +708,7 @@ impl GatherRuns {
 
     /// The open runs, which record now ([`record_runs`]).
     pub(super) fn take(&mut self) -> Vec<GatherRun> {
-        self.runs.drain(..).collect()
+        std::mem::take(&mut self.runs)
     }
 
     /// `request`'s draw joins an open run of its index buffer, program and order that takes it,
