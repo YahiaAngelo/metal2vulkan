@@ -338,12 +338,14 @@ pub(super) fn resolved_nan_texel(
 
 /// Where a channel of `value`, the Vulkan clear value [`color`] gives an attachment of `pf` whose
 /// channels are 32-bit floats, is a NaN: the unsigned-integer format of the texel's size and the
-/// clear value that writes the texel's bits, which the device's clear writes too (a `float`
-/// converts nothing), for a write of the texel elsewhere (`nan_clear.rs`'s resolves). `None` for
-/// another format or a clear without a NaN.
+/// clear value that writes, where `kept`, the texel's bits, which the device's clear writes too (a
+/// `float` converts nothing), else the texel Metal's resolve stores from samples that each hold
+/// it, each NaN channel `0x7fc00000`; for a write of the texel elsewhere (`nan_clear.rs`'s
+/// resolves). `None` for another format or a clear without a NaN.
 pub(super) fn float_nan_texel(
     pf: PixelFormat,
     value: &vk::ClearColorValue,
+    kept: bool,
 ) -> Option<(Format, vk::ClearColorValue)> {
     let channels = channels(pf)?;
     // SAFETY: every member of the union is four 32-bit values; any bits are a valid `f32`.
@@ -357,10 +359,11 @@ pub(super) fn float_nan_texel(
     if !used.iter().any(|v| v.is_nan()) {
         return None;
     }
-    let bytes: Vec<u8> = used
-        .iter()
-        .flat_map(|v| v.to_bits().to_le_bytes())
-        .collect();
+    let bits = |v: &f32| match v.is_nan() && !kept {
+        true => 0x7fc0_0000,
+        false => v.to_bits(),
+    };
+    let bytes: Vec<u8> = used.iter().flat_map(|v| bits(v).to_le_bytes()).collect();
     uint_texel(&bytes)
 }
 
@@ -1198,51 +1201,72 @@ pub(crate) mod tests {
     /// A 32-bit float NaN clears to the double's sign and top payload bits, quieted, as Metal's
     /// conversion (`0x7ff0000020000000` stores `0x7fc00001`, `0xfff8...`
     /// `0xffc00000`, `0x7ffc...` `0x7fe00000`, the signalling `0x7ff0...01` `0x7fc00000`), and
-    /// `float_nan_texel` gives those bits; a clear without a NaN, or of another format, none.
+    /// `float_nan_texel` gives those bits where kept, and each NaN channel `0x7fc00000` where
+    /// not, Metal's resolve of them (its other channels as they are); a clear without a NaN, or of
+    /// another format, none.
     #[test]
     fn float_nan_texels_are_metal_s_conversion() {
         let nan = f64::from_bits;
-        let cases: &[(PixelFormat, [f64; 4], &str)] = &[
+        // The clear, its kept texel and its resolved one.
+        let cases: &[(PixelFormat, [f64; 4], &str, &str)] = &[
             (
                 P::R32Float,
                 [nan(0x7ff0_0000_2000_0000), 0.0, 0.0, 0.0],
                 "0100c07f",
+                "0000c07f",
             ),
             (
                 P::R32Float,
                 [nan(0xfff8_0000_0000_0000), 0.0, 0.0, 0.0],
                 "0000c0ff",
+                "0000c07f",
             ),
             (
                 P::R32Float,
                 [nan(0x7ffc_0000_0000_0000), 0.0, 0.0, 0.0],
                 "0000e07f",
+                "0000c07f",
             ),
             (
                 P::R32Float,
                 [nan(0x7ff0_0000_0000_0001), 0.0, 0.0, 0.0],
+                "0000c07f",
                 "0000c07f",
             ),
             (
                 P::RG32Float,
                 [nan(0x7ff8_0000_0000_0000), 1.0, 0.0, 0.0],
                 "0000c07f0000803f",
+                "0000c07f0000803f",
+            ),
+            (
+                P::RGBA32Float,
+                [
+                    0.5,
+                    nan(0xfff8_0000_0000_0000),
+                    -2.0,
+                    nan(0x7ffc_0000_0000_0000),
+                ],
+                "0000003f0000c0ff000000c00000e07f",
+                "0000003f0000c07f000000c00000c07f",
             ),
         ];
-        for &(pf, c, want) in cases {
+        for &(pf, c, kept, resolved) in cases {
             let value = color(pf, c, ClearRoute::ThroughHalf).unwrap();
-            let (format, bits) = float_nan_texel(pf, &value).unwrap();
-            let format_for = |size: usize| uint_texel(&vec![0; size]).unwrap().0;
-            assert!(format == format_for(want.len() / 2), "{pf:?}");
-            // SAFETY: `float_nan_texel` writes `uint32`.
-            let words = unsafe { bits.uint32 };
-            let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
-            assert_eq!(hex(&bytes[..want.len() / 2]), want, "{pf:?} {c:?}");
+            for (keeps, want) in [(true, kept), (false, resolved)] {
+                let (format, bits) = float_nan_texel(pf, &value, keeps).unwrap();
+                let format_for = |size: usize| uint_texel(&vec![0; size]).unwrap().0;
+                assert!(format == format_for(want.len() / 2), "{pf:?}");
+                // SAFETY: `float_nan_texel` writes `uint32`.
+                let words = unsafe { bits.uint32 };
+                let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+                assert_eq!(hex(&bytes[..want.len() / 2]), want, "{pf:?} {c:?} {keeps}");
+            }
         }
         let finite = color(P::R32Float, [0.5, 0.0, 0.0, 0.0], ClearRoute::ThroughHalf);
-        assert!(float_nan_texel(P::R32Float, &finite.unwrap()).is_none());
+        assert!(float_nan_texel(P::R32Float, &finite.unwrap(), true).is_none());
         let half = color(P::RGBA16Float, [f64::NAN; 4], ClearRoute::ThroughHalf);
-        assert!(float_nan_texel(P::RGBA16Float, &half.unwrap()).is_none());
+        assert!(float_nan_texel(P::RGBA16Float, &half.unwrap(), false).is_none());
     }
 
     /// Where Metal keeps a NaN clear's sign it keeps the top ten bits of the double's payload

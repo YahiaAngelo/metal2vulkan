@@ -30,21 +30,25 @@
 //! texel, its sign kept, where the sign is kept and Metal also keeps the resolve texture compressed
 //! (at its level, of the attachment's extent); elsewhere it averages the samples, each NaN counted
 //! zero ([`clear_value::resolved_nan_texel`]): a `PixelFormatView` or unoptimized resolve texture,
-//! a level under 16 a side, or a later pass that loads the attachment and resolves it, alike. No
-//! device's resolve gives either (each keeps the NaN, or zeroes it where Metal
-//! keeps it: MoltenVK after the copy), so in such a pass the resolve texture's render area is
-//! written after the pass's resolve, its copies included, the same way: a scratch image cleared to
-//! that texel's bits and copied in. A pass with a draw call resolves by the device
-//! (`device-rounded-resolve`).
+//! a level under 16 a side, a pass whose draw calls draw nothing (a draw call of no vertices drops
+//! the sign as any draw call does), or a later pass that loads the attachment and resolves it,
+//! alike. No device's resolve gives either (each keeps the NaN, or zeroes it where Metal keeps it:
+//! MoltenVK after the copy), so in a pass whose draws reach no tile, every sample holding the
+//! clear, the resolve texture's render area is written after the pass's resolve, its copies
+//! included, the same way: a scratch image cleared to that texel's bits and copied in. A pass that
+//! draws resolves by the device (`device-rounded-resolve`).
 //!
 //! **32-bit floats**. Metal clears a `float` NaN as the double's conversion, its sign and top
 //! payload bits kept, at every level, as the devices' clears do ([`clear_value::color`] states the
 //! bits), so such a clear needs nothing before the pass. Its resolve in a pass with no draw call
-//! keeps the clear's texel where the `half` NaN's resolve keeps it, and makes `0x7fc00000`
-//! elsewhere. The exact resolve (`color_resolve.rs`) makes `0x7fc00000` everywhere, so the kept
-//! resolve is written after the pass as the `half` one's is ([`clear_value::float_nan_texel`]), on
-//! every device alike: where the device's resolve kept the texel already, the write stores the same
-//! bits.
+//! keeps the clear's texel where the `half` NaN's resolve keeps it, and makes `0x7fc00000` in each
+//! NaN channel elsewhere, a pass whose draw calls draw nothing among them (the consumer's M3 Max:
+//! `R32Float`, `RG32Float` and `RGBA32Float` at 2 and 4 samples, 16 a side, cleared to `-NaN`, a
+//! draw call of no vertices: `0x7fc00000`). A device's resolve need give neither: MoltenVK's, which
+//! is Metal's own resolve, keeps the sign where its pass records no draw. So in a pass whose draws
+//! reach no tile the resolve is written after the pass as the `half` one's is, the kept texel or
+//! Metal's resolve of it ([`clear_value::float_nan_texel`]), on every device alike: where the
+//! device's resolve stored it already, the write stores the same bits.
 //!
 //! **Copies that convert NaNs**. A device whose copy into a multisampled float image draws the
 //! samples through that image's format (`RuntimeDriverDefect::MultisampledCopiesConvertFloatNans`:
@@ -153,12 +157,13 @@ struct ViewClear {
 impl NanClears {
     /// The clears of `layout`'s attachments, a pass with a draw call where `called`
     /// (`clear_reach::cleared`), each attachment cleared here then loaded in the pass; then,
-    /// in a pass without one, the writes of their resolves after the pass (the module docs).
-    /// `None` for either when there is none; refused as the module docs say.
+    /// in a pass whose draws reach no tile (`drew` false: no draw call, or draw calls that draw
+    /// nothing), the writes of their resolves after the pass (the module docs). `None` for either
+    /// when there is none; refused as the module docs say.
     pub(super) fn plan(
         maker: &CommandBuffer,
         layout: &mut PassLayout,
-        called: bool,
+        (called, drew): (bool, bool),
     ) -> Result<(Option<NanClears>, Option<NanClears>), Error> {
         let mut before = Writes::default();
         let mut after = Writes::default();
@@ -169,8 +174,8 @@ impl NanClears {
             };
             let pixel_format = color.target.texture.pixel_format();
             let signed = keeps_nan_sign(&color.target, called);
-            // The resolve texture's level and slice, where a pass without a draw call resolves
-            // the samples.
+            // The resolve texture's level and slice, where the pass's draws reach no tile, so
+            // every sample holds the clear.
             let resolves = matches!(
                 color.store,
                 StoreAction::MultisampleResolve | StoreAction::StoreAndMultisampleResolve
@@ -178,17 +183,19 @@ impl NanClears {
             let to = color
                 .resolve
                 .as_ref()
-                .filter(|_| resolves && !called && color.target.samples > 1)
+                .filter(|_| resolves && !drew && color.target.samples > 1)
                 .map(|r| r.copy_to.as_ref().unwrap_or(&r.attachment));
             let Some(texel) = clear_value::nan_texel(pixel_format, &color.clear, signed) else {
                 // A 32-bit float NaN, which the device clears as Metal does: its resolve written
-                // with the clear's texel where Metal keeps it, as below (the module docs).
-                let kept = to.filter(|to| signed && keeps_nan_sign(to, called));
-                if let (Some(to), Some(texel)) = (
-                    kept,
-                    clear_value::float_nan_texel(pixel_format, &color.clear),
-                ) {
-                    after.add(maker, to, texel, layout.extent)?;
+                // with the clear's texel where Metal keeps it, else with Metal's resolve of it, as
+                // below (the module docs).
+                if let Some(to) = to {
+                    let kept = signed && keeps_nan_sign(to, called);
+                    if let Some(texel) =
+                        clear_value::float_nan_texel(pixel_format, &color.clear, kept)
+                    {
+                        after.add(maker, to, texel, layout.extent)?;
+                    }
                 }
                 continue;
             };

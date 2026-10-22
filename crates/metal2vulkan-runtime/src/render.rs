@@ -4534,10 +4534,10 @@ impl RenderLowering {
         // A clear holding a `half` or small-float NaN: written before the pass as Metal writes
         // it, through a scratch image of an integer format, and loaded in the pass
         // (`nan_clear.rs`). After the stand-ins' copies, which keep the attachment's own load.
-        // And, in a pass without a draw call, its resolves written after the pass as Metal's
-        // resolve stores them (`nan_clear.rs`).
+        // And, in a pass whose draws reach no tile, its resolves written after the pass as
+        // Metal's resolve stores them (`nan_clear.rs`).
         let (nan_clears, nan_resolves) =
-            NanClears::plan(core.command_buffer(), &mut layout, called)?;
+            NanClears::plan(core.command_buffer(), &mut layout, (called, drew))?;
         // A depth whose `Clear` load held a NaN, loaded instead: Metal's word written into its
         // texture over the clear's reach before the pass, before anything copies the depth out
         // of it (`nan_clear.rs`).
