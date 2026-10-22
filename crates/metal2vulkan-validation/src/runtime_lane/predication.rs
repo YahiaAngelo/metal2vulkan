@@ -466,6 +466,9 @@ fn run_counted(streams: &Streams, script: &str) -> Counted {
 /// Ends' answers.
 pub(crate) type LoopCase = (String, Vec<(usize, u32)>, &'static str);
 
+/// A fixed [`LoopCase`] as written: its script, what Metal ran and its answers.
+type FixedLoopCase = (&'static str, &'static [(usize, u32)], &'static str);
+
 /// The loops Metal ran on an M3 Max under macOS 27.0.1 (`metal_runs_loops_as_the_lane_expects`
 /// on the Metal platform runs each there): the passes of Whiles and DoWhiles of 0 to 64, a While
 /// in a concurrent encoder, three nested loops, each pass's bindings, an If in a DoWhile; loops
@@ -488,7 +491,7 @@ pub(crate) fn loop_cases() -> Vec<LoopCase> {
             "1",
         ));
     }
-    let fixed: [(&str, &[(usize, u32)], &str); 21] = [
+    let fixed: [FixedLoopCase; 21] = [
         ("% w7 T0 V", &[(0, 7)], "1"),
         (
             "w3 T0 Q1 w4@1 T1 Q2 D T2 T3 z5@2 V V",
