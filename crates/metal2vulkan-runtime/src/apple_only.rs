@@ -236,10 +236,14 @@ impl BlitCommandEncoder {
     /// Metal allows. Refused (`Invalid`, `ForeignObject`) for another device's texture, as every
     /// blit is.
     pub fn invalidate_compressed_texture(&mut self, texture: &Texture) -> Result<(), Error> {
-        self.log(|_| BlitCall::InvalidateCompressedTexture(texture.clone()))?;
-        self.core()
-            .check_device("invalidate_compressed_texture", texture.device())?;
-        answer(AppleOnlyCall::InvalidateCompressedTexture)
+        self.logged(
+            |_| BlitCall::InvalidateCompressedTexture(texture.clone()),
+            |this| {
+                this.core()
+                    .check_device("invalidate_compressed_texture", texture.device())?;
+                answer(AppleOnlyCall::InvalidateCompressedTexture)
+            },
+        )
     }
 
     /// `invalidateCompressedTexture:slice:level:` (SPI): a no-op, as
@@ -252,11 +256,15 @@ impl BlitCommandEncoder {
         slice: u64,
         level: u64,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::InvalidateCompressedTextureSlice(texture.clone(), slice, level))?;
-        const CALL: &str = "invalidate_compressed_texture_slice";
-        self.core().check_device(CALL, texture.device())?;
-        check_slice_level(CALL, texture, slice, level)?;
-        answer(AppleOnlyCall::InvalidateCompressedTextureSlice)
+        self.logged(
+            |_| BlitCall::InvalidateCompressedTextureSlice(texture.clone(), slice, level),
+            |this| {
+                const CALL: &str = "invalidate_compressed_texture_slice";
+                this.core().check_device(CALL, texture.device())?;
+                check_slice_level(CALL, texture, slice, level)?;
+                answer(AppleOnlyCall::InvalidateCompressedTextureSlice)
+            },
+        )
     }
 }
 

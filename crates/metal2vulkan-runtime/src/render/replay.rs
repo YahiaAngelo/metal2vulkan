@@ -6,7 +6,9 @@
 //!   ([`RenderCommandEncoder::replaying`]: no refusal of a committed command buffer, the residency
 //!   the encoders ended before it left), running each call again, and ending the pass as
 //!   `end_encoding` ends it, but into the ended encoder's place
-//!   ([`RenderCommandEncoder::finish_replay`]).
+//!   ([`RenderCommandEncoder::finish_replay`]). A call refused as the program made it is refused
+//!   again, and the calls after it run ([`RenderLowering::logged`]); one a lowering thread
+//!   refused failed the command buffer, which keeps no log.
 //! - **Kept** as the compute encoder's log is (`EncoderCore::end_with_replay`): where a command
 //!   named a buffer over host pages, and the pass left no segment for later but its executions of
 //!   indirect command buffers, which the encoding again records at once on the GPU alone, as its
@@ -122,8 +124,9 @@ impl RenderLog {
         residency: Residency,
     ) -> Result<(Replayed, Option<Residency>), Error> {
         let mut encoder = RenderLowering::replaying(command_buffer, &self.descriptor, residency)?;
-        for call in &self.calls.calls {
-            render(&mut encoder, (&self.calls, &self.indexed), call)?;
+        for (at, call) in self.calls.calls.iter().enumerate() {
+            let ran = render(&mut encoder, (&self.calls, &self.indexed), call);
+            self.calls.again(at, ran)?;
         }
         encoder.finish_replay()
     }
@@ -636,6 +639,25 @@ impl RenderLowering {
             let extra = call.extra();
             log.calls.push(call, extra);
         }
+    }
+
+    /// Run `run`, a public call made at once (`RenderCommandEncoder::at_call`, a call its checks
+    /// do not cover, `render/deferral.rs`), which logs itself as it starts ([`log`](Self::log)):
+    /// where it is refused, its log notes it so (`CallLog::refuse`), and an encoding again
+    /// refuses it again and goes on (`replay.rs`). A call refused before it logged itself left
+    /// nothing in the log.
+    pub(crate) fn logged<T>(
+        &mut self,
+        run: impl FnOnce(&mut RenderLowering) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let at = self.log.as_ref().map(|log| log.calls.calls.len());
+        let ran = run(self);
+        if let (Err(_), Some(at), Some(log)) = (&ran, at, &mut self.log) {
+            if log.calls.calls.len() > at {
+                log.calls.refuse(at);
+            }
+        }
+        ran
     }
 
     /// Log a `draw_indexed_primitives` call, whose arguments `draw` makes of the log, before it

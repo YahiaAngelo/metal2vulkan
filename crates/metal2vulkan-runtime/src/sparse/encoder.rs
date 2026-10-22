@@ -200,11 +200,15 @@ impl ResourceStateCommandEncoder {
     /// plain Metal reads it (an M4 under macOS 27.0.1; its validation takes it).
     ///
     /// The host reads the regions once the work before the update completed (the
-    /// `host-read-mapping-arguments` performance degrade, announced once). A region the host
-    /// reads that Metal's validation would stop (past the texture's levels, slices or tiles, or
-    /// arguments past the buffer), or that binds part of one of the device's sparse units of a
-    /// texture whose texels no copy writes, fails the command buffer with that refusal
-    /// (`CommandBufferError::SparseMappingArguments`, `SparseMappingSplit`).
+    /// `host-read-mapping-arguments` performance degrade, announced once). Arguments Metal's
+    /// validation would stop map as plain Metal maps them (the M3 Max under macOS 27.0.1): a
+    /// region past its level's tiles maps the tiles inside them; one whose origin is past them,
+    /// of no size on an axis, or of a level or slice past the texture's, maps nothing; and the
+    /// regions the count names past the buffer map nothing. Differs: Metal's `usedSize` over a
+    /// region of a slice past the texture's varies (a tile more beside other regions, none
+    /// alone, and an unmap of it can take the count below zero); the runtime counts none. A
+    /// region that binds part of one of the device's sparse units of a texture whose texels no
+    /// copy writes fails the command buffer (`CommandBufferError::SparseMappingSplit`).
     ///
     /// A texture that is not sparse records nothing, the buffer unread, as plain Metal maps
     /// nothing in it (as [`update_texture_mapping`](Self::update_texture_mapping)'s). Through a

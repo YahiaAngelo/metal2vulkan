@@ -323,13 +323,31 @@ impl ComputeCommandEncoder {
     }
 
     /// Log the call `call` makes of the log, before it runs, where the encoder logs
-    /// (`replay.rs`).
-    pub(super) fn log(&mut self, call: impl FnOnce(&mut CallLog<ComputeCall>) -> ComputeCall) {
-        if let Some(log) = &mut self.log {
-            let call = call(log);
-            let extra = call.extra();
-            log.push(call, extra);
+    /// (`replay.rs`): its place in the log.
+    pub(super) fn log(
+        &mut self,
+        call: impl FnOnce(&mut CallLog<ComputeCall>) -> ComputeCall,
+    ) -> Option<usize> {
+        let log = self.log.as_mut()?;
+        let call = call(log);
+        let extra = call.extra();
+        Some(log.push(call, extra))
+    }
+
+    /// Run `run`, a public call, logged first as `call` makes it of the log
+    /// ([`log`](Self::log)): where it is refused, its log notes it so (`CallLog::refuse`), and an
+    /// encoding again refuses it again and goes on (`replay.rs`).
+    pub(super) fn logged<T>(
+        &mut self,
+        call: impl FnOnce(&mut CallLog<ComputeCall>) -> ComputeCall,
+        run: impl FnOnce(&mut Self) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        let at = self.log(call);
+        let ran = run(self);
+        if let (Err(_), Some(at), Some(log)) = (&ran, at, &mut self.log) {
+            log.refuse(at);
         }
+        ran
     }
 
     /// The encoder logs nothing more, and will not be encoded again: it used command
@@ -391,12 +409,16 @@ impl ComputeCommandEncoder {
         &mut self,
         state: &ComputePipelineState,
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::PipelineState(state.clone()));
-        self.core
-            .check_device("set_compute_pipeline_state", state.device())?;
-        self.pipeline = Some(state.clone());
-        self.writers.state_set(state.indirect_command_writes());
-        Ok(())
+        self.logged(
+            |_| ComputeCall::PipelineState(state.clone()),
+            |this| {
+                this.core
+                    .check_device("set_compute_pipeline_state", state.device())?;
+                this.pipeline = Some(state.clone());
+                this.writers.state_set(state.indirect_command_writes());
+                Ok(())
+            },
+        )
     }
 
     /// `setBuffer:offset:atIndex:` (`None` unbinds the index). A buffer bound past its length is
@@ -410,9 +432,13 @@ impl ComputeCommandEncoder {
         offset: u64,
         index: u32,
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::Buffer(buffer.cloned(), offset, index));
-        self.table
-            .set_buffer(&mut self.core, "set_buffer", buffer, offset, index)
+        self.logged(
+            |_| ComputeCall::Buffer(buffer.cloned(), offset, index),
+            |this| {
+                this.table
+                    .set_buffer(&mut this.core, "set_buffer", buffer, offset, index)
+            },
+        )
     }
 
     /// `setBuffers:offsets:withRange:`: `buffers[i]` at offset `offsets[i]` at index
@@ -424,11 +450,13 @@ impl ComputeCommandEncoder {
         offsets: &[u64],
         first: u32,
     ) -> Result<(), Error> {
-        self.log(|log| {
-            ComputeCall::Buffers(log.buffer_span(buffers), log.word_span(offsets), first)
-        });
-        self.table
-            .set_buffers(&mut self.core, "set_buffers", buffers, offsets, first)
+        self.logged(
+            |log| ComputeCall::Buffers(log.buffer_span(buffers), log.word_span(offsets), first),
+            |this| {
+                this.table
+                    .set_buffers(&mut this.core, "set_buffers", buffers, offsets, first)
+            },
+        )
     }
 
     /// `setBufferOffset:atIndex:`, which clears the index's attribute stride
@@ -441,9 +469,13 @@ impl ComputeCommandEncoder {
     /// the index is bound again, as plain Metal reads them (an M4; its debug layer asserts there is
     /// no buffer). Refused: an index past the table.
     pub fn set_buffer_offset(&mut self, offset: u64, index: u32) -> Result<(), Error> {
-        self.log(|_| ComputeCall::BufferOffset(offset, index));
-        self.table
-            .set_buffer_offset(&mut self.core, "set_buffer_offset", offset, index)
+        self.logged(
+            |_| ComputeCall::BufferOffset(offset, index),
+            |this| {
+                this.table
+                    .set_buffer_offset(&mut this.core, "set_buffer_offset", offset, index)
+            },
+        )
     }
 
     /// `setBuffer:offset:attributeStride:atIndex:`: as [`set_buffer`](Self::set_buffer), the
@@ -460,14 +492,18 @@ impl ComputeCommandEncoder {
         stride: u64,
         index: u32,
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::BufferWithStride(buffer.cloned(), offset, stride, index));
-        self.table.set_buffer_with_stride(
-            &mut self.core,
-            "set_buffer_with_stride",
-            buffer,
-            offset,
-            stride,
-            index,
+        self.logged(
+            |_| ComputeCall::BufferWithStride(buffer.cloned(), offset, stride, index),
+            |this| {
+                this.table.set_buffer_with_stride(
+                    &mut this.core,
+                    "set_buffer_with_stride",
+                    buffer,
+                    offset,
+                    stride,
+                    index,
+                )
+            },
         )
     }
 
@@ -482,17 +518,21 @@ impl ComputeCommandEncoder {
         strides: &[u64],
         first: u32,
     ) -> Result<(), Error> {
-        self.log(|log| {
-            let (buffers, offsets) = (log.buffer_span(buffers), log.word_span(offsets));
-            ComputeCall::BuffersWithStrides(buffers, offsets, log.word_span(strides), first)
-        });
-        self.table.set_buffers_with_strides(
-            &mut self.core,
-            "set_buffers_with_strides",
-            buffers,
-            offsets,
-            Some(strides),
-            first,
+        self.logged(
+            |log| {
+                let (buffers, offsets) = (log.buffer_span(buffers), log.word_span(offsets));
+                ComputeCall::BuffersWithStrides(buffers, offsets, log.word_span(strides), first)
+            },
+            |this| {
+                this.table.set_buffers_with_strides(
+                    &mut this.core,
+                    "set_buffers_with_strides",
+                    buffers,
+                    offsets,
+                    Some(strides),
+                    first,
+                )
+            },
         )
     }
 
@@ -506,13 +546,17 @@ impl ComputeCommandEncoder {
         stride: u64,
         index: u32,
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::BufferOffsetWithStride(offset, stride, index));
-        self.table.set_buffer_offset_with_stride(
-            &mut self.core,
-            "set_buffer_offset_with_stride",
-            offset,
-            stride,
-            index,
+        self.logged(
+            |_| ComputeCall::BufferOffsetWithStride(offset, stride, index),
+            |this| {
+                this.table.set_buffer_offset_with_stride(
+                    &mut this.core,
+                    "set_buffer_offset_with_stride",
+                    offset,
+                    stride,
+                    index,
+                )
+            },
         )
     }
 
@@ -525,9 +569,13 @@ impl ComputeCommandEncoder {
     /// `Bind(MissingDeviceAddress)`, at the dispatch. Refused: an index past the table, and more
     /// than 4096 bytes, Metal's limit for inline bytes (`Invalid(InlineBytesLength)`).
     pub fn set_bytes(&mut self, bytes: &[u8], index: u32) -> Result<(), Error> {
-        self.log(|log| ComputeCall::Bytes(log.byte_span(bytes), index));
-        self.table
-            .set_bytes(&mut self.core, "set_bytes", bytes, None, index)
+        self.logged(
+            |log| ComputeCall::Bytes(log.byte_span(bytes), index),
+            |this| {
+                this.table
+                    .set_bytes(&mut this.core, "set_bytes", bytes, None, index)
+            },
+        )
     }
 
     /// `setBytes:length:attributeStride:atIndex:`: as [`set_bytes`](Self::set_bytes), the
@@ -541,13 +589,17 @@ impl ComputeCommandEncoder {
         stride: u64,
         index: u32,
     ) -> Result<(), Error> {
-        self.log(|log| ComputeCall::BytesWithStride(log.byte_span(bytes), stride, index));
-        self.table.set_bytes(
-            &mut self.core,
-            "set_bytes_with_stride",
-            bytes,
-            Some(stride),
-            index,
+        self.logged(
+            |log| ComputeCall::BytesWithStride(log.byte_span(bytes), stride, index),
+            |this| {
+                this.table.set_bytes(
+                    &mut this.core,
+                    "set_bytes_with_stride",
+                    bytes,
+                    Some(stride),
+                    index,
+                )
+            },
         )
     }
 
@@ -561,12 +613,16 @@ impl ComputeCommandEncoder {
         table: Option<&VisibleFunctionTable>,
         index: u32,
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::FunctionTable(table.cloned(), index));
-        self.table.set_function_tables(
-            &mut self.core,
-            "set_visible_function_table",
-            &[table],
-            index,
+        self.logged(
+            |_| ComputeCall::FunctionTable(table.cloned(), index),
+            |this| {
+                this.table.set_function_tables(
+                    &mut this.core,
+                    "set_visible_function_table",
+                    &[table],
+                    index,
+                )
+            },
         )
     }
 
@@ -578,28 +634,47 @@ impl ComputeCommandEncoder {
         tables: &[Option<&VisibleFunctionTable>],
         first: u32,
     ) -> Result<(), Error> {
-        self.log(|_| {
-            ComputeCall::FunctionTables(tables.iter().map(|table| table.cloned()).collect(), first)
-        });
-        self.table
-            .set_function_tables(&mut self.core, "set_visible_function_tables", tables, first)
+        self.logged(
+            |_| {
+                ComputeCall::FunctionTables(
+                    tables.iter().map(|table| table.cloned()).collect(),
+                    first,
+                )
+            },
+            |this| {
+                this.table.set_function_tables(
+                    &mut this.core,
+                    "set_visible_function_tables",
+                    tables,
+                    first,
+                )
+            },
+        )
     }
 
     /// `setTexture:atIndex:` (`None` unbinds the index). Refused: an index past the table, a
     /// texture of another device. What a bound texture's usage allows is checked at the
     /// dispatch, against the function's use of the slot.
     pub fn set_texture(&mut self, texture: Option<&Texture>, index: u32) -> Result<(), Error> {
-        self.log(|_| ComputeCall::Texture(texture.cloned(), index));
-        self.table
-            .set_textures(&mut self.core, "set_texture", &[texture], index)
+        self.logged(
+            |_| ComputeCall::Texture(texture.cloned(), index),
+            |this| {
+                this.table
+                    .set_textures(&mut this.core, "set_texture", &[texture], index)
+            },
+        )
     }
 
     /// `setTextures:withRange:`: `textures[i]` at index `first + i`. Refused as
     /// [`ComputeCommandEncoder::set_texture`] is; a refusal binds none of them.
     pub fn set_textures(&mut self, textures: &[Option<&Texture>], first: u32) -> Result<(), Error> {
-        self.log(|log| ComputeCall::Textures(log.texture_span(textures), first));
-        self.table
-            .set_textures(&mut self.core, "set_textures", textures, first)
+        self.logged(
+            |log| ComputeCall::Textures(log.texture_span(textures), first),
+            |this| {
+                this.table
+                    .set_textures(&mut this.core, "set_textures", textures, first)
+            },
+        )
     }
 
     /// `setSamplerState:atIndex:` (`None` unbinds the index). Refused: an index past the table, a
@@ -609,9 +684,18 @@ impl ComputeCommandEncoder {
         sampler: Option<&SamplerState>,
         index: u32,
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::Sampler(sampler.cloned(), index));
-        self.table
-            .set_samplers(&mut self.core, "set_sampler_state", &[sampler], None, index)
+        self.logged(
+            |_| ComputeCall::Sampler(sampler.cloned(), index),
+            |this| {
+                this.table.set_samplers(
+                    &mut this.core,
+                    "set_sampler_state",
+                    &[sampler],
+                    None,
+                    index,
+                )
+            },
+        )
     }
 
     /// `setSamplerStates:withRange:`: `samplers[i]` at index `first + i`. Refused as
@@ -621,14 +705,18 @@ impl ComputeCommandEncoder {
         samplers: &[Option<&SamplerState>],
         first: u32,
     ) -> Result<(), Error> {
-        self.log(|_| {
-            ComputeCall::Samplers(
-                samplers.iter().map(|sampler| sampler.cloned()).collect(),
-                first,
-            )
-        });
-        self.table
-            .set_samplers(&mut self.core, "set_sampler_states", samplers, None, first)
+        self.logged(
+            |_| {
+                ComputeCall::Samplers(
+                    samplers.iter().map(|sampler| sampler.cloned()).collect(),
+                    first,
+                )
+            },
+            |this| {
+                this.table
+                    .set_samplers(&mut this.core, "set_sampler_states", samplers, None, first)
+            },
+        )
     }
 
     /// `setSamplerState:lodMinClamp:lodMaxClamp:atIndex:`: the state with its LOD clamps
@@ -643,15 +731,24 @@ impl ComputeCommandEncoder {
         lod_max_clamp: f32,
         index: u32,
     ) -> Result<(), Error> {
-        self.log(|_| {
-            ComputeCall::SamplerWithLodClamps(sampler.cloned(), lod_min_clamp, lod_max_clamp, index)
-        });
-        self.table.set_samplers(
-            &mut self.core,
-            "set_sampler_state_with_lod_clamps",
-            &[sampler],
-            Some((&[lod_min_clamp], &[lod_max_clamp])),
-            index,
+        self.logged(
+            |_| {
+                ComputeCall::SamplerWithLodClamps(
+                    sampler.cloned(),
+                    lod_min_clamp,
+                    lod_max_clamp,
+                    index,
+                )
+            },
+            |this| {
+                this.table.set_samplers(
+                    &mut this.core,
+                    "set_sampler_state_with_lod_clamps",
+                    &[sampler],
+                    Some((&[lod_min_clamp], &[lod_max_clamp])),
+                    index,
+                )
+            },
         )
     }
 
@@ -666,20 +763,24 @@ impl ComputeCommandEncoder {
         lod_max_clamps: &[f32],
         first: u32,
     ) -> Result<(), Error> {
-        self.log(|_| {
-            ComputeCall::SamplersWithLodClamps(Box::new(SamplersWithLodClamps {
-                samplers: samplers.iter().map(|sampler| sampler.cloned()).collect(),
-                mins: lod_min_clamps.into(),
-                maxes: lod_max_clamps.into(),
-                first,
-            }))
-        });
-        self.table.set_samplers(
-            &mut self.core,
-            "set_sampler_states_with_lod_clamps",
-            samplers,
-            Some((lod_min_clamps, lod_max_clamps)),
-            first,
+        self.logged(
+            |_| {
+                ComputeCall::SamplersWithLodClamps(Box::new(SamplersWithLodClamps {
+                    samplers: samplers.iter().map(|sampler| sampler.cloned()).collect(),
+                    mins: lod_min_clamps.into(),
+                    maxes: lod_max_clamps.into(),
+                    first,
+                }))
+            },
+            |this| {
+                this.table.set_samplers(
+                    &mut this.core,
+                    "set_sampler_states_with_lod_clamps",
+                    samplers,
+                    Some((lod_min_clamps, lod_max_clamps)),
+                    first,
+                )
+            },
         )
     }
 
@@ -688,11 +789,15 @@ impl ComputeCommandEncoder {
     /// held their threads' words on an M4); Metal's API validation asserts. Refused: an index past
     /// the table. The device's limit is checked at the dispatch.
     pub fn set_threadgroup_memory_length(&mut self, length: u32, index: u32) -> Result<(), Error> {
-        self.log(|_| ComputeCall::ThreadgroupMemoryLength(length, index));
-        const CALL: &str = "set_threadgroup_memory_length";
-        check_index(CALL, index, THREADGROUP_SLOTS)?;
-        self.threadgroup_lengths.insert(index, length);
-        Ok(())
+        self.logged(
+            |_| ComputeCall::ThreadgroupMemoryLength(length, index),
+            |this| {
+                const CALL: &str = "set_threadgroup_memory_length";
+                check_index(CALL, index, THREADGROUP_SLOTS)?;
+                this.threadgroup_lengths.insert(index, length);
+                Ok(())
+            },
+        )
     }
 
     /// `setImageblockWidth:height:`: the cells of each threadgroup's explicit imageblock in the
@@ -706,10 +811,14 @@ impl ComputeCommandEncoder {
     /// more than 1024 cells over more rows and columns, which Metal runs as 1024 by 1 with its
     /// cells reading 0, and a side past 65536 (unmeasured).
     pub fn set_imageblock_size(&mut self, width: u64, height: u64) -> Result<(), Error> {
-        self.log(|_| ComputeCall::ImageblockSize(width, height));
-        self.imageblock =
-            imageblock_size(width, height).map_err(|p| invalid("set_imageblock_size", p))?;
-        Ok(())
+        self.logged(
+            |_| ComputeCall::ImageblockSize(width, height),
+            |this| {
+                this.imageblock = imageblock_size(width, height)
+                    .map_err(|p| invalid("set_imageblock_size", p))?;
+                Ok(())
+            },
+        )
     }
 
     /// `setStageInRegion:`: the region whose origin each thread's position in the grid is added
@@ -719,12 +828,16 @@ impl ComputeCommandEncoder {
     /// An origin or size axis past 32 bits is taken modulo `2^32`, as Metal takes it with or
     /// without its API validation (an origin of `2^32 + 1` read 1 and fetched element 1 on an M4).
     pub fn set_stage_in_region(&mut self, region: Region) -> Result<(), Error> {
-        self.log(|_| ComputeCall::StageInRegion(region));
-        let Region { origin, size } = region;
-        let origin = Size::new(origin.x, origin.y, origin.z).truncated();
-        self.stage_in_region = Some(StageInRegion::new(origin, size.truncated()));
-        self.indirect_stage_in = None;
-        Ok(())
+        self.logged(
+            |_| ComputeCall::StageInRegion(region),
+            |this| {
+                let Region { origin, size } = region;
+                let origin = Size::new(origin.x, origin.y, origin.z).truncated();
+                this.stage_in_region = Some(StageInRegion::new(origin, size.truncated()));
+                this.indirect_stage_in = None;
+                Ok(())
+            },
+        )
     }
 
     /// `setStageInRegionWithIndirectBuffer:indirectBufferOffset:`: the encoder's later
@@ -744,20 +857,22 @@ impl ComputeCommandEncoder {
         indirect_buffer: &Buffer,
         indirect_buffer_offset: u64,
     ) -> Result<(), Error> {
-        self.log(|_| {
-            ComputeCall::StageInRegionIndirect(indirect_buffer.clone(), indirect_buffer_offset)
-        });
-        const CALL: &str = "set_stage_in_region_indirect";
-        self.core.check_device(CALL, indirect_buffer.device())?;
-        let offset = indirect_dispatch::arguments_offset(
-            CALL,
-            indirect_buffer.length(),
-            indirect_buffer_offset,
-            STAGE_IN_REGION_BYTES,
-        )?;
-        self.indirect_stage_in = Some((indirect_buffer.clone(), offset));
-        self.stage_in_region = None;
-        Ok(())
+        self.logged(
+            |_| ComputeCall::StageInRegionIndirect(indirect_buffer.clone(), indirect_buffer_offset),
+            |this| {
+                const CALL: &str = "set_stage_in_region_indirect";
+                this.core.check_device(CALL, indirect_buffer.device())?;
+                let offset = indirect_dispatch::arguments_offset(
+                    CALL,
+                    indirect_buffer.length(),
+                    indirect_buffer_offset,
+                    STAGE_IN_REGION_BYTES,
+                )?;
+                this.indirect_stage_in = Some((indirect_buffer.clone(), offset));
+                this.stage_in_region = None;
+                Ok(())
+            },
+        )
     }
 
     /// `dispatchThreadgroups:threadsPerThreadgroup:`. A threadgroup Metal runs nothing for (its
@@ -765,42 +880,50 @@ impl ComputeCommandEncoder {
     /// 32 bits is taken modulo `2^32`, and one that is 0 runs nothing. Refused: no pipeline state
     /// set (plain Metal faults).
     pub fn dispatch_threadgroups(&mut self, groups: Size, threads: Size) -> Result<(), Error> {
-        self.log(|_| ComputeCall::Threadgroups(groups, threads));
-        const CALL: &str = "dispatch_threadgroups";
-        let Some(threads_per_group) = self.threadgroup(CALL, threads)? else {
-            return Ok(());
-        };
-        self.dispatch(
-            CALL,
-            Dispatch::Threadgroups {
-                groups: groups.truncated(),
-                threads_per_group,
+        self.logged(
+            |_| ComputeCall::Threadgroups(groups, threads),
+            |this| {
+                const CALL: &str = "dispatch_threadgroups";
+                let Some(threads_per_group) = this.threadgroup(CALL, threads)? else {
+                    return Ok(());
+                };
+                this.dispatch(
+                    CALL,
+                    Dispatch::Threadgroups {
+                        groups: groups.truncated(),
+                        threads_per_group,
+                    },
+                )?;
+                this.worked();
+                this.capture(|| Event::Threadgroups(groups, threads));
+                Ok(())
             },
-        )?;
-        self.worked();
-        self.capture(|| Event::Threadgroups(groups, threads));
-        Ok(())
+        )
     }
 
     /// `dispatchThreads:threadsPerThreadgroup:`: a grid of `threads`, its edges in partial
     /// threadgroups. Its threadgroup and grid are taken as
     /// [`dispatch_threadgroups`](Self::dispatch_threadgroups) takes its threadgroup and counts.
     pub fn dispatch_threads(&mut self, threads: Size, per_group: Size) -> Result<(), Error> {
-        self.log(|_| ComputeCall::Threads(threads, per_group));
-        const CALL: &str = "dispatch_threads";
-        let Some(threads_per_group) = self.threadgroup(CALL, per_group)? else {
-            return Ok(());
-        };
-        self.dispatch(
-            CALL,
-            Dispatch::Threads {
-                threads: threads.truncated(),
-                threads_per_group,
+        self.logged(
+            |_| ComputeCall::Threads(threads, per_group),
+            |this| {
+                const CALL: &str = "dispatch_threads";
+                let Some(threads_per_group) = this.threadgroup(CALL, per_group)? else {
+                    return Ok(());
+                };
+                this.dispatch(
+                    CALL,
+                    Dispatch::Threads {
+                        threads: threads.truncated(),
+                        threads_per_group,
+                    },
+                )?;
+                this.worked();
+                this.capture(|| Event::Threads(threads, per_group));
+                Ok(())
             },
-        )?;
-        self.worked();
-        self.capture(|| Event::Threads(threads, per_group));
-        Ok(())
+        )
     }
 
     /// `dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup:`:
@@ -823,24 +946,32 @@ impl ComputeCommandEncoder {
         indirect_buffer_offset: u64,
         threads: Size,
     ) -> Result<(), Error> {
-        self.log(|_| {
-            ComputeCall::ThreadgroupsIndirect(
-                indirect_buffer.clone(),
-                indirect_buffer_offset,
-                threads,
-            )
-        });
-        const CALL: &str = "dispatch_threadgroups_indirect";
-        let Some(threads_per_group) = self.threadgroup(CALL, threads)? else {
-            return Ok(());
-        };
-        let arguments = Arguments::Threadgroups { threads_per_group };
-        self.dispatch_indirect(CALL, indirect_buffer, indirect_buffer_offset, arguments)?;
-        self.worked();
-        self.capture(|| {
-            Event::ThreadgroupsIndirect(indirect_buffer.clone(), indirect_buffer_offset, threads)
-        });
-        Ok(())
+        self.logged(
+            |_| {
+                ComputeCall::ThreadgroupsIndirect(
+                    indirect_buffer.clone(),
+                    indirect_buffer_offset,
+                    threads,
+                )
+            },
+            |this| {
+                const CALL: &str = "dispatch_threadgroups_indirect";
+                let Some(threads_per_group) = this.threadgroup(CALL, threads)? else {
+                    return Ok(());
+                };
+                let arguments = Arguments::Threadgroups { threads_per_group };
+                this.dispatch_indirect(CALL, indirect_buffer, indirect_buffer_offset, arguments)?;
+                this.worked();
+                this.capture(|| {
+                    Event::ThreadgroupsIndirect(
+                        indirect_buffer.clone(),
+                        indirect_buffer_offset,
+                        threads,
+                    )
+                });
+                Ok(())
+            },
+        )
     }
 
     /// `dispatchThreadsWithIndirectBuffer:indirectBufferOffset:` (the encoder's SPI; Metal 4's
@@ -864,13 +995,19 @@ impl ComputeCommandEncoder {
         indirect_buffer: &Buffer,
         indirect_buffer_offset: u64,
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::ThreadsIndirect(indirect_buffer.clone(), indirect_buffer_offset));
-        const CALL: &str = "dispatch_threads_indirect";
-        let arguments = Arguments::Threads;
-        self.dispatch_indirect(CALL, indirect_buffer, indirect_buffer_offset, arguments)?;
-        self.worked();
-        self.capture(|| Event::ThreadsIndirect(indirect_buffer.clone(), indirect_buffer_offset));
-        Ok(())
+        self.logged(
+            |_| ComputeCall::ThreadsIndirect(indirect_buffer.clone(), indirect_buffer_offset),
+            |this| {
+                const CALL: &str = "dispatch_threads_indirect";
+                let arguments = Arguments::Threads;
+                this.dispatch_indirect(CALL, indirect_buffer, indirect_buffer_offset, arguments)?;
+                this.worked();
+                this.capture(|| {
+                    Event::ThreadsIndirect(indirect_buffer.clone(), indirect_buffer_offset)
+                });
+                Ok(())
+            },
+        )
     }
 
     /// Check an indirect dispatch of `arguments` at `offset` of `buffer`, and record it on its
@@ -1006,8 +1143,10 @@ impl ComputeCommandEncoder {
         resource: ResourceRef<'_>,
         usage: ResourceUsage,
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::UseResource(Resource::one(resource), usage));
-        self.use_all("use_resource", &[resource], usage)
+        self.logged(
+            |_| ComputeCall::UseResource(Resource::one(resource), usage),
+            |this| this.use_all("use_resource", &[resource], usage),
+        )
     }
 
     /// `useResources:count:usage:`: [`use_resource`](Self::use_resource) of each of
@@ -1017,8 +1156,10 @@ impl ComputeCommandEncoder {
         resources: &[ResourceRef<'_>],
         usage: ResourceUsage,
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::UseResources(Resource::all(resources), usage));
-        self.use_all("use_resources", resources, usage)
+        self.logged(
+            |_| ComputeCall::UseResources(Resource::all(resources), usage),
+            |this| this.use_all("use_resources", resources, usage),
+        )
     }
 
     fn use_all(
@@ -1059,15 +1200,19 @@ impl ComputeCommandEncoder {
     ///
     /// Refused, changing nothing (`Invalid`): a heap of another device.
     pub fn use_heap(&mut self, heap: &Heap) -> Result<(), Error> {
-        self.log(|_| ComputeCall::UseHeap(heap.clone()));
-        self.use_heaps_of("use_heap", &[heap])
+        self.logged(
+            |_| ComputeCall::UseHeap(heap.clone()),
+            |this| this.use_heaps_of("use_heap", &[heap]),
+        )
     }
 
     /// `useHeaps:count:`: [`use_heap`](Self::use_heap) of each of `heaps`, refused, changing
     /// nothing, as it is for any of them.
     pub fn use_heaps(&mut self, heaps: &[&Heap]) -> Result<(), Error> {
-        self.log(|_| ComputeCall::UseHeaps(heaps.iter().map(|&heap| heap.clone()).collect()));
-        self.use_heaps_of("use_heaps", heaps)
+        self.logged(
+            |_| ComputeCall::UseHeaps(heaps.iter().map(|&heap| heap.clone()).collect()),
+            |this| this.use_heaps_of("use_heaps", heaps),
+        )
     }
 
     fn use_heaps_of(&mut self, call: &'static str, heaps: &[&Heap]) -> Result<(), Error> {
@@ -1137,28 +1282,32 @@ impl ComputeCommandEncoder {
         range: Range<u64>,
         check: Option<(IndirectCommandCheck, IndirectCommandCheckNeeds)>,
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::Execute(icb.clone(), range.clone()));
-        const CALL: &str = indirect_execute::CALL;
-        self.core.check_device(CALL, icb.device())?;
-        if icb.is_render() {
-            return Err(Error::NotImplemented(RuntimeGap::IndirectRenderCommands));
-        }
-        let range = icb.command_range(CALL, range)?;
-        // An empty range runs nothing before the inherited pipeline state is looked at, as plain
-        // Metal's with none set.
-        if range.is_empty() {
-            return Ok(());
-        }
-        let pipeline = self.inherited_pipeline(CALL, icb)?;
-        // A buffer of no command types runs nothing, as plain Metal's.
-        if icb.has_no_command_types() {
-            return Ok(());
-        }
-        let fixed = u64::from(range.start)..u64::from(range.end);
-        self.defer_execution(icb, ExecutionRange::Fixed(range), pipeline, check)?;
-        self.worked();
-        self.capture(|| Event::Execute(icb.clone(), fixed));
-        Ok(())
+        self.logged(
+            |_| ComputeCall::Execute(icb.clone(), range.clone()),
+            |this| {
+                const CALL: &str = indirect_execute::CALL;
+                this.core.check_device(CALL, icb.device())?;
+                if icb.is_render() {
+                    return Err(Error::NotImplemented(RuntimeGap::IndirectRenderCommands));
+                }
+                let range = icb.command_range(CALL, range.clone())?;
+                // An empty range runs nothing before the inherited pipeline state is looked at, as
+                // plain Metal's with none set.
+                if range.is_empty() {
+                    return Ok(());
+                }
+                let pipeline = this.inherited_pipeline(CALL, icb)?;
+                // A buffer of no command types runs nothing, as plain Metal's.
+                if icb.has_no_command_types() {
+                    return Ok(());
+                }
+                let fixed = u64::from(range.start)..u64::from(range.end);
+                this.defer_execution(icb, ExecutionRange::Fixed(range), pipeline, check)?;
+                this.worked();
+                this.capture(|| Event::Execute(icb.clone(), fixed));
+                Ok(())
+            },
+        )
     }
 
     /// `executeCommandsInBuffer:indirectBuffer:indirectBufferOffset:`: run the commands of `icb`
@@ -1217,29 +1366,34 @@ impl ComputeCommandEncoder {
         offset: u64,
         check: Option<(IndirectCommandCheck, IndirectCommandCheckNeeds)>,
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::ExecuteIndirect(icb.clone(), range_buffer.clone(), offset));
-        const CALL: &str = indirect_execute::CALL_INDIRECT;
-        self.core.check_device(CALL, icb.device())?;
-        self.core.check_device(CALL, range_buffer.device())?;
-        if icb.is_render() {
-            return Err(Error::NotImplemented(RuntimeGap::IndirectRenderCommands));
-        }
-        indirect_execute::check_range_buffer(CALL, range_buffer.length(), offset)?;
-        let pipeline = self.inherited_pipeline(CALL, icb)?;
-        // A buffer of no command types runs nothing, as plain Metal's; its range is not read.
-        if icb.has_no_command_types() {
-            return Ok(());
-        }
-        let copy = indirect_dispatch::copy_arguments(
-            &mut self.core,
-            range_buffer,
-            offset,
-            indirect_execute::RANGE_BYTES,
-        )?;
-        self.defer_execution(icb, ExecutionRange::Indirect(copy), pipeline, check)?;
-        self.worked();
-        self.capture(|| Event::ExecuteIndirect(icb.clone(), range_buffer.clone(), offset));
-        Ok(())
+        self.logged(
+            |_| ComputeCall::ExecuteIndirect(icb.clone(), range_buffer.clone(), offset),
+            |this| {
+                const CALL: &str = indirect_execute::CALL_INDIRECT;
+                this.core.check_device(CALL, icb.device())?;
+                this.core.check_device(CALL, range_buffer.device())?;
+                if icb.is_render() {
+                    return Err(Error::NotImplemented(RuntimeGap::IndirectRenderCommands));
+                }
+                indirect_execute::check_range_buffer(CALL, range_buffer.length(), offset)?;
+                let pipeline = this.inherited_pipeline(CALL, icb)?;
+                // A buffer of no command types runs nothing, as plain Metal's; its range is not
+                // read.
+                if icb.has_no_command_types() {
+                    return Ok(());
+                }
+                let copy = indirect_dispatch::copy_arguments(
+                    &mut this.core,
+                    range_buffer,
+                    offset,
+                    indirect_execute::RANGE_BYTES,
+                )?;
+                this.defer_execution(icb, ExecutionRange::Indirect(copy), pipeline, check)?;
+                this.worked();
+                this.capture(|| Event::ExecuteIndirect(icb.clone(), range_buffer.clone(), offset));
+                Ok(())
+            },
+        )
     }
 
     /// The encoder's pipeline state where `icb` inherits it (refused `NoPipelineState` where

@@ -235,7 +235,6 @@ fn a_command_buffer_error_names_whose_failure_it_is() {
         FailureOrigin::{Metal, Runtime},
         MemoryKind, MeshRecordsOverflow, PipelineCreationCause, VkResultCode,
     };
-    use crate::sparse::SparseProblem;
     use CommandBufferError as E;
     let overflow = MeshRecordsOverflow {
         draw: 0,
@@ -262,11 +261,6 @@ fn a_command_buffer_error_names_whose_failure_it_is() {
         (E::PredicatedLoopLetGo, Runtime, 1),
         (E::PredicationOpenAtUnitEnd { record: 3 }, Metal, 1),
         (E::SparseHeapSplit, Runtime, 1),
-        (
-            E::SparseMappingArguments(SparseProblem::Lengths),
-            Runtime,
-            1,
-        ),
         (E::SparseMappingSplit, Runtime, 1),
         (E::CubicArgumentSampler, Runtime, 1),
         (E::MeshRecordsOverflow(overflow), Runtime, 8),

@@ -158,8 +158,8 @@ pub enum SparseProblem {
         /// The region, in tiles.
         region: Region,
     },
-    /// An indirect update's arguments, `bytes` of them at `offset`, past the buffer's `length`:
-    /// the count where it is encoded, or the regions it counts where the host reads them.
+    /// An indirect update's count, `bytes` of it at `offset`, past the buffer's `length`, where it
+    /// is encoded.
     IndirectArguments {
         /// The arguments' offset.
         offset: u64,

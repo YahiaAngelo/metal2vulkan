@@ -11,12 +11,14 @@
 //!   handle's clone, held once for the calls that name it in turn; bytes copied into the log's own
 //!   arena), in order, before the call runs:
 //!   encoding it again re-runs each call, so the commands come out as the program encoded them,
-//!   over where their buffers lie now. A call refused at its first encoding is refused again,
-//!   which leaves the encoder as it was encoded first ([`Replay::run`] fails, and the encoder is
-//!   not encoded again). The log starts at the encoder's open where the device has a buffer over
-//!   host pages (`Rebinds::any`); else nothing is logged. It costs one push per
-//!   call; a slice of buffers, offsets, textures or bytes goes into one of the log's arenas, so
-//!   the common calls allocate nothing of their own.
+//!   over where their buffers lie now. A call refused at its first encoding is noted so
+//!   ([`CallLog::refuse`]: the encoder's `logged`, a render encoder's call made at once): encoded
+//!   again, it is refused again and the calls after it run, as they ran after its refusal. A call
+//!   that answers otherwise than at its first encoding leaves the encoder as it was encoded first
+//!   ([`Replay::run`] fails, and the encoder is not encoded again). The log starts at the
+//!   encoder's open where the device has a buffer over host pages (`Rebinds::any`); else nothing
+//!   is logged. It costs one push per call; a slice of buffers, offsets, textures or bytes goes
+//!   into one of the log's arenas, so the common calls allocate nothing of their own.
 //! - **What is kept.** The command buffer keeps an ended encoder's log only where a command of
 //!   it named a buffer over host pages and the encoder can be encoded again: it left no segment
 //!   for later (an indirect stage-in region) but an indirect command buffer's execution, which
@@ -49,7 +51,7 @@ use super::command_buffer::CommandBuffer;
 use super::depth_stencil::DepthStencilState;
 use super::device::lock;
 use super::encoder::Replayed;
-use super::error::Error;
+use super::error::{internal, Error};
 use super::fence::Fence;
 use super::function_table::VisibleFunctionTable;
 use super::heap::Heap;
@@ -137,6 +139,7 @@ pub(super) struct LogMark {
     textures: usize,
     held: [usize; 5],
     size: usize,
+    refused: usize,
 }
 
 /// A run of elements in one of a log's arenas.
@@ -209,6 +212,9 @@ pub(super) struct CallLog<C> {
     /// Calls of the encoder's own public calls run now, which the call that makes them logged
     /// (`BlitCommandEncoder::unlogged`).
     nested: usize,
+    /// The places among its calls of those refused at their first encoding, in order
+    /// ([`refuse`](Self::refuse)).
+    refused: Vec<u32>,
 }
 
 impl<C> CallLog<C> {
@@ -227,6 +233,7 @@ impl<C> CallLog<C> {
             held_depth_stencils: Handles::default(),
             size: 0,
             nested: 0,
+            refused: Vec::new(),
         }
     }
 
@@ -306,10 +313,35 @@ impl<C> CallLog<C> {
         }
     }
 
-    /// Log `call`, which holds `extra` bytes of its own besides its size (a box's).
-    pub(super) fn push(&mut self, call: C, extra: usize) {
+    /// Log `call`, which holds `extra` bytes of its own besides its size (a box's): its place
+    /// among the calls.
+    pub(super) fn push(&mut self, call: C, extra: usize) -> usize {
         self.calls.push(call);
         self.size += std::mem::size_of::<C>() + extra;
+        self.calls.len() - 1
+    }
+
+    /// The call at `at`, logged by a public call that was refused, was refused at its first
+    /// encoding ([`again`](Self::again)).
+    pub(super) fn refuse(&mut self, at: usize) {
+        // Fewer than the log's calls, each of 24 bytes or more.
+        self.refused.push(at as u32);
+        self.size += std::mem::size_of::<u32>();
+    }
+
+    /// The call at `at`, encoded again with the answer `ran`, answered as at its first encoding:
+    /// a call refused then is refused again and the calls after it run, as they ran after its
+    /// refusal; a refusal of a call that ran then stands, as does a call that runs now that was
+    /// refused then (`Replay::run` fails: the encoding again differs from the first).
+    pub(crate) fn again(&self, at: usize, ran: Result<(), Error>) -> Result<(), Error> {
+        let refused = self.refused.binary_search(&(at as u32)).is_ok();
+        match (ran, refused) {
+            (Ok(()), false) | (Err(_), true) => Ok(()),
+            (Ok(()), true) => Err(internal(
+                "a call refused at its first encoding ran as it was encoded again",
+            )),
+            (Err(error), false) => Err(error),
+        }
     }
 
     /// The bytes it holds.
@@ -395,6 +427,7 @@ impl<C> CallLog<C> {
                 self.held_depth_stencils.held.len(),
             ],
             size: self.size,
+            refused: self.refused.len(),
         }
     }
 
@@ -412,6 +445,7 @@ impl<C> CallLog<C> {
         self.held_samplers.held.truncate(samplers);
         self.held_render_states.held.truncate(states);
         self.held_depth_stencils.held.truncate(depth_stencils);
+        self.refused.truncate(mark.refused);
         self.size = mark.size;
     }
 
@@ -428,6 +462,7 @@ impl<C> CallLog<C> {
         self.held_samplers.clear();
         self.held_render_states.clear();
         self.held_depth_stencils.clear();
+        self.refused.clear();
         self.size = 0;
         self.nested = 0;
     }
@@ -444,7 +479,8 @@ impl<C> CallLog<C> {
             + self.held_textures.room()
             + self.held_samplers.room()
             + self.held_render_states.room()
-            + self.held_depth_stencils.room();
+            + self.held_depth_stencils.room()
+            + self.refused.capacity() * std::mem::size_of::<u32>();
         if room > SPARE_LOG_BYTES {
             return None;
         }
@@ -738,9 +774,9 @@ impl Replay {
     /// Encode its encoder again into `command_buffer`, committed and not yet first submitted,
     /// starting with `residency` as the encoder started (`CommandBuffer::inherited_residency`,
     /// of the encoders ended before it): what it recorded, and (a compute encoder's) what it
-    /// made resident. Its calls announce no kind announced before (the module docs). Refused as
-    /// a call is refused, or where it records otherwise than its first encoding did
-    /// (`EncoderCore::finish_replay`).
+    /// made resident. Its calls announce no kind announced before (the module docs). Refused
+    /// where a call answers otherwise than at its first encoding ([`CallLog::again`]), or where
+    /// it records otherwise than its first encoding did (`EncoderCore::finish_replay`).
     pub(super) fn run(
         &self,
         command_buffer: &CommandBuffer,
@@ -750,15 +786,15 @@ impl Replay {
             Replay::Compute { dispatch_type, log } => {
                 let mut encoder =
                     ComputeCommandEncoder::replaying(command_buffer, *dispatch_type, residency)?;
-                for call in &log.calls {
-                    compute(&mut encoder, log, call)?;
+                for (at, call) in log.calls.iter().enumerate() {
+                    log.again(at, compute(&mut encoder, log, call))?;
                 }
                 encoder.finish_replay()
             }
             Replay::Blit(log) => {
                 let mut encoder = BlitCommandEncoder::replaying(command_buffer)?;
-                for call in &log.calls {
-                    blit(&mut encoder, log, call)?;
+                for (at, call) in log.calls.iter().enumerate() {
+                    log.again(at, blit(&mut encoder, log, call))?;
                 }
                 Ok((encoder.finish_replay()?, None))
             }

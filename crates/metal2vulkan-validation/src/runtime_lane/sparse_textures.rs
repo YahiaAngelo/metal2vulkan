@@ -530,9 +530,9 @@ fn sorted(mut tiles: Vec<[u64; 2]>) -> Vec<[u64; 2]> {
 /// An indirect update maps or unmaps the regions its buffer holds when it runs, a `Shared` one
 /// or a `Private` one a blit wrote just before in the same command buffer: a count, then that
 /// many regions, as an M4 reads them; a count of 0 maps nothing; a single tile maps on every device
-/// that makes the texture. Arguments Metal's validation stops fail the command buffer typed; a
-/// count past the buffer is refused where encoded; an offset off 4 reads at the multiple of 4 below
-/// it, as plain Metal reads it. The device announces the host's reads once.
+/// that makes the texture. Arguments Metal's validation stops map as plain Metal maps them; a
+/// count word past the buffer is refused where encoded; an offset off 4 reads at the multiple of 4
+/// below it, as plain Metal reads it. The device announces the host's reads once.
 #[test]
 fn indirect_updates_map_what_the_buffer_holds_when_they_run() {
     on_device(|device, messages| {
@@ -593,28 +593,39 @@ fn indirect_updates_map_what_the_buffer_holds_when_they_run() {
         run(&command_buffer);
         assert_eq!(heap.used_size(), 0, "{name}");
 
-        // Arguments Metal's validation stops, and a single tile.
+        // Arguments Metal's validation stops map as plain Metal maps them (the M3 Max under macOS
+        // 27.0.1): a region past its level's tiles maps the tiles inside them; one whose origin is
+        // past them, of no size, or of a level or slice past the texture's maps nothing; and the
+        // regions a count names past the buffer map nothing. Each unmapped again after.
+        let map = |mode, buffer: &Buffer| indirect(&queue, &texture, mode, buffer, |_| {});
         let past = words_buffer(&queue, &[1, 3, 0, 0, 2, 1, 1, 0, 0], shared);
-        let error = indirect(&queue, &texture, TileMapping::Map, &past, |_| {});
-        let region = Region::new_3d(3, 0, 0, 2, 1, 1);
-        let problem = SparseProblem::Region { level: 0, region };
-        assert_eq!(
-            error,
-            Some(CommandBufferError::SparseMappingArguments(problem))
+        assert_eq!(map(TileMapping::Map, &past), None, "{name}");
+        assert_eq!(heap.used_size(), PAGE, "{name}");
+        if strict {
+            assert_eq!(
+                mapped_tiles(&queue, &texture, strict),
+                vec![[3, 0]],
+                "{name}"
+            );
+        }
+        assert_eq!(map(TileMapping::Unmap, &past), None, "{name}");
+        assert_eq!(heap.used_size(), 0, "{name}");
+        let nothing = words_buffer(
+            &queue,
+            &[
+                4, 4, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0,
+                1, 1, 1, 0, 1,
+            ],
+            shared,
         );
+        assert_eq!(map(TileMapping::Map, &nothing), None, "{name}");
+        assert_eq!(heap.used_size(), 0, "{name}");
         let counted = words_buffer(&queue, &[2, 0, 0, 0, 1, 1, 1, 0, 0], private);
-        let error = indirect(&queue, &texture, TileMapping::Map, &counted, |_| {});
-        let bytes = 4 + 2 * 32;
-        let problem = SparseProblem::IndirectArguments {
-            offset: 0,
-            bytes,
-            length: 36,
-        };
-        assert_eq!(
-            error,
-            Some(CommandBufferError::SparseMappingArguments(problem))
-        );
-        assert_eq!(heap.used_size(), 0);
+        assert_eq!(map(TileMapping::Map, &counted), None, "{name}");
+        assert_eq!(heap.used_size(), PAGE, "{name}");
+        assert_eq!(map(TileMapping::Unmap, &counted), None, "{name}");
+        assert_eq!(heap.used_size(), 0, "{name}");
+        // A single tile.
         let single = words_buffer(&queue, &[1, 2, 0, 0, 1, 1, 1, 0, 0], shared);
         let error = indirect(&queue, &texture, TileMapping::Map, &single, |cb| {
             write_levels(cb, &texture, &[0])

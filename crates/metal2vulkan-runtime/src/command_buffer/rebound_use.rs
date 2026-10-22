@@ -40,8 +40,9 @@ pub(crate) enum ReboundAt {
     /// A command of the encoder's own named the buffer, and the encoder kept no log: why, where
     /// known.
     Unlogged(Option<Unlogged>),
-    /// A command of the encoder's own named it, and its encoding again was refused (a call refused
-    /// again, a recording unlike the first, work no longer on the GPU alone): the refusal.
+    /// A command of the encoder's own named it, and its encoding again was refused (a call that
+    /// answered otherwise than at its encoding, a recording unlike the first, work no longer on the
+    /// GPU alone): the refusal.
     Refused(String),
     /// A command of the encoder's own named it; the encoder kept its log, and no rebind encoded it
     /// again.

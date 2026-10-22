@@ -49,52 +49,57 @@ impl BlitCommandEncoder {
         destination: &IndirectCommandBuffer,
         destination_index: u64,
     ) -> Result<(), Error> {
-        self.log(|_| {
-            BlitCall::CopyIndirectCommandBuffer(Box::new((
-                source.clone(),
-                source_range.clone(),
-                destination.clone(),
-                destination_index,
-            )))
-        })?;
-        const CALL: &str = "copy_indirect_command_buffer";
-        self.core().check_device(CALL, source.device())?;
-        self.core().check_device(CALL, destination.device())?;
-        // Two buffers of no command types copy; one beside a buffer of command types was not
-        // measured.
-        if source.has_no_command_types() != destination.has_no_command_types() {
-            source.check_command_types(CALL)?;
-            destination.check_command_types(CALL)?;
-        }
-        let from = source.command_range(CALL, source_range)?;
-        let count = u64::from(from.end - from.start);
-        let to = destination.command_range(
-            CALL,
-            destination_index..destination_index.saturating_add(count),
-        )?;
-        if from.is_empty() {
-            return Ok(());
-        }
-        destination.written_by_gpu();
-        self.core().retain(destination.gpu_write());
-        destination.keep_copied(source, from.clone());
-        destination.written().copied_from(source.written());
-        // The slots past the records', carried as Metal's copy carries every slot below the count.
-        self.copy_overflow(source, from.clone(), destination, to.start)?;
-        let bytes = IndirectCommandBuffer::record_bytes(from);
-        let at = IndirectCommandBuffer::record_bytes(to).start;
-        self.unlogged(|this| {
-            this.copy_from_buffer_to_buffer(
-                source.storage(),
-                bytes.start,
-                destination.storage(),
-                at,
-                bytes.end - bytes.start,
-            )
-        })?;
-        self.core().retain(source.storage().clone());
-        self.core().retain(destination.storage().clone());
-        Ok(())
+        self.logged(
+            |_| {
+                BlitCall::CopyIndirectCommandBuffer(Box::new((
+                    source.clone(),
+                    source_range.clone(),
+                    destination.clone(),
+                    destination_index,
+                )))
+            },
+            |this| {
+                const CALL: &str = "copy_indirect_command_buffer";
+                this.core().check_device(CALL, source.device())?;
+                this.core().check_device(CALL, destination.device())?;
+                // Two buffers of no command types copy; one beside a buffer of command types was
+                // not measured.
+                if source.has_no_command_types() != destination.has_no_command_types() {
+                    source.check_command_types(CALL)?;
+                    destination.check_command_types(CALL)?;
+                }
+                let from = source.command_range(CALL, source_range.clone())?;
+                let count = u64::from(from.end - from.start);
+                let to = destination.command_range(
+                    CALL,
+                    destination_index..destination_index.saturating_add(count),
+                )?;
+                if from.is_empty() {
+                    return Ok(());
+                }
+                destination.written_by_gpu();
+                this.core().retain(destination.gpu_write());
+                destination.keep_copied(source, from.clone());
+                destination.written().copied_from(source.written());
+                // The slots past the records', carried as Metal's copy carries every slot below the
+                // count.
+                this.copy_overflow(source, from.clone(), destination, to.start)?;
+                let bytes = IndirectCommandBuffer::record_bytes(from);
+                let at = IndirectCommandBuffer::record_bytes(to).start;
+                this.unlogged(|this| {
+                    this.copy_from_buffer_to_buffer(
+                        source.storage(),
+                        bytes.start,
+                        destination.storage(),
+                        at,
+                        bytes.end - bytes.start,
+                    )
+                })?;
+                this.core().retain(source.storage().clone());
+                this.core().retain(destination.storage().clone());
+                Ok(())
+            },
+        )
     }
 
     /// `resetCommandsInBuffer:withRange:`: commands `range` of `buffer` are reset, as a fresh
@@ -108,70 +113,75 @@ impl BlitCommandEncoder {
         buffer: &IndirectCommandBuffer,
         range: Range<u64>,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::ResetCommandsInBuffer(buffer.clone(), range.clone()))?;
-        const CALL: &str = "reset_commands_in_buffer";
-        self.core().check_device(CALL, buffer.device())?;
-        let range = buffer.command_range(CALL, range)?;
-        if range.is_empty() {
-            return Ok(());
-        }
-        let mut reset = [0u8; COMMAND_BYTES];
-        CommandRecord::default()
-            .encode_into(&mut reset)
-            .map_err(|_| internal("a reset record does not encode"))?;
-        buffer.written_by_gpu();
-        self.core().retain(buffer.gpu_write());
-        let bytes = IndirectCommandBuffer::record_bytes(range.clone());
-        let overflow = buffer
-            .overflow()
-            .map(|overflow| (overflow, overflow.bytes(range.clone())));
-        let storage = buffer.storage();
-        if reset.iter().all(|&b| b == 0) {
-            // One fill of the records: a copy region per command costs the device a copy each.
-            let (raw, at) = storage.at(bytes.start);
-            let size = bytes.end - bytes.start;
-            self.command(&[writes(storage, bytes)], |device, command_buffer| {
-                // SAFETY: the encoder's command buffer is recording; the storage is live and
-                // retained until it completes; the range lies inside it, its offset and size
-                // multiples of 4 (whole records after the 16-byte header).
-                unsafe { device.cmd_fill_buffer(command_buffer, raw, at, size, 0) };
-            })?;
-            self.core().retain(storage.clone());
-            if let Some((overflow, bytes)) = overflow {
-                self.clear_overflow(overflow, bytes)?;
-            }
-            return Ok(());
-        }
-        let device = self.core().device().clone();
-        let upload = self.core().command_buffer().state().uploads.upload(
-            &device,
-            &reset,
-            COMMAND_BYTES as u64,
-        )?;
-        let (raw, _) = storage.at(0);
-        let regions: Vec<vk::BufferCopy> = range
-            .map(|index| {
-                let at = IndirectCommandBuffer::record_bytes(index..index + 1).start;
-                vk::BufferCopy {
-                    src_offset: upload.offset(),
-                    dst_offset: storage.at(at).1,
-                    size: COMMAND_BYTES as u64,
+        self.logged(
+            |_| BlitCall::ResetCommandsInBuffer(buffer.clone(), range.clone()),
+            |this| {
+                const CALL: &str = "reset_commands_in_buffer";
+                this.core().check_device(CALL, buffer.device())?;
+                let range = buffer.command_range(CALL, range.clone())?;
+                if range.is_empty() {
+                    return Ok(());
                 }
-            })
-            .collect();
-        let from = upload.raw();
-        self.command(&[writes(storage, bytes)], |device, command_buffer| {
-            // SAFETY: the encoder's command buffer is recording; the storage is live and retained
-            // until it completes, and the arena's region until the command buffer completes; each
-            // region is one record, inside both.
-            unsafe { device.cmd_copy_buffer(command_buffer, from, raw, &regions) };
-        })?;
-        self.core().retain(storage.clone());
-        // The slots past the records', cleared as Metal's reset clears every slot.
-        if let Some((overflow, bytes)) = overflow {
-            self.clear_overflow(overflow, bytes)?;
-        }
-        Ok(())
+                let mut reset = [0u8; COMMAND_BYTES];
+                CommandRecord::default()
+                    .encode_into(&mut reset)
+                    .map_err(|_| internal("a reset record does not encode"))?;
+                buffer.written_by_gpu();
+                this.core().retain(buffer.gpu_write());
+                let bytes = IndirectCommandBuffer::record_bytes(range.clone());
+                let overflow = buffer
+                    .overflow()
+                    .map(|overflow| (overflow, overflow.bytes(range.clone())));
+                let storage = buffer.storage();
+                if reset.iter().all(|&b| b == 0) {
+                    // One fill of the records: a copy region per command costs the device a copy
+                    // each.
+                    let (raw, at) = storage.at(bytes.start);
+                    let size = bytes.end - bytes.start;
+                    this.command(&[writes(storage, bytes)], |device, command_buffer| {
+                        // SAFETY: the encoder's command buffer is recording; the storage is live
+                        // and retained until it completes; the range lies inside it, its offset and
+                        // size multiples of 4 (whole records after the 16-byte header).
+                        unsafe { device.cmd_fill_buffer(command_buffer, raw, at, size, 0) };
+                    })?;
+                    this.core().retain(storage.clone());
+                    if let Some((overflow, bytes)) = overflow {
+                        this.clear_overflow(overflow, bytes)?;
+                    }
+                    return Ok(());
+                }
+                let device = this.core().device().clone();
+                let upload = this.core().command_buffer().state().uploads.upload(
+                    &device,
+                    &reset,
+                    COMMAND_BYTES as u64,
+                )?;
+                let (raw, _) = storage.at(0);
+                let regions: Vec<vk::BufferCopy> = range
+                    .map(|index| {
+                        let at = IndirectCommandBuffer::record_bytes(index..index + 1).start;
+                        vk::BufferCopy {
+                            src_offset: upload.offset(),
+                            dst_offset: storage.at(at).1,
+                            size: COMMAND_BYTES as u64,
+                        }
+                    })
+                    .collect();
+                let from = upload.raw();
+                this.command(&[writes(storage, bytes)], |device, command_buffer| {
+                    // SAFETY: the encoder's command buffer is recording; the storage is live and
+                    // retained until it completes, and the arena's region until the command buffer
+                    // completes; each region is one record, inside both.
+                    unsafe { device.cmd_copy_buffer(command_buffer, from, raw, &regions) };
+                })?;
+                this.core().retain(storage.clone());
+                // The slots past the records', cleared as Metal's reset clears every slot.
+                if let Some((overflow, bytes)) = overflow {
+                    this.clear_overflow(overflow, bytes)?;
+                }
+                Ok(())
+            },
+        )
     }
 
     /// Carry the slots past the records' of `source`'s commands `from` into `destination`'s from
@@ -278,10 +288,14 @@ impl BlitCommandEncoder {
         buffer: &IndirectCommandBuffer,
         range: Range<u64>,
     ) -> Result<(), Error> {
-        self.log(|_| BlitCall::OptimizeIndirectCommandBuffer(buffer.clone(), range.clone()))?;
-        const CALL: &str = "optimize_indirect_command_buffer";
-        self.core().check_device(CALL, buffer.device())?;
-        buffer.command_range(CALL, range)?;
-        Ok(())
+        self.logged(
+            |_| BlitCall::OptimizeIndirectCommandBuffer(buffer.clone(), range.clone()),
+            |this| {
+                const CALL: &str = "optimize_indirect_command_buffer";
+                this.core().check_device(CALL, buffer.device())?;
+                buffer.command_range(CALL, range.clone())?;
+                Ok(())
+            },
+        )
     }
 }

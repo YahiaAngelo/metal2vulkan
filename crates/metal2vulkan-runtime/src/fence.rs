@@ -179,48 +179,62 @@ impl ComputeCommandEncoder {
         &mut self,
         resources: &[ResourceRef<'_>],
     ) -> Result<(), Error> {
-        self.log(|_| ComputeCall::BarrierWithResources(Resource::all(resources)));
-        const CALL: &str = "memory_barrier_with_resources";
-        let core = self.core();
-        for resource in resources {
-            core.check_device(CALL, resource.device())?;
-        }
-        if !resources.is_empty() {
-            core.barrier(Barrier::between_dispatches());
-            self.capture(|| Event::Barrier);
-        }
-        Ok(())
+        self.logged(
+            |_| ComputeCall::BarrierWithResources(Resource::all(resources)),
+            |this| {
+                const CALL: &str = "memory_barrier_with_resources";
+                let core = this.core();
+                for resource in resources {
+                    core.check_device(CALL, resource.device())?;
+                }
+                if !resources.is_empty() {
+                    core.barrier(Barrier::between_dispatches());
+                    this.capture(|| Event::Barrier);
+                }
+                Ok(())
+            },
+        )
     }
 
     /// `updateFence:`: the fence is updated after the encoder's dispatches.
     pub fn update_fence(&mut self, fence: &Fence) -> Result<(), Error> {
-        self.log(|_| ComputeCall::UpdateFence(fence.clone()));
-        self.core().update_fence("update_fence", fence, None)?;
-        // Its unit of command predication ends with it, as Metal's does (`predication.rs`).
-        self.fence_updated();
-        Ok(())
+        self.logged(
+            |_| ComputeCall::UpdateFence(fence.clone()),
+            |this| {
+                this.core().update_fence("update_fence", fence, None)?;
+                // Its unit of command predication ends with it, as Metal's does (`predication.rs`).
+                this.fence_updated();
+                Ok(())
+            },
+        )
     }
 
     /// `waitForFence:`: the encoder's dispatches wait for the fence's last update before them in
     /// the queue's commit order.
     pub fn wait_for_fence(&mut self, fence: &Fence) -> Result<(), Error> {
-        self.log(|_| ComputeCall::WaitForFence(fence.clone()));
-        self.core().wait_for_fence("wait_for_fence", fence, None)
+        self.logged(
+            |_| ComputeCall::WaitForFence(fence.clone()),
+            |this| this.core().wait_for_fence("wait_for_fence", fence, None),
+        )
     }
 }
 
 impl BlitCommandEncoder {
     /// `updateFence:`: the fence is updated after the encoder's commands.
     pub fn update_fence(&mut self, fence: &Fence) -> Result<(), Error> {
-        self.log(|_| BlitCall::UpdateFence(fence.clone()))?;
-        self.core().update_fence("update_fence", fence, None)
+        self.logged(
+            |_| BlitCall::UpdateFence(fence.clone()),
+            |this| this.core().update_fence("update_fence", fence, None),
+        )
     }
 
     /// `waitForFence:`: the encoder's commands wait for the fence's last update before them in
     /// the queue's commit order.
     pub fn wait_for_fence(&mut self, fence: &Fence) -> Result<(), Error> {
-        self.log(|_| BlitCall::WaitForFence(fence.clone()))?;
-        self.core().wait_for_fence("wait_for_fence", fence, None)
+        self.logged(
+            |_| BlitCall::WaitForFence(fence.clone()),
+            |this| this.core().wait_for_fence("wait_for_fence", fence, None),
+        )
     }
 }
 

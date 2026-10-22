@@ -1611,11 +1611,6 @@ pub enum CommandBufferError {
     /// tiles that fit; the runtime binds such a texture's whole units, so it applied none of the
     /// batch's mappings and ran nothing of the command buffer from there.
     SparseHeapSplit,
-    /// An indirect sparse mapping update's arguments, as the host read them, are what Metal's
-    /// validation stops: a level, slice or region past the texture's, or regions past the buffer.
-    /// What Metal maps without validation is not measured, so the runtime applied none of the
-    /// batch's mappings and ran nothing of the command buffer from there.
-    SparseMappingArguments(SparseProblem),
     /// An indirect sparse mapping update's regions, as the host read them, would bind or unbind
     /// part of one of the device's sparse units of a texture whose texels no copy writes
     /// (`Feature::SparseMapping`, refused where a direct update is encoded): nothing of the batch
@@ -1756,13 +1751,14 @@ pub enum CommandBufferError {
     /// resolves such a use as it submits the command buffer, to the pages the buffer lies in
     /// then; the runtime resolved it as the command was encoded. The rebind encodes the command
     /// buffer's compute, blit and render encoders that named it again, from their calls, so they
-    /// reach the new pages as Metal's do; this fails only an encoder that cannot be encoded again:
-    /// a resource state encoder, which logs no calls; one of a command buffer that used command
-    /// predication; a render pass recorded later (an indirect command buffer's execution, a draw
-    /// whose pipeline was being made) or whose end captured its draws' tile reach; and one a call
-    /// of which was refused (at its encoding, and so again). Each of Metal's submissions holding
-    /// such an encoder ran nothing (the command buffer's split), every other ran, the event signals
-    /// fired and the handlers ran. What the command buffer's encoders made resident
+    /// reach the new pages as Metal's do (a resource state encoder takes no pages: an indirect
+    /// mapping update reads its buffer as it runs; a call refused at its encoding is refused
+    /// again, and the calls after it run); this fails only an encoder that cannot be encoded
+    /// again: one of a command buffer that used command predication; a render pass recorded later
+    /// (an indirect command buffer's execution, a draw whose pipeline was being made) or whose end
+    /// captured its draws' tile reach. Each of Metal's submissions holding such an encoder ran
+    /// nothing (the command buffer's split), every other ran, the event signals fired and the
+    /// handlers ran. What the command buffer's encoders made resident
     /// (`use_resource`, `use_heap`) and what its commands reach unnamed follow the rebind as
     /// Metal's do. The device announces the first (`Degradation::EncodedUseRebound`). A command
     /// buffer submitted before the rebind keeps the old pages, as Metal's does.
@@ -1886,8 +1882,7 @@ pub enum FailureOrigin {
     /// The runtime's own: Metal runs the work and fails no command buffer so, where the runtime
     /// failed it rather than run it short or wrong (a fixed pool's overflow, a pipeline made at
     /// the draw, a read or sampler the runtime does not emulate there, a host step's refusal), or
-    /// Metal's answer is unmeasured ([`CommandBufferError::SparseMappingArguments`]), or Vulkan
-    /// failed the submission in a way Metal has no counterpart of
+    /// Vulkan failed the submission in a way Metal has no counterpart of
     /// ([`CommandBufferError::Internal`]). Its [`CommandBufferError::metal_code`] is the nearest of
     /// Metal's codes, not Metal's answer.
     Runtime,
@@ -2019,7 +2014,6 @@ impl CommandBufferError {
             CommandBufferError::Internal(_)
             | CommandBufferError::MeshGridPastLimits
             | CommandBufferError::SparseHeapSplit
-            | CommandBufferError::SparseMappingArguments(_)
             | CommandBufferError::SparseMappingSplit
             | CommandBufferError::Refused
             | CommandBufferError::RenderTargetSize
@@ -2070,7 +2064,6 @@ impl CommandBufferError {
             CommandBufferError::Internal(_)
             | CommandBufferError::IndexPoolOverflow
             | CommandBufferError::SparseHeapSplit
-            | CommandBufferError::SparseMappingArguments(_)
             | CommandBufferError::SparseMappingSplit
             | CommandBufferError::CubicArgumentSampler
             | CommandBufferError::MeshRecordsOverflow(_)
