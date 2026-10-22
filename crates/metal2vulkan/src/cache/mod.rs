@@ -310,6 +310,13 @@ pub struct VariantKey {
     /// it states it.
     #[cfg_attr(feature = "serde", serde(default))]
     pub rotated_weights: bool,
+    /// The synthesized vertex stage of an emulated mesh function's pipeline draws each line or
+    /// triangle from its last index first (`BindShape::mesh_last_first`): the variant a mesh draw
+    /// under Apple's last provoking vertex runs on a device that takes flat inputs from the
+    /// first (`pipeline::link::mesh`). The plan of a pipeline compiled under it states it
+    /// (`RuntimeFact::MeshLastFirst`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub mesh_last_first: bool,
     /// Whether the draw's render pass depth is `Depth16Unorm`, where the render pipeline's depth
     /// format says otherwise (`BindShape::depth16_pass`): plain Metal stores into the pass's depth
     /// whatever format the pipeline names, so the variant's fragment stage writes Metal's 16-bit
@@ -560,6 +567,7 @@ impl VariantKey {
             && self.kept_imageblock_bytes.is_none()
             && !self.depth_clamp_range
             && !self.rotated_weights
+            && !self.mesh_last_first
             && self.depth16_pass.is_none()
             && !self.depth16_biased
             && self.depth16_bias_raises.is_none()

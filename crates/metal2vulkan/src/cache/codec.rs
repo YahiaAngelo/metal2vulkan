@@ -1196,6 +1196,7 @@ codec_enum! {
         DroppedColor { color },
         DepthClampRange,
         RotatedWeights,
+        MeshLastFirst,
         ConstantLanes { slot },
         FunctionTableRange { addressed },
         TestedStorageWrites { early_tests, early_variant },

@@ -131,7 +131,10 @@
 //! - **Rotated weights**. A draw of triangles drawn with Metal's last vertex first
 //!   (`BindShape::rotated_weights`) of a pipeline whose fragment function reads
 //!   `[[barycentric_coord]]` runs the variant that takes Metal's weights back from the drawn
-//!   triangle's (`VariantKey::rotated_weights`, `LoweringInputs::rotated_weights`).
+//!   triangle's (`VariantKey::rotated_weights`, `LoweringInputs::rotated_weights`). A mesh draw
+//!   drawn from each primitive's last index first (`BindShape::mesh_last_first`) of an emulated
+//!   mesh function's pipeline of lines or triangles runs the variant whose synthesized vertex
+//!   stage reads its corners so (`VariantKey::mesh_last_first`).
 //! - **Pass depth**. Plain Metal stores into the render pass's depth whatever depth format the
 //!   pipeline names: a draw against a `Depth16Unorm` depth whose pipeline names another, or
 //!   against another depth (the hidden `float` one included) whose pipeline names `Depth16Unorm`
@@ -1374,6 +1377,18 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
         .dependencies
         .iter()
         .any(|d| d.fact == RuntimeFact::RotatedWeights);
+    // A mesh draw drawn from each primitive's last index first: the variant whose emulated
+    // mesh pipeline's synthesized vertex stage reads its corners so. A pipeline of points, or
+    // one whose mesh function is not emulated, has no order to change.
+    let mesh_last_first = shape.mesh_last_first
+        && p.graphics
+            .mesh_records
+            .as_ref()
+            .is_some_and(|r| r.corners > 1);
+    let compiled_last_first = p
+        .dependencies
+        .iter()
+        .any(|d| d.fact == RuntimeFact::MeshLastFirst);
     // A draw that biases a `Depth16Unorm` depth on a profile that stores its unbiased depths as
     // Metal's codes but not its biased ones: the variant whose fragment stage adds the bias and
     // writes Metal's code, where its function can take that form (`LoweringInputs::depth16_codes`):
@@ -2517,6 +2532,7 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
     );
     variant.depth_clamp_range = depth_clamp_range;
     variant.rotated_weights = rotated_weights;
+    variant.mesh_last_first = mesh_last_first;
     variant.depth16_pass = depth16_pass;
     variant.depth16_biased = depth16_biased;
     variant.depth16_bias_raises = depth16_bias_raises;
@@ -2562,6 +2578,7 @@ fn plan(p: &RenderPipeline, device: &Device, shape: &BindShape) -> Result<Bindin
                 || other_colors
                 || compiled_range != depth_clamp_range
                 || compiled_rotated != rotated_weights
+                || compiled_last_first != mesh_last_first
                 || compiled_depth16_pass != depth16_pass
                 || compiled_biased != depth16_biased
                 || compiled_bias_raises != depth16_bias_raises

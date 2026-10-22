@@ -557,8 +557,16 @@ impl Device {
             .graphics
             .as_ref()
             .and_then(|g| g.mesh_records.as_ref());
+        let mut mesh_facts = Vec::new();
         if let Some(records) = records {
-            let (module, r) = mesh_vertex_stage(records, &linked, p, m)?;
+            // Drawn from each primitive's last index first: Apple's last provoking vertex on a
+            // device that takes flat inputs from the first (`VariantKey::mesh_last_first`).
+            let last_first = v.mesh_last_first && records.corners > 1;
+            let (module, r) = mesh_vertex_stage(records, last_first, &linked, p, m)?;
+            if last_first {
+                let fact = RuntimeFact::MeshLastFirst;
+                mesh_facts.push(RuntimeDependency::new(fact, mechanism(&fact, p)));
+            }
             requirements = p.union_requirements(&requirements, &r);
             let at = stages
                 .iter()
@@ -567,6 +575,7 @@ impl Device {
             stages.insert(at + 1, module);
         }
         let mut dependencies = dependencies(&artifacts, self);
+        dependencies.extend(mesh_facts);
         let depth = (&mut linked, &mut stages, &mut dependencies);
         if let Some(r) = depth16_stage((d.into(), v, d.fragment.is_none()), depth, p, m)? {
             requirements = p.union_requirements(&requirements, &r);
@@ -1458,6 +1467,10 @@ fn variant_fields(v: &VariantKey) -> String {
     // The group a pipeline without a fragment function keeps in no stage's key.
     if v.color_group != 0 {
         fields.push_str(&format!(" color_group {}", v.color_group));
+    }
+    // The synthesized vertex stage of an emulated mesh function's pipeline, in no stage's key.
+    if v.mesh_last_first {
+        fields.push_str(" mesh_last_first");
     }
     fields
 }

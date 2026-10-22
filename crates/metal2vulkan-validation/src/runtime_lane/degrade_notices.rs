@@ -11,8 +11,9 @@
 //! `indirect_host_steps`, in `indirect_dispatches`, in `index_fetches`, in `texture_blits`, in
 //! `sparse_textures`, in `buffer_texture_blits`, in `amplified_draws`, in `color_writes`, in
 //! `binary_archives`, in `view_reinterpretation`, in `mipmaps_exact`, in `clear_reach`, in
-//! `resolves`, in `mesh_draws`, in `visibility`, in `pass_start_reads`, in `unorm_depth_bias`, in
-//! `pvrtc_textures`, in `heaps`, in `rate_maps`, in `rebind_reach`, in `predication` or in `blits` takes, each test checking that
+//! `resolves`, in `mesh_draws`, in `provoking`, in `provoking_mesh`, in `visibility`, in
+//! `pass_start_reads`, in `unorm_depth_bias`, in `pvrtc_textures`, in `heaps`, in `rate_maps`, in
+//! `rebind_reach`, in `predication` or in `blits` takes, each test checking that
 //! its kinds are announced exactly once: the buffers over
 //! host bytes ([`HOST_BYTES`]), blits ([`BLITS`]),
 //! dispatches ([`DISPATCHES`]), render passes ([`PASSES`]), framebuffer fetch's passes
@@ -59,6 +60,8 @@
 //! IOSurface planes under 16 bytes a row in `buffer_texture_blits` ([`NARROW_ROWS`]), one
 //! texture's depth stored and resolved beside its stencil resolved alone in `resolves` ([`MIXED_RESOLVES`]), mesh
 //! draws emulated on a device without `VK_EXT_mesh_shader` in `mesh_draws` ([`EMULATED_MESH`]),
+//! draws under Apple's last provoking vertex on a device without its own in `provoking` and
+//! `provoking_mesh` ([`PROVOKING`]),
 //! render pipeline states whose draws run a synthesized geometry stage in `barycentric_weights`
 //! ([`SYNTHESIZED_GEOMETRY`]), tessellated draws emulated on a device without
 //! `tessellationShader` in `patches` ([`EMULATED_TESSELLATION`]), render and compute pipeline
@@ -192,6 +195,7 @@ use super::no_copy_heaps::HEAP;
 use super::pass_start_reads::{FRAGMENTS_BEFORE_GEOMETRY, IN_PLACE_VERTEX_READS};
 use super::patches::EMULATED_TESSELLATION;
 use super::predication::WORD_PAST_BUFFER;
+use super::provoking::PROVOKING;
 use super::pvrtc_textures::UNREADABLE;
 use super::rate_mapped_passes::ZERO_LAYER_AFTER_RELEASE;
 use super::rebind_reach::REBOUND_USES;
@@ -514,6 +518,7 @@ fn every_kind_has_a_site_a_lane_test_takes() {
         &NARROW_ROWS,
         &MIXED_RESOLVES,
         &EMULATED_MESH,
+        &PROVOKING,
         &CAPPED_ANISOTROPY,
         &NOT_MIPMAPPED_ANISOTROPY,
         &IN_PLACE,

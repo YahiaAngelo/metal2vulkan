@@ -46,6 +46,15 @@ use metal2vulkan_runtime::{
 };
 use std::cell::Cell;
 
+/// The kinds the lane's tests and `provoking_mesh`'s take: draws under `setProvokingVertexMode:`
+/// 1 on a device without its last provoking vertex, of lines drawn from their last vertex to
+/// their first, and of what no form draws as Metal does (a listed triangle's weights, a mode
+/// past 1).
+pub(super) const PROVOKING: [Degradation; 2] = [
+    Degradation::ProvokingVertexLines,
+    Degradation::ProvokingVertexUnmatched,
+];
+
 /// The target's side, in pixels.
 const SIDE: u64 = 32;
 
@@ -763,17 +772,9 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
         .filter_map(|m| m.degradation.as_ref())
         .map(|notice| notice.degradation)
         .collect();
-    let announced = |kind| kinds.contains(&kind);
-    assert_eq!(
-        announced(Degradation::ProvokingVertexLines),
-        !native,
-        "{name}: {kinds:?}"
-    );
-    assert_eq!(
-        announced(Degradation::ProvokingVertexUnmatched),
-        !native,
-        "{name}: {kinds:?}"
-    );
+    for kind in PROVOKING {
+        assert_eq!(kinds.contains(&kind), !native, "{name}: {kinds:?}");
+    }
     eprintln!(
         "{name} (native {native}, weights {weights:?}): {} cases, {} covered pixels at mode 1 \
          all Metal's; {} pixels of the mode-0 draws not; draws {natively} through last-vertex \
@@ -922,9 +923,9 @@ fn the_third_way_is_drawn_as_mode_1_announced() {
 }
 
 /// A draw that makes no primitive, too few vertices or indices for one (a line of one vertex,
-/// quads of three), draws nothing at mode 1, as Metal's does, and announces nothing: through the
-/// device's last vertex and with it withheld, of a pipeline that reads flat inputs and weights,
-/// on the cfg's device.
+/// quads of three), draws nothing at mode 1, as Metal's does, and announces no provoking kind
+/// ([`PROVOKING`]): through the device's last vertex and with it withheld, of a pipeline that
+/// reads flat inputs and weights, on the cfg's device.
 #[test]
 fn draws_of_no_primitive_announce_nothing() {
     use DrawPrimitiveType::{LineLoop, Public, QuadStrip, Quads, TriangleFan};
@@ -967,11 +968,13 @@ fn draws_of_no_primitive_announce_nothing() {
                     );
                 }
             }
+            // The pipeline's stages' precision notes (a device's interpolation) are its own.
             let kinds: Vec<Degradation> = messages
                 .take_notices()
                 .iter()
                 .filter_map(|m| m.degradation.as_ref())
                 .map(|notice| notice.degradation)
+                .filter(|kind| PROVOKING.contains(kind))
                 .collect();
             assert!(kinds.is_empty(), "{name} (withheld {withheld}): {kinds:?}");
         }

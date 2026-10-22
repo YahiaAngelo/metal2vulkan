@@ -85,6 +85,20 @@ pub(super) enum Provoking {
     Native,
     /// As the list of its primitives in `RewriteOrder`, through a first-vertex pipeline.
     Listed(RewriteOrder),
+    /// An emulated mesh draw of lines or triangles, each primitive drawn from its last index
+    /// first through a first-vertex pipeline (`BindState::mesh_last_first`).
+    LastCorners,
+}
+
+/// What of a draw's pipeline variant its provoking vertex asks for (`BindState`): weights taken
+/// back from triangles drawn with their last vertex first, and an emulated mesh's primitives
+/// drawn from their last index first.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct ProvokingForms {
+    /// `BindState::rotated_weights`.
+    pub(super) rotated_weights: bool,
+    /// `BindState::mesh_last_first`.
+    pub(super) mesh_last_first: bool,
 }
 
 impl Provoking {
@@ -92,20 +106,33 @@ impl Provoking {
     /// a last-vertex pipeline, the listed order, else mode 0's.
     pub(super) fn order(self) -> RewriteOrder {
         match self {
-            Provoking::AsIs => RewriteOrder::First,
+            Provoking::AsIs | Provoking::LastCorners => RewriteOrder::First,
             Provoking::Native => RewriteOrder::Last,
             Provoking::Listed(order) => order,
         }
     }
 
-    /// Whether a draw of `pipeline` as `assembly` taken so draws triangles with Metal's last
-    /// vertex first, and its fragment function reads `[[barycentric_coord]]`: it runs the variant
-    /// that takes Metal's weights back from the drawn triangle's (`BindState::rotated_weights`).
-    pub(super) fn rotates_weights(self, assembly: Assembly, pipeline: &DrawingState) -> bool {
-        self == Provoking::Listed(RewriteOrder::LastFirst)
-            && matches!(Class::of(assembly), Class::Triangles { .. })
-            && reads(pipeline).1
+    /// The variant a draw of `pipeline` as `assembly` taken so runs: where it draws triangles
+    /// with Metal's last vertex first and its fragment function reads `[[barycentric_coord]]`,
+    /// the one that takes Metal's weights back from the drawn triangle's; and an emulated mesh
+    /// draw's whose primitives are drawn from their last index first.
+    pub(super) fn forms(self, assembly: Assembly, pipeline: &DrawingState) -> ProvokingForms {
+        let triangles = match Class::of(assembly) {
+            Class::Triangles { .. } => self == Provoking::Listed(RewriteOrder::LastFirst),
+            _ => self == Provoking::LastCorners && mesh_corners(pipeline) == Some(3),
+        };
+        ProvokingForms {
+            rotated_weights: triangles && reads(pipeline).1,
+            mesh_last_first: self == Provoking::LastCorners,
+        }
     }
+}
+
+/// The indices of each primitive of `pipeline`'s emulated mesh function (`GraphicsState::
+/// mesh_records`): 1, 2 or 3; `None` where its mesh function is not emulated or it has none.
+fn mesh_corners(pipeline: &DrawingState) -> Option<u32> {
+    let graphics = &pipeline.base().graphics;
+    graphics.mesh_records.as_ref().map(|r| r.corners)
 }
 
 /// How Metal draws `setProvokingVertexMode:`'s `mode` (the module docs).
@@ -332,6 +359,49 @@ impl RenderLowering {
                     });
                 }
                 Provoking::Listed(RewriteOrder::LastFirst)
+            }
+            // A mesh's weights are in mode 0's order at mode 1 too, as a list's are (a Metal
+            // probe on the M3 Max), so one whose pipeline reads no flat input draws as it is.
+            (Class::Unlisted, false) if matches!(assembly, Assembly::Meshes) => Provoking::AsIs,
+            // An emulated mesh draws its primitives through a vertex stage of its own, which
+            // reads each from its last index first: a triangle's flat inputs, slice and viewport
+            // are Metal's, and its weights taken back to Metal's order but for rounding; a line
+            // runs the other way, announced as a listed line is. One of points draws as it is.
+            (Class::Unlisted, true)
+                if matches!(assembly, Assembly::Meshes) && mesh_corners(pipeline).is_some() =>
+            {
+                match mesh_corners(pipeline) {
+                    Some(1) => return Provoking::AsIs,
+                    Some(2) => device.degrade(Degradation::ProvokingVertexLines, || {
+                        (
+                            format!(
+                                "{call}: a mesh draw of lines under setProvokingVertexMode: 1 \
+                                 whose pipeline state reads their provoking vertex"
+                            ),
+                            "the device has no last provoking vertex \
+                             (VK_EXT_provoking_vertex's provokingVertexLast, with \
+                             provokingVertexModePerPipeline), so each line is drawn from its \
+                             last vertex to its first"
+                                .to_owned(),
+                        )
+                    }),
+                    _ if weights => device.degrade(Degradation::ProvokingVertexUnmatched, || {
+                        (
+                            format!(
+                                "{call}: a mesh draw of triangles under setProvokingVertexMode: \
+                                 1 whose fragment function reads flat inputs and \
+                                 [[barycentric_coord]]"
+                            ),
+                            "the device has no last provoking vertex, so each triangle is drawn \
+                             from its last vertex, and its second and third weights are \
+                             computed from that triangle's, Metal's but for rounding (within \
+                             2^-15)"
+                                .to_owned(),
+                        )
+                    }),
+                    _ => {}
+                }
+                Provoking::LastCorners
             }
             (Class::Unlisted, _) => {
                 device.degrade(Degradation::ProvokingVertexUnmatched, || {
