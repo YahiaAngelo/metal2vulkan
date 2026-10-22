@@ -18,7 +18,8 @@
 //!   has its own entry, [`Memory::import_host`]: one dedicated block per import, never
 //!   pooled, freed through the same [`Memory::free`]. So has a buffer's fresh pages
 //!   ([`import_own_pages`], `fresh_pages.rs`): a dedicated block that unmaps them once its
-//!   memory is freed. A dma-buf's import
+//!   memory is freed, as an import through a read-only view of the caller's pages unmaps the view
+//!   (`read_only_view.rs`). A dma-buf's import
 //!   (`Memory::import_dma_buf`) is in no block: the placement in it keeps it, and frees it as it
 //!   goes (`dma_buf.rs`'s `DmaBufPages`).
 //!
@@ -52,6 +53,7 @@ use super::freed_memory::{Parked, Parking};
 use super::fresh_pages::OwnPages;
 use super::memory_log::{self, MemoryLog};
 use super::range::RangeAllocator;
+use super::read_only_view::ReadOnlyView;
 use super::sharing::Sharing;
 use super::work_counts::Counters;
 use crate::release;
@@ -552,9 +554,17 @@ pub(super) struct Block {
     /// The pages its memory was imported from, where the runtime mapped them for it
     /// ([`import_own_pages`]): unmapped once the memory is freed.
     pages: Option<OwnPages>,
+    /// The read-only view of the caller's pages its memory was imported from, which drops the
+    /// GPU's writes ([`Memory::import_host`], `read_only_view.rs`): unmapped once the memory is
+    /// freed.
+    view: Option<ReadOnlyView>,
     /// Its memory type.
     type_index: u32,
 }
+
+/// What the runtime mapped that a block's memory was imported from (`Block::pages`,
+/// `Block::view`), unmapped once the memory is freed.
+type MappedPages = (Option<OwnPages>, Option<ReadOnlyView>);
 
 /// A buffer over the first `Block::size` bytes of a block, with every usage of an addressed
 /// buffer (`buffer::usage`), whose device address gives each buffer placed in the block its own
@@ -580,8 +590,8 @@ impl Block {
         drop(pages);
     }
 
-    /// Destroy the block's buffer of addresses: its memory, to free, and the pages it was
-    /// imported from where the runtime mapped them, to unmap once it is freed.
+    /// Destroy the block's buffer of addresses: its memory, to free, and the pages or the view
+    /// it was imported from where the runtime mapped them, to unmap once it is freed.
     ///
     /// # Safety
     ///
@@ -589,18 +599,23 @@ impl Block {
     unsafe fn release_addresses(
         self,
         device: &ash::Device,
-    ) -> (vk::DeviceMemory, Option<OwnPages>) {
+    ) -> (vk::DeviceMemory, Option<MappedPages>) {
         let Block {
             memory,
             addresses,
             pages,
+            view,
             ..
         } = self;
         if let Some(addresses) = addresses {
             // SAFETY: the caller's contract.
             unsafe { release::object(device, addresses.raw) };
         }
-        (memory, pages)
+        let mapped_pages = match (pages, view) {
+            (None, None) => None,
+            mapped_pages => Some(mapped_pages),
+        };
+        (memory, mapped_pages)
     }
 }
 
@@ -668,6 +683,8 @@ pub(super) struct Placement {
     pub(super) address: Option<u64>,
     /// It lies in pages the runtime mapped and imported ([`import_own_pages`]).
     own_pages: bool,
+    /// It lies in an import of a read-only view of the caller's pages (`read_only_view.rs`).
+    read_only_view: bool,
     /// The imports of the caller's dma-bufs the placement lies in, with the source that made them
     /// (`dma_buf.rs`), which no block of the runtime's holds: kept until the placement goes, and
     /// freed, the source dropped, when their last holder goes.
@@ -696,6 +713,7 @@ impl Placement {
             mapped: mapped.map(Mapped),
             address: None,
             own_pages: false,
+            read_only_view: false,
             #[cfg(unix)]
             dma_buf: None,
         }
@@ -725,6 +743,7 @@ impl Placement {
             mapped: Some(Mapped(mapped)),
             address: None,
             own_pages: false,
+            read_only_view: false,
             dma_buf: Some(pages),
         }
     }
@@ -756,6 +775,12 @@ impl Placement {
     /// ([`import_own_pages`]), to which no image is bound (`fresh_pages.rs`).
     pub(super) fn over_own_pages(&self) -> bool {
         self.own_pages
+    }
+
+    /// Whether the placement lies in an import of a read-only view of the caller's pages, which
+    /// drops the GPU's writes to them (`read_only_view.rs`).
+    pub(super) fn over_read_only_view(&self) -> bool {
+        self.read_only_view
     }
 
     /// The imports of the caller's dma-bufs the placement lies in, with their source
@@ -791,6 +816,7 @@ impl Placement {
             mapped: self.mapped,
             address: self.address,
             own_pages: self.own_pages,
+            read_only_view: self.read_only_view,
             #[cfg(unix)]
             dma_buf: self.dma_buf.clone(),
         }
@@ -1133,6 +1159,7 @@ impl Memory {
                 .filter(|_| addressed)
                 .map(|addresses| addresses.address + offset),
             own_pages: payload.pages.is_some(),
+            read_only_view: payload.view.is_some(),
             #[cfg(unix)]
             dma_buf: None,
         }
@@ -1291,26 +1318,29 @@ impl Memory {
     /// Import the caller's host memory, `size` bytes at `pointer` (both multiples of the device's
     /// import alignment), as a dedicated block of the best memory type of `class` among
     /// `allowed` (the types both the pointer and the resource take): its placement at offset 0,
-    /// whose `mapped` is `pointer`. The block is never pooled and is freed with the placement,
-    /// as a dedicated block is (`host_memory.rs`). Refused when no type of `class` is among
-    /// `allowed`, else with the failure of the last type tried.
+    /// whose `mapped` is `pointer`. Where `view` is given, a read-only view of those pages
+    /// (`read_only_view.rs`), the view is imported in their place, and unmapped once the memory
+    /// is freed. The block is never pooled and is freed with the placement, as a dedicated block
+    /// is (`host_memory.rs`). Refused when no type of `class` is among `allowed`, else with the
+    /// failure of the last type tried, the view unmapped.
     ///
     /// # Safety
     ///
     /// The `size` bytes at `pointer` are host memory of this process that stays mapped until the
-    /// placement is freed.
+    /// placement is freed; `view`, where given, views them whole.
     pub(super) unsafe fn import_host(
         &mut self,
         device: &ash::Device,
-        pointer: NonNull<u8>,
+        (pointer, view): (NonNull<u8>, Option<ReadOnlyView>),
         size: u64,
         allowed: u32,
         class: MemoryClass,
     ) -> Result<Placement, ImportFailure> {
         let types = candidates(&self.types, allowed, class, self.unified);
-        // SAFETY: the caller's contract.
+        let imported = view.as_ref().map_or(pointer, ReadOnlyView::pointer);
+        // SAFETY: the caller's contract; the view stays mapped while the block holds it.
         let (memory, type_index) =
-            unsafe { import_pointer(device, pointer, size, &types, self.device_address) }?;
+            unsafe { import_pointer(device, imported, size, &types, self.device_address) }?;
         let block = Block {
             memory,
             size,
@@ -1318,6 +1348,7 @@ impl Memory {
             addresses: None,
             imported: true,
             pages: None,
+            view,
             type_index,
         };
         let host = pointer.as_ptr() as usize;
@@ -1555,6 +1586,7 @@ impl BlockMaker {
             addresses,
             imported: false,
             pages: None,
+            view: None,
             type_index,
         })
     }
@@ -1634,6 +1666,7 @@ pub(super) fn import_own_pages(
         addresses: None,
         imported: false,
         pages: Some(pages),
+        view: None,
         type_index,
     };
     let mut memory = lock(memory);

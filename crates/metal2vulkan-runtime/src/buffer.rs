@@ -160,6 +160,10 @@ pub(super) struct HostCell {
     /// The device whose work counts each look at its pages adds to
     /// (`WorkCounts::no_copy_lies_read`).
     device: Device,
+    /// The GPU's writes to the buffer are dropped, as Metal's private option bit 24 drops them:
+    /// its pages are imported through a read-only view of them (`read_only_view.rs`), which a
+    /// rebind's are too.
+    drops_writes: bool,
 }
 
 /// The textures over a buffer's host pages ([`HostCell`]): their images, which a detach makes
@@ -348,6 +352,11 @@ impl Drop for HostCell {
 }
 
 impl HostCell {
+    /// Whether the GPU's writes to the buffer are dropped (`read_only_view.rs`).
+    pub(super) fn drops_writes(&self) -> bool {
+        self.drops_writes
+    }
+
     /// The pages the buffer lies in now; `None` while it is detached.
     pub(super) fn current(&self) -> Option<Arc<HostPages>> {
         self.device.shared().counts.no_copy_lie_read();
@@ -832,6 +841,9 @@ pub(super) struct Shape {
     pub(super) type_index: u32,
     /// The pages were imported as dma-bufs (`dma_buf.rs`), not by their pointer.
     pub(super) over_dma_buf: bool,
+    /// The pages were imported through a read-only view of them, which drops the GPU's writes
+    /// (`read_only_view.rs`).
+    pub(super) drops_writes: bool,
 }
 
 impl Shape {
@@ -845,6 +857,7 @@ impl Shape {
             mapped: placement.mapped,
             type_index: placement.type_index(),
             over_dma_buf: placement.over_dma_buf(),
+            drops_writes: placement.over_read_only_view(),
         }
     }
 
@@ -857,12 +870,14 @@ impl Shape {
             self.reach,
             self.type_index,
             self.over_dma_buf,
+            self.drops_writes,
         ) == (
             other.offset,
             other.base,
             other.reach,
             other.type_index,
             other.over_dma_buf,
+            other.drops_writes,
         ) && at(self) == at(other)
     }
 }
@@ -1017,6 +1032,12 @@ impl HostImport {
         if self.unlisted.load(Ordering::Relaxed) && self.unlisted.swap(false, Ordering::Relaxed) {
             (self.device.shared().counts).host_import_rebound_unlisted(false);
         }
+    }
+
+    /// Whether its pages were imported through a read-only view of them, which drops the GPU's
+    /// writes (`read_only_view.rs`).
+    pub(super) fn drops_writes(&self) -> bool {
+        self.shape.drops_writes
     }
 
     /// Its residency, where the device may release it while idle.
@@ -2322,6 +2343,7 @@ impl Device {
     /// A no-copy buffer's lie, of `key`: pages of its own in `import`, released to `release`
     /// once nothing holds them, which a rebind replaces (`rebind.rs`).
     fn host_lie(&self, key: ResourceKey, import: Arc<HostImport>, release: Option<Release>) -> Lie {
+        let drops_writes = import.drops_writes();
         let host = HostPages::new(import);
         if let Some(release) = release {
             host.release_to(release);
@@ -2332,6 +2354,7 @@ impl Device {
             textures: Mutex::new(TexturesOver::default()),
             exposed: AtomicU8::new(0),
             device: self.clone(),
+            drops_writes,
         });
         self.shared().rebinds.register(key, &cell);
         Lie::Host(cell)

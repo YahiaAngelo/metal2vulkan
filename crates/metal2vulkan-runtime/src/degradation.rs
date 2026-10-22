@@ -978,16 +978,20 @@ degradations! {
             "the record reads its word as zero, where Metal reads what lies at that address in its \
              own address space: zero where nothing is there, another buffer's bytes where Metal \
              placed one";
-        /// A no-copy buffer, a heap or an indirect command buffer made with `MTLResourceOptions`
-        /// bit 24 ([`ResourceOptions::PRIVATE_BIT`](crate::ResourceOptions::PRIVATE_BIT)), which
-        /// Metal makes and keeps the GPU's writes from the memory of (the M3 Max under macOS
-        /// 27.0.1: a kernel's stores and a blit's fill reach neither the CPU nor a later command
-        /// buffer, which read the memory's bytes; a later command of the same command buffer may
-        /// read them, as the GPU's caches hold them; a blit into a texture over or in that memory
-        /// faults the command buffer), is made as without it, and reports its options without
-        /// it, as Metal's does. A buffer of the runtime's memory or a texture descriptor with the
-        /// bit is refused, as Metal ends the process there; a buffer placed in a heap without the
-        /// bit is made as without it, as Metal's is, announcing nothing.
+        /// A heap of the runtime's memory or an indirect command buffer made with
+        /// `MTLResourceOptions` bit 24
+        /// ([`ResourceOptions::PRIVATE_BIT`](crate::ResourceOptions::PRIVATE_BIT)), or off macOS a
+        /// no-copy buffer or heap over the caller's bytes, which Metal makes and keeps the GPU's
+        /// writes from the memory of (the M3 Max under macOS 27.0.1: a kernel's stores and a
+        /// blit's fill reach neither the CPU nor a later command buffer, which read the memory's
+        /// bytes; a later command of the same command buffer may read them, as the GPU's caches
+        /// hold them; a blit into a texture over or in that memory faults the command buffer), is
+        /// made as without it, and reports its options without it, as Metal's does. On macOS a
+        /// no-copy buffer or heap with the bit drops the GPU's writes as Metal's does, its pages
+        /// imported through a read-only view of them (`read_only_view.rs`), announcing nothing.
+        /// A buffer of the runtime's memory or a texture descriptor with the bit is refused, as
+        /// Metal ends the process there; a buffer placed in a heap without the bit is made as
+        /// without it, as Metal's is, announcing nothing.
         PrivateResourceOption = "private-resource-option", Precision,
             "the GPU's writes reach the resource's memory, the CPU and later command buffers, \
              where Metal's never reach them";
@@ -3114,10 +3118,27 @@ impl Device {
         }
     }
 
+    /// `options` of `call`'s no-copy buffer or heap over the caller's bytes without
+    /// [`ResourceOptions::PRIVATE_BIT`], and whether its memory drops the GPU's writes, as Metal's
+    /// does where the options set the bit: on macOS, where the runtime imports the pages through
+    /// a read-only view of them (`read_only_view.rs`). Elsewhere the GPU's writes reach the
+    /// pages, announced once ([`Degradation::PrivateResourceOption`]).
+    pub(super) fn no_copy_options(
+        &self,
+        call: &'static str,
+        options: ResourceOptions,
+    ) -> (ResourceOptions, bool) {
+        if !crate::read_only_view::VIEWS_DROP_WRITES {
+            return (self.take_options(call, options), false);
+        }
+        options.without_private_bit()
+    }
+
     /// `options` as the runtime makes `call`'s resource of them where Metal makes it with
-    /// [`ResourceOptions::PRIVATE_BIT`] and keeps the GPU's writes from its memory (a no-copy
-    /// buffer, a heap; an indirect command buffer, whose GPU-written records under it are not
-    /// measured): without the bit, announced once ([`Degradation::PrivateResourceOption`]).
+    /// [`ResourceOptions::PRIVATE_BIT`] and keeps the GPU's writes from its memory (a heap of
+    /// the runtime's memory; a no-copy buffer or heap off macOS, [`Device::no_copy_options`]; an
+    /// indirect command buffer, whose GPU-written records under it are not measured): without the
+    /// bit, announced once ([`Degradation::PrivateResourceOption`]).
     pub(super) fn take_options(
         &self,
         call: &'static str,

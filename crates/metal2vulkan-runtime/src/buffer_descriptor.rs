@@ -26,6 +26,7 @@ use super::host_memory::{
 #[cfg(unix)]
 use super::host_residency::Again;
 use super::memory::{ImportFailure, MemoryClass, Placement};
+use super::read_only_view::ReadOnlyView;
 use super::rebind::RebindProblem;
 use super::texture::stand_in::TextureImages;
 use super::texture::Remade;
@@ -215,9 +216,9 @@ impl Device {
             }
             (None, None) => Place::At(placement),
         };
-        let resource_options = match contents {
-            BufferContents::NoCopy { .. } => self.take_options(CALL, resource_options),
-            _ => self.own_memory_options(CALL, resource_options)?,
+        let (resource_options, drops_writes) = match contents {
+            BufferContents::NoCopy { .. } => self.no_copy_options(CALL, resource_options),
+            _ => (self.own_memory_options(CALL, resource_options)?, false),
         };
         let buffer = match contents {
             BufferContents::Zero => self.zero_buffer(CALL, length, resource_options, place),
@@ -242,6 +243,7 @@ impl Device {
                     HostRelease::new(deallocator, keep_alive),
                     place,
                     false,
+                    drops_writes,
                 )
             },
         }?;
@@ -280,7 +282,10 @@ impl Device {
     /// GiB measured on an M4 and an M3 Max), where Metal makes the buffer at once and pays at the
     /// first command using it (24 to 88 ms per GiB). Where the device refuses the pointer and
     /// `memory` carries a dma-buf source ([`HostMemory::with_dma_buf`]), the dma-bufs it makes of
-    /// the pages are imported instead.
+    /// the pages are imported instead. With Metal's private option bit 24
+    /// ([`ResourceOptions::PRIVATE_BIT`]), the GPU's writes to the pages are dropped, as Metal's
+    /// are: on macOS the pages are imported through a read-only view of them, by their pointer
+    /// alone; elsewhere the GPU's writes reach them, announced (`private-resource-option`).
     ///
     /// Refused: a length of 0 or past `max_buffer_length` (`Nil`, as plain Metal answers nil);
     /// `Private` or `Memoryless` storage, as Metal stops them, and an undefined
@@ -305,7 +310,7 @@ impl Device {
         deallocator: Option<Deallocator>,
     ) -> Result<Buffer, Error> {
         const CALL: &str = "new_buffer_with_bytes_no_copy";
-        let options = self.take_options(CALL, options);
+        let (options, drops_writes) = self.no_copy_options(CALL, options);
         // SAFETY: the caller's contract.
         let buffer = unsafe {
             self.buffer_over_host_memory(
@@ -316,6 +321,7 @@ impl Device {
                 HostRelease::new(deallocator, None),
                 AddressPlacement::Any.into(),
                 false,
+                drops_writes,
             )
         }?;
         Ok(self.visible(buffer))
@@ -412,7 +418,10 @@ impl Device {
     /// buffer when `of_heap` (`heap.rs`, `Device::new_heap_with_bytes_no_copy`), whose memory
     /// must start at a multiple of the import's unit, the larger of the host page and the
     /// device's `minImportedHostPointerAlignment`, so that the heap's offsets are its memory's
-    /// (`Invalid`, `HeapProblem::HostMemoryAlignment`, elsewhere).
+    /// (`Invalid`, `HeapProblem::HostMemoryAlignment`, elsewhere). Where `drops_writes` (Metal's
+    /// private option bit 24, [`Device::no_copy_options`]), the pages are imported through a
+    /// read-only view of them, which drops the GPU's writes (`read_only_view.rs`): an import of
+    /// its own, which no other buffer lies in or joins, and which the device keeps imported.
     ///
     /// # Safety
     ///
@@ -426,6 +435,7 @@ impl Device {
         release: HostRelease,
         placement: Place,
         of_heap: bool,
+        drops_writes: bool,
     ) -> Result<Buffer, Error> {
         let modes = Modes::of(options)?;
         let class = match modes.storage {
@@ -447,7 +457,7 @@ impl Device {
             .as_ref()
             .map_err(|unsupported| Error::Unsupported(unsupported.clone()))?;
         let (pointer, source, writable) = memory.into_parts();
-        let host = host_window(call, importer, pointer, length, source)?;
+        let host = host_window(call, importer, pointer, length, source, drops_writes)?;
         let window = host.window;
         if of_heap && window.offset != 0 {
             let alignment = importer.page.max(importer.alignment);
@@ -456,10 +466,10 @@ impl Device {
         }
         // A buffer over the bytes a live no-copy buffer was made over, of its memory class, lies
         // in its import (`host_aliases.rs`), its dma-buf source dropped uncalled; a heap's own
-        // buffer imports its own.
+        // buffer imports its own, as does one whose GPU writes are dropped.
         let made_over = (pointer.as_ptr() as u64, length);
         let release = release.of(pointer, length);
-        let shares = (!of_heap)
+        let shares = (!of_heap && !drops_writes)
             .then(|| shared.aliases.import(made_over, class))
             .flatten();
         if shares.is_none() && !of_heap && shared.aliases.inside_live(made_over, class) {
@@ -486,12 +496,12 @@ impl Device {
         // A no-copy buffer's own import of dma-bufs keeps them, so the device may release it
         // while idle and import them again (`host_residency.rs`), as it may its own import of
         // the pointer where the driver's pointer imports follow their address; a heap's import
-        // stays.
+        // stays, as does an import of a read-only view.
         let (buffer, memory, again) =
             match unsafe { self.import_by_pointer(importer, pointer, length, host, class) }? {
                 Ok((buffer, memory)) => {
                     #[cfg(unix)]
-                    let again = (!of_heap)
+                    let again = (!of_heap && !drops_writes)
                         .then(|| Again::pointer(self, pointer, (length, window, class)))
                         .flatten();
                     #[cfg(not(unix))]
@@ -535,10 +545,10 @@ impl Device {
             again,
         });
         // A buffer over the bytes another no-copy buffer covers joins it (`host_aliases.rs`), and
-        // a later one lies in its import.
+        // a later one lies in its import; one whose GPU writes are dropped joins none.
         // A buffer just made lies in its pages (`HostCell::current`).
         let current = buffer.host_cell().and_then(|cell| cell.current());
-        if let (false, Some(current)) = (of_heap, current) {
+        if let (false, false, Some(current)) = (of_heap, drops_writes, current) {
             shared
                 .aliases
                 .join(buffer.identity().key, made_over, class, current.import());
@@ -595,7 +605,9 @@ impl Device {
             .as_ref()
             .map_err(|unsupported| Error::Unsupported(unsupported.clone()))?;
         let (pointer, source, writable) = memory.into_parts();
-        let host = host_window(call, importer, pointer, length, source)?;
+        // A buffer whose GPU writes are dropped keeps them dropped over its new pages.
+        let drops_writes = cell.drops_writes();
+        let host = host_window(call, importer, pointer, length, source, drops_writes)?;
         let window = host.window;
         if heap.is_some() && window.offset != 0 {
             let alignment = importer.page.max(importer.alignment);
@@ -620,10 +632,9 @@ impl Device {
         // dropped uncalled: they pin no page, that import's making asked about the same window,
         // and the pages stay writable while imported (`HostMemory::new`). A heap's own buffer
         // imports its own, whose images bound to its bytes are made again over the new import's
-        // memory or its dma-bufs.
+        // memory or its dma-bufs, as does a buffer whose GPU writes are dropped.
         let made_over = (pointer.as_ptr() as u64, length);
-        let shares = heap
-            .is_none()
+        let shares = (heap.is_none() && !drops_writes)
             .then(|| shared.aliases.import(made_over, class))
             .flatten();
         let (pages, remade) = match shares {
@@ -859,11 +870,13 @@ impl Device {
             by_pointer,
             source,
             unwritable: _,
+            drops_writes,
         } = host;
         let refusal = match by_pointer {
             // SAFETY: the caller's.
-            true => match unsafe { self.import_pointer(importer, pointer, length, &window, class) }
-            {
+            true => match unsafe {
+                self.import_pointer(importer, pointer, length, &window, class, drops_writes)
+            } {
                 Ok(imported) => return Ok(Ok(imported)),
                 Err(error) if refused(&error) => error,
                 Err(error) => return Err(error),
@@ -875,8 +888,9 @@ impl Device {
 
     /// The `VkBuffer` of a no-copy buffer of `length` bytes at `pointer`, made for host
     /// allocations and bound in the import of the window's pages at their pointer
-    /// (`VK_EXT_external_memory_host`), `buffer.base` bytes below the window's offset, as memory
-    /// of `class`: the buffer and the placement. Released again on failure.
+    /// (`VK_EXT_external_memory_host`), or of a read-only view of them where `drops_writes`
+    /// (`read_only_view.rs`), `buffer.base` bytes below the window's offset, as memory of
+    /// `class`: the buffer and the placement. Released again on failure.
     ///
     /// # Safety
     ///
@@ -889,10 +903,12 @@ impl Device {
         length: u64,
         window: &ImportWindow,
         class: MemoryClass,
+        drops_writes: bool,
     ) -> Result<(HostBuffer, Placement), Error> {
         let buffer = self.host_buffer(window, length)?;
         // The window starts `window.offset` bytes before the pointer, in the pages it touches.
         let start = pointer.as_ptr().wrapping_sub(window.offset as usize);
+        let class = (class, drops_writes);
         // SAFETY: the caller's, and the buffer is a new one of this device.
         match unsafe { self.import_backing(importer, &buffer, start, window, class) } {
             Ok(placement) => Ok((buffer, placement)),
@@ -927,9 +943,11 @@ impl Device {
         let window = &again.window;
         // SAFETY: the caller's pages stay mapped at the pointer while the buffer lives
         // (`HostMemory::new`), and the buffer outlives the placement: the import holds it, and a
-        // command buffer that reads it holds the buffer too.
-        let (buffer, placement) =
-            unsafe { self.import_pointer(importer, pointer, again.length, window, again.class) }?;
+        // command buffer that reads it holds the buffer too. An import of a read-only view is
+        // never made again (`Device::buffer_over_host_memory`).
+        let (buffer, placement) = unsafe {
+            self.import_pointer(importer, pointer, again.length, window, again.class, false)
+        }?;
         Ok(self.pages_of(
             buffer.raw,
             placement,
@@ -1036,8 +1054,10 @@ impl Device {
     }
 
     /// Import the window's pages at `start` and bind `buffer` in them, `buffer.base` bytes below
-    /// the window's offset, as memory of `class`: the placement. Released again on failure but
-    /// the buffer.
+    /// the window's offset, as memory of `class`: the placement. Where `drops_writes`, a
+    /// read-only view of the pages is imported in their place (`read_only_view.rs`); a view the
+    /// system cannot map is refused as host memory run out. Released again on failure but the
+    /// buffer.
     ///
     /// # Safety
     ///
@@ -1050,15 +1070,27 @@ impl Device {
         buffer: &HostBuffer,
         start: *mut u8,
         window: &ImportWindow,
-        class: MemoryClass,
+        (class, drops_writes): (MemoryClass, bool),
     ) -> Result<Placement, Error> {
         let raw_device = self.shared().vk();
         let requirements = &buffer.requirements;
         let at = binds_in(window, buffer.base, buffer.size, requirements)
             .map_err(|_| not_importable())?;
         let start = NonNull::new(start).ok_or_else(not_importable)?;
-        // SAFETY: `start` is host memory aligned to the import alignment (the window's).
-        let types = unsafe { importer.memory_types(raw_device, start) }.map_err(import_refused)?;
+        let view = match drops_writes {
+            // SAFETY: the window is whole host pages of the caller's mapped memory (the caller's
+            // contract; `import_window` rounds it out to the host page).
+            true => Some(
+                unsafe { ReadOnlyView::of(start, window.size) }
+                    .ok_or(Error::OutOfMemory(MemoryKind::Host))?,
+            ),
+            false => None,
+        };
+        let imported = view.as_ref().map_or(start, ReadOnlyView::pointer);
+        // SAFETY: the imported pages are host memory aligned to the import alignment (the
+        // window's).
+        let types =
+            unsafe { importer.memory_types(raw_device, imported) }.map_err(import_refused)?;
         let allowed = types & requirements.memory_type_bits;
         // An allocation past the device's, refused before the driver sees it.
         let largest = self
@@ -1069,22 +1101,23 @@ impl Device {
             return Err(Error::OutOfMemory(MemoryKind::Device));
         }
         // SAFETY: the caller's contract keeps the window mapped until the placement is freed,
-        // and the buffer is unbound.
-        unsafe { self.import_now(buffer.raw, start, window.size, allowed, class, at) }
+        // and the buffer is unbound; the view views the window whole.
+        unsafe { self.import_now(buffer.raw, (start, view), window.size, allowed, class, at) }
     }
 
     /// Import `size` bytes of host pages at `start` as memory of `class` among the types
-    /// `allowed`, and bind `raw` in them `at` bytes in: the placement. Released again on failure.
+    /// `allowed`, through `view` where given (`read_only_view.rs`), and bind `raw` in them `at`
+    /// bytes in: the placement. Released again on failure.
     ///
     /// # Safety
     ///
     /// The `size` bytes at `start` are host memory of this process that stays mapped until the
-    /// placement is freed; `raw` is an unbound buffer of this device made for host allocations,
-    /// whose requirements the pages meet from `at`.
+    /// placement is freed, and `view`, where given, views them whole; `raw` is an unbound buffer
+    /// of this device made for host allocations, whose requirements the pages meet from `at`.
     unsafe fn import_now(
         &self,
         raw: vk::Buffer,
-        start: NonNull<u8>,
+        pages: (NonNull<u8>, Option<ReadOnlyView>),
         size: u64,
         allowed: u32,
         class: MemoryClass,
@@ -1094,7 +1127,7 @@ impl Device {
         let raw_device = shared.vk();
         // SAFETY: the caller's contract keeps the pages mapped until the placement is freed.
         let placement =
-            unsafe { lock(&shared.memory).import_host(raw_device, start, size, allowed, class) }
+            unsafe { lock(&shared.memory).import_host(raw_device, pages, size, allowed, class) }
                 .map_err(|failure| match failure {
                     ImportFailure::NoMemoryType => not_importable(),
                     ImportFailure::Vulkan(error) => import_refused(error),
@@ -1119,6 +1152,9 @@ impl Device {
 /// The host pages a no-copy buffer (or a heap's own buffer) of some length imports
 /// ([`host_window`]).
 struct HostWindow {
+    /// The GPU's writes to them are dropped: they are imported through a read-only view of them
+    /// (`read_only_view.rs`), by their pointer alone.
+    drops_writes: bool,
     /// The pages: the range rounded out to the host page.
     window: ImportWindow,
     /// Whether the device's import alignment covers them, so that their pointer is imported
@@ -1160,7 +1196,8 @@ fn writability_settled(
 /// The host pages a no-copy object of `length` bytes at `pointer` imports on the device of
 /// `importer`, for `call`: the pages the range touches ([`import_window`]), imported by their
 /// pointer where the device's import alignment covers them, else only as a dma-buf where the
-/// caller gave a source the device can use. A source the device cannot use is dropped uncalled.
+/// caller gave a source the device can use. A source the device cannot use is dropped uncalled,
+/// as is any where `drops_writes` (imported through a read-only view, `read_only_view.rs`).
 /// Refused: memory past the address space's end (`Nil`, as Metal makes no buffer over it); a
 /// range the import alignment cannot cover, with no usable source (`Unsupported`, `HostMemory`).
 fn host_window(
@@ -1169,8 +1206,9 @@ fn host_window(
     pointer: NonNull<u8>,
     length: u64,
     source: Option<Source>,
+    drops_writes: bool,
 ) -> Result<HostWindow, Error> {
-    let source = source.filter(|_| importer.imports_dma_bufs());
+    let source = source.filter(|_| importer.imports_dma_bufs() && !drops_writes);
     let at = pointer.as_ptr() as u64;
     let window = import_window(at, length, importer.page, 1)
         .map_err(|_| nil(call, Problem::BufferLength { length }))?;
@@ -1179,6 +1217,7 @@ fn host_window(
         return Err(not_importable());
     }
     Ok(HostWindow {
+        drops_writes,
         window,
         by_pointer,
         source,

@@ -1642,14 +1642,16 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   unrelated to the buffer. Cost: the record reads its word as zero, where Metal reads what lies at
   that address in its own address space: zero where nothing is there, another buffer's bytes where
   Metal placed one.
-- `metal2vulkan-degrade-private-resource-option` (precision). `PrivateResourceOption`: A no-copy
-  buffer, a heap or an indirect command buffer made with `MTLResourceOptions` bit 24
-  (`ResourceOptions::PRIVATE_BIT`), which Metal makes and keeps the GPU's writes from the memory of,
-  is made as without it, and reports its options without it, as Metal's does. A buffer of the
-  runtime's memory or a texture descriptor with the bit is refused, as Metal ends the process
-  there; a buffer placed in a heap without the bit is made as without it, announcing nothing. Cost:
-  the GPU's writes reach the resource's memory, the CPU and later command buffers, where Metal's
-  never reach them.
+- `metal2vulkan-degrade-private-resource-option` (precision). `PrivateResourceOption`: A heap of
+  the runtime's memory or an indirect command buffer made with `MTLResourceOptions` bit 24
+  (`ResourceOptions::PRIVATE_BIT`), or off macOS a no-copy buffer or heap over the caller's bytes,
+  which Metal makes and keeps the GPU's writes from the memory of, is made as without it, and
+  reports its options without it, as Metal's does. On macOS a no-copy buffer or heap with the bit
+  drops the GPU's writes as Metal's does, its pages imported through a read-only view of them,
+  announcing nothing. A buffer of the runtime's memory or a texture descriptor with the bit is
+  refused, as Metal ends the process there; a buffer placed in a heap without the bit is made as
+  without it, announcing nothing. Cost: the GPU's writes reach the resource's memory, the CPU and
+  later command buffers, where Metal's never reach them.
 - `metal2vulkan-degrade-optimized-depth-stencil-texture` (precision).
   `OptimizedDepthStencilTexture`: A depth or stencil texture with `allowGPUOptimizedContents` off
   sized or made in a heap (never a device's own texture, whose layout nothing shows), on a device
