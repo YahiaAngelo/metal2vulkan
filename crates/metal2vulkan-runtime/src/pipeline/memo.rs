@@ -19,10 +19,11 @@
 use super::render::RenderVariant;
 use super::Variant;
 use crate::device::lock;
+use crate::key_hash::KeyMap;
 use metal2vulkan::cache::PipelineKey;
 use metal2vulkan::library::{CompiledFunction, FunctionCompileKey};
 use metal2vulkan::pipeline::{ComputePipeline, RenderPipeline};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::sync::{Arc, Mutex, Weak};
 
@@ -32,8 +33,10 @@ pub(crate) const MEMO_ENTRIES: usize = 4096;
 /// A map that keeps at most `max_weight` of its entries' weights and at most `max_entries`
 /// entries, removing the least recently used past either. A lookup or an insert is a use.
 pub(crate) struct Lru<K, V> {
-    /// Each entry's number: the stamp of the insert that kept it.
-    numbers: HashMap<K, u64>,
+    /// Each entry's number: the stamp of the insert that kept it, found by the runtime's key
+    /// hasher (`key_hash.rs`): a lookup of a variant's plan by bind shape is one per dispatch that
+    /// settles.
+    numbers: KeyMap<K, u64>,
     /// The entries, by number.
     entries: BTreeMap<u64, Slot<K, V>>,
     /// Each entry's number by its last use, oldest first.
@@ -64,7 +67,7 @@ impl<K: Clone + Eq + Hash, V> Lru<K, V> {
     /// An empty map bounded by `max_weight` and `max_entries`.
     pub(crate) fn new(max_weight: u64, max_entries: usize) -> Lru<K, V> {
         Lru {
-            numbers: HashMap::new(),
+            numbers: KeyMap::default(),
             entries: BTreeMap::new(),
             order: BTreeMap::new(),
             clock: 0,
