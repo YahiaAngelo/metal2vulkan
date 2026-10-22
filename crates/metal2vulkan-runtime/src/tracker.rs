@@ -91,6 +91,9 @@ use std::ops::Range;
 /// The most entries the state keeps for one resource before it merges them.
 pub(super) const ENTRIES_PER_KEY: usize = 8;
 
+/// The resources an encoder's part makes room for at its first tracked use.
+const TRACKED_ROOM: usize = 8;
+
 /// One side of a dependency: pipeline stages, and the access types in them.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub(super) struct Access {
@@ -654,6 +657,15 @@ impl<T> Few<T> {
         }
     }
 
+    /// [`push`](Self::push) `value`, the room for `room` values past the first made at once
+    /// where it holds one value alone, so a list that grows to `room` allocates once.
+    fn push_with_room(&mut self, value: T, room: usize) {
+        if self.first.is_some() && self.rest.capacity() == 0 {
+            self.rest.reserve_exact(room);
+        }
+        self.push(value);
+    }
+
     fn iter(&self) -> std::iter::Chain<std::option::Iter<'_, T>, std::slice::Iter<'_, T>> {
         self.first.iter().chain(&self.rest)
     }
@@ -1207,6 +1219,11 @@ impl<K: Copy + Ord + Hash> EncoderUses<K> {
             );
         }
         let part = self.current();
+        // Room for a few resources at once, made at the part's first: grown from nothing, the map
+        // would allocate again at its fourth and eighth.
+        if part.tracked.capacity() == 0 {
+            part.tracked.reserve(TRACKED_ROOM);
+        }
         for used in uses
             .iter()
             .filter(|used| used.tracked && !used.is_nothing())
@@ -1217,7 +1234,9 @@ impl<K: Copy + Ord + Hash> EncoderUses<K> {
                     known.read = known.read.union(used.read);
                     known.write = known.write.union(used.write);
                 }
-                None => ranges.push(used.clone()),
+                // A resource used at a second range (a buffer whose draws move along it) takes
+                // room for every range it keeps before they merge, and the merge's own, at once.
+                None => ranges.push_with_room(used.clone(), ENTRIES_PER_KEY + 1),
             }
             if ranges.len() > ENTRIES_PER_KEY {
                 ranges.change_all(coalesce_uses);
@@ -1790,6 +1809,15 @@ impl<K: Copy + Ord> Summary<K> {
         for used in other.updates {
             add_fence(&mut self.updates, used);
         }
+    }
+}
+
+impl<K: Copy + Ord + Hash> EncoderUses<K> {
+    /// The room its current part's list of `key`'s uses has past the first, where it tracks it.
+    #[cfg(test)]
+    pub(super) fn range_room(&self, key: K) -> Option<usize> {
+        let part = self.parts.last()?;
+        part.tracked.get(&key).map(|few| few.rest.capacity())
     }
 }
 

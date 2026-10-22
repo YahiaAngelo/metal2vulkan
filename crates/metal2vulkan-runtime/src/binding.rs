@@ -1233,6 +1233,12 @@ impl LastSetZero {
 /// The most sets 0 one generation of a [`SetCache`] keeps.
 const SETS_KEPT: usize = 128;
 
+/// The sets 0 a [`Generation`] makes room for at its first set; it grows past them to
+/// [`SETS_KEPT`]. A command buffer's commands write a few sets as a rule (one per pipeline state
+/// and bound resources), so the room for all of them at once (about 27 KB) would be made and let
+/// go of at every command buffer.
+const SETS_ROOM: usize = 8;
+
 /// The sets 0 a command buffer's recorded commands allocated and wrote, by what they hold
 /// (`EncoderCore::set_zero`): a later command of the command buffer, in any of its encoders, that
 /// writes the same descriptors into a set of the same layout binds the set again, and allocates
@@ -1254,8 +1260,8 @@ const SETS_KEPT: usize = 128;
 /// generation moves to the newer one; a newer generation that fills becomes the older one, the
 /// older one's sets forgotten (they stay in their pools, unbound by later commands). So a command
 /// buffer whose commands write fewer distinct sets than a generation holds allocates each once.
-/// A generation keeps its storage as it empties, and makes it at its first set: a few
-/// allocations a command buffer, none a command.
+/// A generation keeps its storage as it empties, and makes room for [`SETS_ROOM`] sets at its
+/// first: a few allocations a command buffer, none a command but where the room grows.
 #[derive(Default)]
 pub(crate) struct SetCache {
     generations: [Generation; 2],
@@ -1300,9 +1306,9 @@ impl Generation {
         writes: impl Iterator<Item = SetWrite>,
     ) {
         if self.sets.capacity() == 0 {
-            self.by_key.reserve(SETS_KEPT);
-            self.sets.reserve(SETS_KEPT);
-            self.writes.reserve(4 * SETS_KEPT);
+            self.by_key.reserve(SETS_ROOM);
+            self.sets.reserve(SETS_ROOM);
+            self.writes.reserve(4 * SETS_ROOM);
         }
         let start = self.writes.len();
         self.writes.extend(writes);

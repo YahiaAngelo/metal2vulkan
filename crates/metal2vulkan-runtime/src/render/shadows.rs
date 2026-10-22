@@ -159,6 +159,11 @@ fn range_use(key: ResourceKey, write: bool, range: UseRange) -> Use<ResourceKey>
 /// Add `range` to `ranges` (in order, apart): merged with those it meets or touches, and past
 /// [`RANGES_PER_BUFFER`] the two nearest merged.
 fn insert(ranges: &mut Vec<Range<u64>>, mut range: Range<u64>) {
+    // Room for as many as it holds before two merge, made once: a buffer whose draws move along
+    // it would grow the list several times.
+    if ranges.capacity() == 0 {
+        ranges.reserve_exact(RANGES_PER_BUFFER + 1);
+    }
     ranges.retain(|other| {
         let meets = other.start <= range.end && range.start <= other.end;
         if meets {
@@ -718,5 +723,8 @@ mod tests {
         let ranges = &bounded.bytes[&(a, true)];
         assert_eq!(ranges.len(), RANGES_PER_BUFFER);
         assert!(ranges.contains(&(300..340)), "{ranges:?}");
+        // Its list took room for every range it keeps and the merge's one at its first, and
+        // never grew.
+        assert_eq!(ranges.capacity(), RANGES_PER_BUFFER + 1);
     }
 }
