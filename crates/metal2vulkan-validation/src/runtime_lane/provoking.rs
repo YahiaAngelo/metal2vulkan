@@ -753,8 +753,9 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
     let after = lane.device.work_counts();
     let natively = after.provoking_last_pipeline_draws - before.provoking_last_pipeline_draws;
     let listed = after.provoking_listed_draws - before.provoking_listed_draws;
-    // The listed direct indexed draws of lists take the index gather pass, and so do the private
-    // types' under a last-vertex pipeline, which draws them as lists in Metal's mode-1 order.
+    // The listed direct indexed draws take a run of the index gather pass (lists) or of the
+    // index rewrite pass (strips), and so do the private types' at either mode (under a
+    // last-vertex pipeline in Metal's mode-1 order).
     let gathered = after.gathered_draws - before.gathered_draws;
     match native {
         true => assert!(
@@ -762,7 +763,7 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
             "{name}: {natively} {listed} {gathered}"
         ),
         false => assert!(
-            natively == 0 && listed > gathered && gathered > 0,
+            natively == 0 && listed > 0 && gathered > 0,
             "{name}: {natively} {listed} {gathered}"
         ),
     }
@@ -778,7 +779,7 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
     eprintln!(
         "{name} (native {native}, weights {weights:?}): {} cases, {} covered pixels at mode 1 \
          all Metal's; {} pixels of the mode-0 draws not; draws {natively} through last-vertex \
-         pipelines, {listed} listed ({gathered} by the gather pass); {} pixels of listed lines \
+         pipelines, {listed} listed, {gathered} drawn from a run's lists; {} pixels of listed lines \
          covered otherwise; {} cases of rotated weights checked",
         found.cases, found.covered, found.told_apart, found.lines_moved, found.rotated_weights
     );

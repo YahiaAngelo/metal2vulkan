@@ -7563,11 +7563,14 @@ impl RenderLowering {
                     if self.unordered.written(&in_place) {
                         return Err(Error::NotImplemented(restarted.gap.gap()));
                     }
-                    // An indirect draw of a program whose list follows from its positions,
-                    // reading its arguments and indices in place, joins an indirect run of the
-                    // index gather pass, which plans its list on the GPU; where an earlier draw
-                    // or tile dispatch of the encoder wrote them behind a memory barrier, the
-                    // index rewrite pass's step before the draw's render pass instance writes it.
+                    // A direct indexed draw (of a program the gather pass does not take) joins a
+                    // run of the index rewrite pass, one dispatch for the run's draws, each in a
+                    // workgroup of its own; an indirect draw of a program whose list follows from
+                    // its positions joins an indirect run of the index gather pass, which plans
+                    // its list on the GPU. Either reads its arguments and indices in place; where
+                    // an earlier draw or tile dispatch of the encoder wrote them behind a memory
+                    // barrier, the index rewrite pass's step before the draw's render pass
+                    // instance writes the list.
                     let gathers = match arguments {
                         index_rewrite::Arguments::Indirect(_) => restarted.program.gathers(),
                         index_rewrite::Arguments::IndirectVertices(_) => {
@@ -7575,16 +7578,37 @@ impl RenderLowering {
                         }
                         index_rewrite::Arguments::Direct { .. } => false,
                     };
-                    let pooled = match (
-                        indirect,
-                        gathers && !self.replaying && !private.private_list,
-                    ) {
-                        (Some(source), true)
-                            if source.in_place()
-                                && index.is_none_or(DrawSource::in_place)
-                                && !self.core.uses().written(&reads) =>
+                    let joins = !self.replaying
+                        && !private.private_list
+                        && !self.core.uses().written(&reads);
+                    let commanded = match (arguments, index, indirect) {
+                        (
+                            index_rewrite::Arguments::Direct {
+                                count,
+                                instances,
+                                base_vertex,
+                                base_instance,
+                            },
+                            Some(index),
+                            None,
+                        ) if joins && index.in_place() => self.core.rewrite_run(
+                            index_rewrite::RewriteRunRequest {
+                                program: restarted.program,
+                                restart: restarted.restart,
+                                order: restarted.order,
+                                index,
+                                arguments: (count, instances, base_vertex, base_instance),
+                                wide: size == 4,
+                            },
+                            &reads,
+                        )?,
+                        (_, index, Some(source))
+                            if gathers
+                                && joins
+                                && source.in_place()
+                                && index.is_none_or(DrawSource::in_place) =>
                         {
-                            self.core.gather_indirect(
+                            let list = self.core.gather_indirect(
                                 index_rewrite::IndirectGatherRequest {
                                     program: restarted.program,
                                     order: restarted.order,
@@ -7593,17 +7617,16 @@ impl RenderLowering {
                                     wide: size == 4,
                                 },
                                 &reads,
-                            )?
+                            )?;
+                            if let (Some(_), Some(index)) = (&list, index) {
+                                index_rewrite::announce_past_length(self.core.device(), index);
+                            }
+                            list
                         }
                         _ => None,
                     };
-                    match pooled {
-                        Some(list) => {
-                            if let Some(index) = index {
-                                index_rewrite::announce_past_length(self.core.device(), index);
-                            }
-                            (None, Some(Listed::Pooled(list)))
-                        }
+                    match commanded {
+                        Some(list) => (None, Some(Listed::Commanded(list))),
                         None => {
                             let pass = RewritePass::new(
                                 &mut self.core,
@@ -7625,7 +7648,7 @@ impl RenderLowering {
         };
         // A rewritten draw's list, and an indirect gathered draw's, holds its indices bounded.
         let pass = match (commands.indirect_needs_arguments, &buffers) {
-            _ if rewrite.is_some() || matches!(listed, Some(Listed::Pooled(_))) => None,
+            _ if rewrite.is_some() || matches!(listed, Some(Listed::Commanded(_))) => None,
             (
                 needs,
                 DrawBuffers {

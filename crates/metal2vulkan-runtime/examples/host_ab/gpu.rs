@@ -312,6 +312,15 @@ pub trait Gpu {
         indices: &Self::Buffer,
         offset: usize,
     );
+    /// `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:` of a triangle
+    /// strip and 16-bit indices from `offset`.
+    fn draw_indexed_strip_at(
+        &self,
+        encoder: &mut Self::RenderEncoder,
+        count: usize,
+        indices: &Self::Buffer,
+        offset: usize,
+    );
     /// `drawPrimitives:indirectBuffer:indirectBufferOffset:` of triangles.
     fn draw_triangles_indirect(
         &self,

@@ -101,6 +101,11 @@
 //! passes and index bounds plans one after another (each reads and writes the pool's counter);
 //! the write dispatch's writes (and the place dispatch's) → `INDEX_READ` in `INDEX_INPUT` and
 //! `INDIRECT_COMMAND_READ` in `DRAW_INDIRECT` before the draw.
+//!
+//! **A run** ([`IndexRewriteRun`], [`index_rewrite_run_module`]): direct indexed draws of one
+//! program, order and `k'` over one index buffer, each of one group, take one dispatch for all
+//! of them, each draw's three phases in turn in a workgroup of its own, its words a slot of the
+//! run's and its list a region of the run's output.
 
 use std::sync::Arc;
 
@@ -642,6 +647,9 @@ enum Parameter {
     Order = 14,
     /// 1 for a list drawn in the private list form ([`IndexRewritePass::listed`]).
     Listed = 15,
+    /// A run's draw's: the first word of its region of the run's output
+    /// ([`IndexRewriteRun`]); a pass's draw writes from word 0 and reads no such word.
+    OwnedFirst = 26,
 }
 
 /// The pass's words in the rewrite words, by index.
@@ -776,11 +784,6 @@ fn store(f: &mut FunctionBuilder<'_>, buffer: Value, index: Value, v: Value) -> 
     f.store(p, v, MemAccess::default())
 }
 
-fn store_at(f: &mut FunctionBuilder<'_>, buffer: Value, index: u32, v: Value) -> BResult<()> {
-    let i = k(f, index)?;
-    store(f, buffer, i, v)
-}
-
 /// Word `index` of `buffer` where it lies inside the buffer's bound range, else 0 (contained).
 fn contained(f: &mut FunctionBuilder<'_>, buffer: Value, index: Value) -> BResult<Value> {
     let zero = k(f, 0)?;
@@ -880,6 +883,17 @@ fn barrier(f: &mut FunctionBuilder<'_>) -> BResult<()> {
     f.control_barrier(Scope::Workgroup, Scope::Workgroup, sem)
 }
 
+/// The workgroup barrier over the runs' words and the draw's words, between a run's phases.
+fn phase_barrier(f: &mut FunctionBuilder<'_>) -> BResult<()> {
+    let sem = Semantics {
+        order: MemoryOrder::AcquireRelease,
+        workgroup_memory: true,
+        uniform_memory: true,
+        ..Semantics::RELAXED
+    };
+    f.control_barrier(Scope::Workgroup, Scope::Workgroup, sem)
+}
+
 /// What reads the draw's Metal index at a position.
 #[derive(Clone, Copy)]
 struct Fetch {
@@ -928,6 +942,27 @@ impl Fetch {
 /// module [`index_rewrite_module`] serializes, which the CPU interpreter runs. Its bindings are the
 /// symbols [`WORDS`], [`ARGUMENTS`], [`INDICES`], [`OUTPUT`] and [`STATUS`].
 pub fn rewrite_typed_module(program: RewriteProgram, phase: RewritePhase) -> BResult<TypedModule> {
+    typed_module_of(program, Form::Phase(phase))
+}
+
+/// The dispatch of a run of `program`'s draws ([`IndexRewriteRun`]) as a typed module, before
+/// serialization: the module [`index_rewrite_run_module`] serializes. Its bindings are
+/// [`index_rewrite_module`]'s, the words those of the run's slots.
+pub fn rewrite_run_typed_module(program: RewriteProgram) -> BResult<TypedModule> {
+    typed_module_of(program, Form::Run)
+}
+
+/// What one dispatch of the pass does.
+#[derive(Clone, Copy)]
+enum Form {
+    /// One phase of one draw.
+    Phase(RewritePhase),
+    /// Every phase of one draw of one group per workgroup, the draw's words its slot's.
+    Run,
+}
+
+/// The module of `program`'s dispatch of `form`.
+fn typed_module_of(program: RewriteProgram, form: Form) -> BResult<TypedModule> {
     let mut b = ModuleBuilder::new();
     let u32_ = b.ty(Type::Int {
         width: 32,
@@ -971,6 +1006,7 @@ pub fn rewrite_typed_module(program: RewriteProgram, phase: RewritePhase) -> BRe
         counts: f.module().global_value(counts)?,
         odds: f.module().global_value(odds)?,
         starts: f.module().global_value(starts)?,
+        slot: None,
         u32_,
     };
     let invocation = f.module().global_value(invocation)?;
@@ -978,12 +1014,32 @@ pub fn rewrite_typed_module(program: RewriteProgram, phase: RewritePhase) -> BRe
     let workgroup = f.module().global_value(workgroup)?;
     let workgroup = f.load(workgroup, MemAccess::default())?;
     let group = f.composite_extract(workgroup, &[0])?;
-    let at = Invocation { lin, group };
+    // A run's workgroup is its draw's slot, and its draw's only group.
+    let (g, at) = match form {
+        Form::Phase(_) => (g, Invocation { lin, group }),
+        Form::Run => {
+            let per = k(&mut f, IndexRewriteRun::SLOT_WORDS)?;
+            let first = f.binary(BinOp::IMul, group, per)?;
+            let group = k(&mut f, 0)?;
+            let g = Globals {
+                slot: Some(first),
+                ..g
+            };
+            (g, Invocation { lin, group })
+        }
+    };
     let d = DrawWalk::read(&mut f, g, program)?;
-    match phase {
-        RewritePhase::Count => count_phase(&mut f, g, d, at)?,
-        RewritePhase::Place => place_phase(&mut f, g, d, lin)?,
-        RewritePhase::Write => write_phase(&mut f, g, d, at)?,
+    match form {
+        Form::Phase(RewritePhase::Count) => count_phase(&mut f, g, d, at)?,
+        Form::Phase(RewritePhase::Place) => place_phase(&mut f, g, d, lin)?,
+        Form::Phase(RewritePhase::Write) => write_phase(&mut f, g, d, at)?,
+        Form::Run => {
+            count_phase(&mut f, g, d, at)?;
+            phase_barrier(&mut f)?;
+            place_phase(&mut f, g, d, lin)?;
+            phase_barrier(&mut f)?;
+            write_phase(&mut f, g, d, at)?;
+        }
     }
     f.ret(None)?;
     let id = f.finish()?;
@@ -1003,6 +1059,9 @@ pub fn rewrite_typed_module(program: RewriteProgram, phase: RewritePhase) -> BRe
 #[derive(Clone, Copy)]
 struct Globals {
     words: Value,
+    /// A run's draw: the first of its slot's words ([`IndexRewriteRun::SLOT_WORDS`] per
+    /// workgroup), from which its words lie as a pass's do; `None` for a pass's dispatch.
+    slot: Option<Value>,
     arguments: Value,
     indices: Value,
     output: Value,
@@ -1027,6 +1086,38 @@ struct Entry {
 }
 
 impl Globals {
+    /// The index into the words buffer of the draw's word `index`: past a run's slot's start.
+    fn word(self, f: &mut FunctionBuilder<'_>, index: Value) -> BResult<Value> {
+        match self.slot {
+            None => Ok(index),
+            Some(first) => f.binary(BinOp::IAdd, first, index),
+        }
+    }
+
+    /// The draw's word `index`.
+    fn word_load(self, f: &mut FunctionBuilder<'_>, index: Value) -> BResult<Value> {
+        let i = self.word(f, index)?;
+        load(f, self.words, i)
+    }
+
+    /// The draw's word `index`, a constant.
+    fn word_load_at(self, f: &mut FunctionBuilder<'_>, index: u32) -> BResult<Value> {
+        let i = k(f, index)?;
+        self.word_load(f, i)
+    }
+
+    /// Store `v` as the draw's word `index`.
+    fn word_store(self, f: &mut FunctionBuilder<'_>, index: Value, v: Value) -> BResult<()> {
+        let i = self.word(f, index)?;
+        store(f, self.words, i, v)
+    }
+
+    /// Store `v` as the draw's word `index`, a constant.
+    fn word_store_at(self, f: &mut FunctionBuilder<'_>, index: u32, v: Value) -> BResult<()> {
+        let i = k(f, index)?;
+        self.word_store(f, i, v)
+    }
+
     /// A `u32` function variable holding `init`, by its pointer.
     fn local(self, f: &mut FunctionBuilder<'_>, init: Value) -> BResult<Value> {
         let var = f.local_var(self.u32_, None)?;
@@ -1104,6 +1195,8 @@ struct DrawWalk {
     base: Value,
     base_instance: Value,
     capacity: Value,
+    /// The first word of an owned output: a run's draw's region's, else 0.
+    owned: Value,
     /// Whether the output is the index pool.
     pooled: Value,
     /// The groups, from 1 to `MAX_GROUPS`.
@@ -1119,21 +1212,31 @@ impl DrawWalk {
     fn read(f: &mut FunctionBuilder<'_>, g: Globals, program: RewriteProgram) -> BResult<DrawWalk> {
         let zero = k(f, 0)?;
         let one = k(f, 1)?;
-        let argument_word = load_at(f, g.words, Parameter::ArgumentsWord as u32)?;
-        let first_byte = load_at(f, g.words, Parameter::IndicesByte as u32)?;
-        let inside = load_at(f, g.words, Parameter::Inside as u32)?;
-        let wide = load_at(f, g.words, Parameter::Wide as u32)?;
-        let restart = load_at(f, g.words, Parameter::Restart as u32)?;
-        let capacity = load_at(f, g.words, Parameter::Capacity as u32)?;
-        let pooled = load_at(f, g.words, Parameter::Pooled as u32)?;
-        let groups = load_at(f, g.words, Parameter::Groups as u32)?;
-        let sequential = load_at(f, g.words, Parameter::Sequential as u32)?;
-        let order = load_at(f, g.words, Parameter::Order as u32)?;
-        let listed = load_at(f, g.words, Parameter::Listed as u32)?;
+        let argument_word = g.word_load_at(f, Parameter::ArgumentsWord as u32)?;
+        let first_byte = g.word_load_at(f, Parameter::IndicesByte as u32)?;
+        let inside = g.word_load_at(f, Parameter::Inside as u32)?;
+        let wide = g.word_load_at(f, Parameter::Wide as u32)?;
+        let restart = g.word_load_at(f, Parameter::Restart as u32)?;
+        let capacity = g.word_load_at(f, Parameter::Capacity as u32)?;
+        let pooled = g.word_load_at(f, Parameter::Pooled as u32)?;
+        let groups = g.word_load_at(f, Parameter::Groups as u32)?;
+        let sequential = g.word_load_at(f, Parameter::Sequential as u32)?;
+        let order = g.word_load_at(f, Parameter::Order as u32)?;
+        let listed = g.word_load_at(f, Parameter::Listed as u32)?;
+        let owned = match g.slot {
+            Some(_) => g.word_load_at(f, Parameter::OwnedFirst as u32)?,
+            None => zero,
+        };
         let listed = f.glsl(GlslOp::UMin, &[listed, one])?;
-        let most = k(f, IndexRewritePass::MAX_GROUPS)?;
-        let groups = f.glsl(GlslOp::UMin, &[groups, most])?;
-        let groups = f.glsl(GlslOp::UMax, &[groups, one])?;
+        // A run's draw is its workgroup's alone.
+        let groups = match g.slot {
+            Some(_) => one,
+            None => {
+                let most = k(f, IndexRewritePass::MAX_GROUPS)?;
+                let groups = f.glsl(GlslOp::UMin, &[groups, most])?;
+                f.glsl(GlslOp::UMax, &[groups, one])?
+            }
+        };
         let wide = f.binary(BinOp::INotEqual, wide, zero)?;
         let pooled = f.binary(BinOp::INotEqual, pooled, zero)?;
         let sequential = f.binary(BinOp::INotEqual, sequential, zero)?;
@@ -1151,7 +1254,7 @@ impl DrawWalk {
             let read = contained(f, g.arguments, w)?;
             let given = k(f, Parameter::Arguments as u32)?;
             let given = f.binary(BinOp::IAdd, given, i)?;
-            let given = load(f, g.words, given)?;
+            let given = g.word_load(f, given)?;
             argument.push(f.select(indirect, read, given)?);
         }
         let (count, instances) = (argument[0], argument[1]);
@@ -1189,6 +1292,7 @@ impl DrawWalk {
             base,
             base_instance,
             capacity,
+            owned,
             pooled,
             groups,
             order,
@@ -1520,11 +1624,11 @@ fn count_phase(
             _ => even,
         };
         let w = g.group_word(f, at.group)?;
-        store(f, g.words, w, even)?;
+        g.word_store(f, w, even)?;
         let w1 = f.binary(BinOp::IAdd, w, one)?;
-        store(f, g.words, w1, odd)?;
+        g.word_store(f, w1, odd)?;
         let w2 = f.binary(BinOp::IAdd, w, two)?;
-        store(f, g.words, w2, last)
+        g.word_store(f, w2, last)
     })
 }
 
@@ -1577,11 +1681,11 @@ fn place_phase(f: &mut FunctionBuilder<'_>, g: Globals, d: DrawWalk, lin: Value)
         let one = k(f, 1)?;
         let two = k(f, 2)?;
         let w = g.group_word(f, i)?;
-        let even = load(f, g.words, w)?;
+        let even = g.word_load(f, w)?;
         let w1 = f.binary(BinOp::IAdd, w, one)?;
-        let odd = load(f, g.words, w1)?;
+        let odd = g.word_load(f, w1)?;
         let w2 = f.binary(BinOp::IAdd, w, two)?;
-        let start = load(f, g.words, w2)?;
+        let start = g.word_load(f, w2)?;
         g.list(f, i, Entry { even, odd, start })
     })?;
     barrier(f)?;
@@ -1603,11 +1707,11 @@ fn place_phase(f: &mut FunctionBuilder<'_>, g: Globals, d: DrawWalk, lin: Value)
             let w = g.group_word(f, i)?;
             let p = f.access_chain(g.counts, &[i])?;
             let before = f.load(p, MemAccess::default())?;
-            store(f, g.words, w, before)?;
+            g.word_store(f, w, before)?;
             let w = f.binary(BinOp::IAdd, w, one)?;
             let p = f.access_chain(g.starts, &[i])?;
             let begun = f.load(p, MemAccess::default())?;
-            store(f, g.words, w, begun)
+            g.word_store(f, w, begun)
         })?;
         let walked_total = f.load(total, MemAccess::default())?;
         let last = f.load(last, MemAccess::default())?;
@@ -1631,10 +1735,20 @@ fn place_phase(f: &mut FunctionBuilder<'_>, g: Globals, d: DrawWalk, lin: Value)
         let wrapped = f.binary(BinOp::ULessThan, words_needed, written)?;
         let past = f.binary(BinOp::LogicalOr, past, wrapped)?;
         let countable = f.unary(UnOp::LogicalNot, past)?;
-        // Placed in the pool's room, or in the draw's own region.
-        let counter_ptr = word_ptr(f, g.output, zero)?;
-        let counter = f.load(counter_ptr, MemAccess::default())?;
-        let used = f.glsl(GlslOp::UMin, &[counter, d.capacity])?;
+        // Placed in the pool's room, or in the draw's own region (a run's draws' always: the run
+        // reads no counter).
+        let counter = match g.slot {
+            Some(_) => None,
+            None => {
+                let counter_ptr = word_ptr(f, g.output, zero)?;
+                let counter = f.load(counter_ptr, MemAccess::default())?;
+                Some((counter_ptr, counter))
+            }
+        };
+        let used = match counter {
+            Some((_, counter)) => f.glsl(GlslOp::UMin, &[counter, d.capacity])?,
+            None => zero,
+        };
         let room = f.binary(BinOp::ISub, d.capacity, used)?;
         let four = k(f, 4)?;
         let room = f.binary(BinOp::UDiv, room, four)?;
@@ -1642,15 +1756,17 @@ fn place_phase(f: &mut FunctionBuilder<'_>, g: Globals, d: DrawWalk, lin: Value)
         let fits = f.binary(BinOp::ULessThanEqual, words_needed, room)?;
         let ok = f.binary(BinOp::LogicalAnd, countable, fits)?;
         let reserve = f.binary(BinOp::LogicalAnd, ok, d.pooled)?;
-        when(f, reserve, move |f| {
-            let four = k(f, 4)?;
-            let bytes = f.binary(BinOp::IMul, words_needed, four)?;
-            let next = f.binary(BinOp::IAdd, used, bytes)?;
-            f.store(counter_ptr, next, MemAccess::default())
-        })?;
+        if let Some((counter_ptr, _)) = counter {
+            when(f, reserve, move |f| {
+                let four = k(f, 4)?;
+                let bytes = f.binary(BinOp::IMul, words_needed, four)?;
+                let next = f.binary(BinOp::IAdd, used, bytes)?;
+                f.store(counter_ptr, next, MemAccess::default())
+            })?;
+        }
         // The list's first index, past the base vertex's word in the private list form.
         let first_index = f.binary(BinOp::UDiv, used, four)?;
-        let first_index = f.select(d.pooled, first_index, zero)?;
+        let first_index = f.select(d.pooled, first_index, d.owned)?;
         let first_index = f.binary(BinOp::IAdd, first_index, d.listed)?;
         let header = k(f, (IndexRewritePass::POOL_HEADER_BYTES / 4) as u32)?;
         let pool_base = f.binary(BinOp::IAdd, header, first_index)?;
@@ -1662,7 +1778,7 @@ fn place_phase(f: &mut FunctionBuilder<'_>, g: Globals, d: DrawWalk, lin: Value)
             (Output::TailAt, walked_total),
             (Output::Tail, tail_drawn),
         ] {
-            store_at(f, g.words, word as u32, value)?;
+            g.word_store_at(f, word as u32, value)?;
         }
         let drawn = f.select(ok, written, zero)?;
         let primitives_drawn = f.select(ok, primitives, zero)?;
@@ -1675,9 +1791,9 @@ fn place_phase(f: &mut FunctionBuilder<'_>, g: Globals, d: DrawWalk, lin: Value)
             .into_iter()
             .enumerate()
         {
-            store_at(f, g.words, Output::Draw as u32 + i as u32, value)?;
+            g.word_store_at(f, Output::Draw as u32 + i as u32, value)?;
         }
-        store_at(f, g.words, Output::Primitives as u32, primitives_drawn)?;
+        g.word_store_at(f, Output::Primitives as u32, primitives_drawn)?;
         // A draw whose primitives the output cannot hold draws nothing and says so.
         let over = f.unary(UnOp::LogicalNot, ok)?;
         when(f, over, move |f| {
@@ -1749,9 +1865,9 @@ fn write_phase(
         let one = k(f, 1)?;
         let lanes = k(f, IndexRewriteModule::LOCAL_SIZE)?;
         let w = g.group_word(f, at.group)?;
-        let place = load(f, g.words, w)?;
+        let place = g.word_load(f, w)?;
         let w = f.binary(BinOp::IAdd, w, one)?;
-        let carry = load(f, g.words, w)?;
+        let carry = g.word_load(f, w)?;
         let first_run = f.binary(BinOp::IMul, at.group, lanes)?;
         let entries = Entries {
             n: lanes,
@@ -1762,9 +1878,9 @@ fn write_phase(
         Ok(())
     })?;
     barrier(f)?;
-    let written = load_at(f, g.words, Output::Written as u32)?;
+    let written = g.word_load_at(f, Output::Written as u32)?;
     let ok = f.binary(BinOp::INotEqual, written, zero)?;
-    let base_word = load_at(f, g.words, Output::Base as u32)?;
+    let base_word = g.word_load_at(f, Output::Base as u32)?;
     // In the private list form, Metal's base vertex in the word before the list, written once.
     let listed = f.binary(BinOp::INotEqual, d.listed, zero)?;
     let base_too = f.binary(BinOp::LogicalAnd, ok, listed)?;
@@ -1830,8 +1946,8 @@ fn write_phase(
             f.store(old, value, MemAccess::default())
         })?;
         // The primitives past the walk, the runs taking turns: every index 0, but a fan's first.
-        let tail_at = load_at(f, g.words, Output::TailAt as u32)?;
-        let tail = load_at(f, g.words, Output::Tail as u32)?;
+        let tail_at = g.word_load_at(f, Output::TailAt as u32)?;
+        let tail = g.word_load_at(f, Output::Tail as u32)?;
         for_range(f, g.u32_, (run.t, tail, run.runs), move |f, j| {
             let vk_ = k(f, v)?;
             let zero = k(f, 0)?;
@@ -1911,11 +2027,32 @@ pub fn index_rewrite_module(
     })
 }
 
+/// The index rewrite module of a run of `program`'s draws ([`IndexRewriteRun`]) for `device`,
+/// as [`index_rewrite_module`]'s phases are made: one workgroup per draw, each draw's three
+/// phases in turn.
+pub fn index_rewrite_run_module(
+    device: &Device,
+    program: RewriteProgram,
+) -> Result<IndexRewriteModule, Error> {
+    let (spirv, requirements) = finished(
+        device,
+        rewrite_run_typed_module(program)?,
+        binding_of,
+        "the index rewrite run",
+    )?;
+    Ok(IndexRewriteModule {
+        spirv,
+        requirements,
+    })
+}
+
 mod gather;
+mod run;
 pub use gather::plan::{index_gather_plan_module, IndexGatherPlanModule};
 pub use gather::{
     index_gather_module, GatherDraw, IndexGather, IndexGatherModule, IndirectGatherDraw,
 };
+pub use run::{IndexRewriteRun, RewriteRunDraw};
 
 #[cfg(test)]
 mod tests;

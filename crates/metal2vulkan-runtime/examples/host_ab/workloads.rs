@@ -3015,6 +3015,7 @@ const FLAT_VERTICES: usize = 6;
 enum FlatForm {
     Direct,
     Indexed,
+    IndexedStrip,
     Indirect,
     IndexedIndirect,
 }
@@ -3024,6 +3025,7 @@ impl FlatForm {
         match self {
             FlatForm::Direct => "direct",
             FlatForm::Indexed => "indexed",
+            FlatForm::IndexedStrip => "indexed_strip",
             FlatForm::Indirect => "indirect",
             FlatForm::IndexedIndirect => "indexed_indirect",
         }
@@ -3053,6 +3055,13 @@ pub fn provoking<G: Gpu>(g: &G, library: &G::Library, sizes: &Sizes) {
     let indices: Vec<u8> = (0..n * FLAT_VERTICES)
         .flat_map(|i| (i as u16).to_le_bytes())
         .collect();
+    // Each draw's two triangles as a strip of four of its six vertices: the list's second
+    // triangle is the strip's second, in its order.
+    let strip_indices: Vec<u8> = (0..n * FLAT_VERTICES)
+        .step_by(FLAT_VERTICES)
+        .flat_map(|at| [at, at + 1, at + 2, at + 5])
+        .flat_map(|i| (i as u16).to_le_bytes())
+        .collect();
     let arguments: Vec<u32> = (0..n)
         .flat_map(|d| [FLAT_VERTICES as u32, 1, (d * FLAT_VERTICES) as u32, 0])
         .collect();
@@ -3061,6 +3070,7 @@ pub fn provoking<G: Gpu>(g: &G, library: &G::Library, sizes: &Sizes) {
         .collect();
     let positions = g.buffer_with(&positions);
     let indices = g.buffer_with(&indices);
+    let strip_indices = g.buffer_with(&strip_indices);
     let arguments = g.buffer_with(&words(&arguments));
     let indexed_arguments = g.buffer_with(&words(&indexed_arguments));
     let pipeline = g.render_pipeline(
@@ -3074,6 +3084,7 @@ pub fn provoking<G: Gpu>(g: &G, library: &G::Library, sizes: &Sizes) {
     let forms = [
         FlatForm::Direct,
         FlatForm::Indexed,
+        FlatForm::IndexedStrip,
         FlatForm::Indirect,
         FlatForm::IndexedIndirect,
     ];
@@ -3097,6 +3108,9 @@ pub fn provoking<G: Gpu>(g: &G, library: &G::Library, sizes: &Sizes) {
                             FlatForm::Direct => g.draw_triangles(&mut encoder, at, FLAT_VERTICES),
                             FlatForm::Indexed => {
                                 g.draw_indexed_at(&mut encoder, FLAT_VERTICES, &indices, at * 2)
+                            }
+                            FlatForm::IndexedStrip => {
+                                g.draw_indexed_strip_at(&mut encoder, 4, &strip_indices, draw * 8)
                             }
                             FlatForm::Indirect => {
                                 g.draw_triangles_indirect(&mut encoder, &arguments, draw * 16)
