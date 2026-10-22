@@ -54,6 +54,7 @@ use super::sparse::encoder::SparseUpdate;
 use super::texture::decoded_twin::TwinWrite;
 use super::texture::kept_image::KeptLease;
 use super::tracker::{Barrier, EncoderUses, Reach, Summary, Use, UseRange};
+use super::unique_identifier::ScheduledWork;
 use super::used_resources::EncoderKind;
 use super::Device;
 use crate::device::functions::Vk;
@@ -387,6 +388,7 @@ impl EncoderCore {
     pub(super) fn open(
         command_buffer: &CommandBuffer,
         call: &'static str,
+        kind: EncoderKind,
         ordered: bool,
     ) -> Result<EncoderCore, Error> {
         // The last render encoder's end, where its call left it to the device's lowering thread.
@@ -416,7 +418,7 @@ impl EncoderCore {
             .device()
             .shared()
             .identifiers
-            .encoder_opened();
+            .encoder_opened(kind);
         Ok(EncoderCore {
             open: OpenGuard {
                 command_buffer: command_buffer.clone(),
@@ -1629,6 +1631,15 @@ impl EncoderCore {
     ) -> Result<(), Error> {
         // A pass ended holds no command buffer (`render.rs`); this one ends here if one did.
         self.release_pass()?;
+        // What Metal's identifier allocations follow as the command buffer is scheduled
+        // (`unique_identifier.rs`): a compute or blit encoder that encoded a command, and any
+        // render encoder.
+        let worked = self.recorded || !self.executions.is_empty() || !self.segments.is_empty();
+        let work = ScheduledWork {
+            dispatch: worked && matches!(kind, EncoderKind::Compute | EncoderKind::Blit),
+            render: kind == EncoderKind::Render,
+        };
+        self.open.command_buffer.note_scheduled_work(work);
         let sharing = self.shadows.sharing_truth();
         if sharing > 0 {
             self.device().shared().counts.shadows_sharing_truth(sharing);

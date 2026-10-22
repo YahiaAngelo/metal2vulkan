@@ -28,39 +28,44 @@
 //! - **An indirect command buffer** answers `2^36` plus its private `gpuAddress`, in a range of
 //!   Metal's for them: the lowest gap from `0x18000` that holds its `allocatedSize` and one 16-KiB
 //!   page more, at a multiple of 32 KiB (`0x18000`, `0x20000`, `0x28000` for buffers of four
-//!   commands), free again as the buffer goes. The runtime answers that rule. Metal's own work
-//!   takes ranges there too, which the runtime does not (on the M4 the process's first blit
-//!   encoder that copies, resets or fills takes `0x48000` after the live buffers, and the first
-//!   render encoder about `0x298000`; on the M3 Max a first copy or reset about `0x4a8000`, a fill
-//!   `0x48000`, a render encoder that makes one resident or draws about `0x4c8000`), so a buffer
-//!   made after such work answers below Metal's; and Metal keeps a buffer's range while a command
-//!   buffer that executes it may run, where the runtime frees it as the buffer's last holder goes.
+//!   commands), free again as the buffer goes and no command buffer that executes it may run
+//!   (the command buffer holds it until it completed). The runtime answers that rule.
 //!
-//! **Which answers are Metal's**. An indirect command buffer made before its device opened any
-//! command encoder answers Metal's number (the rule above; on an M4, on the M3 Max, gaps and
-//! releases included): Metal's own encoders take ranges from their first, by kind and by machine
-//! (on an M4 and the M3 Max package of the same probe): a compute encoder that dispatches or
-//! executes a buffer takes a slot, and one that is empty, makes a buffer resident or is never
-//! committed none; a blit encoder that copies takes a range on both, an empty one on the M4 only; a
-//! render encoder takes one, never committed too, of another size on each machine. The runtime
-//! counts every encoder, as no rule tells the encoders that take nothing on every machine (a
-//! resource-state encoder's is not measured). No state's answer is measured to be Metal's. The
-//! first answer of a program's call that is not Metal's number
+//! **Metal's own encoders** take pieces of that range, each once a device, kept for its life, at
+//! the lowest gap that holds it, as a buffer's range is (an M3 Max, macOS 27.0.1, each sequence
+//! in a process of its own, alike in three rounds): a blit encoder 256 KiB at its opening (an
+//! empty one, one never committed and one made while a buffer is made inside it alike), of which
+//! 192 KiB a render encoder's opening takes too, and that 384 KiB in all; and the first command
+//! buffer scheduled with a compute encoder's dispatch or execution, or a blit encoder's command (a
+//! copy, a fill, a reset or copy of commands, a texture copy, a fence update; not a
+//! `synchronizeResource`), 32 KiB as it is scheduled, after its waits (one that waits for an event
+//! not yet signaled has taken nothing; one past `waitUntilScheduled` has). A compute encoder takes
+//! nothing at its opening, nor one that is empty or only makes a buffer resident. Where the
+//! pieces' order inside one opening is not told apart by a measured gap, the runtime takes the
+//! shared piece first. The runtime takes them so ([`Piece`]). A render command buffer's run takes
+//! more, by its targets' sizes and what the device drew before (a buffer made after a draw into a
+//! 64-pixel target answers `0x4e0000` from the base, a 1024-pixel one `0x508000`, a 4096-pixel one
+//! `0x17c8000`, and after one of 16 pixels then one of 4096 `0x4d8000`, below the 16-pixel one's
+//! alone): the runtime does not model it, nor a resource state encoder's pieces (not measured).
+//!
+//! **Which answers are Metal's**. An indirect command buffer made before a command buffer of its
+//! device that encoded a render encoder was scheduled, and before a resource state encoder
+//! opened, answers Metal's number (the rules above). No state's answer is measured to be Metal's.
+//! The first answer of a program's call that is not Metal's number
 //! (`ComputePipelineState::unique_identifier`, `RenderPipelineState::unique_identifier`,
 //! `IndirectCommandBuffer::unique_identifier`, an indirect command's state identifier but 0)
 //! announces, once a device, one of two kinds by how Metal's own answer stands: a plain state's,
 //! which differs from run to run on Metal, `plain-state-unique-identifier`
 //! ([`Degradation::PlainStateUniqueIdentifier`], one of Metal's answers); a state's with indirect
-//! command buffer support, or a buffer's made after an encoder, which Metal answers alike in every
+//! command buffer support, or a buffer's made past the model, which Metal answers alike in every
 //! run of one program started alike, `unmeasured-unique-identifier`
-//! ([`Degradation::UnmeasuredUniqueIdentifier`], a near-equivalent). A program that reads only the
-//! first buffers' identifiers announces nothing. The allocations and the encoder flag are the
+//! ([`Degradation::UnmeasuredUniqueIdentifier`], a near-equivalent). The allocations are the
 //! device's: Metal's measured space is one process's one device, which a device of the runtime
 //! stands for.
 //!
 //! No run reads an identifier: a translated function never sees one.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -68,6 +73,7 @@ use crate::degradation::Degradation;
 use crate::device::lock;
 use crate::error::{Error, MemoryKind};
 use crate::resource_ids::StateKind;
+use crate::used_resources::EncoderKind;
 use crate::Device;
 
 /// The base of Metal's identifiers of indirect command buffers and of states made with
@@ -87,6 +93,45 @@ const BUFFER_PAGE: u64 = 0x4000;
 
 /// The alignment of a buffer's range.
 const BUFFER_SLOT: u64 = 0x8000;
+
+/// One of Metal's own allocations in the buffers' range, which its encoders take (an M3 Max,
+/// macOS 27.0.1; the module docs): each once a device, kept for its life, at the lowest gap that
+/// holds it, as a buffer's range is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Piece {
+    /// The first blit or render encoder's, at its opening: 192 KiB.
+    Shared,
+    /// The first blit encoder's own, after [`Piece::Shared`]: 64 KiB.
+    Blit,
+    /// The first render encoder's own at its opening, after [`Piece::Shared`]: 192 KiB. Its
+    /// command buffer's run takes more, by its targets' sizes and what the device drew before,
+    /// which the runtime does not model ([`UniqueIdentifiers::scheduled`]).
+    Render,
+    /// The first command buffer scheduled with a compute encoder's dispatch or execution or a
+    /// blit encoder's command, as it is scheduled: 32 KiB.
+    Dispatch,
+}
+
+impl Piece {
+    /// Its footprint in the range, as measured.
+    fn footprint(self) -> u64 {
+        match self {
+            Piece::Shared | Piece::Render => 0x3_0000,
+            Piece::Blit => 0x1_0000,
+            Piece::Dispatch => 0x8000,
+        }
+    }
+}
+
+/// What a command buffer's encoders did that Metal's identifier allocations follow as it is
+/// scheduled ([`UniqueIdentifiers::scheduled`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ScheduledWork {
+    /// A compute encoder dispatched or executed commands, or a blit encoder encoded a command.
+    pub(crate) dispatch: bool,
+    /// A render encoder was encoded.
+    pub(crate) render: bool,
+}
 
 /// The end of the buffers' range, from [`INDIRECT_BASE`], where the compute states' starts.
 pub(crate) const BUFFERS_END: u64 = 1 << 34;
@@ -159,16 +204,19 @@ const RENDER_RANGES: &[(u64, u64)] = &[(2 * BUFFERS_END, 4 * BUFFERS_END)];
 struct Allocations {
     compute: Slots,
     render: Slots,
-    /// The live indirect command buffers' ranges: start, then bytes.
+    /// The live indirect command buffers' ranges and Metal's own taken pieces' ([`Piece`]):
+    /// start, then bytes.
     buffers: BTreeMap<u64, u64>,
+    /// The pieces taken.
+    pieces: BTreeSet<Piece>,
 }
 
-/// One device's identifiers: its allocations, and whether it opened a command encoder, from
-/// which on Metal's own encoders take ranges of the buffers' (the module docs).
+/// One device's identifiers: its allocations, and whether Metal's own allocations in the
+/// buffers' range are past what the runtime models (the module docs).
 #[derive(Debug)]
 pub(crate) struct UniqueIdentifiers {
     allocations: Mutex<Allocations>,
-    encoded: AtomicBool,
+    unmeasured: AtomicBool,
 }
 
 impl Default for UniqueIdentifiers {
@@ -178,19 +226,62 @@ impl Default for UniqueIdentifiers {
                 compute: Slots::new(COMPUTE_RANGES, COMPUTE_STEP),
                 render: Slots::new(RENDER_RANGES, RENDER_STEP),
                 buffers: BTreeMap::new(),
+                pieces: BTreeSet::new(),
             }),
-            encoded: AtomicBool::new(false),
+            unmeasured: AtomicBool::new(false),
         }
     }
 }
 
 impl UniqueIdentifiers {
-    /// Note that the device opened a command encoder: an indirect command buffer made from now
-    /// on answers no number measured to be Metal's.
-    pub(crate) fn encoder_opened(&self) {
+    /// The device opened a command encoder of `kind`: the pieces Metal's takes at its opening
+    /// (a blit encoder's [`Piece::Shared`] and [`Piece::Blit`], a render encoder's
+    /// [`Piece::Shared`] and [`Piece::Render`], a compute encoder's none). A resource state
+    /// encoder's are not measured: an indirect command buffer made from then on answers no
+    /// number measured to be Metal's.
+    pub(crate) fn encoder_opened(&self, kind: EncoderKind) {
+        match kind {
+            EncoderKind::Blit => self.take(&[Piece::Shared, Piece::Blit]),
+            EncoderKind::Render => self.take(&[Piece::Shared, Piece::Render]),
+            EncoderKind::Compute => {}
+            EncoderKind::ResourceState => self.unmodelled(),
+        }
+    }
+
+    /// A command buffer of the device that did `work` is scheduled, after its waits: the
+    /// [`Piece::Dispatch`] Metal's dispatch or blit work takes then; and where it encoded a render
+    /// encoder, what Metal's run of it takes, which follows its targets' sizes and what the
+    /// device drew before (an M3 Max: a buffer made after a draw into a 64-pixel target answers
+    /// `0x4e0000` from the base, into a 1024-pixel one `0x508000`, a 4096-pixel one `0x17c8000`,
+    /// and after one of 16 pixels then one of 4096 `0x4d8000`), which the runtime does not model:
+    /// a buffer made from then on answers no number measured to be Metal's.
+    pub(crate) fn scheduled(&self, work: ScheduledWork) {
+        if work.dispatch {
+            self.take(&[Piece::Dispatch]);
+        }
+        if work.render {
+            self.unmodelled();
+        }
+    }
+
+    /// Take `pieces` not yet taken, in order; one no gap holds leaves Metal's allocations past
+    /// the model.
+    fn take(&self, pieces: &[Piece]) {
+        let mut allocations = lock(&self.allocations);
+        for &piece in pieces {
+            if allocations.pieces.insert(piece)
+                && allocations.take_range(piece.footprint()).is_none()
+            {
+                self.unmodelled();
+            }
+        }
+    }
+
+    /// Metal's own allocations are past what the runtime models from now on.
+    fn unmodelled(&self) {
         // Relaxed: only the flag's value matters, read by the buffers made after the program's
-        // call that opened the encoder.
-        self.encoded.store(true, Ordering::Relaxed);
+        // call that set it.
+        self.unmeasured.store(true, Ordering::Relaxed);
     }
 }
 
@@ -215,6 +306,12 @@ impl Allocations {
         let footprint = allocated_size
             .checked_add(BUFFER_PAGE)?
             .checked_next_multiple_of(BUFFER_SLOT)?;
+        self.take_range(footprint)
+    }
+
+    /// The offset of the lowest gap from [`BUFFER_FIRST`] that holds `footprint` bytes (a
+    /// multiple of the slot), taken; none where the range has none.
+    fn take_range(&mut self, footprint: u64) -> Option<u64> {
         let mut offset = BUFFER_FIRST;
         for (&start, &bytes) in &self.buffers {
             if start >= offset.checked_add(footprint)? {
@@ -286,10 +383,10 @@ impl UniqueIdentifier {
         let offset = lock(&ids.allocations)
             .take_buffer(allocated_size)
             .ok_or(Error::OutOfMemory(MemoryKind::Device))?;
-        let encoded = ids.encoded.load(Ordering::Relaxed);
+        let unmeasured = ids.unmeasured.load(Ordering::Relaxed);
         Ok(UniqueIdentifier {
             value: INDIRECT_BASE + offset,
-            degradation: encoded.then_some(Degradation::UnmeasuredUniqueIdentifier),
+            degradation: unmeasured.then_some(Degradation::UnmeasuredUniqueIdentifier),
             back: Some((Arc::clone(ids), Allocation::Buffer)),
         })
     }

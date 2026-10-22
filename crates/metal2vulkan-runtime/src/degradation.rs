@@ -1511,14 +1511,16 @@ degradations! {
         /// to be: a pipeline state's made with `supportIndirectCommandBuffers`
         /// (`ComputePipelineState::unique_identifier`, `RenderPipelineState::unique_identifier`,
         /// an indirect command's state identifier other than 0), or an indirect command buffer's
-        /// made after its device opened a command encoder
-        /// (`IndirectCommandBuffer::unique_identifier`). Metal's is an address of its own
-        /// allocation: a state's follows how the process was started (an M3 Max's first such
-        /// compute state answered `0x1000000280` from a test binary, `0x100` more from a shell),
-        /// the states' functions and what the process made; a buffer's lies past the ranges
-        /// Metal's own encoders took. The runtime's keeps the relations a program can rely on
-        /// (a compute state's from one step into Metal's range, no workload's first). A buffer made
-        /// before any encoder answers Metal's number, quietly.
+        /// made after a command buffer of its device that encoded a render encoder was scheduled,
+        /// or after a resource state encoder opened (`IndirectCommandBuffer::unique_identifier`).
+        /// Metal's is an address of its own allocation: a state's follows how the process was
+        /// started (an M3 Max's first such compute state answered `0x1000000280` from a test
+        /// binary, `0x100` more from a shell), the states' functions and what the process made; a
+        /// buffer's lies past the ranges Metal's own encoders took, a render pass's run by its
+        /// targets' sizes and what the device drew before. The runtime's keeps the relations a
+        /// program can rely on (a compute state's from one step into Metal's range, no workload's
+        /// first). A buffer made before answers Metal's number, quietly, past the pieces Metal's
+        /// blit, compute and render encoders took.
         UnmeasuredUniqueIdentifier = "unmeasured-unique-identifier", Precision,
             "the identifier is unique and fixed for its holder's life, and a released one is \
              reused as Metal reuses it, but it is not the number Metal answers there, which \

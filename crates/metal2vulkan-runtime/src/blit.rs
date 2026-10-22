@@ -177,7 +177,7 @@ impl CommandBuffer {
     /// after one was abandoned, and after commit.
     pub fn blit_command_encoder(&self) -> Result<BlitCommandEncoder, Error> {
         Ok(BlitCommandEncoder {
-            core: EncoderCore::open(self, "blit_command_encoder", true)?,
+            core: EncoderCore::open(self, "blit_command_encoder", EncoderKind::Blit, true)?,
             pattern: None,
             shadows: Vec::new(),
             log: (self.device().shared().rebinds.any())

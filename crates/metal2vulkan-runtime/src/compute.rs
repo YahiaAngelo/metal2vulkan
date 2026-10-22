@@ -227,7 +227,12 @@ impl CommandBuffer {
         call: &'static str,
         dispatch_type: DispatchType,
     ) -> Result<ComputeCommandEncoder, Error> {
-        let core = EncoderCore::open(self, call, dispatch_type == DispatchType::Serial)?;
+        let core = EncoderCore::open(
+            self,
+            call,
+            EncoderKind::Compute,
+            dispatch_type == DispatchType::Serial,
+        )?;
         // It joins its command buffer's unit of command predication, carrying on the loops open
         // across its start, or starts the next.
         let carried = self.state().enter_predication(dispatch_type);

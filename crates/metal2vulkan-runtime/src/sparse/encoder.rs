@@ -90,7 +90,7 @@ impl CommandBuffer {
         }
         state.encoder_open = true;
         drop(state);
-        self.device().shared().identifiers.encoder_opened();
+        (self.device().shared().identifiers).encoder_opened(EncoderKind::ResourceState);
         Ok(ResourceStateCommandEncoder {
             open: OpenGuard {
                 command_buffer: self.clone(),

@@ -1998,7 +1998,8 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   started alike, which the runtime's is not measured to be: a pipeline state's made with
   `supportIndirectCommandBuffers` (`ComputePipelineState::unique_identifier`,
   `RenderPipelineState::unique_identifier`, an indirect command's state identifier other than 0), or
-  an indirect command buffer's made after its device opened a command encoder
+  an indirect command buffer's made after a command buffer of its device that encoded a render
+  encoder was scheduled, or after a resource state encoder opened
   (`IndirectCommandBuffer::unique_identifier`). Cost: the identifier is unique and fixed for its
   holder's life, and a released one is reused as Metal reuses it, but it is not the number Metal
   answers there, which follows how the process was started, what it made and Metal's own encoders'

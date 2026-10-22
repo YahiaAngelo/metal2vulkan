@@ -91,6 +91,7 @@ use super::sparse::indirect::{self, ReadFailure};
 use super::texture::storage_form::Riding;
 use super::texture::Texture;
 use super::tracker::Footprint;
+use super::unique_identifier::ScheduledWork;
 use super::upload::{Upload, Uploads};
 use super::used_resources::{names_any, EncoderKind, EncoderRecord, Reached, ReadRecord};
 use super::values::CommandBufferStatus;
@@ -529,6 +530,9 @@ pub(super) struct State {
     /// Its scheduled handlers ran: `wait_until_scheduled` returns, as Metal's does only once
     /// they ran.
     scheduled_ran: bool,
+    /// What its encoders did that Metal's identifier allocations follow as it is scheduled
+    /// (`unique_identifier.rs`).
+    scheduled_work: ScheduledWork,
     /// The threads sleeping on its `changed` condition variable: a change wakes it only where
     /// one does ([`CommandBufferShared::wake_parked`]).
     parked: usize,
@@ -1610,6 +1614,7 @@ impl CommandBuffer {
                 submission: VecDeque::new(),
                 submitting: false,
                 scheduled_ran: false,
+                scheduled_work: ScheduledWork::default(),
                 parked: 0,
                 failure: None,
                 completed: VecDeque::new(),
@@ -1699,6 +1704,14 @@ impl CommandBuffer {
     }
 
     /// The state, locked.
+    /// Note `work` of an encoder it ended, which its scheduling hands to the device's identifier
+    /// allocations ([`UniqueIdentifiers::scheduled`](crate::unique_identifier::UniqueIdentifiers::scheduled)).
+    pub(super) fn note_scheduled_work(&self, work: ScheduledWork) {
+        let mut state = self.state();
+        state.scheduled_work.dispatch |= work.dispatch;
+        state.scheduled_work.render |= work.render;
+    }
+
     pub(super) fn state(&self) -> MutexGuard<'_, State> {
         lock(&self.0.state)
     }
@@ -3658,6 +3671,12 @@ impl CommandBufferShared {
                 }
                 state = lock(&self.state);
             }
+            // Metal's dispatch and render work take their identifier allocations as the command
+            // buffer is scheduled, before its status reads so (`unique_identifier.rs`).
+            self.device
+                .shared()
+                .identifiers
+                .scheduled(state.scheduled_work);
             state.status = CommandBufferStatus::Scheduled;
             self.answer(&state);
         }

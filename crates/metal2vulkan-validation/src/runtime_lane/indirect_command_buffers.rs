@@ -15,7 +15,7 @@ use metal2vulkan::bind::indirect_commands::COMMAND_BYTES;
 use metal2vulkan::bind::ArgumentDescriptor;
 use metal2vulkan::metal::{
     BlendFactor, ColorWriteMask, DataType, IndexType, IndirectCommandType, PixelFormat,
-    PrimitiveType, ResourceUsage,
+    PrimitiveType, ResourceUsage, TextureUsage,
 };
 use metal2vulkan::pipeline::{
     ColorAttachmentDescriptor, ComputePipelineDescriptor, MeshPipelineDescriptor,
@@ -24,12 +24,13 @@ use metal2vulkan::pipeline::{
 use metal2vulkan::reflection::LinkedUseGap;
 use metal2vulkan_devtools::{engine_dir, llvm_assemble, llvm_assemble_text};
 use metal2vulkan_runtime::{
-    BlitCommandEncoder, ComputePipelineState, CpuCacheMode, Degradation, Device, DrawProblem,
-    EncodedComputeCommand, EncodedRenderCommand, Error, GpuAddress, HazardTrackingMode,
-    IndirectBufferBinding, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor,
-    IndirectCommandBufferProblem, IndirectDispatch, IndirectDraw, Invalid, MetalError,
-    PipelineOptions, Problem, PurgeableState, Region, RenderPipelineState, ResourceId,
-    ResourceOptions, RuntimeGap, Size, StorageMode,
+    BlitCommandEncoder, Buffer, CommandBuffer, ComputePipelineState, CpuCacheMode, Degradation,
+    Device, DrawProblem, EncodedComputeCommand, EncodedRenderCommand, Error, EventRef, GpuAddress,
+    HazardTrackingMode, IndirectBufferBinding, IndirectCommand, IndirectCommandBuffer,
+    IndirectCommandBufferDescriptor, IndirectCommandBufferProblem, IndirectDispatch, IndirectDraw,
+    Invalid, LoadAction, MetalError, PipelineOptions, Problem, PurgeableState, Region,
+    RenderPassDescriptor, RenderPipelineState, ResourceId, ResourceOptions, RuntimeGap, Size,
+    StorageMode, StoreAction, TextureDescriptor,
 };
 
 fn invalid(call: &'static str, problem: Problem) -> Error {
@@ -1570,10 +1571,10 @@ fn identifier_notices(messages: &Messages) -> Vec<Degradation> {
         .collect()
 }
 
-/// Which identifiers answer Metal's number: an indirect command buffer made before its device
-/// opened a command encoder answers it quietly, as does a command naming no state (0); a buffer
-/// made after one, and a state made with indirect command buffer support, announce
-/// `unmeasured-unique-identifier` at their first answer, and a plain state
+/// Which identifiers answer Metal's number: an indirect command buffer answers it quietly, past
+/// the pieces Metal's encoders took ([`buffer_identifiers_follow_metal_s_encoders`]), as does a
+/// command naming no state (0); a state made with indirect command buffer support announces
+/// `unmeasured-unique-identifier` at its first answer, and a plain state
 /// `plain-state-unique-identifier`, each once a device. A compute state with indirect command
 /// buffer support starts one step into Metal's range, `2^36 + 0xc0`.
 #[test]
@@ -1597,9 +1598,15 @@ fn identifiers_not_metal_s_are_announced_once() {
         assert_eq!(first.unique_identifier(), BASE + 0x1_8000);
         assert_eq!(identifier_notices(messages), [], "made before the encoder");
         let later = icb(device, &descriptor, 1);
-        assert_eq!(later.unique_identifier(), BASE + 0x2_0000, "the rule still");
-        assert_eq!(identifier_notices(messages), [kind]);
+        assert_eq!(
+            later.unique_identifier(),
+            BASE + 0x6_0000,
+            "past the blit encoder's pieces"
+        );
+        assert_eq!(identifier_notices(messages), [], "Metal's number");
         let state = template_state(device, true);
+        assert_eq!(state.unique_identifier(), BASE + 0xc0);
+        assert_eq!(identifier_notices(messages), [kind]);
         assert_eq!(state.unique_identifier(), BASE + 0xc0);
         assert_eq!(identifier_notices(messages), [], "once a device");
         let plain = template_state(device, false).unique_identifier();
@@ -1622,6 +1629,188 @@ fn identifiers_not_metal_s_are_announced_once() {
         let named = command(&made, 0).pipeline_unique_identifier;
         assert_eq!(identifier_notices(messages), [kind]);
         assert_eq!(named, Some(state.unique_identifier()));
+        assert_eq!(identifier_notices(messages), []);
+    });
+}
+
+/// A buffer of one command whose command runs the template kernel (its parameters at offset
+/// 16 of `params`, its output `out` with a stride of 4), as
+/// [`a_command_keeps_a_buffer_offset_s_low_32_bits`] sets it.
+fn executable(device: &Device, params: &Buffer, out: &Buffer) -> IndirectCommandBuffer {
+    let mut descriptor = compute_descriptor();
+    descriptor.support_dynamic_attribute_stride = true;
+    let made = icb(device, &descriptor, 1);
+    let command = made.indirect_compute_command_at(0).unwrap();
+    command
+        .set_compute_pipeline_state(&template_state(device, true))
+        .unwrap();
+    command.set_kernel_buffer(Some(params), 16, 0).unwrap();
+    command
+        .set_kernel_buffer_with_stride(Some(out), 0, 4, 1)
+        .unwrap();
+    command
+        .concurrent_dispatch_threadgroups(Size::new(1, 1, 1), Size::new(4, 1, 1))
+        .unwrap();
+    made
+}
+
+/// Encode into `command_buffer` a compute encoder that executes `icb`'s command, which reads
+/// `params` and writes `out` ([`executable`]).
+fn execute_one(
+    command_buffer: &CommandBuffer,
+    icb: &IndirectCommandBuffer,
+    params: &Buffer,
+    out: &Buffer,
+) {
+    let mut encoder = command_buffer.compute_command_encoder().unwrap();
+    encoder
+        .use_resource(params.as_resource(), ResourceUsage::READ)
+        .unwrap();
+    encoder
+        .use_resource(out.as_resource(), ResourceUsage::WRITE)
+        .unwrap();
+    encoder.execute_commands_in_buffer(icb, 0..1).unwrap();
+    encoder.end_encoding().unwrap();
+}
+
+/// An indirect command buffer's `uniqueIdentifier` follows the pieces of Metal's range its own
+/// encoders take (an M3 Max, macOS 27.0.1, the probes' sequences, buffers of 32 KiB from
+/// `2^36 + 0x18000`), quietly: a blit encoder 256 KiB at its opening, its command 32 KiB more as
+/// its command buffer is scheduled, as a compute encoder's execution does, once a device; an empty
+/// compute encoder, or one that only makes a buffer resident, nothing. A render encoder takes 384
+/// KiB at its opening, 192 of them a blit encoder's too; its command buffer's run takes what the
+/// runtime does not model, so a buffer made after announces `unmeasured-unique-identifier`. A
+/// released buffer's range stays taken while a command buffer that executes it may run, and is
+/// free again once it completed.
+#[test]
+fn buffer_identifiers_follow_metal_s_encoders() {
+    const BASE: u64 = 1 << 36;
+    let at = |icb: &IndirectCommandBuffer| icb.unique_identifier() - BASE;
+    let run = |device: &Device, encode: &dyn Fn(&CommandBuffer)| {
+        let queue = device.new_command_queue().unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        encode(&command_buffer);
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.error(), None);
+    };
+    let params = |device: &Device| {
+        let words = [0u32, 0, 0, 0, 7, 100];
+        buffer_with(
+            device,
+            &words
+                .iter()
+                .flat_map(|w| w.to_le_bytes())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
+    };
+    let one = |device: &Device| icb(device, &compute_descriptor(), 1);
+
+    // Compute: nothing for an empty encoder or a residency alone; 32 KiB for an execution.
+    notices::on_device(|device, messages| {
+        messages.take_notices();
+        let (params, out) = (
+            params(device),
+            device.new_buffer(64, ResourceOptions::shared()).unwrap(),
+        );
+        let first = executable(device, &params, &out);
+        assert_eq!(at(&first), 0x1_8000);
+        run(device, &|command_buffer| {
+            let encoder = command_buffer.compute_command_encoder().unwrap();
+            encoder.end_encoding().unwrap();
+        });
+        run(device, &|command_buffer| {
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            encoder
+                .use_resource(out.as_resource(), ResourceUsage::READ)
+                .unwrap();
+            encoder.end_encoding().unwrap();
+        });
+        assert_eq!(at(&one(device)), 0x2_0000, "no compute work");
+        run(device, &|command_buffer| {
+            execute_one(command_buffer, &first, &params, &out)
+        });
+        run(device, &|command_buffer| {
+            execute_one(command_buffer, &first, &params, &out)
+        });
+        let after = one(device);
+        assert_eq!(at(&after), 0x2_8000, "an execution's 32 KiB, once");
+        assert_eq!(identifier_notices(messages), []);
+    });
+    // Blit: 256 KiB at the opening; a fill's 32 KiB as it is scheduled.
+    notices::on_device(|device, messages| {
+        messages.take_notices();
+        let first = one(device);
+        run(device, &|command_buffer| {
+            command_buffer
+                .blit_command_encoder()
+                .unwrap()
+                .end_encoding()
+                .unwrap();
+        });
+        assert_eq!(at(&one(device)), 0x6_0000, "an empty blit encoder");
+        let filled = device.new_buffer(256, ResourceOptions::shared()).unwrap();
+        run(device, &|command_buffer| {
+            let mut blit = command_buffer.blit_command_encoder().unwrap();
+            blit.fill_buffer(&filled, 0..256, 1).unwrap();
+            blit.end_encoding().unwrap();
+        });
+        assert_eq!(at(&one(device)), 0x6_8000, "a fill's 32 KiB");
+        drop(first);
+        assert_eq!(identifier_notices(messages), []);
+    });
+    // Render: 384 KiB at the opening; past the model once its command buffer is scheduled.
+    notices::on_device(|device, messages| {
+        messages.take_notices();
+        let mut target = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 64, 64, false);
+        target.usage = TextureUsage::RENDER_TARGET;
+        let target = device.new_texture(&target).unwrap();
+        let mut pass = RenderPassDescriptor::new();
+        let color = &mut pass.color_attachments[0];
+        color.texture = Some(target);
+        color.load_action = LoadAction::Clear;
+        color.store_action = StoreAction::Store;
+        let queue = device.new_command_queue().unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        let encoder = command_buffer.render_command_encoder(&pass).unwrap();
+        let inside = one(device);
+        assert_eq!(at(&inside), 0x7_8000, "made while the encoder is open");
+        assert_eq!(identifier_notices(messages), []);
+        encoder.end_encoding().unwrap();
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        let _after = one(device).unique_identifier();
+        assert_eq!(
+            identifier_notices(messages),
+            [Degradation::UnmeasuredUniqueIdentifier]
+        );
+    });
+    // A released buffer a command buffer executes keeps its range until that completes.
+    notices::on_device(|device, messages| {
+        messages.take_notices();
+        let (params, out) = (
+            params(device),
+            device.new_buffer(64, ResourceOptions::shared()).unwrap(),
+        );
+        let executed = executable(device, &params, &out);
+        let second = one(device);
+        assert_eq!((at(&executed), at(&second)), (0x1_8000, 0x2_0000));
+        let event = device.new_shared_event().unwrap();
+        let queue = device.new_command_queue().unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        command_buffer
+            .encode_wait_for_event(EventRef::from(&event), 1)
+            .unwrap();
+        execute_one(&command_buffer, &executed, &params, &out);
+        command_buffer.commit().unwrap();
+        drop(executed);
+        let while_held = one(device);
+        assert_eq!(at(&while_held), 0x2_8000, "held while it may run");
+        event.set_signaled_value(1);
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.error(), None);
+        assert_eq!(at(&one(device)), 0x1_8000, "free once it completed");
         assert_eq!(identifier_notices(messages), []);
     });
 }

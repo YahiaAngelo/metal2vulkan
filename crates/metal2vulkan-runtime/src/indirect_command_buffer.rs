@@ -1313,10 +1313,13 @@ impl IndirectCommandBuffer {
     /// `uniqueIdentifier`, Apple's private property: 2^36 plus the buffer's place in Metal's
     /// range for indirect command buffers, as Metal answers it: the lowest gap from `0x18000` that
     /// holds its [`allocated_size`](Self::allocated_size) and one 16-KiB page more, at a multiple
-    /// of 32 KiB, free again once the buffer is gone. Metal's own encoders take ranges there too,
-    /// which the runtime does not, so after a blit encoder that copies, resets or fills, or a
-    /// render encoder, Metal's answer lies above the runtime's: a buffer made after its device
-    /// opened any command encoder announces
+    /// of 32 KiB, free again once the buffer is gone and no command buffer that executes it may
+    /// run. Metal's own encoders take ranges there too, which the runtime takes as an M3 Max's
+    /// do (macOS 27.0.1): a blit encoder's and a render encoder's at their opening, a dispatch's
+    /// or a blit command's as its command buffer is scheduled. A render pass's run takes more, by
+    /// its targets' sizes and what the device drew before, which the runtime does not model: a
+    /// buffer made after a command buffer that encoded a render encoder was scheduled, or after a
+    /// resource state encoder opened, announces
     /// [`Degradation::UnmeasuredUniqueIdentifier`](crate::Degradation::UnmeasuredUniqueIdentifier)
     /// once a device where this answers.
     pub fn unique_identifier(&self) -> u64 {
