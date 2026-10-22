@@ -30,11 +30,12 @@
 //!   Metal is not measured;
 //! - a texture over an IOSurface made with `kIOSurfaceClientDirection`, a key in no header of the
 //!   public macOS SDK, refused by the IOSurface plane's stand-in
-//!   (`Buffer::new_texture_with_iosurface_plane`), which is no call of the table;
-//! - a texture fill of a multisample texture (`blit_fill.rs`), whose samples Metal fills and the
-//!   runtime does not yet. A color fill packed in a format Metal packs no color in, where Metal's
-//!   bytes are its stack's, is built: the command buffer's last packed texel, announced as
-//!   `unpacked-fill-color`.
+//!   (`Buffer::new_texture_with_iosurface_plane`), which is no call of the table.
+//!
+//! Texture fills (`blit_fill.rs`) refuse nothing here: a multisample texture's samples, a texture
+//! buffer's bytes and a color packed in a format Metal packs no color in (the command buffer's
+//! last packed texel, announced as `unpacked-fill-color`) are built. A multisample fill a device
+//! cannot copy into the texture is refused there, `Unsupported`, as the device's gap.
 //!
 //! [`AppleOnlyCall`] is the table, and every call of it is here: the command buffer's, the
 //! compute, render and blit encoders', and the texture's protection options. A texture's
