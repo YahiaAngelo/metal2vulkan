@@ -1522,6 +1522,7 @@ fn mesh_template(flat: bool, multiples: Vec<u32>) -> GraphicsTemplate {
                 stage: GroupStage::Mesh,
             },
             object: None,
+            folded: false,
             records: None,
         }),
         shader_tests: None,
@@ -1726,6 +1727,126 @@ fn object_draws_specialize_each_stage_within_its_limits() {
     let cmds = instantiate(&t, &state, &indirect([0, 1, 1])).expect("indirect nothing");
     assert_eq!(cmds.draw, tasks(0, 0, 0));
     assert!(cmds.uses.is_empty() && cmds.mesh_arguments.is_none());
+}
+
+/// A folded object function's draws (`MeshTemplate::folded`): a direct draw runs its object grid
+/// in the pieces of its fold within the task limits, as `vkCmdDrawMeshTasksEXT` of its one piece or
+/// `vkCmdDrawMeshTasksIndirectEXT` of its pieces' uploaded commands, its object stage reading the
+/// fold's record at its `ReplayRegionAddress` hole and every grid builtin from it (`MultiRegion`
+/// 1); a grid past what runs draws nothing and says so; threads per grid wrap as Metal's; and an
+/// indirect draw is `vkCmdDrawMeshTasksIndirectCountEXT` of the folded arguments pass's pieces.
+#[test]
+fn folded_object_draws_run_their_grid_in_pieces() {
+    use crate::bind::mesh_arguments::{fold_object_grid, MeshArguments, MeshGridLimits};
+    use crate::pipeline::interface::PlacedField;
+    let state = BindState::default();
+    let mut t = object_template();
+    t.stages[0].fields = vec![PlacedField {
+        field: PushField::ReplayRegionAddress,
+        loc: PushLoc::Push { offset: 0 },
+        size: 8,
+    }];
+    t.stages[0].push_range = Some((0, 8));
+    t.mesh.as_mut().expect("a mesh template").folded = true;
+    let task = MeshGridLimits {
+        axes: [65535; 3],
+        total: 1 << 22,
+    };
+    let groups = |groups, lo| DrawCall::MeshThreadgroups {
+        groups,
+        threads_per_object_group: lo,
+        threads_per_mesh_group: [2, 1, 1],
+    };
+    let tasks = |[x, y, z]: [u32; 3]| vk::DrawCommand::DrawMeshTasks {
+        group_count_x: x,
+        group_count_y: y,
+        group_count_z: z,
+    };
+    let hole = PushHole::ReplayRegionAddress {
+        stages: vk::ShaderStageFlags::TASK_EXT,
+        offset: 0,
+    };
+    // One piece, a grid past the task stage's axis among them: no refusal.
+    for (counts, lo, dispatch) in [
+        ([3, 1, 1], [4, 2, 1], [3, 1, 1]),
+        ([1, 1, 65536], [1; 3], [65535, 2, 1]),
+        ([131_070, 2, 1], [1; 3], [65535, 4, 1]),
+    ] {
+        let cmds = instantiate(&t, &state, &groups(counts, lo)).expect("one piece");
+        let fold = fold_object_grid(counts, lo, task, true).expect("fold");
+        assert_eq!(fold.dispatch, dispatch, "{counts:?}");
+        assert_eq!(cmds.draw, tasks(dispatch), "{counts:?}");
+        assert_eq!(cmds.object_fold, Some(fold), "{counts:?}");
+        assert!(cmds.push_holes.contains(&hole), "{counts:?}");
+        assert!(
+            cmds.mesh_arguments.is_none() && cmds.uses.is_empty(),
+            "{counts:?}"
+        );
+        let key = cmds.specialization.as_ref().expect("a mesh draw's key");
+        let multi_region = key.entries.iter().find(|e| e.constant_id == 8).map(|e| {
+            let at = e.offset as usize;
+            u32::from_le_bytes(key.data[at..at + 4].try_into().expect("4 bytes"))
+        });
+        assert_eq!(multi_region, Some(1), "{counts:?}");
+    }
+    // Pieces: the uploaded commands, at their offset in the upload.
+    let cmds = instantiate(&t, &state, &groups([70_000, 100, 1], [1; 3])).expect("pieces");
+    assert_eq!(
+        cmds.draw,
+        vk::DrawCommand::DrawMeshTasksIndirect {
+            offset: u64::from(MeshArguments::OBJECT_COMMANDS),
+            draw_count: 2,
+            stride: 12,
+        }
+    );
+    let fold = cmds.object_fold.expect("a fold");
+    assert_eq!(
+        (fold.dispatch, fold.pieces, fold.past),
+        ([65535, 64, 1], 2, false)
+    );
+    assert_eq!(fold.bytes().len(), 36 + 2 * 12);
+    assert!(cmds.mesh_arguments.is_none());
+    // Past what runs: 2^29 threadgroups or more, which Metal's GPU fails.
+    for counts in [[65535, 65535, 1], [1 << 29, 1, 1]] {
+        let cmds = instantiate(&t, &state, &groups(counts, [1; 3])).expect("past");
+        assert_eq!(cmds.draw, tasks([0; 3]), "{counts:?}");
+        assert!(cmds.object_fold.is_some_and(|f| f.past), "{counts:?}");
+    }
+    // Threads per grid wrapped to 32 bits: a direct draw runs the threadgroups they fill, rounded
+    // up (Metal's), none where they wrap to 0, and the record reports them.
+    let cmds = instantiate(&t, &state, &groups([33_554_433, 1, 1], [128, 1, 1])).expect("wraps");
+    assert_eq!(cmds.draw, tasks([1, 1, 1]));
+    let fold = cmds.object_fold.expect("a fold");
+    assert_eq!(fold.record[..3], [1, 1, 1]);
+    assert_eq!(fold.record[4..7], [128, 1, 1]);
+    // Nothing Metal draws: no fold past anything.
+    for (counts, lo) in [([3, 0, 1], [4, 1, 1]), ([1 << 26, 1, 1], [128, 1, 1])] {
+        let cmds = instantiate(&t, &state, &groups(counts, lo)).expect("nothing");
+        assert_eq!(cmds.draw, tasks([0; 3]), "{counts:?}");
+        assert!(
+            cmds.object_fold.is_some_and(|f| !f.past && f.pieces == 0),
+            "{counts:?}"
+        );
+    }
+    // Indirect: the folded arguments pass's pieces.
+    let indirect = DrawCall::MeshThreadgroupsIndirect {
+        indirect: IndirectRef::new(1, 12),
+        threads_per_object_group: [4, 1, 1],
+        threads_per_mesh_group: [32, 1, 1],
+    };
+    let cmds = instantiate(&t, &state, &indirect).expect("indirect");
+    assert_eq!(
+        cmds.draw,
+        vk::DrawCommand::DrawMeshTasksIndirectCount {
+            offset: u64::from(MeshArguments::OBJECT_COMMANDS),
+            count_offset: u64::from(MeshArguments::OBJECT_COUNT),
+            max_draw_count: MeshArguments::OBJECT_PIECES,
+            stride: 12,
+        }
+    );
+    assert_eq!(cmds.mesh_arguments, Some(MeshArgumentsForm::FoldedObject));
+    assert!(cmds.object_fold.is_none() && cmds.push_holes.contains(&hole));
+    assert!(!cmds.indirect_needs_arguments && cmds.uses.len() == 1);
 }
 
 /// A mesh draw is `vkCmdDrawMeshTasksEXT` of its threadgroups, made with its threadgroup's size as

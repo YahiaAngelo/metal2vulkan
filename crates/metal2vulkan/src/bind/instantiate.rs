@@ -75,7 +75,9 @@ pub enum PushHole {
     /// `ReplayLayout::region_offset` of the dispatch's command and region in the replay's scratch,
     /// as a `u64` at `offset` of the variant's push bytes. A flat variant's dispatch outside a
     /// replay (`BindingPlan::instantiate_dispatch`) reads the record its preprocess wrote beside
-    /// the group counts.
+    /// the group counts. A mesh draw of a folded object function (`TASK_EXT`) reads its scratch's
+    /// region record: the arguments pass's (`DrawCommands::mesh_arguments`) or the uploaded fold's
+    /// (`DrawCommands::object_fold`), at [`MeshArguments::OBJECT_RECORD`](crate::bind::MeshArguments::OBJECT_RECORD), a multiple of 16.
     ReplayRegionAddress {
         stages: vk::ShaderStageFlags,
         offset: u32,

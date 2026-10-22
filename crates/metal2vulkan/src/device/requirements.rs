@@ -91,6 +91,9 @@ pub enum VkFeature {
     VertexAttributeInstanceRateZeroDivisor,
     DrawIndirectFirstInstance,
     MultiDrawIndirect,
+    /// `drawIndirectCount` (Vulkan 1.2, or `VK_KHR_draw_indirect_count`): an indirect draw whose
+    /// draw count is GPU data (an indirect object mesh draw's pieces, `bind::mesh_arguments`).
+    DrawIndirectCount,
     DepthClamp,
     FillModeNonSolid,
     // Images and samplers.

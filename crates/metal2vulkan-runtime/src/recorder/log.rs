@@ -265,6 +265,15 @@ enum Logged {
     BindIndexBuffer2(vk::Buffer, vk::DeviceSize, vk::DeviceSize, vk::IndexType),
     DrawMeshTasks(u32, u32, u32),
     DrawMeshTasksIndirect(vk::Buffer, vk::DeviceSize, u32, u32),
+    /// The commands' buffer and offset, the count's, the most draws and the stride.
+    DrawMeshTasksIndirectCount(
+        vk::Buffer,
+        vk::DeviceSize,
+        vk::Buffer,
+        vk::DeviceSize,
+        u32,
+        u32,
+    ),
     /// Preprocessed, and the info's place in its arena.
     ExecuteGeneratedCommands(vk::Bool32, Span),
     /// The info's place, and the state command buffer where it is another than this one.
@@ -1166,6 +1175,25 @@ impl Log {
         self.op(Logged::DrawMeshTasksIndirect(buffer, offset, count, stride));
     }
 
+    pub(super) unsafe fn cmd_draw_mesh_tasks_indirect_count(
+        &mut self,
+        buffer: vk::Buffer,
+        offset: vk::DeviceSize,
+        count_buffer: vk::Buffer,
+        count_offset: vk::DeviceSize,
+        max_count: u32,
+        stride: u32,
+    ) {
+        self.op(Logged::DrawMeshTasksIndirectCount(
+            buffer,
+            offset,
+            count_buffer,
+            count_offset,
+            max_count,
+            stride,
+        ));
+    }
+
     /// The info, copied, its chain checked empty.
     ///
     /// # Safety
@@ -1718,6 +1746,23 @@ impl Log {
                         buffer,
                         offset,
                         count,
+                        stride
+                    ),
+                    Logged::DrawMeshTasksIndirectCount(
+                        buffer,
+                        offset,
+                        count_buffer,
+                        count_offset,
+                        max_count,
+                        stride,
+                    ) => call!(
+                        CmdDrawMeshTasksIndirectCount,
+                        vk::PFN_vkCmdDrawMeshTasksIndirectCountEXT,
+                        buffer,
+                        offset,
+                        count_buffer,
+                        count_offset,
+                        max_count,
                         stride
                     ),
                     Logged::ExecuteGeneratedCommands(preprocessed, info) => call!(

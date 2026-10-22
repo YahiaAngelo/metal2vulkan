@@ -570,10 +570,24 @@ A grid Metal draws nothing for (an axis past `bind::METAL_MESH_GRID_AXIS`, or mo
 a direct draw's command is zeroed, an object function's wrapper launches nothing for such a grid,
 and an indirect draw reads its counts on the GPU. With the extension, an indirect draw's
 `DrawCommands::mesh_arguments` is a pass to record before the render pass
-(`bind::mesh_arguments_module`, one invocation): it writes the draw's counts into 12 bytes of the
-consumer's scratch, which the draw reads in place of Metal's arguments; an object grid past the
-device's task limits, which Metal draws, is zeroed there and sets
-`StatusBits::MESH_GRID_PAST_LIMITS` in the command buffer's `ExecutionStatus`.
+(`bind::mesh_arguments_module`, one invocation): it writes the draw's counts into the consumer's
+scratch (`MeshArguments::scratch_bytes`), which the draw reads in place of Metal's arguments.
+
+An object grid runs at any count Metal runs, past the task stage's limits too, on a device with
+device addresses, `shaderInt64`, `multiDrawIndirect` and `drawIndirectCount` (every committed
+profile with the extension): the object function is compiled folded, and each draw runs its grid
+in pieces within the task limits (`bind::fold_object_grid`), its object stage reading the
+threadgroups Metal runs and its grid from a 32-byte region record at its
+`PushHole::ReplayRegionAddress`. A direct draw's fold is `DrawCommands::object_fold`, whose bytes
+the consumer uploads (the record, and its pieces' commands where `draw` is indirect); an indirect
+draw's arguments pass (`MeshArgumentsForm::FoldedObject`) writes the record, the pieces and their
+commands, which `draw` (`DrawMeshTasksIndirectCount`) reads. Metal's threads per grid wrap to 32
+bits along each axis, as its builtins report them; a direct draw runs only the threadgroups those
+threads fill, rounded up, an indirect one every threadgroup (`bind::metal_object_grid`). A grid of
+`bind::METAL_OBJECT_GRID_TOTAL` threadgroups or more draws nothing and fails its command buffer
+(Metal's GPU fails it), through `StatusBits::MESH_GRID_PAST_LIMITS` in the command buffer's
+`ExecutionStatus` or the fold's `past`. Elsewhere an indirect draw's object grid past the device's
+task limits does the same, and a direct one is refused naming the limit.
 
 ### Tile pipelines
 
@@ -2887,6 +2901,10 @@ each item named states the rule in full.
   to 4 bytes, and every later position draws index 0 plus the base vertex.
 - **An indexed draw from an index offset at or past the length draws index 0** plus the base vertex
   at each position, where Metal reads whatever memory follows (`zeroed-index-fetch`).
+- **An object grid of 2^29 threadgroups or more fails its command buffer at once**
+  (`MeshGridPastLimits`, Metal's code), drawing nothing of that draw while the command buffer's
+  other work runs. Metal's GPU runs it for its watchdog's 5 seconds, then fails the command buffer
+  with none of its writes landing (`bind::METAL_OBJECT_GRID_TOTAL`).
 - **A mesh grid of 1,048,577 to 2,097,151 threadgroups draws nothing**, direct, indirect or set by
   an object threadgroup. Metal on the M3 Max draws whole up to 1,048,575 and nothing at exactly
   2^20 or from 2^21 on, and between them is erratic (17 by 61,681 and 65,535 by 24 drew, 1025 by

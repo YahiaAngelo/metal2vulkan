@@ -96,12 +96,13 @@ use super::QueueSlot;
 /// and of an execution of commands the GPU generates, which take pipelines of their own kinds.
 /// The first release of each in the process, and the first replay of each command
 /// (`recorder`), registers the hook again as its section ends (`exit_guard::called`).
-pub(crate) const UNPRIMED: [Call; 7] = [
+pub(crate) const UNPRIMED: [Call; 8] = [
     Call::DestroyDevice,
     Call::DestroyDebugUtilsMessenger,
     Call::DestroyInstance,
     Call::CmdDrawMeshTasks,
     Call::CmdDrawMeshTasksIndirect,
+    Call::CmdDrawMeshTasksIndirectCount,
     Call::CmdExecuteGeneratedCommands,
     Call::CmdPreprocessGeneratedCommands,
 ];

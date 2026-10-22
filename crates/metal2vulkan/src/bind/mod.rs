@@ -245,8 +245,9 @@ pub use instantiate::{
     PushConstantWrite, PushHole, ResidentRange, ResidentSet, RootTable,
 };
 pub use mesh_arguments::{
-    mesh_arguments_module, MeshArguments, MeshArgumentsForm, MeshArgumentsModule, MeshGridLimits,
-    MeshGridRule, METAL_MESH_GRID_AXIS, METAL_MESH_GRID_TOTAL,
+    fold_object_grid, mesh_arguments_module, metal_object_grid, MeshArguments, MeshArgumentsForm,
+    MeshArgumentsModule, MeshGridLimits, MeshGridRule, ObjectFold, METAL_MESH_GRID_AXIS,
+    METAL_MESH_GRID_TOTAL, METAL_OBJECT_GRID_TOTAL,
 };
 pub use mesh_scan::{mesh_scan_module, MeshScanModule};
 pub use mipmap_filter::{

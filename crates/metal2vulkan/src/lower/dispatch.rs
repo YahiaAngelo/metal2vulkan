@@ -390,6 +390,10 @@ pub struct DispatchPlan {
     pub keys: DispatchKeys,
     /// The kernel folds Metal's group counts into its dispatch (`LoweringInputs::folded_groups`).
     pub folded_groups: bool,
+    /// A folded object function: its draw's pieces each run `nx · ny · nz` of Metal's
+    /// threadgroups, so its threadgroup's number adds `DrawIndex · nx · ny · nz`
+    /// ([`KernelDecl::folded`]).
+    pub draw_pieces: bool,
     /// The kernel's threadgroup position and grid are what its entry wrapper computes, not its
     /// dispatch's: an emulated mesh function under an object function, whose flat dispatch runs
     /// every object threadgroup's mesh grid ([`WrapperGroups`]).
@@ -556,6 +560,7 @@ pub fn plan_kernel(cx: &mut SelectCx<'_>, tier: Tier) -> Result<DispatchPlan, Er
         flat_grid,
         keys: SpecKey::dispatch_keys(cx.stage),
         folded_groups,
+        draw_pieces: folded_groups && cx.stage == crate::pipeline::sym::Stage::Object,
         wrapper_groups: crate::lower::mesh::wrapper_groups(&cx.families.mesh),
     })
 }
@@ -729,6 +734,8 @@ pub struct KernelDecl {
     flat_grid: bool,
     /// The kernel folds Metal's group counts into its dispatch ([`KernelDecl::folded`]).
     folded_groups: bool,
+    /// A folded object function's `DrawIndex`, its draw's piece ([`DispatchPlan::draw_pieces`]).
+    draw_index: Option<GlobalId>,
     uvec3: TypeId,
     /// `sx, sy, sz`.
     size: [ConstId; 3],
@@ -959,6 +966,7 @@ impl KernelDecl {
             tile_sized: dp.tile_sized,
             flat_grid: dp.flat_grid,
             folded_groups: dp.folded_groups,
+            draw_index: var(dp.draw_pieces, B::DrawIndex, u32_)?,
             uvec3,
             size,
             multi_region,
@@ -1288,9 +1296,13 @@ impl KernelDecl {
 
     /// A folded variant's threadgroup position in the Metal grid (a `uvec3`) and whether its
     /// workgroup is one of Metal's threadgroups: the workgroup's index `(wz · ny + wy) · nx + wx`
-    /// over the dispatch, counted over Metal's group counts `threads_per_grid / (sx, sy, sz)`
-    /// (`region[1].xyz`) `x` fastest, all in 64 bits. Every value it reads is the workgroup's, so
-    /// the whole workgroup is inside or past. Inside the grid each axis's position is below its
+    /// over the dispatch (plus `DrawIndex · nx · ny · nz` for a folded object function, whose
+    /// draw's pieces each run that many), counted over Metal's group counts `x` fastest, all in 64
+    /// bits. A kernel's counts are `threads_per_grid / (sx, sy, sz)` (`region[1].xyz`); a folded
+    /// object function's are the record's base words (`region[0].xyz`, which no folded variant
+    /// reads as a base), since its threads per grid are Metal's, wrapped to 32 bits
+    /// (`bind::metal_object_grid`). Every value it reads is the workgroup's, so the whole workgroup
+    /// is inside or past. Inside the grid each axis's position is below its
     /// count, so it fits its `u32`; past it the position is unused. A count of zero runs no
     /// workgroup (the preprocess writes a zero dispatch), so no running invocation divides by it.
     fn folded(
@@ -1313,12 +1325,30 @@ impl KernelDecl {
         let index = fb.binary(BinOp::IMul, wz, ny)?;
         let index = fb.binary(BinOp::IAdd, index, wy)?;
         let index = fb.binary(BinOp::IMul, index, nx)?;
-        let index = fb.binary(BinOp::IAdd, index, wx)?;
+        let mut index = fb.binary(BinOp::IAdd, index, wx)?;
+        if let Some(draw) = self.draw_index {
+            let piece = fb.module().global_value(draw)?;
+            let piece = fb.load(piece, MemAccess::default())?;
+            let piece = fb.convert(ConvOp::UConvert, piece, u64_)?;
+            let nz = wide(fb, dispatched, 2)?;
+            let size = fb.binary(BinOp::IMul, nx, ny)?;
+            let size = fb.binary(BinOp::IMul, size, nz)?;
+            let first = fb.binary(BinOp::IMul, piece, size)?;
+            index = fb.binary(BinOp::IAdd, index, first)?;
+        }
         let r = region(fb)?;
-        let threads = fb.composite_extract(r, &[1])?;
-        let threads = fb.vector_shuffle(threads, threads, &[0, 1, 2])?;
-        let s = self.size3(fb)?;
-        let counts = fb.binary(BinOp::UDiv, threads, s)?;
+        let counts = match self.draw_index {
+            Some(_) => {
+                let runs = fb.composite_extract(r, &[0])?;
+                fb.vector_shuffle(runs, runs, &[0, 1, 2])?
+            }
+            None => {
+                let threads = fb.composite_extract(r, &[1])?;
+                let threads = fb.vector_shuffle(threads, threads, &[0, 1, 2])?;
+                let s = self.size3(fb)?;
+                fb.binary(BinOp::UDiv, threads, s)?
+            }
+        };
         let [cx, cy, cz] = [
             wide(fb, counts, 0)?,
             wide(fb, counts, 1)?,

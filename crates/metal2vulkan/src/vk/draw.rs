@@ -57,4 +57,13 @@ pub enum DrawCommand {
         draw_count: u32,
         stride: u32,
     },
+    /// `vkCmdDrawMeshTasksIndirectCountEXT` (`drawIndirectCount`): the draw count is the `u32` at
+    /// `count_offset`, at most `max_draw_count`, and the commands start at `offset`, both in the
+    /// buffer the draw names.
+    DrawMeshTasksIndirectCount {
+        offset: u64,
+        count_offset: u64,
+        max_draw_count: u32,
+        stride: u32,
+    },
 }

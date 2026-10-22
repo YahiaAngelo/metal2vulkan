@@ -500,7 +500,10 @@ impl Device {
         let p = self.profile();
         let object = match &d.object {
             Some(o) => {
-                let inputs = v.lowering_inputs(Stage::Object);
+                // An object function on a device that folds its grids runs any object grid in
+                // pieces within the task stage's limits (`bind::mesh_arguments`).
+                let mut inputs = v.lowering_inputs(Stage::Object);
+                inputs.folded_groups = crate::lower::mesh::folds_object_grids(p);
                 Some(self.stage(o, InputsFrom::Given(&inputs), m)?)
             }
             None => None,

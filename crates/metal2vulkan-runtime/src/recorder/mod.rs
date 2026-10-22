@@ -266,15 +266,17 @@ pub(crate) unsafe fn reserve_end(raw: vk::CommandBuffer) {
 pub(crate) struct MeshDraws {
     draw: vk::PFN_vkCmdDrawMeshTasksEXT,
     indirect: vk::PFN_vkCmdDrawMeshTasksIndirectEXT,
+    indirect_count: vk::PFN_vkCmdDrawMeshTasksIndirectCountEXT,
 }
 
 impl MeshDraws {
     /// The commands of `loaded`, through `slot` where the device has one.
     pub(crate) fn new(loaded: &ash::ext::mesh_shader::Device, slot: Option<&Slot>) -> MeshDraws {
         let functions = loaded.fp();
-        let (draw, indirect) = (
+        let (draw, indirect, indirect_count) = (
             functions.cmd_draw_mesh_tasks_ext,
             functions.cmd_draw_mesh_tasks_indirect_ext,
+            functions.cmd_draw_mesh_tasks_indirect_count_ext,
         );
         match slot {
             // SAFETY: each is the device's command of that name.
@@ -282,9 +284,15 @@ impl MeshDraws {
                 MeshDraws {
                     draw: slot.route(Command::CmdDrawMeshTasks, draw),
                     indirect: slot.route(Command::CmdDrawMeshTasksIndirect, indirect),
+                    indirect_count: slot
+                        .route(Command::CmdDrawMeshTasksIndirectCount, indirect_count),
                 }
             },
-            None => MeshDraws { draw, indirect },
+            None => MeshDraws {
+                draw,
+                indirect,
+                indirect_count,
+            },
         }
     }
 
@@ -319,5 +327,33 @@ impl MeshDraws {
     ) {
         // SAFETY: the caller's.
         unsafe { (self.indirect)(command_buffer, buffer, offset, draw_count, stride) }
+    }
+
+    /// `vkCmdDrawMeshTasksIndirectCountEXT`, its count in `buffer` too (the device enabled
+    /// `drawIndirectCount` wherever a pipeline draws it, `bind::mesh_arguments`).
+    ///
+    /// # Safety
+    ///
+    /// As the command's.
+    pub(crate) unsafe fn cmd_draw_mesh_tasks_indirect_count(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        buffer: vk::Buffer,
+        (offset, count_offset): (vk::DeviceSize, vk::DeviceSize),
+        max_draw_count: u32,
+        stride: u32,
+    ) {
+        // SAFETY: the caller's.
+        unsafe {
+            (self.indirect_count)(
+                command_buffer,
+                buffer,
+                offset,
+                buffer,
+                count_offset,
+                max_draw_count,
+                stride,
+            )
+        }
     }
 }

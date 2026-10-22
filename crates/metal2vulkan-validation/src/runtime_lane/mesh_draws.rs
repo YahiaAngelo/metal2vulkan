@@ -24,9 +24,11 @@
 //! writes, which must draw Metal's words too; a grid Metal draws nothing for (an axis past 65,535,
 //! or more than 1,048,575 threadgroups: [`PAST_CASES`], measured on the M3 Max under macOS 27.0.1,
 //! direct and indirect alike) draws nothing, and an object threadgroup that sets one launches
-//! nothing ([`OBJECT_PAST_CASES`]); an object grid past the device's task limits, which
-//! Metal draws, fails the command buffer typed
-//! (`CommandBufferError::MeshGridPastLimits`, [`object_grids_past_the_task_limits_fail_typed`]).
+//! nothing ([`OBJECT_PAST_CASES`]). Object grids of any count run as Metal runs them (the owned
+//! fixture `mesh_object_grid` and Metal probe 5, [`object_grids_run_as_metal_runs_them`]): in
+//! pieces within the task stage's limits, threads per grid wrapped to 32 bits as Metal's, and
+//! one of 2^29 threadgroups, which Metal's GPU fails, failing the command buffer typed
+//! (`CommandBufferError::MeshGridPastLimits`).
 //! A `drawMeshThreads` that leaves a partial object threadgroup is refused
 //! (`NotImplemented(MeshShading)`); Metal's answers for it are printed (a partial object
 //! threadgroup runs the threads left). What Metal's validation
@@ -46,7 +48,7 @@ use super::degrade_notices::{assert_made_once, made_mesh_kinds};
 use super::gpu_times::read_kinds;
 use super::render_state::{texels, texture};
 use super::shared_kinds;
-use super::{buffer_with, validated_device, Messages, ScratchCache, WAIT};
+use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
 use metal2vulkan::device::{VkExtension, VkFeature};
@@ -575,71 +577,293 @@ fn object_draws_store_metals_words() {
     );
 }
 
-/// An indirect draw of 70,000 object threadgroups, each launching no mesh threadgroup (`ctl`
-/// zero), which Metal runs and draws nothing for: on a device whose task stage launches no more
-/// than 65,536 along `x` (RADV, lavapipe) the arguments pass draws nothing and the command buffer
-/// fails with `CommandBufferError::MeshGridPastLimits`; on one that launches them (NVIDIA's
-/// 4,194,304) it completes, drawing nothing; an emulated draw is refused as the object case's.
+/// One case of Metal probe 5 over the owned fixture `mesh_object_grid`: the draw's object
+/// threadgroups and their threads, whether it is direct, and the twelve counter words the M3 Max
+/// (macOS 27.0.1) left: the threadgroups counted, their linear positions and those positions'
+/// squares summed (each wrapping), the largest position, then the grid's `x`, `y`, `z` and the
+/// threads per grid's `x` each threadgroup read, or-ed, then and-ed (from all ones).
+struct GridCase {
+    groups: [u32; 3],
+    threads: [u64; 3],
+    direct: bool,
+    words: [u32; 12],
+}
+
+/// The words of a draw that ran no object threadgroup.
+const RAN_NONE: [u32; 12] = [0, 0, 0, 0, 0, 0, 0, 0, !0, !0, !0, !0];
+
+/// The words of `n` threadgroups in a row along `x`, each reading a grid of `grid` (and threads
+/// per grid of `threads` along `x`): the sums Metal's counters wrap to.
+const fn row(n: u32, sum: u32, squares: u32, grid: [u32; 3], threads: u32) -> [u32; 12] {
+    let [x, y, z] = grid;
+    [n, sum, squares, n - 1, x, y, z, threads, x, y, z, threads]
+}
+
+/// Probe 5's cases, each as Metal ran it (the module docs): grids past every device's task axis
+/// and total, which run in pieces; grids whose threads per grid wrap to 32 bits, which a direct
+/// draw runs as the wrapped threads fill and an indirect one whole, reporting the wrapped grid;
+/// and grids with a zero count. lavapipe does not run a case of more than 1,048,576 threadgroups in
+/// time, and skips it.
+const OBJECT_GRID_CASES: [GridCase; 17] = {
+    const fn case(groups: [u32; 3], threads: [u64; 3], direct: bool, words: [u32; 12]) -> GridCase {
+        GridCase {
+            groups,
+            threads,
+            direct,
+            words,
+        }
+    }
+    let one = [1, 1, 1];
+    [
+        case(
+            [70_000, 1, 1],
+            one,
+            true,
+            row(70_000, 2_449_965_000, 3_148_892_776, [70_000, 1, 1], 70_000),
+        ),
+        case(
+            [70_000, 1, 1],
+            one,
+            false,
+            row(70_000, 2_449_965_000, 3_148_892_776, [70_000, 1, 1], 70_000),
+        ),
+        case(
+            [300, 300, 2],
+            [4, 2, 1],
+            true,
+            row(180_000, 3_315_008_112, 4_292_449_072, [300, 300, 2], 1200),
+        ),
+        case(
+            [300, 300, 2],
+            [4, 2, 1],
+            false,
+            row(180_000, 3_315_008_112, 4_292_449_072, [300, 300, 2], 1200),
+        ),
+        case(
+            [131_070, 2, 1],
+            one,
+            true,
+            row(
+                262_140,
+                4_293_787_658,
+                1_436_942_306,
+                [131_070, 2, 1],
+                131_070,
+            ),
+        ),
+        case(
+            [131_070, 2, 1],
+            one,
+            false,
+            row(
+                262_140,
+                4_293_787_658,
+                1_436_942_306,
+                [131_070, 2, 1],
+                131_070,
+            ),
+        ),
+        case(
+            [65536, 70, 1],
+            one,
+            true,
+            row(
+                4_587_520,
+                4_292_673_536,
+                1_432_420_352,
+                [65536, 70, 1],
+                65536,
+            ),
+        ),
+        case(
+            [65536, 70, 1],
+            one,
+            false,
+            row(
+                4_587_520,
+                4_292_673_536,
+                1_432_420_352,
+                [65536, 70, 1],
+                65536,
+            ),
+        ),
+        case(
+            [4_194_307, 1, 1],
+            one,
+            true,
+            row(
+                4_194_307,
+                10_485_763,
+                1_457_520_645,
+                [4_194_307, 1, 1],
+                4_194_307,
+            ),
+        ),
+        case(
+            [4_194_307, 1, 1],
+            one,
+            false,
+            row(
+                4_194_307,
+                10_485_763,
+                1_457_520_645,
+                [4_194_307, 1, 1],
+                4_194_307,
+            ),
+        ),
+        case(
+            [2, 16_777_217, 1],
+            [1, 128, 1],
+            true,
+            row(33_554_434, 50_331_649, 2_936_012_801, [2, 16_777_217, 1], 2),
+        ),
+        case([3, 0, 1], one, true, RAN_NONE),
+        case([3, 0, 1], one, false, RAN_NONE),
+        case([33_554_432, 1, 1], [128, 1, 1], true, RAN_NONE),
+        case(
+            [33_554_432, 1, 1],
+            [128, 1, 1],
+            false,
+            row(33_554_432, 4_278_190_080, 2_868_903_936, [0, 1, 1], 0),
+        ),
+        case(
+            [33_554_433, 1, 1],
+            [128, 1, 1],
+            true,
+            row(1, 0, 0, [1, 1, 1], 128),
+        ),
+        case(
+            [33_554_433, 1, 1],
+            [128, 1, 1],
+            false,
+            row(33_554_433, 16_777_216, 2_868_903_936, [1, 1, 1], 128),
+        ),
+    ]
+};
+
+/// Object grids of 2^29 threadgroups, direct and indirect, which the M3 Max fails after its GPU's
+/// watchdog (`MTLCommandBufferErrorInternal`, none of the command buffer's writes landing):
+/// drawn nothing, failing the command buffer with Metal's code
+/// (`CommandBufferError::MeshGridPastLimits`).
+const PAST_GRID: [u32; 3] = [1 << 29, 1, 1];
+
+/// Each of [`OBJECT_GRID_CASES`] leaves Metal's words on a device with `VK_EXT_mesh_shader`, its
+/// grid folded into the task stage's limits where it passes them, and each draw of [`PAST_GRID`]
+/// draws nothing and fails its command buffer typed; the emulation refuses what passes its compute
+/// limits, and its indirect draws (`Unsupported{MeshShading}`), printed.
 #[test]
-fn object_grids_past_the_task_limits_fail_typed() {
+fn object_grids_run_as_metal_runs_them() {
     let cache = ScratchCache::new().unwrap();
     let messages = Messages::default();
     {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
         let name = device.name().to_owned();
-        let lane = Lane::new(device);
-        let state = match lane.pipeline(Some("mesh_draws_object"), "mesh_draws_mesh") {
-            Ok(state) => state,
-            Err(refused) if mesh_refused(&refused, &name) => return,
-            Err(error) => panic!("mesh_draws_object on {name}: {error}"),
+        let bitcode = llvm_assemble(&engine_dir().join("mesh_object_grid.ll")).unwrap();
+        let library = device.new_library_with_air(&bitcode).unwrap();
+        let function = |name| {
+            StageSource::Function(
+                library
+                    .new_function_with_name(name)
+                    .unwrap()
+                    .function_descriptor(),
+            )
         };
-        let counts = [70_000u32, 1, 1];
-        let task = lane
-            .device
-            .compile_device()
-            .profile()
-            .limits()
-            .mesh
-            .max_task_work_group_count;
-        let targets = [0, 1].map(|_| texture(&lane.device, PixelFormat::RGBA32Uint, SIDE));
-        let mut pass = RenderPassDescriptor::new();
-        for (attachment, target) in pass.color_attachments.iter_mut().zip(&targets) {
+        let mut descriptor = MeshPipelineDescriptor::new(function("mesh_object_grid_mesh"));
+        descriptor.object = Some(function("mesh_object_grid_object"));
+        descriptor.fragment = Some(function("mesh_object_grid_fragment"));
+        descriptor.color_attachments[0] =
+            Some(ColorAttachmentDescriptor::new(PixelFormat::RGBA32Uint));
+        let state =
+            match device.new_mesh_render_pipeline_state(&descriptor, &PipelineOptions::default()) {
+                Ok(state) => state,
+                Err(refused) if mesh_refused(&refused, &name) => return,
+                Err(error) => panic!("mesh_object_grid on {name}: {error}"),
+            };
+        let queue = device.new_command_queue().unwrap();
+        let target = texture(&device, PixelFormat::RGBA32Uint, SIDE);
+        let run = |groups: [u32; 3], threads: [u64; 3], direct: bool| {
+            let mut pass = RenderPassDescriptor::new();
+            let attachment = &mut pass.color_attachments[0];
             attachment.texture = Some(target.clone());
             attachment.load_action = LoadAction::Clear;
-            attachment.clear_color = ClearColor::new(0.0, 0.0, 0.0, 0.0);
             attachment.store_action = StoreAction::Store;
+            let mut initial = vec![0u8; 32];
+            initial.extend([0xFF; 16]);
+            let counters = buffer_with(&device, &initial).unwrap();
+            let bytes: Vec<u8> = groups.iter().flat_map(|w| w.to_le_bytes()).collect();
+            let arguments = buffer_with(&device, &bytes).unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.render_command_encoder(&pass).unwrap();
+            encoder.set_render_pipeline_state(&state).unwrap();
+            encoder.set_object_buffer(Some(&counters), 0, 0).unwrap();
+            let one = Size::new(1, 1, 1);
+            let drawn = match direct {
+                true => {
+                    encoder.draw_mesh_threadgroups(size(groups.map(u64::from)), size(threads), one)
+                }
+                false => encoder.draw_mesh_threadgroups_indirect(&arguments, 0, size(threads), one),
+            };
+            encoder.end_encoding().unwrap();
+            let started = std::time::Instant::now();
+            command_buffer.commit().unwrap();
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            let words: Vec<u32> = read_buffer(&counters, 0, 48)
+                .unwrap()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|w| u32::from_le_bytes(*w))
+                .collect();
+            let what = format!(
+                "{groups:?} of {threads:?}, {} on {name}",
+                if direct { "direct" } else { "indirect" }
+            );
+            eprintln!(
+                "TIMING {what}: {} ms, {:?}",
+                started.elapsed().as_millis(),
+                command_buffer.error()
+            );
+            (drawn, command_buffer.error(), words, what)
+        };
+        // The emulation's refusals: an indirect draw with an object function, and a grid past its
+        // compute limits.
+        let refused = |drawn: &Result<(), Error>| match drawn {
+            Err(Error::Bind(BindError::Unsupported(u))) if u.feature == Feature::MeshShading => {
+                emulates(&device)
+            }
+            _ => false,
+        };
+        for c in &OBJECT_GRID_CASES {
+            // The threadgroups Metal ran.
+            if cfg!(m2v_cpu_icd) && c.words[0] > 1 << 20 {
+                continue;
+            }
+            let (drawn, error, words, what) = run(c.groups, c.threads, c.direct);
+            if refused(&drawn) {
+                eprintln!("{what}: refused, emulated: {drawn:?}");
+                continue;
+            }
+            if let Err(e) = drawn {
+                panic!("{what}: {e}");
+            }
+            assert_eq!(error, None, "{what}");
+            assert_eq!(words, c.words, "{what}");
         }
-        let ctl = buffer_with(&lane.device, &[0u8; 16]).unwrap();
-        let bytes: Vec<u8> = counts.iter().flat_map(|w| w.to_le_bytes()).collect();
-        let arguments = buffer_with(&lane.device, &bytes).unwrap();
-        let command_buffer = lane.queue.command_buffer().unwrap();
-        let mut encoder = command_buffer.render_command_encoder(&pass).unwrap();
-        encoder.set_render_pipeline_state(&state).unwrap();
-        encoder.set_object_buffer(Some(&ctl), 0, 0).unwrap();
-        let one = Size::new(1, 1, 1);
-        let drawn = encoder.draw_mesh_threadgroups_indirect(&arguments, 0, one, Size::new(2, 1, 1));
-        encoder.end_encoding().unwrap();
-        command_buffer.commit().unwrap();
-        command_buffer.wait_until_completed_for(WAIT).unwrap();
-        match drawn {
-            Err(Error::Bind(BindError::Unsupported(u)))
-                if u.feature == Feature::MeshShading
-                    && u.needs == Needs::NotImplemented
-                    && emulates(&lane.device) =>
-            {
-                eprintln!("object grid past the task limits on {name}: refused, emulated");
+        for direct in [true, false] {
+            let (drawn, error, words, what) = run(PAST_GRID, [1; 3], direct);
+            if refused(&drawn) {
+                eprintln!("{what}: refused, emulated: {drawn:?}");
+                continue;
             }
-            Ok(()) => {
-                let past = counts[0] > task[0];
-                let want = past.then_some(CommandBufferError::MeshGridPastLimits);
-                assert_eq!(command_buffer.error(), want, "{name}: task limits {task:?}");
-                assert!(texels(&targets[0], 16).iter().all(|&b| b == 0), "{name}");
-                eprintln!(
-                    "object grid past the task limits on {name} (task limits {task:?}): {:?}",
-                    command_buffer.error()
-                );
+            if let Err(e) = drawn {
+                panic!("{what}: {e}");
             }
-            Err(error) => panic!("object grid past the task limits on {name}: {error}"),
+            assert_eq!(
+                error,
+                Some(CommandBufferError::MeshGridPastLimits),
+                "{what}"
+            );
+            assert_eq!(words, RAN_NONE, "{what}");
         }
     }
     let reported = messages.take();

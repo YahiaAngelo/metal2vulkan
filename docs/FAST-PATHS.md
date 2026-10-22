@@ -437,12 +437,14 @@ driver's. Each is open work.
   Xe, the UHD 770 and the RTX 5080 Laptop GPU, 128 KiB on the RTX 3090, 192 KiB on the M3 Max and
   M4 under MoltenVK, 48 KiB on lavapipe; 16 KiB elsewhere. An exact form for compute, private memory
   in a runtime buffer with a slot per resident threadgroup, is not built.
-- **An indirect mesh draw's object grid past the device's task limits fails its command buffer**
-  (`CommandBufferError::MeshGridPastLimits`, drawing nothing): Metal draws every object grid
-  measured (16,777,216 along `x`), where RADV launches at most 65,535 task workgroups along an
-  axis and 4,194,304 in all, lavapipe 65,536. A fold of the grid into the task stage's limits is
-  not built. The emulation (MoltenVK, ANV on the Iris Xe) refuses an indirect draw with an object
-  function (`NotImplemented(MeshShading)`).
+- **An object grid past the device's limits where the device does not fold it.** With
+  `VK_EXT_mesh_shader` but without device addresses, `shaderInt64`, `multiDrawIndirect` or
+  `drawIndirectCount` (no committed profile), an indirect draw's object grid past the task stage's
+  limits fails its command buffer (`CommandBufferError::MeshGridPastLimits`, drawing nothing) and
+  a direct one is refused (`Unsupported{MeshShading}` naming the limit). The emulation (MoltenVK,
+  ANV on the Iris Xe) refuses an indirect draw with an object function
+  (`NotImplemented(MeshShading)`) and a direct object grid past the compute stage's limits
+  (`Unsupported{MeshShading}` naming `maxComputeWorkGroupCount`).
 - **An object threadgroup that sets a mesh grid Metal launches nothing for keeps its own writes.**
   On the M3 Max such a threadgroup's device writes (an atomic add before the set) do not land
   either, while the draw's other threadgroups run; the runtime runs the threadgroup and launches

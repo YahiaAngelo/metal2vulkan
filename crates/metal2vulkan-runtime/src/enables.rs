@@ -699,6 +699,7 @@ members! {
     V12.v12.descriptor_binding_variable_descriptor_count => DescriptorBindingVariableDescriptorCount;
     V12.v12.runtime_descriptor_array => RuntimeDescriptorArray;
     V12.v12.sampler_filter_minmax => SamplerFilterMinmax;
+    V12.v12.draw_indirect_count => DrawIndirectCount;
     V12.v12.scalar_block_layout => ScalarBlockLayout;
     V12.v12.uniform_buffer_standard_layout => UniformBufferStandardLayout;
     V12.v12.shader_subgroup_extended_types => ShaderSubgroupExtendedTypes;

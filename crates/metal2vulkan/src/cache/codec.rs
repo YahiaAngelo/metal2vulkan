@@ -930,7 +930,7 @@ codec_enum! {
         ShaderTessellationAndGeometryPointSize, MultiviewGeometryShader,
         AttachmentFeedbackLoopLayout, ExtendedDynamicState3ColorWriteMask,
         ShaderFmaFloat16,
-        ProvokingVertexLast, LogicOp,
+        ProvokingVertexLast, LogicOp, DrawIndirectCount,
     }
     VkExtension {
         ExtRobustness2, ExtImageRobustness, ExtShaderAtomicFloat, ExtShaderAtomicFloat2,

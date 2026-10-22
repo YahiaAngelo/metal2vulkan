@@ -117,8 +117,8 @@ pub struct StatusReport {
     /// capture settle took every tile of the pass's mask (`bind::CaptureSettleModule`): the
     /// pass's reach is the announced fallback, not its draws' tiles.
     pub captured_reach_unmeasured: bool,
-    /// An indirect mesh draw's arguments pass met a grid Metal draws past the device's limits
-    /// for the draw's first stage (`bind::MeshArguments`): that draw drew nothing.
+    /// An indirect mesh draw's arguments pass met an object grid past what runs
+    /// (`StatusBits::MESH_GRID_PAST_LIMITS`): that draw drew nothing.
     pub mesh_grid_past_limits: bool,
 }
 
@@ -243,8 +243,9 @@ impl StatusBits {
     /// nothing (`bind::TessellationScanModule`); the fault words name the command buffer's first
     /// records fault of either kind.
     pub const TESSELLATION_RECORDS_OVERFLOW: StatusBits = StatusBits(1 << 8);
-    /// An indirect mesh draw's arguments pass met an object grid Metal draws past the device's
-    /// task limits, and the draw drew nothing (`bind::MeshArguments`).
+    /// An indirect mesh draw's arguments pass met an object grid past what runs (2^29 or more
+    /// threadgroups, or, unfolded, past the device's task limits), and the draw drew nothing
+    /// (`bind::MeshArguments`).
     pub const MESH_GRID_PAST_LIMITS: StatusBits = StatusBits(1 << 9);
     /// Either records fault: the command buffer's first one of either kind writes the fault
     /// words.

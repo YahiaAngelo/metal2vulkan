@@ -669,6 +669,7 @@ feature_sources! { c, x;
     ShaderResourceResidency => on(c.core.shader_resource_residency);
     SamplerAnisotropy => on(c.core.sampler_anisotropy);
     SamplerFilterMinmax => on(c.v12.sampler_filter_minmax);
+    DrawIndirectCount => on(c.v12.draw_indirect_count);
     SamplerMirrorClampToEdge => on(c.v12.sampler_mirror_clamp_to_edge);
     ShaderStorageImageMultisample => on(c.core.shader_storage_image_multisample);
     ShaderStorageImageExtendedFormats => on(c.core.shader_storage_image_extended_formats);
