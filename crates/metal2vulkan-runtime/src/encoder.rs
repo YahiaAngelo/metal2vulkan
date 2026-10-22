@@ -37,6 +37,7 @@ use super::error::{internal, invalid, vulkan, CommandBufferError, Error, Problem
 use super::execution::Execution;
 use super::fresh_unwritten::FreshRead;
 use super::heap::Heap;
+use super::index_rewrite::{self, GatherRequest, GatherRuns, GatheredList};
 use super::noted_apart::{NotedApart, NotedInto};
 use super::pending_dispatch::PendingDispatch;
 use super::pipeline::VariantObjects;
@@ -226,6 +227,9 @@ pub(super) struct EncoderCore {
     /// The uses of the command [`note_reaching`](Self::note_reaching) notes, with those of the
     /// host memory beside them ([`aliased`](Self::aliased)): kept, so a draw makes no vector.
     aliased_uses: Vec<Use<ResourceKey>>,
+    /// The open runs of the index gather pass ([`gather`](Self::gather)), which record before
+    /// the encoder's next command, and before its `VkCommandBuffer` ends.
+    gathers: GatherRuns,
     /// What the encoder's commands use; `end` hands it to the command buffer.
     retained: Retained,
     /// What its dispatches and draws executed; `end` hands it to the command buffer.
@@ -438,6 +442,7 @@ impl EncoderCore {
             twin_writes: Vec::new(),
             unattached_as_called: false,
             aliased_uses: Vec::new(),
+            gathers: GatherRuns::default(),
             id: CORES.fetch_add(1, Ordering::Relaxed),
             replaying: false,
             last_set_zero: LastSetZero::default(),
@@ -518,6 +523,7 @@ impl EncoderCore {
             twin_writes: Vec::new(),
             unattached_as_called: false,
             aliased_uses: Vec::new(),
+            gathers: GatherRuns::default(),
             id: CORES.fetch_add(1, Ordering::Relaxed),
             // A segment a rebind records again, its command buffer committed.
             replaying: crate::replay::is_replaying(),
@@ -671,11 +677,75 @@ impl EncoderCore {
         unsafe { barrier.record(self.device().shared().vk(), raw) };
     }
 
+    /// `request`'s direct indexed draw joins an open run of the index gather pass, which records
+    /// before the encoder's next command (`index_rewrite.rs`): where its list lies, or `None`
+    /// where no run takes it. Its reads `uses` are tracked here, the run's barriers before and
+    /// after it ordering them. Refused as the run's objects are refused.
+    pub(super) fn gather(
+        &mut self,
+        request: GatherRequest<'_>,
+        uses: &[Use<ResourceKey>],
+    ) -> Result<Option<GatheredList>, Error> {
+        if self.gathers.full() {
+            self.flush_gathers();
+        }
+        let device = self.device().clone();
+        let joined = {
+            let mut state = self.open.command_buffer.state();
+            self.gathers.join(&device, &mut state.uploads, request)?
+        };
+        let Some((list, held)) = joined else {
+            return Ok(None);
+        };
+        if let Some(held) = held {
+            self.retain(held.output);
+            self.retain(held.sets);
+        }
+        // The run's barrier from everything before orders its reads: the one tracking returns
+        // goes unrecorded.
+        let _ = self.command_later(
+            vk::PipelineStageFlags2::COMPUTE_SHADER,
+            uses,
+            &BTreeSet::new(),
+        );
+        device.shared().counts.gathered_draw();
+        Ok(Some(list))
+    }
+
+    /// Record the open gather runs, where any is open, into the encoder's `VkCommandBuffer`.
+    fn flush_gathers(&mut self) {
+        if !self.gathers.is_empty() {
+            self.recording();
+        }
+    }
+
+    /// Record the open gather runs into `raw`, the encoder's `VkCommandBuffer`.
+    fn record_gathers(&mut self, raw: vk::CommandBuffer) {
+        if self.gathers.is_empty() {
+            return;
+        }
+        let runs = self.gathers.take();
+        let device = self.open.command_buffer.device().shared().vk();
+        // SAFETY: `raw` is the encoder's, recording outside a render pass (a pass records into
+        // the one it holds), and only this encoder records it; each run's kernel is the device's,
+        // and its set and output are held by the command buffer (`gather`), as its table's region
+        // is the command buffer's.
+        unsafe { index_rewrite::record_runs(device, raw, &runs) };
+    }
+
     /// The `VkCommandBuffer` the encoder's next command records into: `raw`, or where a pass
     /// holds the one before and no command came since, a new one of the command buffer's pool,
-    /// begun, which goes before the pass's. `None` where none can be made, which abandons the
-    /// command buffer (as a failure to end one does, [`defer`](Self::defer)).
+    /// begun, which goes before the pass's; the open gather runs record into it first
+    /// ([`gather`](Self::gather)). `None` where none can be made, which abandons the command
+    /// buffer (as a failure to end one does, [`defer`](Self::defer)).
     fn recording(&mut self) -> Option<vk::CommandBuffer> {
+        let raw = self.raw_recording()?;
+        self.record_gathers(raw);
+        Some(raw)
+    }
+
+    /// [`recording`](Self::recording) before the open gather runs record into it.
+    fn raw_recording(&mut self) -> Option<vk::CommandBuffer> {
         if self.raw == vk::CommandBuffer::null() {
             match self.continuation() {
                 Ok(next) => self.raw = next.0,
@@ -705,6 +775,7 @@ impl EncoderCore {
         if self.pass.is_some() {
             return Err(internal("a render pass held twice"));
         }
+        self.flush_gathers();
         let held = match self.recorded {
             true => self.continuation()?.0,
             false => {
@@ -724,6 +795,7 @@ impl EncoderCore {
     /// it; and the encoder's commands record on into the pass's, after it. Refused only where
     /// that one does not end, which abandons the command buffer.
     pub(super) fn release_pass(&mut self) -> Result<(), Error> {
+        self.flush_gathers();
         let Some(pass) = self.pass.take() else {
             return Ok(());
         };
@@ -751,6 +823,7 @@ impl EncoderCore {
     /// command begins another command buffer. Refused only where it does not end, which abandons
     /// the command buffer.
     pub(super) fn hand_over_pass(&mut self) -> Result<vk::CommandBuffer, Error> {
+        self.flush_gathers();
         let pass = self.raw;
         if pass == vk::CommandBuffer::null() {
             return Err(internal(
@@ -1468,6 +1541,7 @@ impl EncoderCore {
     /// [`defer`](Self::defer) `work`, the encoder going on in `next`: refused only where the
     /// current `VkCommandBuffer` does not end, which abandons the command buffer.
     fn defer_into(&mut self, next: Continuation, work: Deferred) -> Result<(), Error> {
+        self.flush_gathers();
         if work.leaves_shadows() {
             let copies = self.shadows.leave();
             self.shadow_copies(&copies);
@@ -1721,6 +1795,7 @@ impl EncoderCore {
         if self.uses.broke_hold() {
             return Err(internal("a held depth used but as its attachment"));
         }
+        self.flush_gathers();
         // SAFETY: as in `barrier`.
         unsafe { self.open.command_buffer.end_raw(self.raw) }.map_err(vulkan)?;
         let EncoderCore {

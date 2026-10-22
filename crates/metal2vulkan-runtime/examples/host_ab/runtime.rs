@@ -1067,6 +1067,7 @@ impl Gpu for Runtime {
                 c.provoking_last_pipeline_draws,
             ),
             ("provoking_listed_draws", c.provoking_listed_draws),
+            ("gathered_draws", c.gathered_draws),
         ]
         .into_iter()
         .map(|(name, count)| (name, count as f64))

@@ -704,6 +704,7 @@ fn draws_metal_s_lists(cases: &[Case], weights: Weights) {
             eprintln!("{name}: no geometryShader, so no weights without BaryCoordKHR: skipped");
             return;
         }
+        let before = device.work_counts().gathered_draws;
         let lane = Lane::new(device);
         let pipeline = lane.pipeline("pt_full");
         let (mut drawn, mut covered) = (0, 0);
@@ -733,9 +734,24 @@ fn draws_metal_s_lists(cases: &[Case], weights: Weights) {
             "on {name}: only {drawn} of {} cases cover a pixel",
             cases.len()
         );
+        // A direct indexed draw of a fan or quads takes the index gather pass.
+        let gathered = lane.device.work_counts().gathered_draws - before;
+        let gathers = cases.iter().any(|case| {
+            matches!(case.form, Form::Indexed(_) | Form::Written(_))
+                && matches!(
+                    case.primitive,
+                    DrawPrimitiveType::TriangleFan | DrawPrimitiveType::Quads
+                )
+        });
+        assert_eq!(
+            gathered > 0,
+            gathers,
+            "on {name}: {gathered} gathered draws"
+        );
         eprintln!(
-            "{name} ({weights:?} weights): {} private draws equal Metal's lists at every texel; \
-             {drawn} cover pixels, {covered} covered pixels in all",
+            "{name} ({weights:?} weights): {} private draws equal Metal's lists at every texel \
+             ({gathered} by the gather pass); {drawn} cover pixels, {covered} covered pixels in \
+             all",
             cases.len()
         );
     }

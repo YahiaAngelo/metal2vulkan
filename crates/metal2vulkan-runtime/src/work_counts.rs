@@ -184,6 +184,7 @@ pub(crate) struct Counters {
     two_plane_draws: AtomicU64,
     provoking_last_pipeline_draws: AtomicU64,
     provoking_listed_draws: AtomicU64,
+    gathered_draws: AtomicU64,
     bound_notices_made: AtomicU64,
     argument_tables_retained: AtomicU64,
     argument_objects_retained: AtomicU64,
@@ -1379,6 +1380,12 @@ impl Counters {
     /// order or led by their last vertices (`render/provoking.rs`).
     pub(crate) fn provoking_listed_draw(&self) {
         self.provoking_listed_draws.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A direct indexed draw drawn as a list joined a run of the index gather pass, which writes
+    /// the run's lists by one dispatch (`index_rewrite.rs`).
+    pub(crate) fn gathered_draw(&self) {
+        self.gathered_draws.fetch_add(1, Ordering::Relaxed);
     }
 
     /// A bind of a variant made the notices it announces at every occurrence
@@ -3159,6 +3166,11 @@ pub struct WorkCounts {
     /// without it, which drew the list of their primitives a GPU pass (or the CPU) wrote, in
     /// Metal's mode-1 order or led by each primitive's last vertex.
     pub provoking_listed_draws: u64,
+    /// Direct indexed draws drawn as a list (a restarted strip's, a private primitive type's, or
+    /// one led by its primitives' last vertices) whose list the index gather pass wrote: one
+    /// dispatch for each run of such draws over one index buffer, where the index rewrite pass
+    /// takes three per draw.
+    pub gathered_draws: u64,
     /// Notices of a variant's that a bind announces at every occurrence
     /// (`DeviceOptions::announce_each`), made for a bind: once per variant until the
     /// specializations or the formats its notices name change; each bind announces them.
@@ -4112,6 +4124,7 @@ impl Device {
                 .provoking_last_pipeline_draws
                 .load(Ordering::Relaxed),
             provoking_listed_draws: counters.provoking_listed_draws.load(Ordering::Relaxed),
+            gathered_draws: counters.gathered_draws.load(Ordering::Relaxed),
             bound_notices_made: counters.bound_notices_made.load(Ordering::Relaxed),
             argument_tables_retained: counters.argument_tables_retained.load(Ordering::Relaxed),
             argument_objects_retained: counters.argument_objects_retained.load(Ordering::Relaxed),

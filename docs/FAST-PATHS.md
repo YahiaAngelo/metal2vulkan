@@ -280,10 +280,16 @@ driver's. Each is open work.
 - **A draw under Apple's last provoking vertex on a device without it** (MoltenVK), whose pipeline
   state reads flat inputs or selects a slice or viewport (or a strip's whose fragment function
   reads barycentrics): it draws the list of its primitives led by their last vertices
-  (`render/provoking.rs`), which a GPU pass of three dispatches between barriers writes before
-  its render pass for an indexed or indirect draw, and the CPU writes into the upload arena (4
-  bytes an index) for a direct draw without indices, where Metal's mode costs nothing. Not
-  measured.
+  (`render/provoking.rs`), where Metal's mode costs nothing. A direct draw without indices draws
+  the list the CPU writes into the upload arena (4 bytes an index), and a direct indexed draw of
+  lines or triangles the list a run of the index gather pass writes, one dispatch for a run of
+  draws over one index buffer (`index_rewrite.rs`): on MoltenVK on the M3 Max, 0.15 and 0.26 us
+  more frame time per draw of two triangles than at mode 0 (1.57 and 1.72 us; host_ab's
+  `provoking`, 2000 draws, 3 rounds). A strip's indexed draw, and every indirect draw, takes the
+  index rewrite pass's three dispatches between barriers per draw before its render pass:
+  there 78 us per indexed draw against 1.7, 106 per indirect draw against 1.7, and 86 per
+  indexed indirect draw against 54 (whose index bounds pass mode 0 takes already). Those forms
+  are not batched yet.
 
 - **A no-copy buffer imported by its pointer follows a remap of its pages** on a driver whose
   pointer imports follow their address (`DriverFact::PointerImportsFollowTheirAddress`: ANV on

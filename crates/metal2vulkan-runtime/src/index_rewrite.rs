@@ -2,8 +2,23 @@
 //! one of Metal's private primitive types over indices or from indirect arguments, and of a draw
 //! under Apple's last provoking vertex that a device without it draws as a list led by each
 //! primitive's last vertex (`render/provoking.rs`) (the modules and their contract are
-//! `bind::index_rewrite`); and the list the CPU writes for such a direct draw without indices
-//! ([`WrittenList`]). Each list is written in the draw's `RewriteOrder`.
+//! `bind::index_rewrite`); the list the CPU writes for such a direct draw without indices
+//! ([`WrittenList`]); and the lists of the index gather pass ([`GatherRuns`]). Each list is
+//! written in the draw's `RewriteOrder`.
+//!
+//! **The gather pass** (`bind::index_gather_module`) writes the list of a direct indexed draw of
+//! a program that never restarts (`RewriteProgram::gathers`: line and triangle lists, Apple's
+//! triangle fan and quads) that reads its indices in place and that no earlier draw's write
+//! orders before its render pass instance: the list the rewrite pass would write, index for
+//! index. The draw joins an open run of its index buffer, program and order (up to
+//! [`RUN_DRAWS`] draws, into an output buffer of the run's own of at least [`RUN_OUTPUT_WORDS`]
+//! words), and draws its part of the run's output with `vkCmdDrawIndexed`. Its reads are
+//! tracked as it joins; the open runs (up to [`OPEN_RUNS`]) record before the encoder's next
+//! command and before its `VkCommandBuffer` ends (`encoder.rs`): each run's table written, then
+//! one dispatch per run between one barrier from everything before and one to everything after.
+//! Every other draw's list is the rewrite pass's, of three dispatches between barriers each: on
+//! MoltenVK on the M3 Max, 78 us of frame time per draw of two triangles, where a gathered draw
+//! takes 0.26 us more than at provoking vertex mode 0 (host_ab's `provoking`).
 //!
 //! After `RenderCommandEncoder::set_primitive_restart_enabled` (Apple's
 //! `setPrimitiveRestartEnabled:index:`), Metal restarts an indexed line or triangle strip at the
@@ -46,11 +61,14 @@ use super::owned_kernel::{OwnedKernel, OwnedModule, OwnedSets};
 use super::resource::ResourceKey;
 use super::tracker::{Access, Barrier, Use, UseRange};
 use super::upload::Upload;
+use super::upload::Uploads;
+use super::Device;
 use crate::device::functions::Vk;
 use ash::vk;
 use metal2vulkan::bind::{
-    ExecutionStatus, IndexBufferRef, IndexRewriteModule, IndexRewritePass, IndirectRef,
-    RewriteOrder, RewriteOutput, RewritePhase, RewriteProgram, RewriteSource,
+    ExecutionStatus, GatherDraw, IndexBufferRef, IndexGather, IndexGatherModule,
+    IndexRewriteModule, IndexRewritePass, IndirectRef, RewriteOrder, RewriteOutput, RewritePhase,
+    RewriteProgram, RewriteSource,
 };
 use metal2vulkan::device::VkFeature;
 
@@ -594,5 +612,288 @@ impl RewriteSteps {
                 raw.cmd_dispatch(command_buffer, phase.workgroups(&self.pass), 1, 1);
             }
         }
+    }
+}
+
+/// A list a draw draws in place of its Metal primitives, which the CPU or a run of the index gather
+/// pass wrote (the index rewrite pass's draws apart, `RewritePass::draw`).
+pub(super) enum Listed {
+    /// A direct draw's without indices, the CPU's ([`WrittenList`]).
+    Written(WrittenList),
+    /// A direct indexed draw's, a gather run's ([`GatheredList`]).
+    Gathered(GatheredList),
+}
+
+impl Listed {
+    /// The draw of the list: its index binding, with `sized` the device's index range binding,
+    /// and the indexed draw of it the binder's draw `draw` becomes. `None` for a command of
+    /// another kind than the list's draw takes.
+    pub(super) fn draw(
+        &self,
+        draw: metal2vulkan::vk::DrawCommand,
+        sized: Option<SizedIndexBind>,
+    ) -> Option<(IndexBind, metal2vulkan::vk::DrawCommand)> {
+        match self {
+            Listed::Written(list) => list.draw(draw, sized),
+            Listed::Gathered(list) => list.draw(draw, sized),
+        }
+    }
+}
+
+/// The output words of a run's own buffer, where its first draw's list is shorter.
+const RUN_OUTPUT_WORDS: u32 = 1 << 14;
+
+/// The positions a run's list holds, where its first draw's list is shorter.
+const RUN_POSITIONS: u32 = 1536;
+
+/// The most draws of a run: its table's records, which fit an ordinary chunk of the upload arena
+/// (`upload.rs`).
+const RUN_DRAWS: u32 = 480;
+
+/// The most runs an encoder keeps open before it records them.
+const OPEN_RUNS: usize = 8;
+
+/// A direct indexed draw whose list the index gather pass writes (`bind::index_gather_module`):
+/// its program and order, its Metal index source, Metal's count, and its index size.
+pub(super) struct GatherRequest<'a> {
+    pub(super) program: RewriteProgram,
+    pub(super) order: RewriteOrder,
+    pub(super) index: &'a DrawSource<'a>,
+    pub(super) count: u32,
+    pub(super) wide: bool,
+}
+
+/// The runs of an encoder's gathered draws (the module docs, `index_rewrite.rs`'s gather): each
+/// one dispatch over one index buffer, recorded before the encoder's next command, between a
+/// barrier from everything before and one to everything after for all of them.
+#[derive(Default)]
+pub(super) struct GatherRuns {
+    runs: Vec<GatherRun>,
+}
+
+/// One run: its draws, the index `VkBuffer` and the bytes it binds of it, its table's region,
+/// and its kernel and set.
+pub(super) struct GatherRun {
+    gather: IndexGather,
+    key: (vk::Buffer, u64, u64, RewriteProgram, RewriteOrder),
+    table: Upload,
+    kernel: OwnedKernel,
+    sets: Vec<vk::DescriptorSet>,
+    output: (vk::Buffer, u64),
+}
+
+/// Where a gathered draw's list lies: its `VkBuffer`, its offset there, and its indices.
+pub(super) struct GatheredList {
+    buffer: vk::Buffer,
+    offset: u64,
+    indices: u32,
+}
+
+/// What a new run's command buffer holds until it completes: its output and its set.
+pub(super) struct GatherHeld {
+    pub(super) output: Buffer,
+    pub(super) sets: OwnedSets,
+}
+
+impl GatherRuns {
+    /// Whether no run is open.
+    pub(super) fn is_empty(&self) -> bool {
+        self.runs.is_empty()
+    }
+
+    /// Whether the runs are as many as an encoder keeps open: they record before another opens.
+    pub(super) fn full(&self) -> bool {
+        self.runs.len() >= OPEN_RUNS
+    }
+
+    /// The open runs, which record now ([`record_runs`]).
+    pub(super) fn take(&mut self) -> Vec<GatherRun> {
+        self.runs.drain(..).collect()
+    }
+
+    /// `request`'s draw joins an open run of its index buffer, program and order that takes it,
+    /// or a new one, with its table's region in `uploads`: the list's place, and what a new run's
+    /// command buffer holds. `None` where no run takes the draw (its list is past what a run's
+    /// dispatch or bindings take), which the index rewrite pass then writes. Refused as uploads,
+    /// buffers, kernels and descriptor sets are refused.
+    pub(super) fn join(
+        &mut self,
+        device: &Device,
+        uploads: &mut Uploads,
+        request: GatherRequest<'_>,
+    ) -> Result<Option<(GatheredList, Option<GatherHeld>)>, Error> {
+        let GatherRequest {
+            program,
+            order,
+            index,
+            count,
+            wide,
+        } = request;
+        // The run binds the Metal buffer's bytes, from its start, through where Metal's fetch
+        // stops (its length rounded up to 4, `IndexBufferRef::fetch_end`).
+        let start = index.at - index.metal().1;
+        let draw = GatherDraw {
+            count,
+            index_offset: index.at,
+            index_end: index.at + index.bound(index.at),
+            wide,
+        };
+        let key = (index.raw, start, index.length, program, order);
+        let joined = self
+            .runs
+            .iter_mut()
+            .filter(|run| run.key == key && run.gather.len() < RUN_DRAWS as usize)
+            .find_map(|run| {
+                let first = run.gather.push(draw)?;
+                Some(run.list(first, &draw))
+            });
+        if let Some(list) = joined {
+            return Ok(Some((list, None)));
+        }
+        // A run's output and positions hold its first draw's list, at least the defaults.
+        let Ok(capacity) = u32::try_from(program.capacity(u64::from(count))) else {
+            return Ok(None);
+        };
+        let words = capacity.max(RUN_OUTPUT_WORDS);
+        let limits = &device.properties().description.limits;
+        let Some(mut gather) = IndexGather::new(
+            (program, order),
+            (start, index.length),
+            (
+                limits.min_storage_buffer_offset_alignment,
+                limits.max_storage_buffer_range,
+            ),
+            (words, capacity.max(RUN_POSITIONS)),
+        ) else {
+            return Ok(None);
+        };
+        let Some(first) = gather.push(draw) else {
+            return Ok(None);
+        };
+        let output_bytes = u64::from(words) * 4;
+        if output_bytes > u64::from(limits.max_storage_buffer_range) {
+            return Ok(None);
+        }
+        let positions: Vec<u8> = gather
+            .positions_list()
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        let table_bytes = u64::from(
+            IndexGatherModule::HEADER_WORDS + IndexGatherModule::RECORD_WORDS * RUN_DRAWS,
+        ) * 4;
+        let table = uploads.upload(device, &[], table_bytes)?;
+        let positions = uploads.upload(device, &positions, (positions.len() as u64).max(4))?;
+        let output = device.scratch_buffer(output_bytes)?;
+        let kernel = device.owned_kernel(OwnedModule::IndexGather)?;
+        let region = |upload: &Upload| (upload.raw(), upload.offset(), upload.len());
+        let (output_raw, output_at) = output.at(0);
+        let mut set = [(vk::Buffer::null(), 0, 0); 4];
+        set[IndexGatherModule::TABLE_BINDING as usize] = region(&table);
+        set[IndexGatherModule::POSITIONS_BINDING as usize] = region(&positions);
+        // A run whose draws read no index binds any 4 bytes there.
+        set[IndexGatherModule::INDICES_BINDING as usize] = match gather.indices_range() {
+            Some(range) => (index.raw, range.offset, range.range),
+            None => region(&table),
+        };
+        set[IndexGatherModule::OUTPUT_BINDING as usize] = (output_raw, output_at, output_bytes);
+        let sets = OwnedSets::write(device, &kernel, &[set.to_vec()])?;
+        let run = GatherRun {
+            gather,
+            key,
+            table,
+            kernel,
+            sets: sets.sets.clone(),
+            output: (output_raw, output_at),
+        };
+        let list = run.list(first, &draw);
+        self.runs.push(run);
+        Ok(Some((list, Some(GatherHeld { output, sets }))))
+    }
+}
+
+impl GatherRun {
+    /// The place of the run's list whose first word is `first`, of `draw`.
+    fn list(&self, first: u32, draw: &GatherDraw) -> GatheredList {
+        let (buffer, at) = self.output;
+        GatheredList {
+            buffer,
+            offset: at + u64::from(first) * 4,
+            indices: self.gather.capacity(*draw).unwrap_or(0),
+        }
+    }
+}
+
+impl GatheredList {
+    /// The draw of the list: its index binding, with `sized` the device's index range binding,
+    /// and the binder's draw of the indices `draw` (`vkCmdDrawIndexed`'s), drawn as the indexed
+    /// draw of the list from its first index, with its instances and bases. `None` for another
+    /// command.
+    pub(super) fn draw(
+        &self,
+        draw: metal2vulkan::vk::DrawCommand,
+        sized: Option<SizedIndexBind>,
+    ) -> Option<(IndexBind, metal2vulkan::vk::DrawCommand)> {
+        let metal2vulkan::vk::DrawCommand::DrawIndexed {
+            instance_count,
+            vertex_offset,
+            first_instance,
+            ..
+        } = draw
+        else {
+            return None;
+        };
+        let index_type = metal2vulkan::vk::IndexType::UINT32;
+        let draw = metal2vulkan::vk::DrawCommand::DrawIndexed {
+            index_type,
+            index_buffer_offset: self.offset,
+            index_count: self.indices,
+            instance_count,
+            first_index: 0,
+            vertex_offset,
+            first_instance,
+        };
+        let bind = IndexBind {
+            buffer: self.buffer,
+            offset: self.offset,
+            index_type: index_type.into(),
+            sized: sized.map(|bind| (bind, (u64::from(self.indices) * 4).max(4))),
+        };
+        Some((bind, draw))
+    }
+}
+
+/// Record `runs` into `command_buffer`: each run's table written into its region, then between a
+/// barrier from everything before and one to everything after, each run's dispatch.
+///
+/// # Safety
+///
+/// `command_buffer` is recording outside a render pass, and only one encoder records it; each
+/// run's kernel is the device's and its set and output are held until the command buffer
+/// completes ([`GatherHeld`]), and its table's region is the command buffer's.
+pub(super) unsafe fn record_runs(raw: &Vk, command_buffer: vk::CommandBuffer, runs: &[GatherRun]) {
+    for run in runs {
+        run.table.write(&run.gather.table_bytes());
+    }
+    // SAFETY: as the caller states.
+    unsafe {
+        Barrier::everything().record(raw, command_buffer);
+        for run in runs {
+            raw.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                run.kernel.pipeline,
+            );
+            raw.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::COMPUTE,
+                run.kernel.layout,
+                0,
+                &run.sets,
+                &[],
+            );
+            raw.cmd_dispatch(command_buffer, run.gather.groups(), 1, 1);
+        }
+        Barrier::everything().record(raw, command_buffer);
     }
 }

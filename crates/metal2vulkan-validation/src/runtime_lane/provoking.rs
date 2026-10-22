@@ -738,9 +738,17 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
     let after = lane.device.work_counts();
     let natively = after.provoking_last_pipeline_draws - before.provoking_last_pipeline_draws;
     let listed = after.provoking_listed_draws - before.provoking_listed_draws;
+    // The listed direct indexed draws of lists take the index gather pass.
+    let gathered = after.gathered_draws - before.gathered_draws;
     match native {
-        true => assert!(natively > 0 && listed == 0, "{name}: {natively} {listed}"),
-        false => assert!(natively == 0 && listed > 0, "{name}: {natively} {listed}"),
+        true => assert!(
+            natively > 0 && listed == 0 && gathered == 0,
+            "{name}: {natively} {listed} {gathered}"
+        ),
+        false => assert!(
+            natively == 0 && listed > gathered && gathered > 0,
+            "{name}: {natively} {listed} {gathered}"
+        ),
     }
     let kinds: Vec<Degradation> = messages
         .take_notices()
@@ -762,7 +770,8 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
     eprintln!(
         "{name} (native {native}, weights {weights:?}): {} cases, {} covered pixels at mode 1 \
          all Metal's; {} pixels of the mode-0 draws not; draws {natively} through last-vertex \
-         pipelines, {listed} listed; {} pixels of listed lines covered otherwise",
+         pipelines, {listed} listed ({gathered} by the gather pass); {} pixels of listed lines \
+         covered otherwise",
         found.cases, found.covered, found.told_apart, found.lines_moved
     );
     found

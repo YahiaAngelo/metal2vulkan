@@ -151,7 +151,7 @@ impl GatherDraw {
 pub struct IndexGather {
     program: RewriteProgram,
     order: RewriteOrder,
-    /// The bound indices range, and the end of the bytes it binds.
+    /// The bound indices range, and the end of the bytes it binds (a whole word).
     indices: Option<(BufferRange, u64)>,
     output_words: u32,
     positions: u32,
@@ -177,10 +177,12 @@ impl IndexGather {
         if !program.gathers() {
             return None;
         }
+        // The range runs to a whole word past `index_end`: a partial last index's fetch reads
+        // the bytes there (`IndexBufferRef::fetch_end`).
         let indices = match index_end > index_start {
             true => {
                 let (range, _) = word_range(index_start, index_end, alignment, max_range)?;
-                Some((range, index_end))
+                Some((range, range.offset + range.range))
             }
             false => None,
         };

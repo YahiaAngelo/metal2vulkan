@@ -67,16 +67,17 @@ struct Draw {
 const BASE: u64 = 48;
 
 /// The run of `draws` of `program` in `order` over one index buffer of `buffer` bytes (at
-/// [`BASE`] in its `VkBuffer`), as the interpreter runs its dispatch, in both workgroup orders:
-/// each draw's list.
+/// [`BASE`] in its `VkBuffer`), each draw's fetch stopping at `fetch_end` of them, as the
+/// interpreter runs its dispatch, in both workgroup orders: each draw's list.
 fn gathered(
     program: RewriteProgram,
     order: RewriteOrder,
-    buffer: &[u8],
+    (buffer, fetch_end): (&[u8], u64),
     draws: &[Draw],
 ) -> Vec<Vec<u32>> {
     let output_words = 4096;
     let end = BASE + buffer.len() as u64;
+    let fetch_end = BASE + fetch_end;
     let mut run_of = IndexGather::new(
         (program, order),
         (BASE, end),
@@ -92,7 +93,7 @@ fn gathered(
                 .push(GatherDraw {
                     count: d.count,
                     index_offset: BASE + d.offset,
-                    index_end: end,
+                    index_end: fetch_end,
                     wide: d.wide,
                 })
                 .expect("the run takes the draw");
@@ -211,7 +212,7 @@ fn each_draw_gets_the_rewrite_pass_s_list() {
                         wide,
                     });
                 }
-                let lists = gathered(program, order, &buffer, &draws);
+                let lists = gathered(program, order, (&buffer, buffer.len() as u64), &draws);
                 for (draw, list) in draws.iter().zip(&lists) {
                     assert_eq!(
                         list,
@@ -249,7 +250,7 @@ fn index_sizes_share_a_run() {
             wide: false,
         },
     ];
-    let lists = gathered(program, order, &buffer, &draws);
+    let lists = gathered(program, order, (&buffer, buffer.len() as u64), &draws);
     for (draw, list) in draws.iter().zip(&lists) {
         assert_eq!(list, &expected(program, order, &buffer, draw));
     }
@@ -318,4 +319,31 @@ fn a_run_refuses_what_it_cannot_take() {
         None,
         "workgroups past the most"
     );
+}
+
+/// A 16-bit buffer of an odd number of indices: Metal's fetch reads its partial last index from
+/// the bytes up to the next whole word (`IndexBufferRef::fetch_end`), which the run binds.
+#[test]
+fn a_partial_last_index_reads_its_word() {
+    let buffer: Vec<u8> = (0..10u8).map(|b| b * 17 + 1).collect();
+    let program = RewriteProgram::TriangleList;
+    let draw = Draw {
+        count: 6,
+        offset: 0,
+        wide: false,
+    };
+    let lists = gathered(program, RewriteOrder::First, (&buffer, 12), &[draw]);
+    // The sixth index is the padding's two bytes past the length.
+    let mut padded = buffer.clone();
+    padded.extend([0xCC, 0xCC]);
+    let draw = Draw {
+        count: 6,
+        offset: 0,
+        wide: false,
+    };
+    assert_eq!(
+        lists[0],
+        expected(program, RewriteOrder::First, &padded, &draw)
+    );
+    assert_eq!(lists[0][5], 0xCCCC);
 }

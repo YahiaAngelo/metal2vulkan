@@ -295,7 +295,7 @@ use super::fresh_unwritten::FreshUnwritten;
 use super::function_table::VisibleFunctionTable;
 use super::heap_sets;
 use super::index_bounds::{self, BoundsPass, BoundsSteps};
-use super::index_rewrite::{self, RewritePass, RewriteSteps, WrittenList};
+use super::index_rewrite::{self, Listed, RewritePass, RewriteSteps, WrittenList};
 use super::kept_bytes;
 use super::linear_attachment;
 use super::linear_merge::LinearMerge;
@@ -7326,8 +7326,10 @@ impl RenderLowering {
             self.skipped_draw();
             return Ok(());
         }
-        // A direct draw of a private type without indices draws the list the CPU writes; every
-        // other draw drawn as a list, the list the index rewrite pass writes.
+        // A direct draw of a private type without indices draws the list the CPU writes; a direct
+        // indexed draw of a program that never restarts, reading its indices in place, the list
+        // a run of the index gather pass writes; every other draw drawn as a list, the list the
+        // index rewrite pass writes.
         let (rewrite, listed) = match restarted {
             None => (None, None),
             Some(restarted) => match (&draw, &buffers.index, &buffers.indirect) {
@@ -7345,7 +7347,63 @@ impl RenderLowering {
                         ((restarted.program, restarted.order), restarted.gap.gap()),
                         (vertex_start, vertex_count),
                     )?;
-                    (None, Some(list))
+                    (None, Some(Listed::Written(list)))
+                }
+                (
+                    &DrawCall::Indexed {
+                        index_count,
+                        instance_count,
+                        base_vertex,
+                        base_instance,
+                        ..
+                    },
+                    Some(index),
+                    None,
+                ) if restarted.program.gathers() && index.in_place() && !self.replaying => {
+                    let size = restarted.index_size.unwrap_or(4);
+                    let arguments = index_rewrite::Arguments::Direct {
+                        count: index_count,
+                        instances: instance_count,
+                        base_vertex,
+                        base_instance,
+                    };
+                    let reads = index_rewrite::reads(Some(index), &arguments, size);
+                    if self.unordered.written(&reads) {
+                        return Err(Error::NotImplemented(restarted.gap.gap()));
+                    }
+                    // Indices an earlier draw or tile dispatch of the encoder wrote behind a
+                    // memory barrier are read before the draw's render pass instance: the index
+                    // rewrite pass's step there writes its list.
+                    let gathered = match self.core.uses().written(&reads) {
+                        true => None,
+                        false => self.core.gather(
+                            index_rewrite::GatherRequest {
+                                program: restarted.program,
+                                order: restarted.order,
+                                index,
+                                count: index_count,
+                                wide: size == 4,
+                            },
+                            &reads,
+                        )?,
+                    };
+                    match gathered {
+                        Some(list) => (None, Some(Listed::Gathered(list))),
+                        None => {
+                            let pass = RewritePass::new(
+                                &mut self.core,
+                                (
+                                    (restarted.program, restarted.restart, restarted.order),
+                                    restarted.gap.gap(),
+                                ),
+                                Some(index),
+                                &arguments,
+                                size,
+                                reads,
+                            )?;
+                            (Some(pass), None)
+                        }
+                    }
                 }
                 (draw, index, indirect) => {
                     if commands.indirect_needs_arguments && !commands.index_bounds_pass {
@@ -8268,7 +8326,7 @@ impl RenderLowering {
         // pass's one.
         let sized = device.shared().sized_index_bind;
         let one = |draw| ([draw; 2], 1);
-        // A list the CPU wrote draws as the indexed draw of it the binder's draw of the vertices
+        // A list the CPU or a gather run wrote draws as the indexed draw of it the binder's draw
         // becomes.
         let listed_draw = match &listed {
             Some(list) => Some(

@@ -373,6 +373,11 @@ impl<'a> DrawSource<'a> {
         }
     }
 
+    /// Whether the draw reads the Metal buffer itself, not a copy of its bytes.
+    pub(super) fn in_place(&self) -> bool {
+        self.copy.is_none()
+    }
+
     /// Whether the draw reads a copy because a draw of the encoder wrote the bytes, before any
     /// memory barrier (the module docs).
     pub(super) fn racing(&self) -> bool {
