@@ -63,9 +63,27 @@
 //!   every blend off), a format whose operation Metal was not measured with (extended-range,
 //!   packed small-float, YCbCr), or a function that writes an attachment itself
 //!   ([`logic_operated`]).
-//! - `sampleCoverage` and `pointSmoothEnabled` change what Metal draws; until the translation
-//!   builds one, a value other than Metal's default refuses the pipeline `NotImplemented`
+//! - `sampleCoverage` keeps a fraction of the samples, dithered over each 2x2 quad of window
+//!   pixels, and is applied as `sampleMask` is, after the function runs: the value clamped to
+//!   `[0, 1]` (a NaN taken as 0) and converted to an 8-bit unorm code `c`; at one sample a pixel
+//!   is covered where the value is above 0.5; at 2 and 4 samples the quad keeps `floor((c + s / 2)
+//!   / s)` samples, `s = 64 / n`, handed out one at a time to its pixels in the order `(0, 0)`,
+//!   `(1, 1)`, `(1, 0)`, `(0, 1)` of the window pixel's coordinates modulo 2 (the viewport's
+//!   origin plays no part), and each pixel's filled in the sample order 0, 3, 1, 2 at 4 samples
+//!   and 0, 1 at 2 (probes `sc` to `sc4` on an Apple M3 Max, macOS 27.0.1: every code at 1, 2
+//!   and 4 samples, ties, NaN and infinities, under a viewport offset, with the sample mask and
+//!   the function's own `[[sample_mask]]` output). The coverage is ANDed with both masks and
+//!   alpha to coverage, and `sampleCoverageInvert` changes nothing. As with the sample mask, the
+//!   function runs for every rasterized sample and its `[[sample_mask]]` reads the rasterized
+//!   coverage; colors, depth, stencil and visibility counts keep the covered samples, under
+//!   `[[early_fragment_tests]]` only the colors, and a pipeline without a fragment function
+//!   ignores it. [`applied_masks`] gives the two masks together by the pixel's place in its quad;
+//!   a pipeline whose masks differ between places has its fragment function apply them itself
+//!   (`LoweringInputs::sample_mask`), from the window pixel's coordinates. A value other than 1
+//!   at a sample count Metal was not measured at (8) is refused `NotImplemented`
 //!   ([`Feature::PrivateRenderState`]) naming it.
+//! - `pointSmoothEnabled` changes what Metal draws; until the translation builds it, on is
+//!   refused `NotImplemented` naming it.
 //! - `textureWriteRoundingMode` 2 rounds a fragment function's texture writes to half-float and
 //!   `RG11B10Float` textures to nearest even, which the translation has not built: such a write is
 //!   refused naming it (`PrivateRenderField::TextureWriteRounding`), where the function's slot
@@ -117,14 +135,57 @@ pub(crate) fn check_render(d: &RenderPipelineDescriptor) -> Result<(), Error> {
     if s.explicit_visibility_group_id != u32::MAX && d.max_vertex_amplification_count > 1 {
         return Err(refused(F::ExplicitVisibilityGroup));
     }
-    let unbuilt = [
-        (s.sample_coverage != 1.0, F::SampleCoverage),
-        (s.point_smooth_enabled, F::PointSmooth),
-    ];
-    match unbuilt.into_iter().find(|(set, _)| *set) {
-        Some((_, field)) => Err(refused(field)),
-        None => Ok(()),
+    if s.sample_coverage != 1.0
+        && coverage_masks(s.sample_coverage, d.raster_sample_count).is_none()
+    {
+        return Err(refused(F::SampleCoverage));
     }
+    match s.point_smooth_enabled {
+        true => Err(refused(F::PointSmooth)),
+        false => Ok(()),
+    }
+}
+
+/// The samples of a pixel at `samples` samples, as a mask.
+fn all_samples(samples: u32) -> u32 {
+    match samples {
+        n if n >= 32 => u32::MAX,
+        n => (1u32 << n) - 1,
+    }
+}
+
+/// The masks Metal's `sampleCoverage` of `coverage` keeps at `samples` samples, by the window
+/// pixel's place in its 2x2 quad, index `(x & 1) | (y & 1) << 1` (the module docs); `None` at a
+/// sample count Metal was not measured at.
+pub(crate) fn coverage_masks(coverage: f32, samples: u32) -> Option<[u32; 4]> {
+    /// Each place's turn in taking the quad's samples: `(0, 0)`, `(1, 1)`, `(1, 0)`, `(0, 1)`.
+    const TURN: [u32; 4] = [0, 2, 3, 1];
+    let order: &[u32] = match samples {
+        1 => return Some([u32::from(coverage > 0.5); 4]),
+        2 => &[0, 1],
+        4 => &[0, 3, 1, 2],
+        _ => return None,
+    };
+    let value = if coverage.is_nan() {
+        0.0
+    } else {
+        coverage.clamp(0.0, 1.0)
+    };
+    // The exact product rounded to nearest; its one tie, 0.5, rounds to 128 either way.
+    let code = (f64::from(value) * 255.0).round_ties_even() as u32;
+    let step = 64 / samples;
+    let kept = (code + step / 2) / step;
+    Some(TURN.map(|turn| {
+        let taken = (kept + 3 - turn) / 4;
+        order[..taken as usize]
+            .iter()
+            .fold(0, |mask, sample| mask | 1 << sample)
+    }))
+}
+
+/// Whether `masks` keeps the same samples at every place of the quad.
+pub(crate) fn uniform(masks: &[u32; 4]) -> bool {
+    masks.iter().all(|&m| m == masks[0])
 }
 
 /// The alpha test of the private state `s` its fragment function runs
@@ -185,20 +246,25 @@ pub(crate) fn depth_compares_clamped(
     }
 }
 
-/// The sample mask Metal applies to the pipeline `d`: the private mask's bits below the sample
-/// count, where `d` has a fragment function under enabled rasterization; `None` where that keeps
-/// every sample, or `d` has no fragment stage, which ignores the mask.
-pub(crate) fn applied_sample_mask(d: &RenderPipelineDescriptor) -> Option<u32> {
+/// The masks Metal applies to the coverage of the pipeline `d` after its fragment function runs,
+/// by the window pixel's place in its 2x2 quad ([`coverage_masks`]): the private sample mask's
+/// bits below the sample count ANDed with the sample coverage's, where `d` has a fragment function
+/// under enabled rasterization; `None` where they keep every sample at every place, or `d` has no
+/// fragment stage, which ignores both.
+pub(crate) fn applied_masks(d: &RenderPipelineDescriptor) -> Option<[u32; 4]> {
     if d.fragment.is_none() || !d.rasterization_enabled {
         return None;
     }
-    let all = match d.raster_sample_count {
-        n if n >= 32 => u32::MAX,
-        n => (1u32 << n) - 1,
-    };
+    let all = all_samples(d.raster_sample_count);
     // Metal ignores the bits past the sample count, so the high word is dropped.
     let mask = (d.private.sample_mask as u32) & all;
-    (mask != all).then_some(mask)
+    let coverage = match d.private.sample_coverage == 1.0 {
+        true => [all; 4],
+        // `check_render` refuses a sample count without Metal's masks.
+        false => coverage_masks(d.private.sample_coverage, d.raster_sample_count)?,
+    };
+    let masks = coverage.map(|c| c & mask);
+    (masks != [all; 4]).then_some(masks)
 }
 
 /// Whether the fragment function `a` could tell Vulkan's sample mask, applied before it runs,
@@ -213,48 +279,53 @@ fn observes_sample_mask(a: &FunctionArtifact) -> bool {
         || io.early_fragment_tests
 }
 
-/// The private sample mask the fragment function of `d`, compiled without it as `a`, applies
-/// itself (`LoweringInputs::sample_mask`): the mask Metal applies, where `a` could tell Vulkan's
-/// from it ([`observes_sample_mask`]); `None` elsewhere.
+/// The private masks the fragment function of `d`, compiled without them as `a`, applies itself
+/// (`LoweringInputs::sample_mask`): the masks Metal applies ([`applied_masks`]), where they differ
+/// between the places of a quad, which Vulkan's one mask cannot say, or where `a` could tell
+/// Vulkan's mask from them ([`observes_sample_mask`]); `None` elsewhere.
 pub(crate) fn shader_sample_mask(
     d: &RenderPipelineDescriptor,
     a: &FunctionArtifact,
-) -> Option<u32> {
-    applied_sample_mask(d).filter(|_| observes_sample_mask(a))
+) -> Option<[u32; 4]> {
+    applied_masks(d).filter(|m| !uniform(m) || observes_sample_mask(a))
 }
 
 /// [`GraphicsState::sample_mask`] for the pipeline `d`, its fragment function `fragment` and
 /// its graphics state `g`, or the refusal where neither Vulkan's mask nor the function's own
-/// (`StageIo::sample_mask`) is Metal's. A function that could tell Vulkan's mask from Metal's
-/// applies the mask itself, and the pipeline has no Vulkan mask; one compiled without it, or for
-/// another mask, is compiled for the pipeline again (`NeedsInput(SampleMask)`). A pipeline whose
-/// fragment function writes an attachment itself (a storage attachment, a shadow stencil or an
-/// imageblock, none measured under the mask) is refused.
+/// (`StageIo::sample_mask`) is Metal's. A function that could tell Vulkan's mask from Metal's,
+/// or of a pipeline whose masks differ between the places of a quad, applies the masks itself,
+/// and the pipeline has no Vulkan mask; one compiled without them, or for others, is compiled for
+/// the pipeline again (`NeedsInput(SampleMask)`). A pipeline whose fragment function writes an
+/// attachment itself (a storage attachment, a shadow stencil or an imageblock, none measured
+/// under the masks) is refused, naming the sample coverage where it is not 1.
 pub(crate) fn sample_mask(
     d: &RenderPipelineDescriptor,
     fragment: Option<&FunctionArtifact>,
     g: &GraphicsState,
 ) -> Result<Option<u32>, Error> {
-    let applied = applied_sample_mask(d);
+    let applied = applied_masks(d);
     let own = fragment.and_then(|f| f.interface.io.sample_mask);
     if own.is_some() && own != applied {
         return Err(Error::NeedsInput(RuntimeInput::SampleMask));
     }
-    let Some(mask) = applied else {
+    let Some(masks) = applied else {
         return Ok(None);
     };
     let writes_itself = !g.storage_attachments.is_empty()
         || g.shadow_stencil.is_some()
         || g.fragment_imageblock.is_some();
     if writes_itself {
-        return Err(refused(PrivateRenderField::SampleMask));
+        return Err(refused(match d.private.sample_coverage == 1.0 {
+            true => PrivateRenderField::SampleMask,
+            false => PrivateRenderField::SampleCoverage,
+        }));
     }
     match (own, fragment) {
         (Some(_), _) => Ok(None),
-        (None, Some(f)) if observes_sample_mask(f) => {
+        (None, Some(f)) if observes_sample_mask(f) || !uniform(&masks) => {
             Err(Error::NeedsInput(RuntimeInput::SampleMask))
         }
-        (None, _) => Ok(Some(mask)),
+        (None, _) => Ok(Some(masks[0])),
     }
 }
 
@@ -421,8 +492,12 @@ pub(crate) fn logic_operated(
 /// ([`logic_operation`]), so only Vulkan's operation is added: copy and no-op key as the
 /// pipeline of those attachments.
 pub(crate) fn render_key_fields(d: &RenderPipelineDescriptor) -> String {
-    let mut fields = match applied_sample_mask(d) {
-        Some(mask) => format!(" sample_mask {mask:#x}"),
+    let mut fields = match applied_masks(d) {
+        Some(m) if uniform(&m) => format!(" sample_mask {:#x}", m[0]),
+        Some(m) => format!(
+            " sample_masks {:#x} {:#x} {:#x} {:#x}",
+            m[0], m[1], m[2], m[3]
+        ),
         None => String::new(),
     };
     if let Ok(Some(function)) = alpha_test(&d.private) {

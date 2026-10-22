@@ -145,10 +145,10 @@ pub struct FragmentPass<'a> {
     pub(crate) max_call_stack_depth: u32,
     /// The pipeline's `textureWriteRoundingMode`.
     pub(crate) texture_write_rounding_mode: crate::metal::TextureWriteRoundingMode,
-    /// The pipeline's private sample mask the function applies itself
-    /// (`LoweringInputs::sample_mask`); `None` from a descriptor, set by the compile layer where
-    /// the function compiled without it could tell Vulkan's mask from Metal's.
-    pub(crate) sample_mask: Option<u32>,
+    /// The pipeline's private masks the function applies itself (`LoweringInputs::sample_mask`);
+    /// `None` from a descriptor, set by the compile layer where they differ between a quad's
+    /// pixels or the function compiled without them could tell Vulkan's mask from Metal's.
+    pub(crate) sample_mask: Option<[u32; 4]>,
     /// The pipeline's private alpha test (`LoweringInputs::alpha_test`).
     pub(crate) alpha_test: Option<crate::metal::CompareFunction>,
     /// The pipeline's private `fragmentDepthCompareClampMask`

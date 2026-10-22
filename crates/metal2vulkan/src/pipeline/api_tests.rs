@@ -411,7 +411,7 @@ mod serde_round_trips {
             swizzled_storage: BTreeSet::from([slot(Stage::Fragment, SlotClass::Texture, 3)]),
             addressed_function_tables: true,
             unattached_colors: BTreeSet::from([5, 7]),
-            sample_mask: Some(0b1010),
+            sample_mask: Some([0b1010, 0b0010, 0b1000, 0]),
             alpha_test: Some(metal::CompareFunction::GreaterEqual),
             depth_compare_clamp_mask: 0x8000_0005,
             read_only_tests: true,

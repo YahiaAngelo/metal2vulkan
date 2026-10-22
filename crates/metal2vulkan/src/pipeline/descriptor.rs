@@ -362,7 +362,9 @@ pub struct PrivateRenderState {
     /// pipeline without one ignores it.
     pub sample_mask: u64,
     /// `sampleCoverage` (default 1): a fraction of each 2x2 quad's samples to keep, dithered
-    /// (not built: a value other than 1 is refused).
+    /// over its window pixels and applied with `sample_mask` after the fragment function runs
+    /// (`pipeline::private_state`'s docs); a value other than 1 is refused at a sample count past
+    /// 4, where Metal was not measured.
     pub sample_coverage: f32,
     /// `sampleCoverageInvert` (default off): changes nothing Metal draws.
     pub sample_coverage_invert: bool,
