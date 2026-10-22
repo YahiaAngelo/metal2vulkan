@@ -472,7 +472,7 @@ fn draw(
         encoder.set_blend_color(COLOR[0], COLOR[1], COLOR[2], COLOR[3]);
         for (index, buffer) in buffers.iter().enumerate() {
             encoder
-                .set_fragment_buffer(Some(buffer), 0, index as u64)
+                .set_fragment_buffer(Some(buffer), 0, index as u32)
                 .unwrap();
         }
         encoder
