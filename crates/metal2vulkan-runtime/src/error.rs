@@ -509,6 +509,12 @@ pub enum Problem {
     /// committed command buffer", and a new encoder's `_status <
     /// MTLCommandBufferStatusCommitted`).
     AlreadyCommitted,
+    /// A scheduled signal encoded once the command buffer completed
+    /// (`CommandBuffer::encode_signal_event_scheduled`): Metal's process ends there (a
+    /// segmentation fault, as the consumer measured; in 10 of 15 runs on an M3 Max under macOS
+    /// 27.0.1, the others setting nothing). Encoded after the commit and before the completion,
+    /// it does nothing, as Metal's.
+    ScheduledSignalAfterCompletion,
     /// An object made by another device.
     ForeignObject,
     /// Dma-bufs a `DmaBufSource` returned (a runtime extension: Metal has none,
