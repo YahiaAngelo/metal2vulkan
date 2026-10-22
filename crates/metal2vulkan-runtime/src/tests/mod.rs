@@ -63,6 +63,8 @@ mod dispatch_pending;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod draw_shape_notices;
 mod driver_defects;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod dropped_usage;
 mod enables;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod encoder_holds;

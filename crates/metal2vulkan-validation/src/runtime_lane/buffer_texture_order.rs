@@ -693,7 +693,8 @@ fn beyond_usage(name: &str, usage: TextureUsage) -> (Vec<u8>, Vec<u8>, bool) {
 /// A texture of its own used beyond its declared usage runs as plain Metal runs it (an M4 under
 /// macOS 27.0.1: a write to a `ShaderRead` texture stores and a read of a `ShaderWrite` one reads,
 /// each as the texture with both usages; Metal's validation stops each): [`TEXTURE_WRITER`]'s
-/// texture 0 made `ShaderRead` alone, and [`SAMPLER`]'s made `ShaderWrite` alone, each a
+/// texture 0 made `ShaderRead` alone, and [`SAMPLER`]'s made `ShaderWrite` alone, and each made of
+/// Apple's private 0x8 alone (written and sampled on the M3 Max under macOS 27.0.1), each a
 /// [`BEYOND_SIDE`]-square `RGBA8Unorm` texture ([`beyond_usage`]), give the texels and the output
 /// the same texture with both usages gives. Where the image takes the usage free it has it;
 /// elsewhere the binding takes a shadow, announced once (`undeclared-usage-shadow`). The form each
@@ -702,9 +703,14 @@ fn beyond_usage(name: &str, usage: TextureUsage) -> (Vec<u8>, Vec<u8>, bool) {
 fn textures_run_beyond_their_declared_usage() {
     let both = TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE;
     let mut forms = Vec::new();
+    // Apple's private 0x8 alone, whose Metal texture answers no usage: plain Metal writes and
+    // samples it too (the M3 Max under macOS 27.0.1).
+    let dropped = TextureUsage::try_from(0x8u32).unwrap();
     for (name, usage) in [
         (TEXTURE_WRITER, TextureUsage::SHADER_READ),
         (SAMPLER, TextureUsage::SHADER_WRITE),
+        (TEXTURE_WRITER, dropped),
+        (SAMPLER, dropped),
     ] {
         let (texels, output, shadowed) = beyond_usage(name, usage);
         let (control_texels, control_output, control_shadowed) = beyond_usage(name, both);
