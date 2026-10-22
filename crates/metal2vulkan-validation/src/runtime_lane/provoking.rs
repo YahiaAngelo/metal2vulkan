@@ -46,6 +46,15 @@ use metal2vulkan_runtime::{
 };
 use std::cell::Cell;
 
+/// The kinds the lane's tests and `provoking_mesh`'s take: draws under `setProvokingVertexMode:`
+/// 1 on a device without its last provoking vertex, of lines drawn from their last vertex to
+/// their first, and of what no form draws as Metal does (a listed triangle's weights, a mode
+/// past 1).
+pub(super) const PROVOKING: [Degradation; 2] = [
+    Degradation::ProvokingVertexLines,
+    Degradation::ProvokingVertexUnmatched,
+];
+
 /// The target's side, in pixels.
 const SIDE: u64 = 32;
 
@@ -763,17 +772,9 @@ fn check_every_case(device: Device, native: bool, weights: Weights, messages: &M
         .filter_map(|m| m.degradation.as_ref())
         .map(|notice| notice.degradation)
         .collect();
-    let announced = |kind| kinds.contains(&kind);
-    assert_eq!(
-        announced(Degradation::ProvokingVertexLines),
-        !native,
-        "{name}: {kinds:?}"
-    );
-    assert_eq!(
-        announced(Degradation::ProvokingVertexUnmatched),
-        !native,
-        "{name}: {kinds:?}"
-    );
+    for kind in PROVOKING {
+        assert_eq!(kinds.contains(&kind), !native, "{name}: {kinds:?}");
+    }
     eprintln!(
         "{name} (native {native}, weights {weights:?}): {} cases, {} covered pixels at mode 1 \
          all Metal's; {} pixels of the mode-0 draws not; draws {natively} through last-vertex \

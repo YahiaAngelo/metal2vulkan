@@ -26,6 +26,7 @@
 //! (`provoking-vertex-unmatched`) where the pipeline reads flat inputs; one that reads the weights
 //! alone draws Metal's, unannounced, on every path.
 
+use super::provoking::PROVOKING;
 use super::{validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -364,8 +365,8 @@ fn run(withheld: bool, emulated: bool) {
                 let kinds = kinds.iter().filter_map(|m| m.degradation.as_ref());
                 announced.extend(
                     kinds
-                        .map(|notice| format!("{:?}", notice.degradation))
-                        .filter(|kind| kind.starts_with("ProvokingVertex")),
+                        .map(|notice| notice.degradation)
+                        .filter(|kind| PROVOKING.contains(kind)),
                 );
                 let kind = match path {
                     Path::Native => None,
@@ -381,7 +382,7 @@ fn run(withheld: bool, emulated: bool) {
                     }
                     Path::AsModeZero => None,
                 };
-                expected.extend(kind.map(|k| format!("{k:?}")));
+                expected.extend(kind);
             }
         }
         assert_eq!(announced, expected, "{name} ({path:?})");
