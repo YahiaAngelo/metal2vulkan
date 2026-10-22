@@ -1097,6 +1097,9 @@ impl Primer<'_> {
                 .map_err(vulkan)?;
             self.made(Call::CreateDescriptorSetLayout);
             self.hold(set_layout);
+            let mut support = vk::DescriptorSetLayoutSupport::default();
+            device.get_descriptor_set_layout_support(&info, &mut support);
+            self.made(Call::GetDescriptorSetLayoutSupport);
             let set_layouts = [set_layout];
             let push = [vk::PushConstantRange {
                 stage_flags: vk::ShaderStageFlags::COMPUTE,
