@@ -710,9 +710,15 @@ fn a_resident_buffer_no_command_reaches_fails_its_submission_once_detached() {
     });
 }
 
+/// How long after its signal a split command buffer's first submission is taken as completed: the
+/// Metal probe detached 50 ms after the commit, and a device signals an event as its work ends,
+/// before the runtime's completion turn for that work runs.
+const SETTLE: Duration = Duration::from_millis(50);
+
 /// A command buffer of `queue` whose first submission runs `first` and signals an event, and
 /// whose second, behind a wait for another event, runs `second`; committed, and returned once its
-/// first submission's work completed (its signal seen), with the event that lets the second go.
+/// first submission's work completed (its signal seen, then [`SETTLE`]), with the event that lets
+/// the second go.
 fn split(
     device: &Device,
     queue: &CommandQueue,
@@ -736,6 +742,7 @@ fn split(
         assert!(Instant::now() < deadline, "the first submission never ran");
         std::thread::sleep(Duration::from_millis(1));
     }
+    std::thread::sleep(SETTLE);
     (command_buffer, gate)
 }
 

@@ -1749,9 +1749,10 @@ pub enum CommandBufferError {
     EncodedUseRebound,
     /// A command of the command buffer used a buffer over the caller's host pages (a no-copy
     /// buffer, a heap over the caller's memory, or a buffer placed in one) that was detached
-    /// (`Buffer::detach_backing`, `Heap::detach_backing`) when the command buffer was first
-    /// submitted: named (a binding, a blit's operand, a vertex, index or indirect buffer) or made
-    /// resident (`use_resource`, `use_heap`). Each of Metal's submissions holding such a command
+    /// (`Buffer::detach_backing`, `Heap::detach_backing`) when the command buffer's submission
+    /// holding the command was submitted (each event group's as its first batch goes): named (a
+    /// binding, a blit's operand, a vertex, index or indirect buffer) or made resident
+    /// (`use_resource`, `use_heap`, whether or not a command reaches it). Each of Metal's submissions holding such a command
     /// ran nothing (the command buffer's split), every other ran, the event signals fired and the
     /// handlers ran, as Metal fails a submission that uses a resource whose memory was taken away
     /// (`OutOfMemory`, code 8; the consumer's rebind probe, an M3 Max under macOS 26.7). A reach of
