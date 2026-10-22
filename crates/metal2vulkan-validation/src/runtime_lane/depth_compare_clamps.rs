@@ -10,8 +10,11 @@
 //! the comparison is then `reference OP texel`, false for a NaN reference left unclamped. The
 //! rule matched all 432 probed `sample_compare` rows (depths 0, 0.5 and 1, four functions, masks 0
 //! to 3, nine references among them NaN and the infinities), and the slot, constexpr and gather
-//! rows. Each draw here is checked against it.
+//! rows. Each draw here is checked against it. The comparisons are the device's, which announce
+//! `restricted-depth-range` only on a device whose depth images may narrow a value outside
+//! `[0, 1]` (`degrade_notices::clamps_depth_uploads`).
 
+use super::degrade_notices::{clamps_depth_uploads, counts};
 use super::{buffer_with, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
@@ -20,7 +23,7 @@ use metal2vulkan::metal::{CompareFunction, PixelFormat, PrimitiveType, TextureUs
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
-    ClearColor, CommandQueue, Device, Library, LoadAction, PipelineOptions, Region,
+    ClearColor, CommandQueue, Degradation, Device, Library, LoadAction, PipelineOptions, Region,
     RenderPassDescriptor, RenderPipelineState, ResourceOptions, SamplerState, StoreAction, Texture,
     TextureDescriptor,
 };
@@ -176,7 +179,9 @@ impl Lane {
 /// Every reference of [`REFERENCES`] compared with every depth of [`DEPTHS`], through
 /// `[[sampler(2)]]` under `Less`, `Equal` and `GreaterEqual`, and through a constexpr `Less`
 /// sampler, under masks that clamp the sampler's comparisons and masks that clamp others: each
-/// `sample_compare` and `gather_compare` answers as Metal's rule says (the module docs).
+/// `sample_compare` and `gather_compare` answers as Metal's rule says (the module docs), and
+/// `restricted-depth-range` is announced exactly where the device's depth images may narrow a
+/// value outside `[0, 1]`.
 #[test]
 fn the_depth_compare_clamp_mask_clamps_metal_s_references() {
     let messages = Messages::default();
@@ -239,6 +244,13 @@ fn the_depth_compare_clamp_mask_clamps_metal_s_references() {
         wrong.join("\n")
     );
     eprintln!("{name}: {checked} masked depth comparisons answer as Metal's");
+    let restricted =
+        counts(&messages.take_notices()).contains_key(&Degradation::RestrictedDepthRange);
+    assert_eq!(
+        restricted,
+        clamps_depth_uploads(&lane.device),
+        "{name}: restricted-depth-range announced"
+    );
     drop(lane);
     let reported = messages.take();
     assert!(

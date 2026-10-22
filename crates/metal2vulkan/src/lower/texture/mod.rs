@@ -1006,6 +1006,11 @@ pub struct TexturePlan {
     /// `0x7fc00000` because the device stores that as Metal's (`MetalFloatStorageNans`). The
     /// module requires them.
     pub storage_properties: BTreeSet<crate::device::requirements::VkProperty>,
+    /// The function's depth comparisons the device makes read depth images that keep values
+    /// outside `[0, 1]` without `VK_EXT_depth_range_unrestricted` because the driver's do
+    /// (`VkProperty::DepthImageKeepsValuesOutsideUnitRange`, [`depth_comparison`]): the module
+    /// requires that property.
+    pub kept_depth_range: bool,
 }
 
 impl TexturePlan {

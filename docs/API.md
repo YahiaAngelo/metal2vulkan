@@ -2490,7 +2490,7 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   may answer another sign or payload (llvmpipe: `0xffc00000`).
 - `metal2vulkan-degrade-restricted-depth-range` (precision). `PrecisionNote::RestrictedDepthRange`:
   The device compares a depth texture's texels on a device without `VK_EXT_depth_range_unrestricted`
-  enabled.
+  enabled whose driver is not measured to keep depth values outside `[0, 1]` without it.
 - `metal2vulkan-degrade-cube-gradient-footprint` (precision).
   `PrecisionNote::CubeGradientFootprint`: An explicit-gradient sample of a cube texture takes
   Metal's footprint in a form a Vulkan device reads alike, but for what is not reproduced. Cost:

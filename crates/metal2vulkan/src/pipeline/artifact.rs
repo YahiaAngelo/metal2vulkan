@@ -716,7 +716,8 @@ pub enum PrecisionNote {
     DeviceNanEncoding,
     /// The device compares a depth texture's texels (a sample or a gather with comparison the
     /// shader does not make itself) on a device without `VK_EXT_depth_range_unrestricted` enabled
-    /// (narrowed to comparisons, and to the device's). Metal's `Depth32Float` texels hold any
+    /// whose driver is not measured to keep depth values outside `[0, 1]` without it (narrowed to
+    /// comparisons, and to the device's). Metal's `Depth32Float` texels hold any
     /// `float`, and the device's comparison reads them from a depth image: the texture's own, or
     /// the depth twin of a texture the consumer holds in an `R32_SFLOAT` image. Vulkan leaves a
     /// value outside `[0, 1]` uploaded there undefined without the extension
@@ -724,7 +725,9 @@ pub enum PrecisionNote {
     /// Radeon 780M and ANV read 1000.0 back as 1.0, measured) or keep it (MoltenVK and lavapipe
     /// keep it, measured), so a comparison whose texel and reference both lie outside `[0, 1]` on
     /// the same side can differ. Values within `[0, 1]`, and every texel on a device with the
-    /// extension enabled, are exact. A function that reads, samples or gathers a depth texture
+    /// extension enabled or a driver measured to keep such values without it
+    /// (`VkProperty::DepthImageKeepsValuesOutsideUnitRange`, which such a module requires
+    /// instead), are exact. A function that reads, samples or gathers a depth texture
     /// without comparing, or compares the texels it read without comparison itself (a nearest
     /// comparison, a comparison gather, a linear comparison the emulation reaches), records
     /// nothing: its interface's `TextureSlot::access` states the use, and a consumer that uploads a

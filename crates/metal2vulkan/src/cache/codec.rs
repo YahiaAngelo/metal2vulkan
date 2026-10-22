@@ -980,7 +980,7 @@ codec_enum! {
         MetalFragmentSimdgroups, MetalVertexSimdgroups, CenterFragCoordDepth, SampleFragCoordDepth,
         MetalHalfTexelWrites, MetalNormStorageWrites, Unorm8LinearFilter, DeviceSampling,
         MetalDepth16Stores, MetalDepth16BiasedStores, MetalInterpolation, MetalFirstVertexIndices,
-        MetalFullQuads, ProvokingVertexModePerPipeline,
+        MetalFullQuads, ProvokingVertexModePerPipeline, DepthImageKeepsValuesOutsideUnitRange,
     }
     VkLimit {
         MaxComputeWorkGroupSize(f0), MaxComputeWorkGroupCount(f0), MaxComputeWorkGroupInvocations,

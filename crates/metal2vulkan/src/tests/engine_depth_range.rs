@@ -5,7 +5,9 @@
 //! without it, measured). The product reads the extension from the device's description and
 //! recommends it. A function whose depth comparisons the device makes, which read a depth image,
 //! compiled for a device without it enabled records `PrecisionNote::RestrictedDepthRange` (narrowed
-//! from every depth read to the device's comparisons): a read, a sample and a gather read the
+//! from every depth read to the device's comparisons), unless the device's driver is measured to
+//! keep such values without it (`VkProperty::DepthImageKeepsValuesOutsideUnitRange`, MoltenVK's),
+//! which the module then requires instead: a read, a sample and a gather read the
 //! texels the consumer holds, which a colour image keeps, and record nothing, their use stated by
 //! the interface's `TextureSlot::access`, as do the comparisons the shader makes of such texels. A
 //! size query reads no texel, and a color texture's read is not a depth texel.
@@ -16,6 +18,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::device::profile::DeviceProfile;
 use crate::device::requirements::{VkExtension, VkProperty};
+
+/// The property a depth comparison the device makes requires on a device without the extension
+/// whose depth images keep values outside `[0, 1]`.
+const KEPT: VkProperty = VkProperty::DepthImageKeepsValuesOutsideUnitRange;
 use crate::pipeline::artifact::PrecisionNote;
 use crate::pipeline::interface::SlotInterface;
 use crate::pipeline::testing::EXACT_SAMPLING;
@@ -165,6 +171,10 @@ fn unrestricted(p: &DeviceProfile) -> bool {
         .contains(&VkExtension::ExtDepthRangeUnrestricted)
 }
 
+fn kept(p: &DeviceProfile) -> bool {
+    p.fields().enabled.properties.contains(&KEPT)
+}
+
 /// The committed profiles the product reads the extension from: the RADV and lavapipe
 /// profiles list it, MoltenVK's and the 1.2 floor's do not.
 #[test]
@@ -183,7 +193,8 @@ fn the_extension_is_read_from_the_device_description() {
 }
 
 /// A comparison of a depth texel the device makes records `RestrictedDepthRange` exactly where the
-/// profile lacks the extension; a read, a sample and a gather never do, their use stated by the
+/// profile lacks the extension and its driver is not measured to keep depth values outside
+/// `[0, 1]` (MoltenVK's is, and the module requires that property there instead); a read, a sample and a gather never do, their use stated by the
 /// texture slot's access (read or sample) on every profile, as a color read's is; a size query
 /// reads no texel. The nearest comparison through a constexpr sampler is the device's only on a
 /// device with `VkProperty::MetalSampler` (MoltenVK's); elsewhere the shader compares the texels a
@@ -210,6 +221,7 @@ fn depth_comparisons_record_the_restricted_range_without_the_extension() {
     };
     let [(_, radv), (_, anv), (_, m3)] = &profiles;
     assert!(unrestricted(radv) && !unrestricted(anv) && !unrestricted(m3));
+    assert!(!kept(anv) && kept(m3));
     assert!(!metal(radv) && !metal(anv) && metal(m3));
     for (form, text, texels, compares) in depth_kernels() {
         let Some(bc) = assemble(form, &text) else {
@@ -217,7 +229,8 @@ fn depth_comparisons_record_the_restricted_range_without_the_extension() {
         };
         for (device, p) in &profiles {
             let device_compares = compares && metal(p);
-            let expected = device_compares && !unrestricted(p);
+            let expected = device_compares && !unrestricted(p) && !kept(p);
+            let requires = device_compares && !unrestricted(p) && kept(p);
             let a = compile(&bc, "k", p).unwrap_or_else(|e| panic!("{form}: compile: {e}"));
             link_and_validate(&a, p).unwrap_or_else(|e| panic!("{form}: L3: {e}"));
             assert_eq!(
@@ -225,6 +238,11 @@ fn depth_comparisons_record_the_restricted_range_without_the_extension() {
                 expected,
                 "{form} on {device}: {:?}",
                 a.precision
+            );
+            assert_eq!(
+                a.requirements.properties.contains(&KEPT),
+                requires,
+                "{form} on {device}"
             );
             let slot = a
                 .interface
@@ -249,7 +267,8 @@ fn depth_comparisons_record_the_restricted_range_without_the_extension() {
 /// shader the taps it fetched without comparison, which a twinned texture holds in colour, so it
 /// records no `RestrictedDepthRange` without the extension (ANV), nor with it (RADV); on MoltenVK,
 /// whose device comparison is Metal's own (`VkProperty::MetalSampler`), the device compares,
-/// without the extension, and records it.
+/// without the extension, over a depth image that keeps values outside `[0, 1]`, and requires
+/// that property in place of the note.
 #[test]
 fn a_linear_comparison_the_shader_makes_records_no_restricted_range() {
     // Linear minification and magnification, compare function `less`.
@@ -264,7 +283,7 @@ fn a_linear_comparison_the_shader_makes_records_no_restricted_range() {
     let Some(bc) = assemble("linear compare", &text) else {
         return;
     };
-    for (stem, expected) in [
+    for (stem, requires) in [
         ("intel-irisxe-anv", false),
         ("amd-rdna3-radv", false),
         ("moltenvk-m3", true),
@@ -272,11 +291,15 @@ fn a_linear_comparison_the_shader_makes_records_no_restricted_range() {
         let p = profile(stem, EXACT_SAMPLING).expect(stem);
         let a = compile(&bc, "k", &p).unwrap_or_else(|e| panic!("{stem}: compile: {e}"));
         link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{stem}: L3: {e}"));
-        assert_eq!(
-            a.precision.contains(&PrecisionNote::RestrictedDepthRange),
-            expected,
+        assert!(
+            !a.precision.contains(&PrecisionNote::RestrictedDepthRange),
             "{stem}: {:?}",
             a.precision
+        );
+        assert_eq!(
+            a.requirements.properties.contains(&KEPT),
+            requires,
+            "{stem}"
         );
     }
 }
