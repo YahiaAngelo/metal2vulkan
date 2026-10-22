@@ -2358,12 +2358,14 @@ impl Device {
     /// pages lies otherwise than Metal lays it in the heap's bytes, where it does: Metal's own
     /// layout the runtime does not hold (Metal may keep it compressed, its samples, a layout not
     /// measured: `metal`'s reason; `Untiled::LOSSLESS` for one whose uncompressed tiles a shadow
-    /// would hold), a multisample texture's samples (`Untiled::MULTISAMPLE`), its image a shadow
-    /// of the bytes in rows (`Untiled::ROWS`), or its image bound there in the driver's layout
-    /// (`Untiled::DRIVER`; not a single-sample colour image bound there on a driver whose such
-    /// images lie as Metal's heap textures, `DriverFact::ColorImagesLieAsMetalHeapTextures`, where
-    /// Metal tiles the texture). `None` for a route whose own notice says where it lies (apart, a
-    /// two-plane texture's planes) and a layout a measured route holds.
+    /// would hold; `Untiled::LOSSLESS_BOUND_SAMPLES` for a multisample one Metal keeps
+    /// compressed, its image in the heap's bytes), a multisample texture's samples
+    /// (`Untiled::MULTISAMPLE`), its image a shadow of the bytes in rows (`Untiled::ROWS`), or its
+    /// image bound there in the driver's layout (`Untiled::DRIVER`; not a single-sample colour
+    /// image bound there on a driver whose such images lie as Metal's heap textures,
+    /// `DriverFact::ColorImagesLieAsMetalHeapTextures`, where Metal tiles the texture). `None` for
+    /// a route whose own notice says where it lies (apart, a two-plane texture's planes) and a
+    /// layout a measured route holds.
     fn device_heap_layout(
         &self,
         layout: &TextureLayout,
@@ -2378,6 +2380,10 @@ impl Device {
         }
         match metal {
             HeapLayout::Measured => return None,
+            // Its image lies in the heap's bytes, not in memory of its own.
+            HeapLayout::Untiled(untiled) if *untiled == Untiled::LOSSLESS_MULTISAMPLE => {
+                return Some(Untiled::LOSSLESS_BOUND_SAMPLES);
+            }
             HeapLayout::Untiled(untiled) => return Some(*untiled),
             HeapLayout::Uncompressed(_) => return Some(Untiled::LOSSLESS),
             HeapLayout::Tiled(_) => {}

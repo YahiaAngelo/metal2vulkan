@@ -945,6 +945,18 @@ impl Untiled {
                  stencil format), whose bytes in the heap are no layout of its samples: its \
                  image lies in memory of its own, and the heap's bytes keep what they held",
     };
+    /// A multisample texture Metal keeps losslessly compressed (`heap-texture-lossless-layout`),
+    /// whose image lies in the bytes of a heap over the device's memory (`heap.rs`,
+    /// `Device::device_heap_layout`).
+    pub(crate) const LOSSLESS_BOUND_SAMPLES: Untiled = Untiled {
+        kind: Degradation::HeapTextureLosslessLayout,
+        reason: "Metal keeps the multisample texture losslessly compressed \
+                 (allowGPUOptimizedContents, a sample grid of 16 or more on its shorter side, \
+                 and none of ShaderWrite, PixelFormatView and ShaderAtomic usage, or a depth or \
+                 stencil format), whose bytes in the heap are no layout of its samples: its \
+                 image lies in the heap's bytes, of the runtime's usage, and need not be \
+                 compressed as Metal's",
+    };
     /// A texture of a heap over the device's memory whose image lies in the heap's bytes in the
     /// driver's layout (`heap-texture-untiled-layout`, `heap.rs`).
     pub(crate) const DRIVER: Untiled = Untiled::other(
