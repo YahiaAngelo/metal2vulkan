@@ -159,7 +159,7 @@ mod predication;
 mod rules;
 pub use predication::{
     predication_step_module, PredicationCompare, PredicationOp, PredicationStep,
-    PredicationStepModule,
+    PredicationStepForm, PredicationStepModule,
 };
 pub use rules::{
     draw_replay_draw, draw_replay_merges, draw_replay_primitive_type, draw_replay_slots,
@@ -919,7 +919,19 @@ fn count_loop<'a>(
     n: Value,
     body: impl FnOnce(&mut FunctionBuilder<'_>, Value) -> BResult<()> + 'a,
 ) -> BResult<()> {
-    let index = counter(fb, t, 0)?;
+    count_words(fb, t.u32_, n, body)
+}
+
+/// [`count_loop`] in a module of `u32`s alone (`u32_` its type), which declares no 64-bit type.
+fn count_words<'a>(
+    fb: &mut FunctionBuilder<'_>,
+    u32_: TypeId,
+    n: Value,
+    body: impl FnOnce(&mut FunctionBuilder<'_>, Value) -> BResult<()> + 'a,
+) -> BResult<()> {
+    let start = fb.u32_const(0)?;
+    let var = fb.local_var(u32_, Some(start))?;
+    let index = fb.var_ptr(var)?;
     let zero = k32(fb, 0)?;
     fb.store(index, zero, MemAccess::default())?;
     let looped: LoopFn<'a, ()> = Box::new(move |fb, ctx, lc| {

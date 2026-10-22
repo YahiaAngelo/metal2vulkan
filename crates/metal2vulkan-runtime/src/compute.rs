@@ -72,7 +72,7 @@ use super::pipeline::{
     flat_dispatch, BufferForms, ComputePipelineState, Planned, RawPipeline, RegionKey,
     RegionPipeline, Variant, VariantObjects,
 };
-use super::predication::{Captures, Event};
+use super::predication::{self, Captures, Event};
 use super::pvrtc::degrade_unreadable;
 use super::replay::{CallLog, ComputeCall, Replay, Resource, SamplersWithLodClamps};
 use super::residency::Residency;
@@ -1242,22 +1242,26 @@ impl ComputeCommandEncoder {
         // Inside a block of command predication: the host step's check of the counter, and the
         // gate the GPU-alone path's preprocess of a fixed range runs from (`gpu_execute.rs`), one
         // invocation per command where the counter is 0.
-        let (gate, preprocess_gate) = {
+        let (gate, further, preprocess_gate) = {
             let device = self.core.device().clone();
             let mut state = self.core.command_buffer().state();
             let held = &mut *state;
             let gate = held.predication.host_gate();
-            let preprocess_gate = match (&gate, &range, &check) {
+            let (further, preprocess_gate) = match (&gate, &range, &check) {
                 (Some(_), ExecutionRange::Fixed(range), None) if !range.is_empty() => {
                     let count = [range.len() as u32, 1, 1];
-                    held.predication
-                        .gates(&mut held.uploads, &device, &[count])?
-                        .pop()
+                    let (further, mut gates) =
+                        held.predication
+                            .gates(&mut held.uploads, &device, &[count])?;
+                    (further, gates.pop())
                 }
-                _ => None,
+                _ => (None, None),
             };
-            (gate, preprocess_gate)
+            (gate, further, preprocess_gate)
         };
+        if let Some(step) = further {
+            predication::record_further(&mut self.core, &step)?;
+        }
         self.core.defer(Deferred::Execute(Arc::new(Execute {
             icb: icb.clone(),
             range,
@@ -2009,11 +2013,15 @@ fn record(
                     .map(|region| region.group_count)
                     .collect(),
             };
-            let mut state = core.command_buffer().state();
-            let state = &mut *state;
-            state
-                .predication
-                .gates(&mut state.uploads, &device, &counts)?
+            let (further, gates) = {
+                let mut state = core.command_buffer().state();
+                let state = &mut *state;
+                (state.predication).gates(&mut state.uploads, &device, &counts)?
+            };
+            if let Some(step) = further {
+                predication::record_further(core, &step)?;
+            }
+            gates
         }
         false => Vec::new(),
     };

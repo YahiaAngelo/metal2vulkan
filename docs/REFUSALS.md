@@ -14,13 +14,13 @@ Columns:
   - `none`: no public API path: malformed or non-Metal input, Apple-private calls, or a cap no valid program of ordinary size meets;
   - `?`: not assessed yet.
 
-Generated at `ec355bf52`.
+Generated at `8b7d70192`.
 
 ## Totals
 
 | Kind | Variants | With a site | Reach system | Reach app | Reach rare | Reach none | Unassessed |
 |---|---|---|---|---|---|---|---|
-| Translator and front-end refusals | 125 | 125 | 6 | 33 | 68 | 18 | 0 |
+| Translator and front-end refusals | 124 | 124 | 6 | 33 | 68 | 17 | 0 |
 | Runtime gaps | 66 | 66 | 1 | 8 | 41 | 16 | 0 |
 | Apple-only calls | 9 | 9 | 1 | 0 | 0 | 8 | 0 |
 | Binder refusals at a device limit | 9 | 9 | 0 | 1 | 7 | 1 | 0 |
@@ -154,7 +154,6 @@ Generated at `ec355bf52`.
 | `PrivateRenderState` | A private fixed-function property of Metal's pipeline descriptor (Apple SPI, OpenGL on Metal's) set to a value whose effect the translation has... | every device (not implemented) | 4: `crates/metal2vulkan/src/bind/heap.rs:1300`, `crates/metal2vulkan/src/bind/plan/resources.rs:887` (+2) | `none`: Apple-private pipeline fields of OpenGL on Metal (no public header) |
 | `ExtendedRangeBlend` | Metal's blend into an extended-range attachment (`BGRA10_XR`, `BGR10_XR`, `RGB10A8_2P_XR10` and their `_sRGB` twins), which the function computes... | every device (not implemented) | 4: `crates/metal2vulkan/src/lower/arith/extended_range/blend.rs:305`, `crates/metal2vulkan/src/lower/fragment/fetch.rs:1553` (+2) | `system`: the parts of a blend into an extended-range (XR10) attachment the measured model does not hold (second-source factors, the color blend color difference, a one-color-channel mask, float4 and sRGB outside the measured forms); the consumer's guests blend RGB10A8_2P_XR10 attachments |
 | `TileReach` | The tiles a render pass's primitives reach, binned on the device ([`tile_reach_module`](crate::bind::tile_reach_module)), on a device without what... | devices short of a Vulkan feature the site names; devices without a capability the site computes (`vec![int64]`); every device (not implemented) | 3: `crates/metal2vulkan/src/bind/tile_reach.rs:270`, `crates/metal2vulkan/src/lower/stage_io/plan.rs:2450` (+1) | `app`: the tiles a pass's draws reach, binned on a device without shaderInt64 |
-| `CommandPredication` | Metal's private command predication (`encodeStartIf:offset:comparison:referenceValue:` and the rest), whose step module... | devices without buffer device addresses (`addressed_needs`) | 1: `crates/metal2vulkan/src/bind/replay/predication.rs:450` | `none`: Apple-private command predication on a device without buffer device addresses |
 | `ProgramScopeBinding` | A program-scope buffer binding of MSL 3.2 (macOS 15 and later), `constant T* constant p [[buffer(n)]];` in Apple's `!air.global_bindings` list,... | - | via a helper: 2: `crates/metal2vulkan-air/src/abi/module.rs:77`, `crates/metal2vulkan/src/error/mod.rs:267` | `app`: MSL 3.2 program-scope buffer bindings (macOS 15 and later) |
 | `SeqCstFence` | A sequentially consistent fence (`seq_cst` `atomic_thread_fence`, an LLVM `fence seq_cst`, or a `seq_cst` barrier ordering device memory), whose... | devices short of a Vulkan feature the site names | 1: `crates/metal2vulkan/src/lower/sync/barrier.rs:443` | `rare`: a seq_cst fence in a vertex or fragment stage without its stores and atomics |
 
@@ -223,9 +222,9 @@ Generated at `ec355bf52`.
 | `DetachedTexelAccess` | `Texture::replace_region` or `get_bytes` of a texture whose bytes (a no-copy buffer's or heap's) are detached (`detach_backing`) | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/texture.rs:4820` | `none`: CPU texel access while a runtime extension detached the bytes |
 | `SurfaceDepthStencil` | A use of a texture of a depth or stencil format (`Depth16Unorm`, `Depth32Float`, `Depth32Float_Stencil8`, `Stencil8`, `X32_Stencil8`) over a plane... | every device (runtime piece not built) | 2: `crates/metal2vulkan-runtime/src/blit_texture.rs:236`, `crates/metal2vulkan-runtime/src/texture/surface_depth.rs:57` | `rare`: a blit of the stencil of a Depth32Float_Stencil8 texture over a plane of an IOSurface with planes, or a pass on an X32_Stencil8 one's view as Depth32Float_Stencil8 |
 | `HostHeapUncompressedMultisample` | A multisample texture in a heap over host pages (`Device::new_heap_with_bytes_no_copy`) that Metal keeps uncompressed | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/texture/heap.rs:1924` | `none`: a multisample texture Metal keeps uncompressed in a runtime extension's heap over host pages |
-| `PredicationDropsUngatedWork` | An unbalanced command-predication record (`ComputeCommandEncoder::encode_end_if` and the other ends, or `encode_start_else`, with no block open;... | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/predication.rs:545` | `none`: an unbalanced Apple-private command-predication record as its unit's first, after dispatches of the unit |
-| `PredicationWordPastBuffer` | A predication condition word (`encode_start_if`'s offset, rounded down to a multiple of 4) past its buffer's end | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/predication.rs:178` | `none`: an Apple-private predication condition word past its buffer |
-| `PredicatedLoopDepth` | A predicated loop started (`ComputeCommandEncoder::encode_start_while`, `encode_start_do_while`) with three loops already open in its unit | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/predication.rs:712` | `none`: an Apple-private predicated loop four deep |
+| `PredicationDropsUngatedWork` | An unbalanced command-predication record (`ComputeCommandEncoder::encode_end_if` and the other ends, or `encode_start_else`, with no block open;... | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/predication.rs:641` | `none`: an unbalanced Apple-private command-predication record as its unit's first, after dispatches of the unit |
+| `PredicationWordPastBuffer` | A predication condition word (`encode_start_if`'s offset, rounded down to a multiple of 4) past its buffer's end | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/predication.rs:193` | `none`: an Apple-private predication condition word past its buffer |
+| `PredicatedLoopDepth` | A predicated loop started (`ComputeCommandEncoder::encode_start_while`, `encode_start_do_while`) with three loops already open in its unit | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/predication.rs:810` | `none`: an Apple-private predicated loop four deep |
 | `MultisampledBufferCopy` | A blit copy between a buffer and a multisampled texture (`copyFromBuffer:...toTexture:` into, or `copyFromTexture:...toBuffer:` out of, a texture... | every device (runtime piece not built) | 2: `crates/metal2vulkan-runtime/src/blit_texture.rs:485`, `crates/metal2vulkan-runtime/src/blit_texture.rs:641` | `rare`: a buffer<->multisampled-texture copy on a device without sample-rate shading, an integer multisample attachment at the count, or the copy format's storage; and, where maintenance8's depth/colour copies are missing or wrong, what the sample-rate draws cannot move: a 16-bit depth, or a depth or stencil texture they cannot sample or render to (emulated elsewhere; the consumer's Maps pans and screensaver make the copy) |
 | `ColorAttachmentGroups` | What a render pass the device draws in color groups does not build | every device (runtime piece not built) | 1: `crates/metal2vulkan-runtime/src/render/color_groups.rs:106` | `app`: in a render pass of more color attachments than the device draws at once (five or more on a device of four), or one at an index past them: a pipeline state of other colors, a tile state, an execution of render commands, a draw reading another group's attachment |
 
@@ -418,7 +417,6 @@ Each refusal's sites, with the function that builds it.
 - `feature::PrivateRenderState`: `crates/metal2vulkan/src/bind/heap.rs:1300 (array)`; `crates/metal2vulkan/src/bind/plan/resources.rs:887 (write_rounding)`; `crates/metal2vulkan/src/lower/texture/mod.rs:2902 (mode_rounded_write)`; `crates/metal2vulkan/src/pipeline/private_state.rs:46 (refused)`
 - `feature::ExtendedRangeBlend`: `crates/metal2vulkan/src/lower/arith/extended_range/blend.rs:305 (refused)`; `crates/metal2vulkan/src/lower/fragment/fetch.rs:1553 (plan)`; `crates/metal2vulkan/src/lower/fragment/fetch.rs:1556 (plan)`; `crates/metal2vulkan/src/lower/fragment/input_blend.rs:153 (plan)`
 - `feature::TileReach`: `crates/metal2vulkan/src/bind/tile_reach.rs:270 (tile_reach_module)`; `crates/metal2vulkan/src/lower/stage_io/plan.rs:2450 (capture)`; `crates/metal2vulkan/src/lower/stage_io/plan.rs:2476 (capture)`
-- `feature::CommandPredication`: `crates/metal2vulkan/src/bind/replay/predication.rs:450 (predication_step_module)`
 - `feature::ProgramScopeBinding`: `crates/metal2vulkan-air/src/abi/module.rs:77 (decode)`; `crates/metal2vulkan/src/error/mod.rs:267 (from)`
 - `feature::SeqCstFence`: `crates/metal2vulkan/src/lower/sync/barrier.rs:443 (require_seq_cst)`
 - `gap::Textures`: `crates/metal2vulkan-runtime/src/blit_texture.rs:163 (check_depth_view)`; `crates/metal2vulkan-runtime/src/buffer_texture.rs:1554 (view_usage)`; `crates/metal2vulkan-runtime/src/pipeline/mod.rs:1499 (compile_error)`; `crates/metal2vulkan-runtime/src/texture.rs:1445 (image_error)`; `crates/metal2vulkan-runtime/src/texture.rs:2174 (storage_over_buffer)`; `crates/metal2vulkan-runtime/src/texture.rs:2986 (new_image_starting)`; `crates/metal2vulkan-runtime/src/texture.rs:4030 (image)`; `crates/metal2vulkan-runtime/src/texture.rs:5503 (host_copy)`; `crates/metal2vulkan-runtime/src/texture/surface_two_planes.rs:207 (new_surface_planes_texture)`
@@ -482,9 +480,9 @@ Each refusal's sites, with the function that builds it.
 - `gap::DetachedTexelAccess`: `crates/metal2vulkan-runtime/src/texture.rs:4820 (refuse_detached_texels)`
 - `gap::SurfaceDepthStencil`: `crates/metal2vulkan-runtime/src/blit_texture.rs:236 (unit)`; `crates/metal2vulkan-runtime/src/texture/surface_depth.rs:57 (surface_depth_twin)`
 - `gap::HostHeapUncompressedMultisample`: `crates/metal2vulkan-runtime/src/texture/heap.rs:1924 (host_heap_plan)`
-- `gap::PredicationDropsUngatedWork`: `crates/metal2vulkan-runtime/src/predication.rs:545 (unbalanced)`
-- `gap::PredicationWordPastBuffer`: `crates/metal2vulkan-runtime/src/predication.rs:178 (new)`
-- `gap::PredicatedLoopDepth`: `crates/metal2vulkan-runtime/src/predication.rs:712 (start_loop)`
+- `gap::PredicationDropsUngatedWork`: `crates/metal2vulkan-runtime/src/predication.rs:641 (unbalanced)`
+- `gap::PredicationWordPastBuffer`: `crates/metal2vulkan-runtime/src/predication.rs:193 (new)`
+- `gap::PredicatedLoopDepth`: `crates/metal2vulkan-runtime/src/predication.rs:810 (start_loop)`
 - `gap::MultisampledBufferCopy`: `crates/metal2vulkan-runtime/src/blit_texture.rs:485 (copy_from_buffer_to_texture)`; `crates/metal2vulkan-runtime/src/blit_texture.rs:641 (copy_from_texture_to_buffer)`
 - `gap::ColorAttachmentGroups`: `crates/metal2vulkan-runtime/src/render/color_groups.rs:106 (gap)`
 - `apple::ProtectedContent`: `crates/metal2vulkan-runtime/src/apple_only.rs:200 (check)`

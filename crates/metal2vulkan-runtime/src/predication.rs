@@ -67,13 +67,20 @@
 //! - **A skip counter** per unit, in the command buffer's upload arena, and **a step** at each
 //!   record that moves it: one invocation of the crate's predication step module
 //!   (`bind::predication_step_module`), behind a barrier from everything before it and with one
-//!   to the commands after it. A device without device addresses refuses every call
-//!   (`Unsupported{CommandPredication}`).
+//!   to the commands after it. On a device with device addresses (and `shaderInt64`) the step
+//!   reaches its record by the address it is pushed, and every other place by the address the
+//!   record names; on any other device (`bind::PredicationStepForm::Bound`) it binds its record's
+//!   region, its unit's counter, Metal's word (its buffer at the word's offset aligned down to
+//!   `minStorageBufferOffsetAlignment`), its loop's flag and the overflow or check word as five
+//!   storage buffers of a set of its own, and the record names each by its byte offset there.
 //! - **Gated dispatches.** A dispatch encoded inside a block, or after the unit's first block
 //!   opened with none open (so a later unbalanced record can drop it), runs by
 //!   `vkCmdDispatchIndirect` from a gate the step before it writes: its group counts where the
-//!   counter is 0, else zero. A dispatch on the flat path gates its preprocess, whose command then
-//!   stays zero. A dispatch or an execution a host step records reads the counter there, once the
+//!   counter is 0, else zero. A gate lies in the arena, named in the step's table, or in the
+//!   bound form in the step's own record, which holds 16 (as many as one dispatch needs, where
+//!   more): a dispatch past them first records a further step, a `PredicationOp::Hold`, which
+//!   leaves the counter as it is and holds the next gates. A dispatch on the flat path gates its
+//!   preprocess, whose command then stays zero. A dispatch or an execution a host step records reads the counter there, once the
 //!   work before it completed, and records nothing where it is not 0; an execution inside a block
 //!   is always recorded so (`Degradation::HostReplayedIndirectCommands`).
 //! - **A kill** rewrites the outermost open block's start step as `PredicationOp::Dead`, whose
@@ -108,7 +115,7 @@ use super::compute::{ComputeCommandEncoder, EncoderState};
 use super::encoder::EncoderCore;
 use super::error::{internal, Error, RuntimeGap};
 use super::indirect_command_buffer::IndirectCommandBuffer;
-use super::owned_kernel::{OwnedKernel, OwnedModule};
+use super::owned_kernel::{OwnedBinds, OwnedKernel, OwnedModule, OwnedSet};
 use super::residency::Residency;
 use super::resource::ResourceKey;
 use super::tracker::{Access, Barrier, Use, UseRange};
@@ -117,7 +124,7 @@ use super::values::Size;
 use super::Device;
 use ash::vk;
 use metal2vulkan::bind::{
-    PredicationCompare, PredicationOp, PredicationStep, PredicationStepModule,
+    PredicationCompare, PredicationOp, PredicationStep, PredicationStepForm, PredicationStepModule,
 };
 use metal2vulkan::metal::{BarrierScope, DispatchType};
 use std::ops::Range;
@@ -158,32 +165,52 @@ const FIRST_COPIES: usize = 64;
 const NESTED_COPIES: usize = 16;
 
 /// A record's condition: the `u32` at byte `at` of `buffer` (Metal's offset rounded down to a
-/// multiple of 4), at device address `address`, compared so with `reference`.
+/// multiple of 4), compared so with `reference`: at `place`, its device address, or in the bound
+/// form its byte offset in `binding` (the `VkBuffer`, the offset and the range a step binds it
+/// at, the offset aligned down as the device asks).
 #[derive(Clone)]
 pub(super) struct Test {
     buffer: Buffer,
     at: u64,
-    address: u64,
+    place: u64,
+    binding: Option<(vk::Buffer, u64, u64)>,
     compare: PredicationCompare,
     reference: u32,
 }
 
 impl Test {
     /// The condition of a record on `buffer` at `offset`, of Metal's `comparison` code and
-    /// `reference`. Refused: a word past the buffer's end
+    /// `reference`, on `device`. Refused: a word past the buffer's end
     /// ([`RuntimeGap::PredicationWordPastBuffer`]).
-    fn new(buffer: &Buffer, offset: u64, comparison: u64, reference: u32) -> Result<Test, Error> {
+    fn new(
+        device: &Device,
+        buffer: &Buffer,
+        offset: u64,
+        (comparison, reference): (u64, u32),
+    ) -> Result<Test, Error> {
         let at = offset & !3;
         if at.checked_add(4).is_none_or(|end| end > buffer.length()) {
             return Err(Error::NotImplemented(RuntimeGap::PredicationWordPastBuffer));
         }
-        let address = buffer
-            .device_address()
-            .ok_or_else(|| internal("a condition word without a device address"))?;
+        let (place, binding) = match bound(device) {
+            false => {
+                let address = buffer
+                    .device_address()
+                    .ok_or_else(|| internal("a condition word without a device address"))?;
+                (address + at, None)
+            }
+            true => {
+                let (raw, start) = buffer.at(at);
+                let limits = &device.properties().description.limits;
+                let within = start % limits.min_storage_buffer_offset_alignment.max(4);
+                (within, Some((raw, start - within, within + 4)))
+            }
+        };
         Ok(Test {
             buffer: buffer.clone(),
             at,
-            address: address + at,
+            place,
+            binding,
             compare: PredicationCompare::from_metal(comparison),
             reference,
         })
@@ -191,9 +218,46 @@ impl Test {
 
     /// `step` testing this condition.
     fn of(&self, step: PredicationStep) -> PredicationStep {
-        step.testing(self.address, self.compare, self.reference)
+        step.testing(self.place, self.compare, self.reference)
     }
 }
+
+/// Whether `device` runs the bound form of the step module
+/// (`bind::PredicationStepForm::Bound`): no device addresses, so each step binds its places.
+fn bound(device: &Device) -> bool {
+    PredicationStepForm::of(device.compile_device()) == PredicationStepForm::Bound
+}
+
+/// Where a step's record names `upload` on `device`: its device address, or in the bound form
+/// byte 0 of its binding (each region is bound at its own offset).
+fn place(device: &Device, upload: &Upload) -> Result<u64, Error> {
+    match bound(device) {
+        true => Ok(0),
+        false => addressed(upload),
+    }
+}
+
+/// A step to record: its record, and in the bound form what it binds besides its record and
+/// Metal's word.
+#[derive(Clone)]
+pub(super) struct Step {
+    record: Upload,
+    bound: Option<Places>,
+}
+
+/// What a bound step binds besides its record and Metal's word: its unit's counter, and its
+/// loop's flag and the overflow word, or a `UnitEnd`'s check word, where it has them (its record
+/// where not).
+#[derive(Clone)]
+struct Places {
+    counter: Upload,
+    flag: Option<Upload>,
+    overflow: Option<Upload>,
+}
+
+/// The gates a bound step's record holds before a dispatch needs a further step's
+/// (`Predication::gates`).
+const BOUND_GATES: u64 = 16;
 
 /// A record's condition as called: the word at `offset` of `buffer`, compared by Metal's
 /// `comparison` code with `reference`, read (made a [`Test`]) only where the record tests it, as
@@ -207,9 +271,10 @@ pub(super) struct Condition<'a> {
 }
 
 impl Condition<'_> {
-    /// Its [`Test`], refused as [`Test::new`] refuses.
-    fn test(self) -> Result<Test, Error> {
-        Test::new(self.buffer, self.offset, self.comparison, self.reference)
+    /// Its [`Test`] on `device`, refused as [`Test::new`] refuses.
+    fn test(self, device: &Device) -> Result<Test, Error> {
+        let arguments = (self.comparison, self.reference);
+        Test::new(device, self.buffer, self.offset, arguments)
     }
 }
 
@@ -303,15 +368,17 @@ pub(super) struct Looping {
 /// the loop, with a DoWhile's condition, whose further copies the encoder lays down.
 struct LoopEnd {
     answer: bool,
-    record: Option<Upload>,
+    record: Option<Step>,
     closed: bool,
     copies: Option<(Looping, Option<Test>)>,
 }
 
-/// A step's record and the gates (device addresses) of the dispatches it runs.
+/// A step's record and the gates of the dispatches it runs: their device addresses, or in the
+/// bound form their byte offsets in its record's region, which holds `capacity` of them.
 struct Run {
     record: Upload,
     gates: Vec<u64>,
+    capacity: Option<u64>,
 }
 
 impl Unit {
@@ -443,7 +510,9 @@ impl Predication {
     /// record. Refused as the arena refuses a table.
     pub(super) fn commit(&mut self, uploads: &mut Uploads, device: &Device) -> Result<(), Error> {
         self.end_unit();
-        for run in self.runs.iter().filter(|run| !run.gates.is_empty()) {
+        // A bound step's gates lie in its record, their count written with them.
+        let tabled = |run: &&Run| run.capacity.is_none() && !run.gates.is_empty();
+        for run in self.runs.iter().filter(tabled) {
             let bytes = PredicationStep::table(addressed(&run.record)?, &run.gates);
             let table = uploads.upload(device, &bytes, bytes.len() as u64)?;
             let address = addressed(&table)?;
@@ -462,44 +531,71 @@ impl Predication {
             .ok_or_else(|| internal("a predication record outside a unit"))
     }
 
-    /// A step of `step` on the unit's counter (made now where it has none): its record, which
-    /// gates the dispatches encoded after it until the next step.
+    /// A step of `step` on the unit's counter (made now where it has none), whose loop's flag
+    /// and overflow word, or check word, are `places` where it has them: what to record, which
+    /// gates the dispatches encoded after it until the next step. `step` takes the counter's
+    /// place ([`place`]).
     fn step(
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
+        places: (Option<&Upload>, Option<&Upload>),
         step: impl FnOnce(u64) -> PredicationStep,
-    ) -> Result<Upload, Error> {
+    ) -> Result<Step, Error> {
+        self.step_holding(uploads, device, (places, BOUND_GATES), step)
+    }
+
+    /// [`step`](Self::step), whose record holds `gates` gates in the bound form.
+    fn step_holding(
+        &mut self,
+        uploads: &mut Uploads,
+        device: &Device,
+        ((flag, overflow), gates): ((Option<&Upload>, Option<&Upload>), u64),
+        step: impl FnOnce(u64) -> PredicationStep,
+    ) -> Result<Step, Error> {
         let counter = match self.unit()?.counter.clone() {
             Some(counter) => counter,
             None => uploads.upload(device, &[], 16)?,
         };
-        let record = uploads.upload(device, &[], PredicationStep::RECORD_BYTES)?;
-        let at = addressed(&record)?;
-        record.write(&step(addressed(&counter)?).record(at));
+        let bound = bound(device);
+        let bytes = match bound {
+            true => PredicationStep::bound_bytes(gates),
+            false => PredicationStep::RECORD_BYTES,
+        };
+        let record = uploads.upload(device, &[], bytes)?;
+        let at = place(device, &record)?;
+        record.write(&step(place(device, &counter)?).record(at));
         let run = self.runs.len();
         self.runs.push(Run {
             record: record.clone(),
             gates: Vec::new(),
+            capacity: bound.then_some(gates),
         });
         let unit = self.unit()?;
-        unit.counter = Some(counter);
+        unit.counter = Some(counter.clone());
         unit.run = Some(run);
         if unit.range.anchor.is_some() {
             unit.range.since.push(record.clone());
         }
-        Ok(record)
+        let places = bound.then(|| Places {
+            counter,
+            flag: flag.cloned(),
+            overflow: overflow.cloned(),
+        });
+        Ok(Step {
+            record,
+            bound: places,
+        })
     }
 
-    /// The overflow word's device address, made with the first loop.
-    fn overflow(&mut self, uploads: &mut Uploads, device: &Device) -> Result<u64, Error> {
+    /// The overflow word, made with the first loop.
+    fn overflow(&mut self, uploads: &mut Uploads, device: &Device) -> Result<Upload, Error> {
         let overflow = match &self.overflow {
             Some(overflow) => overflow.clone(),
             None => uploads.upload(device, &[], 16)?,
         };
-        let address = addressed(&overflow)?;
-        self.overflow = Some(overflow);
-        Ok(address)
+        self.overflow = Some(overflow.clone());
+        Ok(overflow)
     }
 
     /// Whether a loop's last copy found the loop would run another: read once the command
@@ -527,7 +623,7 @@ impl Predication {
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
-    ) -> Result<Option<Upload>, Error> {
+    ) -> Result<Option<Step>, Error> {
         let range = &mut self.unit()?.range;
         if range.dropping {
             return Ok(None);
@@ -545,7 +641,7 @@ impl Predication {
                 RuntimeGap::PredicationDropsUngatedWork,
             ));
         }
-        let record = self.step(uploads, device, |counter| {
+        let record = self.step(uploads, device, (None, None), |counter| {
             PredicationStep::new(counter, PredicationOp::Drop)
         })?;
         self.unit()?.range.dropping = true;
@@ -559,13 +655,13 @@ impl Predication {
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
-    ) -> Result<(Option<Upload>, bool), Error> {
+    ) -> Result<(Option<Step>, bool), Error> {
         let unit = self.unit()?;
         if !unit.stack.is_empty() || !unit.range.dropping {
             return Ok((None, false));
         }
         let dead = !unit.range.work;
-        let record = self.step(uploads, device, |counter| {
+        let record = self.step(uploads, device, (None, None), |counter| {
             PredicationStep::new(counter, PredicationOp::Resume)
         })?;
         self.unit()?.range.dropping = false;
@@ -574,17 +670,17 @@ impl Predication {
 
     /// Open a block of `kind` started by `record`: one with none open is the unit's anchor, and is
     /// killed from its start where `dead` (the module docs).
-    fn open(&mut self, record: &Upload, kind: Kind, dead: bool) -> Result<(), Error> {
+    fn open(&mut self, record: &Step, kind: Kind, dead: bool) -> Result<(), Error> {
         let index = self.records;
         let unit = self.unit()?;
         if unit.stack.is_empty() {
             unit.range = Droppable {
-                anchor: Some(record.clone()),
+                anchor: Some(record.record.clone()),
                 ..Droppable::default()
             };
         }
         unit.stack.push(Block {
-            start: record.clone(),
+            start: record.record.clone(),
             record: index,
             kind,
         });
@@ -596,7 +692,7 @@ impl Predication {
 
     /// A Start or an `encodeEndDoWhile` on a nil buffer: inside a block it kills, answering NO;
     /// with none it is unbalanced: the step to record, if any.
-    fn nil(&mut self, uploads: &mut Uploads, device: &Device) -> Result<Option<Upload>, Error> {
+    fn nil(&mut self, uploads: &mut Uploads, device: &Device) -> Result<Option<Step>, Error> {
         let unit = self.unit()?;
         if unit.stack.is_empty() {
             return self.unbalanced(uploads, device);
@@ -611,9 +707,9 @@ impl Predication {
         uploads: &mut Uploads,
         device: &Device,
         test: &Test,
-    ) -> Result<(Option<Upload>, Upload), Error> {
+    ) -> Result<(Option<Step>, Step), Error> {
         let (resume, dead) = self.resume(uploads, device)?;
-        let record = self.step(uploads, device, |counter| {
+        let record = self.step(uploads, device, (None, None), |counter| {
             test.of(PredicationStep::new(counter, PredicationOp::If))
         })?;
         self.open(&record, Kind::If { elsed: false }, dead)?;
@@ -626,7 +722,7 @@ impl Predication {
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
-    ) -> Result<Option<Upload>, Error> {
+    ) -> Result<Option<Step>, Error> {
         let unit = self.unit()?;
         let Some(top) = unit.stack.last() else {
             return self.unbalanced(uploads, device);
@@ -635,7 +731,7 @@ impl Predication {
             unit.kill();
             return Ok(None);
         }
-        let record = self.step(uploads, device, |counter| {
+        let record = self.step(uploads, device, (None, None), |counter| {
             PredicationStep::new(counter, PredicationOp::Else)
         })?;
         if let Some(top) = self.unit()?.stack.last_mut() {
@@ -652,13 +748,15 @@ impl Predication {
         uploads: &mut Uploads,
         device: &Device,
         op: PredicationOp,
-    ) -> Result<(bool, Upload), Error> {
+    ) -> Result<(bool, Step), Error> {
         let unit = self.unit()?;
         let op = match unit.dead && unit.stack.len() == 1 {
             true => PredicationOp::EndDead,
             false => op,
         };
-        let record = self.step(uploads, device, |counter| PredicationStep::new(counter, op))?;
+        let record = self.step(uploads, device, (None, None), |counter| {
+            PredicationStep::new(counter, op)
+        })?;
         let unit = self.unit()?;
         unit.stack.pop();
         let answer = match unit.dead {
@@ -678,7 +776,7 @@ impl Predication {
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
-    ) -> Result<(bool, Option<Upload>), Error> {
+    ) -> Result<(bool, Option<Step>), Error> {
         let unit = self.unit()?;
         let Some(top) = unit.stack.last() else {
             return Ok((false, self.unbalanced(uploads, device)?));
@@ -707,7 +805,7 @@ impl Predication {
         uploads: &mut Uploads,
         device: &Device,
         test: Option<&Test>,
-    ) -> Result<(Option<Upload>, Upload), Error> {
+    ) -> Result<(Option<Step>, Step), Error> {
         if self.loops_open() >= MAX_LOOP_DEPTH {
             return Err(Error::NotImplemented(RuntimeGap::PredicatedLoopDepth));
         }
@@ -727,7 +825,7 @@ impl Predication {
         uploads: &mut Uploads,
         device: &Device,
         looping: &Looping,
-    ) -> Result<Upload, Error> {
+    ) -> Result<Step, Error> {
         let op = match looping.test {
             Some(_) => PredicationOp::While,
             None => PredicationOp::Do,
@@ -741,11 +839,11 @@ impl Predication {
         uploads: &mut Uploads,
         device: &Device,
         looping: &Looping,
-    ) -> Result<Upload, Error> {
+    ) -> Result<Step, Error> {
         let record = self.copy_step(uploads, device, looping)?;
         let index = self.records;
         self.unit()?.stack.push(Block {
-            start: record.clone(),
+            start: record.record.clone(),
             record: index,
             kind: Kind::Loop(looping.clone()),
         });
@@ -759,10 +857,12 @@ impl Predication {
         device: &Device,
         looping: &Looping,
         (op, test): (PredicationOp, Option<&Test>),
-    ) -> Result<Upload, Error> {
-        let (flag, overflow) = (addressed(&looping.flag)?, self.overflow(uploads, device)?);
-        self.step(uploads, device, |counter| {
-            let step = PredicationStep::new(counter, op).in_loop(flag, overflow);
+    ) -> Result<Step, Error> {
+        let overflow = self.overflow(uploads, device)?;
+        let (flag, overflow_at) = (place(device, &looping.flag)?, place(device, &overflow)?);
+        let places = (Some(&looping.flag), Some(&overflow));
+        self.step(uploads, device, places, |counter| {
+            let step = PredicationStep::new(counter, op).in_loop(flag, overflow_at);
             match test {
                 Some(test) => test.of(step),
                 None => step,
@@ -778,7 +878,7 @@ impl Predication {
         device: &Device,
         looping: &Looping,
         test: Option<&Test>,
-    ) -> Result<Upload, Error> {
+    ) -> Result<Step, Error> {
         let op = match looping.test {
             Some(_) => PredicationOp::End,
             None => PredicationOp::DoEnd,
@@ -796,7 +896,7 @@ impl Predication {
         device: &Device,
         looping: &Looping,
         test: Option<&Test>,
-    ) -> Result<Upload, Error> {
+    ) -> Result<Step, Error> {
         let op = match looping.test {
             Some(_) => PredicationOp::WhilePast,
             None => PredicationOp::DoPast,
@@ -847,7 +947,7 @@ impl Predication {
             });
         }
         // Only a live DoWhile's End reads its word.
-        let test = condition.map(Condition::test).transpose()?;
+        let test = condition.map(|c| c.test(device)).transpose()?;
         let record = self.copy_end(uploads, device, &looping, test.as_ref())?;
         Ok(LoopEnd {
             answer: true,
@@ -865,7 +965,7 @@ impl Predication {
         uploads: &mut Uploads,
         device: &Device,
         (worked, open): (bool, Vec<Vec<(EncoderState, Event)>>),
-    ) -> Result<Option<Upload>, Error> {
+    ) -> Result<Option<Step>, Error> {
         let unit = self.unit()?;
         unit.note_work(worked);
         unit.carried = open;
@@ -876,8 +976,8 @@ impl Predication {
             Some(check) => check.clone(),
             None => uploads.upload(device, &[], 16)?,
         };
-        let word = addressed(&check)?;
-        let record = self.step(uploads, device, |counter| {
+        let word = place(device, &check)?;
+        let record = self.step(uploads, device, (None, Some(&check)), |counter| {
             PredicationStep::new(counter, PredicationOp::UnitEnd).checking(word)
         })?;
         self.unit()?.check = Some(check);
@@ -894,35 +994,65 @@ impl Predication {
 
     /// The gates of a dispatch the open encoder records now, one per command of `counts` (its
     /// group counts), where its unit gates its dispatches (`Unit::gated`); none where not, and it
-    /// runs as recorded.
+    /// runs as recorded. In the bound form they lie in the last step's record, or where it has no
+    /// room for them in a further step's, which leaves the counter as it is (`Hold`): that step,
+    /// to record before the dispatch.
     pub(super) fn gates(
         &mut self,
         uploads: &mut Uploads,
         device: &Device,
         counts: &[[u32; 3]],
-    ) -> Result<Vec<Upload>, Error> {
+    ) -> Result<(Option<Step>, Vec<Upload>), Error> {
         let Some(unit) = &self.unit else {
-            return Ok(Vec::new());
+            return Ok((None, Vec::new()));
         };
         if !unit.gated() {
-            return Ok(Vec::new());
+            return Ok((None, Vec::new()));
         }
-        let run = unit
+        let mut run = unit
             .run
             .ok_or_else(|| internal("a gated predication unit without its step"))?;
+        let mut further = None;
+        if let Some(capacity) = self.runs[run].capacity {
+            if (self.runs[run].gates.len() + counts.len()) as u64 > capacity {
+                let holding = BOUND_GATES.max(counts.len() as u64);
+                let hold = |counter| PredicationStep::new(counter, PredicationOp::Hold);
+                further =
+                    Some(self.step_holding(uploads, device, ((None, None), holding), hold)?);
+                run = self.runs.len() - 1;
+            }
+        }
+        let record = self.runs[run].record.clone();
+        let bound = self.runs[run].capacity.is_some();
+        let first = self.runs[run].gates.len() as u64;
         let mut gates = Vec::with_capacity(counts.len());
-        let mut addresses = Vec::with_capacity(counts.len());
-        for &count in counts {
-            let gate = uploads.upload(
-                device,
-                &PredicationStep::gate(count),
-                PredicationStep::GATE_BYTES,
-            )?;
-            addresses.push(addressed(&gate)?);
+        let mut places = Vec::with_capacity(counts.len());
+        for (i, &count) in (0..).zip(counts) {
+            let bytes = PredicationStep::gate(count);
+            let gate = match bound {
+                true => {
+                    let at = PredicationStep::BOUND_GATES_OFFSET
+                        + (first + i) * PredicationStep::GATE_BYTES;
+                    let gate = record.part(at, PredicationStep::GATE_BYTES);
+                    gate.write(&bytes);
+                    places.push(at);
+                    gate
+                }
+                false => {
+                    let gate = uploads.upload(device, &bytes, PredicationStep::GATE_BYTES)?;
+                    places.push(addressed(&gate)?);
+                    gate
+                }
+            };
             gates.push(gate);
         }
-        self.runs[run].gates.extend(addresses);
-        Ok(gates)
+        let run = &mut self.runs[run];
+        run.gates.extend(places);
+        if bound {
+            let count = run.gates.len() as u32;
+            record.write_at(PredicationStep::BOUND_COUNT_OFFSET, &count.to_le_bytes());
+        }
+        Ok((further, gates))
     }
 
     /// The check of a command the open encoder leaves to a host step, where its unit gates its
@@ -936,8 +1066,7 @@ impl Predication {
     }
 }
 
-/// The device address of `upload`, which every predication region has (its step module needs
-/// device addresses).
+/// The device address of `upload`, which every predication region has in the addressed form.
 fn addressed(upload: &Upload) -> Result<u64, Error> {
     upload
         .device_address()
@@ -962,10 +1091,33 @@ impl HostGate {
 fn record_step(
     core: &mut EncoderCore,
     kernel: OwnedKernel,
-    record: &Upload,
+    step: &Step,
     test: Option<&Test>,
 ) -> Result<(), Error> {
-    let push = PredicationStepModule::push_constants(addressed(record)?);
+    // The addressed form pushes the record's address; the bound one binds its places.
+    let (push, binds) = match &step.bound {
+        None => {
+            let address = addressed(&step.record)?;
+            (Some(PredicationStepModule::push_constants(address)), None)
+        }
+        Some(places) => {
+            let region = |upload: &Upload| (upload.raw(), upload.offset(), upload.len());
+            let record = region(&step.record);
+            let or_record = |upload: &Option<Upload>| upload.as_ref().map_or(record, region);
+            let set = OwnedSet {
+                images: Vec::new(),
+                storage_images: Vec::new(),
+                buffers: vec![
+                    record,
+                    region(&places.counter),
+                    test.and_then(|test| test.binding).unwrap_or(record),
+                    or_record(&places.flag),
+                    or_record(&places.overflow),
+                ],
+            };
+            (None, Some(OwnedBinds::new(core.device(), &kernel, &[set])?))
+        }
+    };
     let uses: Vec<Use<ResourceKey>> = test
         .iter()
         .map(|test| {
@@ -991,29 +1143,44 @@ fn record_step(
                     vk::PipelineBindPoint::COMPUTE,
                     kernel.pipeline,
                 );
-                raw.cmd_push_constants(
-                    command_buffer,
-                    kernel.layout,
-                    vk::ShaderStageFlags::COMPUTE,
-                    0,
-                    &push,
-                );
+                if let Some(push) = &push {
+                    raw.cmd_push_constants(
+                        command_buffer,
+                        kernel.layout,
+                        vk::ShaderStageFlags::COMPUTE,
+                        0,
+                        push,
+                    );
+                }
+                if let Some(binds) = &binds {
+                    binds.bind(raw, command_buffer, &kernel, 0);
+                }
                 raw.cmd_dispatch(command_buffer, 1, 1, 1);
                 Barrier::between_dispatches().record(raw, command_buffer);
             }
         },
     );
+    if let Some(binds) = binds {
+        core.retain(binds);
+    }
     if let Some(test) = test {
         core.retain(test.buffer.clone());
     }
     Ok(())
 }
 
+/// Record `step`, a step [`Predication::gates`] made for a dispatch's gates, into `core` before
+/// the dispatch.
+pub(super) fn record_further(core: &mut EncoderCore, step: &Step) -> Result<(), Error> {
+    let kernel = core.device().owned_kernel(OwnedModule::PredicationStep)?;
+    record_step(core, kernel, step, None)
+}
+
 /// Record `steps` (their records and tests, each where there is one) into `core` in order.
 fn record_steps(
     core: &mut EncoderCore,
     kernel: OwnedKernel,
-    steps: [(Option<&Upload>, Option<&Test>); 2],
+    steps: [(Option<&Step>, Option<&Test>); 2],
 ) -> Result<(), Error> {
     for (record, test) in steps {
         if let Some(record) = record {
@@ -1075,8 +1242,7 @@ impl Captures {
 }
 
 impl ComputeCommandEncoder {
-    /// The predication step kernel, which refuses on a device without device addresses
-    /// (`Unsupported{CommandPredication}`).
+    /// The predication step kernel, in the device's form.
     fn predication_kernel(&mut self) -> Result<OwnedKernel, Error> {
         self.core()
             .device()
@@ -1168,8 +1334,7 @@ impl ComputeCommandEncoder {
     }
 
     /// The condition of a record of `call` on `buffer` (`None`: a nil buffer), with the step
-    /// kernel. Refused: a buffer of another device (`Invalid`), a device without device
-    /// addresses (`Unsupported{CommandPredication}`).
+    /// kernel. Refused: a buffer of another device (`Invalid`).
     fn condition<'a>(
         &mut self,
         call: &'static str,
@@ -1364,8 +1529,7 @@ impl ComputeCommandEncoder {
     /// Refused, recording nothing: a buffer of another device (`Invalid`); a word past the
     /// buffer's end (`NotImplemented(PredicationWordPastBuffer)`); a nil buffer with no block
     /// open whose range holds the unit's dispatches from before its first record
-    /// (`NotImplemented(PredicationDropsUngatedWork)`); a device without device addresses
-    /// (`Unsupported{CommandPredication}`).
+    /// (`NotImplemented(PredicationDropsUngatedWork)`).
     pub fn encode_start_if(
         &mut self,
         buffer: Option<&Buffer>,
@@ -1387,7 +1551,10 @@ impl ComputeCommandEncoder {
     ) -> Result<(), Error> {
         let arguments = (comparison, reference_value);
         let (kernel, condition) = self.condition("encode_start_if", buffer, offset, arguments)?;
-        match &condition.map(Condition::test).transpose()? {
+        match &condition
+            .map(|c| c.test(self.core().device()))
+            .transpose()?
+        {
             Some(test) => {
                 let (resume, record) = self.predication(|predication, uploads, device| {
                     predication.start_if(uploads, device, test)
@@ -1414,8 +1581,7 @@ impl ComputeCommandEncoder {
     /// an unbalanced record, as Metal's is.
     ///
     /// Refused, recording nothing: no block open where its range holds the unit's dispatches from
-    /// before its first record (`NotImplemented(PredicationDropsUngatedWork)`); a device without
-    /// device addresses (`Unsupported{CommandPredication}`).
+    /// before its first record (`NotImplemented(PredicationDropsUngatedWork)`).
     pub fn encode_start_else(&mut self) -> Result<(), Error> {
         let result = self.encode_start_else_uncounted();
         self.counted(result)
@@ -1493,7 +1659,10 @@ impl ComputeCommandEncoder {
         let (kernel, condition) =
             self.condition("encode_start_while", buffer, offset, arguments)?;
         let event = || Event::StartWhile(buffer.cloned(), offset, comparison, reference_value);
-        match &condition.map(Condition::test).transpose()? {
+        match &condition
+            .map(|c| c.test(self.core().device()))
+            .transpose()?
+        {
             Some(test) => self.open_loop(kernel, Some(test), event),
             None => {
                 let record = self

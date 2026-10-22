@@ -278,7 +278,7 @@ pub use replay::{
 pub(crate) use replay::{merged_vertex, MergedVertex};
 pub use replay::{
     predication_step_module, PredicationCompare, PredicationOp, PredicationStep,
-    PredicationStepModule,
+    PredicationStepForm, PredicationStepModule,
 };
 pub use state::{
     ArgumentFunctionTable, ArgumentSampler, ArgumentSamplersShape, BindShape, BindState,

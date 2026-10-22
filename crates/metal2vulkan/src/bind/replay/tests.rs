@@ -1886,8 +1886,129 @@ fn step_run(
 }
 
 /// [`step_run`], and Metal's word as the step left it (a [`PredicationOp::UnitEnd`] writes its
-/// check word there where the step names it).
+/// check word there where the step names it): run in each form of the module, which give the
+/// same.
 fn step_out(
+    step: PredicationStep,
+    counter: u32,
+    metal_word: Option<u32>,
+    gates: &[[u32; 3]],
+) -> (u32, Vec<[u32; 3]>, Option<u32>) {
+    let addressed = addressed_out(step, counter, metal_word, gates);
+    let bound = bound_out(step, counter, metal_word, gates);
+    assert_eq!(
+        addressed, bound,
+        "{step:?}: the addressed and the bound form"
+    );
+    addressed
+}
+
+/// Whether a step of `op` reads Metal's word.
+fn op_tests(op: PredicationOp) -> bool {
+    use PredicationOp::{DoEnd, If, While, WhilePast};
+    matches!(op, If | While | DoEnd | WhilePast)
+}
+
+/// Metal's word's byte in the bound harness's word binding, as an aligned-down binding leaves it.
+const BOUND_WORD_AT: usize = 8;
+
+/// [`step_out`] in the bound form: the record of `step` with every place at byte 0 of its binding
+/// (Metal's word at [`BOUND_WORD_AT`]), its gates after it; a place the step names in its own
+/// record a copy of the record (the interpreter keeps bindings apart), and the check word of a
+/// `UnitEnd` the overflow binding's.
+fn bound_out(
+    step: PredicationStep,
+    counter: u32,
+    metal_word: Option<u32>,
+    gates: &[[u32; 3]],
+) -> (u32, Vec<[u32; 3]>, Option<u32>) {
+    let at = BOUND_WORD_AT as u64;
+    let bound = PredicationStep {
+        counter: 0,
+        word: if op_tests(step.op) { at } else { 0 },
+        flag: 0,
+        overflow: if step.op == PredicationOp::UnitEnd {
+            at
+        } else {
+            0
+        },
+        ..step
+    };
+    let record = bound.record(0).to_vec();
+    let gate_bytes = PredicationStep::GATE_BYTES as usize;
+    let mut region = vec![0xEE; PredicationStep::bound_bytes(gates.len() as u64) as usize];
+    region[..record.len()].copy_from_slice(&record);
+    let count = PredicationStep::BOUND_COUNT_OFFSET as usize;
+    region[count..count + 4].copy_from_slice(&(gates.len() as u32).to_le_bytes());
+    let first = PredicationStep::BOUND_GATES_OFFSET as usize;
+    for (i, counts) in gates.iter().enumerate() {
+        region[first + i * gate_bytes..first + (i + 1) * gate_bytes]
+            .copy_from_slice(&PredicationStep::gate(*counts));
+    }
+    let mut words = vec![0xEE; BOUND_WORD_AT + 8];
+    if let Some(metal_word) = metal_word {
+        words[BOUND_WORD_AT..BOUND_WORD_AT + 4].copy_from_slice(&metal_word.to_le_bytes());
+    }
+    let own = || record.clone();
+    let (word_bytes, flag_bytes, overflow_bytes) = match step.op {
+        PredicationOp::UnitEnd => (own(), own(), words.clone()),
+        op if op_tests(op) => (words.clone(), own(), own()),
+        _ => (own(), own(), own()),
+    };
+    let slots = super::predication::BOUND_SLOTS;
+    let bytes = [
+        region.clone(),
+        counter.to_le_bytes().to_vec(),
+        word_bytes,
+        flag_bytes,
+        overflow_bytes,
+    ];
+    let buffers = slots
+        .into_iter()
+        .zip(bytes)
+        .map(|(slot, bytes)| Buffer {
+            slot: Some(slot),
+            address: None,
+            bytes,
+        })
+        .collect();
+    let res = Resources {
+        buffers,
+        push: Vec::new(),
+        spec: Default::default(),
+    };
+    let cfg = Config {
+        workgroups: [1, 1, 1],
+        ..Config::default()
+    };
+    let m = predication::bound_typed_module().expect("module");
+    let out = run(&m, &cfg, res).expect("run").buffers;
+    let fields = ..record.len();
+    assert_eq!(out[0][fields], region[fields], "the record is only read");
+    let outs = (0..gates.len())
+        .map(|i| {
+            let base = first + i * gate_bytes + PredicationStep::GATE_OUT_OFFSET as usize;
+            std::array::from_fn(|axis| word(&out[0], base + 4 * axis))
+        })
+        .collect();
+    for (i, counts) in gates.iter().enumerate() {
+        let source = &out[0][first + i * gate_bytes..first + i * gate_bytes + 12];
+        assert_eq!(
+            source,
+            &PredicationStep::gate(*counts)[..12],
+            "a gate's command is only read"
+        );
+    }
+    let metal_word = metal_word.map(|value| match step.op {
+        PredicationOp::UnitEnd => word(&out[4], BOUND_WORD_AT),
+        op if op_tests(op) => word(&out[2], BOUND_WORD_AT),
+        _ => value,
+    });
+    (word(&out[1], 0), outs, metal_word)
+}
+
+/// [`step_out`] in the addressed form.
+fn addressed_out(
     step: PredicationStep,
     counter: u32,
     metal_word: Option<u32>,
@@ -1966,42 +2087,27 @@ fn step_out(
     (word(&out[1], 0), outs, metal_word)
 }
 
-/// The predication step module is valid on every committed profile with device addresses and
-/// refused by name on the others.
+/// The predication step module is valid on every committed profile in the profile's form: the
+/// addressed one (no descriptor, the record's address pushed) where the device has device
+/// addresses, the bound one (five storage buffers, no push constants) elsewhere; and the bound
+/// form is valid on every profile.
 #[test]
-fn the_predication_step_module_is_valid_where_device_addresses_are() {
+fn the_predication_step_module_is_valid_in_each_devices_form() {
     let mut seen = (0, 0);
     for (stem, dev) in devices() {
         let p = dev.profile();
+        assert_valid(predication::bound_typed_module().expect("module"), p);
+        let m = predication_step_module(&dev).unwrap_or_else(|e| panic!("{stem}: {e}"));
+        assert!(p.check(&m.requirements).is_ok(), "{stem}");
         if addressed(&dev) {
             seen.0 += 1;
             assert_valid(predication::typed_module().expect("module"), p);
-            let m = predication_step_module(&dev).unwrap_or_else(|e| panic!("{stem}: {e}"));
-            assert!(p.check(&m.requirements).is_ok(), "{stem}");
-            assert!(m.layout.sets.is_empty(), "{stem}");
-            assert_eq!(
-                m.layout
-                    .push_constants
-                    .iter()
-                    .map(|r| (r.stages, r.offset, r.size))
-                    .collect::<Vec<_>>(),
-                vec![(
-                    crate::vk::ShaderStageFlags::COMPUTE,
-                    0,
-                    PredicationStepModule::PUSH_BYTES
-                )],
-                "{stem}"
-            );
+            assert_eq!(m.form, PredicationStepForm::Addressed, "{stem}");
         } else {
             seen.1 += 1;
-            let e =
-                Unsupported::needs_any_of(Feature::CommandPredication, vec![p.addressed_needs()]);
-            assert_eq!(
-                predication_step_module(&dev),
-                Err(Error::Unsupported(e)),
-                "{stem}"
-            );
+            assert_eq!(m.form, PredicationStepForm::Bound, "{stem}");
         }
+        assert_eq!(PredicationStepForm::of(&dev), m.form, "{stem}");
     }
     assert!(seen.0 > 0 && seen.1 > 0, "{seen:?}");
 }
@@ -2156,6 +2262,14 @@ fn a_predication_table_ends_at_the_records_sink_gate() {
         assert_eq!(table.len(), past + 8, "{gates:x?}");
         assert_eq!(table[past..], sink.to_le_bytes(), "{gates:x?}");
     }
+    // The bound form's region holds one gate past its count.
+    for gates in 0..3 {
+        let past = PredicationStep::BOUND_GATES_OFFSET + gates * PredicationStep::GATE_BYTES;
+        assert_eq!(
+            PredicationStep::bound_bytes(gates),
+            past + PredicationStep::GATE_BYTES
+        );
+    }
     let record = PredicationStep::new(STEP_COUNTER, PredicationOp::End).record(STEP_RECORD);
     let field = PredicationStep::TABLE_OFFSET as usize;
     let empty = STEP_RECORD + PredicationStep::EMPTY_TABLE_OFFSET;
@@ -2209,6 +2323,55 @@ fn loop_run(
     let out = run(&m, &cfg, res).expect("run").buffers;
     assert_eq!(out[0], record, "the record is only read");
     assert_eq!(word(&out[2], 0), 7, "the word is only read");
+    let addressed = [word(&out[1], 0), word(&out[3], 0), word(&out[4], 0)];
+    let bound = bound_loop_run(step, (counter, flag, overflow));
+    assert_eq!(addressed, bound, "{op:?}: the addressed and the bound form");
+    addressed
+}
+
+/// [`loop_run`]'s step `step` in the bound form: every place at byte 0 of its binding, Metal's
+/// word 7 at [`BOUND_WORD_AT`] of its.
+fn bound_loop_run(step: PredicationStep, (counter, flag, overflow): (u32, u32, u32)) -> [u32; 3] {
+    let bound = PredicationStep {
+        counter: 0,
+        word: BOUND_WORD_AT as u64,
+        flag: 0,
+        overflow: 0,
+        ..step
+    };
+    let record = bound.record(0).to_vec();
+    let mut region = vec![0; PredicationStep::bound_bytes(0) as usize];
+    region[..record.len()].copy_from_slice(&record);
+    let mut words = vec![0xEE; BOUND_WORD_AT + 8];
+    words[BOUND_WORD_AT..BOUND_WORD_AT + 4].copy_from_slice(&7u32.to_le_bytes());
+    let bytes = [
+        region,
+        counter.to_le_bytes().to_vec(),
+        words,
+        flag.to_le_bytes().to_vec(),
+        overflow.to_le_bytes().to_vec(),
+    ];
+    let buffers = (super::predication::BOUND_SLOTS.into_iter())
+        .zip(bytes)
+        .map(|(slot, bytes)| Buffer {
+            slot: Some(slot),
+            address: None,
+            bytes,
+        })
+        .collect();
+    let res = Resources {
+        buffers,
+        push: Vec::new(),
+        spec: Default::default(),
+    };
+    let cfg = Config {
+        workgroups: [1, 1, 1],
+        ..Config::default()
+    };
+    let m = predication::bound_typed_module().expect("module");
+    let out = run(&m, &cfg, res).expect("run").buffers;
+    assert_eq!(out[0][..record.len()], record, "the record is only read");
+    assert_eq!(word(&out[2], BOUND_WORD_AT), 7, "the word is only read");
     [word(&out[1], 0), word(&out[3], 0), word(&out[4], 0)]
 }
 

@@ -2861,9 +2861,10 @@ each item named states the rule in full.
   may hold rules out every kind the check names (`IndirectCommandCheckNeeds::ALL` names both), the
   check has nothing to see, is never called, and the execution may run on the GPU alone.
 - **Command predication** (`encode_start_if`, `encode_start_else`, `encode_end_if` and the
-  while and do-while loops) runs Metal's blocks and loops, its unbalanced records answering `NO`
-  and dropping their ranges, and its live blocks left open where a unit ends failing the command
-  buffer as Metal's GPU recovery does (`PredicationOpenAtUnitEnd`). A loop is laid down as 64
+  while and do-while loops) runs Metal's blocks and loops on every device, with or without
+  buffer device addresses, its unbalanced records answering `NO` and dropping their ranges, and
+  its live blocks left open where a unit ends failing the command buffer as Metal's GPU recovery
+  does (`PredicationOpenAtUnitEnd`). A loop is laid down as 64
   copies (16 inside another loop); one that runs past them fails its command buffer
   (`PredicatedLoopPastCopies`), where Metal runs on. Refused where Metal runs on
   (`RuntimeGap`): a fourth loop open (`PredicatedLoopDepth`), a word past its buffer

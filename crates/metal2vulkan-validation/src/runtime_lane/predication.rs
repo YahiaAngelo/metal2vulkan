@@ -28,6 +28,8 @@ use super::{
 };
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
+use metal2vulkan::bind::PredicationStepForm;
+use metal2vulkan::device::VkFeature;
 use metal2vulkan::metal::{BarrierScope, DispatchType, IndirectCommandType, ResourceUsage};
 use metal2vulkan::pipeline::{ComputePipelineDescriptor, StageSource};
 use metal2vulkan_devtools::llvm_assemble_text;
@@ -227,13 +229,32 @@ fn on_device_at(level: MetalLevel, test: impl FnOnce(&Device)) {
     assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
 }
 
-/// Run `test` on a validated device, then require that the layer reported nothing.
-fn on_device(test: impl FnOnce(&Device)) {
+/// Run `test` on a validated device, then, where it has device addresses, on one made without
+/// them (`bufferDeviceAddress` withheld), whose step module binds its places
+/// (`PredicationStepForm::Bound`); after each, require that the layer reported nothing.
+fn on_device(test: impl Fn(&Device)) {
     let cache = ScratchCache::new().unwrap();
     let messages = Messages::default();
-    {
+    let addressed = {
         let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
-        println!("PRD device {}", device.name());
+        let form = PredicationStepForm::of(device.compile_device());
+        println!("PRD device {} {form:?}", device.name());
+        test(&device);
+        form == PredicationStepForm::Addressed
+    };
+    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+    if !addressed {
+        return;
+    }
+    let cache = ScratchCache::new().unwrap();
+    {
+        let without = |options: &mut metal2vulkan_runtime::DeviceOptions| {
+            (options.withheld_features).insert(VkFeature::BufferDeviceAddress);
+        };
+        let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), without).unwrap();
+        let form = PredicationStepForm::of(device.compile_device());
+        assert_eq!(form, PredicationStepForm::Bound, "without device addresses");
+        println!("PRD device {} {form:?}", device.name());
         test(&device);
     }
     assert_eq!(messages.take(), Vec::new(), "the validation layer reported");

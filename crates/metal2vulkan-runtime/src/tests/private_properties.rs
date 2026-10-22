@@ -23,15 +23,8 @@ fn answers(
     let (enabled, properties) = created_at(stem, desc, level);
     let compile = Device::new(enabled.clone(), DevicePolicy::UNTRUSTED).unwrap();
     let rows = all_audits(stem, desc).remove(&MEASURED_FAMILY).unwrap();
-    let predicates = compile.profile().addressed_needs().is_empty();
     let formats = |pf| format_capabilities(&enabled, &compile, level, pf);
-    PrivateProperties::of(
-        &properties,
-        compile.metal_properties(),
-        &rows,
-        predicates,
-        &formats,
-    )
+    PrivateProperties::of(&properties, compile.metal_properties(), &rows, &formats)
 }
 
 /// `ALL` lists each property once, in declaration order, under a selector of its own.
@@ -232,24 +225,25 @@ fn the_device_draws_the_public_primitive_types() {
     assert!(!properties.supports_primitive_type(u64::from(u32::MAX) + 1));
 }
 
-/// Command predication's properties answer as it runs: Metal's where the device has device
-/// addresses, which its step module reaches memory by, and none elsewhere.
+/// Command predication's properties answer Metal's on every device, with device addresses (whose
+/// step module reaches memory by them) or without (whose step module binds its places).
 #[test]
 fn predication_answers_where_it_runs() {
+    let mut seen = (0, 0);
     for (stem, desc) in committed_descriptions() {
         let (enabled, _) = created_at(&stem, &desc, MetalLevel::NEWEST);
         let compile = Device::new(enabled, DevicePolicy::UNTRUSTED).unwrap();
-        let runs = compile.profile().addressed_needs().is_empty();
+        match compile.profile().addressed_needs().is_empty() {
+            true => seen.0 += 1,
+            false => seen.1 += 1,
+        }
         let p = answers(&stem, &desc, MetalLevel::NEWEST);
         let jump = p.flag(PrivateFlag::SupportsCommandBufferJump).value();
-        assert_eq!(jump, Some(runs), "{stem}");
+        assert_eq!(jump, Some(true), "{stem}");
         let depth = p.count(PrivateCount::MaxPredicatedNestingDepth).value();
-        assert_eq!(
-            depth,
-            Some(if runs { u64::from(u32::MAX) } else { 0 }),
-            "{stem}"
-        );
+        assert_eq!(depth, Some(u64::from(u32::MAX)), "{stem}");
     }
+    assert!(seen.0 > 0 && seen.1 > 0, "{seen:?}");
 }
 
 /// `gpuCoreCount` is the device's where its driver reports its cores, and none elsewhere: never
@@ -261,16 +255,9 @@ fn the_core_count_and_fp16_are_the_devices() {
         let (enabled, properties) = created_at(&stem, &desc, MetalLevel::NEWEST);
         let compile = Device::new(enabled.clone(), DevicePolicy::UNTRUSTED).unwrap();
         let rows = all_audits(&stem, &desc).remove(&MEASURED_FAMILY).unwrap();
-        let predicates = compile.profile().addressed_needs().is_empty();
         let formats = |pf| format_capabilities(&enabled, &compile, MetalLevel::NEWEST, pf);
         let of = |properties: &DeviceProperties| {
-            PrivateProperties::of(
-                properties,
-                compile.metal_properties(),
-                &rows,
-                predicates,
-                &formats,
-            )
+            PrivateProperties::of(properties, compile.metal_properties(), &rows, &formats)
         };
         let unknown = of(&properties).count(PrivateCount::GpuCoreCount);
         assert_eq!(unknown.value(), None, "{stem}");
