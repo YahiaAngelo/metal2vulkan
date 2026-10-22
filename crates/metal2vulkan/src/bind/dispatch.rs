@@ -424,7 +424,7 @@ fn tile_layout_measured(width: u32, height: u32) -> bool {
     if (width, height) == (1, 1) {
         return true;
     }
-    let side = |n: u32| n % 2 == 0 && (2..=TILE_THREADGROUP_SIDE).contains(&n);
+    let side = |n: u32| n.is_multiple_of(2) && (2..=TILE_THREADGROUP_SIDE).contains(&n);
     side(width) && side(height)
 }
 
