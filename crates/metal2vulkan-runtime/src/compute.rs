@@ -2291,7 +2291,7 @@ fn record(
             unlisted,
             &format!("kernel `{kernel}`'s dispatches"),
         );
-        // A host step's dispatch, which no commit lists again, fails its command buffer.
+        // A host step's dispatch, which no commit lists again, runs with the states it listed.
         let mut held = core.command_buffer().state();
         held.unlisted_argument_sampler(&device);
     }

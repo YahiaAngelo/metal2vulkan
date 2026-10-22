@@ -81,7 +81,6 @@ impl Degradation {
                 // Points Metal sizes none of: what it draws is undefined, mostly nothing, and the
                 // runtime draws nothing.
                 | D::UnsizedPoints => Exactness::OneOfMetals,
-                D::UnlistedArgumentSampler => Exactness::FailsInstead(E::UnlistedArgumentSampler),
                 D::EncodedUseRebound => Exactness::FailsInstead(E::EncodedUseRebound),
                 _ => Exactness::NearEquivalent,
             },

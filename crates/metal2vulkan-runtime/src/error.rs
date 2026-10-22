@@ -1616,22 +1616,6 @@ pub enum CommandBufferError {
     /// the command buffer fails (`NotImplemented(SamplerBicubicFilter)`'s reach, decided where the
     /// function ran). A command buffer whose functions never reach such a sampler runs as Metal's.
     CubicArgumentSampler,
-    /// As the command buffer committed, a command's plan could not list the sampler states live
-    /// then, which Metal's function reaches by their resource IDs as it runs: a state past the
-    /// command's set-1 sampler arrays (more states live than they hold), more states than its
-    /// sampler tables hold (twice the class of the states live as it was encoded), or a state of a
-    /// shape the plan's checks refuse (such as a cubic state beside a fragment stage). The command
-    /// ran with the states it could list, so a function reading a state left out would have read
-    /// the neutral sampler, and the command buffer fails. So does one a command of which a host
-    /// step recorded after the commit (an indirect command buffer whose records the GPU writes)
-    /// left a live state out, more states living then than the command's set-1 sampler arrays hold:
-    /// no commit lists such a command again.
-    ///
-    /// The refusal is over-approximate: it fails the command buffer whether or not any function
-    /// reached the state left out, so it can fail a command buffer that Metal completes. Each is
-    /// counted (`WorkCounts::unlisted_argument_sampler_failures`), and the device announces the
-    /// first (`Degradation::UnlistedArgumentSampler`).
-    UnlistedArgumentSampler,
     /// An emulated mesh draw's records did not fit the rest of the command buffer's mesh records
     /// pool, or its vertices passed a `u32`: such draws drew nothing. Metal draws them; the
     /// runtime's pool is the device's budget, so nothing is drawn short silently. The first such
@@ -2007,7 +1991,6 @@ impl CommandBufferError {
             | CommandBufferError::Refused
             | CommandBufferError::RenderTargetSize
             | CommandBufferError::CubicArgumentSampler
-            | CommandBufferError::UnlistedArgumentSampler
             | CommandBufferError::HostStepObject(_)
             | CommandBufferError::EncodedUseRebound
             | CommandBufferError::PredicatedLoopPastCopies
@@ -2050,7 +2033,6 @@ impl CommandBufferError {
             | CommandBufferError::SparseMappingArguments(_)
             | CommandBufferError::SparseMappingSplit
             | CommandBufferError::CubicArgumentSampler
-            | CommandBufferError::UnlistedArgumentSampler
             | CommandBufferError::MeshRecordsOverflow(_)
             | CommandBufferError::TessellationRecordsOverflow(_)
             | CommandBufferError::Refused

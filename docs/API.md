@@ -1508,9 +1508,16 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-unlisted-argument-sampler` (precision). `UnlistedArgumentSampler`: A sampler
   state whose element no set-1 sampler array can hold, as more states live than it holds: the
   device's, as the state is made, or a pipeline's, as a command lists the argument samplers or its
-  command buffer lists them again as it commits or as the command's batch is submitted. Cost: a command buffer whose commands list the
-  argument samplers while the state lives fails (UnlistedArgumentSampler), where Metal's function
-  reads the state through its ID.
+  command buffer lists them again as it commits or as the command's batch is submitted. Or, as a
+  command buffer commits or the batch is submitted, more states live than a command's plan's
+  sampler tables hold, or one of a shape its checks refuse. The command runs with the states it
+  lists: those that fit its sampler arrays, where its tables hold them, else those it listed
+  before; each such command buffer is counted once (`WorkCounts::unlisted_argument_sampler_buffers`).
+  A command misses a state where more states live than its sampler arrays hold (at most the device's
+  update-after-bind sampler limit), or than its plan's tables hold, twice the capacity class of the
+  states live as it was encoded. Cost: a function reading the
+  state through its ID in an argument buffer reads the neutral sampler, where Metal's reads the
+  state.
 - `metal2vulkan-degrade-depth-twin` (performance). `DepthTwin`: A `Depth32Float` texture the program
   only reads or samples, on a device whose driver is not measured to keep every `float` in a depth
   image, is held in an `R32_SFLOAT` image with a `D32_SFLOAT` twin for the comparisons the device

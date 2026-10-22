@@ -271,7 +271,6 @@ fn a_command_buffer_error_names_whose_failure_it_is() {
         ),
         (E::SparseMappingSplit, Runtime, 1),
         (E::CubicArgumentSampler, Runtime, 1),
-        (E::UnlistedArgumentSampler, Runtime, 1),
         (E::MeshRecordsOverflow(overflow), Runtime, 8),
         (E::Refused, Runtime, 1),
         (

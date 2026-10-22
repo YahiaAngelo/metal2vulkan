@@ -1599,9 +1599,9 @@ pub(super) fn fit_samplers(
 
 /// Announce that `commands` (the commands of a function, named) leave the sampler state at
 /// resource ID `id` out of their argument samplers, their variant's set-1 sampler arrays holding
-/// `capacity` elements ([`fit_samplers`]): their command buffer fails as it completes, where the
-/// state still lives as it commits (`sampler_listing.rs`), or where a host step recorded them after
-/// the commit.
+/// `capacity` elements ([`fit_samplers`]): a function of theirs reading it reads the neutral
+/// sampler, where the state still lives as their command buffer commits (`sampler_listing.rs`),
+/// or where a host step recorded them after the commit.
 pub(super) fn degrade_unlisted(device: &Device, unlisted: (u64, u64), commands: &str) {
     device.degrade(Degradation::UnlistedArgumentSampler, || {
         unlisted_notice(unlisted, commands)
@@ -1614,8 +1614,8 @@ pub(super) fn unlisted_notice((id, capacity): (u64, u64), commands: &str) -> (St
         format!("sampler state at resource ID {id}"),
         format!(
             "{commands}' set-1 sampler arrays hold {capacity} elements, fewer than the live \
-             sampler states, so they leave the state out of their argument samplers and their \
-             command buffer fails (CommandBufferError::UnlistedArgumentSampler)"
+             sampler states, so they leave the state out of their argument samplers, and a \
+             function of theirs reading it reads the neutral sampler"
         ),
     )
 }

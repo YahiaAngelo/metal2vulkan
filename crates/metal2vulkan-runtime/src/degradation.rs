@@ -800,14 +800,18 @@ degradations! {
         /// is submitted (`sampler.rs`, `compute.rs`, `sampler_listing.rs`). Or, as a command
         /// buffer commits or the batch is submitted, more states live than a command's plan's
         /// sampler tables hold, or one of a shape its checks refuse (`sampler_listing.rs`): at the
-        /// submission, announced on the device's scheduler thread, outside any program call. A
-        /// command buffer whose command lists the argument samplers then
-        /// fails (`CommandBufferError::UnlistedArgumentSampler`), whether or not its functions
-        /// reach the state; each is counted (`WorkCounts::unlisted_argument_sampler_failures`).
+        /// submission, announced on the device's scheduler thread, outside any program call. The
+        /// command runs with the states it lists: those that fit its sampler arrays, where its
+        /// tables hold them, else those it listed before. Each command buffer that left a state
+        /// out is counted once, whether or not its functions reach the state
+        /// (`WorkCounts::unlisted_argument_sampler_buffers`). Where it happens: a command misses a
+        /// state where more states live than its sampler arrays hold (at most the device's
+        /// update-after-bind sampler limit), or than its plan's tables hold, twice the capacity
+        /// class of the states live as it was encoded, so where the live states more than doubled
+        /// between its encoding and its batch's submission.
         UnlistedArgumentSampler = "unlisted-argument-sampler", Precision,
-            "a command buffer whose commands list the argument samplers while the state lives \
-             fails (UnlistedArgumentSampler), where Metal's function reads the state through \
-             its ID";
+            "a function reading the state through its ID in an argument buffer reads the \
+             neutral sampler, where Metal's reads the state";
         /// A `Depth32Float` texture the program only reads or samples, on a device whose driver
         /// is not measured to keep every `float` in a depth image (`device/driver_facts.rs`: a
         /// denormal, and without `VK_EXT_depth_range_unrestricted` a value outside `[0, 1]`), is

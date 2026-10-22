@@ -56,7 +56,7 @@ pub(crate) struct Counters {
     variant_pipelines_made: AtomicU64,
     flights_followed: AtomicU64,
     variants_taken_back: AtomicU64,
-    unlisted_argument_sampler_failures: AtomicU64,
+    unlisted_argument_sampler_buffers: AtomicU64,
     host_step_sampler_sets_made: AtomicU64,
     creation_pipelines_made: AtomicU64,
     creation_pipelines_drawn: AtomicU64,
@@ -794,11 +794,10 @@ impl Counters {
         self.variants_taken_back.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// A command buffer committed whose commands' plans could not list the sampler states live
-    /// then (`sampler_listing.rs`), or whose host step's command left a live state out: it fails
-    /// `CommandBufferError::UnlistedArgumentSampler`.
-    pub(crate) fn unlisted_argument_sampler_failure(&self) {
-        self.unlisted_argument_sampler_failures
+    /// A command buffer committed whose commands' plans could not list every sampler state live
+    /// then (`sampler_listing.rs`), or whose host step's command left a live state out.
+    pub(crate) fn unlisted_argument_sampler_buffer(&self) {
+        self.unlisted_argument_sampler_buffers
             .fetch_add(1, Ordering::Relaxed);
     }
 
@@ -2447,13 +2446,14 @@ pub struct WorkCounts {
     pub flights_followed: u64,
     /// Variants made again that took back a released variant's objects and `VkPipeline`s.
     pub variants_taken_back: u64,
-    /// Command buffers committed whose commands' plans could not list the sampler states live
-    /// as they committed (`sampler_listing.rs`): a state past the sampler arrays, more states
-    /// than the plan's tables hold, or a shape its checks refuse; or one of whose commands a host
-    /// step recorded after the commit left a live state out, past the sampler arrays. Each fails
-    /// `CommandBufferError::UnlistedArgumentSampler` unless another error fails it first, and
-    /// is counted once whether or not its functions reach the state left out.
-    pub unlisted_argument_sampler_failures: u64,
+    /// Command buffers committed whose commands' plans could not list every sampler state live
+    /// as they committed or as their batches were submitted (`sampler_listing.rs`): a state past
+    /// the sampler arrays, more states than the plan's tables hold, or a shape its checks refuse;
+    /// or one of whose commands a host step recorded after the commit left a live state out, past
+    /// the sampler arrays. Each runs, a function reading a state left out reading the neutral
+    /// sampler (`Degradation::UnlistedArgumentSampler`), and is counted once whether or not its
+    /// functions reach the state left out.
+    pub unlisted_argument_sampler_buffers: u64,
     /// Immutable sampler sets a command buffer's host step made, counting samplers on the
     /// scheduler's thread, because the device's map held no set of its variant's samplers: the
     /// open break (a render execution's step drawing a state made after its commit, on the variant
@@ -3899,8 +3899,8 @@ impl Device {
             variant_pipelines_made: counters.variant_pipelines_made.load(Ordering::Relaxed),
             flights_followed: counters.flights_followed.load(Ordering::Relaxed),
             variants_taken_back: counters.variants_taken_back.load(Ordering::Relaxed),
-            unlisted_argument_sampler_failures: counters
-                .unlisted_argument_sampler_failures
+            unlisted_argument_sampler_buffers: counters
+                .unlisted_argument_sampler_buffers
                 .load(Ordering::Relaxed),
             host_step_sampler_sets_made: counters
                 .host_step_sampler_sets_made

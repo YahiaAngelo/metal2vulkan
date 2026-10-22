@@ -21,10 +21,11 @@
 //! - **Where they do not** (a state past the command's set-1 sampler arrays,
 //!   `heap_sets::fit_samplers`; more states than its tables hold; or a shape its checks refuse,
 //!   such as a cubic state beside a fragment stage), the command cannot reach every state as
-//!   Metal's function would, so its command buffer fails as it completes
-//!   (`CommandBufferError::UnlistedArgumentSampler`), announced once as `unlisted-argument-sampler`
-//!   and counted (`WorkCounts::unlisted_argument_sampler_failures`). The refusal is
-//!   over-approximate: it holds whether or not the function reaches the state left out.
+//!   Metal's function would: it runs with the states that fit the arrays where its tables hold
+//!   them, else with those it listed before, and a function reading a state left out reads the
+//!   neutral sampler. Announced as `unlisted-argument-sampler` and counted once per command buffer
+//!   (`WorkCounts::unlisted_argument_sampler_buffers`), whether or not a function reaches the
+//!   state left out.
 //!
 //! **Why the submission.** A batch is submitted only once every event it waits for is reached
 //! (`scheduler.rs`), and an event wait starts a batch of its own (`batches.rs`). So a state made
@@ -41,10 +42,8 @@
 //!
 //! A command a host step records after the commit is listed again by no commit: it lists the states
 //! live as it is recorded, and where more live than its set-1 sampler arrays hold, so that it
-//! leaves one out (`heap_sets::fit_samplers`), its command buffer fails as it completes
-//! (`CommandBufferError::UnlistedArgumentSampler`, `State::unlisted_argument_sampler`), announced
-//! and counted as above, where it completed with the function reading the neutral sampler for the
-//! state left out.
+//! leaves one out (`heap_sets::fit_samplers`), it runs with the others, announced and counted as
+//! above (`State::unlisted_argument_sampler`).
 
 use super::binding;
 use super::error::{internal, Error};
@@ -123,10 +122,10 @@ impl SamplerListing {
     /// List `live` again, the device's live states at the count `changed` of the sampler IDs'
     /// slots' changes, as the command buffer whose heap use is `heaps` commits or as the batch
     /// holding the command is submitted (the module docs): the Vulkan samplers the new elements
-    /// name, which the command buffer holds until it completes, or, where the command's plan cannot
-    /// list them (its command buffer then fails, `CommandBufferError::UnlistedArgumentSampler`),
-    /// the object and the reason of the `unlisted-argument-sampler` notice, for the caller to
-    /// announce.
+    /// name, which the command buffer holds until it completes, and, where the command's plan
+    /// cannot list every one, the object and the reason of the `unlisted-argument-sampler` notice,
+    /// for the caller to announce. The command then lists those that fit its sampler arrays, where
+    /// its tables hold them, else keeps those it listed.
     pub(super) fn relist(
         &mut self,
         device: &Device,
@@ -135,32 +134,36 @@ impl SamplerListing {
     ) -> Result<Relisted, Error> {
         self.listed_at = Some(changed);
         let mut live = live.to_vec();
-        let mut unlisted = None;
-        heap_sets::fit_samplers(Some(&self.heap), &mut live, &mut unlisted);
-        // A state past the command's sampler arrays, which no element of them holds.
-        if let Some(unlisted) = unlisted {
-            return Ok(Relisted::Unlisted(heap_sets::unlisted_notice(
-                unlisted,
-                &self.commands,
-            )));
-        }
+        let mut past = None;
+        // A state past the command's sampler arrays, which no element of them holds, is left out.
+        heap_sets::fit_samplers(Some(&self.heap), &mut live, &mut past);
+        let unlisted = past.map(|past| heap_sets::unlisted_notice(past, &self.commands));
         let samplers = heap_sets::listed(&live);
         if samplers == self.listed {
-            return Ok(Relisted::Listed(Vec::new()));
+            return Ok(Relisted {
+                samplers: Vec::new(),
+                unlisted,
+            });
         }
         let Some(bytes) = self
             .plan
             .relisted_sampler_tables(device.compile_device(), &samplers, self.placement)
             .map_err(Error::Bind)?
         else {
-            return Ok(Relisted::Unlisted((
-                format!("{} listing the argument samplers", self.commands),
-                "the sampler states live as their command buffer commits, or as their batch is \
-                 submitted, are more than their plan's sampler tables hold, or of a shape its \
-                 checks refuse, so the command buffer fails \
-                 (CommandBufferError::UnlistedArgumentSampler)"
-                    .to_owned(),
-            )));
+            let unlisted = unlisted.unwrap_or_else(|| {
+                (
+                    format!("{} listing the argument samplers", self.commands),
+                    "the sampler states live as their command buffer commits, or as their batch \
+                     is submitted, are more than their plan's sampler tables hold, or of a shape \
+                     its checks refuse, so the commands keep the states they listed before, and \
+                     a function reading another reads the neutral sampler"
+                        .to_owned(),
+                )
+            });
+            return Ok(Relisted {
+                samplers: Vec::new(),
+                unlisted: Some(unlisted),
+            });
         };
         for (key, region) in &self.tables {
             let table = bytes
@@ -174,14 +177,18 @@ impl SamplerListing {
             heap_sets::bind(device, &self.objects, heaps, writes, None)?;
         }
         self.listed = samplers;
-        Ok(Relisted::Listed(owned))
+        Ok(Relisted {
+            samplers: owned,
+            unlisted,
+        })
     }
 }
 
 /// What [`SamplerListing::relist`] made of the live states.
-pub(super) enum Relisted {
-    /// Listed: the Vulkan samplers the new elements name, none where nothing changed.
-    Listed(Vec<Arc<OwnedSampler>>),
-    /// Not listed: the object and the reason of the `unlisted-argument-sampler` notice.
-    Unlisted((String, String)),
+pub(super) struct Relisted {
+    /// The Vulkan samplers the new elements name, none where nothing changed.
+    pub(super) samplers: Vec<Arc<OwnedSampler>>,
+    /// Where a live state is left out, the object and the reason of the
+    /// `unlisted-argument-sampler` notice.
+    pub(super) unlisted: Option<(String, String)>,
 }

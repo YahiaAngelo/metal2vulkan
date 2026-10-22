@@ -483,8 +483,8 @@ impl Device {
                     format!(
                         "more sampler states live than a set-1 sampler array of the device \
                          holds ({limit:?} is {available}), so none holds its element {element}, \
-                         and a command buffer whose commands list the argument samplers while it \
-                         lives fails (CommandBufferError::UnlistedArgumentSampler)"
+                         and a function reading it through an argument buffer while it lives \
+                         reads the neutral sampler"
                     ),
                 )
             });

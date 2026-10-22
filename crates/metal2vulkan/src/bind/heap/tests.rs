@@ -976,8 +976,8 @@ fn sampler_tables_relist_states_of_the_plans_shapes() {
 /// samplers for a cubic filter, is relisted with `SamplerWord::CUBIC` in its flags, which the
 /// stage's test reads, whether the plan's list held a cubic state or not. Beside a stage that does
 /// not test (a fragment stage's table) a new cubic shape is not the plan's (`None`: the runtime
-/// fails the command buffer `UnlistedArgumentSampler`), as the plan itself refuses a listed one
-/// there.
+/// keeps the states listed before, announcing `unlisted-argument-sampler`), as the plan itself
+/// refuses a listed one there.
 #[test]
 fn a_late_cubic_sampler_is_listed_with_its_cubic_bit_beside_tested_stages() {
     use crate::metal::sampler::SamplerWord;

@@ -2572,32 +2572,32 @@ fn a_host_step_s_draw_of_a_state_made_after_the_commit_binds_a_neutral_made_befo
     });
 }
 
-/// The most sampler states [`a_host_step_s_draw_past_its_sampler_arrays_fails_its_command_buffer`]
+/// The most sampler states [`a_host_step_s_draw_past_its_sampler_arrays_runs_with_the_states_it_lists`]
 /// makes to crowd its variant's set-1 sampler arrays (`resource_ids`' crowd).
 const HOST_CROWD: u64 = 2048;
 
 /// A command a host step records after its command buffer's commit is listed again by no commit
 /// (`sampler_listing.rs`), so one that leaves a live sampler state out of its argument samplers,
 /// more states living than its variant's set-1 sampler arrays hold (`heap_sets::fit_samplers`),
-/// fails its command buffer as it completes (`CommandBufferError::UnlistedArgumentSampler`, Metal
-/// code 1), announced once (`UNLISTED`) and counted once
-/// (`WorkCounts::unlisted_argument_sampler_failures`), where the command buffer completed with the
-/// function reading the neutral sampler for the state left out. The host step draws, as in
+/// runs with the states it lists, announced once (`UNLISTED`) and counted once
+/// (`WorkCounts::unlisted_argument_sampler_buffers`): the command buffer completes, and a function
+/// reading a state left out would read the neutral sampler. The host step draws, as in
 /// [`a_host_step_s_draw_of_a_state_made_after_the_commit_binds_a_neutral_made_before_it`], a state
 /// made after the commit whose fragment function samples a texture through a sampler state its
 /// argument buffer holds (`render_arguments::SAMPLED`). With 20 more states made after the commit,
 /// within the arrays, the draw writes Metal's texels and nothing fails or is counted. The line
 /// `SAMPLER-CAPACITY` reports the step's variant's arrays; where they hold at most [`HOST_CROWD`]
-/// elements, as many more states made after the commit leave one out. Where they hold more (65536
+/// elements, as many more states made after the commit leave one out, and the draw, whose state
+/// was made before them and is listed, still writes Metal's texels. Where they hold more (65536
 /// on lavapipe and the M4), filling them takes more Vulkan samplers than lavapipe allows
 /// (`maxSamplerAllocationCount` 32768), so that half runs only on such a device.
 #[test]
-fn a_host_step_s_draw_past_its_sampler_arrays_fails_its_command_buffer() {
+fn a_host_step_s_draw_past_its_sampler_arrays_runs_with_the_states_it_lists() {
     let case = public_render(SAMPLED);
     let metal = case.metal_output.clone().unwrap();
     on_device(|device, messages| {
-        let failures = || device.work_counts().unlisted_argument_sampler_failures;
-        let before = failures();
+        let unlisted = || device.work_counts().unlisted_argument_sampler_buffers;
+        let before = unlisted();
         let render = &case.render;
         let fragment = render.fragment.as_ref().expect("a fragment case");
         let members = Members::of(device, fragment);
@@ -2695,7 +2695,7 @@ fn a_host_step_s_draw_past_its_sampler_arrays_fails_its_command_buffer() {
         let (command_buffer, target) = step(20);
         assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
         assert_eq!(output(&case, &target, &members), metal, "Metal's texels");
-        assert_eq!(failures(), before, "20 more states");
+        assert_eq!(unlisted(), before, "20 more states");
         let made = [sampled_descriptor(device, &case)];
         assert_made_once(messages, &HOST_STEPS, &forced_with(device, &made));
         let executions = command_buffer.executions();
@@ -2717,12 +2717,11 @@ fn a_host_step_s_draw_past_its_sampler_arrays_fails_its_command_buffer() {
             device.name()
         );
         if u64::from(capacity) <= HOST_CROWD {
-            let (command_buffer, _) = step(capacity.into());
-            assert_eq!(command_buffer.status(), CommandBufferStatus::Error);
-            let error = command_buffer.error().expect("the command buffer's error");
-            assert_eq!(error, CommandBufferError::UnlistedArgumentSampler);
-            assert_eq!(error.metal_code(), 1);
-            assert_eq!(failures(), before + 1, "counted once");
+            let (command_buffer, target) = step(capacity.into());
+            assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+            assert_eq!(command_buffer.error(), None);
+            assert_eq!(output(&case, &target, &members), metal, "past the arrays");
+            assert_eq!(unlisted(), before + 1, "counted once");
             let steps = HOST_STEPS.into_iter().collect();
             assert_made_once(messages, &UNLISTED, &steps);
         }
