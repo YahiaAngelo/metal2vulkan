@@ -2,9 +2,13 @@
 //! (`executeCommandsInBuffer:withRange:`).
 //!
 //! - **When.** As a compute encoder's (`indirect_execute.rs`), an execution runs the records as
-//!   they stand when the command buffer is committed: Metal's sees CPU writes made after the
-//!   call and before commit, and the GPU's writes before it where an encoder made the buffer
-//!   resident for writing. So the call records nothing for the commands:
+//!   they stand when its batch is submitted: Metal's reads them as it runs, so it sees CPU writes
+//!   made after the call, and the GPU's writes before it where an encoder made the buffer
+//!   resident for writing. `commit` records the CPU's records as they stand then; where the CPU
+//!   writes them again before the pass's batch is ready to submit (an event wait holds it), the
+//!   host step records the pass again from the records as they stand then, waiting for no work
+//!   on the GPU and announcing nothing. A CPU write after the batch was submitted races the GPU,
+//!   as on Metal. So the call records nothing for the commands:
 //!   the instance it is encoded in ends its secondary command buffer there and goes on in a new
 //!   one, the execution's own secondary standing between the two ([`Piece`](super::Piece)).
 //!   A secondary command buffer must be recorded before a primary executes it, so a pass with an
@@ -319,6 +323,7 @@ use metal2vulkan::pipeline::{CommandWrites, VertexStride};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 mod ahead;
@@ -411,9 +416,9 @@ impl RenderLowering {
         range_buffer: &Buffer,
         offset: u64,
         check: IndirectCommandCheck,
+        needs: IndirectCommandCheckNeeds,
     ) -> Result<(), Error> {
-        let check = (check, IndirectCommandCheckNeeds::ALL);
-        self.execute_indirect_range(icb, range_buffer, offset, Some(check))
+        self.execute_indirect_range(icb, range_buffer, offset, Some((check, needs)))
     }
 
     /// [`execute_commands_in_buffer_indirect`](Self::execute_commands_in_buffer_indirect), with
@@ -729,6 +734,7 @@ impl RenderLowering {
                 .as_ref()
                 .map_or(IndirectCommandCheckNeeds::ALL, |(_, needs)| *needs),
             check: check.map(|(check, _)| Mutex::new(check)),
+            read_at: AtomicU64::new(indirect_execute::NOT_READ),
         });
         // Its commands may name any pipeline state, reading handles in any stage.
         self.command_encoded(every_render_stage());
@@ -738,9 +744,10 @@ impl RenderLowering {
 
 impl RenderCommandEncoder {
     /// `executeCommandsInBuffer:withRange:`: run render commands `range` of `icb` here, as their
-    /// records stand when the command buffer is committed, or, where an encoder made `icb`
-    /// resident for writing, once the work before them completed (a host step the device
-    /// announces once, `Degradation::HostReplayedIndirectCommands`). Each draws as this
+    /// records stand when the command buffer's batch that executes them is submitted (the commit
+    /// reads them, and the batch's submission again where the CPU wrote them since), or, where an
+    /// encoder made `icb` resident for writing, once the work before them completed (a host step
+    /// the device announces once, `Degradation::HostReplayedIndirectCommands`). Each draws as this
     /// encoder's `draw_primitives`, `draw_indexed_primitives` or `draw_patches` would, with the
     /// encoder's state as it is now, and its own pipeline state and buffers, or the encoder's
     /// where `icb` inherits them (the module docs).
@@ -772,16 +779,16 @@ impl RenderCommandEncoder {
     }
 
     /// [`execute_commands_in_buffer`](Self::execute_commands_in_buffer) with a check of the
-    /// commands its host step runs (a runtime extension; Metal has none), which looks for `needs`:
-    /// where a host step records the pass from the records as the GPU and the CPU left them (an
-    /// encoder made `icb` resident for writing, `IndirectCommandBuffer::gpu_written`), the step
-    /// first calls `check` with each command of the range it will record, in order, before it
-    /// records any of them ([`IndirectCommandCheck`]). An execution `commit` records from the CPU's
-    /// records never calls it; nor does one that runs on the GPU alone (`render/executions/gpu.rs`),
-    /// which it may only where what `icb`'s records may hold, at the commit and again as the
-    /// pass's batch is ready to submit, rules out every kind `needs` names
-    /// ([`IndirectCommandCheckNeeds`], [`IndirectCommandCheckNeeds::ALL`] included). Refused as
-    /// [`execute_commands_in_buffer`](Self::execute_commands_in_buffer) refuses.
+    /// commands it runs (a runtime extension; Metal has none), which looks for `needs`: where the
+    /// commit records the pass from the CPU's records, or a host step from the records as the GPU
+    /// and the CPU left them (an encoder made `icb` resident for writing,
+    /// `IndirectCommandBuffer::gpu_written`), it first calls `check` with each command of the range
+    /// it will record, in order, before it records any of them ([`IndirectCommandCheck`]). Neither
+    /// calls it where what `icb`'s records may hold rules out every kind `needs` names
+    /// ([`IndirectCommandCheckNeeds`], [`IndirectCommandCheckNeeds::ALL`] included); nor does an
+    /// execution that runs on the GPU alone (`render/executions/gpu.rs`), which it may only where
+    /// they rule them out at the commit and again as the pass's batch is ready to submit. Refused
+    /// as [`execute_commands_in_buffer`](Self::execute_commands_in_buffer) refuses.
     pub fn execute_commands_in_buffer_checked(
         &mut self,
         icb: &IndirectCommandBuffer,
@@ -840,11 +847,12 @@ impl RenderCommandEncoder {
     }
 
     /// [`execute_commands_in_buffer_indirect`](Self::execute_commands_in_buffer_indirect) with a
-    /// check of the commands its host step runs, which always records the pass: the step first
-    /// calls `check` with each command of the range it read that it will record, in order, before
-    /// it records any of them, as
+    /// check of the commands its host step runs, which always records the pass, looking for
+    /// `needs`: the step first calls `check` with each command of the range it read that it will
+    /// record, in order, before it records any of them, as
     /// [`execute_commands_in_buffer_checked`](Self::execute_commands_in_buffer_checked)'s does
-    /// ([`IndirectCommandCheck`]). Refused as
+    /// ([`IndirectCommandCheck`]), unless what `icb`'s records may hold then rules out every kind
+    /// `needs` names ([`IndirectCommandCheckNeeds`]). Refused as
     /// [`execute_commands_in_buffer_indirect`](Self::execute_commands_in_buffer_indirect) refuses.
     pub fn execute_commands_in_buffer_indirect_checked(
         &mut self,
@@ -852,6 +860,7 @@ impl RenderCommandEncoder {
         range_buffer: &Buffer,
         offset: u64,
         check: IndirectCommandCheck,
+        needs: IndirectCommandCheckNeeds,
     ) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| {
@@ -860,11 +869,12 @@ impl RenderCommandEncoder {
                     range_buffer,
                     offset,
                     check,
+                    needs,
                 )
             }),
             false => self.defer(|_| {
                 let check = SharedCheck::new(check);
-                let call = (icb.clone(), range_buffer.clone(), offset, check);
+                let call = (icb.clone(), range_buffer.clone(), offset, check, needs);
                 RenderCall::ExecuteIndirectChecked(Box::new(call))
             }),
         }
@@ -920,6 +930,10 @@ pub(crate) struct RenderExecution {
     /// What the check looks for, which decides whether the execution may run on the GPU alone
     /// (`gpu.rs`): every kind where it has no check.
     needs: IndirectCommandCheckNeeds,
+    /// Where `commit` recorded it from the CPU's records, the count of the CPU's writes of them it
+    /// read them after (`IndirectCommandBuffer::cpu_writes`); `indirect_execute::NOT_READ` until
+    /// then ([`rewritten`](Self::rewritten)).
+    read_at: AtomicU64,
 }
 
 /// The encoder's state an execution's draws take: as the call found it, its tables only where
@@ -2402,6 +2416,37 @@ impl RenderExecution {
         core
     }
 
+    /// What its check, if any, may see among commands whose records may hold `written`
+    /// (`IndirectCommandCheckNeeds::sees`): draws of points, and commands under states that may
+    /// encode indirect commands (the encoder's state where the buffer inherits it, else those the
+    /// records may name, `IndirectCommandBuffer::may_name_encoding_states`), each where it looks
+    /// for them; neither without a check.
+    fn check_sees(&self, written: CommandWrites) -> (bool, bool) {
+        if self.check.is_none() {
+            return (false, false);
+        }
+        let encodes = || match &self.pipeline {
+            Some(pipeline) => pipeline.can_encode_indirect_commands(),
+            None => self.icb.may_name_encoding_states(),
+        };
+        self.needs.sees(written, encodes)
+    }
+
+    /// Whether `commit` recorded it from the CPU's records and the CPU wrote the buffer's records
+    /// since ([`read_at`](Self::read_at)): the pass's host step records it again, from the
+    /// records as they stand then, before its batch is submitted.
+    fn rewritten(&self) -> bool {
+        let read_at = self.read_at.load(Ordering::Acquire);
+        read_at != indirect_execute::NOT_READ && self.icb.cpu_writes() != read_at
+    }
+
+    /// Whether its check may see something among its commands, as its buffer's records may hold
+    /// them now ([`check_sees`](Self::check_sees)).
+    fn check_sees_now(&self) -> bool {
+        let (points, encodes) = self.check_sees(self.icb.command_writes());
+        points || encodes
+    }
+
     /// The commands of the range, in order, `None` where a record runs nothing for a fault, and
     /// the faults: the CPU's records, or for the host step the records as the GPU and the CPU
     /// left them, each naming its state among the live ones made with
@@ -2420,16 +2465,26 @@ impl RenderExecution {
             }
             // The execution announces the commands it runs otherwise than Metal's may, as it
             // records them.
+            let start = range.start;
+            // Counted before the records are read: a write meanwhile records it again.
+            self.read_at.store(self.icb.cpu_writes(), Ordering::Release);
             let (commands, released) = self.icb.render_records(range, Reader::Commit)?;
             self.icb.degrade_released(&released);
+            // The caller's check sees each command `commit` will record, before it records any,
+            // where it may see something.
+            if let Some(check) = self.check.as_ref().filter(|_| self.check_sees_now()) {
+                let read = commands.iter().map(|(record, _)| record);
+                self.icb.check_read(check, start, read);
+            }
             return Ok((
                 commands.into_iter().map(Some).collect(),
                 ReplayFaults::default(),
             ));
         }
         let written = self.icb.written_records(range.clone())?;
-        // The caller's check sees each command the step will record, before it records any.
-        if let Some(check) = &self.check {
+        // The caller's check sees each command the step will record, before it records any,
+        // where it may see something.
+        if let Some(check) = self.check.as_ref().filter(|_| self.check_sees_now()) {
             self.icb
                 .check_recorded(check, range.start, &written.records);
         }
@@ -2797,12 +2852,24 @@ impl DeferredPass {
     /// Whether a route encoded since `commit` recorded the pass with executions in their GPU form
     /// may write more into one of their buffers than the decision found (`gpu.rs`): a route that
     /// runs before the pass, which a command buffer enqueued before its own and committed after it
-    /// may hold, may have written commands the GPU form does not run. Until its batch is
-    /// submitted, the host step records the pass instead (`Deferred::outgrown`).
+    /// may hold, may have written commands the GPU form does not run; or the CPU wrote the records
+    /// of one of its other executions, which `commit` read ([`rewritten`](Self::rewritten)). Until
+    /// its batch is submitted, the host step records the pass instead (`Deferred::outgrown`).
     pub(crate) fn outgrown(&self) -> bool {
-        lock(&self.on_gpu)
-            .iter()
-            .any(|(written, decided)| written.writes() != *decided)
+        let on_gpu = lock(&self.on_gpu);
+        !on_gpu.is_empty()
+            && (on_gpu
+                .iter()
+                .any(|(written, decided)| written.writes() != *decided)
+                || self.rewritten())
+    }
+
+    /// Whether `commit` recorded one of its executions from the CPU's records, which the CPU
+    /// wrote since (`RenderExecution::rewritten`): its host step records the pass again, from the
+    /// records as they stand then, before its batch is submitted (`Deferred::rewritten`; where
+    /// `commit` recorded the pass on the GPU for good, [`outgrown`](Self::outgrown)).
+    pub(crate) fn rewritten(&self) -> bool {
+        self.executions.iter().any(RenderExecution::rewritten)
     }
 
     /// [`record`](Self::record), each execution with a GPU form among `forms` (by index) in it.

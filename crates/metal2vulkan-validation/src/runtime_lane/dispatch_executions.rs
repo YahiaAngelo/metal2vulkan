@@ -23,13 +23,22 @@
 //!   and with one more in the host step, which runs it faster;
 //! - inside a block of command predication, nothing where the block skips and every command where
 //!   it holds, from the preprocess's gate;
-//! - a checked execution, and one whose range is read from a buffer, keep the host step, announced
-//!   once, and run the same.
+//! - an execution `commit` recorded from the CPU's records (no encoder made the buffer resident
+//!   for writing) whose records the CPU writes after the commit, before the batch is submitted (it
+//!   waits for an event), runs them as written then, recorded again from the records then, and
+//!   announces nothing; without the write, the commit's recording runs;
+//! - a checked execution whose check has nothing to see (no state the records may name encodes
+//!   indirect commands) runs on the GPU alone, its check never called, and one whose range is read
+//!   from a buffer keeps the host step, which does not call it either; where a state the CPU set
+//!   on a command may encode, the host step of either calls it with each command before any runs,
+//!   a check that looks for nothing still uncalled; where the CPU sets such a state after the
+//!   commit, before the batch is submitted, the host step records the execution instead and calls
+//!   the check. Each runs the same; the host step is announced once.
 
 use super::degrade_notices::assert_made_once;
 use super::generated_executions::flat_template;
 use super::host_memory::Seen;
-use super::indirect_host_steps::HOST_STEPS;
+use super::indirect_host_steps::{self, HOST_STEPS};
 use super::rebind_reach::{buffer_len, buffer_over, pages};
 use super::rebinds::rebind;
 use super::shared_kinds;
@@ -44,8 +53,10 @@ use metal2vulkan_devtools::llvm_assemble_text;
 use metal2vulkan_runtime::{
     Buffer, CommandBuffer, CommandBufferStatus, ComputeCommandEncoder, ComputePipelineState,
     Degradation, Device, EventRef, ExecutedPipeline, IndirectCommandBuffer,
-    IndirectCommandBufferDescriptor, PipelineOptions, ResourceOptions, Size,
+    IndirectCommandBufferDescriptor, IndirectCommandCheck, IndirectCommandCheckNeeds,
+    PipelineOptions, ResourceOptions, Size,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// `flat_mark(params, out, p)`: each thread adds `params[0] * 1000 + p.x` to `out[p.x]` by a
@@ -171,6 +182,13 @@ fn expected(ran: std::ops::Range<usize>) -> Vec<u32> {
             }
         }
     }
+    out
+}
+
+/// [`expected`] over a buffer of `size` commands: those past [`PLAN`]'s run nothing.
+fn expected_of(size: u64, ran: std::ops::Range<usize>) -> Vec<u32> {
+    let mut out = expected(ran);
+    out.resize(size as usize * WINDOW, 0);
     out
 }
 
@@ -646,49 +664,204 @@ fn predicated_executions_run_as_their_blocks_say() {
     });
 }
 
-/// A checked execution (the caller's check runs in the host step), and one whose range is read
-/// from a buffer, keep the host step, announced once; both run what Metal runs.
+/// A state that may encode indirect commands (`icb_replay_encode`'s), made with
+/// `supportIndirectCommandBuffers`: a command the CPU sets it on may name a state that encodes.
+fn encoding_state(device: &Device) -> ComputePipelineState {
+    indirect_host_steps::state(device, "icb_replay_encode", true)
+}
+
+/// A check that counts its calls, and the count.
+fn counting() -> (IndirectCommandCheck, Arc<AtomicUsize>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&calls);
+    let check: IndirectCommandCheck = Box::new(move |_, _| {
+        counted.fetch_add(1, Ordering::SeqCst);
+    });
+    (check, calls)
+}
+
+/// An execution of the CPU's records, which `commit` records (no encoder made the buffer resident
+/// for writing), runs the records as they stand when its batch is submitted, as Metal's execution
+/// reads them as it runs: where the CPU resets command 0 after the commit, before the batch is
+/// submitted (it waits for an event the test signals after the reset), a host step records the
+/// execution again from the records then (each record read again), command 0 runs nothing and the
+/// rest run; without the reset, the commit's recording runs, each record read once. Nothing is
+/// announced but the split of a ragged grid the dispatches take.
 #[test]
-fn checked_and_indirect_range_executions_keep_the_host_step() {
+fn the_cpu_s_writes_after_the_commit_run_where_the_batch_waits() {
     on_device(|device, messages| {
         let queue = device.new_command_queue().unwrap();
-        for form in ["checked", "indirect range"] {
+        for write in [false, true] {
             let setup = Setup::new(device);
+            let event = device.new_shared_event().unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            command_buffer
+                .encode_wait_for_event(EventRef::from(&event), 1)
+                .unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            setup.resident(&mut encoder);
+            encoder
+                .execute_commands_in_buffer(&setup.icb, 0..COMMANDS)
+                .unwrap();
+            encoder.end_encoding().unwrap();
+            let before = device.work_counts().indirect_records_read;
+            command_buffer.commit().unwrap();
+            if write {
+                let command = setup.icb.indirect_compute_command_at(0).unwrap();
+                command.reset().unwrap();
+            }
+            event.set_signaled_value(1);
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+            assert_eq!(
+                command_buffer.execution_report(),
+                Some(StatusReport::default())
+            );
+            let read = device.work_counts().indirect_records_read - before;
+            assert!(!setup.icb.gpu_written(), "write {write}");
+            let ran = if write { 1 } else { 0 };
+            assert_eq!(
+                setup.output(),
+                expected(ran..COMMANDS as usize),
+                "write {write}"
+            );
+            let reads = if write { 2 * COMMANDS } else { COMMANDS };
+            assert_eq!(read, reads, "write {write}: the records read");
+        }
+        announced(device, messages, &[Degradation::SplitDispatch]);
+    });
+}
+
+/// A checked execution's check is called only where what the buffer's records may hold leaves it
+/// something to see (`IndirectCommandCheckNeeds`): with the flat states alone, which encode no
+/// indirect commands, a check that looks for every kind is never called, and a range given as
+/// such runs on the GPU alone, while one read from a buffer keeps the host step; once the CPU set
+/// a state that may encode on a command outside the range, the host step of either calls it with
+/// each command of the range, and a check that looks for nothing is still never called. Each runs
+/// what Metal runs; the host step is announced once.
+#[test]
+fn checked_executions_call_their_check_where_it_may_see_something() {
+    on_device(|device, messages| {
+        let queue = device.new_command_queue().unwrap();
+        let (all, none) = (
+            IndirectCommandCheckNeeds::ALL,
+            IndirectCommandCheckNeeds::new(false, false),
+        );
+        let mut encoding = None;
+        for (encodes, needs, indirect) in [
+            (false, all, false),
+            (false, all, true),
+            (true, all, false),
+            (true, all, true),
+            (true, none, false),
+            (true, none, true),
+        ] {
+            let setup = Setup::sized(device, COMMANDS + 1);
+            if encodes {
+                // Made only now: with it alive, the GPU-alone path would run its variant too.
+                let encoding = encoding.get_or_insert_with(|| encoding_state(device));
+                let outside = setup.icb.indirect_compute_command_at(COMMANDS).unwrap();
+                outside.set_compute_pipeline_state(encoding).unwrap();
+            }
             let command_buffer = queue.command_buffer().unwrap();
             setup.writable(&command_buffer);
             let range = buffer_with(device, &[0, 0, 0, 0, COMMANDS as u8, 0, 0, 0]).unwrap();
-            let checked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let (check, calls) = counting();
             let mut encoder = command_buffer.compute_command_encoder().unwrap();
             setup.resident(&mut encoder);
-            match form {
-                "checked" => {
-                    let seen = std::sync::Arc::clone(&checked);
-                    encoder
-                        .execute_commands_in_buffer_checked(
-                            &setup.icb,
-                            0..COMMANDS,
-                            Box::new(move |_, _| {
-                                seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            }),
-                            metal2vulkan_runtime::IndirectCommandCheckNeeds::ALL,
-                        )
-                        .unwrap();
-                }
-                _ => encoder
-                    .execute_commands_in_buffer_indirect(&setup.icb, &range, 0)
-                    .unwrap(),
+            match indirect {
+                false => encoder.execute_commands_in_buffer_checked(
+                    &setup.icb,
+                    0..COMMANDS,
+                    check,
+                    needs,
+                ),
+                true => encoder.execute_commands_in_buffer_indirect_checked(
+                    &setup.icb, &range, 0, check, needs,
+                ),
             }
+            .unwrap();
             encoder.end_encoding().unwrap();
             complete(&command_buffer);
-            assert_eq!(setup.output(), expected(0..COMMANDS as usize), "{form}");
-            assert!(!ran_flat(&command_buffer), "{form}");
-            if form == "checked" {
-                // The check saw each command the step recorded.
-                assert!(checked.load(std::sync::atomic::Ordering::Relaxed) > 0);
+            let at = format!("encodes {encodes}, {needs:?}, indirect {indirect}");
+            let want = expected_of(COMMANDS + 1, 0..COMMANDS as usize);
+            assert_eq!(setup.output(), want, "{at}");
+            let called = encodes && needs == all;
+            let expected_calls = if called { COMMANDS as usize } else { 0 };
+            assert_eq!(calls.load(Ordering::SeqCst), expected_calls, "{at}");
+            if !encodes {
+                assert_eq!(ran_flat(&command_buffer), !indirect, "{at}");
+            } else if called {
+                assert!(!ran_flat(&command_buffer), "{at}");
             }
         }
         // The check reads the commands, which answer the runtime's unique identifiers of their
         // states, announced as the getter announces them.
+        let identifiers = [Degradation::UnmeasuredUniqueIdentifier];
+        let kinds: Vec<Degradation> = STEPPED.iter().chain(&identifiers).copied().collect();
+        announced(device, messages, &kinds);
+    });
+}
+
+/// A checked execution `commit` recorded on the GPU alone, its check having nothing to see (the
+/// flat states encode no indirect commands), takes the host step where the CPU sets a state that
+/// may encode on a command after the commit, before the batch is submitted (it waits for an event
+/// the test signals after the set): the step calls the check with each command of the range and
+/// runs what Metal runs, in a serial and in a concurrent encoder (whose GPU-alone recording kept
+/// what its batch's submission would record again). Without the set the check is never called and
+/// the commands run on the GPU alone.
+#[test]
+fn a_check_given_something_to_see_after_the_commit_takes_the_host_step() {
+    on_device(|device, messages| {
+        let queue = device.new_command_queue().unwrap();
+        let mut encoding = None;
+        for (dispatch_type, set) in [
+            (DispatchType::Serial, false),
+            (DispatchType::Serial, true),
+            (DispatchType::Concurrent, true),
+        ] {
+            let setup = Setup::sized(device, COMMANDS + 1);
+            let event = device.new_shared_event().unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            setup.writable(&command_buffer);
+            command_buffer
+                .encode_wait_for_event(EventRef::from(&event), 1)
+                .unwrap();
+            let mut encoder = command_buffer
+                .compute_command_encoder_with_dispatch_type(dispatch_type)
+                .unwrap();
+            setup.resident(&mut encoder);
+            let (check, calls) = counting();
+            encoder
+                .execute_commands_in_buffer_checked(
+                    &setup.icb,
+                    0..COMMANDS,
+                    check,
+                    IndirectCommandCheckNeeds::new(false, true),
+                )
+                .unwrap();
+            encoder.end_encoding().unwrap();
+            command_buffer.commit().unwrap();
+            if set {
+                // Made after the commit, which recorded the states alive then.
+                let encoding = encoding.get_or_insert_with(|| encoding_state(device));
+                let outside = setup.icb.indirect_compute_command_at(COMMANDS).unwrap();
+                outside.set_compute_pipeline_state(encoding).unwrap();
+            }
+            event.set_signaled_value(1);
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+            assert_eq!(
+                command_buffer.execution_report(),
+                Some(StatusReport::default())
+            );
+            let at = format!("{dispatch_type:?}, set {set}");
+            let want = expected_of(COMMANDS + 1, 0..COMMANDS as usize);
+            assert_eq!(setup.output(), want, "{at}");
+            let expected_calls = if set { COMMANDS as usize } else { 0 };
+            assert_eq!(calls.load(Ordering::SeqCst), expected_calls, "{at}");
+            assert_eq!(ran_flat(&command_buffer), !set, "{at}");
+        }
         let identifiers = [Degradation::UnmeasuredUniqueIdentifier];
         let kinds: Vec<Degradation> = STEPPED.iter().chain(&identifiers).copied().collect();
         announced(device, messages, &kinds);

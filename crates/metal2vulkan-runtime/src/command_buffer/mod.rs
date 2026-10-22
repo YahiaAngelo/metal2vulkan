@@ -3042,8 +3042,12 @@ impl CommandBufferShared {
             summaries.push(&encoder.summary);
             for segment in &encoder.segments {
                 match &segment.recorded {
-                    // One recorded again on the GPU alone uses what its recording does.
-                    Some(recording) if !segment.needs_step() || segment.rerecords() => {
+                    // One recorded again on the GPU alone uses what its recording does; one a
+                    // route outgrew, what its host step finds.
+                    Some(recording)
+                        if !segment.needs_step()
+                            || (segment.rerecords() && !segment.work.outgrown()) =>
+                    {
                         summaries.push(&recording.summary)
                     }
                     _ => known.push(segment.known_summary(&self.device)?),
@@ -3102,11 +3106,17 @@ impl CommandBufferShared {
         if steps.is_empty() {
             return;
         }
-        // The first segment a host step records, which the device announces: a recording on the
-        // GPU alone made again announces nothing (`gpu_execute::Rerecord`).
+        // The first segment a host step records for what the GPU may write, which the device
+        // announces: a recording on the GPU alone made again announces nothing
+        // (`gpu_execute::Rerecord`), unless a route outgrew it (`Deferred::outgrown`), which the
+        // step records from the records; nor does work recorded again for the CPU's writes since
+        // the commit alone (`Deferred::rewritten`), or for its pipelines alone.
         let announced = steps
             .iter()
-            .find(|(_, _, inputs)| !matches!(inputs, Some(StepInputs::Rerecord(_))))
+            .find(|(_, work, inputs)| {
+                work.gpu_written()
+                    && (!matches!(inputs, Some(StepInputs::Rerecord(_))) || work.outgrown())
+            })
             .map(|(_, work, _)| work.clone());
         let buffer = CommandBuffer(Arc::clone(self));
         for ((encoder, at), work, inputs) in steps {

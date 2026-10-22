@@ -95,6 +95,7 @@ use metal2vulkan::metal::{BarrierScope, DispatchType, RenderStages, ResourceUsag
 use metal2vulkan::pipeline::Stage;
 use std::collections::BTreeMap;
 use std::ops::Range;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// Entries of a compute encoder's threadgroup memory table.
@@ -1073,16 +1074,16 @@ impl ComputeCommandEncoder {
     }
 
     /// [`execute_commands_in_buffer`](Self::execute_commands_in_buffer) with a check of the
-    /// commands its host step runs (a runtime extension; Metal has none): where a host step
-    /// records the execution from the records as the GPU and the CPU left them (an encoder made
-    /// `icb` resident for writing, or the execution lies inside a block of command predication),
-    /// the step first calls `check` with each command it will record, in order, before it records
-    /// any of them ([`IndirectCommandCheck`]); `needs` is what it looks for
-    /// ([`IndirectCommandCheckNeeds`], the render encoder's shape). An execution recorded at the
-    /// commit from the CPU's records never calls it, and one with a check never runs on the GPU
-    /// alone (`VK_EXT_device_generated_commands`), whatever its `needs`, so the step always reads
-    /// the records. Refused as [`execute_commands_in_buffer`](Self::execute_commands_in_buffer)
-    /// refuses.
+    /// commands it runs (a runtime extension; Metal has none), which looks for what `needs` names
+    /// ([`IndirectCommandCheckNeeds`]; a compute command draws no points): where the commit records
+    /// the execution from the CPU's records, or a host step from the records as the GPU and the CPU
+    /// left them (an encoder made `icb` resident for writing, or the execution lies inside a block
+    /// of command predication), it first calls `check` with each command it will record, in order,
+    /// before it records any of them ([`IndirectCommandCheck`]). Where what the records may hold
+    /// leaves the check nothing to see, neither calls it, and an execution a host step would record
+    /// may run on the GPU alone, as an unchecked one may; a route encoded after the commit that
+    /// gives the check something to see before the batch is submitted sends it to the host step.
+    /// Refused as [`execute_commands_in_buffer`](Self::execute_commands_in_buffer) refuses.
     pub fn execute_commands_in_buffer_checked(
         &mut self,
         icb: &IndirectCommandBuffer,
@@ -1154,11 +1155,12 @@ impl ComputeCommandEncoder {
     }
 
     /// [`execute_commands_in_buffer_indirect`](Self::execute_commands_in_buffer_indirect) with a
-    /// check of the commands its host step runs, which always records it: the step first calls
-    /// `check` with each command of the range it read that it will record, in order, before it
-    /// records any of them, as
+    /// check of the commands its host step runs, which always records it, looking for what `needs`
+    /// names: the step first calls `check` with each command of the range it read that it will
+    /// record, in order, before it records any of them, as
     /// [`execute_commands_in_buffer_checked`](Self::execute_commands_in_buffer_checked)'s does
-    /// ([`IndirectCommandCheck`]). Refused as
+    /// ([`IndirectCommandCheck`]), unless what the records may hold then leaves the check nothing
+    /// to see ([`IndirectCommandCheckNeeds`]). Refused as
     /// [`execute_commands_in_buffer_indirect`](Self::execute_commands_in_buffer_indirect) refuses.
     pub fn execute_commands_in_buffer_indirect_checked(
         &mut self,
@@ -1166,9 +1168,9 @@ impl ComputeCommandEncoder {
         range_buffer: &Buffer,
         offset: u64,
         check: IndirectCommandCheck,
+        needs: IndirectCommandCheckNeeds,
     ) -> Result<(), Error> {
-        let check = (check, IndirectCommandCheckNeeds::ALL);
-        self.execute_indirect_range(icb, range_buffer, offset, Some(check))
+        self.execute_indirect_range(icb, range_buffer, offset, Some((check, needs)))
     }
 
     /// [`execute_commands_in_buffer_indirect`](Self::execute_commands_in_buffer_indirect), with
@@ -1247,8 +1249,8 @@ impl ComputeCommandEncoder {
             let mut state = self.core.command_buffer().state();
             let held = &mut *state;
             let gate = held.predication.host_gate();
-            let (further, preprocess_gate) = match (&gate, &range, &check) {
-                (Some(_), ExecutionRange::Fixed(range), None) if !range.is_empty() => {
+            let (further, preprocess_gate) = match (&gate, &range) {
+                (Some(_), ExecutionRange::Fixed(range)) if !range.is_empty() => {
                     let count = [range.len() as u32, 1, 1];
                     let (further, mut gates) =
                         held.predication
@@ -1271,6 +1273,8 @@ impl ComputeCommandEncoder {
             gate,
             preprocess_gate,
             check: check.map(|(check, needs)| (Mutex::new(check), needs)),
+            unchecked: Mutex::new(None),
+            read_at: AtomicU64::new(indirect_execute::NOT_READ),
         })))?;
         // Its commands may name any pipeline state.
         self.command_encoded(true);

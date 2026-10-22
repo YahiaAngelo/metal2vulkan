@@ -63,7 +63,7 @@
 //!   commit: a CPU setter, or a route encoded since. Where it grew by the time the pass's batch is
 //!   otherwise ready to submit (`DeferredPass::outgrown`, `Segment::needs_step`), the host step
 //!   records the pass instead, as for any pass whose records the GPU may write, and calls the
-//!   caller's check. Every writer the runtime orders before the pass was committed by then: a
+//!   caller's check where it then has something to see. Every writer the runtime orders before the pass was committed by then: a
 //!   queue's batches go in commit order, and a batch that waits for an event is ready only once a
 //!   submitted signal reaches it. A CPU write after that races the GPU, as on Metal.
 //! - **Faults.** A record the host's decode refuses draws nothing, and the execution report
@@ -392,22 +392,12 @@ impl RenderExecution {
     /// Whether the caller's check, if any, has nothing to see among commands whose records may
     /// hold `written`, under the encoder's state, which the buffer inherits: neither draws of
     /// points (a primitive type the writes do not state counts as one) nor a state that may encode
-    /// indirect commands where it looks for them (`IndirectCommandCheckNeeds`); else which of
+    /// indirect commands where it looks for them (`RenderExecution::check_sees`); else which of
     /// those it may see.
     fn check_has_nothing_to_see(&self, written: CommandWrites) -> Result<(), HostStepCause> {
-        let needs = self.needs;
-        let points = written.may_draw_primitive_type(PrimitiveType::Point.as_raw());
-        let encodes = self
-            .pipeline
-            .as_ref()
-            .is_none_or(|pipeline| pipeline.can_encode_indirect_commands());
-        let (points, encodes) = (
-            needs.point_draws && points,
-            needs.encoding_states && encodes,
-        );
-        match self.check.is_some() && (points || encodes) {
-            true => Err(HostStepCause::Check { points, encodes }),
-            false => Ok(()),
+        match self.check_sees(written) {
+            (false, false) => Ok(()),
+            (points, encodes) => Err(HostStepCause::Check { points, encodes }),
         }
     }
 

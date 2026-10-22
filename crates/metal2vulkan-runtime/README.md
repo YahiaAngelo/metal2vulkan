@@ -247,11 +247,11 @@ Calls Metal does not have, for a consumer that emulates a Metal device:
 - Resource ID reservations, placements and counts (`Device::reserve_resource_ids`,
   `IdPlacement`, `Device::sampler_ids_live`), and the private getters of indirect commands.
 - `execute_commands_in_buffer_checked` and `execute_commands_in_buffer_indirect_checked` (render and
-  compute encoders) take an `IndirectCommandCheck`, which the host step that records an execution
-  from records the GPU may have written calls with each command it will record, before it records
-  any. `execute_commands_in_buffer_checked` takes what the check looks for too
-  (`IndirectCommandCheckNeeds`): a render execution whose records cannot hold any of it runs on
-  the GPU alone where it can, and never calls the check.
+  compute encoders) take an `IndirectCommandCheck` and what it looks for
+  (`IndirectCommandCheckNeeds`). Wherever the runtime reads an execution's records, at `commit` for
+  the CPU's or in the host step for records the GPU may have written, it calls the check with each
+  command it will record, before it records any; an execution whose records cannot hold what the
+  check looks for never calls it, and runs on the GPU alone where it can.
 - `HostMemory::with_dma_buf` and its `DmaBufSource`: dma-bufs of a no-copy object's pages, for a
   device that refuses their pointer.
 

@@ -5,6 +5,7 @@
 //! (`command_buffer`).
 
 use super::command_buffer::CommandBuffer;
+use super::device::lock;
 use super::encoder::RecordedSegment;
 use super::error::{internal, Error};
 use super::gpu_execute::{self, Rerecord};
@@ -138,15 +139,27 @@ impl Deferred {
         let device = command_buffer.device();
         match self {
             Deferred::Execute(execute) if step => {
-                // On the GPU alone where it is total (`gpu_execute.rs`): not a checked execution,
-                // whose step reads its records for the caller's check, nor one inside a block of
-                // command predication without its preprocess's gate, whose step reads the counter.
+                // On the GPU alone where it is total (`gpu_execute.rs`): not a checked execution
+                // whose check may see something, whose step reads its records for the check, nor
+                // one inside a block of command predication without its preprocess's gate, whose
+                // step reads the counter. A checked one's host step, where a route encoded since
+                // gives its check something to see (`Execute::outgrown`), is settled now.
                 if let Some((recorded, inputs)) = self.record_on_gpu(command_buffer)? {
+                    let retained: Option<Box<dyn Any + Send + Sync>> = match &execute.check {
+                        Some(_) => {
+                            let residency = command_buffer.residency()?.kernel();
+                            let Settled { states, variants } =
+                                execute.settle(device, execute.states(device), &residency);
+                            *lock(&execute.unchecked) = Some(states);
+                            Some(Box::new(variants))
+                        }
+                        None => None,
+                    };
                     return Ok(Prepared {
                         recorded: Some(recorded),
                         for_good: true,
                         inputs,
-                        retained: None,
+                        retained,
                         pipelines: false,
                     });
                 }
@@ -307,6 +320,12 @@ impl Deferred {
     ) -> Result<RecordedSegment, Error> {
         match self {
             Deferred::Execute(execute) => {
+                // Recorded on the GPU alone with a check a route encoded since gave something to
+                // see: recorded from the records as the GPU and the CPU left them, naming states
+                // among those `commit` settled, for good.
+                if let Some(states) = execute.take_outgrown() {
+                    return execute.record(command_buffer, Some(&states));
+                }
                 let states = match inputs {
                     StepInputs::Settled(states) => states.clone(),
                     StepInputs::Unforeseen(unforeseen) => {
@@ -332,15 +351,27 @@ impl Deferred {
     }
 
     /// Whether a route encoded since `commit` recorded the work for good on the GPU may write
-    /// more than `commit` decided on (`DeferredPass::outgrown`): its host step records it
-    /// instead, before its batch is submitted. A render pass's executions' GPU form alone.
+    /// more than `commit` decided on (`DeferredPass::outgrown`), or gives the check of an
+    /// execution recorded there something to see (`Execute::outgrown`): its host step records it
+    /// instead, before its batch is submitted. A render pass's executions' GPU form, and an
+    /// execution's on the GPU alone with a check.
     pub(super) fn outgrown(&self) -> bool {
         match self {
             Deferred::RenderPass(pass) => pass.outgrown(),
-            Deferred::Execute(_)
-            | Deferred::Dispatch(_)
-            | Deferred::SparseScrub(_)
-            | Deferred::Pending(_) => false,
+            Deferred::Execute(execute) => execute.outgrown(),
+            Deferred::Dispatch(_) | Deferred::SparseScrub(_) | Deferred::Pending(_) => false,
+        }
+    }
+
+    /// Whether `commit` recorded it from the CPU's records of an indirect command buffer the CPU
+    /// wrote since (`Execute::rewritten`, `DeferredPass::rewritten`): its host step records it
+    /// again from the records as they stand then, before its batch is submitted, waiting for no
+    /// work on the GPU.
+    pub(super) fn rewritten(&self) -> bool {
+        match self {
+            Deferred::Execute(execute) => execute.rewritten(),
+            Deferred::RenderPass(pass) => pass.rewritten(),
+            Deferred::Dispatch(_) | Deferred::SparseScrub(_) | Deferred::Pending(_) => false,
         }
     }
 

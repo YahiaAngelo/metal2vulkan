@@ -654,9 +654,11 @@ degradations! {
         /// its records may hold, at the commit or as its batch is ready, more than draws of one
         /// primitive type under the encoder's state, or what its check looks for
         /// (`render/executions/gpu.rs`); its notice names the first rule that kept it from the GPU
-        /// alone. A compute execution: with the caller's check
-        /// (`execute_commands_in_buffer_checked`); with its range read from a buffer; of a buffer
-        /// that inherits the encoder's buffers; where its records may name a pipeline state whose
+        /// alone. A compute execution: with a caller's check (`execute_commands_in_buffer_checked`)
+        /// that may see what it looks for (`IndirectCommandCheckNeeds`: a state that may encode
+        /// indirect commands, the encoder's where the buffer inherits it, else one its records may
+        /// name), at the commit or as its batch is ready; with its range read from a buffer; of a
+        /// buffer that inherits the encoder's buffers; where its records may name a pipeline state whose
         /// kernel observes its threadgroup partition or fetches `[[stage_in]]` attributes, or a
         /// state the CPU set that the program released since; and, on a device without
         /// `VK_EXT_device_generated_commands`, where the host step is faster: where its commands

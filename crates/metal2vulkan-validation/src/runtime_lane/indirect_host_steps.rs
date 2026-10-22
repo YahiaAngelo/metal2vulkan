@@ -16,7 +16,8 @@
 //! - a sticky encoding fault in the header runs no command, and the execution report says so;
 //! - an execution reads its range from a buffer as it runs;
 //! - a checked execution's host step checks each command before it records any, from the records
-//!   it read once;
+//!   it read once; `commit` checks the CPU's records it records the same way, where a state the
+//!   records may name may encode, and never where none may;
 //! - the blit encoder's copy, reset and optimize act on the commands as they run;
 //! - a kernel reaches the buffer made last with the ID it encodes through, placed or not, and
 //!   none once that one is gone;
@@ -52,7 +53,6 @@ use metal2vulkan_runtime::{
     RecordsRead, ResourceId, ResourceOptions, Size,
 };
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
@@ -423,9 +423,12 @@ fn commands_a_kernel_writes_run_after_it() {
 /// step calls the check once for each command it records, in order, with the command as
 /// `IndirectCommandBuffer::commands` reads it (each a dispatch), before it records any: the
 /// commands' windows of `out` are all still zero at every call. An execution of the CPU's records
-/// in a buffer no encoder made resident for writing, which `commit` records, never calls it, and
-/// both run as their plain forms run. The commands the check reads answer the runtime's unique
-/// identifiers of their states, which the device announces as the getter does.
+/// in a buffer no encoder made resident for writing, which `commit` records, calls it there, on
+/// the committing thread before `commit` returns, with each command, where the CPU set a state
+/// that may encode on one of them (since replaced by the template); where no state the records
+/// may name may, never. All run as their plain forms run. The commands the check reads answer
+/// the runtime's unique identifiers of their states, which the device announces as the getter
+/// does.
 #[test]
 fn a_checked_execution_checks_each_written_command_before_its_step_records_it() {
     on_device_forcing(&[Degradation::UnmeasuredUniqueIdentifier], |device| {
@@ -469,34 +472,60 @@ fn a_checked_execution_checks_each_written_command_before_its_step_records_it() 
             every,
             "each command, before any runs"
         );
-        // The CPU's records, recorded at the commit: no call.
-        let setup = Setup::new(device, 2);
-        setup.write_on_the_cpu();
-        let calls = Arc::new(AtomicUsize::new(0));
-        let counted = Arc::clone(&calls);
-        let command_buffer = queue.command_buffer().unwrap();
-        let mut encoder = command_buffer.compute_command_encoder().unwrap();
-        encoder
-            .use_resource(setup.params.as_resource(), ResourceUsage::READ)
-            .unwrap();
-        encoder
-            .use_resource(setup.out.as_resource(), ResourceUsage::WRITE)
-            .unwrap();
-        encoder
-            .execute_commands_in_buffer_checked(
-                &setup.icb,
-                0..COMMANDS,
-                Box::new(move |_, _| {
-                    counted.fetch_add(1, Ordering::SeqCst);
-                }),
-                IndirectCommandCheckNeeds::ALL,
-            )
-            .unwrap();
-        encoder.end_encoding().unwrap();
-        complete(&command_buffer);
-        assert!(!setup.icb.gpu_written());
-        assert_eq!(setup.output(), expected(), "the CPU's records run");
-        assert_eq!(calls.load(Ordering::SeqCst), 0, "no host step, no check");
+        // The CPU's records, recorded at the commit: checked there where a state they may name
+        // may encode.
+        let encoding = state(device, "icb_replay_encode", true);
+        for encodes in [false, true] {
+            let setup = Setup::new(device, 2);
+            if encodes {
+                let command = setup.icb.indirect_compute_command_at(0).unwrap();
+                command.set_compute_pipeline_state(&encoding).unwrap();
+            }
+            setup.write_on_the_cpu();
+            let seen: Arc<Mutex<Vec<(u64, std::thread::ThreadId)>>> = Arc::default();
+            let log = Arc::clone(&seen);
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            encoder
+                .use_resource(setup.params.as_resource(), ResourceUsage::READ)
+                .unwrap();
+            encoder
+                .use_resource(setup.out.as_resource(), ResourceUsage::WRITE)
+                .unwrap();
+            encoder
+                .execute_commands_in_buffer_checked(
+                    &setup.icb,
+                    0..COMMANDS,
+                    Box::new(move |index, _| {
+                        log.lock()
+                            .unwrap()
+                            .push((index, std::thread::current().id()));
+                    }),
+                    IndirectCommandCheckNeeds::ALL,
+                )
+                .unwrap();
+            encoder.end_encoding().unwrap();
+            command_buffer.commit().unwrap();
+            let at_commit = seen.lock().unwrap().clone();
+            wait(&command_buffer);
+            assert!(!setup.icb.gpu_written());
+            assert_eq!(
+                setup.output(),
+                expected(),
+                "the CPU's records run, encodes {encodes}"
+            );
+            let committing = std::thread::current().id();
+            let every: Vec<(u64, std::thread::ThreadId)> = match encodes {
+                true => (0..COMMANDS).map(|index| (index, committing)).collect(),
+                false => Vec::new(),
+            };
+            assert_eq!(at_commit, every, "checked in `commit`, encodes {encodes}");
+            assert_eq!(
+                *seen.lock().unwrap(),
+                every,
+                "and only there, encodes {encodes}"
+            );
+        }
     });
 }
 

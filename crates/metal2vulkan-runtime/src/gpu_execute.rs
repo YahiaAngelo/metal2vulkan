@@ -5,8 +5,9 @@
 //! - **Totality, decided at commit.** An execution a host step would record (`indirect_execute.rs`:
 //!   its buffer an encoder made resident for writing, or it lies inside a block of command
 //!   predication) runs here where every record it may hold is covered: its range is given as
-//!   such, not read from a buffer; no caller's check is given (`execute_commands_in_buffer_checked`
-//!   runs its check in the host step, before the commands reach the device); the buffer does not
+//!   such, not read from a buffer; a caller's check (`execute_commands_in_buffer_checked`) has
+//!   nothing to see (`Execute::check_sees`), else the host step runs it before the commands reach
+//!   the device; the buffer does not
 //!   inherit the encoder's buffers; every pipeline state its records may name (the encoder's where
 //!   the buffer inherits it, else every state made with `supportIndirectCommandBuffers` alive at
 //!   the commit) compiles as a flat device-replay variant (`ComputePipelineState::replay_variant`:
@@ -19,7 +20,9 @@
 //!   every grid and threadgroup size of its state, so the records' contents cannot leave a command
 //!   uncovered. Otherwise the execution takes the host step (`indirect_execute.rs`, part 3a), which
 //!   the device announces once (`Degradation::HostReplayedIndirectCommands`). Nothing is decided at
-//!   run time.
+//!   run time, but for a checked execution whose check a route encoded since the commit gives
+//!   something to see before its batch is submitted: its host step records it then
+//!   (`Execute::outgrown`), from the states `commit` settled for it.
 //! - **What runs.** One segment: the replay's preprocess (`bind::replay_preprocess_module`, an
 //!   owned kernel) over the range, reading the records where the GPU and the CPU left them and
 //!   writing each command's slot table, region record, and what the recording reads; a barrier;
@@ -252,9 +255,9 @@ pub(super) fn record(
     command_buffer: &CommandBuffer,
     execute: &Execute,
 ) -> Result<Option<(RecordedSegment, Option<Arc<Rerecord>>)>, Error> {
-    // A checked execution's host step runs the caller's check first; one inside a block of
-    // command predication runs here only from its preprocess's gate.
-    if execute.check.is_some() || (execute.predicated() && execute.preprocess_gate.is_none()) {
+    // A checked execution's host step runs the caller's check first, where it may see something;
+    // one inside a block of command predication runs here only from its preprocess's gate.
+    if execute.check_sees() || (execute.predicated() && execute.preprocess_gate.is_none()) {
         return Ok(None);
     }
     let device = command_buffer.device();

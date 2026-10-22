@@ -50,10 +50,13 @@
 //!   encoder's viewport, scissor, cull mode and winding); the scissor rectangle and viewport counts
 //!   and `allowOverrideRenderStates` are kept, and change nothing a command draws.
 //! - **Read-back.** [`IndirectCommandBuffer::commands`] decodes a range of records into typed
-//!   commands, a runtime extension standing for Metal's private getters.
+//!   commands, and each command's getters ([`IndirectComputeCommand::command_type`],
+//!   [`IndirectRenderCommand::draw`] and the rest) read one field of its record: runtime
+//!   extensions standing for Metal's private getters.
 //! - **Execution.** A compute encoder's `execute_commands_in_buffer` runs a range of the records
-//!   as they stand at commit ([`indirect_execute`](super::indirect_execute)); it refuses a buffer
-//!   of render commands, which a render encoder's runs (`render/executions.rs`).
+//!   as they stand when the execution's batch is submitted, or for records the GPU may write, once
+//!   the work before it completed ([`indirect_execute`](super::indirect_execute)); it refuses a
+//!   buffer of render commands, which a render encoder's runs (`render/executions.rs`).
 //! - **Creation.** The records of every command must fit one buffer of the device's
 //!   `max_buffer_length`; a larger buffer is refused, naming the limit. The record format holds
 //!   every render command type, mesh draws among them, whose object and mesh buffers a command sets
@@ -96,7 +99,7 @@ use metal2vulkan::metal::{
 use metal2vulkan::pipeline::CommandWrites;
 use std::num::NonZeroU64;
 use std::ops::Range;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 /// The threadgroup lengths a fresh descriptor binds, as Metal's answers.
@@ -585,6 +588,7 @@ impl Device {
             pipelines: Mutex::new(vec![None; size as usize]),
             gpu_written: AtomicBool::new(false),
             unforeseen: Mutex::new(Vec::new()),
+            cpu_writes: AtomicU64::new(0),
             barriers: AtomicBool::new(false),
             overflow,
             written: Arc::default(),
@@ -919,6 +923,10 @@ struct IcbShared {
     /// The executions `commit` recorded from the CPU's records before the flag was set, held
     /// weakly until it is (`watch`, `written_by_gpu`).
     unforeseen: Mutex<Vec<Weak<Unforeseen>>>,
+    /// The CPU's writes of the records and of the slots past them so far, counted
+    /// ([`cpu_writes`](IndirectCommandBuffer::cpu_writes)). Each adds under `pipelines`, after it
+    /// wrote.
+    cpu_writes: AtomicU64,
     /// The CPU set a render command's barrier: an execution's render pass instance may split at
     /// it (`render/executions.rs`), for good.
     barriers: AtomicBool,
@@ -1136,7 +1144,24 @@ impl IndirectCommandBuffer {
                 COMMAND_BYTES,
             );
         }
+        self.wrote();
         Ok(())
+    }
+
+    /// Count a write of the CPU's ([`cpu_writes`](Self::cpu_writes)), made. The caller holds
+    /// `pipelines`.
+    fn wrote(&self) {
+        self.0.cpu_writes.fetch_add(1, Ordering::Release);
+    }
+
+    /// The CPU's writes of the records, and of the slots past them, so far: setters, resets and
+    /// the CPU's range resets. An execution `commit` recorded from the CPU's records reads it
+    /// before it reads them; where it moved by the time the execution's batch is ready to submit,
+    /// a host step records the execution again from the records as they stand then
+    /// (`indirect_execute.rs`, `render/executions.rs`), as Metal's execution reads them as it
+    /// runs.
+    pub(super) fn cpu_writes(&self) -> u64 {
+        self.0.cpu_writes.load(Ordering::Acquire)
     }
 
     /// Reset commands `range` (inside the size).
@@ -1334,6 +1359,7 @@ impl IndirectCommandBuffer {
                 written.len(),
             );
         }
+        self.wrote();
         let pipeline = &mut pipelines[index as usize];
         if let Some(set) = set {
             *pipeline = Some(set);
@@ -1464,6 +1490,7 @@ impl IndirectCommandBuffer {
                 bytes.len(),
             );
         }
+        self.wrote();
         Ok(())
     }
 
@@ -1527,6 +1554,7 @@ impl IndirectCommandBuffer {
                 (bytes.end - bytes.start) as usize,
             );
         }
+        self.wrote();
         Ok(())
     }
 
@@ -1641,10 +1669,29 @@ impl IndirectCommandBuffer {
         start: u32,
         recorded: &[Option<CommandRecord>],
     ) {
-        let held: Vec<(u32, &CommandRecord)> = (start..)
+        let held = (start..)
             .zip(recorded)
             .filter_map(|(index, record)| Some((index, record.as_ref()?)))
             .collect();
+        self.check_held(check, held);
+    }
+
+    /// Call `check` on each command of `read`, the records `commit` read of commands from
+    /// `start` (inside the size), in order, as [`commands`](Self::commands) reads them now:
+    /// `commit`'s check of the commands it records from the CPU's records, before it records any
+    /// ([`IndirectCommandCheck`]). None is read again.
+    pub(super) fn check_read<'r>(
+        &self,
+        check: &Mutex<IndirectCommandCheck>,
+        start: u32,
+        read: impl Iterator<Item = &'r CommandRecord>,
+    ) {
+        self.check_held(check, (start..).zip(read).collect());
+    }
+
+    /// Call `check` on each of `held`, a command's index and its record, in order, as
+    /// [`commands`](Self::commands) reads them now, the state the CPU set on each as it is now.
+    fn check_held(&self, check: &Mutex<IndirectCommandCheck>, held: Vec<(u32, &CommandRecord)>) {
         if held.is_empty() {
             return;
         }
@@ -3041,23 +3088,35 @@ fn low_bits(size: Size) -> [u32; 3] {
     [size.width, size.height, size.depth].map(|axis| axis as u32)
 }
 
-/// A check of the commands an execution's host step runs (a runtime extension; Metal has none),
-/// given to `execute_commands_in_buffer_checked` or `execute_commands_in_buffer_indirect_checked`
-/// of a render or a compute encoder. Where a host step records the execution from the records as
-/// the GPU and the CPU left them, it calls the check once for each command it will record, in
-/// order, before it records any command of the range, on the thread that runs the step: with the
+/// A check of the commands an execution runs (a runtime extension; Metal has none), given with
+/// what it looks for ([`IndirectCommandCheckNeeds`]) to `execute_commands_in_buffer_checked` or
+/// `execute_commands_in_buffer_indirect_checked` of a render or a compute encoder. Where the
+/// runtime reads the records of the commands it will record for the execution, it calls the check
+/// once for each of them, in order, before it records any command of the range, with the
 /// command's index in the buffer and the command as [`IndirectCommandBuffer::commands`] reads it
-/// then. A command whose record faulted runs nothing and is not checked; nor is any where the
-/// buffer's header faulted. The check may end the process, and must not unwind; returning lets the
-/// commands run. A command buffer dropped before its host step never calls it.
+/// then: at `commit`, on the thread that commits, where it records the execution from the CPU's
+/// records as they stand then; in a host step, on the thread that runs the step, where the step
+/// records it from the records as the GPU and the CPU left them. An execution `commit` recorded
+/// that a host step records again before its batch is submitted (an encoder made its buffer
+/// resident for writing since, or a route outgrew its render pass's form on the GPU) is checked
+/// again there. Neither calls it
+/// where what the records may hold leaves it nothing to see ([`IndirectCommandCheckNeeds`]). A
+/// command whose record faulted runs nothing and is not checked; nor is any where the buffer's
+/// header faulted. The check may end the process, and must not unwind; returning lets the commands
+/// run. A command buffer dropped before its host step never calls the step's check.
 pub type IndirectCommandCheck = Box<dyn FnMut(u64, &IndirectCommand) + Send + 'static>;
 
 /// What an [`IndirectCommandCheck`] looks for among an execution's commands (a runtime extension;
-/// Metal has none), given with it to `execute_commands_in_buffer_checked`. Where what the
-/// buffer's records may hold, as the runtime last decides on before the execution runs, rules out
-/// every kind it names, the check has nothing to see: an execution that then runs on the GPU
-/// alone never calls it, and no host step reads the records for it. Where it does not, a host
-/// step calls the check with every command, as for [`IndirectCommandCheckNeeds::ALL`].
+/// Metal has none), given with it to `execute_commands_in_buffer_checked` and
+/// `execute_commands_in_buffer_indirect_checked`. Where what the buffer's records may hold, as
+/// the runtime last decides on before it would read them for the check, rules out every kind it
+/// names, the check has nothing to see and is not called: an execution may then run on the GPU
+/// alone, and neither `commit` nor a host step calls the check, or reads the records for it. A
+/// record that holds no draw and no dispatch runs nothing, so a buffer into whose records no route
+/// wrote one leaves every check nothing to see. Where what the records may hold grows past what
+/// left the check nothing to see by the time an execution that runs on the GPU alone is ready to
+/// submit, a host step records it instead and calls the check. Where it does not rule them out,
+/// the check is called with every command, as for [`IndirectCommandCheckNeeds::ALL`].
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct IndirectCommandCheckNeeds {
@@ -3088,7 +3147,33 @@ impl IndirectCommandCheckNeeds {
             encoding_states,
         }
     }
+
+    /// What a check of these needs may see among commands whose records may hold `writes`, where
+    /// `encodes` answers whether a state they may run may encode indirect commands (asked only
+    /// where it decides): draws of points (a primitive type `writes` do not state counts as one)
+    /// and commands under such states, each where it looks for them; neither where no record may
+    /// hold a draw or a dispatch, as such a record runs nothing.
+    pub(super) fn sees(
+        self,
+        writes: CommandWrites,
+        encodes: impl FnOnce() -> bool,
+    ) -> (bool, bool) {
+        if !writes.may(RUNS) {
+            return (false, false);
+        }
+        let points =
+            self.point_draws && writes.may_draw_primitive_type(PrimitiveType::Point.as_raw());
+        (points, self.encoding_states && encodes())
+    }
 }
+
+/// The operations of a record that runs something: a draw of any kind, or a dispatch
+/// ([`IndirectCommandCheckNeeds::sees`]).
+const RUNS: u32 = CommandWrites::DRAW
+    | CommandWrites::DRAW_INDEXED
+    | CommandWrites::DRAW_PATCHES
+    | CommandWrites::DRAW_MESH
+    | CommandWrites::DISPATCH;
 
 /// One command of an indirect command buffer, as [`IndirectCommandBuffer::commands`] reads it: a
 /// runtime extension standing for Metal's private getters.

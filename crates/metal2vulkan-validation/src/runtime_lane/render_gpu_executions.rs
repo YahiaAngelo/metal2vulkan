@@ -15,6 +15,12 @@
 //!   written) is never called, and the commands draw on the GPU; where the CPU writes a point
 //!   draw after the commit, before the pass's batch is ready, the host step records the pass
 //!   instead and calls the check;
+//! - a check of the CPU's records, which `commit` records, is called there with each command,
+//!   before `commit` returns, where the records may hold draws of points and it looks for them;
+//!   never where they hold triangles alone, or where it looks for nothing;
+//! - the CPU's records, which `commit` records, written again after the commit, before the pass's
+//!   batch is submitted (it waits for an event), draw as written then, the host step recording
+//!   the pass again and announcing nothing;
 //! - two executions of one buffer in one pass draw each its own range;
 //! - a buffer that may hold a barrier takes the host step, announced once;
 //! - an address outside the resident resources misses, counted, while its neighbours draw;
@@ -383,6 +389,122 @@ fn facts_that_grow_before_the_batch_is_ready_take_the_host_step() {
         let reason = host_step_reason(messages);
         assert!(reason.contains("grew after the commit"), "{reason}");
         assert_made_once(messages, &HOST_STEPS, &forced_with(device, &[]));
+    });
+}
+
+/// A check of commands the CPU wrote, in a buffer no encoder made resident for writing, which
+/// `commit` records from the CPU's records: `commit` calls it with each command of the range
+/// before it returns, where the CPU drew points and the check looks for them; where the CPU drew
+/// triangles alone, or the check looks for nothing, never. The commands draw the same each time,
+/// and no host step runs.
+#[test]
+fn commit_checks_the_cpu_s_records_where_the_check_may_see_something() {
+    on_device(|device, messages| {
+        let points = IndirectCommandCheckNeeds::new(true, false);
+        let nothing = IndirectCommandCheckNeeds::new(false, false);
+        for (primitive_type, needs) in [
+            (PrimitiveType::Point, points),
+            (PrimitiveType::Triangle, points),
+            (PrimitiveType::Point, nothing),
+        ] {
+            let setup = Setup::new(device);
+            let icb = icb(device, &inheriting(1), 4);
+            for index in 0..4 {
+                buffers(&setup, &icb, index, index as usize);
+                icb.indirect_render_command_at(index)
+                    .unwrap()
+                    .draw_primitives(primitive_type, 0, 3, 1, 0)
+                    .unwrap();
+            }
+            let seen: Arc<Mutex<Vec<u64>>> = Arc::default();
+            let log = Arc::clone(&seen);
+            let queue = device.new_command_queue().unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.render_command_encoder(&pass()).unwrap();
+            encoder.set_render_pipeline_state(&setup.state).unwrap();
+            setup.resident(&mut encoder);
+            encoder
+                .execute_commands_in_buffer_checked(
+                    &icb,
+                    0..4,
+                    Box::new(move |index, _| log.lock().unwrap().push(index)),
+                    needs,
+                )
+                .unwrap();
+            encoder.end_encoding().unwrap();
+            let (_, read) = counted(device, || command_buffer.commit().unwrap());
+            let at_commit = seen.lock().unwrap().clone();
+            indirect_host_steps::wait(&command_buffer);
+            let at = format!("{primitive_type:?}, {needs:?}");
+            assert!(!icb.gpu_written(), "{at}");
+            assert_eq!(read, 4, "{at}: the commit read each record");
+            let every: Vec<u64> = match primitive_type == PrimitiveType::Point && needs == points {
+                true => vec![0, 1, 2, 3],
+                false => Vec::new(),
+            };
+            assert_eq!(at_commit, every, "{at}: checked in `commit`");
+            assert_eq!(*seen.lock().unwrap(), every, "{at}: and only there");
+            let draws: Vec<Drawn> = (0..4).map(|window| drawn(window, 0, 3)).collect();
+            assert_eq!(setup.output(), expected(&draws), "{at}");
+        }
+        assert_made_once(messages, &[], &forced_with(device, &[]));
+    });
+}
+
+/// Commands the CPU wrote, in a buffer no encoder made resident for writing, draw as their records
+/// stand when the pass's batch is submitted, as Metal's execution reads them as it runs: where the
+/// CPU draws 2 more vertices in command 1 after the commit, before the batch is submitted (it waits
+/// for an event the test signals after the write), the host step records the pass again from the
+/// records then (each record read again) and command 1 draws 5 vertices; without the write, the
+/// commit's recording draws 3. Nothing is announced.
+#[test]
+fn the_cpu_s_writes_after_the_commit_draw_where_the_batch_waits() {
+    on_device(|device, messages| {
+        for write in [false, true] {
+            let setup = Setup::new(device);
+            let icb = icb(device, &inheriting(1), 4);
+            for index in 0..4 {
+                buffers(&setup, &icb, index, index as usize);
+                icb.indirect_render_command_at(index)
+                    .unwrap()
+                    .draw_primitives(PrimitiveType::Point, 0, 3, 1, 0)
+                    .unwrap();
+            }
+            let event = device.new_shared_event().unwrap();
+            let queue = device.new_command_queue().unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            command_buffer
+                .encode_wait_for_event(EventRef::from(&event), 1)
+                .unwrap();
+            let mut encoder = command_buffer.render_command_encoder(&pass()).unwrap();
+            encoder.set_render_pipeline_state(&setup.state).unwrap();
+            setup.resident(&mut encoder);
+            encoder.execute_commands_in_buffer(&icb, 0..4).unwrap();
+            encoder.end_encoding().unwrap();
+            let (_, read) = counted(device, || {
+                command_buffer.commit().unwrap();
+                if write {
+                    icb.indirect_render_command_at(1)
+                        .unwrap()
+                        .draw_primitives(PrimitiveType::Point, 0, 5, 1, 0)
+                        .unwrap();
+                }
+                event.set_signaled_value(1);
+                indirect_host_steps::wait(&command_buffer);
+            });
+            assert!(!icb.gpu_written(), "write {write}");
+            let reads = if write { 8 } else { 4 };
+            assert_eq!(read, reads, "write {write}: the records read");
+            let count = |window: usize| match (write, window) {
+                (true, 1) => 5,
+                _ => 3,
+            };
+            let draws: Vec<Drawn> = (0..4)
+                .map(|window| drawn(window, 0, count(window)))
+                .collect();
+            assert_eq!(setup.output(), expected(&draws), "write {write}");
+        }
+        assert_made_once(messages, &[], &forced_with(device, &[]));
     });
 }
 
