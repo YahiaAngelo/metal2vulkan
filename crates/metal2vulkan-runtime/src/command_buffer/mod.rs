@@ -36,7 +36,7 @@ pub(super) mod fences;
 mod first_submission;
 pub(super) mod gate;
 mod group;
-mod hang;
+pub(super) mod hang;
 pub(super) mod kept_barriers;
 pub(super) mod own;
 pub(super) mod rebound_use;
@@ -567,6 +567,9 @@ pub(super) struct State {
     fails_from: Option<(usize, CommandBufferError)>,
     /// The hold of the encoder Metal's GPU hangs at, where one does (`hang.rs`).
     hang: Option<Hang>,
+    /// It was committed with an event wait while a hang of its queue was in flight: the verdict
+    /// its first batch's submission applies (`hang.rs`, `checks.rs`).
+    behind_hang: Option<hang::Verdict>,
     /// The ended encoders Metal's GPU faults, each with the error it fails the command buffer
     /// with (an execution of commands that inherit a pipeline state made without
     /// `supportIndirectCommandBuffers`, `CommandBufferError::PageFault`; an indexed or indirect
@@ -1199,13 +1202,14 @@ impl State {
 
     /// Ended encoder `encoder` drew primitive type 9 directly, at which Metal's GPU hangs
     /// (`hang.rs`): the command buffer fails from it on with `CommandBufferError::GpuHang`, and,
-    /// where nothing failed it from an earlier encoder, what follows the encoder waits for the
-    /// hang's hold.
+    /// where nothing failed it from an earlier encoder, the work before the encoder signals the
+    /// hang's event and what follows waits for the hang's hold.
     pub(super) fn hang_from(&mut self, encoder: usize, device: &Device) -> Result<(), Error> {
         if self.fails_from.is_none() && self.hang.is_none() {
             let hang = Hang::new(device)?;
-            let event = Arc::clone(EventRef::Shared(hang.event()).shared());
-            self.batches.hold(event, 1);
+            let event = || Arc::clone(EventRef::Shared(hang.event()).shared());
+            self.batches.hold_signal(event(), Hang::REACHED);
+            self.batches.hold(event(), Hang::RELEASED);
             self.hang = Some(hang);
         }
         self.fail_from(encoder, CommandBufferError::GpuHang);
@@ -1611,6 +1615,7 @@ impl CommandBuffer {
                 fails_from: None,
                 faulted: BTreeMap::new(),
                 hang: None,
+                behind_hang: None,
                 shadow_attachments: Vec::new(),
                 shadows_copied_in: Vec::new(),
                 descriptors: DescriptorArena::default(),
@@ -2271,17 +2276,31 @@ impl CommandBuffer {
                 let held = &mut *state;
                 held.predication.commit(&mut held.uploads, device)?;
             }
-            // One committed on its queue while a hang of it is in flight runs nothing; its own
-            // hang hangs where its encoder runs under what it was committed as (`hang.rs`).
+            // One committed on its queue while a hang of it is in flight runs nothing, decided
+            // here without an event wait and at its first batch's submission with one; its own
+            // hang hangs where its encoder runs and its signals fire under what it was committed
+            // as (`hang.rs`).
+            let event_waits = state.batches.events().0;
             let failure = match failure {
-                None if run != CommitRun::Refused => {
-                    hang::discarded(&self.0.queue, state.batches.events().0)
-                }
+                None if run != CommitRun::Refused => hang::discarded(&self.0.queue, event_waits),
                 failure => failure,
+            };
+            state.behind_hang = match run != CommitRun::Refused && failure.is_none() {
+                true if event_waits > 0 => hang::behind(&self.0.queue, || {
+                    let batches = state.batches.all().iter();
+                    batches
+                        .flat_map(|batch| batch.waits.iter().cloned())
+                        .collect()
+                }),
+                _ => None,
             };
             let hangs = run != CommitRun::Refused
                 && matches!(state.fails_from, Some((at, CommandBufferError::GpuHang))
-                    if failure.as_ref().is_none_or(|f| !f.encoders.fails(at)));
+                    if failure.as_ref().is_none_or(|f| f.signals && !f.encoders.fails(at)));
+            if let (true, Some(hang)) = (hangs, &state.hang) {
+                let event = Arc::clone(EventRef::Shared(hang.event()).shared());
+                state.batches.hold_signal(event, Hang::DONE);
+            }
             let failure = Failure::of(failure, state.fails_from, ended);
             let failure = Failure::with_faults(failure, &state.faulted, ended);
             // The encoders that run: all but those `failure` fails.

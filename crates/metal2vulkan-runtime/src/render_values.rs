@@ -353,11 +353,12 @@ pub enum DrawPrimitiveType {
     /// a direct draw of 1 or 2 vertices draws nothing and fails nothing, as an empty draw does.
     /// Its render encoder runs nothing, not even its pass's load, clear or store actions, and the
     /// command buffer's event signals fire. A hang also runs nothing of the encoders after it,
-    /// and holds its command buffer until 37 ms after its commit (Metal failed it 37.7 to
-    /// 42.7 ms after its commit); a command buffer committed on its queue meanwhile, with no
-    /// event wait, runs nothing and completes with no error, after it. A fault or a victim
-    /// fails that encoder alone: the encoders after it run, and so do the queue's other command
-    /// buffers. Metal's API validation stops the process at it.
+    /// and holds its command buffer until 32.7 ms after its commit and 27.5 ms after the work
+    /// before the draw ran (Metal failed it 32.7 to 42.7 ms after its commit); a command buffer
+    /// of its queue that reaches its submission meanwhile (committed during it, its event waits
+    /// met) runs nothing and completes with no error, after it. A fault or a victim fails that
+    /// encoder alone: the encoders after it run, and so do the queue's other command buffers.
+    /// Metal's API validation stops the process at it.
     Nine,
 }
 

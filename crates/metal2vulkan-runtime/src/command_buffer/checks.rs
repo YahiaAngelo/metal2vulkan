@@ -39,6 +39,12 @@
 //!   completed handlers run, and the command buffer completes with status `Error` and
 //!   `CommandBufferError::Injected` of the first failure's code (a `commit_failed`'s before any
 //!   check's). A check that panics fails its submission with code 1 (`Internal`).
+//! - **Behind a hang** (`hang.rs`). A command buffer committed with an event wait while a hang
+//!   of its queue (a draw of primitive type 9) was in flight is held for this pass too, with or
+//!   without a check: its first batch's pass, once its waits are met and the batches before it
+//!   in its queue's order are submitted, runs nothing of it where a hang of its queue is still in
+//!   flight then, and the command buffer completes with no error, its event signals firing. No
+//!   check of the program's runs for it then.
 //! - **Zero cost without a check.** A command buffer without one holds no submission and its
 //!   batches are never held for one: the scheduler reads one flag per batch.
 
@@ -126,6 +132,13 @@ pub(super) struct Planned {
     failed: bool,
 }
 
+/// The submissions due for checks before a batch, each by its place among Metal's, its kind and
+/// its encoders, with the program's check where it set one (`State::due`).
+type Due = (
+    Option<SubmissionCheck>,
+    Vec<(usize, EncoderKind, Range<usize>)>,
+);
+
 /// What a committed command buffer with a check keeps for it.
 pub(super) struct Checks {
     /// Metal's submissions of its ended encoders, in order, made at the commit.
@@ -155,9 +168,9 @@ pub(crate) fn metal_submissions(
 
 impl State {
     /// Metal's submissions of its ended encoders, for its check, as it commits; nothing without
-    /// a check.
+    /// a check, or a decision of its first batch's submission behind a hang (`hang.rs`).
     pub(super) fn plan_checks(&mut self) {
-        if self.check.is_none() {
+        if self.check.is_none() && self.behind_hang.is_none() {
             return;
         }
         let encoders = self.ended.iter().map(|record| {
@@ -183,12 +196,9 @@ impl State {
     }
 
     /// The submissions to check before batch `index` is submitted: each that begins in it, and
-    /// each that a host step of it recorded commands for; each marked checked. `None` when the
-    /// batch needs no check pass.
-    fn due(
-        &mut self,
-        index: usize,
-    ) -> Option<(SubmissionCheck, Vec<(usize, EncoderKind, Range<usize>)>)> {
+    /// each that a host step of it recorded commands for; each marked checked; with the program's
+    /// check, where it set one. `None` when the batch needs no check pass.
+    fn due(&mut self, index: usize) -> Option<Due> {
         let range = self.batch_range(index);
         let parts = &self.recorded[range];
         let encoders: Vec<usize> = parts.iter().map(|part| part.encoder).collect();
@@ -201,7 +211,7 @@ impl State {
             })
             .map(|part| part.encoder)
             .collect();
-        let check = self.check.clone()?;
+        let check = self.check.clone();
         let checks = self.checks.as_mut()?;
         if checks.batches > index {
             return None;
@@ -243,6 +253,26 @@ impl State {
         }
         if self.failure.is_none() {
             self.failure = Some(CommandBufferError::Injected(code));
+        }
+    }
+
+    /// Its first batch's submission, batch `index`, found a hang of its queue in flight
+    /// (`hang.rs`): from that batch on every encoder runs nothing, and it completes with no
+    /// error, its event signals firing, as one committed during the hang with no event wait
+    /// does. No check of the program's runs for it.
+    fn discard_behind_hang(&mut self, index: usize) {
+        if let Some(checks) = &mut self.checks {
+            for planned in &mut checks.planned {
+                planned.checked = true;
+                planned.failed = true;
+            }
+        }
+        let from = self.batch_range(index).start;
+        let State {
+            recorded, retained, ..
+        } = self;
+        for part in &mut recorded[from..] {
+            State::fail_part(part, retained);
         }
     }
 
@@ -303,7 +333,21 @@ impl CommandBufferShared {
     /// batch is otherwise ready and its host step recorded. Each due check runs as the program's
     /// code (`exit_guard::program`); a code it answers, or a panic, fails its submission.
     pub(crate) fn run_checks(self: &Arc<Self>, index: usize) {
-        let Some((check, due)) = lock(&self.state).due(index) else {
+        let due = {
+            let mut state = lock(&self.state);
+            // Committed with an event wait during a hang of its queue: applied once, here.
+            let behind_hang = state.behind_hang.take();
+            if behind_hang.is_some_and(|verdict| verdict.discards(&self.queue)) {
+                state.discard_behind_hang(index);
+                state.checked(index);
+                return;
+            }
+            state.due(index)
+        };
+        let Some((Some(check), due)) = due else {
+            if due.is_some() {
+                lock(&self.state).checked(index);
+            }
             return;
         };
         let buffer = CommandBuffer(Arc::clone(self));

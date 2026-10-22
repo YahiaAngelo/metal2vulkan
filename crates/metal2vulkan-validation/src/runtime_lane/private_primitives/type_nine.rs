@@ -2,15 +2,18 @@
 //! the device the cfg selects, under the validation layer: its command buffer fails as Metal's
 //! GPU fails it, and the queue's other command buffers answer as Metal's do.
 //!
-//! Metal's answers (a probe on the Apple M3 Max, macOS 27.0.1, 18 runs, each the scenario below):
+//! Metal's answers (probes on the Apple M3 Max, macOS 27.0.1, 21 runs, the scenario below and
+//! one that also commits after the hang read `Scheduled` and 20 ms on):
 //!
 //! - **A direct draw of 3 vertices or more** (1 or 2 instances) hangs Metal's GPU: the command
-//!   buffer fails with `MTLCommandBufferErrorTimeout` ([`CommandBufferError::GpuHang`]) 37.7 to
+//!   buffer fails with `MTLCommandBufferErrorTimeout` ([`CommandBufferError::GpuHang`]) 32.7 to
 //!   42.7 ms after its commit. Its encoders before the pass run; the pass (its clear too) and every
-//!   encoder after it run nothing; its event signal fires. The command buffers of its queue
-//!   committed meanwhile run nothing and complete with no error after it, their event signals
-//!   firing; one whose event wait the host met after the hang ran, as did one of another queue
-//!   (in 4 ms, during the hang) and one committed after the hang.
+//!   encoder after it run nothing; its event signal fires. Every command buffer of its queue
+//!   scheduled meanwhile runs nothing and completes with no error together with it, its event
+//!   signals firing: committed at once or 10 ms on, or with an event wait met during the hang by
+//!   the host or by another queue's command buffer. One whose event wait the host met after the
+//!   hang completed ran, as did one of another queue (in 4 ms, during the hang) and one committed
+//!   after the hang.
 //! - **A direct draw of 1 or 2 vertices, or of no vertex or instance** draws nothing: the pass
 //!   clears, and every command buffer runs.
 //! - **An indexed draw** (1, 2 or 3 indices) faults Metal's GPU: the command buffer fails with
@@ -22,9 +25,11 @@
 //!
 //! Each scenario commits on the lane's queue the command buffer of the draw (a blit's mark, the
 //! pass of the draw over a target the host filled, a mark, an event signal of 1, a mark), at once
-//! one that marks and signals 2, and on another queue one that marks; 10 ms on, on the lane's
-//! queue, one that marks and one that waits for an event first. It waits for the first three,
-//! then signals the held one's event, and commits one more that marks once all completed.
+//! one that marks and signals 2, and on another queue one that marks. 10 ms on, on the lane's
+//! queue, it commits one that marks and three that wait for an event first, then mark: the host
+//! meets the first's 15 ms after the draw's commit, another queue's command buffer committed then
+//! the second's, and the host the third's only once the others completed. Last, it commits one
+//! more that marks.
 
 use super::super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
 use super::{Lane, FORMATS, SIDE};
@@ -38,23 +43,36 @@ use metal2vulkan_runtime::{
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-/// The earliest Metal failed a command buffer its GPU hung at after its commit: 37.7 ms.
-const HANG: Duration = Duration::from_millis(37);
+/// The earliest Metal failed a command buffer its GPU hung at after its commit: 32.7 ms.
+const HANG: Duration = Duration::from_micros(32_700);
+
+/// When the host meets the event wait of the queue's command buffer it meets during a hang,
+/// after the draw's commit.
+const DURING: Duration = Duration::from_millis(15);
 
 /// The byte the host fills the pass's first target with, which its clear overwrites.
 const FILLED: u8 = 0x5a;
 
 /// The marks, by slot: each command buffer's, and the hanging one's three.
-const MARKS: [(&str, u8); 8] = [
+const MARKS: [(&str, u8); 10] = [
     ("before the pass", 0xa1),
     ("after the pass", 0xb1),
     ("after the signal", 0xb2),
     ("the queue's, at once", 0xc1),
     ("the queue's, 10 ms on", 0xc2),
-    ("the queue's, held", 0xc3),
+    (
+        "the queue's, its wait met by the host during the hang",
+        0xc4,
+    ),
+    ("the queue's, its wait met by another queue's", 0xc5),
+    ("the queue's, its wait met after the hang", 0xc3),
     ("another queue's", 0xd1),
     ("the one after", 0xe1),
 ];
+
+/// The slots of [`MARKS`] that a scenario's command buffers other than the draw's mark, in the
+/// order of [`Outcome::answers`] after the draw's.
+const OTHERS: [usize; 7] = [3, 4, 5, 6, 7, 8, 9];
 
 /// The draw of type 9 a scenario's pass makes.
 #[derive(Clone, Copy, Debug)]
@@ -155,12 +173,13 @@ impl Tracked {
     }
 }
 
-/// A scenario's answers: the command buffer of the draw's, then the others' in [`MARKS`]'s order
-/// (the queue's at once, 10 ms on and held, another queue's, the one after), the marks, the
-/// event's value and whether the pass cleared its target.
+/// A scenario's answers: the command buffer of the draw's, then the others' in [`OTHERS`]'s order
+/// (the queue's at once, 10 ms on, its wait met during the hang by the host and by another
+/// queue's, its wait met after the hang; another queue's, the one after), the marks, the event's
+/// value and whether the pass cleared its target.
 struct Outcome {
-    answers: [Answer; 6],
-    marks: [u8; 8],
+    answers: [Answer; 8],
+    marks: [u8; 10],
     event: u64,
     cleared: bool,
 }
@@ -195,8 +214,10 @@ fn targets(lane: &Lane) -> (Vec<Texture>, RenderPassDescriptor) {
 /// Run the scenario (the module docs) of `draw` under `pipeline`.
 fn scenario(lane: &Lane, pipeline: &RenderPipelineState, draw: Draw) -> Outcome {
     let device = &lane.device;
-    let marks = buffer_with(device, &[0; 32]).unwrap();
+    let marks = buffer_with(device, &[0; 40]).unwrap();
     let event = device.new_shared_event().unwrap();
+    let during_gate = device.new_shared_event().unwrap();
+    let gpu_gate = device.new_shared_event().unwrap();
     let gate = device.new_shared_event().unwrap();
     let other_queue = device.new_command_queue().unwrap();
     let indices = buffer_with(device, &[0, 0, 1, 0, 2, 0, 0, 0]).unwrap();
@@ -254,38 +275,62 @@ fn scenario(lane: &Lane, pipeline: &RenderPipelineState, draw: Draw) -> Outcome 
         .unwrap();
     let mut later = Tracked::new(&lane.queue);
     later.mark(&marks, 4);
-    let mut held = Tracked::new(&lane.queue);
-    held.command_buffer
-        .encode_wait_for_event(EventRef::from(&gate), 1)
-        .unwrap();
-    held.mark(&marks, 5);
+    let waiting = |slot: usize, gate| {
+        let tracked = Tracked::new(&lane.queue);
+        tracked
+            .command_buffer
+            .encode_wait_for_event(EventRef::from(gate), 1)
+            .unwrap();
+        tracked.mark(&marks, slot);
+        tracked
+    };
+    let mut during = waiting(5, &during_gate);
+    let mut on_gpu = waiting(6, &gpu_gate);
+    let mut held = waiting(7, &gate);
     let mut other = Tracked::new(&other_queue);
-    other.mark(&marks, 6);
+    other.mark(&marks, 8);
+    let signaller = other_queue.command_buffer().unwrap();
+    signaller
+        .encode_signal_event(EventRef::from(&gpu_gate), 1)
+        .unwrap();
 
     drawn.commit();
     at_once.commit();
     other.commit();
     std::thread::sleep(Duration::from_millis(10));
     later.commit();
+    // The event waits last in the queue's order, so they hold back none of the others.
+    during.commit();
+    on_gpu.commit();
     held.commit();
-    drawn.wait();
-    at_once.wait();
-    later.wait();
+    signaller.commit().unwrap();
+    let due = drawn.committed.unwrap() + DURING;
+    if let Some(left) = due.checked_duration_since(Instant::now()) {
+        std::thread::sleep(left);
+    }
+    during_gate.set_signaled_value(1);
+    for tracked in [&drawn, &at_once, &later, &during, &on_gpu] {
+        tracked.wait();
+    }
     gate.set_signaled_value(1);
     held.wait();
     other.wait();
+    signaller.wait_until_completed_for(WAIT).unwrap();
     let mut after = Tracked::new(&lane.queue);
-    after.mark(&marks, 7);
+    after.mark(&marks, 9);
     after.commit();
     after.wait();
 
-    let read = read_buffer(&marks, 0, 32).unwrap();
+    let read = read_buffer(&marks, 0, 40).unwrap();
     let mut texel = [0u8; 16];
     targets[0]
         .get_bytes(&mut texel, 16, 16, Region::new_2d(0, 0, 1, 1), 0, 0)
         .unwrap();
     Outcome {
-        answers: [&drawn, &at_once, &later, &held, &other, &after].map(Tracked::answer),
+        answers: [
+            &drawn, &at_once, &later, &during, &on_gpu, &held, &other, &after,
+        ]
+        .map(Tracked::answer),
         marks: std::array::from_fn(|slot| read[slot * 4]),
         event: event.signaled_value(),
         cleared: texel == [0; 16],
@@ -304,19 +349,19 @@ fn answers_as_metal_does(draws: &[Draw], expected: Expected) {
         for &draw in draws {
             let outcome = scenario(&lane, &pipeline, draw);
             check(&outcome, expected, &format!("{draw:?} on {name}"));
-            let [drawn, at_once, later, held, other, after] = &outcome.answers;
+            let [drawn, rest @ ..] = &outcome.answers;
             let ms = |answer: &Answer| answer.took().as_secs_f64() * 1e3;
+            let rest: Vec<String> = rest
+                .iter()
+                .zip(OTHERS)
+                .map(|(answer, slot)| format!("{} {:.1} ms", MARKS[slot].0, ms(answer)))
+                .collect();
             println!(
-                "{name}: {draw:?}: {:?} {:?} in {:.1} ms; the queue's at once {:.1} ms, 10 ms on \
-                 {:.1} ms, held {:.1} ms; another queue's {:.1} ms; the one after {:.1} ms",
+                "{name}: {draw:?}: {:?} {:?} in {:.1} ms; {}",
                 drawn.status,
                 drawn.error,
                 ms(drawn),
-                ms(at_once),
-                ms(later),
-                ms(held),
-                ms(other),
-                ms(after),
+                rest.join("; "),
             );
         }
     }
@@ -329,22 +374,36 @@ fn answers_as_metal_does(draws: &[Draw], expected: Expected) {
 
 /// Check `outcome` against Metal's answer `expected` (the module docs).
 fn check(outcome: &Outcome, expected: Expected, label: &str) {
-    let [drawn, at_once, later, held, other, after] = &outcome.answers;
-    let marked = |slots: &[usize]| -> [u8; 8] {
+    let [drawn, at_once, later, during, on_gpu, held, other, after] = &outcome.answers;
+    let marked = |slots: &[usize]| -> [u8; 10] {
         std::array::from_fn(|slot| match slots.contains(&slot) {
             true => MARKS[slot].1,
             false => 0,
         })
     };
     assert_eq!(outcome.event, 2, "{label}: the event's value");
-    for (answer, which) in [(held, "held"), (other, "another queue's"), (after, "after")] {
+    let discarded = [
+        (at_once, "at once"),
+        (later, "10 ms on"),
+        (during, "met by the host during the hang"),
+        (on_gpu, "met by another queue's"),
+    ];
+    for (answer, which) in
+        discarded
+            .into_iter()
+            .chain([(held, "held"), (other, "another queue's"), (after, "after")])
+    {
         assert!(answer.completed_cleanly(), "{label}: {which}: {answer:?}");
     }
     match expected {
         Expected::Nothing => {
             assert!(drawn.completed_cleanly(), "{label}: {drawn:?}");
             assert!(outcome.cleared, "{label}: the pass cleared its target");
-            assert_eq!(outcome.marks, marked(&[0, 1, 2, 3, 4, 5, 6, 7]), "{label}");
+            assert_eq!(
+                outcome.marks,
+                marked(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+                "{label}"
+            );
         }
         Expected::Hang => {
             assert_eq!(drawn.status, CommandBufferStatus::Error, "{label}");
@@ -355,9 +414,8 @@ fn check(outcome: &Outcome, expected: Expected, label: &str) {
                 drawn.took()
             );
             assert!(!outcome.cleared, "{label}: the pass ran nothing");
-            assert_eq!(outcome.marks, marked(&[0, 5, 6, 7]), "{label}");
-            for (answer, which) in [(at_once, "at once"), (later, "10 ms on")] {
-                assert!(answer.completed_cleanly(), "{label}: {which}: {answer:?}");
+            assert_eq!(outcome.marks, marked(&[0, 7, 8, 9]), "{label}");
+            for (answer, which) in discarded {
                 assert!(
                     answer.completed >= drawn.completed,
                     "{label}: {which} completed before the hang did"
@@ -372,10 +430,11 @@ fn check(outcome: &Outcome, expected: Expected, label: &str) {
             assert_eq!(drawn.status, CommandBufferStatus::Error, "{label}");
             assert_eq!(drawn.error, Some(error), "{label}");
             assert!(!outcome.cleared, "{label}: the pass ran nothing");
-            assert_eq!(outcome.marks, marked(&[0, 1, 2, 3, 4, 5, 6, 7]), "{label}");
-            for (answer, which) in [(at_once, "at once"), (later, "10 ms on")] {
-                assert!(answer.completed_cleanly(), "{label}: {which}: {answer:?}");
-            }
+            assert_eq!(
+                outcome.marks,
+                marked(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+                "{label}"
+            );
         }
     }
 }
@@ -383,7 +442,8 @@ fn check(outcome: &Outcome, expected: Expected, label: &str) {
 /// A direct draw of type 9 of 3 vertices or more hangs Metal's GPU: its command buffer fails
 /// with `GpuHang` no sooner than Metal's did, running nothing from the pass on but its event
 /// signal, and the queue's command buffers committed meanwhile run nothing and complete cleanly
-/// after it, while one held by an event wait, another queue's and a later one run.
+/// after it, those whose event waits were met during the hang too, while one whose wait is met
+/// after it, another queue's and a later one run.
 #[test]
 fn a_direct_draw_of_type_nine_hangs_as_metal_s_gpu_does() {
     answers_as_metal_does(
