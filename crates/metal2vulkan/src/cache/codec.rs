@@ -667,6 +667,7 @@ codec_vk_raw!(
     DynamicState: i32,
     BlendFactor: i32,
     BlendOp: i32,
+    LogicOp: i32,
     Filter: i32,
     SamplerMipmapMode: i32,
     SamplerAddressMode: i32,
@@ -929,7 +930,7 @@ codec_enum! {
         ShaderTessellationAndGeometryPointSize, MultiviewGeometryShader,
         AttachmentFeedbackLoopLayout, ExtendedDynamicState3ColorWriteMask,
         ShaderFmaFloat16,
-        ProvokingVertexLast,
+        ProvokingVertexLast, LogicOp,
     }
     VkExtension {
         ExtRobustness2, ExtImageRobustness, ExtShaderAtomicFloat, ExtShaderAtomicFloat2,
@@ -1325,7 +1326,7 @@ codec_struct! {
         reads_position_depth,
         fragment_writes_memory, color_outputs, sample_mask, shader_tests, color_write_rules,
         snapshot_reads,
-        color_group,
+        color_group, logic_op,
     }
     TessellationState {
         patch_control_points, domain, control_points, factor_step_function, push_offset,

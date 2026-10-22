@@ -47,9 +47,25 @@
 //!   is 1; where the pipeline amplifies, a group other than the default draws one copy's color and
 //!   counts every copy's samples on Metal, a rule not built: refused
 //!   (`PrivateRenderField::ExplicitVisibilityGroup`).
-//! - `sampleCoverage`, `logicOperationEnabled` and `pointSmoothEnabled` change what Metal draws;
-//!   until the translation builds one, a value other than Metal's default refuses the pipeline
-//!   `NotImplemented` ([`Feature::PrivateRenderState`]) naming it.
+//! - `logicOperationEnabled` applies `logicOperation` (its low four bits, in Direct3D's order:
+//!   clear, set, copy, copy inverted, no-op, invert, and, nand, or, nor, xor, equivalent, and
+//!   reverse, and inverted, or reverse, or inverted) to the codes of each normalized, sRGB and
+//!   integer color attachment, the fragment's code against the stored one, blending ignored there,
+//!   and the write mask kept after it; a 16- or 32-bit float attachment ignores it and blends
+//!   (probes on an Apple M3 Max, macOS 27.0.1: `RGBA8Unorm`, `RGBA8Snorm`, `RGBA8Unorm_sRGB`,
+//!   `BGRA8Unorm`, `RGB10A2Unorm`, `R16Unorm`, `RGBA8Uint`, `RGBA8Sint`, `R32Uint`, `RGBA16Float`,
+//!   every operation, blended and not). [`logic_operation`] draws copy and no-op on every device
+//!   by the attachments' blends and masks, and the rest through Vulkan's `logicOp`
+//!   ([`GraphicsState::logic_op`]), which applies the same operation to the same codes of a
+//!   normalized or integer attachment; a device without it refuses them naming the feature, and
+//!   so is an operation other than copy and no-op where Vulkan's form is not Metal's: an sRGB
+//!   attachment (Vulkan applies none there), a float attachment that blends (Vulkan's turns
+//!   every blend off), a format whose operation Metal was not measured with (extended-range,
+//!   packed small-float, YCbCr), or a function that writes an attachment itself
+//!   ([`logic_operated`]).
+//! - `sampleCoverage` and `pointSmoothEnabled` change what Metal draws; until the translation
+//!   builds one, a value other than Metal's default refuses the pipeline `NotImplemented`
+//!   ([`Feature::PrivateRenderState`]) naming it.
 //! - `textureWriteRoundingMode` 2 rounds a fragment function's texture writes to half-float and
 //!   `RG11B10Float` textures to nearest even, which the translation has not built: such a write is
 //!   refused naming it (`PrivateRenderField::TextureWriteRounding`), where the function's slot
@@ -58,14 +74,23 @@
 //!
 //! [`GraphicsState::sample_mask`]: crate::pipeline::GraphicsState::sample_mask
 
+use std::borrow::Cow;
+
+use crate::device::requirements::VkFeature;
+use crate::device::DeviceProfile;
 use crate::error::{
-    DescriptorError, Error, Feature, PrivateRenderField, RuntimeInput, Unsupported,
+    Attachment, Capability, DescriptorError, Error, Feature, PrivateRenderField, RuntimeInput,
+    Unsupported,
 };
 use crate::library::FunctionArtifact;
-use crate::metal::CompareFunction;
+use crate::metal::format::{write_conversion, WriteConversion};
+use crate::metal::{ColorWriteMask, CompareFunction, PixelFormat};
 use crate::pipeline::descriptor::{PrivateRenderState, RenderPipelineDescriptor};
+use crate::pipeline::lower_inputs::ChannelWrite;
 use crate::pipeline::stage_io::{DepthCompares, StageBuiltin};
+use crate::pipeline::sym::SampledType;
 use crate::pipeline::GraphicsState;
+use crate::vk;
 
 /// The refusal of `field` at a value the translation has not built.
 fn refused(field: PrivateRenderField) -> Error {
@@ -94,7 +119,6 @@ pub(crate) fn check_render(d: &RenderPipelineDescriptor) -> Result<(), Error> {
     }
     let unbuilt = [
         (s.sample_coverage != 1.0, F::SampleCoverage),
-        (s.logic_operation_enabled, F::LogicOperation),
         (s.point_smooth_enabled, F::PointSmooth),
     ];
     match unbuilt.into_iter().find(|(set, _)| *set) {
@@ -231,6 +255,163 @@ pub(crate) fn sample_mask(
             Err(Error::NeedsInput(RuntimeInput::SampleMask))
         }
         (None, _) => Ok(Some(mask)),
+    }
+}
+
+/// Metal's logic operations by the low four bits of `logicOperation` (Direct3D's order), as
+/// Vulkan's.
+const LOGIC_OPS: [vk::LogicOp; 16] = [
+    vk::LogicOp::CLEAR,
+    vk::LogicOp::SET,
+    vk::LogicOp::COPY,
+    vk::LogicOp::COPY_INVERTED,
+    vk::LogicOp::NO_OP,
+    vk::LogicOp::INVERT,
+    vk::LogicOp::AND,
+    vk::LogicOp::NAND,
+    vk::LogicOp::OR,
+    vk::LogicOp::NOR,
+    vk::LogicOp::XOR,
+    vk::LogicOp::EQUIVALENT,
+    vk::LogicOp::AND_REVERSE,
+    vk::LogicOp::AND_INVERTED,
+    vk::LogicOp::OR_REVERSE,
+    vk::LogicOp::OR_INVERTED,
+];
+
+/// How Metal's logic operation takes a color attachment of a format (the module docs).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LogicClass {
+    /// A normalized or integer format: the operation on its codes, blending ignored.
+    Codes,
+    /// An 8-bit sRGB format: the operation on its encoded codes, blending ignored.
+    Srgb,
+    /// A 16- or 32-bit float format: no operation, the attachment's blend.
+    Float,
+    /// A format whose operation Metal was not measured with.
+    Unmeasured,
+}
+
+/// The class of logic operation an attachment of `pf` takes (the module docs): by the
+/// conversion of its channels (`metal::format::write_conversion`).
+fn logic_class(pf: PixelFormat) -> LogicClass {
+    let half = ChannelWrite::FloatTowardZero {
+        mantissa: 10,
+        signed: true,
+    };
+    match write_conversion(pf) {
+        Some(WriteConversion::Exact) => match crate::metal::format::sampled_type(pf) {
+            Some(SampledType::Uint | SampledType::Sint) => LogicClass::Codes,
+            _ => LogicClass::Unmeasured,
+        },
+        Some(WriteConversion::Float) => LogicClass::Float,
+        Some(WriteConversion::Rules(rules)) => {
+            let rules = rules.iter().flatten();
+            if rules.clone().any(|r| *r == ChannelWrite::Srgb) {
+                LogicClass::Srgb
+            } else if rules.clone().all(|r| {
+                matches!(
+                    r,
+                    ChannelWrite::Unorm { .. }
+                        | ChannelWrite::Snorm { .. }
+                        | ChannelWrite::HalfUnorm { .. }
+                )
+            }) {
+                LogicClass::Codes
+            } else if rules.clone().all(|r| *r == half) {
+                LogicClass::Float
+            } else {
+                LogicClass::Unmeasured
+            }
+        }
+        _ => LogicClass::Unmeasured,
+    }
+}
+
+/// The pipeline `d` draws as on `p` under its private logic operation (the module docs), and
+/// the Vulkan logic operation it draws with ([`GraphicsState::logic_op`]): each normalized, sRGB
+/// and integer attachment unblended, under a no-op also unwritten, a float attachment as it is.
+/// Copy and no-op are then Metal's on every device and need no Vulkan operation; every other
+/// operation takes Vulkan's `logicOp`, refused naming the feature on a device without it, and
+/// refused `NotImplemented` (`PrivateRenderField::LogicOperation`) where an attachment is sRGB, a
+/// float attachment blends, or an attachment's format was not measured. A pipeline without a
+/// fragment function writes no color, and takes no operation.
+pub(crate) fn logic_operation<'a>(
+    d: &'a RenderPipelineDescriptor,
+    p: &DeviceProfile,
+) -> Result<(Cow<'a, RenderPipelineDescriptor>, Option<vk::LogicOp>), Error> {
+    if !d.private.logic_operation_enabled || d.fragment.is_none() {
+        return Ok((Cow::Borrowed(d), None));
+    }
+    let op = LOGIC_OPS[(d.private.logic_operation & 15) as usize];
+    let blendless = matches!(op, vk::LogicOp::COPY | vk::LogicOp::NO_OP);
+    let mut out = d.clone();
+    for (index, slot) in out.color_attachments.iter_mut().enumerate() {
+        let Some(a) = slot
+            .as_mut()
+            .filter(|a| a.pixel_format != PixelFormat::Invalid)
+        else {
+            continue;
+        };
+        let refused = || {
+            refused(PrivateRenderField::LogicOperation)
+                .at_attachment(Attachment::Color(index as u32))
+        };
+        match (logic_class(a.pixel_format), blendless) {
+            (LogicClass::Unmeasured, _) => return Err(refused()),
+            (LogicClass::Float, true) => {}
+            (LogicClass::Float, false) if a.blending_enabled => return Err(refused()),
+            (LogicClass::Float, false) => {}
+            (LogicClass::Srgb, false) => return Err(refused()),
+            (LogicClass::Codes, _) | (LogicClass::Srgb, true) => {
+                a.blending_enabled = false;
+                if op == vk::LogicOp::NO_OP {
+                    a.write_mask = ColorWriteMask::empty();
+                }
+            }
+        }
+    }
+    if blendless {
+        return Ok((Cow::Owned(out), None));
+    }
+    if !p.fields().enabled.features.contains(&VkFeature::LogicOp) {
+        return Err(Unsupported::needs(
+            Feature::PrivateRenderState(PrivateRenderField::LogicOperation),
+            Capability::Feature(VkFeature::LogicOp),
+        )
+        .into());
+    }
+    Ok((Cow::Owned(out), Some(op)))
+}
+
+/// `Ok` where the linked pipeline `g` draws its Vulkan logic operation `op`
+/// ([`logic_operation`]) as Metal's: the operation applies to the color attachments of the
+/// subpass alone, so a pipeline whose fragment function writes an attachment itself (a storage
+/// attachment, a shadow stencil, an imageblock, or a word it merges with its input attachment's)
+/// is refused (`PrivateRenderField::LogicOperation`), Metal's answer there unmeasured.
+pub(crate) fn logic_operated(
+    op: Option<vk::LogicOp>,
+    fragment: Option<&FunctionArtifact>,
+    g: &GraphicsState,
+) -> Result<(), Error> {
+    if op.is_none() {
+        return Ok(());
+    }
+    let merges = fragment.is_some_and(|f| {
+        f.facts.iter().any(|fact| {
+            matches!(
+                fact,
+                crate::pipeline::facts::RuntimeFact::WordInputMerge { .. }
+            )
+        })
+    });
+    let writes_itself = !g.storage_attachments.is_empty()
+        || g.shadow_stencil.is_some()
+        || g.fragment_imageblock.is_some()
+        || merges;
+    match writes_itself {
+        true => Err(refused(PrivateRenderField::LogicOperation)),
+        false => Ok(()),
     }
 }
 

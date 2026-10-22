@@ -1449,7 +1449,10 @@ pub enum PrivateRenderField {
     /// whose color 0 is not four `float` or `half` lanes (Metal's compiler fails a function that
     /// writes no color 0 under the test), or one that loops over its covered samples.
     AlphaTest,
-    /// `logicOperationEnabled`.
+    /// `logicOperationEnabled` with an operation other than copy and no-op: on a device without
+    /// `logicOp` (`Unsupported::needs` naming it), or where Vulkan's operation is not Metal's (an
+    /// sRGB attachment, a float attachment that blends, a format whose operation Metal was not
+    /// measured with, a fragment function that writes an attachment itself).
     LogicOperation,
     /// `pointSmoothEnabled`.
     PointSmooth,

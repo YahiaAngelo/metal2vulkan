@@ -329,6 +329,10 @@ pub enum VkFeature {
     /// under which a primitive's flat inputs read its last vertex, as Metal's
     /// `setProvokingVertexMode:` of 1 draws.
     ProvokingVertexLast,
+    /// `logicOp` (Vulkan 1.0): `VkPipelineColorBlendStateCreateInfo::logicOpEnable`, a logical
+    /// operation on the codes of each normalized and integer color attachment. A render pipeline
+    /// whose private `logicOperation` the device applies requires it (`GraphicsState::logic_op`).
+    LogicOp,
 }
 
 /// A Vulkan device extension the new core can require.

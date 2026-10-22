@@ -373,9 +373,16 @@ pub struct PrivateRenderState {
     /// `alphaTestFunction` (default 0, `MTLCompareFunctionNever`), the raw value: read only
     /// with the alpha test on, where a value past `MTLCompareFunctionAlways` is refused.
     pub alpha_test_function: u64,
-    /// `logicOperationEnabled` (default off; not built: on is refused).
+    /// `logicOperationEnabled` (default off): `logic_operation` applies to the codes of each
+    /// normalized, sRGB and integer color attachment, which then blends nothing; a float
+    /// attachment ignores it (`pipeline::private_state`'s docs). Copy and no-op draw on every
+    /// device; the other operations need the device's `logicOp`, and are refused where an
+    /// attachment is sRGB, a float attachment blends, or a format was not measured.
     pub logic_operation_enabled: bool,
-    /// `logicOperation` (default 0), the raw value: read only with the logic operation on.
+    /// `logicOperation` (default 0), the raw value: read only with the logic operation on, by its
+    /// low four bits, in Direct3D's order (0 clear, 1 set, 2 copy, 3 copy inverted, 4 no-op,
+    /// 5 invert, 6 and, 7 nand, 8 or, 9 nor, 10 xor, 11 equivalent, 12 and reverse, 13 and
+    /// inverted, 14 or reverse, 15 or inverted).
     pub logic_operation: u64,
     /// `clipDistanceEnableMask` (default `0xff`): changes nothing Metal draws; every clip
     /// distance the vertex function writes clips.

@@ -13,6 +13,10 @@
 //!   `engine/multisample`, writing memory).
 //! - The alpha test is run by the fragment function, against the encoder's reference as a push
 //!   field; `Always` keeps the pipeline.
+//! - The logic operation leaves the normalized, sRGB and integer attachments unblended (unwritten
+//!   under a no-op), so copy and no-op draw on every device; the others take Vulkan's `logicOp`
+//!   where the device has it (lavapipe), and are refused naming it where it does not
+//!   (MoltenVK), and where Vulkan's operation is not Metal's.
 //! - Each property not built refuses a value other than Metal's default `NotImplemented`, naming
 //!   it. A compute pipeline's `needs_custom_border_color_samplers`, which changes nothing, keeps
 //!   its key.
@@ -322,7 +326,7 @@ fn each_property_not_built_refuses_a_value_other_than_metals_default() {
     let Some(lib) = fixture("rt6_render_state") else {
         return;
     };
-    let cases: [(fn(&mut PrivateRenderState), PrivateRenderField); 5] = [
+    let cases: [(fn(&mut PrivateRenderState), PrivateRenderField); 4] = [
         (|p| p.sample_coverage = 0.5, F::SampleCoverage),
         (|p| p.sample_coverage = f32::NAN, F::SampleCoverage),
         (
@@ -332,7 +336,6 @@ fn each_property_not_built_refuses_a_value_other_than_metals_default() {
             },
             F::AlphaTest,
         ),
-        (|p| p.logic_operation_enabled = true, F::LogicOperation),
         (|p| p.point_smooth_enabled = true, F::PointSmooth),
     ];
     for stem in STEMS {
@@ -360,6 +363,115 @@ fn each_property_not_built_refuses_a_value_other_than_metals_default() {
             Err(Error::InvalidDescriptor(_)) => {}
             other => panic!("{stem}: vertexAmplificationMode 2: {other:?}"),
         }
+    }
+}
+
+/// The private logic operation: every normalized, sRGB and integer attachment is unblended, and
+/// under a no-op unwritten, which draws copy and no-op on both profiles with no Vulkan operation;
+/// another operation (xor, raw 10, and raw 26, whose low four bits are xor's) is Vulkan's
+/// `logicOp` on lavapipe, its requirements naming the feature, and refused naming the feature on
+/// MoltenVK, which lacks it; a float attachment keeps its blend under copy and no-op and takes
+/// Vulkan's operation unblended; an sRGB attachment under xor, a blended float attachment under xor
+/// and a format whose operation Metal was not measured with are refused `NotImplemented`.
+#[test]
+fn the_logic_operation_draws_as_metal_s_or_is_refused() {
+    use crate::device::requirements::VkFeature;
+    use crate::error::{Attachment, Capability};
+    use crate::metal::BlendFactor;
+    use crate::vk;
+    let Some(lib) = fixture("rt6_render_state") else {
+        return;
+    };
+    let with = |pf: PixelFormat, blended: bool, op: Option<u64>| {
+        let mut d = render(&lib, 1);
+        let mut a = ColorAttachmentDescriptor::new(pf);
+        if blended {
+            a.blending_enabled = true;
+            a.source_rgb_blend_factor = BlendFactor::One;
+            a.destination_rgb_blend_factor = BlendFactor::One;
+        }
+        d.color_attachments[0] = Some(a);
+        if let Some(op) = op {
+            d.private.logic_operation_enabled = true;
+            d.private.logic_operation = op;
+        }
+        d
+    };
+    let not_built = |index: u32| {
+        Error::Unsupported(Unsupported::not_implemented(Feature::PrivateRenderState(
+            PrivateRenderField::LogicOperation,
+        )))
+        .at_attachment(Attachment::Color(index))
+    };
+    for stem in STEMS {
+        let dev = device(stem);
+        let has = stem == "lavapipe";
+        let state = |d: &RenderPipelineDescriptor, what: &str| {
+            let p = compile(&dev, d, &format!("{stem} {what}"));
+            let a = p.graphics.color_attachments[0].expect("attachment 0");
+            (p.graphics.logic_op, a.blend.is_some(), a.write_mask, p)
+        };
+        // Copy and no-op on every device, the blend dropped, no-op writing nothing.
+        let (op, blends, mask, _) = state(&with(PixelFormat::RGBA8Unorm, true, Some(2)), "copy");
+        assert_eq!((op, blends), (None, false), "{stem} copy");
+        assert_eq!(mask, vk::ColorComponentFlags::known_bits(), "{stem} copy");
+        let (op, blends, mask, _) = state(&with(PixelFormat::RGBA8Unorm, true, Some(4)), "no-op");
+        assert_eq!(
+            (op, blends, mask),
+            (None, false, vk::ColorComponentFlags::empty())
+        );
+        let (op, blends, _, _) = state(&with(PixelFormat::RGBA8UnormSRGB, true, Some(2)), "srgb");
+        assert_eq!((op, blends), (None, false), "{stem} sRGB copy");
+        // A float attachment keeps its blend under copy.
+        let (op, blends, _, _) = state(&with(PixelFormat::RGBA16Float, true, Some(2)), "float");
+        assert_eq!((op, blends), (None, true), "{stem} float copy");
+        for raw in [10, 26] {
+            for pf in [
+                PixelFormat::RGBA8Unorm,
+                PixelFormat::RGBA8Snorm,
+                PixelFormat::RGB10A2Unorm,
+                PixelFormat::R16Unorm,
+                PixelFormat::RGBA16Float,
+            ] {
+                let blended = pf != PixelFormat::RGBA16Float;
+                let d = with(pf, blended, Some(raw));
+                match (has, dev.compile_render_pipeline(&d, &Budget::standard())) {
+                    (true, Ok(p)) => {
+                        assert_eq!(p.graphics.logic_op, Some(vk::LogicOp::XOR), "{pf:?}");
+                        let a = p.graphics.color_attachments[0].expect("attachment 0");
+                        assert!(a.blend.is_none(), "{stem} {pf:?} blends");
+                        assert!(p.requirements.features.contains(&VkFeature::LogicOp));
+                    }
+                    (false, Err(e)) => assert_eq!(
+                        e,
+                        Error::Unsupported(Unsupported::needs(
+                            Feature::PrivateRenderState(PrivateRenderField::LogicOperation),
+                            Capability::Feature(VkFeature::LogicOp),
+                        )),
+                        "{stem} {pf:?}"
+                    ),
+                    (_, other) => panic!("{stem} {pf:?} xor: {other:?}"),
+                }
+            }
+        }
+        // Where Vulkan's operation is not Metal's, on either device.
+        for (pf, blended) in [
+            (PixelFormat::RGBA8UnormSRGB, false),
+            (PixelFormat::RGBA16Float, true),
+            (PixelFormat::RG11B10Float, false),
+        ] {
+            match dev.compile_render_pipeline(&with(pf, blended, Some(10)), &Budget::standard()) {
+                Err(e) => assert_eq!(e, not_built(0), "{stem} {pf:?}"),
+                Ok(_) => panic!("{stem} {pf:?} xor compiled"),
+            }
+        }
+        // Off, the pipeline is the one without the property.
+        let off = compile(&dev, &with(PixelFormat::RGBA8Unorm, true, None), "off");
+        let mut d = with(PixelFormat::RGBA8Unorm, true, None);
+        d.private.logic_operation = 10;
+        let unset = compile(&dev, &d, "off, an operation set");
+        assert!(off.graphics.logic_op.is_none() && unset.graphics.logic_op.is_none());
+        assert_eq!(off.graphics, unset.graphics, "{stem}");
     }
 }
 

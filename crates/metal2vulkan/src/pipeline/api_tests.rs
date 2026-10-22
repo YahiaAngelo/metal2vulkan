@@ -676,6 +676,7 @@ mod serde_round_trips {
                 width: 4,
                 group: 0,
             }),
+            logic_op: Some(vk::LogicOp::EQUIVALENT),
         });
         let mut slots = BTreeMap::new();
         slots.insert(

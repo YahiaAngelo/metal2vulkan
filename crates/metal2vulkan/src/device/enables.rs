@@ -197,7 +197,8 @@ exposures! {
     Core(v(0)) => [
         RobustBufferAccess, ShaderInt16, ShaderInt64, ShaderFloat64,
         VertexPipelineStoresAndAtomics, FragmentStoresAndAtomics, GeometryShader,
-        TessellationShader, SampleRateShading, DualSrcBlend, IndependentBlend, ShaderClipDistance,
+        TessellationShader, SampleRateShading, DualSrcBlend, LogicOp, IndependentBlend,
+        ShaderClipDistance,
         ShaderCullDistance, DrawIndirectFirstInstance, MultiDrawIndirect, DepthClamp,
         FillModeNonSolid, ImageCubeArray, ShaderImageGatherExtended, ShaderResourceMinLod,
         SamplerAnisotropy, ShaderStorageImageMultisample, ShaderStorageImageExtendedFormats,
