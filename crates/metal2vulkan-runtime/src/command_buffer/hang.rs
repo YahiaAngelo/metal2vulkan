@@ -249,7 +249,7 @@ impl Held {
     }
 
     /// How long after it read `Scheduled` and the GPU reached the encoder its wait goes.
-    fn from_reached(self) -> Duration {
+    fn after_reached(self) -> Duration {
         match self {
             Held::Hang => FROM_REACHED,
             Held::Fault => FAULT_FROM_REACHED,
@@ -355,7 +355,7 @@ impl Hang {
             sleep_until(committed + held.scheduled());
             let scheduled = hang_scheduled(weak);
             event.wait_until_signaled_value(Hang::REACHED, SIGNAL_BOUND);
-            let release = Instant::now() + held.from_reached();
+            let release = Instant::now() + held.after_reached();
             match scheduled {
                 true => hangs.schedule_early(hang, release),
                 false => sleep_until(release),
