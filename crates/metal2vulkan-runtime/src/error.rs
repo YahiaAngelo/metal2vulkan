@@ -1511,13 +1511,6 @@ pub enum RuntimeGap {
         /// The attachment's pixel format.
         pixel_format: PixelFormat,
     },
-    /// An unbalanced command-predication record (`ComputeCommandEncoder::encode_end_if` and the
-    /// other ends, or `encode_start_else`, with no block open; `encode_start_if` on a nil buffer
-    /// with none) that is its unit's first record, after dispatches of the unit (of this encoder,
-    /// or of an earlier one of its unit). Metal answers NO and drops those dispatches, which have
-    /// run nothing; the runtime recorded them ungated, before any record, so it cannot drop them.
-    /// Every other unbalanced record runs as Metal's does.
-    PredicationDropsUngatedWork,
     /// A blit copy between a buffer and a multisampled texture (`copyFromBuffer:...toTexture:`
     /// into, or `copyFromTexture:...toBuffer:` out of, a texture of more than one sample).
     /// Vulkan copies no multisampled image to or from a buffer (its `vkCmdCopyBufferToImage` and

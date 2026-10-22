@@ -2381,6 +2381,14 @@ impl<M: Clone + KeptArea> ShadowSync<M> {
         copies
     }
 
+    /// Forget every texture, recording no copy: what the encoder recorded so far is left out of
+    /// its command buffer's work (`EncoderCore::leave_out_recorded`), so no image holds what a
+    /// copy in there moved, and nothing written through one there ran. A later command copies in
+    /// again.
+    pub(super) fn forget(&mut self) {
+        self.entries.clear();
+    }
+
     /// The copies back at the end of the encoder: every texture written through since its last
     /// (merged where kept).
     pub(super) fn finish(&mut self) -> Vec<ShadowCopy<M>> {

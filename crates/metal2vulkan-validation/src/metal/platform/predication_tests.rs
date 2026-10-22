@@ -386,8 +386,9 @@ fn metal_compares_as_recorded() {
 /// Whiles and DoWhiles of 0 to 64, a While in a concurrent encoder, three nested loops, each
 /// pass's bindings, an If in a DoWhile; loops spanning a unit's encoders (serial, concurrent,
 /// three, around an If, inside a spanning If, with an encoder's own bindings) and a serial
-/// encoder's While its concurrent encoder ends, which kills it; six nested loops; and loops of 65
-/// to 100000 passes, past the copies the runtime lays down, which Metal runs on.
+/// encoder's While its concurrent encoder ends, which kills it; six nested loops; loops of 65
+/// to 100000 passes, past the copies the runtime lays down, which Metal runs on; and loops after
+/// an unbalanced End that drops its unit's dispatches before it.
 #[test]
 fn metal_runs_loops_as_the_lane_expects() {
     let probe = Probe::new();

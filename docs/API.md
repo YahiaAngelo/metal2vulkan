@@ -3011,9 +3011,9 @@ each item named states the rule in full.
   run, after another round trip to the host where its first recording waited for the work
   before it. A condition word past its buffer reads
   as Metal reads it (the heap's bytes, or zero), and as zero where Metal reads memory unrelated to
-  the buffer (`predication-word-past-buffer`). Refused where Metal runs on (`RuntimeGap`): an
-  unbalanced record that is its unit's first after dispatches of the unit
-  (`PredicationDropsUngatedWork`).
+  the buffer (`predication-word-past-buffer`). An unbalanced record that is its unit's first
+  drops the unit's dispatches before it as Metal's does: what the unit's encoders recorded before
+  it is never submitted.
 - **A GPU-written indirect command naming a placed ID runs that ID's live holder**, the state made
   last; once it is released, nothing.
 - **An indirect render command keeps a draw's values to 32 bits**, as Metal's records keep most of

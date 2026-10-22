@@ -237,6 +237,9 @@ pub(super) struct EncoderCore {
     ended: Vec<vk::CommandBuffer>,
     /// The segments it left for commit, `executions_at` counting its own executions.
     segments: Vec<Segment>,
+    /// Its first parts, which a command-predication record left out of the command buffer's
+    /// work ([`leave_out_recorded`](Self::leave_out_recorded)): each ends running nothing.
+    left_out: usize,
     /// The order of the encoder's commands, and its summary.
     uses: EncoderUses<ResourceKey>,
     /// The uses of the command [`note_reaching`](Self::note_reaching) notes, with those of the
@@ -446,6 +449,7 @@ impl EncoderCore {
             pass: None,
             ended: Vec::new(),
             segments: Vec::new(),
+            left_out: 0,
             uses: EncoderUses::new(ordered),
             retained: Retained::default(),
             executions: Vec::new(),
@@ -528,6 +532,7 @@ impl EncoderCore {
             pass: None,
             ended: Vec::new(),
             segments: Vec::new(),
+            left_out: 0,
             uses: EncoderUses::new(ordered),
             retained: Retained::default(),
             executions: Vec::new(),
@@ -1713,6 +1718,40 @@ impl EncoderCore {
         self.defer(work)
     }
 
+    /// Leave what the encoder recorded so far out of the command buffer's work, as a
+    /// command-predication record that drops it does (`predication.rs`): its `VkCommandBuffer`s so
+    /// far, ended, are never submitted; the work it left apart is never recorded, and is held as
+    /// what its commands use is; the textures it shadows are forgotten unread, so nothing is
+    /// copied back and a later command copies in again; and its later commands go on in a new
+    /// `VkCommandBuffer`, in a part of their own, which needs no barrier after the commands left
+    /// out. Its parts so far end as a failed encoder's do, with their fences' waits alone
+    /// ([`end_with_replay`](Self::end_with_replay)). Refused where no new one can be made, or the
+    /// current one does not end, which abandons the command buffer.
+    pub(super) fn leave_out_recorded(&mut self) -> Result<(), Error> {
+        self.release_pass()?;
+        self.flush_gathers();
+        let next = self.continuation()?;
+        if self.raw != vk::CommandBuffer::null() {
+            // SAFETY: as in `barrier`.
+            if let Err(error) = unsafe { self.open.command_buffer.end_raw(self.raw) } {
+                self.open.command_buffer.state().abandoned = true;
+                return Err(vulkan(error));
+            }
+        }
+        self.raw = next.0;
+        self.recorded = false;
+        self.ended.clear();
+        // A segment the GPU may write what it reads for started a part of its own.
+        self.left_out += 1 + self.segments.iter().filter(|segment| segment.host).count();
+        for segment in self.segments.drain(..) {
+            self.retained
+                .boxed(Box::new((segment.work, segment.inputs)));
+        }
+        self.uses.split();
+        self.shadows.forget();
+        Ok(())
+    }
+
     /// Begin `raw`, a `VkCommandBuffer` the command buffer's pool just handed out, with `flags`.
     fn begin(
         &self,
@@ -1886,6 +1925,7 @@ impl EncoderCore {
             raw,
             mut ended,
             segments,
+            left_out,
             uses,
             retained,
             executions,
@@ -1949,6 +1989,24 @@ impl EncoderCore {
                 .replay_log_kept(bytes);
         }
         let mut summaries = uses.finish_parts().into_iter();
+        // The parts a command-predication record left out run nothing, each with its fences'
+        // waits alone (`leave_out_recorded`), in the batch the encoder's first part joins.
+        for _ in 0..left_out {
+            let summary = summaries
+                .next()
+                .ok_or_else(|| internal("an encoder's part without its summary"))?;
+            state.end_encoder(
+                &open.command_buffer,
+                Recorded {
+                    encoder,
+                    raws: Vec::new(),
+                    segments: Vec::new(),
+                    summary: summary.fences_only(),
+                    sparse: Vec::new(),
+                    twin_writes: Vec::new(),
+                },
+            );
+        }
         let parts = into_parts(ended, segments, base);
         // The writes into ASTC carriers go with the last part (a blit encoder's only one).
         let count = parts.len();
