@@ -134,7 +134,9 @@ impl Lane {
                 0,
             )
             .unwrap();
-        out.chunks_exact(8)
+        out.as_chunks::<8>()
+            .0
+            .iter()
             .map(|t| std::array::from_fn(|c| u16::from_le_bytes([t[2 * c], t[2 * c + 1]])))
             .collect()
     }
