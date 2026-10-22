@@ -606,6 +606,7 @@ fn object_grids_past_the_task_limits_fail_typed() {
         for (attachment, target) in pass.color_attachments.iter_mut().zip(&targets) {
             attachment.texture = Some(target.clone());
             attachment.load_action = LoadAction::Clear;
+            attachment.clear_color = ClearColor::new(0.0, 0.0, 0.0, 0.0);
             attachment.store_action = StoreAction::Store;
         }
         let ctl = buffer_with(&lane.device, &[0u8; 16]).unwrap();
