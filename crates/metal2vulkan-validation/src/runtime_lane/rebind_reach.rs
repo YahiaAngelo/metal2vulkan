@@ -1244,14 +1244,16 @@ fn a_rebound_submission_before_commit_faileds_encoders_runs_over_the_new_pages()
     );
 }
 
-/// A command buffer whose first batch was submitted before a rebind (its wait for an event after
-/// the walker's encoder splits it) keeps the table and pages that submission took for its later
-/// batch, which runs after the rebind: its blit, which names the buffer, copies the old node, and
-/// its walker, which made the buffer resident, reads it, as the first batch's did (table 3: a
-/// running command buffer reads the old pages). The old pages' deallocator waits for the command
-/// buffer; a command buffer encoded after the rebind reads the new pages.
+/// A rebind between two submissions of one command buffer (its wait for an event after the
+/// walker's encoder splits it), as Metal answers it on the M3 Max (macOS 27.0.1): the later
+/// submission, behind the wait, runs over the new pages with no error. Its blit, which names the
+/// buffer, is encoded again by the rebind and copies the new node. Its walker, which made the
+/// buffer resident, reaches it through the table the first submission fixed, and reads the old
+/// node where Metal's reads the new one (`docs/FAST-PATHS.md`, known gaps), the old pages' import
+/// held, and their deallocator waiting, until the command buffer completed. A command buffer
+/// encoded after the rebind reads the new pages.
 #[test]
-fn a_command_buffer_first_submitted_before_a_rebind_keeps_its_pages_in_every_later_batch() {
+fn a_rebind_between_submissions_reaches_the_new_pages_in_the_later_named_use() {
     on_device(|device| {
         let queue = device.new_command_queue().unwrap();
         let walker = public_case(POINTER_WALKER).unwrap();
@@ -1310,8 +1312,9 @@ fn a_command_buffer_first_submitted_before_a_rebind_keeps_its_pages_in_every_lat
             read_buffer(&buffers[&binding], offset, length).unwrap()
         };
         assert!(read(&first) == outputs.a, "the first batch's walk");
+        // The known gap: Metal's later walk reads the new node.
         assert!(read(&later) == outputs.a, "the later batch's walk");
-        assert_eq!(read_buffer(&copied, 0, 16).unwrap(), node(A), "its blit");
+        assert_eq!(read_buffer(&copied, 0, 16).unwrap(), node(B), "its blit");
         deallocated(&old);
         drop(holding);
         let after = walk(
@@ -1328,7 +1331,9 @@ fn a_command_buffer_first_submitted_before_a_rebind_keeps_its_pages_in_every_lat
             after.produced == outputs.b,
             "a command buffer encoded after"
         );
-        eprintln!("REBIND-REACH submitted: the later batch kept the first submission's pages");
+        eprintln!(
+            "REBIND-REACH between submissions: the later blit encoded again over the new pages"
+        );
     });
 }
 

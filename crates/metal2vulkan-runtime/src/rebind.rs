@@ -12,17 +12,19 @@
 //!   (the device's own Metal address space, `address.rs`: the resident table maps each address
 //!   to the `VkBuffer` behind it at encode time), their resource IDs, labels, offsets and
 //!   options. `contents` answers the new pointer at once.
-//! - **The ordering rule, by first submission** (by commit before). Metal resolves a command
-//!   buffer's uses as it submits it (the consumer's rebind probe, tables 2 and 3, the M3 Max): one
-//!   first submitted before the rebind keeps the old pages until it completes; one committed before
-//!   it and first submitted after reaches the new pages through what it uses or made resident, and
-//!   none through what it only reaches unnamed (the rebind ends the use). The runtime resolves both
-//!   at the first submission (`command_buffer/first_submission.rs`); a command it encoded that
-//!   names the buffer took the pages as it was encoded (`Taken`), so the rebind encodes its
+//! - **The ordering rule, by submission** (by commit before). Metal resolves a command buffer's
+//!   uses as it submits each of its submissions (the consumer's rebind probe, tables 2 and 3, the
+//!   M3 Max; and a rebind between two submissions of one command buffer, the M3 Max under macOS
+//!   27.0.1): one submitted before the rebind keeps the old pages until its work completed; one
+//!   committed before it and submitted after reaches the new pages through what it names or made
+//!   resident (a later submission of a command buffer whose earlier one ran included), and none
+//!   through what it only reaches unnamed (the rebind ends the use). The runtime resolves both as
+//!   each event group is submitted (`command_buffer/first_submission.rs`); a command it encoded
+//!   that names the buffer took the pages as it was encoded (`Taken`), so the rebind encodes its
 //!   compute, blit and render encoders that named the buffer again, in the rebind's call, before
-//!   the command buffer's first submission (`replay.rs`, `command_buffer/reencode.rs`); an encoder
-//!   it cannot encode again (one of a command buffer that used command predication, among others)
-//!   fails `CommandBufferError::EncodedUseRebound` there, as all did before. Commands encoded after
+//!   their group's submission (`replay.rs`, `command_buffer/reencode.rs`); an encoder it cannot
+//!   encode again (one of a command buffer that used command predication, among others) fails
+//!   `CommandBufferError::EncodedUseRebound` there, as all did before. Commands encoded after
 //!   the rebind use the new pages. A rebind while a command buffer that is not yet committed has
 //!   encoded a use of the buffer or heap (one of its resources included), or has an encoder open
 //!   that used one (a render encoder uses its attachments' bytes from its open), is refused
@@ -38,7 +40,8 @@
 //! - **The deallocators.** The old range's runs once every command buffer first submitted
 //!   before the rebind that used it completed (at the rebind where none holds it: a command
 //!   buffer not yet submitted holds its pages weakly); the new range's at the next rebind's turn,
-//!   or when the buffer or heap goes.
+//!   or when the buffer or heap goes. A detached buffer's or heap's rebind runs, inside the call,
+//!   the deallocator of the range its detach let go of (`detach.rs`), as Metal's replace does.
 //! - **Textures.** Nothing of the old contents is copied. A heap texture bound to the heap's
 //!   bytes (a no-copy heap's linear image), and a texture over a no-copy buffer (or over a
 //!   buffer of a no-copy heap) whose linear image aliases its bytes, has its image made again over
@@ -97,8 +100,8 @@ pub(super) struct Rebinds {
     buffers: Mutex<KeyMap<ResourceKey, Entry>>,
     /// How many of them are detached (`detach.rs`): else no command names a detached one.
     detached: AtomicUsize,
-    /// Signaled as a submitted command buffer that took one of them completes
-    /// (`SubmittedHolds`): a detach of it waits for none to hold it.
+    /// Signaled as the work of a submitted batch that took one of them completes, and as its hold
+    /// goes (`SubmittedHolds`): a buffer's detach waits for no such work to run.
     completed: Condvar,
     /// The device's stand-in a detached buffer's commands take (`buffer::Detached`), while one
     /// is detached: made again once every one let go of it.
@@ -111,15 +114,17 @@ pub(super) struct Rebinds {
     pub(super) stale: Mutex<Vec<StaleTexture>>,
     /// How many there are: the check at each submission costs one load while none is.
     pub(super) stale_count: AtomicUsize,
-    /// The command buffers committed and not yet first submitted that an encoder of theirs can
-    /// encode again (`replay.rs`), or work of theirs on the GPU alone can be recorded again, with
-    /// the keys of the buffers over host pages those encoders and that work named: a rebind of
-    /// one of them has them encoded or recorded again before their first submission. Taken under
-    /// `buffers`' lock, after it.
+    /// The command buffers committed whose last event group is not yet submitted that an encoder
+    /// of theirs can encode again (`replay.rs`), or work of theirs on the GPU alone can be
+    /// recorded again, with the keys of the buffers over host pages those encoders and that work
+    /// named: a rebind of one of them has the encoders of the groups not yet submitted encoded
+    /// again, and that work recorded again before the first submission. Taken under `buffers`'
+    /// lock, after it.
     waiting: Mutex<Waiting>,
 }
 
-/// The command buffers waiting for their first submission whose encoders a rebind encodes again,
+/// The command buffers waiting for the submission of an event group whose encoders a rebind
+/// encodes again,
 /// or whose work on the GPU alone it records again ([`Rebinds::wait_for_replay`]), each with the
 /// keys they named, sorted.
 #[derive(Default)]
@@ -171,9 +176,12 @@ struct Entry {
     cell: Weak<HostCell>,
     /// The holds of encoders and of command buffers not yet committed on it ([`Holds`]).
     pending: u32,
-    /// The submitted command buffers not yet complete whose commands took it
-    /// (`SubmittedHolds`): a detach waits for none, or refuses.
+    /// The holds of submitted work that took it (`SubmittedHolds`), each from the submission of
+    /// its batches until their work completed, or, for a command buffer's last batches, until its
+    /// completed handlers ran: a detach refuses while one is.
     submitted: u32,
+    /// Those of them whose work has not yet completed: a buffer's detach waits for none.
+    running: u32,
     /// It is detached (`detach.rs`), as its cell says.
     detached: bool,
     /// A submitted command buffer took the pages it lies in now and found them its own: Metal
@@ -201,6 +209,7 @@ impl Rebinds {
             cell: Arc::downgrade(cell),
             pending: 0,
             submitted: 0,
+            running: 0,
             detached: false,
             resident: false,
         };
@@ -248,9 +257,10 @@ impl Rebinds {
     }
 
     /// Note `buffer`, committed now and not yet first submitted, whose encoders that can be
-    /// encoded again named the buffers of `keys` (sorted): a rebind of one of them before its
-    /// first submission has them encoded again ([`Rebinds::replace`]). Its first submission
-    /// lets go of it ([`Submitting::submitted_now`]).
+    /// encoded again named the buffers of `keys` (sorted): a rebind of one of them before the
+    /// submission of their event group has them encoded again ([`Rebinds::replace`]). The
+    /// submission of its last group lets go of it ([`Submitting::submitted_now`]), and so does
+    /// its completion.
     pub(super) fn wait_for_replay(
         &self,
         buffer: &Arc<CommandBufferShared>,
@@ -259,6 +269,15 @@ impl Rebinds {
         let mut waiting = lock(&self.waiting);
         waiting.prune();
         waiting.buffers.push((Arc::downgrade(buffer), keys));
+    }
+
+    /// `buffer` waits for no rebind's replay from here: its last event group was submitted, or
+    /// it completed.
+    pub(super) fn no_replays(&self, buffer: &CommandBufferShared) {
+        let mut waiting = lock(&self.waiting);
+        waiting
+            .buffers
+            .retain(|(waiting, _)| !std::ptr::eq(Weak::as_ptr(waiting), buffer));
     }
 
     /// Whether a buffer of the device is detached now (`detach.rs`): a render encoder logs no call
@@ -277,8 +296,8 @@ impl Rebinds {
             .any(|key| buffers.get(&key).is_some_and(|entry| entry.detached))
     }
 
-    /// Detach the buffer of `key`, whose hold on its pages is `cell`, to `detached`, unless a
-    /// submitted command buffer not yet complete took it (`SubmittedHolds`): where it lay, and
+    /// Detach the buffer of `key`, whose hold on its pages is `cell`, to `detached`, unless
+    /// submitted work holds it (`SubmittedHolds`): where it lay, and
     /// whether a submitted command buffer made those pages resident, or `None` where such a command
     /// buffer refuses it. Already detached, it stays so.
     pub(super) fn detach(
@@ -301,13 +320,13 @@ impl Rebinds {
         Some((cell.replace(Lying::Detached(detached)), resident))
     }
 
-    /// Wait until no submitted command buffer not yet complete holds the buffer of `key`
-    /// (`SubmittedHolds`), with no other lock of the runtime's held: the completion path lets
-    /// go of each without this one's caller. Settles on a lost device (`Err(DeviceLost)`),
-    /// whose command buffers may never complete.
-    pub(super) fn wait_unsubmitted(&self, device: &Device, key: ResourceKey) -> Result<(), Error> {
+    /// Wait until no submitted work that holds the buffer of `key` still runs
+    /// (`SubmittedHolds::ran`), with no other lock of the runtime's held: the completion path
+    /// notes each without this one's caller. Settles on a lost device (`Err(DeviceLost)`), whose
+    /// command buffers may never complete.
+    pub(super) fn wait_ran(&self, device: &Device, key: ResourceKey) -> Result<(), Error> {
         let mut buffers = lock(&self.buffers);
-        while buffers.get(&key).is_some_and(|entry| entry.submitted > 0) {
+        while buffers.get(&key).is_some_and(|entry| entry.running > 0) {
             if device.is_lost() {
                 return Err(Error::DeviceLost);
             }
@@ -319,7 +338,7 @@ impl Rebinds {
         Ok(())
     }
 
-    /// Whether a submitted command buffer not yet complete holds the buffer of `key`.
+    /// Whether submitted work holds the buffer of `key` (`SubmittedHolds`).
     pub(super) fn submitted(&self, key: ResourceKey) -> bool {
         lock(&self.buffers)
             .get(&key)
@@ -334,12 +353,29 @@ impl Rebinds {
         }
     }
 
-    /// Submitted command buffers that took `keys` completed: a detach may go on.
-    fn completed(&self, keys: &[ResourceKey]) {
+    /// The holds of submitted work on `keys` go, the work having completed unless `ran` noted it
+    /// already: a detach may go on.
+    fn let_go(&self, keys: &[ResourceKey], ran: bool) {
         let mut buffers = lock(&self.buffers);
         for key in keys {
             if let Some(entry) = buffers.get_mut(key) {
                 entry.submitted = entry.submitted.saturating_sub(1);
+                if !ran {
+                    entry.running = entry.running.saturating_sub(1);
+                }
+            }
+        }
+        drop(buffers);
+        self.completed.notify_all();
+    }
+
+    /// The submitted work holding `keys` completed, its holds staying: a buffer's detach waiting
+    /// for it answers.
+    fn ran(&self, keys: &[ResourceKey]) {
+        let mut buffers = lock(&self.buffers);
+        for key in keys {
+            if let Some(entry) = buffers.get_mut(key) {
+                entry.running = entry.running.saturating_sub(1);
             }
         }
         drop(buffers);
@@ -362,10 +398,10 @@ impl Rebinds {
 
     /// Give the buffer of `key`, whose hold on its pages is `cell`, `pages` from now on, unless
     /// a hold refuses it: where it lay (a detached one is attached again), and the command
-    /// buffers waiting for their first submission whose replayable encoders or work on the GPU
-    /// alone named it ([`Rebinds::wait_for_replay`]), each marked under this lock to encode or
-    /// record them again before that submission (`CommandBufferShared::reencode`), which the
-    /// caller runs; `Err` gives `pages` back.
+    /// buffers waiting for the submission of an event group whose replayable encoders or work on
+    /// the GPU alone named it ([`Rebinds::wait_for_replay`]), each marked under this lock to
+    /// encode or record them again before that submission (`CommandBufferShared::reencode`), which
+    /// the caller runs; `Err` gives `pages` back.
     pub(super) fn replace(
         &self,
         key: ResourceKey,
@@ -386,7 +422,7 @@ impl Rebinds {
         // No command buffer made the new pages resident yet.
         entry.resident = false;
         let lying = cell.replace(Lying::In(pages));
-        // Marked before this lock goes, so a first submission either came before the rebind
+        // Marked before this lock goes, so a group's submission either came before the rebind
         // (and keeps the old pages) or waits for the encoders encoded again.
         // Each upgraded one goes to the caller, which lets go of it without this lock.
         let mut again: Vec<Arc<CommandBufferShared>> = Vec::new();
@@ -465,13 +501,10 @@ impl Submitting<'_> {
         })
     }
 
-    /// `buffer` is first submitted now (or holds back for its encoders encoded again): it waits
-    /// for no rebind's replay from here ([`Rebinds::wait_for_replay`]).
+    /// `buffer`'s last event group is submitted now: it waits for no rebind's replay from here
+    /// ([`Rebinds::wait_for_replay`]).
     pub(super) fn submitted_now(&self, rebinds: &Rebinds, buffer: &CommandBufferShared) {
-        let mut waiting = lock(&rebinds.waiting);
-        waiting
-            .buffers
-            .retain(|(waiting, _)| !std::ptr::eq(Weak::as_ptr(waiting), buffer));
+        rebinds.no_replays(buffer);
     }
 
     /// Judge `taken`, and hold every pin whose pages still live in `retained` until the command
@@ -515,6 +548,7 @@ impl Submitting<'_> {
                 // Pages the command buffer finds its own, Metal makes resident.
                 entry.resident |= !moved && !detached;
                 entry.submitted += 1;
+                entry.running += 1;
                 holds.keys.push(key);
                 retained.push(Box::new(pages));
             }
@@ -533,12 +567,17 @@ impl Submitting<'_> {
     }
 }
 
-/// The holds a submitted command buffer's commands took on buffers over host pages
-/// (`Submitting::submit`), counted per buffer until it completes: dropped with what it
-/// retained, it lets a detach waiting for them go on.
+/// The holds the commands of a command buffer's submitted batches took on buffers over host
+/// pages (`Submitting::submit`), counted per buffer, as Metal holds what a submission uses
+/// (`command_buffer/first_submission.rs`): from the submission of the batches' event group until
+/// their work completed, where a buffer's detach waiting for them answers (`ran`), and, for the
+/// command buffer's last group, until its completed handlers ran, where it is dropped. Until
+/// then a detach answers `false`.
 pub(super) struct SubmittedHolds {
     device: Device,
     keys: Vec<ResourceKey>,
+    /// Their work completed, noted already ([`SubmittedHolds::ran`]).
+    ran: bool,
 }
 
 impl SubmittedHolds {
@@ -547,6 +586,7 @@ impl SubmittedHolds {
         SubmittedHolds {
             device: device.clone(),
             keys: Vec::new(),
+            ran: false,
         }
     }
 
@@ -554,12 +594,24 @@ impl SubmittedHolds {
     pub(super) fn is_empty(&self) -> bool {
         self.keys.is_empty()
     }
+
+    /// The work holding them completed, the holds staying until they are dropped: a buffer's
+    /// detach waiting for that work answers `false`. Once.
+    pub(super) fn ran(&mut self) {
+        if self.ran {
+            return;
+        }
+        self.ran = true;
+        if !self.keys.is_empty() {
+            self.device.shared().rebinds.ran(&self.keys);
+        }
+    }
 }
 
 impl Drop for SubmittedHolds {
     fn drop(&mut self) {
         if !self.keys.is_empty() {
-            self.device.shared().rebinds.completed(&self.keys);
+            self.device.shared().rebinds.let_go(&self.keys, self.ran);
         }
     }
 }
@@ -781,8 +833,9 @@ impl Buffer {
     /// this call cannot encode again named the buffer (one of a command buffer that used command
     /// predication, among others); commands encoded after it use the new. The old memory's
     /// deallocator runs once every command buffer submitted before the call that used it completed
-    /// (in the call, where none holds it); `deallocator` runs for the new memory at the next
-    /// rebind's turn, or when the buffer goes. A refused call runs neither and changes nothing.
+    /// (in the call, where none holds it), and that of the memory a detach let go of in the call,
+    /// as Metal's replace runs it; `deallocator` runs for the new memory at the next rebind's
+    /// turn, or when the buffer goes. A refused call runs neither and changes nothing.
     /// `keep_alive` ([`KeepAlive`]) is dropped once the device's import of the new memory is freed:
     /// with one, `deallocator` runs at that turn though something still holds the import (a command
     /// buffer submitted before a texture over the bytes was released); with none, `deallocator`

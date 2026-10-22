@@ -7,9 +7,12 @@
 //!   holds the pages its commands took of buffers over host pages (`rebind::Taken`) and the live
 //!   buffers' table its resident set was made of (`Live`) weakly: a rebind or a release meanwhile
 //!   lets the pages go, their deallocator run, where no submitted command buffer holds them
-//!   (the question, answered without revoking anything). From the first submission on it holds them
-//!   until it completes, so a submitted command buffer keeps the pages it took, as Metal's does
-//!   (table 3: a submitted command buffer never sees the new pages). A root table recorded
+//!   (the question, answered without revoking anything). The pages an event group's commands took
+//!   (its batches between event waits and signals, `State::event_group`) are held from that
+//!   group's first batch's submission until the command buffer completes, so submitted work keeps
+//!   the pages it took, as Metal's does (table 3: a submitted command buffer never sees the new
+//!   pages); a detach waits for, or refuses on, that group only until its work completed
+//!   (`rebind::SubmittedHolds`), as Metal holds a submission's uses. A root table recorded
 //!   before then, by a rebind's encoding again (`reencode.rs`) or a host step, holds the table
 //!   (`State::hold_live`) until the first submission, which lets go of it where the list changed
 //!   meanwhile: at once, as Metal lets a released buffer go, but on a handler thread
@@ -46,8 +49,16 @@
 //!   release meanwhile takes effect in its commands, which are recorded once. What its commands
 //!   named is encoded or recorded again as an encoder's commands are (`reencode.rs`).
 //! - **Each submission at its own batch**. The first submission finds which of Metal's submissions
-//!   are rebound, against the pages and the table it fixes for every later batch; each fails only
-//!   as its own batch is submitted, after that batch's submission checks (`checks.rs`). One its
+//!   of the first event group are rebound or hold a detached buffer, and each later group's first
+//!   batch those of its group, against where the buffers lie then, as Metal decides each
+//!   submission as it submits it (a detach between two submissions fails the later one, code 8,
+//!   the earlier one having run: the M3 Max under macOS 27.0.1). A rebind before a later group's
+//!   submission encodes its encoders that named the buffer again, as before the first
+//!   (`reencode.rs`): Metal's later submission runs over the new pages. The table its first
+//!   submission fixes serves every later batch: a later group reaches a buffer detached or
+//!   rebound since then through an address (made resident, or unnamed) through the pages it took,
+//!   where Metal's reads the new pages or zeros. Each fails only as its own batch is submitted,
+//!   after that batch's submission checks (`checks.rs`). One its
 //!   check failed already keeps the check's code (8 for the consumer's detach) and announces
 //!   nothing, and so does one whose every encoder the commit's failure failed (`commit_failed`'s);
 //!   the submissions before it run as Metal runs them, and the command buffer fails with the first
@@ -61,10 +72,11 @@ use super::{write_fields, CommandBufferShared, Resident, State};
 use crate::buffer::HostPages;
 use crate::error::{internal, CommandBufferError, Error};
 use crate::live_buffers::LiveTable;
-use crate::rebind::SubmittedHolds;
+use crate::rebind::{SubmittedHolds, Submitting};
 use crate::residency::Residency;
 use crate::upload::Upload;
 use crate::used_resources::UsedResources;
+use crate::values::CommandBufferStatus;
 use crate::Device;
 use metal2vulkan::bind::{ResidentRange, ResidentSet, RootTable};
 use std::collections::{BTreeMap, BTreeSet};
@@ -318,17 +330,20 @@ impl State {
     }
 
     /// As its first batch is submitted (the module docs), on the thread that submits it, under
-    /// the scheduler's lock and its own, after that batch's checks: Metal's submissions found
-    /// rebound, or holding a detached buffer, go to `failing`, each to fail as its own batch is
-    /// submitted (`State::failing_at`). What its commands took is judged and held under one lock of
-    /// the device's buffers over host pages (`Submitting`), so a detach comes either before (and
-    /// fails the submission) or after (and waits for the command buffer). Nothing here lets pages
-    /// go: the weak holds become strong, and what it held strongly it retains.
+    /// the scheduler's lock and its own, after that batch's checks: Metal's submissions of its first
+    /// event group ([`State::event_group`]) found rebound, or holding a detached buffer, go to
+    /// `failing`, each to fail as its own batch is submitted (`State::failing_at`). What the
+    /// group's commands took is judged and held under one lock of the device's buffers over host
+    /// pages (`Submitting`), so a detach comes either before (and fails the submission) or after
+    /// (and waits for the group's work); a later group's is judged and held as its own first
+    /// batch is submitted (`State::failing_at`). Nothing here lets pages go: the weak holds become
+    /// strong, and what it held strongly it retains.
     /// `Ok(false)`, changing nothing, while a rebind since its commit has encoders of it, which
     /// `buffer`'s rebinds mark, to encode again (`reencode.rs`): read under the lock its rebinds
     /// mark them under, so a rebind comes either before this submission (which waits for them)
-    /// or after it (which keeps the old pages). From here it waits for no rebind's replay; its
-    /// encoders' logs stay until its release (`CommandBufferShared::complete`).
+    /// or after it (which keeps the old pages for this group). From here it waits for no
+    /// rebind's replay; its encoders' logs stay until its release
+    /// (`CommandBufferShared::complete`).
     pub(super) fn first_submission(
         &mut self,
         device: &Device,
@@ -336,67 +351,30 @@ impl State {
     ) -> Result<bool, Error> {
         let shared = device.shared();
         let mut verdicts = BTreeMap::new();
-        let mut moved = false;
         let mut holds = SubmittedHolds::new(device);
-        {
+        let group = self.event_group(0);
+        let parts = self.group_parts(&group);
+        let encoders = self.first_parts(parts.clone());
+        let moved = {
             let mut submitting = shared.rebinds.submitting();
             if buffer.reencode_pending() {
                 return Ok(false);
             }
             self.submitted = true;
-            submitting.submitted_now(&shared.rebinds, buffer);
-            let State {
-                ended,
-                recorded,
-                retained,
-                rebound_use,
-                ..
-            } = self;
-            for (at, record) in ended.iter_mut().enumerate() {
-                let found = submitting.submit(&mut record.taken, retained, &mut holds);
-                moved |= found.moved;
-                judge(&mut verdicts, at, found.failure());
-                if found.failure() == Some(CommandBufferError::EncodedUseRebound) {
-                    let at_commands = match (&record.replay, &record.refused) {
-                        (None, _) => ReboundAt::Unlogged(record.unlogged),
-                        (Some(_), Some(refusal)) => ReboundAt::Refused(refusal.clone()),
-                        (Some(_), None) => ReboundAt::NotEncodedAgain,
-                    };
-                    rebound_use.get_or_insert(ReboundUse {
-                        encoder: at,
-                        kind: record.kind,
-                        at: at_commands,
-                    });
-                }
+            self.judged_to = group.end;
+            if group.end == self.batches.all().len() {
+                submitting.submitted_now(&shared.rebinds, buffer);
             }
-            for part in recorded.iter_mut() {
-                let kind = ended.get(part.encoder).map(|record| record.kind);
-                for segment in &mut part.segments {
-                    let recording = match (segment.gpu_alone, segment.stepped) {
-                        (true, _) => Recording::GpuAlone,
-                        (false, true) => Recording::HostStep,
-                        (false, false) => Recording::Commit,
-                    };
-                    let Some(done) = segment.recorded.as_mut() else {
-                        continue;
-                    };
-                    let found = submitting.submit(&mut done.taken, retained, &mut holds);
-                    moved |= found.moved;
-                    judge(&mut verdicts, part.encoder, found.failure());
-                    if let (Some(CommandBufferError::EncodedUseRebound), Some(kind)) =
-                        (found.failure(), kind)
-                    {
-                        rebound_use.get_or_insert(ReboundUse {
-                            encoder: part.encoder,
-                            kind,
-                            at: ReboundAt::Segment(recording),
-                        });
-                    }
-                }
-            }
-        }
+            self.judge_group(
+                &mut submitting,
+                &encoders,
+                parts.clone(),
+                &mut verdicts,
+                &mut holds,
+            )
+        };
         if !holds.is_empty() {
-            self.submitted_holds.push(holds);
+            self.submitted_holds.push((group.end - 1, holds));
         }
         // The list changed since the commit: what it listed is listed again, a rebind having
         // ended its use, and its resident set made of the list as it stands.
@@ -425,23 +403,10 @@ impl State {
         // at its own batch, after its check.
         self.failing = self.failing_submissions(&verdicts);
         // Their names let go; the listing released without the lock.
+        self.judged(&encoders, parts);
         let State {
-            ended,
-            recorded,
-            retained,
-            listing,
-            ..
+            retained, listing, ..
         } = self;
-        for record in ended.iter_mut() {
-            record.taken.judged();
-        }
-        let segments = recorded
-            .iter_mut()
-            .flat_map(|part| part.segments.iter_mut())
-            .filter_map(|segment| segment.recorded.as_mut());
-        for done in segments {
-            done.taken.judged();
-        }
         // An empty listing (a command buffer that used no no-copy buffer and no heap) holds
         // nothing to let go of.
         if let Some(Listing { used, .. }) = listing.take() {
@@ -485,6 +450,72 @@ impl State {
             .collect()
     }
 
+    /// As batch `index` is submitted, after the first submission, where it begins a later event
+    /// group ([`State::event_group`]): that group's commands are judged and held as the first
+    /// submission judged the first group's, as Metal decides each submission as it submits it,
+    /// those found rebound or holding a detached buffer going to `failing`. `false`, changing
+    /// nothing, while a rebind since the last group's submission has encoders of this one, which
+    /// `buffer`'s rebinds mark, to encode again (`reencode.rs`): read under the lock its rebinds
+    /// mark them under, so a rebind comes either before this group's submission (which waits for
+    /// them) or after it. From the last group on it waits for no rebind's replay.
+    pub(super) fn later_group(
+        &mut self,
+        device: &Device,
+        buffer: &CommandBufferShared,
+        index: usize,
+    ) -> bool {
+        let group = self.event_group(index);
+        if index == 0 || group.start != index {
+            return true;
+        }
+        let shared = device.shared();
+        let parts = self.group_parts(&group);
+        let encoders = self.first_parts(parts.clone());
+        let mut verdicts = BTreeMap::new();
+        let mut holds = SubmittedHolds::new(device);
+        {
+            let mut submitting = shared.rebinds.submitting();
+            if buffer.reencode_pending() {
+                return false;
+            }
+            self.judged_to = group.end;
+            if group.end == self.batches.all().len() {
+                submitting.submitted_now(&shared.rebinds, buffer);
+            }
+            self.judge_group(
+                &mut submitting,
+                &encoders,
+                parts.clone(),
+                &mut verdicts,
+                &mut holds,
+            );
+        }
+        self.judged(&encoders, parts);
+        let failing = self.failing_submissions(&verdicts);
+        self.failing.extend(failing);
+        if !holds.is_empty() {
+            self.submitted_holds.push((group.end - 1, holds));
+        }
+        true
+    }
+
+    /// Whether it completed or failed: no rebind encodes it again.
+    pub(super) fn finished(&self) -> bool {
+        matches!(
+            self.status,
+            CommandBufferStatus::Completed | CommandBufferStatus::Error
+        )
+    }
+
+    /// The first part of the event groups not judged yet ([`State::later_group`]): the parts from
+    /// it on are what a rebind may encode again (`reencode.rs`).
+    pub(super) fn unjudged_parts(&self) -> usize {
+        match self.batches.all().len() {
+            len if self.judged_to >= len => self.recorded.len(),
+            _ => self.batch_range(self.judged_to).start,
+        }
+    }
+
     /// As batch `index` is submitted, after its checks ran: the segments a host step recorded
     /// for it since the first submission are judged and held as the first submission judged the
     /// rest (`State::first_submission`); then each of Metal's submissions found failing that
@@ -497,6 +528,7 @@ impl State {
     /// Metal's runs, whatever the command buffer failed with before.
     pub(super) fn failing_at(&mut self, device: &Device, index: usize) -> bool {
         let range = self.batch_range(index);
+        let group = self.event_group(index);
         let mut later = BTreeMap::new();
         let mut holds = SubmittedHolds::new(device);
         let mut found_later = None;
@@ -528,7 +560,7 @@ impl State {
             }
         }
         if !holds.is_empty() {
-            self.submitted_holds.push(holds);
+            self.submitted_holds.push((group.end - 1, holds));
         }
         if self.failing.is_empty() && later.is_empty() {
             return false;
@@ -568,6 +600,129 @@ impl State {
         }
         due.iter()
             .any(|(_, failure)| *failure == CommandBufferError::EncodedUseRebound)
+    }
+
+    /// The batches of the event group batch `index` lies in: the run of batches around it that
+    /// no event (or binary semaphore) wait or signal splits. Metal holds what a group's
+    /// submissions use from the group's submission until its work completed (a buffer's detach
+    /// waits for that work, and one with its later work behind a wait detaches at once, measured
+    /// on the M3 Max), and the runtime judges and holds a group's commands as its first batch is
+    /// submitted ([`State::first_submission`], [`State::failing_at`]), letting go as its last
+    /// batch's work completed (`CommandBufferShared::holds_until`).
+    pub(super) fn event_group(&self, index: usize) -> Range<usize> {
+        let batches = self.batches.all();
+        let splits = |at: usize| {
+            at == 0
+                || at >= batches.len()
+                || !batches[at].waits.is_empty()
+                || !batches[at].binary_waits.is_empty()
+                || !batches[at - 1].signals.is_empty()
+                || !batches[at - 1].binary_signals.is_empty()
+        };
+        let start = (0..=index).rev().find(|&at| splits(at)).unwrap_or(0);
+        let end = (index + 1..=batches.len())
+            .find(|&at| splits(at))
+            .unwrap_or(batches.len());
+        start..end
+    }
+
+    /// The parts of the ended encoders the batches of `group` hold.
+    fn group_parts(&self, group: &Range<usize>) -> Range<usize> {
+        let start = self.batch_range(group.start).start;
+        let end = self.batch_range(group.end - 1).end;
+        start..end
+    }
+
+    /// The ended encoders whose first part lies among `parts`, in order.
+    fn first_parts(&self, parts: Range<usize>) -> Vec<usize> {
+        parts
+            .filter(|&at| at == 0 || self.recorded[at - 1].encoder != self.recorded[at].encoder)
+            .map(|at| self.recorded[at].encoder)
+            .collect()
+    }
+
+    /// Judge and hold what `encoders` took, and the segments of `parts` recorded so far, against
+    /// where their buffers lie now (`Submitting::submit`): their failures go to `verdicts`, their
+    /// holds to `holds`, their pages to what the command buffer retains. Whether a buffer one took
+    /// lies elsewhere now.
+    fn judge_group(
+        &mut self,
+        submitting: &mut Submitting<'_>,
+        encoders: &[usize],
+        parts: Range<usize>,
+        verdicts: &mut BTreeMap<usize, CommandBufferError>,
+        holds: &mut SubmittedHolds,
+    ) -> bool {
+        let mut moved = false;
+        let State {
+            ended,
+            recorded,
+            retained,
+            rebound_use,
+            ..
+        } = self;
+        for &at in encoders {
+            let Some(record) = ended.get_mut(at) else {
+                continue;
+            };
+            let found = submitting.submit(&mut record.taken, retained, holds);
+            moved |= found.moved;
+            judge(verdicts, at, found.failure());
+            if found.failure() == Some(CommandBufferError::EncodedUseRebound) {
+                let at_commands = match (&record.replay, &record.refused) {
+                    (None, _) => ReboundAt::Unlogged(record.unlogged),
+                    (Some(_), Some(refusal)) => ReboundAt::Refused(refusal.clone()),
+                    (Some(_), None) => ReboundAt::NotEncodedAgain,
+                };
+                rebound_use.get_or_insert(ReboundUse {
+                    encoder: at,
+                    kind: record.kind,
+                    at: at_commands,
+                });
+            }
+        }
+        for part in &mut recorded[parts] {
+            let kind = ended.get(part.encoder).map(|record| record.kind);
+            for segment in &mut part.segments {
+                let recording = match (segment.gpu_alone, segment.stepped) {
+                    (true, _) => Recording::GpuAlone,
+                    (false, true) => Recording::HostStep,
+                    (false, false) => Recording::Commit,
+                };
+                let Some(done) = segment.recorded.as_mut() else {
+                    continue;
+                };
+                let found = submitting.submit(&mut done.taken, retained, holds);
+                moved |= found.moved;
+                judge(verdicts, part.encoder, found.failure());
+                if let (Some(CommandBufferError::EncodedUseRebound), Some(kind)) =
+                    (found.failure(), kind)
+                {
+                    rebound_use.get_or_insert(ReboundUse {
+                        encoder: part.encoder,
+                        kind,
+                        at: ReboundAt::Segment(recording),
+                    });
+                }
+            }
+        }
+        moved
+    }
+
+    /// Let go of the names of what `encoders` and the segments of `parts` took, once judged.
+    fn judged(&mut self, encoders: &[usize], parts: Range<usize>) {
+        for &at in encoders {
+            if let Some(record) = self.ended.get_mut(at) {
+                record.taken.judged();
+            }
+        }
+        let segments = self.recorded[parts]
+            .iter_mut()
+            .flat_map(|part| part.segments.iter_mut())
+            .filter_map(|segment| segment.recorded.as_mut());
+        for done in segments {
+            done.taken.judged();
+        }
     }
 
     /// Whether the commit's failure failed every encoder of Metal's submission of `encoders`.

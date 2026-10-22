@@ -82,7 +82,7 @@ use super::heap::Heap;
 use super::indirect_command_buffer::IndirectCommandBuffer;
 use super::key_hash::KeyMap;
 use super::live_buffers::LiveTable;
-use super::resource::ResourceRef;
+use super::resource::{ResourceKey, ResourceRef};
 use super::texture::Texture;
 use metal2vulkan::bind::{ResidentRange, ResourceClass, UsedResource};
 use metal2vulkan::metal::{RenderStages, ResourceUsage};
@@ -143,6 +143,18 @@ struct HeapUse {
     heap: Heap,
     stages: RenderStages,
     next: u64,
+}
+
+impl Used {
+    /// The key of the buffer whose bytes it is: a buffer's, a heap's own buffer's; `None` for a
+    /// texture and an indirect command buffer.
+    pub(super) fn bytes_key(&self) -> Option<ResourceKey> {
+        match self {
+            Used::Buffer(buffer) => Some(buffer.identity().key),
+            Used::Heap { bytes, .. } => Some(bytes.identity().key),
+            Used::Texture(_) | Used::IndirectCommandBuffer(_) => None,
+        }
+    }
 }
 
 impl Residency {

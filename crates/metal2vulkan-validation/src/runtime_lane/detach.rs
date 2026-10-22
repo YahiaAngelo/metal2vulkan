@@ -6,13 +6,24 @@
 //!   buffer whose command names the buffer (bound and read, case 1; bound and walked, case 2; a
 //!   blit's operand, case 5) or whose encoder made it resident (`use_resources`, case 3;
 //!   `use_heap`, case 3h) fails `CommandBufferError::DetachedBacking`, Metal's code 8, and runs
-//!   nothing; its signal fires, its completed handler runs, and the queue runs on. One that
+//!   nothing; its signal fires, its completed handler runs, and the queue runs on. A resident
+//!   buffer counts whether or not a command reaches it, once the encoder encoded a command after
+//!   making it resident (the M3 Max under macOS 27.0.1). One that
 //!   reaches the buffer unnamed alone (case 4) reads 0 there and completes. No degradation is
 //!   announced: the failure is Metal's.
-//! - **Submitted work** (table 3: a command buffer submitted and not yet complete). A buffer's
-//!   detach blocks until each such command buffer that took it completed, then answers `false`
-//!   and detaches nothing; a heap's answers `false` at once; a buffer such a command buffer does
-//!   not take is detached at once.
+//! - **Submitted work** (table 3, and the M3 Max under macOS 27.0.1). Metal holds what a
+//!   submission uses from its submission until its work completed, and the last submission's
+//!   until the command buffer's completed handlers ran: a buffer's detach meanwhile blocks until
+//!   that work completed, then answers `false` and detaches nothing; a heap's answers `false` at
+//!   once; a detach in a completed handler answers `false`, and one once `wait_until_completed`
+//!   returned detaches. A command buffer's later submission behind an event wait holds nothing
+//!   until it is submitted: a detach while it waits detaches at once, though the command buffer's
+//!   earlier work ran or still runs, and that submission then fails with code 8.
+//! - **The deallocator** of the pages a detach lets go of runs at the buffer's next rebind,
+//!   inside the call, on its thread, or at its release, never at the detach (the M3 Max under
+//!   macOS 27.0.1, a `newBufferWithBytesNoCopy:` buffer and one of `newBufferWithDescriptor:`,
+//!   each with and without GPU use before the detach). A keep-alive goes after the deallocator,
+//!   once the import is freed.
 //! - **Encoded while detached.** A command that names a detached buffer records nothing, nor does
 //!   any after it in its encoder (blit, dispatch, draw), and its command buffer fails
 //!   `DetachedBacking` and runs nothing; where a rebind gave the buffer pages again before its
@@ -20,8 +31,9 @@
 //!   command buffer completes over the new pages, as Metal's (`EncodedUseRebound` before). The
 //!   layer reports nothing: no Vulkan command takes the detached buffer's stand-in.
 //! - **Racing a commit.** A detach on one thread while another commits a command buffer whose
-//!   command names the buffer runs the old pages' deallocator in one of the two calls, wherever
-//!   the device's recorder replays the commands, and announces nothing.
+//!   command names the buffer runs the old pages' deallocator in neither call, wherever the
+//!   device's recorder replays the commands, and the buffer's release runs it, on the releasing
+//!   thread; nothing is announced.
 //! - **No memory.** A detach places no memory of the bytes it detaches: once the device's
 //!   stand-in is made, detaching a large heap, and a large buffer, allocates no device memory.
 //! - **Textures**: `detach_textures.rs`.
@@ -32,25 +44,24 @@ use super::degrade_notices::{
 use super::host_memory::{gpu_read, on_device, recording, Mapping, Seen};
 use super::no_copy_heaps::shared;
 use super::rebind_reach::{
-    buffer_len, buffer_over, deallocated, heap_member, kept_member_over, member_over, node, pages,
+    buffer_len, buffer_over, heap_member, kept_member_over, member_over, node, pages,
     rebind_heap_to, rebind_to, walk, Outputs, Uses, Walked, A, B, POINTER_WALKER,
 };
 use super::shared_kinds;
-use super::{
-    bound_buffers, buffer_with, encode_case, pipeline_state, public_case, read_buffer,
-    CaseResources, WAIT,
-};
+use super::{buffer_with, public_case, read_buffer, WAIT};
 use crate::air_library::AirLibrary;
-use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureUsage};
-use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
+use metal2vulkan::metal::{PixelFormat, PrimitiveType, ResourceUsage, TextureUsage};
+use metal2vulkan::pipeline::{
+    ColorAttachmentDescriptor, ComputePipelineDescriptor, RenderPipelineDescriptor, StageSource,
+};
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBuffer, CommandBufferError, CommandBufferStatus, CommandQueue,
-    Degradation, Device, Error, EventRef, Heap, HeapDescriptor, HeapType, HostMemory, Invalid,
-    LoadAction, PipelineOptions, Problem, RebindProblem, Region, RenderPassDescriptor,
-    ResourceOptions, SharedEvent, StoreAction, TextureDescriptor,
+    ComputePipelineState, Degradation, Device, Error, EventRef, Heap, HeapDescriptor, HeapType,
+    HostMemory, Invalid, LoadAction, PipelineOptions, Problem, RebindProblem, Region,
+    RenderPassDescriptor, ResourceOptions, SharedEvent, Size, StoreAction, TextureDescriptor,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -121,8 +132,10 @@ fn table_1_a_pending_command_buffer_holding_a_detached_buffer_fails_with_code_8(
         };
         let blit = held(&member, Uses::Blit, &|| detach(&member));
         failed(device, &queue, blit, "5: a blit's operand");
-        deallocated(&old);
+        // The old pages' deallocator waits for the rebind, which runs it inside the call.
+        assert_eq!(old.runs.load(Ordering::SeqCst), 0, "ran at the detach");
         rebind_to(&member, A);
+        ran_here(&old, "the rebind after a detach");
         let resident = held(&member, Uses::Resident, &|| detach(&member));
         failed(device, &queue, resident, "3: resident");
         rebind_to(&member, A);
@@ -220,7 +233,7 @@ fn a_command_naming_a_detached_buffer_records_nothing_and_its_command_buffer_run
         gpu_read(&queue, &member, 0..16);
         assert!(member.contents().is_some());
         detach(&member);
-        deallocated(&old);
+        assert_eq!(old.runs.load(Ordering::SeqCst), 0, "ran at the detach");
         assert_eq!(member.contents(), None, "a detached buffer's contents");
         detach(&member);
 
@@ -277,6 +290,7 @@ fn a_command_naming_a_detached_buffer_records_nothing_and_its_command_buffer_run
         assert!(!notices.contains_key(&Degradation::EncodedUseRebound));
         let reencoded = device.work_counts().encoders_reencoded;
         rebind_to(&member, B);
+        ran_here(&old, "the rebind after the detach");
         // The rebind encodes the blit encoder again over the new pages before its first
         // submission: the copy reads them, as Metal's does.
         assert!(
@@ -391,21 +405,106 @@ fn a_render_pass_drawing_from_a_detached_buffer_runs_nothing() {
     });
 }
 
-/// A command buffer whose first batch was submitted (an event wait after its first encoder
-/// splits it), held by that wait.
-struct Running {
-    command_buffer: CommandBuffer,
-    event: SharedEvent,
+/// `seen`'s deallocator ran once, on this thread, before the call that should run it returned.
+fn ran_here(seen: &Seen, call: &str) {
+    assert_eq!(
+        seen.runs.load(Ordering::SeqCst),
+        1,
+        "{call}: ran once, in the call"
+    );
+    assert_eq!(
+        *seen.thread.lock().unwrap(),
+        Some(std::thread::current().id()),
+        "{call}: on the calling thread"
+    );
 }
 
-impl Running {
-    /// `encode` encodes its first encoder; a blit after the wait fills a buffer of its own.
-    fn new(device: &Device, queue: &CommandQueue, encode: impl FnOnce(&CommandBuffer)) -> Running {
-        let event = device.new_shared_event().unwrap();
+/// The most loads a spin makes: seconds on the M3 Max (about 135 ns a load there), so a spin whose
+/// word is never seen raised still ends.
+const SPIN_CAP: u32 = 1 << 25;
+
+/// The owned fixture's kernel that loads a word no one raises until its cap
+/// (`kernel_spin_on_an_unraised_word`): its GPU work runs until the host raises the word. Run
+/// once on `queue`, its word raised from the start, so its `VkPipeline` is made: a dispatch whose
+/// pipeline is still being made records at a host step, which its submission waits for.
+fn spin_state(device: &Device, queue: &CommandQueue) -> ComputePipelineState {
+    let ll = engine_dir().join("kernel_spin_on_an_unraised_word.ll");
+    let library = device
+        .new_library_with_air(&llvm_assemble(&ll).unwrap())
+        .unwrap();
+    let function = library
+        .new_function_with_name("spin_on_an_unraised_word")
+        .unwrap();
+    let state = device
+        .new_compute_pipeline_state(
+            &ComputePipelineDescriptor::new(StageSource::Function(function.function_descriptor())),
+            &PipelineOptions::default(),
+        )
+        .unwrap();
+    let raised = buffer_with(device, &1u32.to_le_bytes()).unwrap();
+    let loads = buffer_with(device, &[0; 4]).unwrap();
+    let command_buffer = queue.command_buffer().unwrap();
+    let mut encoder = command_buffer.compute_command_encoder().unwrap();
+    encoder.set_compute_pipeline_state(&state).unwrap();
+    encoder.set_buffer(Some(&raised), 0, 0).unwrap();
+    encoder.set_buffer(Some(&loads), 0, 1).unwrap();
+    encoder.set_bytes(&SPIN_CAP.to_le_bytes(), 2).unwrap();
+    encoder
+        .dispatch_threadgroups(Size::new(1, 1, 1), Size::new(1, 1, 1))
+        .unwrap();
+    encoder.end_encoding().unwrap();
+    command_buffer.commit().unwrap();
+    command_buffer.wait_until_completed_for(WAIT).unwrap();
+    assert_eq!(command_buffer.error(), None, "the spin, raised");
+    assert_eq!(
+        read_buffer(&loads, 0, 4).unwrap(),
+        [0; 4],
+        "the spin, raised"
+    );
+    state
+}
+
+/// A command buffer whose first batch spins over a buffer until [`Spinning::release`] (the
+/// buffer bound as the kernel's output, or made resident), and whose next batch, behind an event
+/// wait, fills a buffer of its own; committed, its first batch submitted.
+struct Spinning {
+    command_buffer: CommandBuffer,
+    flag: Buffer,
+    output: Buffer,
+    gate: SharedEvent,
+}
+
+impl Spinning {
+    fn new(
+        device: &Device,
+        queue: &CommandQueue,
+        state: &ComputePipelineState,
+        held: &Buffer,
+        resident: bool,
+    ) -> Spinning {
+        let flag = buffer_with(device, &[0; 16]).unwrap();
+        let output = match resident {
+            true => buffer_with(device, &[0; 16]).unwrap(),
+            false => held.clone(),
+        };
+        let gate = device.new_shared_event().unwrap();
         let command_buffer = queue.command_buffer().unwrap();
-        encode(&command_buffer);
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        encoder.set_compute_pipeline_state(state).unwrap();
+        encoder.set_buffer(Some(&flag), 0, 0).unwrap();
+        encoder.set_buffer(Some(&output), 0, 1).unwrap();
+        encoder.set_bytes(&SPIN_CAP.to_le_bytes(), 2).unwrap();
+        if resident {
+            encoder
+                .use_resource(held.as_resource(), ResourceUsage::READ)
+                .unwrap();
+        }
+        encoder
+            .dispatch_threadgroups(Size::new(1, 1, 1), Size::new(1, 1, 1))
+            .unwrap();
+        encoder.end_encoding().unwrap();
         command_buffer
-            .encode_wait_for_event(EventRef::from(&event), 1)
+            .encode_wait_for_event(EventRef::from(&gate), 1)
             .unwrap();
         let filled = device.new_buffer(16, ResourceOptions::shared()).unwrap();
         let mut blit = command_buffer.blit_command_encoder().unwrap();
@@ -420,23 +519,45 @@ impl Running {
             );
             std::thread::sleep(Duration::from_millis(1));
         }
-        Running {
+        Spinning {
             command_buffer,
-            event,
+            flag,
+            output,
+            gate,
         }
+    }
+
+    /// Raise the word: an atomic store into the buffer the kernel's atomic loads read. The spin
+    /// ends.
+    fn release(&self) {
+        let contents = self.flag.contents().unwrap();
+        // SAFETY: the buffer's first word, `Shared` and 4-aligned, which the host and the
+        // kernel's atomics alone touch while the kernel runs.
+        let flag = unsafe { AtomicU32::from_ptr(contents.as_ptr().cast::<u32>()) };
+        flag.store(1, Ordering::SeqCst);
     }
 
     /// Let it run to its end.
     fn finish(&self) {
-        self.event.set_signaled_value(1);
+        self.release();
+        self.gate.set_signaled_value(1);
         self.command_buffer.wait_until_completed_for(WAIT).unwrap();
         assert_eq!(self.command_buffer.error(), None);
     }
 }
 
-/// `detach`, called on another thread while `running` waits: it must not return before the
-/// command buffer is let run, and answers `false` once it completed.
-fn waits_then_refuses(running: &Running, detach: impl FnOnce() -> Result<bool, Error> + Send) {
+impl Drop for Spinning {
+    /// The GPU is never left spinning, whatever failed.
+    fn drop(&mut self) {
+        self.release();
+        self.gate.set_signaled_value(1);
+    }
+}
+
+/// `detach`, called on another thread while `spinning`'s first batch spins: it must not return
+/// before the spin ends, and answers `false` once it ended, the command buffer still waiting for
+/// its event: the hold is the submission's, not the command buffer's.
+fn waits_then_refuses(spinning: &Spinning, detach: impl FnOnce() -> Result<bool, Error> + Send) {
     let returned = AtomicBool::new(false);
     std::thread::scope(|scope| {
         let detaching = scope.spawn(|| {
@@ -445,89 +566,374 @@ fn waits_then_refuses(running: &Running, detach: impl FnOnce() -> Result<bool, E
             answer
         });
         std::thread::sleep(EARLY);
-        assert!(
-            !returned.load(Ordering::SeqCst),
-            "the detach did not wait for the submitted command buffer"
-        );
-        running.event.set_signaled_value(1);
+        if returned.load(Ordering::SeqCst) {
+            spinning.release();
+            let answer = detaching.join().unwrap();
+            panic!(
+                "the detach did not wait for the submitted work: {answer:?}, the command buffer \
+                 {:?}, the spin's output {:?}",
+                spinning.command_buffer.status(),
+                read_buffer(&spinning.output, 0, 4)
+            );
+        }
+        spinning.release();
         assert_eq!(detaching.join().unwrap(), Ok(false));
-        assert_eq!(
-            running.command_buffer.status(),
+        assert_ne!(
+            spinning.command_buffer.status(),
             CommandBufferStatus::Completed,
-            "the detach answered before the command buffer completed"
+            "the detach waited for the command buffer, not for the submission"
         );
     });
 }
 
-/// Table 3 (a command buffer submitted and not yet complete): a buffer its command named, or
-/// its encoder made resident, is detached only once it completed: the detach blocks until then
-/// and answers `false`, detaching nothing (the buffer reads its pages after). A heap one of its
-/// buffers was named in answers `false` at once, the command buffer still running. A buffer it
-/// does not take is detached at once.
+/// Table 3 (work submitted and not yet complete), as Metal answers it on the M3 Max (macOS
+/// 27.0.1): a buffer a running submission's command named, or its encoder made resident (the spin
+/// reaching no buffer through an address), is detached only once that work completed: the detach blocks until then and answers `false`,
+/// detaching nothing, though the command buffer still waits for an event behind it. A heap one of
+/// whose buffers that work named answers `false` at once. A buffer it does not take is detached at
+/// once.
 #[test]
-fn table_3_a_detach_waits_for_a_submitted_command_buffer_then_refuses() {
+fn table_3_a_detach_waits_for_running_work_then_refuses() {
     on_device(|device| {
         let queue = device.new_command_queue().unwrap();
-        let walker = public_case(POINTER_WALKER).unwrap();
+        let state = spin_state(device, &queue);
         let Some((member, _)) = member_over(device, A) else {
             return;
         };
-        let copied = device.new_buffer(16, ResourceOptions::shared()).unwrap();
-        let named = Running::new(device, &queue, |command_buffer| {
-            let mut blit = command_buffer.blit_command_encoder().unwrap();
-            blit.copy_from_buffer_to_buffer(&member, 0, &copied, 0, 16)
-                .unwrap();
-            blit.end_encoding().unwrap();
-        });
+        let named = Spinning::new(device, &queue, &state, &member, false);
         // A buffer it does not take: at once.
         let (unrelated, _) = member_over(device, B).unwrap();
         detach(&unrelated);
-        assert_eq!(
-            named.command_buffer.status(),
-            CommandBufferStatus::Committed
-        );
         waits_then_refuses(&named, || member.detach_backing());
-        assert_eq!(read_buffer(&copied, 0, 16).unwrap(), node(A));
+        named.finish();
         assert!(member.contents().is_some(), "detached though refused");
-        assert_eq!(gpu_read(&queue, &member, 0..16), node(A));
+        // Once its command buffer completed and the wait returned, it detaches.
+        detach(&member);
+        rebind_to(&member, A);
 
-        // Resident: the walker reaches it through what its encoder made resident.
-        let state = pipeline_state(device, &walker).unwrap();
-        let mut holding = CaseResources::new(device, &walker).unwrap();
-        let [field] = holding.argument_buffers.keys().copied().collect::<Vec<_>>()[..] else {
-            panic!("{POINTER_WALKER}: one argument-buffer buffer");
-        };
-        holding.argument_buffers.insert(field, member.clone());
-        let buffers = bound_buffers(device, &walker.compute, &holding).unwrap();
-        let resident = Running::new(device, &queue, |command_buffer| {
-            let mut encoder = command_buffer.compute_command_encoder().unwrap();
-            encode_case(&mut encoder, &state, &walker.compute, &buffers, &holding).unwrap();
-            encoder.end_encoding().unwrap();
-        });
+        // Resident: its encoder made the buffer resident.
+        let resident = Spinning::new(device, &queue, &state, &member, true);
         waits_then_refuses(&resident, || member.detach_backing());
-        drop(holding);
+        resident.finish();
         detach(&member);
 
         // A heap: at once.
         let Some((heap, placed)) = heap_member(device) else {
             return;
         };
-        let in_heap = Running::new(device, &queue, |command_buffer| {
-            let mut blit = command_buffer.blit_command_encoder().unwrap();
-            blit.copy_from_buffer_to_buffer(&placed, 0, &copied, 0, 16)
-                .unwrap();
-            blit.end_encoding().unwrap();
-        });
+        let in_heap = Spinning::new(device, &queue, &state, &placed, false);
         assert_eq!(heap.detach_backing(), Ok(false));
-        assert_eq!(
+        assert_ne!(
             in_heap.command_buffer.status(),
-            CommandBufferStatus::Committed,
+            CommandBufferStatus::Completed,
             "the heap's detach waited"
         );
         in_heap.finish();
-        assert_eq!(read_buffer(&copied, 0, 16).unwrap(), node(A));
         detach_heap(&heap);
-        eprintln!("DETACH table 3: a buffer waits then refuses, a heap refuses at once");
+        eprintln!(
+            "DETACH table 3: a buffer waits for the running submission then refuses, a heap \
+             refuses at once"
+        );
+    });
+}
+
+/// A command buffer of `queue`, behind a wait for `gate` where it is given, whose compute encoder
+/// makes `resident` resident and runs the spin over a raised word, which reaches no buffer through
+/// an address: committed. Its spin writes 0 loads into the returned buffer, which holds `0xff`
+/// bytes until then.
+fn resident_unreached(
+    device: &Device,
+    queue: &CommandQueue,
+    state: &ComputePipelineState,
+    resident: &Buffer,
+    gate: Option<&SharedEvent>,
+) -> (CommandBuffer, Buffer) {
+    let raised = buffer_with(device, &1u32.to_le_bytes()).unwrap();
+    let loads = buffer_with(device, &[0xff; 4]).unwrap();
+    let command_buffer = queue.command_buffer().unwrap();
+    if let Some(gate) = gate {
+        command_buffer
+            .encode_wait_for_event(EventRef::from(gate), 1)
+            .unwrap();
+    }
+    let mut encoder = command_buffer.compute_command_encoder().unwrap();
+    encoder
+        .use_resource(resident.as_resource(), ResourceUsage::READ)
+        .unwrap();
+    encoder.set_compute_pipeline_state(state).unwrap();
+    encoder.set_buffer(Some(&raised), 0, 0).unwrap();
+    encoder.set_buffer(Some(&loads), 0, 1).unwrap();
+    encoder.set_bytes(&SPIN_CAP.to_le_bytes(), 2).unwrap();
+    encoder
+        .dispatch_threadgroups(Size::new(1, 1, 1), Size::new(1, 1, 1))
+        .unwrap();
+    encoder.end_encoding().unwrap();
+    command_buffer.commit().unwrap();
+    (command_buffer, loads)
+}
+
+/// An encoder's resident buffer that no command reaches, as Metal answers it on the M3 Max (macOS
+/// 27.0.1): held and judged as a reached one. Detached before the command buffer is encoded, or
+/// after its commit and before its first submission (the detach answering `true` at once), its
+/// submission fails `DetachedBacking` (code 8) and runs nothing.
+#[test]
+fn a_resident_buffer_no_command_reaches_fails_its_submission_once_detached() {
+    on_device(|device| {
+        let queue = device.new_command_queue().unwrap();
+        let state = spin_state(device, &queue);
+        let Some((member, _)) = member_over(device, A) else {
+            return;
+        };
+        detach(&member);
+        let (encoded, loads) = resident_unreached(device, &queue, &state, &member, None);
+        encoded.wait_until_completed_for(WAIT).unwrap();
+        detached_backing(&encoded, "encoded detached");
+        assert_eq!(
+            read_buffer(&loads, 0, 4).unwrap(),
+            [0xff; 4],
+            "the spin ran"
+        );
+        rebind_to(&member, A);
+
+        let gate = device.new_shared_event().unwrap();
+        let (pending, loads) = resident_unreached(device, &queue, &state, &member, Some(&gate));
+        detach(&member);
+        gate.set_signaled_value(1);
+        pending.wait_until_completed_for(WAIT).unwrap();
+        detached_backing(&pending, "detached before its submission");
+        assert_eq!(
+            read_buffer(&loads, 0, 4).unwrap(),
+            [0xff; 4],
+            "the spin ran"
+        );
+        eprintln!("DETACH resident unreached: held and failed with code 8 as a reached one");
+    });
+}
+
+/// A command buffer of `queue` whose first submission runs `first` and signals an event, and
+/// whose second, behind a wait for another event, runs `second`; committed, and returned once its
+/// first submission's work completed (its signal seen), with the event that lets the second go.
+fn split(
+    device: &Device,
+    queue: &CommandQueue,
+    first: impl FnOnce(&CommandBuffer),
+    second: impl FnOnce(&CommandBuffer),
+) -> (CommandBuffer, SharedEvent) {
+    let done = device.new_shared_event().unwrap();
+    let gate = device.new_shared_event().unwrap();
+    let command_buffer = queue.command_buffer().unwrap();
+    first(&command_buffer);
+    command_buffer
+        .encode_signal_event(EventRef::from(&done), 1)
+        .unwrap();
+    command_buffer
+        .encode_wait_for_event(EventRef::from(&gate), 1)
+        .unwrap();
+    second(&command_buffer);
+    command_buffer.commit().unwrap();
+    let deadline = Instant::now() + WAIT;
+    while done.signaled_value() < 1 {
+        assert!(Instant::now() < deadline, "the first submission never ran");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    (command_buffer, gate)
+}
+
+/// A blit of `command_buffer` that fills the first 16 bytes of `buffer` with `value`.
+fn fill(command_buffer: &CommandBuffer, buffer: &Buffer, value: u8) {
+    let mut blit = command_buffer.blit_command_encoder().unwrap();
+    blit.fill_buffer(buffer, 0..16, value).unwrap();
+    blit.end_encoding().unwrap();
+}
+
+/// A detach between two of a command buffer's submissions, as Metal answers it on the M3 Max
+/// (macOS 27.0.1): Metal holds what a submission uses only from its submission until its work
+/// completed, so a detach while the command buffer waits for an event after a submission that used
+/// the buffer, its work done, detaches at once, and the command buffer completes; one before a
+/// later submission that uses it detaches at once too, and that submission fails with code 8, the
+/// earlier one having run. Buffer and heap forms.
+#[test]
+fn a_detach_between_submissions_detaches_at_once_and_fails_only_the_later_submission() {
+    on_device(|device| {
+        let queue = device.new_command_queue().unwrap();
+        let Some((member, _)) = member_over(device, A) else {
+            return;
+        };
+        let Some((heap, placed)) = heap_member(device) else {
+            return;
+        };
+        type Forms<'a> = [(
+            &'a str,
+            &'a Buffer,
+            &'a dyn Fn() -> Result<bool, Error>,
+            &'a dyn Fn(),
+        ); 2];
+        let forms: Forms<'_> = [
+            ("buffer", &member, &|| member.detach_backing(), &|| {
+                rebind_to(&member, A);
+            }),
+            ("heap", &placed, &|| heap.detach_backing(), &|| {
+                rebind_heap_to(&heap, A)
+            }),
+        ];
+        for (form, used, detach, reattach) in forms {
+            // The use before the wait: its work done, the detach detaches at once.
+            let other = buffer_with(device, &[0; 16]).unwrap();
+            let (command_buffer, gate) = split(
+                device,
+                &queue,
+                |cb| fill(cb, used, 0x5c),
+                |cb| fill(cb, &other, 0x5d),
+            );
+            let started = Instant::now();
+            assert_eq!(detach(), Ok(true), "{form}: used before the wait");
+            assert!(started.elapsed() < EARLY, "{form}: the detach waited");
+            gate.set_signaled_value(1);
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            assert_eq!(command_buffer.error(), None, "{form}: used before the wait");
+            assert_eq!(read_buffer(&other, 0, 16).unwrap(), [0x5d; 16]);
+            reattach();
+
+            // The use behind the wait: detached at once, and that submission fails.
+            let other = buffer_with(device, &[0; 16]).unwrap();
+            let (command_buffer, gate) = split(
+                device,
+                &queue,
+                |cb| fill(cb, &other, 0x5c),
+                |cb| fill(cb, used, 0x5d),
+            );
+            let started = Instant::now();
+            assert_eq!(detach(), Ok(true), "{form}: used behind the wait");
+            assert!(started.elapsed() < EARLY, "{form}: the detach waited");
+            gate.set_signaled_value(1);
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            detached_backing(&command_buffer, form);
+            assert_eq!(
+                read_buffer(&other, 0, 16).unwrap(),
+                [0x5c; 16],
+                "{form}: the earlier submission ran"
+            );
+            reattach();
+        }
+        eprintln!(
+            "DETACH split: a detach between submissions detaches at once; the later submission \
+             fails with code 8"
+        );
+    });
+}
+
+/// A detach a completed handler calls: a buffer's or a heap's.
+type Detaching = Arc<dyn Fn() -> Result<bool, Error> + Send + Sync>;
+
+/// A detach in a completed handler of the command buffer that used the buffer answers `false`, as
+/// Metal's does (37 of 40 on the M3 Max, macOS 27.0.1; the consumer measured 197 of 200 and 39 of
+/// 40), and one once its `wait_until_completed` returned detaches (36 of 40 there; always 2 ms
+/// later). Buffer and heap forms.
+#[test]
+fn a_detach_in_a_completed_handler_answers_false() {
+    on_device(|device| {
+        let queue = device.new_command_queue().unwrap();
+        let Some((member, _)) = member_over(device, A) else {
+            return;
+        };
+        let Some((heap, placed)) = heap_member(device) else {
+            return;
+        };
+        let (buffer_answer, heap_answer) = (member.clone(), heap.clone());
+        let forms: [(&str, &Buffer, Detaching); 2] = [
+            (
+                "buffer",
+                &member,
+                Arc::new(move || buffer_answer.detach_backing()),
+            ),
+            (
+                "heap",
+                &placed,
+                Arc::new(move || heap_answer.detach_backing()),
+            ),
+        ];
+        for (form, used, detach) in forms {
+            let answered = Arc::new(std::sync::Mutex::new(None));
+            let command_buffer = queue.command_buffer().unwrap();
+            let (in_handler, seen) = (Arc::clone(&detach), Arc::clone(&answered));
+            command_buffer
+                .add_completed_handler(Box::new(move |_| {
+                    *seen.lock().unwrap() = Some(in_handler());
+                }))
+                .unwrap();
+            fill(&command_buffer, used, 0x5a);
+            command_buffer.commit().unwrap();
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            assert_eq!(command_buffer.error(), None, "{form}");
+            assert_eq!(
+                *answered.lock().unwrap(),
+                Some(Ok(false)),
+                "{form}: in its completed handler"
+            );
+            assert_eq!(detach(), Ok(true), "{form}: once the wait returned");
+        }
+        drop(heap);
+        eprintln!("DETACH handler: false in the completed handler, true once the wait returned");
+    });
+}
+
+/// The deallocator of the pages a detach lets go of runs at the buffer's next rebind, inside the
+/// call, on its thread, and, where the buffer is released detached, at the release, on the
+/// releasing thread; never at the detach, as Metal runs it (the M3 Max, macOS 27.0.1). A
+/// keep-alive goes after the deallocator, which may read the bytes, once the import is freed. With
+/// GPU use before the detach and without.
+#[test]
+fn a_detach_holds_the_deallocator_until_the_rebind_or_the_release() {
+    on_device(|device| {
+        let queue = device.new_command_queue().unwrap();
+        for used in [false, true] {
+            let Some((member, old)) = member_over(device, A) else {
+                return;
+            };
+            if used {
+                gpu_read(&queue, &member, 0..16);
+            }
+            detach(&member);
+            std::thread::sleep(Duration::from_millis(20));
+            assert_eq!(
+                old.runs.load(Ordering::SeqCst),
+                0,
+                "used {used}: at the detach"
+            );
+            let new = rebind_to(&member, B);
+            ran_here(&old, "the rebind");
+            if used {
+                gpu_read(&queue, &member, 0..16);
+            }
+            detach(&member);
+            std::thread::sleep(Duration::from_millis(20));
+            assert_eq!(
+                new.runs.load(Ordering::SeqCst),
+                0,
+                "used {used}: the second detach"
+            );
+            drop(member);
+            ran_here(&new, "the release of a detached buffer");
+        }
+        let Some((member, old, dropped)) = kept_member_over(device, A) else {
+            return;
+        };
+        gpu_read(&queue, &member, 0..16);
+        detach(&member);
+        assert_eq!(old.runs.load(Ordering::SeqCst), 0, "kept: at the detach");
+        // The keep-alive waits for the deallocator, which may read the bytes.
+        assert!(
+            !dropped.load(Ordering::SeqCst),
+            "kept: the keep-alive went first"
+        );
+        drop(member);
+        ran_here(&old, "kept: the release of a detached buffer");
+        let deadline = Instant::now() + WAIT;
+        while !dropped.load(Ordering::SeqCst) {
+            assert!(Instant::now() < deadline, "kept: the keep-alive never went");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        eprintln!("DETACH deallocator: at the rebind or the release, never at the detach");
     });
 }
 
@@ -600,7 +1006,7 @@ fn a_detach_of_a_large_heap_allocates_no_device_memory() {
         detach_heap(&heap);
         detach(&large);
         assert_eq!(allocated(), made, "a detach allocated device memory");
-        deallocated(&seen);
+        assert_eq!(seen.runs.load(Ordering::SeqCst), 0, "ran at the detach");
         for (name, buffer) in [("the heap's buffer", &placed), ("the buffer", &large)] {
             let command_buffer = queue.command_buffer().unwrap();
             let mut blit = command_buffer.blit_command_encoder().unwrap();
@@ -616,6 +1022,8 @@ fn a_detach_of_a_large_heap_allocates_no_device_memory() {
             made,
             "a command buffer naming a detached buffer allocated device memory"
         );
+        drop(large);
+        ran_here(&seen, "the release of a detached buffer");
         eprintln!(
             "DETACH memory: 0 bytes allocated detaching {} MiB twice",
             LARGE >> 20
@@ -623,8 +1031,8 @@ fn a_detach_of_a_large_heap_allocates_no_device_memory() {
     });
 }
 
-/// The rounds of [`a_detach_racing_a_commit_runs_the_deallocator_in_one_of_the_two_calls`], for
-/// each form: two sweeps of the offsets.
+/// The rounds of [`a_detach_racing_a_commit_leaves_the_deallocator_to_the_release`], for each
+/// form: two sweeps of the offsets.
 const RACES: u32 = 640;
 
 /// How far apart the detach and the commit of a race start, at most, either first.
@@ -644,14 +1052,15 @@ fn spin_until(at: Instant) {
 }
 
 /// A detach on one thread racing the commit, on another, of a command buffer whose blit names the
-/// buffer: the old pages' deallocator runs once, in one of the two calls (the detach where it lets
-/// go of the pages last, the commit where its encoder held them last), wherever the device's
-/// recorder replays the command buffer's commands, and nothing is announced: with a keep-alive
-/// and without one. The command buffer, which an event holds back until both calls returned,
-/// then fails `DetachedBacking`. The races start the two calls up to 40 us apart, either first,
-/// swept in steps of 0.25 us, so that many land inside each other.
+/// buffer: the old pages' deallocator runs in neither call (the detach or the commit, whichever
+/// lets go of the pages last), wherever the device's recorder replays the command buffer's
+/// commands, and runs once at the buffer's release, on the releasing thread, as Metal runs it
+/// there; nothing is announced: with a keep-alive and without one. The command buffer, which an
+/// event holds back until both calls returned, then fails `DetachedBacking`. The races start the
+/// two calls up to 40 us apart, either first, swept in steps of 0.25 us, so that many land inside
+/// each other.
 #[test]
-fn a_detach_racing_a_commit_runs_the_deallocator_in_one_of_the_two_calls() {
+fn a_detach_racing_a_commit_leaves_the_deallocator_to_the_release() {
     for (form, kept) in [("no keep-alive", false), ("keep-alive", true)] {
         on_device_noticed(|device, messages| {
             let queue = device.new_command_queue().unwrap();
@@ -660,8 +1069,7 @@ fn a_detach_racing_a_commit_runs_the_deallocator_in_one_of_the_two_calls() {
                 true => kept_member_over(device, A).map(|(buffer, seen, _)| (buffer, seen)),
                 false => member_over(device, A),
             };
-            let detacher = std::thread::current().id();
-            let (mut in_detach, mut in_commit, mut late, mut elsewhere) = (0, 0, 0, 0);
+            let (mut early, mut elsewhere) = (0, 0);
             let before = device.work_counts();
             let span = RACE_SPAN.as_nanos() as i64;
             for round in 0..RACES {
@@ -682,41 +1090,39 @@ fn a_detach_racing_a_commit_runs_the_deallocator_in_one_of_the_two_calls() {
                 let start = Instant::now() + RACE_LEAD;
                 let late_by = |ns: i64| Duration::from_nanos(ns.max(0) as u64);
                 let (commit_at, detach_at) = (start + late_by(offset), start + late_by(-offset));
-                let committer = std::thread::scope(|scope| {
-                    let committing = scope.spawn(|| {
+                std::thread::scope(|scope| {
+                    scope.spawn(|| {
                         spin_until(commit_at);
                         command_buffer.commit().unwrap();
-                        std::thread::current().id()
                     });
                     spin_until(detach_at);
                     detach(&buffer);
-                    committing.join().unwrap()
                 });
-                let ran = *seen.thread.lock().unwrap();
-                match (seen.runs.load(Ordering::SeqCst), ran) {
-                    (1, Some(thread)) if thread == detacher => in_detach += 1,
-                    (1, Some(thread)) if thread == committer => in_commit += 1,
-                    (0, _) => late += 1,
-                    _ => elsewhere += 1,
-                }
+                early += seen.runs.load(Ordering::SeqCst);
                 event.set_signaled_value(value);
                 command_buffer.wait_until_completed_for(WAIT).unwrap();
                 detached_backing(&command_buffer, form);
-                deallocated(&seen);
-                assert_eq!(seen.runs.load(Ordering::SeqCst), 1, "{form}: ran once");
+                early += seen.runs.load(Ordering::SeqCst);
+                drop(command_buffer);
+                drop(buffer);
+                let here = *seen.thread.lock().unwrap() == Some(std::thread::current().id());
+                match (seen.runs.load(Ordering::SeqCst), here) {
+                    (1, true) => {}
+                    _ => elsewhere += 1,
+                }
             }
             let inline = device.work_counts().command_buffers_replayed_inline
                 - before.command_buffers_replayed_inline;
             eprintln!(
-                "DETACH race {} ({form}): {RACES} races, the deallocator ran in the detach {in_detach}, \
-                 in the commit {in_commit}, after both returned {late}, on another thread \
-                 {elsewhere}; {inline} command buffers replayed off the recorder's thread",
+                "DETACH race {} ({form}): {RACES} races, the deallocator ran before the release \
+                 {early}, not once in the release on its thread {elsewhere}; {inline} command \
+                 buffers replayed off the recorder's thread",
                 device.name()
             );
             assert_eq!(
-                (late, elsewhere),
+                (early, elsewhere),
                 (0, 0),
-                "{form}: the deallocator ran outside the detach and the commit"
+                "{form}: the deallocator ran outside the buffer's release"
             );
             assert_once_allowing(&messages.take_notices(), &[], &shared_kinds(device));
         });

@@ -1047,8 +1047,9 @@ fn submit_ready(
             if !binary.ready(&held.binary_needs) {
                 return None;
             }
-            // Its first submission waits while a rebind encodes encoders of it again.
-            if held.index == 0 && held.buffer.reencode_pending() {
+            // The submission of its event group waits while a rebind encodes encoders of it again
+            // (`command_buffer/reencode.rs`).
+            if held.buffer.reencode_pending() {
                 return None;
             }
             // Held for a decoded twin's CPU decode it may read: any batch, while an untracked

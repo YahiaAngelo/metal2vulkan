@@ -1777,7 +1777,10 @@ degradations! {
         /// - with no keep-alive, on a device whose driver fails pending work where memory a
         ///   device-address buffer lay in is freed
         ///   (`RuntimeDriverDefect::FreedAddressMemoryFailsPendingWork`: MoltenVK), while the
-        ///   batches submitted before the import's memory went are in flight (`freed_memory.rs`).
+        ///   batches submitted before the import's memory went are in flight (`freed_memory.rs`);
+        /// - with no keep-alive, a detached buffer's or heap's rebind or release while the pages
+        ///   its detach let go of are still imported, as above: the deallocator its detach held
+        ///   back (Metal runs it at the replace or the release) runs once they go (`detach.rs`).
         ///
         /// With a keep-alive the deallocator runs at the release, as Metal's, and the import keeps
         /// the keep-alive, which keeps the pages mapped, until it is freed: not announced.

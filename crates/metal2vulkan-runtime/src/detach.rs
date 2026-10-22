@@ -4,22 +4,39 @@
 //!
 //! A consumer that moves its pages lets go of the old ones before it has the new: the buffer or
 //! heap lies in no pages until a rebind gives it some. Metal's answers (the consumer's rebind
-//! probe on the M3 Max, tables 1 to 3), which the runtime keeps:
+//! probe on the M3 Max, tables 1 to 3, and the M3 Max under macOS 27.0.1), which the runtime
+//! keeps:
 //!
-//! - **The call.** It detaches at once, and answers `true`, unless a command buffer submitted
-//!   and not yet complete took the buffer or heap: through a command that named it (one of a
-//!   heap's buffers included), or through what it made resident (`use_resource`, `use_heap`).
-//!   Then a buffer's call blocks until each such command buffer completed and answers `false`,
-//!   detaching nothing; a heap's answers `false` at once. A lost device ends the wait
-//!   (`Err(DeviceLost)`). The wait holds no lock of the runtime's: a completion turn lets go
-//!   of each command buffer's holds without one (`rebind::SubmittedHolds`).
-//! - **Pending work.** A command buffer whose first submission comes after the detach and whose
-//!   commands named the buffer or made it resident (a render pass whose attachment lies in the
-//!   bytes names them from its open), encoded before the detach or after it, fails at that
-//!   submission with `CommandBufferError::DetachedBacking` (Metal's code 8) and runs nothing of it;
-//!   one that only reaches the bytes unnamed reads zeros there (`live_buffers.rs` no longer lists
-//!   them) and runs. A rebind before that submission gives a command encoded while detached
-//!   `EncodedUseRebound` instead, the gap until encoded uses resolve at submission.
+//! - **The call.** It detaches at once, and answers `true`, unless submitted work holds the
+//!   buffer or heap: a submission whose command named it (one of a heap's buffers included), or
+//!   whose encoder made it resident (`use_resource`, `use_heap`), holds it from its submission
+//!   until its work completed, and the command buffer's last submissions hold it until its
+//!   completed handlers ran (`rebind::SubmittedHolds`; an event wait or signal splits the
+//!   submissions, `State::event_group`). Then a buffer's call blocks until the work of each such
+//!   submission completed and answers `false`, detaching nothing; a heap's answers `false` at
+//!   once. So a detach in a completed handler of the command buffer that used the buffer answers
+//!   `false` (Metal's: 37 of 40 such detaches, the other 3 a race of its kernel's retire), and one
+//!   once its `wait_until_completed` returned detaches (36 of 40 on Metal, always 2 ms later). A
+//!   later submission of a command buffer, behind an event wait, holds nothing until it is
+//!   submitted: a detach while it waits detaches at once, whatever the command buffer's earlier
+//!   submissions held, which keep their pages until they complete. A lost device ends the wait
+//!   (`Err(DeviceLost)`). The wait holds no lock of the runtime's: a completion turn notes each
+//!   submission's work complete without one.
+//! - **Pending work.** A submission that comes after the detach, the command buffer's first or a
+//!   later one, whose commands named the buffer or made it resident (a render pass whose
+//!   attachment lies in the bytes names them from its open), encoded before the detach or after
+//!   it, fails with `CommandBufferError::DetachedBacking` (Metal's code 8) and runs nothing of it,
+//!   its other submissions running; one that only reaches the bytes unnamed reads zeros there
+//!   (`live_buffers.rs` no longer lists them) and runs, where its command buffer's first
+//!   submission came after the detach. A rebind before the first submission gives a command
+//!   encoded while detached `EncodedUseRebound` instead, the gap until encoded uses resolve at
+//!   submission; so does a rebind before a later submission whose commands named the buffer,
+//!   which the rebind does not encode again.
+//! - **The deallocator** of the pages a detach lets go of runs at the buffer's (or heap's) next
+//!   rebind, inside the call, on its thread, or at its release, on the releasing thread, never at
+//!   the detach, as Metal's (`HostCell::hold_back`): their import goes at the detach, once nothing
+//!   holds it; a keep-alive goes once both the deallocator ran and the import is freed, so the
+//!   deallocator may read the bytes.
 //! - **No memory.** A detached buffer takes the device's stand-in, a small buffer of the
 //!   runtime's own shared by every detached buffer (`buffer::Detached`), never memory of its
 //!   size. No command that takes the stand-in runs: an encoder whose command names a detached
@@ -55,20 +72,23 @@ use std::sync::{Arc, Weak};
 const STAND_IN_BYTES: u64 = 256;
 
 impl Buffer {
-    /// `detachBacking` (a runtime extension; the module docs of `detach.rs` state the rule): let
-    /// the no-copy buffer lie in no host pages until
+    /// `detachBacking` (Metal's private `MTLBuffer` method; the module docs of `detach.rs` state
+    /// the rule): let the no-copy buffer lie in no host pages until
     /// [`rebind_bytes_no_copy`](Buffer::rebind_bytes_no_copy) gives it some. `true` once it is
-    /// detached (at once, or it was already). Where a command buffer submitted and not yet
-    /// complete took the buffer, the call blocks until each such command buffer completed and
-    /// answers `false`, detaching nothing. The old memory's deallocator runs once every command
-    /// buffer submitted before the call that used it completed, and every open encoder that named
-    /// it was committed or dropped (in the call, where none holds it). The buffer, its
-    /// `gpu_address` and its options stay; `contents` answers `None` while it is detached.
+    /// detached (at once, or it was already). Where submitted work holds the buffer (a submission
+    /// that named it or made it resident, from its submission until its work completed, and the
+    /// command buffer's last submissions until its completed handlers ran), the call blocks until
+    /// that work completed and answers `false`, detaching nothing, as Metal's does. The old
+    /// memory's import goes once nothing holds it; its deallocator runs at the buffer's next
+    /// rebind, inside the call, or at its release, never at the detach, as Metal's. The buffer, its
+    /// `gpu_address` and its options stay; `contents` answers `None` while it is detached, where
+    /// Metal's answers the old pointer.
     ///
-    /// A command buffer first submitted after the call whose commands named the buffer or made
-    /// it resident (a render pass whose attachment lies over it names it from its open) fails
-    /// there, `CommandBufferError::DetachedBacking`, and runs nothing of it; one that reaches the
-    /// buffer only by its address reads zeros there.
+    /// A submission after the call, the command buffer's first or a later one behind an event
+    /// wait, whose commands named the buffer or made it resident (a render pass whose attachment
+    /// lies over it names it from its open) fails there, `CommandBufferError::DetachedBacking`, and
+    /// runs nothing of it; one whose command buffer reaches the buffer only by its address reads
+    /// zeros there, where its first submission came after the call.
     ///
     /// A texture over the buffer's bytes stays, and presents a stand-in until the buffer lies in
     /// pages again: its queries answer its own descriptor, an unnamed read reads zeros, and a
@@ -90,11 +110,12 @@ impl Buffer {
 
 impl Heap {
     /// `detachBacking` of a heap over the caller's host memory
-    /// (`Device::new_heap_with_bytes_no_copy`; a runtime extension), as [`Buffer::detach_backing`]
-    /// detaches a no-copy buffer: every buffer placed in it stays, at its offset, and lies in no
-    /// pages until [`rebind_bytes_no_copy`](Heap::rebind_bytes_no_copy) gives the heap some. Where
-    /// a command buffer submitted and not yet complete took the heap or a buffer placed in it, the
-    /// call answers `false` at once, detaching nothing.
+    /// (`Device::new_heap_with_bytes_no_copy`; Metal's private `MTLHeap` method), as
+    /// [`Buffer::detach_backing`] detaches a no-copy buffer: every buffer placed in it stays, at
+    /// its offset, and lies in no pages until [`rebind_bytes_no_copy`](Heap::rebind_bytes_no_copy)
+    /// gives the heap some. Where submitted work holds the heap or a buffer placed in it, the call
+    /// answers `false` at once, detaching nothing, as Metal's does. The deallocator of the heap's
+    /// memory runs at its next rebind or its release, as a buffer's.
     ///
     /// Its textures, and those over its buffers, stay and present stand-ins as a buffer's do.
     ///
@@ -116,9 +137,8 @@ impl Heap {
 
 impl Device {
     /// Detach `buffer`, a no-copy buffer whose hold on its pages is `cell` (`heap`'s own buffer
-    /// where given), as the module docs say: `true` once detached; `false` where a command
-    /// buffer submitted and not yet complete took it, after waiting for each such command buffer
-    /// to complete unless it is a heap's.
+    /// where given), as the module docs say: `true` once detached; `false` where submitted work
+    /// holds it, after waiting for that work to complete unless it is a heap's.
     fn detach_host_pages(
         &self,
         buffer: &Buffer,
@@ -134,10 +154,10 @@ impl Device {
         shared.deferred.lower_all();
         let rebinds = &shared.rebinds;
         let key = buffer.identity().key;
-        // A submitted command buffer took it: a buffer's call waits for each, a heap's not.
+        // Submitted work holds it: a buffer's call waits for that work, a heap's not.
         let refuse = || {
             if heap.is_none() {
-                rebinds.wait_unsubmitted(self, key)?;
+                rebinds.wait_ran(self, key)?;
             }
             Ok(false)
         };
@@ -211,7 +231,11 @@ impl Device {
                 Lying::Detached(_) => super::heap_sets::retire(self, Box::new(gone)),
             }
         }
-        // The old pages go now where no command buffer holds them, their deallocator with them.
+        // The old pages go now where no command buffer holds them, their import freed; their
+        // deallocator waits for the next rebind or the release (`HostCell::hold_back`).
+        if let Lying::In(pages) = &old {
+            cell.hold_back(pages);
+        }
         drop(old);
         Ok(true)
     }

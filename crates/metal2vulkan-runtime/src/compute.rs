@@ -1006,7 +1006,7 @@ impl ComputeCommandEncoder {
                 .residency
                 .use_resource(resource, usage, RenderStages::empty());
             if let Some(used) = used {
-                self.core.retain(used);
+                self.core.made_resident(used);
             }
             if let ResourceRef::IndirectCommandBuffer(icb) = resource {
                 if usage.contains(ResourceUsage::WRITE) {
@@ -1047,7 +1047,7 @@ impl ComputeCommandEncoder {
         }
         for heap in heaps {
             for used in self.residency.use_heap(heap, RenderStages::empty()) {
-                self.core.retain(used);
+                self.core.made_resident(used);
             }
         }
         Ok(())

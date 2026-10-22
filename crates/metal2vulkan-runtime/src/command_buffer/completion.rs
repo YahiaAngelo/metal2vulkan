@@ -121,6 +121,7 @@ use crate::error::{CommandBufferError, Error, MemoryKind, VkResultCode};
 use crate::event::EventShared;
 use crate::exit_guard::{self, Call};
 use crate::gpu_time;
+use crate::rebind::SubmittedHolds;
 use crate::release;
 use crate::Device;
 use ash::vk;
@@ -212,6 +213,10 @@ pub(crate) struct Submitted {
     pub(crate) fence: Option<vk::Fence>,
     /// The events it signals, with their signal indices.
     pub(crate) signals: Vec<(Arc<EventShared>, u64)>,
+    /// The holds of what its event group's commands took that its completion lets go
+    /// (`State::holds_until`): at once, or, where it ends its command buffer, once the command
+    /// buffer's completed handlers ran.
+    pub(crate) holds: Vec<SubmittedHolds>,
 }
 
 impl Completion {
@@ -378,7 +383,7 @@ fn turns(watch: &Watch, lists: &mut FenceLists) -> bool {
 /// reached, the scheduler told, their fences settled, then, for each that ends its command buffer,
 /// its timestamps read and its GPU times placed, and its transition posted. False once the
 /// process is exiting.
-fn finish(watch: &Watch, lists: &mut FenceLists, finished: Vec<(usize, Submitted)>) -> bool {
+fn finish(watch: &Watch, lists: &mut FenceLists, mut finished: Vec<(usize, Submitted)>) -> bool {
     // The host time the batches were seen complete: an uncalibrated command buffer's GPU end
     // (`gpu_time.rs`).
     let seen = gpu_time::host_nanos();
@@ -389,6 +394,13 @@ fn finish(watch: &Watch, lists: &mut FenceLists, finished: Vec<(usize, Submitted
     else {
         return true;
     };
+    // The holds of the batches that end no command buffer go first, their work completed: a
+    // detach that sees one of their signals detaches what only they held (`detach.rs`).
+    for (_, batch) in &mut finished {
+        if !batch.last {
+            batch.holds.clear();
+        }
+    }
     // Their event signals are seen before the scheduler looks again: a batch whose submission
     // checks wait for a GPU signal to land may now go.
     for (_, batch) in &finished {
@@ -407,11 +419,15 @@ fn finish(watch: &Watch, lists: &mut FenceLists, finished: Vec<(usize, Submitted
             buffer,
             last,
             fence,
+            holds,
             ..
         } = batch;
         lists.gathered.extend(fence.map(|fence| (queue, fence)));
         if last {
-            lock(&buffer.state).times.completed = seen;
+            let mut state = lock(&buffer.state);
+            state.times.completed = seen;
+            state.keep_holds(holds);
+            drop(state);
             ending.push(buffer);
         }
     }
@@ -465,10 +481,14 @@ fn fail(watch: &Watch, ending: Vec<Hold<CommandBufferShared>>, error: CommandBuf
             buffer,
             last,
             fence,
+            holds,
             ..
         } = batch;
         if let Some(fence) = fence {
             let_go(buffer.device(), queue, fence);
+        }
+        if last {
+            lock(&buffer.state).keep_holds(holds);
         }
         last.then_some(buffer)
     });
