@@ -12,9 +12,14 @@
 //!   `YCBCR10_420_2P`, `YCBCR10_422_2P` or `YCBCR10_444_2P` (format gap 1 step 2), each code in the
 //!   high 10 bits of its 16-bit word, over the surfaces and conversions measured: `x420`, `xf20`,
 //!   `x422`, `xf22`, `x444` and `xf44`, without a matrix and under BT.709.
-//! - What is not measured is refused, typed (`Feature::Format`), leaving the surface's bytes: a
-//!   load, a `DontCare` store, a blend, a mask of some of red, green and blue, and the `_sRGB`
-//!   twins' pipelines and passes.
+//! - A pass that loads such a texture loads each texel as the texture reads it and stores every
+//!   texel of each 32x32 tile its draws reach, re-encoded, keeping the planes' bytes of the other
+//!   tiles (`loaded_passes_store_the_tiles_they_reach_as_metal`); a `DontCare` store, or a store
+//!   left `Unknown`, stores nothing; a write mask keeps the masked channels' cleared or loaded
+//!   values; a blend blends the pass's floats, within a code of Metal's tile of halves, and
+//!   announces it (`masked_blended_and_unstored_passes_are_metal_s`).
+//! - What is not measured is refused, typed (`Feature::Format`), leaving the surface's bytes: the
+//!   `_sRGB` twins' pipelines and passes.
 //! - A packed 10-bit format's pipeline is made, as Metal makes it, and a pass into its texture
 //!   is refused, typed and naming the format, leaving the surface's bytes: Metal's pass fails,
 //!   its error and the bytes it leaves varying from run to run, so no exact form exists.
@@ -22,16 +27,16 @@
 use super::degrade_notices::{counts, on_device};
 use super::{buffer_with, read_buffer};
 use crate::air_library::AirLibrary;
-use metal2vulkan::bind::{ycbcr_store, YCbCrCodes, YCbCrMatrix, YCbCrRange};
+use metal2vulkan::bind::{ycbcr_read, ycbcr_store, YCbCrCodes, YCbCrMatrix, YCbCrRange};
 use metal2vulkan::error::{Error as CompileError, Feature};
 use metal2vulkan::metal::format::ycbcr_format;
-use metal2vulkan::metal::{ColorWriteMask, PixelFormat, PrimitiveType, TextureUsage};
+use metal2vulkan::metal::{BlendFactor, ColorWriteMask, PixelFormat, PrimitiveType, TextureUsage};
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
 use metal2vulkan_devtools::llvm_assemble_text;
 use metal2vulkan_runtime::{
-    Buffer, ClearColor, CommandQueue, Device, Error, IoSurfacePlane, IoSurfaceYCbCr, Library,
-    LoadAction, PipelineOptions, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
-    StoreAction, SurfaceYCbCrMatrix, Texture, TextureDescriptor,
+    Buffer, ClearColor, CommandQueue, Degradation, Device, Error, IoSurfacePlane, IoSurfaceYCbCr,
+    Library, LoadAction, PipelineOptions, RenderPassDescriptor, RenderPipelineState,
+    ResourceOptions, ScissorRect, StoreAction, SurfaceYCbCrMatrix, Texture, TextureDescriptor,
 };
 use std::time::Duration;
 
@@ -440,10 +445,9 @@ fn refused_format<T>(result: Result<T, Error>) -> bool {
 }
 
 /// What a pass into a YCbCr texture does that is not measured is refused, typed
-/// (`Feature::Format`), and the surface keeps its bytes: a load, a `DontCare` store, a blend and
-/// a mask of red and green into an 8-bit converted texture; and the `_sRGB` twins' pipelines and
-/// passes (the 10-bit formats' once too). The packed formats' pipelines are made, unblended, and
-/// their passes refused, naming the format.
+/// (`Feature::Format`), and the surface keeps its bytes: the `_sRGB` twins' pipelines and passes
+/// (the 10-bit formats' once too). The packed formats' pipelines are made, unblended, and their
+/// passes refused, naming the format.
 #[test]
 fn ycbcr_passes_outside_the_matched_store_are_refused_typed() {
     use PixelFormat as P;
@@ -452,19 +456,6 @@ fn ycbcr_passes_outside_the_matched_store_are_refused_typed() {
             .new_library_with_air(&llvm_assemble_text(SHADERS).unwrap())
             .unwrap();
         let queue = device.new_command_queue().unwrap();
-        let blended = pipeline(device, &library, P::YCBCR84202P, |a| {
-            a.blending_enabled = true;
-        });
-        assert!(refused_format(blended), "a blend");
-        let masked = pipeline(device, &library, P::YCBCR84202P, |a| {
-            a.write_mask = ColorWriteMask::RED | ColorWriteMask::GREEN;
-        });
-        assert!(refused_format(masked), "a mask of red and green");
-        // A mask of every channel but alpha, which no plane holds, stores as every channel.
-        let unmasked = pipeline(device, &library, P::YCBCR84202P, |a| {
-            a.write_mask = ColorWriteMask::RED | ColorWriteMask::GREEN | ColorWriteMask::BLUE;
-        });
-        assert!(unmasked.is_ok(), "{:?}", unmasked.err());
         assert!(
             refused_format(pipeline(device, &library, P::YCBCR104202PSRGB, |_| {})),
             "10-bit 4:2:0 sRGB's pipeline"
@@ -477,13 +468,6 @@ fn ycbcr_passes_outside_the_matched_store_are_refused_typed() {
         }
         let mut random = Random(0x6b0);
         for (pf, ostype, load, store) in [
-            (P::YCBCR84202P, "420v", LoadAction::Load, StoreAction::Store),
-            (
-                P::YCBCR84442P,
-                "444f",
-                LoadAction::Clear,
-                StoreAction::DontCare,
-            ),
             (
                 P::YCBCR104202PSRGB,
                 "x420",
@@ -527,5 +511,328 @@ fn ycbcr_passes_outside_the_matched_store_are_refused_typed() {
             let after = read_buffer(&surface, 0, bytes.len() as u64).unwrap();
             assert!(after == bytes, "{case}: the surface's bytes changed");
         }
+    });
+}
+
+/// The texels a texture of `codes` over the surface `bytes` reads, as `[r, g, b]` floats of the
+/// converted values (`metal2vulkan::bind::ycbcr_read`, `v / 2048`): each texel's luma code and its
+/// chroma pairs filtered as Metal reads them (the nearer pair weighted 3 and the farther 1 along
+/// each halved axis, the conversion module's filter).
+fn loaded_texels(
+    bytes: &[u8],
+    codes: YCbCrCodes,
+    conversion: (YCbCrRange, YCbCrMatrix),
+) -> Vec<[f32; 3]> {
+    let unit = u64::from(codes.bytes);
+    let code = |at: u64| -> u32 {
+        let at = at as usize;
+        match unit {
+            1 => u32::from(bytes[at]),
+            _ => u32::from(u16::from_le_bytes([bytes[at], bytes[at + 1]])) >> 6,
+        }
+    };
+    let [across, down] = codes.subsampling.halved();
+    let [cw, ch] = [(W, across), (H, down)].map(|(n, halved)| if halved { n / 2 } else { n });
+    let pair = |x: u64, y: u64| {
+        let at = CHROMA_AT + y * ROW + 2 * unit * x;
+        [code(at), code(at + unit)]
+    };
+    // The chroma pairs along one axis at texel `v` and their weights.
+    let taps = |v: u64, halved: bool, n: u64| -> Vec<(u64, u32)> {
+        match halved {
+            false => vec![(v, 4)],
+            true => {
+                let near = v / 2;
+                let far = match v % 2 {
+                    1 => (near + 1).min(n - 1),
+                    _ => near.saturating_sub(1),
+                };
+                vec![(near, 3), (far, 1)]
+            }
+        }
+    };
+    (0..W * H)
+        .map(|i| {
+            let (x, y) = (i % W, i / W);
+            let mut sums = [0u32; 2];
+            for (cx, wx) in taps(x, across, cw) {
+                for (cy, wy) in taps(y, down, ch) {
+                    let [cb, cr] = pair(cx, cy);
+                    sums[0] += wx * wy * cb;
+                    sums[1] += wx * wy * cr;
+                }
+            }
+            let [cb, cr] = sums.map(|s| ((s + 8) >> 4) as u16);
+            let luma = code(y * ROW + unit * x) as u16;
+            ycbcr_read(codes, conversion, [luma, cb, cr]).map(|v| f32::from(v) / 2048.0)
+        })
+        .collect()
+}
+
+/// `stored` (the surface's bytes after a store of every texel) inside the texels `[x0, x1)`
+/// across and every row, chroma pairs of those columns too, and `bytes` elsewhere.
+fn within_columns(bytes: &[u8], stored: &[u8], codes: YCbCrCodes, [x0, x1]: [u64; 2]) -> Vec<u8> {
+    let unit = u64::from(codes.bytes);
+    let [across, _] = codes.subsampling.halved();
+    let mut out = bytes.to_vec();
+    let mut keep = |offset: u64, rows: u64, columns: [u64; 2], pair: u64| {
+        for y in 0..rows {
+            let from = (offset + y * ROW + pair * unit * columns[0]) as usize;
+            let to = (offset + y * ROW + pair * unit * columns[1]) as usize;
+            out[from..to].copy_from_slice(&stored[from..to]);
+        }
+    };
+    keep(0, H, [x0, x1], 1);
+    let half = |v: u64| if across { v / 2 } else { v };
+    keep(CHROMA_AT, H, [half(x0), half(x1)], 2);
+    out
+}
+
+/// A pass that loads a converted YCbCr texture stores as Metal's tile does (the M3 Max under
+/// macOS 27.0.1, our probe `ycp`: a load and a partial draw of 128 x 96 `420v` and `x420`
+/// surfaces): the texels it loads are the texture's reads, its draws write over them, and its
+/// store re-encodes every texel of each 32x32 tile a draw reaches, keeping every byte of the
+/// others. Here a draw of the texels left of column 21 and above row 13, scissored to them,
+/// reaches the tile of columns 0 to 31: those columns store the loaded and drawn texels' codes,
+/// and columns 32 to 39 keep their bytes. A full-screen draw over a load stores every texel.
+#[test]
+fn loaded_passes_store_the_tiles_they_reach_as_metal() {
+    use PixelFormat as P;
+    use YCbCrMatrix::{Bt601, Bt709};
+    use YCbCrRange::{Full, Video};
+    on_device(|device, messages| {
+        let library = device
+            .new_library_with_air(&llvm_assemble_text(SHADERS).unwrap())
+            .unwrap();
+        let queue = device.new_command_queue().unwrap();
+        let b709 = Some(SurfaceYCbCrMatrix::Itu709);
+        let mut seed = 0x7a1;
+        for (pf, ostype, matrix, conversion) in [
+            (P::YCBCR84202P, "420v", None, (Video, Bt601)),
+            (P::YCBCR84222P, "422f", b709, (Full, Bt709)),
+            (P::YCBCR84442P, "444v", None, (Video, Bt601)),
+            (P::YCBCR104202P, "x420", b709, (Video, Bt709)),
+            (P::YCBCR104222P, "xf22", None, (Full, Bt601)),
+            (P::YCBCR104442P, "xf44", b709, (Full, Bt709)),
+        ] {
+            let codes = codes_of(pf);
+            let state = pipeline(device, &library, pf, |_| {}).unwrap();
+            for drawn in [[21, 13], [W, H]] {
+                seed += 1;
+                let case = format!("{pf:?} over {ostype}, {matrix:?}, a draw of {drawn:?}");
+                let mut random = Random(seed);
+                let bytes: Vec<u8> = (0..LENGTH).map(|_| random.next() as u8).collect();
+                let surface = buffer_with(device, &bytes).unwrap();
+                let texture = pass_texture(&surface, pf, ostype, matrix).unwrap();
+                let values: Vec<[f32; 4]> = (0..W * H)
+                    .map(|_| std::array::from_fn(|_| random.channel()))
+                    .collect();
+                let buffer: Vec<u8> = values
+                    .iter()
+                    .flatten()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect();
+                let buffer = buffer_with(device, &buffer).unwrap();
+                let mut descriptor = RenderPassDescriptor::new();
+                let color = &mut descriptor.color_attachments[0];
+                color.texture = Some(texture.clone());
+                color.load_action = LoadAction::Load;
+                color.store_action = StoreAction::Store;
+                let command_buffer = queue.command_buffer().unwrap();
+                let mut encoder = command_buffer.render_command_encoder(&descriptor).unwrap();
+                let corners = rectangle(device, drawn);
+                encoder.set_render_pipeline_state(&state).unwrap();
+                encoder
+                    .set_scissor_rect(ScissorRect {
+                        x: 0,
+                        y: 0,
+                        width: drawn[0],
+                        height: drawn[1],
+                    })
+                    .unwrap();
+                encoder.set_vertex_buffer(Some(&corners), 0, 0).unwrap();
+                encoder.set_fragment_buffer(Some(&buffer), 0, 0).unwrap();
+                encoder
+                    .draw_primitives(PrimitiveType::Triangle, 0, 6, 1, 0)
+                    .unwrap();
+                encoder.end_encoding().unwrap();
+                command_buffer.commit().unwrap();
+                command_buffer.wait_until_completed_for(WAIT).unwrap();
+                assert_eq!(command_buffer.error(), None, "{case}");
+                let loaded = loaded_texels(&bytes, codes, conversion);
+                let texels: Vec<[f32; 3]> = (0..W * H)
+                    .map(|i| {
+                        let (x, y) = (i % W, i / W);
+                        let [r, g, b, _] = values[i as usize];
+                        match x < drawn[0] && y < drawn[1] {
+                            true => [r, g, b],
+                            false => loaded[i as usize],
+                        }
+                    })
+                    .collect();
+                let stored = match codes.bits {
+                    10 => stored_words(&bytes, codes, conversion, &texels),
+                    _ => stored_bytes(&bytes, codes, conversion, &texels),
+                };
+                // The tiles the draw reaches: columns 0 to 31, or every column.
+                let reached = if drawn[0] < W { 32 } else { W };
+                let want = within_columns(&bytes, &stored, codes, [0, reached]);
+                let after = read_buffer(&surface, 0, LENGTH).unwrap();
+                assert!(
+                    after == want,
+                    "{case}: the surface's bytes after the pass, first difference (at, got, \
+                     want) {:?}",
+                    first_difference(&after, &want)
+                );
+            }
+        }
+        let notices = counts(&messages.take_notices());
+        assert!(
+            notices.contains_key(&Degradation::YCbCrLoadTiles),
+            "{notices:?}"
+        );
+    });
+}
+
+/// The rest of a pass's shapes into a converted YCbCr texture, as Metal's tile of halves takes
+/// them (the M3 Max under macOS 27.0.1, our probe `ycp`): a `DontCare` store, and a store action
+/// left `Unknown` to the pass's end, store nothing; a write mask keeps the masked channels'
+/// cleared values (red alone, green and blue, and every channel but alpha); and a draw that
+/// blends with source alpha stores within a code of Metal's blend of the cleared halves (an
+/// 8-bit format's in half arithmetic, a 10-bit one's in `float` rounded toward zero, which the
+/// device's blend of floats can miss by one), announced (`ycbcr-blend-rounding`).
+#[test]
+fn masked_blended_and_unstored_passes_are_metal_s() {
+    use PixelFormat as P;
+    use YCbCrMatrix::{Bt601, Bt709};
+    use YCbCrRange::{Full, Video};
+    on_device(|device, messages| {
+        let library = device
+            .new_library_with_air(&llvm_assemble_text(SHADERS).unwrap())
+            .unwrap();
+        let queue = device.new_command_queue().unwrap();
+        let b709 = Some(SurfaceYCbCrMatrix::Itu709);
+        let mut seed = 0x7b1;
+        let clear = [0.2, 0.5, 0.8, 1.0];
+        let cleared = [0, 1, 2].map(|c| half_nearest(clear[c] as f32));
+        for (pf, ostype, matrix, conversion) in [
+            (P::YCBCR84202P, "420f", b709, (Full, Bt709)),
+            (P::YCBCR104442P, "x444", None, (Video, Bt601)),
+        ] {
+            let codes = codes_of(pf);
+            for case in 0..6 {
+                seed += 1;
+                let mut random = Random(seed);
+                let bytes: Vec<u8> = (0..LENGTH).map(|_| random.next() as u8).collect();
+                let surface = buffer_with(device, &bytes).unwrap();
+                let texture = pass_texture(&surface, pf, ostype, matrix).unwrap();
+                // Values in [0, 1], their alphas too.
+                let values: Vec<[f32; 4]> = (0..W * H)
+                    .map(|_| std::array::from_fn(|_| (random.next() % 65537) as f32 / 65536.0))
+                    .collect();
+                let buffer: Vec<u8> = values
+                    .iter()
+                    .flatten()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect();
+                let buffer = buffer_with(device, &buffer).unwrap();
+                let (mask, blend, store) = match case {
+                    0 => (ColorWriteMask::RED, false, StoreAction::Store),
+                    1 => (
+                        ColorWriteMask::GREEN | ColorWriteMask::BLUE,
+                        false,
+                        StoreAction::Store,
+                    ),
+                    2 => (ColorWriteMask::ALPHA, false, StoreAction::Store),
+                    3 => (ColorWriteMask::ALL, true, StoreAction::Store),
+                    4 => (ColorWriteMask::ALL, false, StoreAction::DontCare),
+                    _ => (ColorWriteMask::ALL, false, StoreAction::Unknown),
+                };
+                let state = pipeline(device, &library, pf, |a| {
+                    a.write_mask = mask;
+                    a.blending_enabled = blend;
+                    a.source_rgb_blend_factor = BlendFactor::SourceAlpha;
+                    a.destination_rgb_blend_factor = BlendFactor::OneMinusSourceAlpha;
+                })
+                .unwrap();
+                let name = format!("{pf:?} over {ostype}, {mask:?}, blend {blend}, {store:?}");
+                let mut descriptor = RenderPassDescriptor::new();
+                let color = &mut descriptor.color_attachments[0];
+                color.texture = Some(texture.clone());
+                color.load_action = LoadAction::Clear;
+                color.store_action = store;
+                color.clear_color = ClearColor::new(clear[0], clear[1], clear[2], clear[3]);
+                let command_buffer = queue.command_buffer().unwrap();
+                let mut encoder = command_buffer.render_command_encoder(&descriptor).unwrap();
+                let corners = rectangle(device, [W, H]);
+                encoder.set_render_pipeline_state(&state).unwrap();
+                encoder.set_vertex_buffer(Some(&corners), 0, 0).unwrap();
+                encoder.set_fragment_buffer(Some(&buffer), 0, 0).unwrap();
+                encoder
+                    .draw_primitives(PrimitiveType::Triangle, 0, 6, 1, 0)
+                    .unwrap();
+                encoder.end_encoding().unwrap();
+                command_buffer.commit().unwrap();
+                command_buffer.wait_until_completed_for(WAIT).unwrap();
+                assert_eq!(command_buffer.error(), None, "{name}");
+                let after = read_buffer(&surface, 0, LENGTH).unwrap();
+                if store != StoreAction::Store {
+                    assert!(after == bytes, "{name}: the surface's bytes changed");
+                    continue;
+                }
+                let kept = [
+                    ColorWriteMask::RED,
+                    ColorWriteMask::GREEN,
+                    ColorWriteMask::BLUE,
+                ];
+                let texels: Vec<[f32; 3]> = values
+                    .iter()
+                    .map(|v| {
+                        std::array::from_fn(|c| match blend {
+                            // Metal's blend of the cleared halves: an 8-bit format's in half
+                            // arithmetic, a 10-bit one's in `float`.
+                            true if codes.bits == 8 => {
+                                let a = half_nearest(v[3]);
+                                let s = half_nearest(half_nearest(v[c]) * a);
+                                half_nearest(cleared[c] * half_nearest(1.0 - a) + s)
+                            }
+                            true => v[c] * v[3] + cleared[c] * (1.0 - v[3]),
+                            false if mask.contains(kept[c]) => v[c],
+                            false => cleared[c],
+                        })
+                    })
+                    .collect();
+                let want = match codes.bits {
+                    10 => stored_words(&bytes, codes, conversion, &texels),
+                    _ => stored_bytes(&bytes, codes, conversion, &texels),
+                };
+                if !blend {
+                    assert!(
+                        after == want,
+                        "{name}: first difference (at, got, want) {:?}",
+                        first_difference(&after, &want)
+                    );
+                    continue;
+                }
+                // Within a code of Metal's: each byte (8-bit codes) or 16-bit word's code.
+                let step = match codes.bits {
+                    10 => 2,
+                    _ => 1,
+                };
+                for at in (0..after.len()).step_by(step) {
+                    let read = |b: &[u8]| match step {
+                        2 => i32::from(u16::from_le_bytes([b[at], b[at + 1]]) >> 6),
+                        _ => i32::from(b[at]),
+                    };
+                    let (got, wanted) = (read(&after), read(&want));
+                    assert!((got - wanted).abs() <= 1, "{name}: at {at}: {got} {wanted}");
+                }
+            }
+        }
+        let notices = counts(&messages.take_notices());
+        assert!(
+            notices.contains_key(&Degradation::YCbCrBlendRounding),
+            "{notices:?}"
+        );
     });
 }

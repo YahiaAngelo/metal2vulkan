@@ -1377,6 +1377,26 @@ degradations! {
         RotatedLoadTiles = "rotated-load-tiles", Precision,
             "the tiles no draw reaches land mirrored as the tiles it reaches do, where Metal keeps \
              their texels in place";
+        /// A render pass that draws loads and stores a two-plane YCbCr texture
+        /// (`metal::format::ycbcr_renders`) whose draws reach the tiles their primitives touch
+        /// (`ycbcr.rs`): the pass stores every 32x32 tile of the rectangle bounding its draws'
+        /// scissors, each texel's codes re-encoded from the texel it loaded (its chroma the
+        /// filtered pairs), where Metal stores only the tiles a draw's primitives reach (the M3
+        /// Max under macOS 27.0.1) and keeps the planes' bytes of the others. Announced at the
+        /// pass's end, naming the attachment.
+        YCbCrLoadTiles = "ycbcr-load-tiles", Precision,
+            "in the tiles no draw reaches the planes' codes are re-encoded from the texels the \
+             pass loaded, the chroma from its filtered pairs, where Metal keeps their bytes";
+        /// A draw that blends into a color attachment of a two-plane YCbCr texture
+        /// (`metal::format::ycbcr_renders`, `ycbcr.rs`): the device blends the pass's floats,
+        /// where Metal's tile blends halves, an 8-bit format's in half arithmetic (the source and
+        /// its alpha rounded to `half`, each product, and a fused sum), a 10-bit one's in `float`
+        /// rounded toward zero to `half` (the M3 Max under macOS 27.0.1, every code of 4096
+        /// blended texels matched by those rules). Announced at the draw, naming the attachment.
+        YCbCrBlendRounding = "ycbcr-blend-rounding", Precision,
+            "a blended texel's codes can miss Metal's by one, where Metal's blend in half \
+             arithmetic rounds otherwise than the device's in float, or over a texel an earlier \
+             draw of the pass wrote (Metal holds it as a half)";
         /// A command buffer's command named a buffer over the caller's host pages (a binding, a
         /// blit's operand, an attachment, a texture over the pages, an indirect command's
         /// resolved buffer) that was rebound (`rebind_bytes_no_copy`) after the command was

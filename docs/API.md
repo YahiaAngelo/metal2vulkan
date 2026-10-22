@@ -1972,6 +1972,20 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   only the 32x32 tiles a draw's primitives reach and keeps the texels of the others in place. Cost:
   the tiles no draw reaches land mirrored as the tiles it reaches do, where Metal keeps their texels
   in place.
+- `metal2vulkan-degrade-ycbcr-load-tiles` (precision). `YCbCrLoadTiles`: A render pass that
+  draws loads and stores a two-plane YCbCr texture (`YCBCR8_420_2P` and its kin over plane 0 of a
+  surface): the pass stores every 32x32 tile of the rectangle bounding its draws' scissors, each
+  texel's codes re-encoded from the texel it loaded (its chroma the filtered pairs), where Metal
+  stores only the tiles a draw's primitives reach and keeps the planes' bytes of the others. Cost:
+  in the tiles no draw reaches the planes' codes are re-encoded from the texels the pass loaded,
+  the chroma from its filtered pairs, where Metal keeps their bytes.
+- `metal2vulkan-degrade-ycbcr-blend-rounding` (precision). `YCbCrBlendRounding`: A draw that
+  blends into a color attachment of a two-plane YCbCr texture: the device blends the pass's floats,
+  where Metal's tile blends halves, an 8-bit format's in half arithmetic (the source and its alpha
+  rounded to `half`, each product, and a fused sum), a 10-bit one's in `float` rounded toward zero
+  to `half`. Cost: a blended texel's codes can miss Metal's by one, where Metal's blend in half
+  arithmetic rounds otherwise than the device's in float, or over a texel an earlier draw of the
+  pass wrote (Metal holds it as a half).
 - `metal2vulkan-degrade-encoded-use-rebound` (precision). `EncodedUseRebound`: A command buffer's
   command named a buffer over the caller's host pages (a binding, a blit's operand, an attachment, a
   texture over the pages, an indirect command's resolved buffer) that was rebound

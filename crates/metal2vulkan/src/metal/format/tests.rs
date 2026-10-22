@@ -2547,9 +2547,9 @@ fn only_subsampled_and_packed_ycbcr_formats_drop_writes() {
 }
 
 /// A pass renders exactly the YCbCr formats whose store a rule matches (the 8- and 10-bit
-/// converted unpacked ones) into `R32G32B32A32_SFLOAT`, unblended; the packed 10-bit
-/// formats held make their pipelines in the same floats, a pass into one refused; their images
-/// stay the converted texels, and every other YCbCr format renders into nothing.
+/// converted unpacked ones) into `R32G32B32A32_SFLOAT`, blended where the device blends it; the
+/// packed 10-bit formats held make their pipelines in the same floats, a pass into one refused;
+/// their images stay the converted texels, and every other YCbCr format renders into nothing.
 #[test]
 fn a_pass_renders_only_the_ycbcr_formats_whose_store_is_matched() {
     use FormatUsage as U;
@@ -2596,7 +2596,21 @@ fn a_pass_renders_only_the_ycbcr_formats_whose_store_is_matched() {
             );
             let not_implemented: Result<FormatMapping, Error> =
                 Err(Unsupported::not_implemented(Feature::Format).into());
-            assert_eq!(blended, not_implemented, "{stem} {pf:?}");
+            // A blend is the device's blend of the floats, where it blends them.
+            let floats_blend = vk_format(
+                P::RGBA32Float,
+                &usages(&[U::ColorAttachment, U::ColorAttachmentBlend]),
+                dev.profile(),
+            )
+            .is_ok();
+            match (ycbcr_renders(pf), floats_blend) {
+                (true, true) => assert_eq!(blended, attachment, "{stem} {pf:?}"),
+                (true, false) => assert!(
+                    matches!(&blended, Err(Error::Unsupported(u)) if u.feature == Feature::Format),
+                    "{stem} {pf:?}: {blended:?}"
+                ),
+                (false, _) => assert_eq!(blended, not_implemented, "{stem} {pf:?}"),
+            }
             let emulation = match (ycbcr_renders(pf), ycbcr_pass_refused(pf)) {
                 (true, false) => FormatEmulation::YCbCrRendered,
                 (false, true) => FormatEmulation::YCbCrPassRefused,

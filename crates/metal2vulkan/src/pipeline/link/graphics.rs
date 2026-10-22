@@ -415,18 +415,6 @@ pub fn graphics_state(
                         usages.insert(FormatUsage::ColorAttachmentBlend);
                     }
                     let descriptor_mask = color_write_mask(a.write_mask)?;
-                    // A YCbCr attachment's store is matched for writes of its red, green and
-                    // blue together (`metal::format::ycbcr_renders`); a mask of some of them is
-                    // not.
-                    let rgb = vk::ColorComponentFlags::R
-                        | vk::ColorComponentFlags::G
-                        | vk::ColorComponentFlags::B;
-                    if metal::format::ycbcr_renders(a.pixel_format)
-                        && !(descriptor_mask & rgb).is_empty()
-                        && !descriptor_mask.contains(rgb)
-                    {
-                        return Err(Unsupported::not_implemented(Feature::Format).into());
-                    }
                     let descriptor_mask = match (alpha_red, rotated) {
                         (true, _) => rotated_mask(descriptor_mask) & vk::ColorComponentFlags::R,
                         (false, true) => rotated_mask(descriptor_mask),

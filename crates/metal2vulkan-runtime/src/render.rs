@@ -362,7 +362,7 @@ use metal2vulkan::device::{DriverFact, FormatUsage, VkFeature};
 use metal2vulkan::error::BindError;
 use metal2vulkan::error::Feature as ErrorFeature;
 use metal2vulkan::error::RuntimeDriverDefect;
-use metal2vulkan::metal::format::ExtendedRange;
+use metal2vulkan::metal::format::{ycbcr_renders, ExtendedRange};
 use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{
     CullMode, DepthClipMode, IndexType, PixelFormat, PrimitiveType, RenderStages, TriangleFillMode,
@@ -4188,12 +4188,16 @@ impl RenderLowering {
         let reach = clear_reach::PassReach::of(&layout, called, drew);
         // The color attachments the pass loads as the encoder set them, before its `DontCare`
         // loads and reach clears below give any a clear before the pass and a load
-        // (`render/shadows.rs` bounds the others' copies back by the draws' scissors).
+        // (`render/shadows.rs` bounds the others' copies back by the draws' scissors). Not a
+        // two-plane YCbCr texture in a pass that reaches every tile: Metal stores every tile of
+        // it, each texel's codes re-encoded from what the tile loaded (`ycbcr.rs`).
         let mut loaded = [false; MAX_COLOR_ATTACHMENTS];
         for (loaded, color) in loaded.iter_mut().zip(&layout.colors) {
-            *loaded = color
-                .as_ref()
-                .is_some_and(|color| color.load == LoadAction::Load);
+            *loaded = color.as_ref().is_some_and(|color| {
+                color.load == LoadAction::Load
+                    && !(reach == clear_reach::PassReach::Every
+                        && ycbcr_renders(color.target.texture.pixel_format()))
+            });
         }
         let loaded_colors = &loaded[..layout.colors.len()];
         let tiles = match reach {
@@ -4223,6 +4227,19 @@ impl RenderLowering {
         // the inverse of its store: every tile turns, where Metal turns only those a draw
         // reaches (`rotated.rs`), but where the pass's draws reach every tile.
         let draws = reach == clear_reach::PassReach::Draws;
+        // A two-plane YCbCr texture the pass loads and stores: its render shadow's copy back
+        // stores every tile of the rectangle bounding the draws' scissors, where Metal stores
+        // only those a draw's primitives reach (`ycbcr.rs`), but where they reach every tile.
+        if let Some(named) = draws.then(|| shadows::ycbcr_loaded(&layout)).flatten() {
+            device.degrade(Degradation::YCbCrLoadTiles, || {
+                (
+                    named,
+                    "Metal loads and stores only the tiles a draw's primitives reach, which \
+                     depend on where the GPU places the vertices"
+                        .to_owned(),
+                )
+            });
+        }
         if let Some(named) = draws.then(|| shadows::loaded_apart(&layout)).flatten() {
             device.degrade(Degradation::RotatedLoadTiles, || {
                 (
@@ -6834,6 +6851,42 @@ impl RenderLowering {
             });
     }
 
+    /// Announce `ycbcr-blend-rounding` at a draw whose state blends into a color of the pass
+    /// that is a two-plane YCbCr texture's render shadow (`metal::format::ycbcr_renders`): the
+    /// device blends its floats, where Metal's tile blends halves (`ycbcr.rs`).
+    fn degrade_ycbcr_blends(&mut self) {
+        let Some(RenderStateKind::Graphics(state)) =
+            self.pipeline.as_ref().map(RenderPipelineState::kind)
+        else {
+            return;
+        };
+        let descriptor = state.descriptor();
+        let blended = (0u32..)
+            .zip(&self.layout.colors)
+            .find_map(|(index, color)| {
+                let format = color.as_ref()?.target.texture.pixel_format();
+                let attachment = descriptor
+                    .color_attachments()
+                    .get(index as usize)
+                    .copied()
+                    .flatten()?;
+                (ycbcr_renders(format) && attachment.blending_enabled).then_some((index, format))
+            });
+        let Some((index, format)) = blended else {
+            return;
+        };
+        let draw = descriptor.draw_at(index);
+        self.core.device().degrade(Degradation::YCbCrBlendRounding, || {
+            (
+                format!("{draw}, blending into color {index} of its render pass, a {format:?} texture"),
+                "Metal's tile blends the attachment's halves, an 8-bit format's in half \
+                 arithmetic and a 10-bit one's in float rounded toward zero, where the device \
+                 blends floats: a blended texel's codes can miss Metal's by one"
+                    .to_owned(),
+            )
+        });
+    }
+
     /// Announce `extended-range-blends-stored-codes` at an execution of render commands in a
     /// pass with an extended-range color, whose commands may blend onto each other or onto
     /// the pass's earlier draws, and note every such color as written: the commands' states are
@@ -7021,6 +7074,7 @@ impl RenderLowering {
             self.degrade_kept_attachments();
             self.rewrites_unused_bits = true;
             self.degrade_extended_range_blends();
+            self.degrade_ycbcr_blends();
         }
         self.draw_calls += 1;
         self.command_encoded(reads);

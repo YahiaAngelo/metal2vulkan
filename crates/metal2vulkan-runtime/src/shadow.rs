@@ -127,8 +127,11 @@
 //!   above are the same: a copy back leaves the texture's converted texels stale, so they convert
 //!   again at their next use, and a command writing the planes two ways is refused, as no merge
 //!   serves the planes. A pass's color attachment of such a texture renders into its render shadow,
-//!   a texture whose shadow is one of these over floats: its copy back stores every texel's codes,
-//!   the marks not read.
+//!   a texture whose shadow is one of these over floats: its copy in converts the planes into every
+//!   texel, as the texture reads them (the pass's load), and its copy back stores every texel's
+//!   codes, the marks not read, of the tiles of 32 texels a side that meet its area where it has
+//!   one ([`ShadowCopy::area`]: the pass loads the attachment and its draws' scissors bound what
+//!   it changes).
 //! - **Two planes in a heap** (`texture/heap_two_planes.rs`): a heap's two-plane extended-range
 //!   texture is an image of its texels whose truth is its first level's planes in the heap's
 //!   bytes, as Metal lays them ([`ShadowTarget::Planes`]): its copies go through a staging buffer
@@ -623,6 +626,20 @@ impl ShadowCopies {
             ShadowSource::Image { .. }
             | ShadowSource::Converted { .. }
             | ShadowSource::YCbCrWrite { .. } => None,
+        }
+    }
+
+    /// Whether a render pass that reaches no tile and loads this shadow's texture leaves it to
+    /// its truth, which keeps every texel: an image of a buffer's bytes (`ShadowTarget::Image`),
+    /// which the texture's own image holds, and a two-plane YCbCr texture's render shadow,
+    /// whose copy back would store the planes' codes again (`ycbcr.rs`), where Metal keeps them.
+    pub(super) fn left_untouched(&self) -> bool {
+        match &self.source {
+            ShadowSource::Bytes { target, .. } => {
+                matches!(target, ShadowTarget::Image { .. }) && !self.drops_writes
+            }
+            ShadowSource::YCbCrWrite { write_back, .. } => write_back.loads(),
+            ShadowSource::Image { .. } | ShadowSource::Converted { .. } => false,
         }
     }
 
@@ -1172,6 +1189,11 @@ impl ShadowCopy {
             );
         let converted = matches!(self.copies.source, ShadowSource::Converted { .. });
         let encoded = matches!(self.copies.source, ShadowSource::YCbCrWrite { .. });
+        // A render shadow's copy in loads it through the conversion kernel (`ycbcr.rs`).
+        let loaded = matches!(
+            &self.copies.source,
+            ShadowSource::YCbCrWrite { write_back, .. } if write_back.loads()
+        );
         match self.step {
             Step::Merge(_) => {
                 vk::PipelineStageFlags2::TRANSFER | vk::PipelineStageFlags2::COMPUTE_SHADER
@@ -1189,6 +1211,9 @@ impl ShadowCopy {
                     | vk::PipelineStageFlags2::COMPUTE_SHADER
             }
             Step::Back if encoded => {
+                vk::PipelineStageFlags2::TRANSFER | vk::PipelineStageFlags2::COMPUTE_SHADER
+            }
+            Step::Into if loaded => {
                 vk::PipelineStageFlags2::TRANSFER | vk::PipelineStageFlags2::COMPUTE_SHADER
             }
             Step::Into | Step::Back | Step::Keep(_) => vk::PipelineStageFlags2::TRANSFER,
@@ -1223,6 +1248,10 @@ impl ShadowCopy {
         }
         if let ShadowSource::YCbCrWrite { write_back, .. } = &c.source {
             return match &self.step {
+                // A render shadow's load converts the planes into every texel.
+                Step::Into if write_back.loads() => {
+                    write_back.load_uses(Use::reads(truth, c.tracked, range, read), c)
+                }
                 // A clear of every texel: nothing of the truth is read.
                 Step::Into => vec![Use::writes(
                     c.shadow_key,
@@ -1307,7 +1336,10 @@ impl ShadowCopy {
                 write_back,
                 ..
             } => {
-                if into_shadow {
+                if into_shadow && write_back.loads() {
+                    // SAFETY: the caller's contract, which the load's record takes.
+                    unsafe { write_back.record_load(device, command_buffer, buffer.raw()) };
+                } else if into_shadow {
                     let range = vk::ImageSubresourceRange {
                         aspect_mask: vk::ImageAspectFlags::COLOR,
                         base_mip_level: 0,
@@ -1329,7 +1361,7 @@ impl ShadowCopy {
                     }
                 } else {
                     // SAFETY: the caller's contract, which the write-back's record takes.
-                    unsafe { write_back.record(device, command_buffer, buffer.raw()) };
+                    unsafe { write_back.record(device, command_buffer, buffer.raw(), self.area) };
                 }
                 return;
             }

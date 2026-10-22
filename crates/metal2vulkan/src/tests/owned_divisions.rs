@@ -176,6 +176,10 @@ fn modules() -> Vec<Build> {
             format!("ycbcr_convert_module({output:?})"),
             Box::new(move |d| Ok(bind::ycbcr_convert_module(d, output)?.spirv)),
         );
+        push(
+            format!("ycbcr_convert_floats_module({output:?})"),
+            Box::new(move |d| Ok(bind::ycbcr_convert_floats_module(d, output)?.spirv)),
+        );
     }
     for copy in PlanesCopy::ALL {
         push(

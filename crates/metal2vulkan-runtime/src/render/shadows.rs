@@ -59,7 +59,7 @@ use crate::render_target;
 use crate::render_values::{LoadAction, StoreAction};
 use crate::residency::Used;
 use crate::resource::ResourceKey;
-use crate::shadow::{self, ShadowCopies, ShadowCopy, ShadowTarget, ShadowUse, Within};
+use crate::shadow::{self, ShadowCopies, ShadowCopy, ShadowUse, Within};
 use crate::tracker::{Access, Use, UseRange};
 use crate::work_counts::{ColorTaken, Counters};
 use crate::Device;
@@ -416,6 +416,32 @@ pub(super) fn loaded_apart(layout: &PassLayout) -> Option<String> {
     })
 }
 
+/// A color attachment of `layout`'s pass that the pass loads and stores and that is a two-plane
+/// YCbCr texture's render shadow, which stores every texel of the tiles its copy back covers
+/// (`ycbcr.rs`), named as a degrade notice names it.
+pub(super) fn ycbcr_loaded(layout: &PassLayout) -> Option<String> {
+    layout.colors.iter().enumerate().find_map(|(index, color)| {
+        let color = color.as_ref()?;
+        let stores = matches!(
+            color.store,
+            StoreAction::Store | StoreAction::StoreAndMultisampleResolve | StoreAction::Unknown
+        );
+        let texture = &color.target.texture;
+        let rendered = texture
+            .shadow()
+            .is_some_and(|copies| copies.left_untouched())
+            && metal2vulkan::metal::format::ycbcr_renders(texture.pixel_format());
+        (color.load == LoadAction::Load && stores && rendered).then(|| {
+            format!(
+                "color attachment {index} of a render pass, a {}x{} {:?} texture, loaded",
+                texture.width(),
+                texture.height(),
+                texture.pixel_format()
+            )
+        })
+    })
+}
+
 /// The shadowed textures among a pass's attachments and resolve targets: a store writes through
 /// one (an unknown store action counts as one), and so does a resolve. A depth or stencil
 /// attachment's are heap shadows (`texture/heap.rs`): its texture, each aspect's where the two are
@@ -503,8 +529,7 @@ fn attachment_shadows(
         let own = color.stand_in.as_ref().map(|s| &s.own);
         for target in std::iter::once(&color.target).chain(own) {
             if let Some(copies) = target.texture.shadow() {
-                let plain = matches!(copies.target(), Some(ShadowTarget::Image { .. }));
-                if untouched && plain && !copies.drops_writes {
+                if untouched && copies.left_untouched() {
                     continue;
                 }
                 let used = ShadowUse {
@@ -621,9 +646,8 @@ fn count_colors(
             continue;
         };
         let take = color_take(layout, index, color, reached, drawn);
-        let plain = matches!(copies.target(), Some(ShadowTarget::Image { .. }));
         let taken = match color.load {
-            _ if take.untouched && plain && !copies.drops_writes => ColorTaken::Untouched,
+            _ if take.untouched && copies.left_untouched() => ColorTaken::Untouched,
             _ if take.overwrites => ColorTaken::Cleared,
             LoadAction::Clear => ColorTaken::ClearedInPart,
             _ if take.area.is_some() => ColorTaken::LoadedWithin,

@@ -135,8 +135,10 @@ pub(super) enum OwnedModule {
     RotateTexels,
     /// `bind::ycbcr_convert_module`: a YCbCr texture's texels converted from its surface's two
     /// planes into its image (`ycbcr.rs`), which it binds as a storage image: converted values,
-    /// or (`YCbCrOutput::Codes`) the packed codes.
-    YCbCrConvert(YCbCrOutput),
+    /// or (`YCbCrOutput::Codes`) the packed codes; or, with `true`,
+    /// `bind::ycbcr_convert_floats_module`: the texels as floats into a render pass's render
+    /// shadow of the texture, which the pass loads (`ycbcr.rs`).
+    YCbCrConvert(YCbCrOutput, bool),
     /// `bind::ycbcr_refresh_module`: a YCbCr texture's planes compared with the copy its last
     /// conversion read, the changed words stored over it, and the conversion's indirect group
     /// count written where any changed (`ycbcr.rs`).
@@ -221,7 +223,7 @@ impl OwnedModule {
     /// The module's storage-image bindings, which come after its sampled images.
     fn storage_images(self) -> u32 {
         match self {
-            OwnedModule::YCbCrConvert(_)
+            OwnedModule::YCbCrConvert(..)
             | OwnedModule::YCbCrWrite
             | OwnedModule::ShadowCopyIn(_) => 1,
             OwnedModule::ExtendedShadowLoad(_) => 2,
@@ -390,10 +392,13 @@ impl OwnedModule {
                     .map_err(Error::Compile)?;
                 Ok((module.spirv.to_vec(), 5, 0))
             }
-            OwnedModule::YCbCrConvert(output) => {
-                let module =
-                    metal2vulkan::bind::ycbcr_convert_module(device.compile_device(), output)
-                        .map_err(Error::Compile)?;
+            OwnedModule::YCbCrConvert(output, floats) => {
+                let device = device.compile_device();
+                let module = match floats {
+                    true => metal2vulkan::bind::ycbcr_convert_floats_module(device, output),
+                    false => metal2vulkan::bind::ycbcr_convert_module(device, output),
+                }
+                .map_err(Error::Compile)?;
                 Ok((module.spirv.to_vec(), 2, 0))
             }
             OwnedModule::RotateTexels => {
@@ -551,7 +556,7 @@ pub(super) struct OwnedKernels {
     rotate_texels: Option<OwnedKernel>,
     rows_copy: Option<OwnedKernel>,
     ycbcr_refresh: Option<OwnedKernel>,
-    ycbcr_converts: HashMap<YCbCrOutput, OwnedKernel>,
+    ycbcr_converts: HashMap<(YCbCrOutput, bool), OwnedKernel>,
     two_plane_texels: Option<OwnedKernel>,
     plane_bytes_copy: Option<OwnedKernel>,
     ycbcr_write: Option<OwnedKernel>,
@@ -637,7 +642,9 @@ impl OwnedKernels {
                 self.index_rewrites.get(&(program, phase)).copied()
             }
             OwnedModule::IndexRewriteRun(program) => self.index_rewrite_runs.get(&program).copied(),
-            OwnedModule::YCbCrConvert(output) => self.ycbcr_converts.get(&output).copied(),
+            OwnedModule::YCbCrConvert(output, floats) => {
+                self.ycbcr_converts.get(&(output, floats)).copied()
+            }
             OwnedModule::UnusedBits(format, words) => {
                 self.unused_bits.get(&(format, words)).copied()
             }
@@ -673,8 +680,8 @@ impl OwnedKernels {
             OwnedModule::IndexRewriteRun(program) => {
                 self.index_rewrite_runs.insert(program, kernel);
             }
-            OwnedModule::YCbCrConvert(output) => {
-                self.ycbcr_converts.insert(output, kernel);
+            OwnedModule::YCbCrConvert(output, floats) => {
+                self.ycbcr_converts.insert((output, floats), kernel);
             }
             OwnedModule::UnusedBits(format, words) => {
                 self.unused_bits.insert((format, words), kernel);
@@ -729,7 +736,7 @@ impl OwnedKernels {
             | OwnedModule::MipmapFilter(_)
             | OwnedModule::IndexRewrite(..)
             | OwnedModule::IndexRewriteRun(_)
-            | OwnedModule::YCbCrConvert(_)
+            | OwnedModule::YCbCrConvert(..)
             | OwnedModule::UnusedBits(..)
             | OwnedModule::CompressedBlit(_)
             | OwnedModule::ExtendedShadowLoad(_)

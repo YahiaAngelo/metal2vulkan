@@ -439,7 +439,8 @@ impl Texture {
             usage: ImageUsageFlags::STORAGE,
         })?;
         let (raw, at) = texels.buffer.at(span.start);
-        let write_back = YCbCrWriteBack::new(device, (&planes, span.clone()), at, (view, false))?;
+        let write_back =
+            YCbCrWriteBack::new(device, (&planes, span.clone()), at, (view, false), None)?;
         let (bytes, tracked) = texels.buffer.tracked(span);
         let copies = ShadowCopies {
             source: ShadowSource::YCbCrWrite {
@@ -471,9 +472,10 @@ impl Texture {
     /// (`metal::format::ycbcr_renders`), for Metal's `call`, made at its first need and kept
     /// with the texture: a texture of the texture's format and size over its planes whose image
     /// is `R32G32B32A32_SFLOAT`, the color attachment a pass renders the values it leaves in
-    /// each texel into (`FormatEmulation::YCbCrRendered`), and its copies, a clear in and the
-    /// store of every texel's codes back into the planes (`ShadowSource::YCbCrWrite` of a
-    /// store, `ycbcr.rs`), which leaves the texture's converted texels stale. Refused
+    /// each texel into (`FormatEmulation::YCbCrRendered`), and its copies: in, a clear, or for a
+    /// pass that loads the attachment the planes converted into floats; back, the store of each
+    /// stored texel's codes into the planes (`ShadowSource::YCbCrWrite` of a store, `ycbcr.rs`),
+    /// which leaves the texture's converted texels stale. Refused
     /// (`Unsupported`, `NotImplemented`, `Feature::Format`, naming the format) for a texture
     /// over plane 1 of its surface, one of a size its chroma blocks do not tile, and one whose
     /// texels are no conversion of planes, none of whose stores is measured; as `new_texture`
@@ -522,19 +524,24 @@ impl Texture {
         let facts = device.shared().textures.facts(profile);
         let plan = plan_image(&float, usage, false, &facts)
             .map_err(|refusal| image_error(call, refusal))?;
-        // Rendered, read by the store through a view of its bits, and cleared.
+        // Rendered, read by the store through a view of its bits, cleared, and written by the
+        // load's conversion.
         let needed = ImageUsageFlags::COLOR_ATTACHMENT
             | ImageUsageFlags::STORAGE
             | ImageUsageFlags::TRANSFER_DST;
         let mapping =
             vk_format(pf, &[FormatUsage::ColorAttachment].into(), profile).map_err(|_| gap())?;
         let bits = Format::R32G32B32A32_UINT;
+        let storage = |f| {
+            facts
+                .optimal(f)
+                .contains(FormatFeatureFlags2::STORAGE_IMAGE)
+        };
         if plan.format != Format::R32G32B32A32_SFLOAT
             || mapping.format != plan.format
             || !plan.usage.contains(needed)
-            || !facts
-                .optimal(bits)
-                .contains(FormatFeatureFlags2::STORAGE_IMAGE)
+            || !storage(bits)
+            || !storage(plan.format)
         {
             return Err(gap());
         }
@@ -569,8 +576,26 @@ impl Texture {
             layer_count: 1,
             usage: ImageUsageFlags::STORAGE,
         })?;
+        // The load's (`ycbcr.rs`), which converts the planes into the floats.
+        let floats = image.own_view(&VkView {
+            view_type: ImageViewType::TYPE_2D,
+            format: Format::R32G32B32A32_SFLOAT,
+            components: ComponentMapping::IDENTITY,
+            aspect: ImageAspectFlags::COLOR,
+            base_level: 0,
+            level_count: 1,
+            base_layer: 0,
+            layer_count: 1,
+            usage: ImageUsageFlags::STORAGE,
+        })?;
         let (raw, at) = texels.buffer.at(span.start);
-        let write_back = YCbCrWriteBack::new(device, (&planes, span.clone()), at, (view, true))?;
+        let write_back = YCbCrWriteBack::new(
+            device,
+            (&planes, span.clone()),
+            at,
+            (view, true),
+            Some(floats),
+        )?;
         let (bytes, tracked) = texels.buffer.tracked(span);
         let copies = ShadowCopies {
             source: ShadowSource::YCbCrWrite {
