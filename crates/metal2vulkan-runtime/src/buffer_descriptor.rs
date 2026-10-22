@@ -215,7 +215,10 @@ impl Device {
             }
             (None, None) => Place::At(placement),
         };
-        let resource_options = self.take_options(CALL, resource_options);
+        let resource_options = match contents {
+            BufferContents::NoCopy { .. } => self.take_options(CALL, resource_options),
+            _ => self.own_memory_options(CALL, resource_options)?,
+        };
         let buffer = match contents {
             BufferContents::Zero => self.zero_buffer(CALL, length, resource_options, place),
             BufferContents::Copy(bytes) => {
@@ -258,7 +261,7 @@ impl Device {
     ) -> Result<Buffer, Error> {
         const CALL: &str = "new_buffer_with_bytes";
         self.keep_room();
-        let options = self.take_options(CALL, options);
+        let options = self.own_memory_options(CALL, options)?;
         let buffer = self.buffer_with_bytes(CALL, bytes, options, AddressPlacement::Any)?;
         Ok(self.visible(buffer))
     }

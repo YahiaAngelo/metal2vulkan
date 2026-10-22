@@ -1577,7 +1577,7 @@ impl Device {
     pub fn new_texture(&self, descriptor: &TextureDescriptor) -> Result<Texture, Error> {
         const CALL: &str = "new_texture";
         self.keep_room();
-        let descriptor = &self.take_texture_options(CALL, descriptor);
+        let descriptor = &self.texture_options(CALL, descriptor)?;
         // An `Outside` texture takes no ID, so no ID's limit applies.
         if descriptor.placement != IdPlacement::Outside {
             self.check_texture_placement(
@@ -3517,9 +3517,7 @@ impl Heap {
     /// Refused for a placement heap, whose textures take an offset (`Invalid`, as for its
     /// buffers).
     pub fn new_texture(&self, descriptor: &TextureDescriptor) -> Result<Texture, Error> {
-        let descriptor = &self
-            .device()
-            .take_texture_options("new_texture", descriptor);
+        let descriptor = &self.device().texture_options("new_texture", descriptor)?;
         match self.heap_type() {
             HeapType::Sparse => self.device().new_sparse_texture(self, descriptor),
             HeapType::Automatic => self.device().new_heap_texture(self, descriptor, None),
@@ -3554,7 +3552,7 @@ impl Heap {
         offset: u64,
     ) -> Result<Texture, Error> {
         let device = self.device();
-        let descriptor = &device.take_texture_options("new_texture_at_offset", descriptor);
+        let descriptor = &device.texture_options("new_texture_at_offset", descriptor)?;
         device.new_heap_texture(self, descriptor, Some(offset))
     }
 }

@@ -70,7 +70,7 @@ impl Device {
         // descriptor says, so a rotated one asserts as one without it does.
         let descriptor = &TextureDescriptor {
             framebuffer_only: false,
-            ..self.take_texture_options(CALL, descriptor)
+            ..self.texture_options(CALL, descriptor)?
         };
         self.check_texture_placement(
             CALL,

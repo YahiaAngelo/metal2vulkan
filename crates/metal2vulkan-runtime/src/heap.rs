@@ -940,7 +940,9 @@ impl Heap {
     /// (`OutOfMemory(Heap)`).
     pub fn new_buffer(&self, length: u64, options: ResourceOptions) -> Result<Buffer, Error> {
         const CALL: &str = "new_buffer";
-        let options = self.device().take_options(CALL, options);
+        // Metal makes a placed buffer with the private bit as without it (the heap's own options
+        // decide where its writes go).
+        let options = options.without_private_bit().0;
         let options = self.placed_options(CALL, options)?;
         let bytes = self.check_type(CALL, HeapType::Automatic)?;
         if length == 0 {
@@ -976,7 +978,8 @@ impl Heap {
         offset: u64,
     ) -> Result<Buffer, Error> {
         const CALL: &str = "new_buffer_at_offset";
-        let options = self.device().take_options(CALL, options);
+        // As `new_buffer`: the private bit is the heap's to take.
+        let options = options.without_private_bit().0;
         let options = self.placed_options(CALL, options)?;
         let bytes = self.check_type(CALL, HeapType::Placement)?;
         self.check_length(CALL, length)?;

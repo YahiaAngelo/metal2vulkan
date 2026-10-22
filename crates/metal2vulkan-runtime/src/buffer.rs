@@ -1790,7 +1790,7 @@ impl Device {
     /// (`Invalid`).
     pub fn new_buffer(&self, length: u64, options: ResourceOptions) -> Result<Buffer, Error> {
         self.keep_room();
-        let options = self.take_options("new_buffer", options);
+        let options = self.own_memory_options("new_buffer", options)?;
         let (buffer, class) =
             self.buffer_of_length("new_buffer", length, options, AddressPlacement::Any)?;
         self.degrade_system_memory(&buffer, class, || {

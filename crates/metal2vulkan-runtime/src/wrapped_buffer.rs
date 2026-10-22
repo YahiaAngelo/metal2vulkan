@@ -230,7 +230,7 @@ impl Device {
         options: ResourceOptions,
     ) -> Result<Buffer, Error> {
         const CALL: &str = "new_buffer_with_vk_buffer";
-        let options = self.take_options(CALL, options);
+        let options = self.own_memory_options(CALL, options)?;
         let modes = Modes::of(options)?;
         if !matches!(modes.storage, StorageMode::Shared | StorageMode::Private) {
             return Err(invalid(CALL, Problem::StorageMode));

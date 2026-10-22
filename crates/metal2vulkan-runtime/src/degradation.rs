@@ -978,13 +978,19 @@ degradations! {
             "the record reads its word as zero, where Metal reads what lies at that address in its \
              own address space: zero where nothing is there, another buffer's bytes where Metal \
              placed one";
-        /// A resource made with `MTLResourceOptions` bit 24, a private option Metal takes
-        /// ([`ResourceOptions::PRIVATE_BIT`](crate::ResourceOptions::PRIVATE_BIT)), is
-        /// made as without it, and reports its options without it, as Metal's does.
+        /// A no-copy buffer, a heap or an indirect command buffer made with `MTLResourceOptions`
+        /// bit 24 ([`ResourceOptions::PRIVATE_BIT`](crate::ResourceOptions::PRIVATE_BIT)), which
+        /// Metal makes and keeps the GPU's writes from the memory of (the M3 Max under macOS
+        /// 27.0.1: a kernel's stores and a blit's fill reach neither the CPU nor a later command
+        /// buffer, which read the memory's bytes; a later command of the same command buffer may
+        /// read them, as the GPU's caches hold them; a blit into a texture over or in that memory
+        /// faults the command buffer), is made as without it, and reports its options without
+        /// it, as Metal's does. A buffer of the runtime's memory or a texture descriptor with the
+        /// bit is refused, as Metal ends the process there; a buffer placed in a heap without the
+        /// bit is made as without it, as Metal's is, announcing nothing.
         PrivateResourceOption = "private-resource-option", Precision,
-            "the private option has no effect here: on Metal a no-copy buffer made with it kept \
-             the GPU's writes from the CPU (Metal probe nc_bit24 on an M4), where the runtime's \
-             reach it";
+            "the GPU's writes reach the resource's memory, the CPU and later command buffers, \
+             where Metal's never reach them";
         /// A depth or stencil texture with `allowGPUOptimizedContents` off sized or made in a heap
         /// (never a device's own texture, whose layout nothing shows), on a device whose driver
         /// keeps depth and stencil images GPU-optimized whatever their create info
@@ -2764,6 +2770,20 @@ pub(crate) fn announcement_breach(each: bool) -> Option<NoticePlace> {
     }
 }
 
+/// `Invalid` (`Problem::UndefinedValue`) where `options` set [`ResourceOptions::PRIVATE_BIT`].
+fn refuse_private_bit(call: &'static str, options: ResourceOptions) -> Result<(), Error> {
+    match options.without_private_bit().1 {
+        true => Err(crate::error::invalid(
+            call,
+            crate::error::Problem::UndefinedValue {
+                ty: "MTLResourceOptions",
+                raw: options.raw(),
+            },
+        )),
+        false => Ok(()),
+    }
+}
+
 /// Whether a misplaced announcement ends the process: in builds with debug assertions, which
 /// every lane and gate runs.
 pub(crate) const MISPLACED_ENDS: bool = cfg!(debug_assertions);
@@ -3094,9 +3114,10 @@ impl Device {
         }
     }
 
-    /// `options` as the runtime makes `call`'s resource of them: without
-    /// [`ResourceOptions::PRIVATE_BIT`], which has no effect here, announced once
-    /// ([`Degradation::PrivateResourceOption`]).
+    /// `options` as the runtime makes `call`'s resource of them where Metal makes it with
+    /// [`ResourceOptions::PRIVATE_BIT`] and keeps the GPU's writes from its memory (a no-copy
+    /// buffer, a heap; an indirect command buffer, whose GPU-written records under it are not
+    /// measured): without the bit, announced once ([`Degradation::PrivateResourceOption`]).
     pub(super) fn take_options(
         &self,
         call: &'static str,
@@ -3116,16 +3137,33 @@ impl Device {
         taken
     }
 
-    /// `descriptor` with its options as [`take_options`](Self::take_options) takes them.
-    pub(super) fn take_texture_options(
+    /// `options` of `call`'s resource whose memory the runtime gives it (a buffer of a length or
+    /// of bytes, a Vulkan buffer of the caller's): refused where they set
+    /// [`ResourceOptions::PRIVATE_BIT`] (`Invalid`, `Problem::UndefinedValue`), as Metal ends the
+    /// process there (the M3 Max under macOS 27.0.1: `newBufferWithLength:options:` and
+    /// `newBufferWithBytes:length:options:`, `Shared` or `Private`, assert in the buffer's
+    /// suballocator, "Different MTLResourceOptions used for the same heap index").
+    pub(super) fn own_memory_options(
+        &self,
+        call: &'static str,
+        options: ResourceOptions,
+    ) -> Result<ResourceOptions, Error> {
+        refuse_private_bit(call, options)?;
+        Ok(options)
+    }
+
+    /// `descriptor`, refused where its options set [`ResourceOptions::PRIVATE_BIT`] (`Invalid`,
+    /// `Problem::UndefinedValue`), as Metal's texture descriptor validation ends the process there
+    /// for every texture (the M3 Max under macOS 27.0.1: "MTLResourceOptions (0x1000000) contains
+    /// unknown bits", a device's texture, `Shared` or `Private`, a heap's, a buffer's and a
+    /// shareable one alike).
+    pub(super) fn texture_options(
         &self,
         call: &'static str,
         descriptor: &TextureDescriptor,
-    ) -> TextureDescriptor {
-        TextureDescriptor {
-            resource_options: self.take_options(call, descriptor.resource_options),
-            ..*descriptor
-        }
+    ) -> Result<TextureDescriptor, Error> {
+        refuse_private_bit(call, descriptor.resource_options)?;
+        Ok(*descriptor)
     }
 
     /// Announce what `stages` (a variant's) record, `at` its making or a bind

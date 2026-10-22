@@ -248,7 +248,7 @@ use metal2vulkan_runtime::{
     BlitOption, CpuCacheMode, DebugMessage, Degradation, DegradationCategory, Device,
     DeviceOptions, DriverSetting, Error, HazardTrackingMode, HeapDescriptor, HeapType, HostMemory,
     LayerSetting, LayerSettingValue, LoadAction, MessageSeverity, MetalLevel,
-    MultisampleStencilResolveFilter, Origin, PipelineOptions, RenderPassDescriptor,
+    MultisampleStencilResolveFilter, Origin, PipelineOptions, Problem, RenderPassDescriptor,
     ResourceOptions, RuntimeGap, Size, StorageMode, StoreAction, TextureDescriptor,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -912,44 +912,83 @@ fn an_anisotropic_state_without_mips_is_announced_through_metals_sampler() {
 /// takes its site, as a build without debug assertions does.
 const MISPLACED: [Degradation; 1] = [Degradation::MisplacedNotice];
 
-/// The kind Metal's private option bit takes ([`the_private_option_bit_is_ignored_once`]).
+/// The kind Metal's private option bit takes where the GPU's writes reach the memory here
+/// ([`the_private_option_bit_is_announced_where_the_gpu_s_writes_reach_the_memory`]).
 const PRIVATE_OPTION: [Degradation; 1] = [Degradation::PrivateResourceOption];
 
-/// Metal's private option bit 24 (0x1000000), which plain Metal takes and reports its options
-/// without (Metal probe `nc_bit24` on an M4), makes each resource as without it: buffers, a no-copy
-/// buffer whose GPU writes reach the CPU here, a texture, a heap and a heap's buffer, each
-/// reporting its options without the bit; it is announced once.
+/// `options` with Metal's private option bit 24 (0x1000000).
+fn with_private_bit(options: ResourceOptions) -> ResourceOptions {
+    ResourceOptions::from_raw(options.raw() | ResourceOptions::PRIVATE_BIT)
+        .expect("the runtime takes the private bit")
+}
+
+/// Whether `made` is refused `Invalid` for the undefined option bits `raw`.
+fn refused_bits<T>(made: Result<T, Error>, raw: u64) -> bool {
+    matches!(
+        made,
+        Err(Error::Invalid(invalid)) if invalid.problem
+            == Problem::UndefinedValue { ty: "MTLResourceOptions", raw }
+    )
+}
+
+/// Where Metal ends the process at Metal's private option bit 24 (the M3 Max under macOS 27.0.1:
+/// a buffer of a length or of bytes, `Shared` or `Private`, asserts in its suballocator, and a
+/// texture descriptor in its validation), the runtime refuses the call `Invalid`; a buffer with it
+/// placed in a heap without it is made as without it and reports its options without it, as
+/// Metal's is. Nothing is announced.
 #[test]
-fn the_private_option_bit_is_ignored_once() {
+fn the_private_option_bit_is_refused_where_metal_ends_and_ignored_in_a_plain_heap() {
     on_device(|device, messages| {
-        let bit = ResourceOptions::PRIVATE_BIT;
-        let with_bit = |options: ResourceOptions| {
-            ResourceOptions::from_raw(options.raw() | bit).expect("Metal takes the private bit")
-        };
-        let shared = with_bit(ResourceOptions::shared());
-        let plain = device
-            .new_buffer(256, ResourceOptions::shared())
-            .unwrap()
-            .resource_options();
-        assert_eq!(plain.raw() & bit, 0);
-        let buffer = device.new_buffer(256, shared).unwrap();
-        assert_eq!(buffer.resource_options(), plain);
-        let copied = device.new_buffer_with_bytes(&[7; 16], shared).unwrap();
-        assert_eq!(copied.resource_options(), plain);
+        let shared = with_private_bit(ResourceOptions::shared());
+        let private = with_private_bit(ResourceOptions::private());
+        assert!(refused_bits(device.new_buffer(256, shared), shared.raw()));
+        assert!(refused_bits(device.new_buffer(256, private), private.raw()));
+        assert!(refused_bits(
+            device.new_buffer_with_bytes(&[7; 16], shared),
+            shared.raw()
+        ));
         let mut d = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 4, 4, false);
         d.resource_options = shared;
-        let texture = device.new_texture(&d).unwrap();
-        assert_eq!(texture.resource_options().raw() & bit, 0);
-        let private = with_bit(ResourceOptions::private());
+        assert!(refused_bits(device.new_texture(&d), shared.raw()));
+        d.resource_options = private;
+        assert!(refused_bits(device.new_texture(&d), private.raw()));
+        let plain = ResourceOptions::private();
+        let heap = device
+            .new_heap(&HeapDescriptor::new(HeapType::Automatic, 1 << 16, plain))
+            .unwrap();
+        assert!(refused_bits(heap.new_texture(&d), private.raw()));
+        let placed = heap.new_buffer(256, private).unwrap();
+        assert_eq!(
+            placed.resource_options(),
+            heap.new_buffer(256, plain).unwrap().resource_options()
+        );
+        assert_eq!(
+            placed.resource_options().raw() & ResourceOptions::PRIVATE_BIT,
+            0
+        );
+        assert_made_once(messages, &[], &BTreeSet::new());
+    });
+}
+
+/// A heap and a no-copy buffer made with Metal's private option bit 24, which Metal makes and
+/// keeps the GPU's writes from the memory of, are made as without it here, the GPU's writes
+/// reaching the memory, each reporting its options without the bit; it is announced once.
+#[test]
+fn the_private_option_bit_is_announced_where_the_gpu_s_writes_reach_the_memory() {
+    on_device(|device, messages| {
+        let bit = ResourceOptions::PRIVATE_BIT;
+        let shared = with_private_bit(ResourceOptions::shared());
+        let private = with_private_bit(ResourceOptions::private());
         let heap = device
             .new_heap(&HeapDescriptor::new(HeapType::Automatic, 1 << 16, private))
             .unwrap();
         assert_eq!(heap.resource_options().raw() & bit, 0);
         let placed = heap.new_buffer(256, private).unwrap();
         assert_eq!(placed.resource_options().raw() & bit, 0);
-
-        // A no-copy buffer, the form RT4 measured: the GPU's writes reach the CPU, as without
-        // the bit.
+        let plain = device
+            .new_buffer(256, ResourceOptions::shared())
+            .unwrap()
+            .resource_options();
         let memory = Mapping::anonymous(GUEST_PAGE);
         // SAFETY: the mapping outlives the buffer, which is dropped first.
         let no_copy = unsafe {

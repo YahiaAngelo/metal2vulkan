@@ -1642,11 +1642,14 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   unrelated to the buffer. Cost: the record reads its word as zero, where Metal reads what lies at
   that address in its own address space: zero where nothing is there, another buffer's bytes where
   Metal placed one.
-- `metal2vulkan-degrade-private-resource-option` (precision). `PrivateResourceOption`: A resource
-  made with `MTLResourceOptions` bit 24, a private option Metal takes
-  (`ResourceOptions::PRIVATE_BIT`), is made as without it, and reports its options without it, as
-  Metal's does. Cost: the private option has no effect here: on Metal a no-copy buffer made with it
-  kept the GPU's writes from the CPU (measured on an M4), where the runtime's reach it.
+- `metal2vulkan-degrade-private-resource-option` (precision). `PrivateResourceOption`: A no-copy
+  buffer, a heap or an indirect command buffer made with `MTLResourceOptions` bit 24
+  (`ResourceOptions::PRIVATE_BIT`), which Metal makes and keeps the GPU's writes from the memory of,
+  is made as without it, and reports its options without it, as Metal's does. A buffer of the
+  runtime's memory or a texture descriptor with the bit is refused, as Metal ends the process
+  there; a buffer placed in a heap without the bit is made as without it, announcing nothing. Cost:
+  the GPU's writes reach the resource's memory, the CPU and later command buffers, where Metal's
+  never reach them.
 - `metal2vulkan-degrade-optimized-depth-stencil-texture` (precision).
   `OptimizedDepthStencilTexture`: A depth or stencil texture with `allowGPUOptimizedContents` off
   sized or made in a heap (never a device's own texture, whose layout nothing shows), on a device
