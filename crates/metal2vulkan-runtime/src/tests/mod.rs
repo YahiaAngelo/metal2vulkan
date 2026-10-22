@@ -45,6 +45,8 @@ mod contexts;
 mod copy_bounds;
 mod copy_plan;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod cpu_copy_layouts;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod deferred_calls;
 mod degradation;
 mod depth_copy;
@@ -80,8 +82,6 @@ mod fresh_pages;
 mod fresh_unwritten;
 mod function_table;
 mod gate;
-#[cfg(any(m2v_gpu, m2v_cpu_icd))]
-mod get_bytes_layouts;
 mod gpu_pools;
 mod gpu_time;
 mod heap;

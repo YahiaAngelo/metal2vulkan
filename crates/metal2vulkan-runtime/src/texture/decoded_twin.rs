@@ -939,8 +939,8 @@ impl Image {
     }
 
     /// The decode into the image's decoded twin of `region`, which a host call just wrote into
-    /// the image on the host or the staging queue as `packed` (its blocks, laid out as
-    /// [`buffer_image_copy`] reads them): queued for the device's decode thread, which decodes it
+    /// the image on the host or the staging queue as the bytes `packed` makes (its blocks, laid
+    /// out as [`buffer_image_copy`] reads them, made only for an image with a twin): queued for the device's decode thread, which decodes it
     /// on the CPU and copies the texels into the twin as the twin's copies go
     /// (`twin_decode.rs`; announced `cpu-block-decode`). The first batch that may read the
     /// texture waits at its submission for it (every batch, where the texture is untracked);
@@ -955,11 +955,12 @@ impl Image {
     pub(super) fn decode_written(
         self: &Arc<Self>,
         region: &ImageRegion,
-        packed: Vec<u8>,
+        packed: impl FnOnce() -> Vec<u8>,
     ) -> Result<(), Error> {
         let Some(decoded) = self.decoded.as_deref() else {
             return Ok(());
         };
+        let packed = packed();
         let host = decoded.image.takes_host_copies();
         let (region, packed) = self.written_rows(decoded, region, packed)?;
         self.queue_twin_decode(&region, Some(packed))?;
@@ -1170,7 +1171,10 @@ impl Image {
                         let copies = host_parts(&band, row);
                         twin.host_write_disjoint(&copies, &texels, twin_decode::THREADS)?
                     }
-                    false => twin.staging_write(buffer_image_copy(&band), &texels)?,
+                    false => {
+                        let (copy, len) = (buffer_image_copy(&band), texels.len() as u64);
+                        twin.staging_write(copy, len, |staged| staged.copy_from_slice(&texels))?
+                    }
                 };
                 if !written {
                     return Err(internal(

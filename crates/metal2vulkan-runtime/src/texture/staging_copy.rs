@@ -67,20 +67,22 @@ impl Image {
         !(self.device.shared().textures.first_moves).texels_wait(at.cast())
     }
 
-    /// Copy `packed`, laid out as `copy` reads it from a buffer, into the image on the staging
-    /// queue; the image [takes staging copies](Self::takes_staging_copies). Whether it did: not
-    /// while it presents a stand-in.
+    /// Copy `len` bytes, laid out as `copy` reads them from a buffer, which `fill` writes into the
+    /// staging buffer where they lie, into the image on the staging queue; the image [takes
+    /// staging copies](Self::takes_staging_copies). Whether it did: not while it presents a
+    /// stand-in, and then `fill` is not called.
     pub(super) fn staging_write(
         &self,
         copy: vk::BufferImageCopy,
-        packed: &[u8],
+        len: u64,
+        fill: impl FnOnce(&mut [u8]),
     ) -> Result<bool, Error> {
         let detached = lock(&self.detached);
         if detached.is_some() || !self.nothing_staged() {
             return Ok(false);
         }
-        let mut staging = Staging::new(&self.device, packed.len() as u64)?;
-        staging.bytes().copy_from_slice(packed);
+        let mut staging = Staging::new(&self.device, len)?;
+        fill(staging.bytes());
         let (buffer, image) = (staging.raw, self.raw.get());
         self.device.submit_staging(|raw, command_buffer, _| {
             transfer_barrier(raw, command_buffer, true);

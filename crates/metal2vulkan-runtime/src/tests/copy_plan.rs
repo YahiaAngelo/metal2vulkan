@@ -580,3 +580,32 @@ fn a_host_layout_is_packed_exactly_where_unpacking_moves_nothing() {
         }
     }
 }
+
+/// A host layout is packed (`HostLayout::is_packed`, where `replaceRegion` copies from the
+/// caller's bytes in place) exactly where packing a host buffer of distinct bytes in it gives that
+/// buffer's first `packed_len` bytes: every layout of up to 3 rows of up to 3 bytes in up to 3
+/// images, every pitch of rows and images up to 12 bytes, 0 included.
+#[test]
+fn a_host_layout_is_packed_exactly_where_packing_moves_nothing() {
+    for (row_bytes, rows, images) in
+        (1..=3).flat_map(|r| (1..=3).flat_map(move |n| (1..=3).map(move |i| (r, n, i))))
+    {
+        for bytes_per_row in 0..=12 {
+            for bytes_per_image in 0..=12 {
+                let layout = HostLayout {
+                    row_bytes,
+                    rows,
+                    images,
+                    bytes_per_row,
+                    bytes_per_image,
+                };
+                let len = layout.host_len().max(layout.packed_len()) as usize;
+                let host: Vec<u8> = (1..=len as u8).collect();
+                let mut packed = vec![0; layout.packed_len() as usize];
+                layout.pack(&host, &mut packed);
+                let in_place = host[..packed.len()] == packed[..];
+                assert_eq!(layout.is_packed(), in_place, "{layout:?}");
+            }
+        }
+    }
+}
