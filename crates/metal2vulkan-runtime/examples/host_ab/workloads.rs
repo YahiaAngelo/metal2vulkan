@@ -2791,8 +2791,67 @@ impl<G: Gpu> CallObjects<G> {
     }
 }
 
+/// The buffers the calls workload's `resident_*` variants make resident, of 256 bytes each.
+const DRAWN_RESIDENT: usize = 4096;
+
+/// The draws of a `resident_*` variant's render encoder.
+const RESIDENT_DRAWS: usize = 512;
+
+/// The calls workload's `resident_*` variants, each run only where named: a render encoder of the
+/// buffer-fragment pipeline state, its vertex and fragment buffers set, one
+/// `useResources:count:usage:stages:` (reading, vertex and fragment) of 0, 1, 256 or 4096 buffers,
+/// then [`RESIDENT_DRAWS`] draws of a strip with nothing changed between them. Per variant: the
+/// `useResources` call, the encoding thread's wall time per draw after it, and the command
+/// buffer's whole time to its wait's return.
+fn calls_resident<G: Gpu>(g: &G, objects: &CallObjects<G>, sizes: &Sizes, variants: &[String]) {
+    let wanted: Vec<(&str, usize)> = [("0", 0), ("1", 1), ("256", 256), ("4096", 4096)]
+        .into_iter()
+        .filter(|(name, _)| variants.iter().any(|v| *v == format!("resident_{name}")))
+        .collect();
+    if wanted.is_empty() {
+        return;
+    }
+    let resident: Vec<G::Buffer> = (0..DRAWN_RESIDENT).map(|_| g.buffer(256)).collect();
+    let vertex = [&objects.positions, &objects.colours];
+    for (name, count) in wanted {
+        let list: Vec<&G::Buffer> = resident[..count].iter().collect();
+        let (mut using, mut draws, mut total) = (vec![], vec![], vec![]);
+        for run in 0..sizes.timed + 3 {
+            g.pool(|| {
+                let t0 = Instant::now();
+                let cb = g.command_buffer();
+                let mut e = g.pass_encoder(&cb, &objects.pass);
+                g.set_render_pipeline(&mut e, &objects.states[1]);
+                g.set_vertex_buffers(&mut e, &vertex, &[0, 0], 0);
+                g.set_fragment_buffer(&mut e, &objects.uniforms, 0, 0);
+                let t1 = Instant::now();
+                g.use_buffers_drawn(&mut e, &list);
+                let t2 = Instant::now();
+                for _ in 0..RESIDENT_DRAWS {
+                    g.draw_strip(&mut e, 4);
+                }
+                let t3 = Instant::now();
+                g.end_render(e);
+                g.commit(&cb);
+                g.wait(&cb);
+                let t4 = Instant::now();
+                if run >= 3 {
+                    using.push((t2 - t1).as_secs_f64() * 1e6);
+                    draws.push((t3 - t2).as_secs_f64() * 1e9 / RESIDENT_DRAWS as f64);
+                    total.push((t4 - t0).as_secs_f64() * 1e3);
+                }
+            });
+        }
+        let metric = |what: &str| format!("resident_{name}_{what}");
+        emit("calls", &metric("use_call"), "us", &mut using);
+        emit("calls", &metric("draw"), "ns/call", &mut draws);
+        emit("calls", &metric("cb_total"), "ms", &mut total);
+    }
+}
+
 /// The consumer's frames, call by call (module docs of `main.rs`): each step's mean a call over
 /// each timed frame, then its allocations a call on the encoding thread over one more frame.
+/// The `resident_*` variants run only where named ([`calls_resident`]).
 pub fn calls<G: Gpu>(
     g: &G,
     s: &Scene<G>,
@@ -2875,4 +2934,5 @@ pub fn calls<G: Gpu>(
             }
         }
     }
+    calls_resident(g, &objects, sizes, variants);
 }

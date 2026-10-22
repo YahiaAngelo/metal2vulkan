@@ -40,7 +40,11 @@
 //!   `set_state`, ..., `draw`, `end_render`, ..., `handler_commit`): the mean a call of each of
 //!   `--timed` frames, in ns, after 5 frames not timed; `*_frame_calls`, the frame's timed calls
 //!   summed; and `*_allocs`, the heap allocations a call of the step made on the encoding thread
-//!   over one more frame (`allocs`). `--variants wide` or `many` runs one shape alone.
+//!   over one more frame (`allocs`); `*_frame_wall`, the frame from its first call until its last
+//!   wait returned. `--variants wide` or `many` runs one shape alone. Only where named,
+//!   `resident_0`, `_1`, `_256` and `_4096`: a render encoder's 512 draws, nothing changed between
+//!   them, after one `useResources:count:usage:stages:` of 0, 1, 256 or 4096 buffers; the call,
+//!   each draw after it, and the command buffer to its wait's return.
 //! - `latency`: commit to `waitUntilCompleted`'s return, and commit to the completed handler, of
 //!   a command buffer that is empty, one blit fill, one dispatch, or one draw; one in flight.
 //! - `gpu`: a full-screen heavy fragment (`heavy_fragment`, 2048x2048 `RGBA16Float`) and a heavy

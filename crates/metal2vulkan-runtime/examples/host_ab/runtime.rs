@@ -727,6 +727,15 @@ impl Gpu for Runtime {
             .expect("use_resources");
     }
 
+    fn use_buffers_drawn(&self, encoder: &mut rt::RenderCommandEncoder, buffers: &[&rt::Buffer]) {
+        let resources: Vec<rt::ResourceRef> = buffers.iter().map(|b| b.as_resource()).collect();
+        let stages =
+            metal2vulkan::metal::RenderStages::VERTEX | metal2vulkan::metal::RenderStages::FRAGMENT;
+        encoder
+            .use_resources(&resources, ResourceUsage::READ, stages)
+            .expect("use_resources");
+    }
+
     fn use_buffer(&self, encoder: &mut rt::ComputeCommandEncoder, buffer: &rt::Buffer) {
         encoder
             .use_resource(

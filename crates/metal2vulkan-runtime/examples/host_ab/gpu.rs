@@ -285,6 +285,9 @@ pub trait Gpu {
     fn use_commands(&self, encoder: &mut Self::ComputeEncoder, commands: &Self::IndirectCommands);
     /// `useResources:count:usage:` of `buffers`, `MTLResourceUsageRead`.
     fn use_buffers_read(&self, encoder: &mut Self::ComputeEncoder, buffers: &[&Self::Buffer]);
+    /// `useResources:count:usage:stages:` of `buffers`, `MTLResourceUsageRead`, in the vertex and
+    /// fragment stages.
+    fn use_buffers_drawn(&self, encoder: &mut Self::RenderEncoder, buffers: &[&Self::Buffer]);
     /// `useResource:usage:` of `buffer`, read and write: the executed commands bind it.
     fn use_buffer(&self, encoder: &mut Self::ComputeEncoder, buffer: &Self::Buffer);
     /// `useResources:count:usage:` of `buffers`, `MTLResourceUsageRead`.

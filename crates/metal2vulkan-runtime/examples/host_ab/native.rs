@@ -764,6 +764,24 @@ impl Gpu for Native {
         }
     }
 
+    fn use_buffers_drawn(&self, encoder: &mut Self::RenderEncoder, buffers: &[&Self::Buffer]) {
+        let resources: Vec<NonNull<ProtocolObject<dyn MTLResource>>> = buffers
+            .iter()
+            .map(|b| NonNull::from(ProtocolObject::<dyn MTLResource>::from_ref(&***b)))
+            .collect();
+        if let Some(first) = NonNull::new(resources.as_ptr() as *mut _) {
+            // SAFETY: `resources.len()` resources of this device.
+            unsafe {
+                encoder.useResources_count_usage_stages(
+                    first,
+                    resources.len(),
+                    MTLResourceUsage::Read,
+                    MTLRenderStages::Vertex | MTLRenderStages::Fragment,
+                )
+            };
+        }
+    }
+
     fn use_buffer(&self, encoder: &mut Self::ComputeEncoder, buffer: &Self::Buffer) {
         encoder.useResource_usage(
             ProtocolObject::from_ref(&**buffer),
