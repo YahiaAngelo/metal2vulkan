@@ -2351,6 +2351,7 @@ impl RenderExecution {
             bind_memo: crate::binding::BindMemo::default(),
             shape_memo: Default::default(),
             last_retained: Default::default(),
+            heaps_noted: None,
             inline: super::inline_first::Inline::Never,
             held_bound: Default::default(),
             // No pass of several color groups executes render commands

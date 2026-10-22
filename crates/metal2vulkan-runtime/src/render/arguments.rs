@@ -126,8 +126,13 @@ impl RenderLowering {
     /// texture handles from memory in render stages `reads`, the textures they reach whose
     /// blocks a carrier holds.
     pub(super) fn command_encoded(&mut self, reads: RenderStages) {
-        // The command, encoded, used the heaps of what the encoder made resident.
-        self.core.touch_heaps(self.residency.heaps());
+        // The command, encoded, used the heaps of what the encoder made resident: noted once a
+        // change of it, as an earlier command noted those it held then.
+        let generation = self.residency.generation();
+        if self.heaps_noted != Some(generation) {
+            self.core.touch_heaps(self.residency.heaps());
+            self.heaps_noted = Some(generation);
+        }
         if reads.is_empty() {
             return;
         }

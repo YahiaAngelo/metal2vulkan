@@ -1343,6 +1343,9 @@ pub(crate) struct RenderLowering {
     shape_memo: ShapeMemo,
     /// What its draws retained of their own, each once ([`LastRetained`]).
     last_retained: LastRetained,
+    /// The residency's generation as a command last noted the heaps of what it made resident
+    /// (`command_encoded`): no command notes them again before it changes.
+    heaps_noted: Option<u64>,
     /// Whether the pass's first instance records inline (`render/inline_first.rs`).
     inline: inline_first::Inline,
     /// What the draws recorded inline into the pass's command buffer bound there, in its every
@@ -1818,6 +1821,7 @@ impl RenderLowering {
             bind_memo,
             shape_memo: ShapeMemo::default(),
             last_retained: LastRetained::default(),
+            heaps_noted: None,
             inline: match inline {
                 Some(splits) => inline_first::Inline::Open { splits },
                 None => inline_first::Inline::Never,
@@ -5440,6 +5444,12 @@ impl RenderLowering {
         // (`live_bind::ReadFrom`); a table that keeps its stamp is checked in debug builds alone.
         let moved = crate::buffer::host_cells_moved();
         let same = live.read_from.reads(interface, maps, moved);
+        // The state's used resources are what the encoder made resident still where the
+        // residency kept its generation since they were made of it (`Residency::generation`), no
+        // no-copy buffer moved since (their addresses), and each indirect command buffer made
+        // resident holds its ID's slot as they state (`Residency::holds_slots_as`).
+        let generation = self.residency.generation();
+        let resident = live.read_from.resident(generation, moved);
         let counts = &self.core.device().shared().counts;
         for (at, (stage, table)) in tables.into_iter().enumerate() {
             let kept = state.stages.entry(stage).or_default();
@@ -5471,7 +5481,15 @@ impl RenderLowering {
             &mut object.threadgroup_lengths,
             &self.object_threadgroup_lengths,
         );
-        reshape.field(&mut state.used_resources, self.residency.used_resources());
+        let kept = resident && self.residency.holds_slots_as(&state.used_resources);
+        debug_assert!(
+            !kept || state.used_resources == self.residency.used_resources(),
+            "a draw's kept used resources that are not its residency's"
+        );
+        if !kept {
+            reshape.field(&mut state.used_resources, self.residency.used_resources());
+        }
+        live.read_from.made_resident(generation);
         // Listed again only where the device's sampler states changed since: not where the
         // listing kept is of every live state at the count of their slots' changes that still
         // holds; else they are taken and compared state by state.
