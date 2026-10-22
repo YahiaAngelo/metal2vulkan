@@ -2,8 +2,13 @@
 //! `encodeStartIf:offset:comparison:referenceValue:`, `encodeStartElse` and `encodeEndIf`, and its
 //! loops, `encodeStartWhile:offset:comparison:referenceValue:` to `encodeEndWhile` and
 //! `encodeStartDoWhile` to `encodeEndDoWhile:offset:comparison:referenceValue:`, as Metal runs
-//! them (measured on an M3 Max under macOS 27.0.1, which the runtime answers as on every device;
-//! an M4 under macOS 27.0.1 gave the same answers for every stream both ran).
+//! them (measured on an M3 Max under macOS 27.0.1, which the runtime answers as on every device
+//! and at every Metal level; an M4 under macOS 27.0.1 gave the same answers for every stream both
+//! ran). At macOS 26.7 the consumer's M3 Max gave the same answers wherever it recorded one (its
+//! unbalanced records, open blocks and loops); its unit model, fences and misused records there
+//! are not measured. What 26.7 does differently it does with or without a record: it ends the
+//! process at a run of compute encoders' first indirect dispatch in an encoder of another dispatch
+//! type, which the device answers by its level (`metal_level.rs`).
 //!
 //! # What Metal does
 //!
@@ -131,6 +136,10 @@ pub(super) struct Predication {
     /// The command buffer's command-predication calls that returned `Ok` so far: the index of
     /// the next (the calls a loop's copies replay not counted).
     records: u32,
+    /// The run of compute encoders the open one is in, whose first indirect dispatch in an
+    /// encoder of another type than its first encoder's ends the process at some levels
+    /// (`MetalLevel::ends_at_a_runs_first_indirect_of_another_type`).
+    indirect_run: Option<IndirectRun>,
     /// The word a loop's last copy sets where the loop would run another (made with the
     /// command buffer's first loop): the command buffer fails at its completion
     /// (`CommandBufferError::PredicatedLoopPastCopies`).
@@ -182,6 +191,21 @@ impl Test {
     fn of(&self, step: PredicationStep) -> PredicationStep {
         step.testing(self.address, self.compare, self.reference)
     }
+}
+
+/// A run of a command buffer's compute encoders one after another, with no other encoder and no
+/// event signal or wait between: at some Metal levels its first indirect dispatch in an encoder of
+/// another type than its first encoder's ends the process
+/// (`MetalLevel::ends_at_a_runs_first_indirect_of_another_type`).
+struct IndirectRun {
+    /// The place among the command buffer's ended encoders its last encoder takes.
+    place: usize,
+    /// The event waits and signals encoded before it.
+    events: (usize, usize),
+    /// Its first encoder's dispatch type.
+    first: DispatchType,
+    /// One of its indirect dispatches went through.
+    through: bool,
 }
 
 /// One unit of predication.
@@ -330,6 +354,17 @@ impl Predication {
         events: (usize, usize),
         dispatch_type: DispatchType,
     ) -> Vec<Vec<(EncoderState, Event)>> {
+        match &mut self.indirect_run {
+            Some(run) if run.place + 1 == place && run.events == events => run.place = place,
+            _ => {
+                self.indirect_run = Some(IndirectRun {
+                    place,
+                    events,
+                    first: dispatch_type,
+                    through: false,
+                })
+            }
+        }
         if let Some(unit) = &mut self.unit {
             if !unit.closing
                 && unit.place + 1 == place
@@ -362,6 +397,21 @@ impl Predication {
                 self.open_checks.push((check, outermost.record));
             }
         }
+    }
+
+    /// An indirect dispatch of the open encoder, of `dispatch_type`, where the device's Metal level
+    /// ends the process at a run's first one in an encoder of another type than the run's first
+    /// encoder's (`ends`): whether it goes through (once one did, every later one of the run
+    /// does).
+    pub(super) fn indirect_dispatch(&mut self, dispatch_type: DispatchType, ends: bool) -> bool {
+        let Some(run) = &mut self.indirect_run else {
+            return true;
+        };
+        if ends && !run.through && run.first != dispatch_type {
+            return false;
+        }
+        run.through = true;
+        true
     }
 
     /// A command-predication call returned `Ok`: the next call's index is one more.

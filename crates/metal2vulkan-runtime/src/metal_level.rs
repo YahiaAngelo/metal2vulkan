@@ -2,7 +2,9 @@
 //!
 //! Metal's answers about pixel formats differ by macOS release: which raw values a texture
 //! descriptor's `setPixelFormat:` takes, and which formats `MTLPixelFormatGetInfoForDevice`
-//! describes, whose textures Metal's validation stops otherwise. A [`MetalLevel`] is one measured
+//! describes, whose textures Metal's validation stops otherwise; and whether a compute encoder
+//! run's first indirect dispatch in an encoder of another dispatch type ends the process
+//! ([`MetalLevel::ends_at_a_runs_first_indirect_of_another_type`]). A [`MetalLevel`] is one measured
 //! release, and its row of the table ([`MetalLevel::knows`], [`MetalLevel::describes`]) is what
 //! that release answered on our own probes. Every check that differs by release reads the row of
 //! the device's level, never a release's name.
@@ -78,6 +80,10 @@ struct Row {
     no_texture_stack_alignment: u64,
     /// How its Metal's `generateMipmapsForTexture:` makes each level after the first.
     mipmaps: MipmapRule,
+    /// Whether its Metal ends the process at a run of compute encoders' first indirect dispatch
+    /// in an encoder of another dispatch type than the run's first encoder's
+    /// ([`MetalLevel::ends_at_a_runs_first_indirect_of_another_type`]).
+    indirect_of_another_type_ends: bool,
 }
 
 /// How a level's Metal places a block-compressed texture's blocks in its levels' tiles, per
@@ -114,6 +120,10 @@ const MACOS_26_7: Row = Row {
     // Measured plain and validated, every usage and storage mode.
     no_texture_stack_alignment: 16 << 10,
     mipmaps: MipmapRule::AppleM3MaxPasses,
+    // The consumer's measurement on its M3 Max (25G229): a segmentation fault at the call, in 7
+    // of the 18 shapes of its `a_units_first_indirect_dispatch_of_another_type_dies` (the
+    // others run), and in `interplay_decodewalk_27` in each of its setups; not run here.
+    indirect_of_another_type_ends: true,
 };
 
 /// macOS 27.0.1 on an Apple M3 Max: its descriptor knows every value the runtime names (it
@@ -143,6 +153,9 @@ const MACOS_27_0_1: Row = Row {
     no_texture_stack_alignment: 128,
     // Every level the filter of the level above (`bind::mipmap_filter`'s "By release").
     mipmaps: MipmapRule::Filter,
+    // Our probe on the M3 Max: 12 shapes of it, with and without a predication block open, run;
+    // the consumer's `interplay_decodewalk_27` completes in each of its setups.
+    indirect_of_another_type_ends: false,
 };
 
 impl MetalLevel {
@@ -229,6 +242,20 @@ impl MetalLevel {
     /// No Metal counterpart: Metal makes its own release's.
     pub fn mipmap_rule(self) -> MipmapRule {
         self.row().mipmaps
+    }
+
+    /// Whether the release's Metal ends the process (a segmentation fault) at a run of compute
+    /// encoders' first indirect dispatch (`dispatchThreadgroupsWithIndirectBuffer:...` or
+    /// `dispatchThreadsWithIndirectBuffer:...`) in an encoder whose dispatch type is not the
+    /// run's first encoder's, which the runtime answers alike (`Invalid`,
+    /// `Problem::IndirectDispatchOfAnotherType`). A run is a command buffer's compute encoders one
+    /// after another with no other encoder and no event signal or wait between; its first
+    /// encoder's type counts though it dispatches nothing, and once one indirect dispatch of the
+    /// run went through, every later one does. No command-predication record is needed. macOS
+    /// 26.7 does, as the consumer measured on an M3 Max (we cannot run 26.7 here); 27.0.1 runs
+    /// on. Whether a fence update ends such a run at 26.7 is not measured: none does.
+    pub(crate) fn ends_at_a_runs_first_indirect_of_another_type(self) -> bool {
+        self.row().indirect_of_another_type_ends
     }
 
     /// The newest level whose release is at or below macOS `version` (major, minor, patch), if

@@ -525,6 +525,15 @@ pub enum Problem {
     Semaphore(SemaphoreProblem),
     /// No pipeline state is set (plain Metal faults at a compute dispatch without one).
     NoPipelineState,
+    /// A run of compute encoders' first indirect dispatch (`dispatch_threadgroups_indirect`,
+    /// `dispatch_threads_indirect`) in an encoder whose dispatch type is not the run's first
+    /// encoder's, on a device whose Metal level ends the process there (a segmentation fault):
+    /// [`MetalLevel::MacOS26_7`](crate::MetalLevel::MacOS26_7), as the consumer measured on an M3
+    /// Max. A run is a command buffer's compute encoders one after another with no other encoder
+    /// and no event signal or wait between; its first encoder's type counts though it dispatches
+    /// nothing, and once one indirect dispatch of the run went through, every later one does.
+    /// macOS 27.0.1 runs it.
+    IndirectDispatchOfAnotherType,
     /// An argument-table index past Metal's table (plain Metal writes past its own table: a
     /// compute texture at index 128 faulted the dispatch on an M4).
     IndexOutOfRange {

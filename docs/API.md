@@ -1879,9 +1879,10 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-metal-level-below-host` (precision). `MetalLevelBelowHost`: A device made,
   with no level named in its options, on a macOS host whose release has no measured `MetalLevel`: it
   answers as the newest measured release below the host's. Cost: where Metal's answers differ by
-  release (which pixel formats a texture descriptor takes and Metal describes), the device gives the
-  older release's: it can stop or refuse a texture the host's Metal makes, and never makes one the
-  older release stops.
+  release (which pixel formats a texture descriptor takes and Metal describes, whether a run of
+  compute encoders' first indirect dispatch of another dispatch type ends the process), the device
+  gives the older release's: it can stop or refuse a texture or a dispatch the host's Metal makes,
+  and never makes one the older release stops.
 - `metal2vulkan-degrade-unreached-tiles-rewritten` (precision). `UnreachedTilesRewritten`: A render
   pass that loads a color attachment of an extended-range or padded 10-bit format (`BGR10_XR`,
   `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and their sRGB twins), or under
@@ -2208,8 +2209,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-metal-level-not-macos` (precision). `MetalLevelNotMacOS`: A device made off
   macOS with no Metal level named: it answers as the newest measured release (`MetalLevel::NEWEST`),
   no release of the host's. Cost: where Metal's answers differ by release (which pixel formats a
-  texture descriptor takes and Metal describes, how a heap texture's blocks lie), the device gives
-  the newest measured release's, whatever release the program expects.
+  texture descriptor takes and Metal describes, how a heap texture's blocks lie, whether a run of
+  compute encoders' first indirect dispatch of another dispatch type ends the process), the device
+  gives the newest measured release's, whatever release the program expects.
 - `metal2vulkan-degrade-private-properties-unknown` (precision). `PrivatePropertiesUnknown`: Apple's
   private device properties the device has no answer for: no document describes them and nothing the
   device reports maps to them. Cost: the device gives no answer for them (`PrivateAnswer::value` is
