@@ -1696,7 +1696,7 @@ impl Counters {
     pub(crate) fn host_import_fds_keep(&self, count: u64, limit: u64) -> bool {
         let kept = &self.host_import_fds_kept;
         let fits = |held: u64| held.checked_add(count).filter(|after| *after <= limit);
-        kept.fetch_update(Ordering::AcqRel, Ordering::Acquire, fits)
+        kept.try_update(Ordering::AcqRel, Ordering::Acquire, fits)
             .is_ok()
     }
 

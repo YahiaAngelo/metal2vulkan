@@ -134,7 +134,7 @@ fn keep_fds(count: u64) -> bool {
     let limit = kept_fds_limit();
     let fits = |held: u64| held.checked_add(count).filter(|after| *after <= limit);
     KEPT_FDS
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, fits)
+        .try_update(Ordering::AcqRel, Ordering::Acquire, fits)
         .is_ok()
 }
 
