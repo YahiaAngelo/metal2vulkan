@@ -853,6 +853,25 @@ impl Gpu for Native {
         };
     }
 
+    fn draw_indexed_strip_at(
+        &self,
+        encoder: &mut Self::RenderEncoder,
+        count: usize,
+        indices: &Self::Buffer,
+        offset: usize,
+    ) {
+        // SAFETY: the indices lie in the buffer, and the bound state reads only its bound buffers.
+        unsafe {
+            encoder.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset(
+                MTLPrimitiveType::TriangleStrip,
+                count,
+                MTLIndexType::UInt16,
+                indices,
+                offset,
+            )
+        };
+    }
+
     fn draw_triangles_indirect(
         &self,
         encoder: &mut Self::RenderEncoder,

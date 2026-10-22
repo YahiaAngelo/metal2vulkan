@@ -38,7 +38,8 @@ use super::execution::Execution;
 use super::fresh_unwritten::FreshRead;
 use super::heap::Heap;
 use super::index_rewrite::{
-    self, GatherHeld, GatherRequest, GatherRuns, GatheredList, IndirectGatherRequest, PooledList,
+    self, CommandedList, GatherHeld, GatherRequest, GatherRuns, GatheredList,
+    IndirectGatherRequest, RewriteRunRequest,
 };
 use super::noted_apart::{NotedApart, NotedInto};
 use super::pending_dispatch::PendingDispatch;
@@ -734,7 +735,7 @@ impl EncoderCore {
         &mut self,
         request: IndirectGatherRequest<'_>,
         uses: &[Use<ResourceKey>],
-    ) -> Result<Option<PooledList>, Error> {
+    ) -> Result<Option<CommandedList>, Error> {
         if self.gathers.full() {
             self.flush_gathers();
         }
@@ -754,7 +755,34 @@ impl EncoderCore {
         Ok(Some(list))
     }
 
-    /// A draw joined a gather run: hold what a new run's command buffer holds, track the draw's
+    /// `request`'s direct indexed draw joins an open run of the index rewrite pass, which records
+    /// before the encoder's next command (`index_rewrite.rs`): where its list and command lie, or
+    /// `None` where no run takes it. Its reads `uses` are tracked here, the run's barriers before
+    /// and after it ordering them. Refused as the run's objects and the command buffer's status
+    /// words are refused.
+    pub(super) fn rewrite_run(
+        &mut self,
+        request: RewriteRunRequest<'_>,
+        uses: &[Use<ResourceKey>],
+    ) -> Result<Option<CommandedList>, Error> {
+        if self.gathers.full() {
+            self.flush_gathers();
+        }
+        let device = self.device().clone();
+        let joined = {
+            let mut state = self.open.command_buffer.state();
+            let status = state.status_words(&device)?;
+            self.gathers
+                .join_rewrite(&device, (&mut state.uploads, &status), request)?
+        };
+        let Some((list, held)) = joined else {
+            return Ok(None);
+        };
+        self.joined(held, uses);
+        Ok(Some(list))
+    }
+
+    /// A draw joined a gather run or a rewrite run: hold what a new run's command buffer holds, track the draw's
     /// reads `uses` (the run's barrier from everything before orders them: the one tracking
     /// returns goes unrecorded), and count the draw.
     fn joined(&mut self, held: Option<GatherHeld>, uses: &[Use<ResourceKey>]) {

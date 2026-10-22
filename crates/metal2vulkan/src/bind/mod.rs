@@ -44,7 +44,9 @@
 //! indexed draw whose primitives Vulkan's input assembly does not form as Metal does (a strip
 //! restarting at another index than all-ones) can draw them as a list instead: an
 //! [`IndexRewritePass`] of three [`index_rewrite_module`] dispatches ([`RewritePhase`]) before the
-//! render pass instance, and one indirect draw; a run of draws whose lists follow from their
+//! render pass instance, and one indirect draw (a run of direct draws of one walk group each,
+//! over one index buffer, one [`IndexRewriteRun`] dispatch of [`index_rewrite_run_module`] for
+//! all of them instead); a run of draws whose lists follow from their
 //! positions (direct draws of a program that never restarts, [`RewriteProgram::gathers`], over
 //! one index buffer; indirect draws over one arguments buffer, [`IndirectGatherDraw`]) can take
 //! one [`IndexGather`] dispatch of [`index_gather_module`] for all of them instead (an indirect
@@ -235,9 +237,10 @@ pub use index_bounds::{
     IndexBoundsPlanModule,
 };
 pub use index_rewrite::{
-    index_gather_module, index_gather_plan_module, index_rewrite_module, GatherDraw, IndexGather,
-    IndexGatherModule, IndexGatherPlanModule, IndexRewriteModule, IndexRewritePass,
-    IndirectGatherDraw, RewriteOrder, RewriteOutput, RewritePhase, RewriteProgram, RewriteSource,
+    index_gather_module, index_gather_plan_module, index_rewrite_module, index_rewrite_run_module,
+    GatherDraw, IndexGather, IndexGatherModule, IndexGatherPlanModule, IndexRewriteModule,
+    IndexRewritePass, IndexRewriteRun, IndirectGatherDraw, RewriteOrder, RewriteOutput,
+    RewritePhase, RewriteProgram, RewriteRunDraw, RewriteSource,
 };
 pub use indirect_clamp::{indirect_clamp_module, IndirectClamp, IndirectClampModule};
 pub use instantiate::{

@@ -124,6 +124,9 @@ pub(super) enum OwnedModule {
     /// `bind::index_rewrite_module` of one program's dispatch of one phase: an indexed draw's
     /// primitives as a list (`index_rewrite.rs`).
     IndexRewrite(RewriteProgram, RewritePhase),
+    /// `bind::index_rewrite_run_module` of one program: a run of direct indexed draws'
+    /// primitives as lists, one workgroup per draw (`index_rewrite.rs`).
+    IndexRewriteRun(RewriteProgram),
     /// `bind::rotate_texels_module`: a rotated texture's texels moved between its pass's frame
     /// and its bytes (`rotated.rs`).
     RotateTexels,
@@ -372,6 +375,12 @@ impl OwnedModule {
                     .map_err(Error::Compile)?;
                 Ok((module.spirv.to_vec(), 5, 0))
             }
+            OwnedModule::IndexRewriteRun(program) => {
+                let device = device.compile_device();
+                let module = metal2vulkan::bind::index_rewrite_run_module(device, program)
+                    .map_err(Error::Compile)?;
+                Ok((module.spirv.to_vec(), 5, 0))
+            }
             OwnedModule::YCbCrConvert(output) => {
                 let module =
                     metal2vulkan::bind::ycbcr_convert_module(device.compile_device(), output)
@@ -528,6 +537,7 @@ pub(super) struct OwnedKernels {
     plane_words: Option<OwnedKernel>,
     plane_copy: Option<OwnedKernel>,
     index_rewrites: HashMap<(RewriteProgram, RewritePhase), OwnedKernel>,
+    index_rewrite_runs: HashMap<RewriteProgram, OwnedKernel>,
     rotate_texels: Option<OwnedKernel>,
     rows_copy: Option<OwnedKernel>,
     ycbcr_refresh: Option<OwnedKernel>,
@@ -590,6 +600,7 @@ impl OwnedKernels {
         .chain(self.shadow_copy_ins.values().copied())
         .chain(self.mipmap_filters.values().copied())
         .chain(self.index_rewrites.values().copied())
+        .chain(self.index_rewrite_runs.values().copied())
         .chain(self.ycbcr_converts.values().copied())
         .chain(self.unused_bits.values().copied())
         .chain(self.compressed_blits.values().copied())
@@ -614,6 +625,7 @@ impl OwnedKernels {
             OwnedModule::IndexRewrite(program, phase) => {
                 self.index_rewrites.get(&(program, phase)).copied()
             }
+            OwnedModule::IndexRewriteRun(program) => self.index_rewrite_runs.get(&program).copied(),
             OwnedModule::YCbCrConvert(output) => self.ycbcr_converts.get(&output).copied(),
             OwnedModule::UnusedBits(format, words) => {
                 self.unused_bits.get(&(format, words)).copied()
@@ -647,6 +659,9 @@ impl OwnedKernels {
             OwnedModule::IndexRewrite(program, phase) => {
                 self.index_rewrites.insert((program, phase), kernel);
             }
+            OwnedModule::IndexRewriteRun(program) => {
+                self.index_rewrite_runs.insert(program, kernel);
+            }
             OwnedModule::YCbCrConvert(output) => {
                 self.ycbcr_converts.insert(output, kernel);
             }
@@ -674,7 +689,7 @@ impl OwnedKernels {
     }
 
     /// The slot of a kernel the device makes once (none for the shadow copy back's, the image
-    /// merge's, the shadow copy in's, the mipmap filter's, the index rewrite's, the YCbCr conversion's, the unused bits', the compressed
+    /// merge's, the shadow copy in's, the mipmap filter's, the index rewrite's and its run's, the YCbCr conversion's, the unused bits', the compressed
     /// blit's, the extended shadow load's, the twin decode's or the tessellation scan's, one
     /// per key).
     fn slot(&mut self, which: OwnedModule) -> Option<&mut Option<OwnedKernel>> {
@@ -702,6 +717,7 @@ impl OwnedKernels {
             | OwnedModule::ShadowCopyIn(_)
             | OwnedModule::MipmapFilter(_)
             | OwnedModule::IndexRewrite(..)
+            | OwnedModule::IndexRewriteRun(_)
             | OwnedModule::YCbCrConvert(_)
             | OwnedModule::UnusedBits(..)
             | OwnedModule::CompressedBlit(_)

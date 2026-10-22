@@ -719,13 +719,29 @@ impl PrivateForm {
     fn of(pipeline: &DrawingState, program: RewriteProgram, draw: &DrawCall) -> PrivateForm {
         let graphics = &pipeline.base().graphics;
         let quads = matches!(program, RewriteProgram::Quads | RewriteProgram::QuadStrip);
-        let far = matches!(*draw, DrawCall::Primitives { vertex_start, vertex_count, .. }
-            if u64::from(vertex_start) + u64::from(vertex_count) > 1 << 31);
         PrivateForm {
             quad_primitive_ids: quads && graphics.reads_primitive_id,
-            private_list: writes_primitive_ids(pipeline) || graphics.vertex_writes_memory || far,
+            private_list: writes_primitive_ids(pipeline)
+                || graphics.vertex_writes_memory
+                || far(draw),
         }
     }
+
+    /// The form of a public type's `draw` drawn as a list (a strip that restarts where Vulkan does
+    /// not, a draw under the last provoking vertex): the private list form where its last vertex
+    /// ID passes `i32::MAX`, which an indexed list's base vertex cannot carry.
+    fn listed(draw: &DrawCall) -> PrivateForm {
+        PrivateForm {
+            quad_primitive_ids: false,
+            private_list: far(draw),
+        }
+    }
+}
+
+/// Whether `draw` is a direct draw without indices whose last vertex ID passes `i32::MAX`.
+fn far(draw: &DrawCall) -> bool {
+    matches!(*draw, DrawCall::Primitives { vertex_start, vertex_count, .. }
+        if u64::from(vertex_start) + u64::from(vertex_count) > 1 << 31)
 }
 
 /// The draw the binder instantiates for `draw` of a private type in the private list form, of
@@ -7141,9 +7157,10 @@ impl RenderLowering {
         let provoking = self.provoking(call, &pipeline, assembly, &draw);
         let provoking_forms = provoking.forms(assembly, &pipeline);
         let restarted = self.restarted(assembly, &draw, provoking);
-        let private = match assembly {
-            Assembly::Private(program) => PrivateForm::of(&pipeline, program, &draw),
-            _ => PrivateForm::default(),
+        let private = match (assembly, restarted) {
+            (Assembly::Private(program), _) => PrivateForm::of(&pipeline, program, &draw),
+            (_, Some(_)) => PrivateForm::listed(&draw),
+            (_, None) => PrivateForm::default(),
         };
         let assembly = restarted.map_or(assembly, |r| r.assembly());
         // Its settings, and the memo entry its draw state and pipeline are found and kept in
@@ -7563,11 +7580,14 @@ impl RenderLowering {
                     if self.unordered.written(&in_place) {
                         return Err(Error::NotImplemented(restarted.gap.gap()));
                     }
-                    // An indirect draw of a program whose list follows from its positions,
-                    // reading its arguments and indices in place, joins an indirect run of the
-                    // index gather pass, which plans its list on the GPU; where an earlier draw
-                    // or tile dispatch of the encoder wrote them behind a memory barrier, the
-                    // index rewrite pass's step before the draw's render pass instance writes it.
+                    // A direct indexed draw (of a program the gather pass does not take) joins a
+                    // run of the index rewrite pass, one dispatch for the run's draws, each in a
+                    // workgroup of its own; an indirect draw of a program whose list follows from
+                    // its positions joins an indirect run of the index gather pass, which plans
+                    // its list on the GPU. Either reads its arguments and indices in place; where
+                    // an earlier draw or tile dispatch of the encoder wrote them behind a memory
+                    // barrier, the index rewrite pass's step before the draw's render pass
+                    // instance writes the list.
                     let gathers = match arguments {
                         index_rewrite::Arguments::Indirect(_) => restarted.program.gathers(),
                         index_rewrite::Arguments::IndirectVertices(_) => {
@@ -7575,16 +7595,37 @@ impl RenderLowering {
                         }
                         index_rewrite::Arguments::Direct { .. } => false,
                     };
-                    let pooled = match (
-                        indirect,
-                        gathers && !self.replaying && !private.private_list,
-                    ) {
-                        (Some(source), true)
-                            if source.in_place()
-                                && index.is_none_or(DrawSource::in_place)
-                                && !self.core.uses().written(&reads) =>
+                    let joins = !self.replaying
+                        && !private.private_list
+                        && !self.core.uses().written(&reads);
+                    let commanded = match (arguments, index, indirect) {
+                        (
+                            index_rewrite::Arguments::Direct {
+                                count,
+                                instances,
+                                base_vertex,
+                                base_instance,
+                            },
+                            Some(index),
+                            None,
+                        ) if joins && index.in_place() => self.core.rewrite_run(
+                            index_rewrite::RewriteRunRequest {
+                                program: restarted.program,
+                                restart: restarted.restart,
+                                order: restarted.order,
+                                index,
+                                arguments: (count, instances, base_vertex, base_instance),
+                                wide: size == 4,
+                            },
+                            &reads,
+                        )?,
+                        (_, index, Some(source))
+                            if gathers
+                                && joins
+                                && source.in_place()
+                                && index.is_none_or(DrawSource::in_place) =>
                         {
-                            self.core.gather_indirect(
+                            let list = self.core.gather_indirect(
                                 index_rewrite::IndirectGatherRequest {
                                     program: restarted.program,
                                     order: restarted.order,
@@ -7593,17 +7634,16 @@ impl RenderLowering {
                                     wide: size == 4,
                                 },
                                 &reads,
-                            )?
+                            )?;
+                            if let (Some(_), Some(index)) = (&list, index) {
+                                index_rewrite::announce_past_length(self.core.device(), index);
+                            }
+                            list
                         }
                         _ => None,
                     };
-                    match pooled {
-                        Some(list) => {
-                            if let Some(index) = index {
-                                index_rewrite::announce_past_length(self.core.device(), index);
-                            }
-                            (None, Some(Listed::Pooled(list)))
-                        }
+                    match commanded {
+                        Some(list) => (None, Some(Listed::Commanded(list))),
                         None => {
                             let pass = RewritePass::new(
                                 &mut self.core,
@@ -7625,7 +7665,7 @@ impl RenderLowering {
         };
         // A rewritten draw's list, and an indirect gathered draw's, holds its indices bounded.
         let pass = match (commands.indirect_needs_arguments, &buffers) {
-            _ if rewrite.is_some() || matches!(listed, Some(Listed::Pooled(_))) => None,
+            _ if rewrite.is_some() || matches!(listed, Some(Listed::Commanded(_))) => None,
             (
                 needs,
                 DrawBuffers {
@@ -8022,15 +8062,16 @@ impl RenderLowering {
         if let Some(header) = self.replayed.as_ref().and_then(|r| r.merged_header()) {
             tables = tables.with_merged_header(header);
         }
-        // A private type's list in the private list form is read at its address, which the device
-        // gives the list's memory where it has device addresses, as the form needs.
+        // A list in the private list form is read at its address, which the device gives the
+        // list's memory where it has device addresses, as the form needs.
         if capture.is_none() && variant.key().private_list {
             let address = match (&listed, &rewrite) {
                 (Some(list), _) => list.address(),
                 (_, Some(pass)) => pass.address(),
                 _ => None,
             };
-            let address = address.ok_or(Error::NotImplemented(RuntimeGap::PrivatePrimitives))?;
+            let gap = restarted.map_or(RuntimeGap::PrivatePrimitives, |r| r.gap.gap());
+            let address = address.ok_or(Error::NotImplemented(gap))?;
             tables = tables.with_indices(address);
         }
         // A de-indexed draw's vertex function reads its indices in place, at their address.

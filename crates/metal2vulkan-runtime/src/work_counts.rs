@@ -3198,10 +3198,11 @@ pub struct WorkCounts {
     /// without it, which drew the list of their primitives a GPU pass (or the CPU) wrote, in
     /// Metal's mode-1 order or led by each primitive's last vertex.
     pub provoking_listed_draws: u64,
-    /// Direct indexed draws drawn as a list (a restarted strip's, a private primitive type's, or
-    /// one led by its primitives' last vertices) whose list the index gather pass wrote: one
-    /// dispatch for each run of such draws over one index buffer, where the index rewrite pass
-    /// takes three per draw.
+    /// Draws drawn as a list (a restarted strip's, a private primitive type's, or one led by its
+    /// primitives' last vertices) whose list a run wrote: the index gather pass's (one dispatch
+    /// for a run of direct indexed draws over one index buffer, or of indirect draws after one
+    /// plan dispatch) or the index rewrite pass's (one dispatch for a run of direct indexed draws
+    /// over one index buffer), where a draw's own rewrite pass takes three dispatches.
     pub gathered_draws: u64,
     /// Notices of a variant's that a bind announces at every occurrence
     /// (`DeviceOptions::announce_each`), made for a bind: once per variant until the

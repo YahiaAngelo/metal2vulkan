@@ -794,6 +794,27 @@ impl Gpu for Runtime {
             .expect("draw_indexed_primitives");
     }
 
+    fn draw_indexed_strip_at(
+        &self,
+        encoder: &mut rt::RenderCommandEncoder,
+        count: usize,
+        indices: &rt::Buffer,
+        offset: usize,
+    ) {
+        encoder
+            .draw_indexed_primitives(
+                PrimitiveType::TriangleStrip,
+                count as u32,
+                IndexType::UInt16,
+                indices,
+                offset as u64,
+                1,
+                0,
+                0,
+            )
+            .expect("draw_indexed_primitives");
+    }
+
     fn draw_triangles_indirect(
         &self,
         encoder: &mut rt::RenderCommandEncoder,

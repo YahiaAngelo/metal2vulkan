@@ -286,15 +286,17 @@ driver's. Each is open work.
   state reads flat inputs or selects a slice or viewport (or a strip's whose fragment function reads
   barycentrics): it draws the list of its primitives led by their last vertices
   (`render/provoking.rs`), where Metal's mode costs nothing. A direct draw without indices draws the
-  list the CPU writes into the upload arena (4 bytes an index); a direct indexed draw of lines or
-  triangles, and an indirect draw but an indexed strip's, the list a run of the index gather pass
-  writes, one dispatch for a run of draws over one index buffer, an indirect run's after one plan
-  dispatch (`index_rewrite.rs`). On MoltenVK on the M3 Max that is 0.15, 0.23 and 0.64 us more frame
-  time per direct, indexed and indirect draw of two triangles than at mode 0 (1.56, 1.71 and 1.65
-  us; host_ab's `provoking`, 2000 draws, 3 rounds), and 2.2 us per indexed indirect draw against
-  mode 0's 56 (the index bounds pass's, which a gathered list does not need). A strip's indexed draw
-  takes the index rewrite pass's three dispatches between barriers per draw before its render pass:
-  there 78 us per draw against 1.7. That form is not batched.
+  list the CPU writes into the upload arena (4 bytes an index); every other draw the list a run
+  writes, one dispatch for a run of draws over one index buffer (`index_rewrite.rs`): the index
+  gather pass's for a direct indexed draw of lines or triangles and for an indirect draw but an
+  indexed strip's (an indirect run's after one plan dispatch), the index rewrite pass's for a direct
+  indexed strip of up to a few thousand positions. On MoltenVK on the M3 Max that is 0.16, 0.24,
+  0.65 and 0.71 us more frame time per direct, indexed, indexed strip and indirect draw of two
+  triangles than at mode 0 (1.58, 1.72, 1.73 and 1.71 us; host_ab's `provoking`, 2000 draws, 3
+  rounds), and 2.6 us per indexed indirect draw against mode 0's 55 (the index bounds pass's, which
+  a gathered list does not need). A draw no run takes (a longer strip, an indexed indirect strip,
+  indices an earlier draw of the encoder wrote) takes the index rewrite pass's three dispatches
+  between barriers before its render pass: there 77 us per draw.
 
 - **An indirect render command's draw of primitive type 9 that its execution's call cannot see**:
   one the CPU wrote after the call, or among a range the execution reads from a buffer. It runs

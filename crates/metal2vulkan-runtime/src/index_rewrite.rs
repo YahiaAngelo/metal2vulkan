@@ -31,13 +31,24 @@
 //!   with `vkCmdDrawIndexedIndirect` over the pool. A list the pool cannot hold draws nothing and
 //!   fails the command buffer with `CommandBufferError::IndexPoolOverflow`, as the rewrite pass's.
 //!
-//! Its reads are tracked as it joins; the open runs (up to [`OPEN_RUNS`]) record before the
-//! encoder's next command and before its `VkCommandBuffer` ends (`encoder.rs`): each run's table
-//! written, then between one barrier from everything before and one to everything after, the
-//! indirect runs' plans, one after another, and after them one dispatch per run. Every other
-//! draw's list is the rewrite pass's, of three dispatches between barriers each: on MoltenVK on
-//! the M3 Max, 78 us of frame time per indexed strip of two triangles, where a gathered draw takes
-//! 0.2 (direct) to 0.6 us (indirect) more than at provoking vertex mode 0 (host_ab's `provoking`).
+//! **The rewrite runs** (`bind::index_rewrite_run_module`): a direct indexed draw of a program the
+//! gather pass does not take (a strip, which restarts; Apple's line loop and quad strip), not in
+//! the private list form, that reads its indices in place, whose walk takes one group
+//! (`bind::IndexRewriteRun`: a few thousand positions) and that no earlier draw's write orders
+//! before its render pass instance, joins an open rewrite run of its index buffer, program, `k'`
+//! and order (up to [`REWRITE_RUN_DRAWS`] draws, into an output buffer of the run's own of at
+//! least [`RUN_OUTPUT_WORDS`] words): each draw's three phases in a workgroup of its own of the
+//! run's one dispatch. The draw draws its command with `vkCmdDrawIndexedIndirect` over the run's
+//! output: the list its own pass would write, index for index.
+//!
+//! Its reads are tracked as it joins; the open runs (up to [`OPEN_RUNS`] of either pass) record
+//! before the encoder's next command and before its `VkCommandBuffer` ends (`encoder.rs`): each
+//! run's table or words written, then between one barrier from everything before and one to
+//! everything after, the rewrite runs' dispatches and the indirect runs' plans, one after another,
+//! and after the plans one dispatch per gather run. Every other draw's list is the rewrite pass's,
+//! of three dispatches between barriers each: on MoltenVK on the M3 Max, 77 us of frame time per
+//! draw of two triangles, where a run's draw takes 0.2 to 0.7 us more than at provoking vertex
+//! mode 0 (host_ab's `provoking`).
 //!
 //! After `RenderCommandEncoder::set_primitive_restart_enabled` (Apple's
 //! `setPrimitiveRestartEnabled:index:`), Metal restarts an indexed line or triangle strip at the
@@ -86,8 +97,9 @@ use crate::device::functions::Vk;
 use ash::vk;
 use metal2vulkan::bind::{
     ExecutionStatus, GatherDraw, IndexBufferRef, IndexGather, IndexGatherModule,
-    IndexGatherPlanModule, IndexRewriteModule, IndexRewritePass, IndirectGatherDraw, IndirectRef,
-    RewriteOrder, RewriteOutput, RewritePhase, RewriteProgram, RewriteSource,
+    IndexGatherPlanModule, IndexRewriteModule, IndexRewritePass, IndexRewriteRun,
+    IndirectGatherDraw, IndirectRef, RewriteOrder, RewriteOutput, RewritePhase, RewriteProgram,
+    RewriteRunDraw, RewriteSource,
 };
 use metal2vulkan::device::VkFeature;
 
@@ -700,8 +712,10 @@ pub(super) enum Listed {
     Written(WrittenList),
     /// A direct indexed draw's, a gather run's ([`GatheredList`]).
     Gathered(GatheredList),
-    /// An indirect draw's, an indirect gather run's in the index pool ([`PooledList`]).
-    Pooled(PooledList),
+    /// An indirect draw's, an indirect gather run's in the index pool, or a direct indexed draw's,
+    /// a rewrite run's in its output, each drawn from the command the GPU wrote
+    /// ([`CommandedList`]).
+    Commanded(CommandedList),
 }
 
 impl Listed {
@@ -717,7 +731,7 @@ impl Listed {
         match self {
             Listed::Written(list) => list.draw(draw, sized).map(|(bind, d)| (bind, None, d)),
             Listed::Gathered(list) => list.draw(draw, sized).map(|(bind, d)| (bind, None, d)),
-            Listed::Pooled(list) => list.draw(draw, sized),
+            Listed::Commanded(list) => list.draw(draw, sized),
         }
     }
 
@@ -726,7 +740,7 @@ impl Listed {
     pub(super) fn address(&self) -> Option<u64> {
         match self {
             Listed::Written(list) => list.address(),
-            Listed::Gathered(_) | Listed::Pooled(_) => None,
+            Listed::Gathered(_) | Listed::Commanded(_) => None,
         }
     }
 }
@@ -737,6 +751,10 @@ const RUN_OUTPUT_WORDS: u32 = 1 << 14;
 /// The most draws of a run: its table's records, which fit an ordinary chunk of the upload arena
 /// (`upload.rs`), and so do an indirect run's draws' commands.
 const RUN_DRAWS: u32 = 480;
+
+/// The most draws of a rewrite run: its words, of [`IndexRewriteRun::SLOT_BYTES`] each, fit half
+/// an ordinary chunk of the upload arena (`upload.rs`).
+const REWRITE_RUN_DRAWS: u32 = 224;
 
 /// The most runs an encoder keeps open before it records them.
 const OPEN_RUNS: usize = 8;
@@ -762,12 +780,46 @@ pub(super) struct IndirectGatherRequest<'a> {
     pub(super) wide: bool,
 }
 
+/// A direct indexed draw whose list a run of the index rewrite pass writes
+/// (`bind::index_rewrite_run_module`): its program, `k'` and order, its Metal index source, Metal's
+/// count, instances, base vertex and base instance, and its index size.
+pub(super) struct RewriteRunRequest<'a> {
+    pub(super) program: RewriteProgram,
+    pub(super) restart: u32,
+    pub(super) order: RewriteOrder,
+    pub(super) index: &'a DrawSource<'a>,
+    pub(super) arguments: (u32, u32, i32, u32),
+    pub(super) wide: bool,
+}
+
 /// The runs of an encoder's gathered draws (the module docs, `index_rewrite.rs`'s gather): each
 /// one dispatch (an indirect run's after its plan), recorded before the encoder's next command,
 /// between a barrier from everything before and one to everything after for all of them.
 #[derive(Default)]
 pub(super) struct GatherRuns {
     runs: Vec<GatherRun>,
+    rewrites: Vec<RewriteRun>,
+}
+
+/// The open runs an encoder records now ([`record_runs`]).
+pub(super) struct TakenRuns {
+    gathers: Vec<GatherRun>,
+    rewrites: Vec<RewriteRun>,
+}
+
+/// What a rewrite run's draws share: the index `VkBuffer` and the bytes it binds of it, the
+/// program, `k'` and the order.
+type RewriteKey = ((vk::Buffer, u64, u64), RewriteProgram, u32, RewriteOrder);
+
+/// One run of the index rewrite pass: its draws, what they share, its words' region, its kernel
+/// and set, and its output's `VkBuffer`, offset and bytes.
+pub(super) struct RewriteRun {
+    run: IndexRewriteRun,
+    key: RewriteKey,
+    words: Upload,
+    kernel: OwnedKernel,
+    sets: Vec<vk::DescriptorSet>,
+    output: (vk::Buffer, u64, u64),
 }
 
 /// What a run's draws share: a direct run's index `VkBuffer` and the bytes it binds of it; an
@@ -810,11 +862,12 @@ pub(super) struct GatheredList {
     indices: u32,
 }
 
-/// Where an indirect gathered draw's list and command lie: the index pool's block and its index
-/// bytes, and the command's `VkBuffer` and offset there.
-pub(super) struct PooledList {
-    block: vk::Buffer,
-    index_bytes: u64,
+/// Where a list the GPU placed and its command lie: the `VkBuffer` of its indices, the offset
+/// there the command's first index counts from and the bytes from it (an indirect gathered
+/// draw's: the index pool's block past its header; a rewrite run's draw's: the run's output), and
+/// the command's `VkBuffer` and offset there.
+pub(super) struct CommandedList {
+    indices: (vk::Buffer, u64, u64),
     command: (vk::Buffer, u64),
 }
 
@@ -828,17 +881,20 @@ pub(super) struct GatherHeld {
 impl GatherRuns {
     /// Whether no run is open.
     pub(super) fn is_empty(&self) -> bool {
-        self.runs.is_empty()
+        self.runs.is_empty() && self.rewrites.is_empty()
     }
 
     /// Whether the runs are as many as an encoder keeps open: they record before another opens.
     pub(super) fn full(&self) -> bool {
-        self.runs.len() >= OPEN_RUNS
+        self.runs.len() + self.rewrites.len() >= OPEN_RUNS
     }
 
     /// The open runs, which record now ([`record_runs`]).
-    pub(super) fn take(&mut self) -> Vec<GatherRun> {
-        std::mem::take(&mut self.runs)
+    pub(super) fn take(&mut self) -> TakenRuns {
+        TakenRuns {
+            gathers: std::mem::take(&mut self.runs),
+            rewrites: std::mem::take(&mut self.rewrites),
+        }
     }
 
     /// `request`'s draw joins an open run of its index buffer, program and order that takes it,
@@ -946,7 +1002,7 @@ impl GatherRuns {
         device: &Device,
         (uploads, status, pool): (&mut Uploads, &Upload, &IndexPool),
         request: IndirectGatherRequest<'_>,
-    ) -> Result<Option<(PooledList, Option<GatherHeld>)>, Error> {
+    ) -> Result<Option<(CommandedList, Option<GatherHeld>)>, Error> {
         let IndirectGatherRequest {
             program,
             order,
@@ -1058,6 +1114,142 @@ impl GatherRuns {
     }
 }
 
+impl GatherRuns {
+    /// `request`'s direct indexed draw joins an open rewrite run of its index buffer, program,
+    /// `k'` and order that takes it, or a new one, with its words' region in `uploads` and
+    /// `status` the command buffer's status words: where its list and command lie, and what a new
+    /// run's command buffer holds. `None` where no run takes the draw (a walk of more than one
+    /// group, a list past what a run's output binds or a `u32` counts, or a base instance the
+    /// device's indirect draws cannot carry), which the draw's own pass then writes. Refused as
+    /// uploads, buffers, kernels and descriptor sets are refused.
+    pub(super) fn join_rewrite(
+        &mut self,
+        device: &Device,
+        (uploads, status): (&mut Uploads, &Upload),
+        request: RewriteRunRequest<'_>,
+    ) -> Result<Option<(CommandedList, Option<GatherHeld>)>, Error> {
+        let RewriteRunRequest {
+            program,
+            restart,
+            order,
+            index,
+            arguments: (count, instances, base_vertex, base_instance),
+            wide,
+        } = request;
+        if base_instance != 0
+            && !device
+                .enabled()
+                .features
+                .contains(&VkFeature::DrawIndirectFirstInstance)
+        {
+            return Ok(None);
+        }
+        // The run binds the Metal buffer's bytes, from its start, through where Metal's fetch
+        // stops (its length rounded up to 4, `IndexBufferRef::fetch_end`).
+        let start = index.at - index.metal().1;
+        let draw = RewriteRunDraw {
+            count,
+            instances,
+            base_vertex,
+            base_instance,
+            index_offset: index.at,
+            index_end: index.at + index.bound(index.at),
+            wide,
+        };
+        let key = ((index.raw, start, index.length), program, restart, order);
+        let joined = self
+            .rewrites
+            .iter_mut()
+            .filter(|run| run.key == key && run.run.len() < REWRITE_RUN_DRAWS as usize)
+            .find_map(|run| {
+                let slot = run.run.push(draw)?;
+                Some(run.list(slot))
+            });
+        if let Some(list) = joined {
+            return Ok(Some((list, None)));
+        }
+        // A run's output holds its first draw's list, at least the default.
+        let Ok(capacity) = u32::try_from(program.capacity(u64::from(count))) else {
+            return Ok(None);
+        };
+        let words = capacity.max(RUN_OUTPUT_WORDS);
+        let output_bytes = u64::from(words) * 4;
+        let limits = &device.properties().description.limits;
+        if output_bytes > u64::from(limits.max_storage_buffer_range) {
+            return Ok(None);
+        }
+        let Some(mut run) = IndexRewriteRun::new(
+            (program, order, restart),
+            (start, index.length),
+            (
+                limits.min_storage_buffer_offset_alignment,
+                limits.max_storage_buffer_range,
+            ),
+            words,
+        ) else {
+            return Ok(None);
+        };
+        let Some(slot) = run.push(draw) else {
+            return Ok(None);
+        };
+        let words_upload = uploads.upload(
+            device,
+            &[],
+            u64::from(REWRITE_RUN_DRAWS) * IndexRewriteRun::SLOT_BYTES,
+        )?;
+        let output = device.scratch_buffer(output_bytes)?;
+        let kernel = device.owned_kernel(OwnedModule::IndexRewriteRun(program))?;
+        let region = |upload: &Upload, len: u64| (upload.raw(), upload.offset(), len);
+        let words_range = region(&words_upload, words_upload.len());
+        let (output_raw, output_at) = output.at(0);
+        let mut set = [(vk::Buffer::null(), 0, 0); 5];
+        set[IndexRewriteModule::WORDS_BINDING as usize] = words_range;
+        // Every draw is direct, and a run whose draws read no index reads none: nothing reads
+        // the binding there, which takes the words.
+        set[IndexRewriteModule::ARGUMENTS_BINDING as usize] = words_range;
+        set[IndexRewriteModule::INDICES_BINDING as usize] = match run.indices_range() {
+            Some(range) => (index.raw, range.offset, range.range),
+            None => words_range,
+        };
+        set[IndexRewriteModule::OUTPUT_BINDING as usize] = (output_raw, output_at, output_bytes);
+        set[IndexRewriteModule::STATUS_BINDING as usize] =
+            region(status, ExecutionStatus::BYTES as u64);
+        let sets = OwnedSets::write(device, &kernel, &[set.to_vec()])?;
+        let run = RewriteRun {
+            run,
+            key,
+            words: words_upload,
+            kernel,
+            sets: sets.sets.clone(),
+            output: (output_raw, output_at, output_bytes),
+        };
+        let list = run.list(slot);
+        self.rewrites.push(run);
+        Ok(Some((
+            list,
+            Some(GatherHeld {
+                output: Some(output),
+                sets: vec![sets],
+            }),
+        )))
+    }
+}
+
+impl RewriteRun {
+    /// Where the run's draw of slot `slot` finds its list (the run's output, from its start, the
+    /// command's first index its region's) and its command.
+    fn list(&self, slot: u32) -> CommandedList {
+        let (raw, at, bytes) = self.output;
+        CommandedList {
+            indices: (raw, at, bytes),
+            command: (
+                self.words.raw(),
+                self.words.offset() + IndexRewriteRun::draw_offset(slot),
+            ),
+        }
+    }
+}
+
 /// A new run's table region (of [`RUN_DRAWS`] records) and pattern, in `uploads`.
 fn run_uploads(
     device: &Device,
@@ -1112,11 +1304,14 @@ impl GatherRun {
 
     /// Where an indirect run's draw at `place` finds its list in `pool` and its command; `None`
     /// for a direct run.
-    fn pooled(&self, place: u32, pool: &IndexPool) -> Option<PooledList> {
+    fn pooled(&self, place: u32, pool: &IndexPool) -> Option<CommandedList> {
         let plan = self.plan.as_ref()?;
-        Some(PooledList {
-            block: pool.block,
-            index_bytes: pool.index_bytes(),
+        Some(CommandedList {
+            indices: (
+                pool.block,
+                IndexRewritePass::POOL_HEADER_BYTES,
+                pool.index_bytes(),
+            ),
             command: (
                 plan.commands.raw(),
                 plan.commands.offset() + u64::from(place) * IndexGatherPlanModule::DRAW_BYTES,
@@ -1164,11 +1359,12 @@ impl GatheredList {
     }
 }
 
-impl PooledList {
-    /// The draw of the list: the pool's indices bound from its header's end, with `sized` the
-    /// device's index range binding, the `VkBuffer` of the plan's command, and the binder's
-    /// indirect draw `draw` (`vkCmdDrawIndirect`'s or `vkCmdDrawIndexedIndirect`'s), drawn as the
-    /// one indexed indirect draw of the command. `None` for another command.
+impl CommandedList {
+    /// The draw of the list: its indices bound from their offset, with `sized` the device's index
+    /// range binding, the `VkBuffer` of its command, and the binder's draw `draw` (an indirect
+    /// one, `vkCmdDrawIndirect`'s or `vkCmdDrawIndexedIndirect`'s, or a rewrite run's direct
+    /// `vkCmdDrawIndexed`'s), drawn as the one indexed indirect draw of the command, which
+    /// carries Metal's arguments. `None` for another command.
     pub(super) fn draw(
         &self,
         draw: metal2vulkan::vk::DrawCommand,
@@ -1178,11 +1374,12 @@ impl PooledList {
             draw,
             metal2vulkan::vk::DrawCommand::DrawIndirect { .. }
                 | metal2vulkan::vk::DrawCommand::DrawIndexedIndirect { .. }
+                | metal2vulkan::vk::DrawCommand::DrawIndexed { .. }
         ) {
             return None;
         }
         let index_type = metal2vulkan::vk::IndexType::UINT32;
-        let offset = IndexRewritePass::POOL_HEADER_BYTES;
+        let (block, offset, index_bytes) = self.indices;
         let (raw, at) = self.command;
         let draw = metal2vulkan::vk::DrawCommand::DrawIndexedIndirect {
             index_type,
@@ -1192,28 +1389,34 @@ impl PooledList {
             stride: IndexGatherPlanModule::DRAW_BYTES as u32,
         };
         let bind = IndexBind {
-            buffer: self.block,
+            buffer: block,
             offset,
             index_type: index_type.into(),
-            sized: sized.map(|bind| (bind, self.index_bytes)),
+            sized: sized.map(|bind| (bind, index_bytes)),
         };
         Some((bind, Some(raw), draw))
     }
 }
 
-/// Record `runs` into `command_buffer`: each run's table written into its region, then between a
-/// barrier from everything before and one to everything after, each indirect run's plan (one
-/// after another: each reads and writes the index pool's counter), and after the plans' writes
-/// each run's dispatch (an indirect run's from its plan's).
+/// Record `runs` into `command_buffer`: each run's table or words written into its region, then
+/// between a barrier from everything before and one to everything after, each rewrite run's
+/// dispatch, each indirect run's plan (one after another: each reads and writes the index pool's
+/// counter), and after the plans' writes each gather run's dispatch (an indirect run's from its
+/// plan's).
 ///
 /// # Safety
 ///
 /// `command_buffer` is recording outside a render pass, and only one encoder records it; each
 /// run's kernels are the device's and its sets and output are held until the command buffer
-/// completes ([`GatherHeld`]), and its table's and commands' regions are the command buffer's.
-pub(super) unsafe fn record_runs(raw: &Vk, command_buffer: vk::CommandBuffer, runs: &[GatherRun]) {
+/// completes ([`GatherHeld`]), and its table's, words' and commands' regions are the command
+/// buffer's.
+pub(super) unsafe fn record_runs(raw: &Vk, command_buffer: vk::CommandBuffer, taken: &TakenRuns) {
+    let runs = &taken.gathers;
     for run in runs {
         run.table.write(&run.gather.table_bytes());
+    }
+    for run in &taken.rewrites {
+        run.words.write(&run.run.words());
     }
     let bind = |kernel: &OwnedKernel, sets: &[vk::DescriptorSet]| {
         // SAFETY: as the caller states.
@@ -1236,6 +1439,10 @@ pub(super) unsafe fn record_runs(raw: &Vk, command_buffer: vk::CommandBuffer, ru
     // SAFETY: as the caller states.
     unsafe {
         Barrier::everything().record(raw, command_buffer);
+        for run in &taken.rewrites {
+            bind(&run.kernel, &run.sets);
+            raw.cmd_dispatch(command_buffer, run.run.workgroups(), 1, 1);
+        }
         let plans = runs.iter().filter_map(|run| run.plan.as_ref());
         for (at, plan) in plans.enumerate() {
             if at > 0 {
