@@ -793,6 +793,12 @@ pub enum RuntimeFact {
         rounding_order: bool,
         half_blend: bool,
     },
+    /// The render pipeline was compiled under `VariantKey::quad_primitive_ids`, and its fragment
+    /// function reads `[[primitive_id]]` from Vulkan's `PrimitiveId` shifted right by one
+    /// (`LoweringInputs::quad_primitive_ids`): for a draw of Metal's private quads or quad strip,
+    /// listed as two triangles a quad. Its plans state the variant the shape asks for
+    /// (`BindShape::quad_primitive_ids`).
+    QuadPrimitiveIds,
 }
 
 /// What one compile made of a slot of a `RuntimeFact::UniformViewRange`.

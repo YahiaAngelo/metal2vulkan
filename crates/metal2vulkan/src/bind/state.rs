@@ -109,6 +109,14 @@ pub struct BindState {
     /// asks for it (`BindError::NeedsVariant`) or refuses the draw.
     #[cfg_attr(feature = "serde", serde(default))]
     pub primitive_id_indices: Option<metal::IndexType>,
+    /// The draw is of Metal's private quads or quad strip, which the consumer lists as two
+    /// triangles a quad, each quad's adjacent (`bind::RewriteProgram::Quads`, `QuadStrip`): a
+    /// pipeline whose fragment function reads Vulkan's `PrimitiveId` runs the variant that reads
+    /// the quad's, that value shifted right by one, as Metal counts one primitive a quad
+    /// (`VariantKey::quad_primitive_ids`). Part of the shape (`BindShape::quad_primitive_ids`);
+    /// `false` for every other draw.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub quad_primitive_ids: bool,
     /// Where the heap arrays (set 1) hold the command's heap members and argument samplers
     /// ([`HeapPlacement`]). Only the instantiated tables and the elements the consumer writes
     /// ([`BindingPlan::heap_elements`]) depend on it, so it is not part of the shape.
@@ -696,6 +704,7 @@ impl BindState {
             depth16_biased: self.depth16_biased,
             depth16_bias_raises: self.depth16_bias_raises,
             primitive_id_indices: self.primitive_id_indices,
+            quad_primitive_ids: self.quad_primitive_ids,
         }
     }
 
@@ -749,6 +758,7 @@ impl BindState {
             depth16_biased,
             depth16_bias_raises,
             primitive_id_indices,
+            quad_primitive_ids,
         } = shape;
         let tables = self.stages.iter().filter(|(_, t)| !t.has_empty_shape());
         tables.clone().count() == stages.len()
@@ -778,6 +788,7 @@ impl BindState {
             && self.depth16_biased == *depth16_biased
             && self.depth16_bias_raises == *depth16_bias_raises
             && self.primitive_id_indices == *primitive_id_indices
+            && self.quad_primitive_ids == *quad_primitive_ids
             // Last: the one field compared through a shape made of it.
             && match self.used_resources.is_empty() {
                 true => used.is_empty(),
@@ -1628,6 +1639,11 @@ pub struct BindShape {
     /// draw's index type (`VariantKey::primitive_id_indices`), where the pipeline writes the ID.
     #[cfg_attr(feature = "serde", serde(default))]
     pub primitive_id_indices: Option<metal::IndexType>,
+    /// `BindState.quad_primitive_ids`: a draw of Metal's private quads or quad strip, whose
+    /// pipeline's fragment function reads `[[primitive_id]]` from Vulkan's `PrimitiveId`, runs the
+    /// variant that reads the quad's (`VariantKey::quad_primitive_ids`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub quad_primitive_ids: bool,
 }
 
 impl BindShape {

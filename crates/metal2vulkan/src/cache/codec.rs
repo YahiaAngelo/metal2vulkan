@@ -1226,6 +1226,7 @@ codec_enum! {
             half_blend
         },
         MergedDraws,
+        QuadPrimitiveIds,
     }
     UniformViewChoice { Viewed, Spare, Kept }
     Mechanism {

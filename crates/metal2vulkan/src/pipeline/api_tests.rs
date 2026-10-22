@@ -229,6 +229,7 @@ mod serde_round_trips {
             cubic_samplers: BTreeMap::from([(slot(Stage::Fragment, SlotClass::Sampler, 0), 0x2d0)]),
             captured_positions: Some(crate::pipeline::CaptureForm::Vertices),
             primitive_id_indices: Some(metal::IndexType::UInt16),
+            quad_primitive_ids: true,
             extended_shadows: BTreeSet::from([0]),
             snapshot_textures: BTreeMap::from([(
                 slot(Stage::Fragment, SlotClass::Texture, 2),
@@ -342,6 +343,7 @@ mod serde_round_trips {
             render_target_array_index_varying: true,
             primitive_id_varying: true,
             primitive_id_indices: Some(crate::metal::IndexType::UInt16),
+            quad_primitive_ids: true,
             color_writes: BTreeMap::from([
                 (
                     0,
@@ -1011,6 +1013,7 @@ mod bind_serde_round_trips {
             depth16_biased: true,
             depth16_bias_raises: Some(true),
             primitive_id_indices: Some(metal::IndexType::UInt16),
+            quad_primitive_ids: true,
         });
         let mut shape = StageShape::default();
         shape.buffers.insert(
@@ -1071,6 +1074,7 @@ mod bind_serde_round_trips {
             depth16_biased: true,
             depth16_bias_raises: Some(true),
             primitive_id_indices: Some(metal::IndexType::UInt32),
+            quad_primitive_ids: true,
         });
     }
 

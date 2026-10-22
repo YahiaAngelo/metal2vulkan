@@ -675,20 +675,17 @@ fn writes_primitive_ids(pipeline: &DrawingState) -> bool {
 }
 
 /// Refuses (`NotImplemented(PrivatePrimitives)`) a draw of `pipeline` of a private type drawn as
-/// `program`'s list where `[[primitive_id]]` would read other than Metal's: under a vertex
-/// function that computes it into its varying, from a vertex index the list's indices are not;
-/// and quads or a quad strip under a fragment function that reads it, as Metal counts one a quad
-/// where the list draws two triangles.
-fn check_private_primitive_ids(
-    pipeline: &DrawingState,
-    program: RewriteProgram,
-) -> Result<(), Error> {
-    let quads = matches!(program, RewriteProgram::Quads | RewriteProgram::QuadStrip);
-    let reads = pipeline.base().graphics.reads_primitive_id;
-    match writes_primitive_ids(pipeline) || (quads && reads) {
-        true => Err(Error::NotImplemented(RuntimeGap::PrivatePrimitives)),
-        false => Ok(()),
+/// its program's list where `[[primitive_id]]` would read other than Metal's: under a vertex
+/// function that computes it into its varying, from a vertex index the list's indices are not.
+/// Answers whether the draw is of quads or a quad strip whose fragment function reads it
+/// (`BindState::quad_primitive_ids`), which runs the variant that reads the quad's, as Metal
+/// counts one primitive a quad where the list draws two triangles.
+fn private_primitive_ids(pipeline: &DrawingState, program: RewriteProgram) -> Result<bool, Error> {
+    if writes_primitive_ids(pipeline) {
+        return Err(Error::NotImplemented(RuntimeGap::PrivatePrimitives));
     }
+    let quads = matches!(program, RewriteProgram::Quads | RewriteProgram::QuadStrip);
+    Ok(quads && pipeline.base().graphics.reads_primitive_id)
 }
 
 /// What a draw settles from the encoder's state before its bind state
@@ -7042,9 +7039,10 @@ impl RenderLowering {
         // of one of Metal's private types, is drawn as a list, of its class's list topology
         // (`render/restart.rs`).
         let restarted = self.restarted(assembly, &draw);
-        if let Assembly::Private(program) = assembly {
-            check_private_primitive_ids(&pipeline, program)?;
-        }
+        let quad_primitive_ids = match assembly {
+            Assembly::Private(program) => private_primitive_ids(&pipeline, program)?,
+            _ => false,
+        };
         let assembly = restarted.map_or(assembly, |r| r.assembly());
         // Its settings, and the memo entry its draw state and pipeline are found and kept in
         // (`render/draw_shape.rs`).
@@ -7116,7 +7114,12 @@ impl RenderLowering {
             plan,
         } = self.settle_draw(
             live,
-            (&pipeline, &settings, primitive_id_indices),
+            (
+                &pipeline,
+                &settings,
+                primitive_id_indices,
+                quad_primitive_ids,
+            ),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut unlisted),
             (&function_tables, &mut snapshot),
@@ -9237,7 +9240,9 @@ impl RenderLowering {
 
     /// Bring `live`, the encoder's kept bind state, to the bind state a draw of `pipeline` under
     /// `settings` binds in, reading its indices as `primitive_id_indices` says (`BindState::
-    /// primitive_id_indices`, [`primitive_id_indices`]), its vertex, object and mesh tables
+    /// primitive_id_indices`, [`primitive_id_indices`]), its quads' primitive IDs as
+    /// `quad_primitive_ids` says (`BindState::quad_primitive_ids`, [`private_primitive_ids`]),
+    /// its vertex, object and mesh tables
     /// `pass_start`'s or the encoder's
     /// ([`refresh_bind_state`](Self::refresh_bind_state)), its runtime samplers' address modes
     /// `sampler_maps` ([`sampler_maps`](Self::sampler_maps)), and answer the variant it runs on in
@@ -9249,10 +9254,11 @@ impl RenderLowering {
     fn settle_draw(
         &self,
         live: &mut LiveBind,
-        (pipeline, settings, primitive_id_indices): (
+        (pipeline, settings, primitive_id_indices, quad_primitive_ids): (
             &DrawingState,
             &DrawSettings,
             Option<IndexType>,
+            bool,
         ),
         (pass_start, sampler_maps): (&PassStartTables, &SamplerMaps),
         (argument_samplers, unlisted): (&mut ArgumentSamplers, &mut Option<(u64, u64)>),
@@ -9294,6 +9300,7 @@ impl RenderLowering {
             );
             reshape.field(&mut state.depth16_bias_raises, settings.depth16_bias_raises);
             reshape.field(&mut state.primitive_id_indices, primitive_id_indices);
+            reshape.field(&mut state.quad_primitive_ids, quad_primitive_ids);
             reshape.field_from(&mut state.dropped_colors, &colors.dropped);
             reshape.field_from(&mut state.extended_shadows, shadows);
             let snapshots = snapshot.as_ref().map_or(&NO_INDICES, |w| &w.slots);

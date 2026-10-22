@@ -489,6 +489,9 @@ Where Metal's rules differ from Vulkan's, the pipeline gives Metal's answer:
   de-indexed (`VariantKey::primitive_id_indices`: needs device addresses, shades every index).
   `NotImplemented(PrimitiveId)`: an indexed strip, an indirect indexed draw, indices past their
   buffer, a vertex function that writes memory in that form, and a mesh pipeline.
+  A draw of Metal's private quads or quad strip, which the consumer lists as two triangles a quad
+  (`BindState::quad_primitive_ids`), runs the fragment variant that reads `PrimitiveId` shifted
+  right by one (`VariantKey::quad_primitive_ids`), as Metal counts one primitive a quad.
   Behind an emulated post-tessellation vertex function the varying carries the patch's position
   in its draw (tessellation, below).
 - A device draws to at most the lesser of its `maxColorAttachments` and

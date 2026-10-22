@@ -24,9 +24,9 @@
 //! the public strip of their class and asks it to differ, so the comparison tells the forms apart.
 //! A direct draw without indices draws the list the runtime writes on the CPU; every other form
 //! the list the index rewrite pass writes on the GPU, from indices or arguments a blit may write
-//! earlier in the command buffer. Quads and a quad strip under a fragment function that reads
-//! `[[primitive_id]]` are refused (`NotImplemented(PrivatePrimitives)`): the list's triangles
-//! count two IDs where Metal counts one.
+//! earlier in the command buffer. Under quads and a quad strip, Metal's primitive IDs are the
+//! list's halved: the list draws two triangles a quad where Metal counts one, so the reference's
+//! primitive IDs are shifted right by one ([`Lane::reference`]).
 //!
 //! Type 9's draws, which fail their command buffers as Metal's GPU does: [`type_nine`].
 
@@ -42,7 +42,7 @@ use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBuffer, CommandBufferError, CommandBufferStatus, CommandQueue,
     Device, DrawPrimitiveType, Error, ExecutedPipeline, Library, LoadAction, PipelineOptions,
     Region, RenderCommandEncoder, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
-    RuntimeGap, StoreAction, TextureDescriptor,
+    StoreAction, TextureDescriptor,
 };
 
 mod type_nine;
@@ -419,9 +419,13 @@ impl Lane {
 
     /// Metal's answer to `case`: [`Case::list`] drawn as the public list of 32-bit indices, with
     /// the case's instances, base instance and base vertex (a draw without indices: its vertex
-    /// start).
+    /// start); under quads, its primitive IDs halved, one a quad ([`halved`]).
     fn reference(&self, pipeline: &RenderPipelineState, case: &Case) -> Texels {
-        self.public(pipeline, case, list_type(case.primitive), &case.list())
+        let mut texels = self.public(pipeline, case, list_type(case.primitive), &case.list());
+        if quads(case.primitive) {
+            texels = halved(texels);
+        }
+        texels
     }
 
     /// `indices` drawn as the public `primitive` of 32-bit indices, with `case`'s instances, base
@@ -584,13 +588,12 @@ fn covers(texels: &[Vec<[u32; 4]>]) -> bool {
     texels[3].iter().any(|t| t[3] == 1)
 }
 
-/// The fragment function a case of `primitive` reads everything Metal gives it with: the primitive
-/// ID too, but under quads, where it is refused.
-fn full(primitive: DrawPrimitiveType) -> &'static str {
-    match quads(primitive) {
-        true => "pt_weights",
-        false => "pt_full",
-    }
+/// `texels` with the primitive ID attachment's IDs shifted right by one: Metal's quad of each of
+/// the list's triangles, two a quad. Texels no draw covers hold 0, which stays 0, and a fragment
+/// function that writes no primitive ID writes 0.
+fn halved(mut texels: Texels) -> Texels {
+    texels[3].iter_mut().for_each(|t| t[0] >>= 1);
+    texels
 }
 
 /// The direct draws without indices: each type at every count from 0 to 11, from vertex start 3,
@@ -673,7 +676,8 @@ enum Weights {
 }
 
 /// Each case of `cases` draws, at every texel of every attachment, what Metal's list drawn as the
-/// public list draws, under the fragment function [`full`] names, and most cover a pixel. With
+/// public list draws, under the fragment function that reads every input (`pt_full`), and most
+/// cover a pixel. With
 /// the weights `Withheld`, every draw's pipeline carries geometry stages; a device without
 /// `geometryShader` then refuses the functions (`runtime_lane::barycentric_weights` checks how),
 /// and the check is skipped, printed.
@@ -701,20 +705,12 @@ fn draws_metal_s_lists(cases: &[Case], weights: Weights) {
             return;
         }
         let lane = Lane::new(device);
-        let pipelines: Vec<_> = PRIVATE
-            .iter()
-            .map(|&p| (p, lane.pipeline(full(p))))
-            .collect();
+        let pipeline = lane.pipeline("pt_full");
         let (mut drawn, mut covered) = (0, 0);
         for case in cases {
-            let pipeline = &pipelines
-                .iter()
-                .find(|(p, _)| *p == case.primitive)
-                .unwrap()
-                .1;
-            let expected = lane.reference(pipeline, case);
+            let expected = lane.reference(&pipeline, case);
             let (texels, stages) = lane
-                .private_executed(pipeline, case)
+                .private_executed(&pipeline, case)
                 .unwrap_or_else(|e| panic!("{case:?} on {name}: {e}"));
             if weights == Weights::Withheld {
                 assert!(
@@ -772,7 +768,7 @@ fn through_a_geometry_stage_private_draws_are_metal_s_lists() {
 }
 
 /// Under fragment functions that read fewer of the inputs (the primitive ID without the weights,
-/// or neither), a draw of each form draws Metal's list too; and the same indices drawn as the
+/// the weights without the primitive ID, or neither), a draw of each form draws Metal's list too; and the same indices drawn as the
 /// public strip of their class differ from Metal's list, so the comparison tells the forms apart.
 #[test]
 fn other_fragments_draw_metal_s_lists_and_strips_differ() {
@@ -783,12 +779,9 @@ fn other_fragments_draw_metal_s_lists_and_strips_differ() {
         let name = device.name().to_owned();
         let lane = Lane::new(device);
         let walk: Vec<u32> = (0..14).map(|i| (i * 5 + 1) % SCATTERED).collect();
-        for fragment in ["pt_primitive", "pt_plain"] {
+        for fragment in ["pt_primitive", "pt_weights", "pt_plain"] {
             let pipeline = lane.pipeline(fragment);
             for &p in &PRIVATE {
-                if fragment == "pt_primitive" && quads(p) {
-                    continue;
-                }
                 let cases = [
                     Case::direct(p, 10),
                     Case::indexed(p, Form::Indexed(IndexType::UInt16), walk.clone()),
@@ -822,11 +815,12 @@ fn other_fragments_draw_metal_s_lists_and_strips_differ() {
     );
 }
 
-/// Quads and a quad strip under a fragment function that reads `[[primitive_id]]` are refused
-/// `NotImplemented(PrivatePrimitives)`, direct and indexed, and draw nothing; the line loop and
-/// the fan under it draw.
+/// Quads and a quad strip count one `[[primitive_id]]` a quad, read by a fragment function with
+/// and without the weights, direct and indexed: the private draw's IDs are the list's halved
+/// ([`Lane::reference`]), and at some covered texel differ from the list's own, so the comparison
+/// sees the halving.
 #[test]
-fn quads_under_a_primitive_id_are_refused() {
+fn quads_count_one_primitive_id_a_quad() {
     let cache = ScratchCache::new().unwrap();
     let messages = Messages::default();
     {
@@ -836,23 +830,29 @@ fn quads_under_a_primitive_id_are_refused() {
         let walk: Vec<u32> = (0..14).map(|i| (i * 5 + 1) % SCATTERED).collect();
         for fragment in ["pt_full", "pt_primitive"] {
             let pipeline = lane.pipeline(fragment);
-            for &p in &PRIVATE {
+            for p in PRIVATE.into_iter().filter(|&p| quads(p)) {
                 for case in [
                     Case::direct(p, 10),
                     Case::indexed(p, Form::Indexed(IndexType::UInt32), walk.clone()),
                 ] {
-                    let result = lane.private(&pipeline, &case);
-                    match quads(p) {
-                        true => assert!(
-                            matches!(
-                                result,
-                                Err(Error::NotImplemented(RuntimeGap::PrivatePrimitives))
-                            ),
-                            "{fragment} {case:?} on {name}: {:?}",
-                            result.err()
-                        ),
-                        false => assert!(result.is_ok(), "{fragment} {case:?} on {name}"),
-                    }
+                    let list = lane.public(&pipeline, &case, list_type(p), &case.list());
+                    let expected = lane.reference(&pipeline, &case);
+                    let texels = lane
+                        .private(&pipeline, &case)
+                        .unwrap_or_else(|e| panic!("{fragment} {case:?} on {name}: {e}"));
+                    assert!(
+                        texels == expected,
+                        "{fragment} {case:?} on {name}: differs from Metal's quads"
+                    );
+                    let halved = list[3]
+                        .iter()
+                        .zip(&expected[3])
+                        .filter(|(l, e)| l[3] == 1 && l[0] != e[0])
+                        .count();
+                    assert!(
+                        halved > 0,
+                        "{fragment} {case:?} on {name}: no covered texel's ID is halved"
+                    );
                 }
             }
         }
