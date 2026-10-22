@@ -334,6 +334,10 @@ pub(super) struct DeviceShared {
     /// The command buffers' index and mesh records pools: their bytes and spare blocks
     /// (`gpu_pools.rs`).
     pub(super) gpu_pools: GpuPools,
+    /// The most bytes of images each command queue keeps for its heaps' multisample textures'
+    /// moves: a sixty-fourth of the largest device-local heap, as a GPU pool's
+    /// (`texture/copy_images.rs`, `gpu_pools::device_share`).
+    pub(super) copy_images_bytes: u64,
     /// The largest framebuffer: `maxFramebufferWidth`, `maxFramebufferHeight` and
     /// `maxFramebufferLayers` (`render_pass.rs`).
     pub(super) max_framebuffer: [u32; 3],
@@ -1499,6 +1503,7 @@ impl Device {
         // The index pool's bytes are a `u32`'s, its counter's.
         let index_pool_bytes = budget(index_header).min(u64::from(u32::MAX) / 4 * 4);
         let gpu_pools = GpuPools::new(index_pool_bytes, budget(0));
+        let copy_images_bytes = crate::gpu_pools::device_share(&memory_properties);
         // From the host's clock where the options say, and on a driver whose timestamps wait for
         // every queue's whatever they say (`gpu_time.rs`).
         let from_host = if gpu_times_from_host {
@@ -1673,6 +1678,7 @@ impl Device {
             snapshot_fallbacks: Mutex::new(Vec::new()),
             reader_sizes: Mutex::new(Default::default()),
             gpu_pools,
+            copy_images_bytes,
             max_framebuffer: [
                 limits.max_framebuffer_width,
                 limits.max_framebuffer_height,

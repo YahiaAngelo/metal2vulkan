@@ -86,6 +86,17 @@ pub(crate) fn pool_budget(
     max_allocation: u64,
     header: u64,
 ) -> u64 {
+    device_share(properties)
+        .min(u64::from(max_range).saturating_sub(header))
+        .min(max_allocation.saturating_sub(header))
+        / 4
+        * 4
+}
+
+/// A sixty-fourth of the largest device-local heap of a device with `properties`' heaps: a pool's
+/// bytes before its bindings' and allocation's bounds ([`pool_budget`]), and the bytes of images a
+/// command queue keeps for its heaps' multisample textures' moves (`texture/copy_images.rs`).
+pub(crate) fn device_share(properties: &vk::PhysicalDeviceMemoryProperties) -> u64 {
     let count = (properties.memory_heap_count as usize).min(vk::MAX_MEMORY_HEAPS);
     let heap = properties.memory_heaps[..count]
         .iter()
@@ -93,11 +104,7 @@ pub(crate) fn pool_budget(
         .map(|heap| heap.size)
         .max()
         .unwrap_or(0);
-    (heap / POOL_SHARE)
-        .min(u64::from(max_range).saturating_sub(header))
-        .min(max_allocation.saturating_sub(header))
-        / 4
-        * 4
+    heap / POOL_SHARE
 }
 
 /// Which of a command buffer's pools.

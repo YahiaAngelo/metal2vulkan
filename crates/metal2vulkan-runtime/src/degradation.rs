@@ -1559,8 +1559,10 @@ degradations! {
              grow over many draws that blend onto each other";
         /// A heap texture sized or made (`heap_texture_size_and_align`, `Heap::new_texture`) whose
         /// size Metal's layout the runtime does not model (`texture/heap_tiled.rs`): a format or a
-        /// sample count whose layout in Metal's heaps is not measured (a PVRTC format, 8
-        /// samples; a mipmapped texture Metal compresses and a `Depth32Float_Stencil8` one are).
+        /// sample count whose layout in Metal's heaps is not measured at the device's Metal level
+        /// (8 samples; a PVRTC format at macOS 26.7's level, whose blocks' placement only macOS
+        /// 27.0.1's measures; a mipmapped texture Metal compresses and a
+        /// `Depth32Float_Stencil8` one are).
         /// The runtime answers its device's image's size and alignment there, which can differ from
         /// Metal's either way.
         UnmeasuredHeapTextureSize = "unmeasured-heap-texture-size", Precision,

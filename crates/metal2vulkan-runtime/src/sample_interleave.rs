@@ -67,6 +67,7 @@ use super::release;
 use super::resource::ResourceKey;
 use super::sample_copy::{self, SampleCopy, Side};
 use super::sample_planes::{pipeline_layout, set_layout, shader_module};
+use super::texture::copy_images::Reused;
 use super::texture::{ImageMaker, Texture};
 use super::texture_descriptor::{largest_side, TextureDescriptor};
 use super::tracker::{Access, Barrier, Use};
@@ -96,7 +97,8 @@ const INTERLEAVE_STAGES: vk::PipelineStageFlags2 = vk::PipelineStageFlags2::from
         | vk::PipelineStageFlags2::ALL_TRANSFER.as_raw(),
 );
 
-/// A cap on the bytes a band's wide plus scratch images hold, so the copy stays bounded.
+/// A cap on the bytes a band's wide plus scratch images hold, so the copy stays bounded: every
+/// band of the copy goes through the images of its first of its extent (`texture/copy_images.rs`).
 const BAND_MEMORY_CAP: u64 = 64 << 20;
 
 /// The Metal uint pixel format whose Vulkan format is the copy format (for the scratch and wide
@@ -632,11 +634,13 @@ struct Staging {
 }
 
 /// The emulated copy: its steps, the resource uses the command barriers over, the stages it
-/// runs in, the band objects, the copy's own images (its scratch and wide images), held as long
-/// as the copy, and the staging buffer its rows go through, if they do (with the first row's
-/// offset in the buffer). The texture it copies into or out of is its caller's to hold while a
-/// command buffer records the copy (a blit's encoder retains it; a heap texture's copies are its
-/// own, `texture/heap_tiled.rs`), and so is the buffer it copies with (`EncoderCore::blit_at`).
+/// runs in, the band objects, the images it goes through (its bands' scratch and wide images, the
+/// bands of one extent through the first's, `texture/copy_images.rs`), held as long as the copy,
+/// and the staging buffer its rows go through, if they do (with the first row's offset in the
+/// buffer). The texture it copies into or out of is its caller's to hold while a command buffer
+/// records the copy (a blit's encoder retains it, and an encoder a heap texture's moves'
+/// texture, `texture/heap_tiled.rs`), and so is the buffer it copies with
+/// (`EncoderCore::blit_at`).
 pub(super) struct InterleaveCopy {
     steps: Vec<Recorded>,
     pub(super) uses: Vec<Use<ResourceKey>>,
@@ -1003,6 +1007,11 @@ impl InterleaveCopy {
         into_texture: bool,
     ) -> Result<Option<InterleaveCopy>, Error> {
         let device = maker.device().clone();
+        // Each band takes the images an earlier band of its extent made: the bands are recorded
+        // one after another, each command after a barrier from everything
+        // (`texture/copy_images.rs`).
+        let reused = Reused::new(maker);
+        let maker: &dyn ImageMaker = &reused;
         let plan = texture.image_plan()?;
         let format = plan.format;
         let Some(copy) = copy_format(format, aspect) else {
@@ -1071,7 +1080,13 @@ impl InterleaveCopy {
             .limits()
             .max_image_dimension_2d
             .min(metal_side);
-        let tiles = bands(width, height, samples, bpp, limit);
+        // The last band first: a depth or stencil aspect's draws go through images at the
+        // texture's coordinates, from the origin to the band's end (`sample_copy.rs`), so the
+        // first band's cover every later band's (`texture/copy_images.rs`). The bands write
+        // disjoint texels and rows (`placed_rows` refuses rows out of the texture that overlap),
+        // so their order is free.
+        let mut tiles = bands(width, height, samples, bpp, limit);
+        tiles.reverse();
         // A buffer-image copy's offset is a multiple of the copy format's texel; the pitch is a
         // multiple of the pixel or of 16 bytes ([`placed_rows`]), so of the texel too, and only
         // the first row's offset (and a no-copy buffer's byte 0 in its `VkBuffer`) may miss it.
@@ -1312,8 +1327,12 @@ impl InterleaveCopy {
             );
             uses.push(wide.image_use(0..1, 0..1, read, true)?);
             uses.push(scratch.image_use(0..1, 0..1, write, true)?);
-            textures.push(wide);
-            textures.push(scratch);
+            for texture in [wide, scratch] {
+                if !textures.contains(&texture) {
+                    textures.push(texture);
+                }
+            }
+            reused.next();
         }
         let first = starts.first().copied().unwrap_or(0);
         Ok(Some(InterleaveCopy {

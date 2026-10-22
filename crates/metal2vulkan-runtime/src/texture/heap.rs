@@ -2358,12 +2358,14 @@ impl Device {
     /// pages lies otherwise than Metal lays it in the heap's bytes, where it does: Metal's own
     /// layout the runtime does not hold (Metal may keep it compressed, its samples, a layout not
     /// measured: `metal`'s reason; `Untiled::LOSSLESS` for one whose uncompressed tiles a shadow
-    /// would hold), a multisample texture's samples (`Untiled::MULTISAMPLE`), its image a shadow
-    /// of the bytes in rows (`Untiled::ROWS`), or its image bound there in the driver's layout
-    /// (`Untiled::DRIVER`; not a single-sample colour image bound there on a driver whose such
-    /// images lie as Metal's heap textures, `DriverFact::ColorImagesLieAsMetalHeapTextures`, where
-    /// Metal tiles the texture). `None` for a route whose own notice says where it lies (apart, a
-    /// two-plane texture's planes) and a layout a measured route holds.
+    /// would hold; `Untiled::LOSSLESS_BOUND_SAMPLES` for a multisample one Metal keeps
+    /// compressed, its image in the heap's bytes), a multisample texture's samples
+    /// (`Untiled::MULTISAMPLE`), its image a shadow of the bytes in rows (`Untiled::ROWS`), or its
+    /// image bound there in the driver's layout (`Untiled::DRIVER`; not a single-sample colour
+    /// image bound there on a driver whose such images lie as Metal's heap textures,
+    /// `DriverFact::ColorImagesLieAsMetalHeapTextures`, where Metal tiles the texture). `None` for
+    /// a route whose own notice says where it lies (apart, a two-plane texture's planes) and a
+    /// layout a measured route holds.
     fn device_heap_layout(
         &self,
         layout: &TextureLayout,
@@ -2378,6 +2380,10 @@ impl Device {
         }
         match metal {
             HeapLayout::Measured => return None,
+            // Its image lies in the heap's bytes, not in memory of its own.
+            HeapLayout::Untiled(untiled) if *untiled == Untiled::LOSSLESS_MULTISAMPLE => {
+                return Some(Untiled::LOSSLESS_BOUND_SAMPLES);
+            }
             HeapLayout::Untiled(untiled) => return Some(*untiled),
             HeapLayout::Uncompressed(_) => return Some(Untiled::LOSSLESS),
             HeapLayout::Tiled(_) => {}
@@ -2459,23 +2465,30 @@ impl Device {
     }
 
     /// Whether the device moves the samples of a multisample image of `plan` to and from a buffer
-    /// (`HeapTiledCopies::plan_samples`, `sample_interleave.rs`): the moves planned once for an
-    /// image of one pixel of its format, usage and sample count, and remembered. A failure to make
-    /// what the moves need answers no: the texture then lies in memory of its own.
+    /// (`HeapTiledCopies::sample_moves`, `sample_interleave.rs`).
     fn sample_moves_run(&self, plan: &ImagePlan) -> bool {
-        let key = (plan.format, plan.pixel_format, plan.usage, plan.samples);
-        let answers = &self.shared().textures.sample_moves;
-        if let Some(&(_, runs)) = lock(answers).iter().find(|(known, _)| *known == key) {
-            return runs;
-        }
-        let runs = self.sample_moves_try(plan).unwrap_or(false);
-        lock(answers).push((key, runs));
-        runs
+        self.sample_moves_trial(plan).is_some()
     }
 
-    /// [`sample_moves_run`](Self::sample_moves_run)'s trial: the moves of an image of `plan`'s
+    /// Whether the device moves the samples of a multisample image of `plan` to and from a buffer,
+    /// and what the moves into the image change (`drawn-depth-copy`), `None` where they are exact:
+    /// the moves planned once each way for an image of one pixel of its format, usage and sample
+    /// count, and remembered. `None` where it does not; a failure to make what the moves need
+    /// answers so: the texture then lies in memory of its own.
+    fn sample_moves_trial(&self, plan: &ImagePlan) -> Option<Option<&'static str>> {
+        let key = (plan.format, plan.pixel_format, plan.usage, plan.samples);
+        let answers = &self.shared().textures.sample_moves;
+        if let Some(&(_, trial)) = lock(answers).iter().find(|(known, _)| *known == key) {
+            return trial;
+        }
+        let trial = self.sample_moves_try(plan).unwrap_or(None);
+        lock(answers).push((key, trial));
+        trial
+    }
+
+    /// [`sample_moves_trial`](Self::sample_moves_trial)'s trial: the moves of an image of `plan`'s
     /// format, usage and sample count, one pixel of one slice, planned over no buffer.
-    fn sample_moves_try(&self, plan: &ImagePlan) -> Result<bool, Error> {
+    fn sample_moves_try(&self, plan: &ImagePlan) -> Result<Option<Option<&'static str>>, Error> {
         let samples = plan.samples.as_raw();
         let one = ImagePlan {
             extent: [1, 1, 1],
@@ -2957,8 +2970,8 @@ impl Device {
             IdUse::Program(descriptor.placement),
         );
         // A multisample texture's moves between its image and Metal's tiles, which name its
-        // image's views, are planned once it is (`heap_tiled.rs`); `sample_tiles` found that the
-        // device runs them.
+        // image's views, are planned as its copies are recorded (`heap_tiled.rs`), of the texture
+        // known now; `sample_tiles` found that the device runs them.
         if route == AliasRoute::Tiled && p.layout.samples > 1 {
             let copies = texture.shadow().and_then(|copies| copies.target());
             let Some(ShadowTarget::Tiled { tiles, .. }) = copies else {
@@ -2966,11 +2979,12 @@ impl Device {
                     "a tiled multisample heap texture without its tiles",
                 ));
             };
-            if !tiles.plan_samples(self, call, &texture)? {
+            let Some(inexact) = self.sample_moves_trial(texture.image_plan()?) else {
                 return Err(internal(
                     "a tiled multisample heap texture whose samples the device does not move",
                 ));
-            }
+            };
+            tiles.know_samples(self, call, &texture, inexact);
         }
         heap.hold_texture(&texture);
         // It holds what its bytes held: its twin decodes all of it before any command reads it.

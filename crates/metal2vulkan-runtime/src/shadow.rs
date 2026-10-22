@@ -150,7 +150,8 @@ use super::rotated::{RotatedCopies, Turn};
 use super::row_copies::RowCopies;
 use super::shadow_copy_back::{CopyBack, WordView};
 use super::shadow_merge::{ScratchSpares, ShadowMerge, UnormView};
-use super::texture::heap_tiled::HeapTiledCopies;
+use super::texture::copy_images::UseMaker;
+use super::texture::heap_tiled::{HeapTiledCopies, SampleMoves};
 use super::texture::heap_two_planes::HeapPlaneCopies;
 use super::texture::Texture;
 use super::tracker::{Access, Barrier, Use, UseRange};
@@ -728,8 +729,8 @@ impl ShadowCopies {
         &self,
         device: &Vk,
         command_buffer: vk::CommandBuffer,
-        to: vk::Buffer,
-        at: u64,
+        (to, at): (vk::Buffer, u64),
+        moves: Option<&SampleMoves>,
     ) {
         if let ShadowSource::Bytes {
             buffer,
@@ -750,23 +751,24 @@ impl ShadowCopies {
             }
         }
         // SAFETY: the caller's contract.
-        unsafe { self.record_out(device, command_buffer, to, at) };
+        unsafe { self.record_out(device, command_buffer, (to, at), moves) };
     }
 
     /// Record a copy of the shadow's texels into `to` from `at`, laid out as in the buffer from
-    /// the texture's first byte (`shadow_merge.rs`).
+    /// the texture's first byte (`shadow_merge.rs`), a heap's multisample texture's through
+    /// `moves` out of its image (`ShadowCopy::plan_moves`).
     ///
     /// # Safety
     ///
-    /// `command_buffer` is recording, outside a render pass; the shadow and `to` are live until
-    /// it completes, `to` holds the texture's bytes from `at`, a multiple of 16, and an image is
-    /// in the `GENERAL` layout.
+    /// `command_buffer` is recording, outside a render pass; the shadow, the moves and `to` are
+    /// live until it completes, `to` holds the texture's bytes from `at`, a multiple of 16, and an
+    /// image is in the `GENERAL` layout.
     pub(super) unsafe fn record_out(
         &self,
         device: &Vk,
         command_buffer: vk::CommandBuffer,
-        to: vk::Buffer,
-        at: u64,
+        (to, at): (vk::Buffer, u64),
+        moves: Option<&SampleMoves>,
     ) {
         // An image's shadow keeps no bytes, a rotated texture's keeps them turned, and a heap's
         // two-plane texture's in two planes: no merge is made of any (`shadow_merge.rs`,
@@ -782,7 +784,9 @@ impl ShadowCopies {
                 tiles,
             } => {
                 // SAFETY: the caller's contract, which the tiles' record takes.
-                unsafe { tiles.record_out(device, command_buffer, *image, staging, (to, at)) };
+                unsafe {
+                    tiles.record_out(device, command_buffer, (*image, moves), staging, (to, at));
+                }
             }
             ShadowTarget::Image { image, regions, .. } => {
                 let origin = regions.first().map_or(0, |region| region.buffer_offset);
@@ -849,6 +853,10 @@ pub(super) struct ShadowCopy<M = Arc<ShadowMerge>> {
     pub(super) area: Option<[u32; 4]>,
     /// Why a copy in is made, as `WorkCounts` counts its texels; `None` for every other step.
     pub(super) cause: Option<CopyCause>,
+    /// A heap's multisample texture's moves between its image and Metal's tiles that its record
+    /// takes, planned as the encoder takes the copy (`EncoderCore::sample_moves`); `None` for
+    /// every other texture, and where none could be planned (failing the command buffer).
+    pub(super) moves: Option<Arc<SampleMoves>>,
 }
 
 /// Why a copy in is made, as `WorkCounts` counts its texels.
@@ -892,6 +900,27 @@ pub(super) enum Lost {
 }
 
 impl<M> ShadowCopy<M> {
+    /// The moves between a heap's multisample texture's image and Metal's tiles that the copy's
+    /// record takes (`texture/heap_tiled.rs`), planned now through `maker`: into the image for a
+    /// copy in, out of it for every other step (a copy back, a merge's keep and its copy of what
+    /// changed). `None` for every other texture. Refused as their images are made.
+    pub(super) fn plan_moves(&self, maker: &UseMaker) -> Result<Option<SampleMoves>, Error> {
+        if !self.moves_samples() {
+            return Ok(None);
+        }
+        let Some(ShadowTarget::Tiled { tiles, .. }) = self.copies.target() else {
+            return Ok(None);
+        };
+        tiles.sample_moves(maker, matches!(self.step, Step::Into))
+    }
+
+    /// Whether the copy's record takes moves between a heap's multisample texture's image and
+    /// Metal's tiles ([`plan_moves`](Self::plan_moves)).
+    pub(super) fn moves_samples(&self) -> bool {
+        let tiled = self.copies.target();
+        matches!(tiled, Some(ShadowTarget::Tiled { tiles, .. }) if tiles.moves_samples())
+    }
+
     /// Whether the copy writes the texture's truth: a copy back or a merge.
     pub(super) fn writes_truth(&self) -> bool {
         matches!(self.step, Step::Back | Step::Merge(_))
@@ -1241,12 +1270,18 @@ impl ShadowCopy {
         back: Option<&RowCopies>,
     ) {
         let c = &self.copies;
+        let moves = self.moves.as_deref();
         let into_shadow = match &self.step {
             Step::Into => true,
             Step::Back => false,
             // SAFETY: the caller's contract, which the merge's records take.
-            Step::Keep(merge) => return unsafe { merge.record_keep(device, command_buffer, c) },
-            Step::Merge(merge) => return unsafe { merge.record_merge(device, command_buffer, c) },
+            Step::Keep(merge) => {
+                return unsafe { merge.record_keep(device, command_buffer, (c, moves)) }
+            }
+            // SAFETY: as above.
+            Step::Merge(merge) => {
+                return unsafe { merge.record_merge(device, command_buffer, (c, moves)) }
+            }
         };
         let (buffer, target) = match &c.source {
             ShadowSource::Bytes { buffer, target, .. } => (buffer.raw(), target),
@@ -1432,14 +1467,15 @@ impl ShadowCopy {
                 staging,
                 tiles,
             } => {
-                // SAFETY: the caller's contract, which the tiles' record takes.
+                // SAFETY: the caller's contract, which the tiles' record takes; the moves are held
+                // with the copy.
                 unsafe {
                     tiles.record(
                         device,
                         command_buffer,
                         *image,
                         (buffer, staging),
-                        into_shadow,
+                        (into_shadow, moves),
                         back,
                     );
                 }
@@ -2068,6 +2104,7 @@ impl<M: Clone + KeptArea> ShadowSync<M> {
             kept: false,
             area,
             cause: None,
+            moves: None,
         });
         for (j, other) in self.entries.iter_mut().enumerate() {
             if j != i && other.copies.shares_truth(&written) {
@@ -2217,6 +2254,7 @@ impl<M: Clone + KeptArea> ShadowSync<M> {
                         kept: shadow.kept,
                         area: needs,
                         cause: Some(cause),
+                        moves: None,
                     });
                 }
                 entry.standing = Standing::Current;
@@ -2245,6 +2283,7 @@ impl<M: Clone + KeptArea> ShadowSync<M> {
                         kept: shadow.kept,
                         area: Some(area),
                         cause: Some(CopyCause::Bounded),
+                        moves: None,
                     });
                 }
             }
@@ -2270,6 +2309,7 @@ impl<M: Clone + KeptArea> ShadowSync<M> {
                 kept: false,
                 area: None,
                 cause: None,
+                moves: None,
             });
         }
         for (shadow, merge) in kept {
@@ -2282,6 +2322,7 @@ impl<M: Clone + KeptArea> ShadowSync<M> {
                 kept: false,
                 area: None,
                 cause: None,
+                moves: None,
             });
         }
         Ok(copies)

@@ -115,6 +115,7 @@ use super::resource::ResourceKey;
 use super::shadow::{ShadowCopies, ShadowSource, ShadowTarget};
 use super::shadow_copy_back::{self, CopyBack, WordView};
 use super::shadow_copy_in::CopyIn;
+use super::texture::heap_tiled::SampleMoves;
 use super::texture::kept_image::{KeptImage, KeptImages, KeptLease, TakenImage};
 use super::tracker::{Access, Barrier, Use, UseRange};
 use super::values::{HazardTrackingMode, ResourceOptions};
@@ -763,7 +764,7 @@ impl ShadowMerge {
         &self,
         device: &Vk,
         command_buffer: vk::CommandBuffer,
-        copies: &ShadowCopies,
+        (copies, moves): (&ShadowCopies, Option<&SampleMoves>),
         part: Part,
     ) {
         // SAFETY: the caller's contract; the part holds the rectangle's texels row after row, or
@@ -780,7 +781,7 @@ impl ShadowMerge {
                         ..*region
                     }],
                 ),
-                None => copies.record_out(device, command_buffer, part.raw, part.at),
+                None => copies.record_out(device, command_buffer, (part.raw, part.at), moves),
             }
         }
     }
@@ -857,17 +858,18 @@ impl ShadowMerge {
         ]
     }
 
-    /// Record the keep of the shadow of `copies` into `command_buffer`.
+    /// Record the keep of the shadow of `copies` into `command_buffer`, a heap's multisample
+    /// texture's through `moves` out of its image (`ShadowCopy::plan_moves`).
     ///
     /// # Safety
     ///
-    /// `command_buffer` is recording, outside a render pass; the buffer, the shadow and the
-    /// scratch are live until it completes, and an image is in the `GENERAL` layout.
+    /// `command_buffer` is recording, outside a render pass; the buffer, the shadow, the moves and
+    /// the scratch are live until it completes, and an image is in the `GENERAL` layout.
     pub(super) unsafe fn record_keep(
         &self,
         device: &Vk,
         command_buffer: vk::CommandBuffer,
-        copies: &ShadowCopies,
+        (copies, moves): (&ShadowCopies, Option<&SampleMoves>),
     ) {
         // SAFETY: the caller's contract; the kept part holds the texture's bytes, and the
         // dispatch stores the shadow's texels there as the copy would; the kept image, of a
@@ -877,8 +879,8 @@ impl ShadowMerge {
             match (&self.keep_dispatch, self.kept_in) {
                 (Some(keep), _) => keep.record(device, command_buffer),
                 (None, KeptIn::Part(kept)) => match self.cut {
-                    Some(_) => self.record_out(device, command_buffer, copies, kept),
-                    None => copies.record_kept(device, command_buffer, kept.raw, kept.at),
+                    Some(_) => self.record_out(device, command_buffer, (copies, moves), kept),
+                    None => copies.record_kept(device, command_buffer, (kept.raw, kept.at), moves),
                 },
                 (
                     None,
@@ -899,9 +901,10 @@ impl ShadowMerge {
 
     /// Record the merge of the shadow of `copies` into its buffer's bytes (the module docs): a
     /// barrier between the copies of the texels into the changed and current parts, where it has
-    /// them, and its dispatches; and one to everything after them. A merge that fetches the
-    /// texels in place records no copy, and its dispatches follow the commands by the barrier
-    /// every caller records before a copy (the encoder's, from the merge's uses).
+    /// them (a heap's multisample texture's through `moves` out of its image), and its
+    /// dispatches; and one to everything after them. A merge that fetches the texels in place
+    /// records no copy, and its dispatches follow the commands by the barrier every caller
+    /// records before a copy (the encoder's, from the merge's uses).
     ///
     /// # Safety
     ///
@@ -911,7 +914,7 @@ impl ShadowMerge {
         &self,
         device: &Vk,
         command_buffer: vk::CommandBuffer,
-        copies: &ShadowCopies,
+        (copies, moves): (&ShadowCopies, Option<&SampleMoves>),
     ) {
         let Merged {
             buffer,
@@ -930,7 +933,7 @@ impl ShadowMerge {
                     ..
                 } => out.record(device, command_buffer),
                 Changed::Copied { part, .. } => {
-                    self.record_out(device, command_buffer, copies, *part);
+                    self.record_out(device, command_buffer, (copies, moves), *part);
                 }
                 Changed::Fetched => {}
             }
