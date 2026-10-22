@@ -1873,3 +1873,118 @@ fn an_object_functions_threadgroup_memory_is_the_encoders_lengths() {
         "{stem} at 76: 65 bytes"
     );
 }
+
+/// Under `VariantKey::mesh_last_first` an emulated mesh pipeline's synthesized vertex stage reads
+/// each triangle's corner `(c + k - 1) mod k`, so the draw takes each primitive from its last
+/// index first: one `OpIAdd` and one `OpUMod` more than the base's, valid, its plan stating the
+/// variant (`RuntimeFact::MeshLastFirst`). A draw whose shape asks for it runs it
+/// (`BindError::NeedsVariant` from the base), and the variant's plan of the default shape asks
+/// for the base again.
+#[test]
+fn a_last_first_mesh_draw_reads_its_corners_from_the_last() {
+    use crate::bind::{BindState, DrawCall};
+    use crate::budget::Budget;
+    use crate::error::BindError;
+    use crate::library::Library;
+    use crate::metal::PixelFormat;
+    use crate::pipeline::descriptor::{
+        ColorAttachmentDescriptor, FunctionDescriptor, MeshPipelineDescriptor, StageSource,
+    };
+    use crate::vk;
+    /// `OpIAdd` and `OpUMod`.
+    const ADD_MOD: [u32; 2] = [128, 137];
+    let Some(draws) = fixture("mesh_draws") else {
+        return;
+    };
+    let draws = Library::from_air(&draws).expect("library");
+    let stage = |name: &str| {
+        StageSource::Function(FunctionDescriptor::new(
+            draws.function(name).expect("function"),
+        ))
+    };
+    let budget = Budget::standard();
+    let draw = DrawCall::MeshThreadgroups {
+        groups: [2, 1, 1],
+        threads_per_object_group: [1; 3],
+        threads_per_mesh_group: [8, 1, 1],
+    };
+    let last_first = BindState {
+        mesh_last_first: true,
+        ..Default::default()
+    };
+    for (stem, _) in emulating_profiles() {
+        let dev = device(&stem);
+        let mut d = MeshPipelineDescriptor::new(stage("mesh_draws_grid"));
+        d.fragment = Some(stage("mesh_draws_fragment"));
+        for i in 0..2 {
+            d.color_attachments[i] = Some(ColorAttachmentDescriptor::new(PixelFormat::RGBA32Uint));
+        }
+        let base = dev
+            .compile_mesh_pipeline(&d, &budget)
+            .unwrap_or_else(|e| panic!("{stem}: {e}"));
+        let plan = base
+            .plan(&dev, &last_first.shape())
+            .unwrap_or_else(|e| panic!("{stem}: {e:?}"));
+        assert!(plan.variant.mesh_last_first, "{stem}");
+        assert_eq!(
+            plan.instantiate_draw(&last_first, &draw),
+            Err(BindError::NeedsVariant {
+                variant: Box::new(plan.variant.clone())
+            }),
+            "{stem}"
+        );
+        let key = plan.variant.clone();
+        let v = dev
+            .compile_mesh_variant(&d, &key, &budget)
+            .unwrap_or_else(|e| panic!("{stem}: {e}"));
+        for m in &v.stages {
+            check_words_valid(&m.spirv, &v.requirements, dev.profile())
+                .unwrap_or_else(|e| panic!("{stem} {:?}: L3: {e}", m.stage));
+        }
+        assert!(
+            v.dependencies
+                .iter()
+                .any(|x| x.fact == RuntimeFact::MeshLastFirst),
+            "{stem}"
+        );
+        assert!(
+            !base
+                .dependencies
+                .iter()
+                .any(|x| x.fact == RuntimeFact::MeshLastFirst),
+            "{stem}"
+        );
+        assert_ne!(v.key, base.key, "{stem}");
+        let vertex = |p: &crate::pipeline::RenderPipeline| {
+            let m = p
+                .stages
+                .iter()
+                .find(|m| m.stage == vk::ShaderStage::VERTEX)
+                .expect("the synthesized vertex stage");
+            opcodes(&m.spirv)
+        };
+        let (a, b) = (vertex(&v), vertex(&base));
+        for op in ADD_MOD {
+            let n = |ops: &[u32]| ops.iter().filter(|&&o| o == op).count();
+            assert_eq!(n(&a), n(&b) + 1, "{stem}: opcode {op}");
+        }
+        let plan = v
+            .plan(&dev, &last_first.shape())
+            .unwrap_or_else(|e| panic!("{stem}: {e:?}"));
+        assert_eq!(plan.variant, key, "{stem}");
+        plan.instantiate_draw(&last_first, &draw)
+            .unwrap_or_else(|e| panic!("{stem}: {e:?}"));
+        let plain = BindState::default();
+        let plan = v
+            .plan(&dev, &plain.shape())
+            .unwrap_or_else(|e| panic!("{stem}: {e:?}"));
+        assert!(!plan.variant.mesh_last_first, "{stem}");
+        assert!(
+            matches!(
+                plan.instantiate_draw(&plain, &draw),
+                Err(BindError::NeedsVariant { .. })
+            ),
+            "{stem}"
+        );
+    }
+}

@@ -374,6 +374,7 @@ use metal2vulkan::pipeline::{
 use pass_start_reads::{PassStartReads, PassStartTables};
 use pass_steps::{InstanceSteps, PassSteps, StagedDispatch, StagedRows};
 use pending::{OwnedRecording, PendingDraw};
+use provoking::ProvokingForms;
 use shadows::InstanceShadows;
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
@@ -7130,7 +7131,7 @@ impl RenderLowering {
         // A draw under the last provoking vertex is drawn as a list on a device without it
         // (`render/provoking.rs`).
         let provoking = self.provoking(call, &pipeline, assembly, &draw);
-        let rotated_weights = provoking.rotates_weights(assembly, &pipeline);
+        let provoking_forms = provoking.forms(assembly, &pipeline);
         let restarted = self.restarted(assembly, &draw, provoking);
         let private = match assembly {
             Assembly::Private(program) => PrivateForm::of(&pipeline, program, &draw),
@@ -7212,7 +7213,7 @@ impl RenderLowering {
                 &settings,
                 primitive_id_indices,
                 private,
-                rotated_weights,
+                provoking_forms,
             ),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut unlisted),
@@ -7233,7 +7234,7 @@ impl RenderLowering {
                 .shared()
                 .counts
                 .provoking_last_pipeline_draw(),
-            provoking::Provoking::Listed(_) => {
+            provoking::Provoking::Listed(_) | provoking::Provoking::LastCorners => {
                 self.core.device().shared().counts.provoking_listed_draw()
             }
         }
@@ -9422,8 +9423,8 @@ impl RenderLowering {
     /// `settings` binds in, reading its indices as `primitive_id_indices` says (`BindState::
     /// primitive_id_indices`, [`primitive_id_indices`]), a private type's list as `private` says
     /// (`BindState::quad_primitive_ids` and `private_list`, [`PrivateForm`]),
-    /// its triangles' barycentric weights as `rotated_weights` says (`BindState::rotated_weights`,
-    /// `render/provoking.rs`),
+    /// its triangles' barycentric weights and an emulated mesh's corners as `provoking` says
+    /// (`BindState::rotated_weights` and `mesh_last_first`, `render/provoking.rs`),
     /// its vertex, object and mesh tables
     /// `pass_start`'s or the encoder's
     /// ([`refresh_bind_state`](Self::refresh_bind_state)), its runtime samplers' address modes
@@ -9436,12 +9437,12 @@ impl RenderLowering {
     fn settle_draw(
         &self,
         live: &mut LiveBind,
-        (pipeline, settings, primitive_id_indices, private, rotated_weights): (
+        (pipeline, settings, primitive_id_indices, private, provoking): (
             &DrawingState,
             &DrawSettings,
             Option<IndexType>,
             PrivateForm,
-            bool,
+            ProvokingForms,
         ),
         (pass_start, sampler_maps): (&PassStartTables, &SamplerMaps),
         (argument_samplers, unlisted): (&mut ArgumentSamplers, &mut Option<(u64, u64)>),
@@ -9485,7 +9486,8 @@ impl RenderLowering {
             reshape.field(&mut state.primitive_id_indices, primitive_id_indices);
             reshape.field(&mut state.quad_primitive_ids, private.quad_primitive_ids);
             reshape.field(&mut state.private_list, private.private_list);
-            reshape.field(&mut state.rotated_weights, rotated_weights);
+            reshape.field(&mut state.rotated_weights, provoking.rotated_weights);
+            reshape.field(&mut state.mesh_last_first, provoking.mesh_last_first);
             reshape.field_from(&mut state.dropped_colors, &colors.dropped);
             reshape.field_from(&mut state.extended_shadows, shadows);
             let snapshots = snapshot.as_ref().map_or(&NO_INDICES, |w| &w.slots);

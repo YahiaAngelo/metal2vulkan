@@ -28,6 +28,13 @@
 //! threadgroup in their linear order, slot by slot, which is the order Metal draws a mesh draw's
 //! primitives in.
 //!
+//! Under `VariantKey::mesh_last_first` (a draw under Apple's last provoking vertex on a device
+//! that takes flat inputs from the first) vertex `v` reads corner `(c + k - 1) mod k` instead:
+//! each primitive is drawn from Metal's last index first, a triangle `(i0, i1, i2)` as
+//! `(i2, i0, i1)`, which keeps its winding, and a line `(i0, i1)` as `(i1, i0)`, so its flat
+//! inputs are its last vertex's, as Metal's are at mode 1 (Metal probe: a mesh triangle's flat
+//! input from its last index).
+//!
 //! The records do not hold the primitive id: a fragment function that reads `[[primitive_id]]`
 //! behind an emulated mesh function is not implemented ([`records`]), since the vertex stage's
 //! primitives are counted across the draw.
@@ -115,16 +122,18 @@ pub fn records(ifaces: &[&StageInterface]) -> Result<Option<MeshRecords>, Error>
     }))
 }
 
-/// The synthesized vertex stage of records `r` as a final module under link table `table`, with
-/// its module's requirements: verified by the owned verifier, serialized, and relocated, as a
-/// compiled function's module is.
+/// The synthesized vertex stage of records `r`, each primitive drawn from its last index first
+/// where `last_first`, as a final module under link table `table`, with its module's
+/// requirements: verified by the owned verifier, serialized, and relocated, as a compiled
+/// function's module is.
 pub fn synthesized_stage(
     r: &MeshRecords,
+    last_first: bool,
     table: &impl SymbolTable,
     p: &DeviceProfile,
     m: &mut Meter,
 ) -> Result<(StageModule, Requirements), Error> {
-    let module = vertex_module(r)?;
+    let module = vertex_module(r, last_first)?;
     crate::spirv::verify::verify(&module, p, m)?;
     let module = crate::spirv::serialize::serialize_for(module, p)?;
     let words = crate::spirv::serialize::relocate(&module, table)?;
@@ -216,8 +225,9 @@ struct Out<'r> {
     ty: TypeId,
 }
 
-/// The synthesized vertex stage of records `r` (the module docs).
-pub fn vertex_module(r: &MeshRecords) -> BResult<TypedModule> {
+/// The synthesized vertex stage of records `r`, each primitive drawn from its last index first
+/// where `last_first` (the module docs).
+pub fn vertex_module(r: &MeshRecords, last_first: bool) -> BResult<TypedModule> {
     let mut mb = ModuleBuilder::new();
     let u32_ = scalar(&mut mb, IoNumeric::Uint)?;
     let f32_ = scalar(&mut mb, IoNumeric::Float)?;
@@ -293,7 +303,13 @@ pub fn vertex_module(r: &MeshRecords) -> BResult<TypedModule> {
     let g = fb.binary(BinOp::UDiv, v, per_group)?;
     let rem = fb.binary(BinOp::UMod, v, per_group)?;
     let slot = fb.binary(BinOp::UDiv, rem, k)?;
-    let corner = fb.binary(BinOp::UMod, rem, k)?;
+    let mut corner = fb.binary(BinOp::UMod, rem, k)?;
+    // Drawn from the last index first: corner `(c + k - 1) mod k`.
+    if last_first && r.corners > 1 {
+        let back = ku(&mut fb, r.corners - 1)?;
+        let moved = fb.binary(BinOp::IAdd, corner, back)?;
+        corner = fb.binary(BinOp::UMod, moved, k)?;
+    }
     // The threadgroup's records, from the draw's first word: within a `u32`, since the binder
     // binds them whole.
     let at = ku(&mut fb, crate::lower::mesh::work::RECORDS_BASE)?;

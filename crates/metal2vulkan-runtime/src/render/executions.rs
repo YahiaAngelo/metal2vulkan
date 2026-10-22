@@ -259,6 +259,7 @@ use super::mesh::MeshGrid;
 use super::pass_start_reads::{PassStartReads, PassStartTables};
 use super::pass_steps::PassSteps;
 use super::pending_tile::TilePipelines;
+use super::provoking::ProvokingForms;
 use super::replay::SharedCheck;
 use super::shadows::InstanceShadows;
 use super::tile_memory::TileMemory;
@@ -1805,7 +1806,7 @@ impl RenderLowering {
         let sampler_maps = self.sampler_maps(state, &pass_start)?;
         let settled = self.settle_draw(
             &mut lock(&live),
-            (state, &settings, None, PrivateForm::default(), false),
+            (state, &settings, None, PrivateForm::default(), ProvokingForms::default()),
             (&pass_start, &sampler_maps),
             (&mut argument_samplers, &mut None),
             (&function_tables, &mut None),

@@ -205,6 +205,14 @@ pub struct BindState {
     /// `VariantKey::rotated_weights`). Part of the shape; `false` for every other draw.
     #[cfg_attr(feature = "serde", serde(default))]
     pub rotated_weights: bool,
+    /// Whether a mesh draw of an emulated mesh function's pipeline draws each line or triangle
+    /// from its last index first: a draw under Apple's last provoking vertex
+    /// (`setProvokingVertexMode:` 1) on a device that takes flat inputs from the first vertex.
+    /// Its pipeline runs the variant whose synthesized vertex stage reads its corners so
+    /// (`BindShape::mesh_last_first`, `VariantKey::mesh_last_first`). Part of the shape; `false`
+    /// for every other draw.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub mesh_last_first: bool,
     /// Whether the depth the draw renders against is `Depth16Unorm`: its render pass's depth
     /// attachment's format, or `false` for the hidden `float` depth a pass without one tests;
     /// `None` where the draw has no depth. Plain Metal stores into that depth whatever format the
@@ -720,6 +728,7 @@ impl BindState {
             kept_imageblock_bytes: self.kept_imageblock_bytes,
             depth_clamp_range: self.depth_clamp_range.is_some(),
             rotated_weights: self.rotated_weights,
+            mesh_last_first: self.mesh_last_first,
             interlocked_colors: self.interlocked_colors.clone(),
             fragment_tests: self.fragment_tests,
             extended_shadows: self.extended_shadows.clone(),
@@ -776,6 +785,7 @@ impl BindState {
             kept_imageblock_bytes,
             depth_clamp_range,
             rotated_weights,
+            mesh_last_first,
             interlocked_colors,
             fragment_tests,
             extended_shadows,
@@ -808,6 +818,7 @@ impl BindState {
             && self.kept_imageblock_bytes == *kept_imageblock_bytes
             && self.depth_clamp_range.is_some() == *depth_clamp_range
             && self.rotated_weights == *rotated_weights
+            && self.mesh_last_first == *mesh_last_first
             && self.interlocked_colors == *interlocked_colors
             && self.fragment_tests == *fragment_tests
             && self.extended_shadows == *extended_shadows
@@ -1636,6 +1647,11 @@ pub struct BindShape {
     /// (`VariantKey::rotated_weights`).
     #[cfg_attr(feature = "serde", serde(default))]
     pub rotated_weights: bool,
+    /// `BindState.mesh_last_first`: the variant whose emulated mesh pipeline's synthesized
+    /// vertex stage draws each line or triangle from its last index first
+    /// (`VariantKey::mesh_last_first`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub mesh_last_first: bool,
     /// `BindState.interlocked_colors`: the variant whose fragment function writes those it writes
     /// through the interlocked storage form (`VariantKey::interlocked_colors`).
     #[cfg_attr(feature = "serde", serde(default))]
