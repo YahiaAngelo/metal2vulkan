@@ -2381,7 +2381,13 @@ impl CommandBuffer {
     ) -> Result<(), Error> {
         let device = &self.0.device;
         let committed = Instant::now();
-        let (segments, places, failure, reached, hangs): (Vec<(Deferred, bool)>, Vec<usize>, _, _, _) = {
+        let (segments, places, failure, reached, hangs): (
+            Vec<(Deferred, bool)>,
+            Vec<usize>,
+            _,
+            _,
+            _,
+        ) = {
             let mut state = self.state();
             let refusal = match run {
                 CommitRun::AtCall => state.refusal(),

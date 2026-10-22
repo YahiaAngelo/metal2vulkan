@@ -13,8 +13,13 @@ use objc2_metal::{
     MTLCreateSystemDefaultDevice, MTLCullMode, MTLDepthStencilDescriptor, MTLDepthStencilState,
     MTLDevice, MTLDispatchType, MTLHazardTrackingMode, MTLHeap, MTLHeapDescriptor, MTLHeapType,
     MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
-    MTLIndirectCommandType, MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction, MTLOrigin, MTLPipelineOption, MTLPixelFormat, MTLPrimitiveType, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor, MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLSharedEvent, MTLSharedEventListener, MTLSize, MTLStorageMode,
-    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage, MTLWinding,
+    MTLIndirectCommandType, MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary,
+    MTLLoadAction, MTLOrigin, MTLPipelineOption, MTLPixelFormat, MTLPrimitiveType, MTLRegion,
+    MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor,
+    MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage,
+    MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLSharedEvent,
+    MTLSharedEventListener, MTLSize, MTLStorageMode, MTLStoreAction, MTLTexture,
+    MTLTextureDescriptor, MTLTextureUsage, MTLWinding,
 };
 use std::ffi::c_void;
 use std::path::Path;

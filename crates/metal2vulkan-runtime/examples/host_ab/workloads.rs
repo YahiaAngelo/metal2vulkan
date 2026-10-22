@@ -3004,6 +3004,7 @@ pub fn calls<G: Gpu>(
         }
     }
     calls_resident(g, &objects, sizes, variants);
+}
 
 /// The provoking workload's draws in a frame: each two small triangles of six vertices of their own
 /// in a 64 by 32 grid over the target (module docs of `main.rs`).

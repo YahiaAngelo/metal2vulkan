@@ -38,9 +38,12 @@ const DRAWN: [f32; 4] = [0.25, 0.55, 0.75, 0.65];
 /// The color drawn into the signed format, two channels negative.
 const DRAWN_SIGNED: [f32; 4] = [-0.25, 0.55, -0.75, 0.65];
 
-/// The formats drawn: each normalized one's channels (bits, signed) in memory order with the
-/// color channel each holds, and the texel's bytes; `None` for the float format.
-fn layout(pf: PixelFormat) -> Option<(&'static [(u32, bool, usize)], usize)> {
+/// A normalized format's channels (bits, signed) in memory order with the color channel each
+/// holds, and the texel's bytes.
+type Layout = (&'static [(u32, bool, usize)], usize);
+
+/// The formats drawn: each normalized one's [`Layout`]; `None` for the float format.
+fn layout(pf: PixelFormat) -> Option<Layout> {
     Some(match pf {
         PixelFormat::RGBA8Unorm => (
             &[(8, false, 0), (8, false, 1), (8, false, 2), (8, false, 3)],
