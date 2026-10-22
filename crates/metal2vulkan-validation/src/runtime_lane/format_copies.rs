@@ -1,6 +1,7 @@
-//! Blit copies between textures of different formats and within one texture on the device the cfg
-//! selects, under the validation layer, against what Metal probes measured on an M3 Max (macOS
-//! 26.7) and an M4 (macOS 27.0.1), alike without API validation:
+//! Blit copies between textures of different formats and within one texture, and the CPU's copies
+//! through a stencil view, on the device the cfg selects, under the validation layer, against what
+//! Metal probes measured on an M3 Max (macOS 26.7 and 27.0.1) and an M4 (macOS 27.0.1), alike
+//! without API validation:
 //!
 //! - Between a depth-only or stencil-only format, or the stencil view `X32Stencil8` of a
 //!   `Depth32FloatStencil8` texture, and a colour format of its copy unit (2 bytes for
@@ -18,9 +19,11 @@
 //! - A region copied onto itself keeps its texels; a copy between other overlapping regions of
 //!   one texture gives `memmove`'s answer, Metal's for small regions (its copy races past a few
 //!   hundred texels), announcing `overlapping-texture-copy-as-memmove` once.
+//! - The CPU's copies through the stencil view of a `Shared` combined texture move the stencil, a
+//!   byte a texel, rows `bytes_per_row` apart, its depth kept.
 //!
-//! Every texture is `Private` and read back through a buffer, as the probes read theirs. Depth
-//! values lie in `[0, 1]` wherever a depth image holds them, so no device's clamping decides
+//! Every other texture is `Private` and read back through a buffer, as the probes read theirs.
+//! Depth values lie in `[0, 1]` wherever a depth image holds them, so no device's clamping decides
 //! (`texture_blits` measures that).
 
 use super::degrade_notices::assert_once;
@@ -29,7 +32,7 @@ use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
 use metal2vulkan_runtime::{
     BlitCommandEncoder, BlitOption, Buffer, CommandQueue, CopyProblem, CpuCacheMode, Degradation,
-    Device, Error, HazardTrackingMode, Invalid, Origin, Problem, ResourceOptions, Size,
+    Device, Error, HazardTrackingMode, Invalid, Origin, Problem, Region, ResourceOptions, Size,
     StorageMode, Texture, TextureDescriptor,
 };
 use std::time::Duration;
@@ -392,6 +395,80 @@ fn the_stencil_view_of_a_combined_texture_copies_its_stencil() {
             ]),
             "a combined texture into another on {name}"
         );
+    }
+    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+}
+
+/// The CPU's copies through the stencil view `X32Stencil8` of a `Shared` `Depth32FloatStencil8`
+/// texture move the stencil, a byte a texel, rows `bytes_per_row` apart, the depth kept; the
+/// texture's own copies move the depth: plain Metal's answers on an M3 Max under macOS 27.0.1 (a
+/// probe at 32 and 4 bytes a row; its validation stops the CPU access).
+#[test]
+fn the_cpu_copies_through_the_stencil_view_move_the_stencil() {
+    let messages = Messages::default();
+    let cache = ScratchCache::new().unwrap();
+    {
+        let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
+        let name = device.name().to_owned();
+        let lane = Lane {
+            queue: device.new_command_queue().unwrap(),
+            device,
+        };
+        let mut d = TextureDescriptor::texture_2d(PixelFormat::Depth32FloatStencil8, W, 2, false);
+        d.usage = TextureUsage::SHADER_READ
+            | TextureUsage::RENDER_TARGET
+            | TextureUsage::PIXEL_FORMAT_VIEW;
+        d.resource_options = ResourceOptions::shared();
+        let texture = lane.device.new_texture(&d).unwrap();
+        let view = texture.new_texture_view(PixelFormat::X32Stencil8).unwrap();
+        let region = Region::new_2d(0, 0, W, 2);
+        let depth = [FOUR, FOUR].concat();
+        texture
+            .replace_region(region, 0, 0, &depth, 16, 32)
+            .unwrap();
+        // The stencil, rows 32 bytes apart, the bytes between them unread.
+        let mut apart = [0xeeu8; 64];
+        apart[..4].copy_from_slice(&[0x10, 0x11, 0x12, 0x13]);
+        apart[32..36].copy_from_slice(&[0x30, 0x31, 0x32, 0x33]);
+        view.replace_region(region, 0, 0, &apart, 32, 64).unwrap();
+        let mut got = [0xeeu8; 64];
+        view.get_bytes(&mut got, 32, 64, region, 0, 0).unwrap();
+        assert_eq!(got, apart, "the stencil 32 bytes a row on {name}");
+        let mut packed = [0xeeu8; 8];
+        view.get_bytes(&mut packed, 4, 8, region, 0, 0).unwrap();
+        let stencil = [0x10, 0x11, 0x12, 0x13, 0x30, 0x31, 0x32, 0x33];
+        assert_eq!(packed, stencil, "the stencil 4 bytes a row on {name}");
+        let mut held = [0u8; 32];
+        texture.get_bytes(&mut held, 16, 32, region, 0, 0).unwrap();
+        assert_eq!(held.to_vec(), depth, "the depth kept on {name}");
+        // A write at 4 bytes a row, read back by a blit of the texture's stencil.
+        let rows = [0x5a, 0xff, 0x01, 0x80, 0x14, 0x15, 0x16, 0x17];
+        view.replace_region(region, 0, 0, &rows, 4, 8).unwrap();
+        let blitted = lane
+            .run(|blit| {
+                let buffer = lane.buffer(&[0xee; 16]);
+                blit.copy_from_texture_to_buffer(
+                    &texture,
+                    0,
+                    0,
+                    Origin::new(0, 0, 0),
+                    Size::new(W, 2, 1),
+                    &buffer,
+                    0,
+                    W,
+                    2 * W,
+                    BlitOption::StencilFromDepthStencil,
+                )?;
+                Ok(vec![(buffer, 8)])
+            })
+            .unwrap();
+        assert_eq!(
+            blitted,
+            vec![rows.to_vec()],
+            "the stencil blitted on {name}"
+        );
+        texture.get_bytes(&mut held, 16, 32, region, 0, 0).unwrap();
+        assert_eq!(held.to_vec(), depth, "the depth kept again on {name}");
     }
     assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
 }

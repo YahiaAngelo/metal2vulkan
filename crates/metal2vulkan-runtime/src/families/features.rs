@@ -922,12 +922,11 @@ impl FeatureRow {
             // (`buffer_texture::view_usage`), and a texture over a buffer whose image no copy can
             // write (`texture.rs`).
             F::LinearTextures => first([gap(G::Textures)]),
-            // A stencil view of a depth/stencil texture (`Texture::new_texture_view`): sampled,
-            // read and blitted where the view is `X32Stencil8` of `Depth32FloatStencil8`
-            // (probes). A blit through a depth or stencil view of another format than its
-            // texture's, and a stencil view's host access, are refused
-            // (`NotImplemented(Textures)`): Metal's answers are not measured.
-            F::StencilTextureViews => first([gap(G::Textures)]),
+            // The stencil view of a combined depth/stencil texture (`X32Stencil8` of
+            // `Depth32FloatStencil8`, `Texture::new_texture_view`), the one depth or stencil view
+            // of another format Metal makes: sampled, read, blitted and copied by the CPU as
+            // plain Metal does (probes).
+            F::StencilTextureViews => RowState::Exact,
             // Arrays of textures and samplers indexed by a value the function computes: the
             // compile layer's descriptor arrays, which `shader*ArrayDynamicIndexing` lets it index.
             F::ArrayOfTexturesRead => first([needs_features(
