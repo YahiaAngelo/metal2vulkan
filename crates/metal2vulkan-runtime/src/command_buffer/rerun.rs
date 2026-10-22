@@ -201,9 +201,10 @@ impl LoopCheck {
         *lock(&self.rounds) = Rounds::Running;
         let check = Arc::clone(self);
         let buffer = command_buffer.0.hold();
-        let spawned = std::thread::Builder::new()
-            .name("metal2vulkan-loop".to_owned())
-            .spawn(move || run_again(&check, buffer));
+        // One of the threads that take a command buffer to its handlers (`exit_guard.rs`).
+        let builder = std::thread::Builder::new().name("metal2vulkan-loop".to_owned());
+        let spawned =
+            exit_guard::spawn_user_interactive(builder, move || run_again(&check, buffer));
         if spawned.is_err() {
             *lock(&self.rounds) = Rounds::Ended;
             return Err(internal(
