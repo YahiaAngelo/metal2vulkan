@@ -2246,9 +2246,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   where the pipeline selects it in a synthesized geometry stage (a device without
   `shaderOutputLayer` or `shaderOutputViewportIndex`, an index that differs between a primitive's
   vertices, or weights the stage writes), from each primitive's first vertex. And on every device,
-  a mode from 2 to `2^63 - 1`, which Metal draws a third way that differs between pipeline states
-  (every line's flat inputs and `[[primitive_id]]` 0) and the runtime as mode 1: announced at the
-  call. Cost: flat inputs or a computed primitive ID read another vertex than Metal's, or
+  a mode past 1, its top bit set or not, which Metal draws a third way that differs between
+  pipeline states (every line's flat inputs and `[[primitive_id]]` 0) and the runtime as mode 1:
+  announced at the call. Cost: flat inputs or a computed primitive ID read another vertex than Metal's, or
   barycentric weights come in another order than Metal's or round otherwise.
 - `metal2vulkan-degrade-visibility-count-per-color` (precision). `VisibilityCountPerColor`: A
   draw counted by a `Counting` visibility result whose fragment function writes more than one color

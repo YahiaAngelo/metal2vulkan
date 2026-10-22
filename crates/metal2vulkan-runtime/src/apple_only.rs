@@ -7,7 +7,7 @@
 //! - the call states Metal's default, which every runtime object already has: a line width of
 //!   1, the viewport transform on, no protection options;
 //! - the call sets encoder state the runtime draws as Metal does: a provoking vertex mode of 0
-//!   or 1, or one whose top bit is set (which Metal draws as 0), `render/provoking.rs`;
+//!   or 1, `render/provoking.rs`;
 //! - the call acts on state no runtime object has: Vulkan shows no texture compression, so a
 //!   reinterpretation flush has nothing to flush, and after an invalidation Metal leaves the
 //!   contents undefined, so keeping them is one of the outcomes Metal allows; and no pipeline the
@@ -17,15 +17,15 @@
 //! - `setPointSize:`, which Metal measured makes a no-op: the point is the vertex function's
 //!   `[[point_size]]`.
 //!
+//! A provoking vertex mode past 1, which Metal draws a third way that differs between pipeline
+//! states, is accepted and drawn as mode 1, announced at the call (`provoking-vertex-unmatched`).
+//!
 //! Every other call is refused, and records nothing:
 //! - nonzero protection options, whose effect on Metal is not measured (Vulkan's protected
 //!   memory is the nearest form);
 //! - a line width other than 1 (Apple's wide-line rule is unmeasured, where Vulkan has
 //!   `wideLines`), and vertex amplification mode, and depth or stencil "cleared", whose meaning
 //!   or raw values are unmeasured;
-//! - a provoking vertex mode from 2 to `2^63 - 1`: SPI outside the public SDK, measured (a
-//!   triangle's flat inputs from its last vertex, an odd strip triangle's from its first, every
-//!   line's flat inputs and `[[primitive_id]]` 0) but not built;
 //! - turning the viewport transform off, which Vulkan has no switch for and whose meaning on
 //!   Metal is not measured;
 //! - a texture over an IOSurface made with `kIOSurfaceClientDirection`, a key in no header of the
@@ -361,19 +361,18 @@ impl RenderCommandEncoder {
 
     /// `setProvokingVertexMode:` (SPI): the vertex the encoder's draws after the call take each
     /// primitive's flat inputs from, until the next call or the encoder's end, as Metal draws it
-    /// (the M3 Max, macOS 27.0.1): mode 0, Metal's default, and every mode whose top bit is set,
-    /// the first vertex; mode 1 the last, a triangle strip's odd triangle then in Vulkan's
-    /// last-vertex order for its barycentric weights too. An execution of indirect render
-    /// commands takes the first vertex whatever the mode, as on Metal. Mode 1 runs a pipeline of
-    /// the last vertex where the device enables `VK_EXT_provoking_vertex`'s
-    /// `provokingVertexLast` with `provokingVertexModePerPipeline`, and elsewhere draws each
-    /// primitive whose vertex order a pipeline state reads from a list led by its last vertex,
-    /// which a GPU pass writes (the CPU for a direct draw without indices); what that list
-    /// draws otherwise than Metal is announced (`provoking-vertex-lines`,
-    /// `provoking-vertex-unmatched`). Metal draws a mode from 2 to `2^63 - 1` a third way, which
-    /// differs between pipeline states (every line's flat inputs and `[[primitive_id]]` 0), and
-    /// the runtime as mode 1, announced at the call (`provoking-vertex-unmatched`). No mode is
-    /// refused.
+    /// (the M3 Max, macOS 27.0.1): mode 0, Metal's default, the first vertex; mode 1 the last, a
+    /// triangle strip's odd triangle then in Vulkan's last-vertex order for its barycentric
+    /// weights too. An execution of indirect render commands takes the first vertex whatever the
+    /// mode, as on Metal. Mode 1 runs a pipeline of the last vertex where the device enables
+    /// `VK_EXT_provoking_vertex`'s `provokingVertexLast` with `provokingVertexModePerPipeline`,
+    /// and elsewhere draws each primitive whose vertex order a pipeline state reads from a list
+    /// led by its last vertex, which a GPU pass writes (the CPU for a direct draw without
+    /// indices); what that list draws otherwise than Metal is announced
+    /// (`provoking-vertex-lines`, `provoking-vertex-unmatched`). Metal draws every other mode,
+    /// its top bit set or not, a third way, which differs between pipeline states (every line's
+    /// flat inputs and `[[primitive_id]]` 0), and the runtime as mode 1, announced at the call
+    /// (`provoking-vertex-unmatched`). No mode is refused.
     pub fn set_provoking_vertex_mode(&mut self, mode: u64) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| lowering.set_provoking_vertex_mode(mode)),

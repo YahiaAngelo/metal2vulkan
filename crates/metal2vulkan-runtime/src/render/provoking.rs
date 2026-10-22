@@ -3,14 +3,13 @@
 //! Measured on the M3 Max with macOS 27.0.1 (each primitive's flat inputs, `[[primitive_id]]`,
 //! barycentric weights, slice and viewport, solved for its vertices):
 //!
-//! - Mode 0, and every value whose top bit is set, takes a primitive's flat inputs, and the slice
-//!   and viewport its vertex function selects, from its first vertex; mode 1 from its last. The
-//!   values from 2 to `2^63 - 1` draw a third way, which differs between pipeline states (for one,
-//!   a triangle list from its last vertex and an odd strip triangle `(i + 2, i + 1, i)` from `i`;
-//!   for one whose vertex function selects a slice, a triangle from its middle vertex) and draws
-//!   every line's flat inputs and `[[primitive_id]]` 0: the runtime draws them as mode 1,
-//!   announcing it at the call (`Degradation::ProvokingVertexUnmatched`). No value is a
-//!   validation error.
+//! - Mode 0 takes a primitive's flat inputs, and the slice and viewport its vertex function
+//!   selects, from its first vertex; mode 1 from its last. Every other value, its top bit set or
+//!   not, draws a third way, which differs between pipeline states (for one, a triangle list from
+//!   its last vertex and an odd strip triangle `(i + 2, i + 1, i)` from `i`; for one whose vertex
+//!   function selects a slice, a triangle from its middle vertex) and draws every line's flat
+//!   inputs and `[[primitive_id]]` 0: the runtime draws them as mode 1, announcing it at the call
+//!   (`Degradation::ProvokingVertexUnmatched`). No value is a validation error.
 //! - At mode 1 the vertex is a line list's `2j + 1`, a line strip's `j + 1`, a triangle list's
 //!   `3j + 2`, a triangle strip's `j + 2`, and Metal's private types' list primitives' last
 //!   (`DrawPrimitiveType`). The barycentric order is mode 0's but for a triangle strip's odd
@@ -110,11 +109,11 @@ impl Provoking {
 /// How Metal draws `setProvokingVertexMode:`'s `mode` (the module docs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
-    /// The first vertex: 0, and every value whose top bit is set.
+    /// The first vertex: 0.
     First,
     /// The last vertex: 1.
     Last,
-    /// The third way: the values from 2 to `2^63 - 1`.
+    /// The third way: every other value.
     Third,
 }
 
@@ -123,7 +122,6 @@ impl Mode {
         match mode {
             0 => Mode::First,
             1 => Mode::Last,
-            m if m >> 63 == 1 => Mode::First,
             _ => Mode::Third,
         }
     }
@@ -202,7 +200,7 @@ impl RenderLowering {
                 .device()
                 .degrade(Degradation::ProvokingVertexUnmatched, || {
                     (
-                        "setProvokingVertexMode: of a mode from 2 to 2^63 - 1".to_owned(),
+                        "setProvokingVertexMode: of a mode past 1".to_owned(),
                         "Metal draws such a mode a third way, which differs between pipeline \
                          states, and every line's flat inputs and [[primitive_id]] as 0; the \
                          runtime draws it as mode 1"
@@ -338,13 +336,11 @@ impl RenderLowering {
 mod tests {
     use super::Mode;
 
-    /// The values Metal takes: 0 and every value whose top bit is set the first vertex, 1 the
-    /// last, the values between the third way (Metal probes on the M3 Max, macOS 27.0.1).
+    /// The values Metal takes: 0 the first vertex, 1 the last, every other value the third way,
+    /// its top bit set or not (Metal probes on the M3 Max, macOS 27.0.1).
     #[test]
     fn the_modes_are_metal_s_measured_ones() {
-        for mode in [0, 1 << 63, u64::MAX, u64::MAX - 1] {
-            assert_eq!(Mode::of(mode), Mode::First, "{mode:#x}");
-        }
+        assert_eq!(Mode::of(0), Mode::First);
         assert_eq!(Mode::of(1), Mode::Last);
         for mode in [
             2,
@@ -354,7 +350,11 @@ mod tests {
             0x8000_0000,
             0xffff_ffff,
             1 << 32,
+            1 << 62,
             i64::MAX as u64,
+            1 << 63,
+            u64::MAX - 1,
+            u64::MAX,
         ] {
             assert_eq!(Mode::of(mode), Mode::Third, "{mode:#x}");
         }

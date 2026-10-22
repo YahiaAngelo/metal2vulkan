@@ -1896,7 +1896,7 @@ degradations! {
         /// selects it in a synthesized geometry stage (a device without `shaderOutputLayer` or
         /// `shaderOutputViewportIndex`, an index that differs between a primitive's vertices, or
         /// weights the stage writes), from each primitive's first vertex. And on every device, a
-        /// mode from 2 to `2^63 - 1`, which Metal draws a third way that differs between
+        /// mode past 1, its top bit set or not, which Metal draws a third way that differs between
         /// pipeline states (every line's flat inputs and `[[primitive_id]]` 0) and the runtime as
         /// mode 1: announced at the call.
         ProvokingVertexUnmatched = "provoking-vertex-unmatched", Precision,

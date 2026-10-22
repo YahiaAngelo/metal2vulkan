@@ -1723,8 +1723,8 @@ fn passes_and_draws_are_refused_as_metal_refuses_them() {
     assert_eq!(encoder.set_line_width(2.0), apple(AppleOnly::LineWidth));
     // `setPointSize:` changes nothing Metal draws, at every size (088029d75).
     assert_eq!(encoder.set_point_size(4.0), Ok(()));
-    // Every mode is drawn, as Metal draws every one; a mode from 2 to 2^63 - 1, which Metal
-    // draws a third way, as mode 1 (`runtime_lane::provoking` checks the announcement).
+    // Every mode is drawn, as Metal draws every one; a mode past 1, which Metal draws a third
+    // way, as mode 1 (`runtime_lane::provoking` checks the announcement).
     for mode in [0, 1, u64::MAX, 1 << 63, 2, i64::MAX as u64] {
         assert_eq!(encoder.set_provoking_vertex_mode(mode), Ok(()), "{mode:#x}");
     }

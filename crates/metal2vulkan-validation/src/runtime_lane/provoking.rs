@@ -871,8 +871,8 @@ fn draws_take_metal_s_last_vertex_listed_through_a_geometry_stage() {
     run(true, Weights::Withheld);
 }
 
-/// A mode from 2 to `2^63 - 1`, which Metal draws a third way, is drawn as mode 1, bit for bit,
-/// and announced at the call (`provoking-vertex-unmatched`), on the cfg's device.
+/// A mode past 1, its top bit set or not, which Metal draws a third way, is drawn as mode 1, bit
+/// for bit, and announced at the call (`provoking-vertex-unmatched`), on the cfg's device.
 #[test]
 fn the_third_way_is_drawn_as_mode_1_announced() {
     let cache = ScratchCache::new().unwrap();
@@ -896,11 +896,18 @@ fn the_third_way_is_drawn_as_mode_1_announced() {
                 .iter()
                 .filter_map(|m| m.degradation.as_ref())
                 .filter(|notice| notice.degradation == Degradation::ProvokingVertexUnmatched)
-                .filter(|notice| notice.object.contains("a mode from 2 to 2^63 - 1"))
+                .filter(|notice| notice.object.contains("a mode past 1"))
                 .count()
         };
         assert_eq!(third(&messages), 0, "{name}");
-        for mode in [2, 0xffff_ffff, i64::MAX as u64] {
+        for mode in [
+            2,
+            0xffff_ffff,
+            i64::MAX as u64,
+            1 << 63,
+            u64::MAX - 1,
+            u64::MAX,
+        ] {
             for (case, last) in cases.iter().zip(&last) {
                 assert!(at(case, mode) == *last, "{case:?} at {mode:#x} on {name}");
             }
