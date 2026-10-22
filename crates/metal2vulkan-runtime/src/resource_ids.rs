@@ -107,12 +107,17 @@
 //!   20001 next), and the runtime's. A texture or sampler state ID of [`RESERVED_POOL_LIMIT`]
 //!   (2^28) or more, whose pool would hold 2^29 IDs, ended Metal's process (2^27 + 5 was taken,
 //!   2^28 + 5 to 2^32 - 1 ended it, at the reservation or the first allocation after it): refused
-//!   `Invalid`. So is an indirect command buffer ID of [`RECORDS_RESERVED_LIMIT`] (2^30) or more
-//!   (2^30 - 1 was taken, 2^30 + 5 and up ended the process), and a placement of one at
-//!   [`RECORDS_PLACEMENT_LIMIT`] (16384) or more, past Metal's table of them. A reserved indirect
-//!   command buffer ID needs no records, but a buffer whose own ID is 2^23 or more has no records
-//!   address: it is refused `OutOfMemory` as it is made, as a buffer is once every ID below it is
-//!   held. Pipeline state IDs, measured to 1,000,000, are refused nowhere. The texture table
+//!   `Invalid`. An indirect command buffer ID is reserved to 2^31 - 1, and plain IDs are handed
+//!   out past it, each buffer made and run (an M3 Max, macOS 27.0.1: 2^23 + 5, 2^30 + 5 and
+//!   2^31 - 2 gave 2^23 + 6, 2^30 + 6 and 2^31 - 1 next); one of [`RECORDS_RESERVED_LIMIT`] (2^31)
+//!   to 2^32 - 1 never returned there (Metal's pool spins), and is refused `Invalid`. An M4's
+//!   Metal ended the process at the first allocation after a reservation of 2^30 + 5 to 2^31 - 1,
+//!   which the M3 Max, of the same GPU family (Apple9), made and ran: the runtime follows the M3
+//!   Max. A placement of one at [`RECORDS_PLACEMENT_LIMIT`] (16384) or more, past Metal's table
+//!   of them, is refused `Invalid`. A buffer's records lie at its ID's records address, which
+//!   holds the records of any buffer Metal makes below ID 2^26 and 2 GiB of them from it
+//!   (`records_span`): a buffer of more records at such an ID is refused `OutOfMemory` as it is
+//!   made, as one is once every ID below 2^31 is held. Pipeline state IDs, measured to 1,000,000, are refused nowhere. The texture table
 //!   reaches every ID a heap array can (`heap_sets.rs`), so a texture Metal numbers past its
 //!   placement limit is reached as any other. A texture's ID indexes every set-1 array its usage
 //!   can bind it through (sampled where it reads, storage where it writes), so an ID past the least
@@ -212,11 +217,12 @@ const RESERVED_POOL_LIMIT: u64 = 1 << 28;
 /// 16383 placed, 16384 to 65536 ended it).
 pub(super) const PIPELINE_ID_LIMIT: u64 = 16384;
 
-/// The first indirect command buffer ID whose reservation ended Metal's process: its pool would
-/// hold 2^31 IDs or more (on an M4: 2^29 + 5 and 2^30 - 1 were taken and plain
-/// IDs handed out past them; 2^30 + 5 to 2^31 - 1 ended it at the first allocation, 2^31 and up
-/// at the reservation).
-const RECORDS_RESERVED_LIMIT: u64 = 1 << 30;
+/// The first indirect command buffer ID whose reservation Metal never returns from: its pool
+/// would hold 2^32 IDs (on an M3 Max, macOS 27.0.1: 2^23 + 5, 2^29 + 5, 2^30 + 5, 3 * 2^29 and
+/// 2^31 - 2 were taken and plain IDs handed out past them, each buffer made and run; 2^31, 2^31 +
+/// 5 and 2^32 - 1 spun, and 2^32 was dropped). An M4 ended the process at the first allocation
+/// after 2^30 + 5 to 2^31 - 1, and at the reservation from 2^31.
+const RECORDS_RESERVED_LIMIT: u64 = 1 << 31;
 
 /// The first ID an indirect command buffer's placement is refused at: past Metal's table of
 /// them, which Metal writes past (on an M4: 16384 to 50367 made in each of six
@@ -936,12 +942,14 @@ impl Device {
     /// A call holding an ID of 2^32 or more is dropped whole, silently, and leaves the kind's
     /// reservation to a later call, as Metal's is; 0, the null handle, reserves nothing.
     ///
-    /// Refused, reserving nothing: a texture or sampler state ID of 2^28 or more, and an indirect
-    /// command buffer ID of 2^30 or more (`Invalid`, `Problem::ResourceId`), which end Metal's
-    /// process; a texture ID no set-1 array of the device can hold (`Unsupported`, naming the
-    /// limit). An indirect command buffer ID needs no records to be reserved, but a buffer whose
-    /// own ID would be [`RECORDS_ID_LIMIT`](metal2vulkan::bind::indirect_commands::RECORDS_ID_LIMIT)
-    /// or more is refused `OutOfMemory` as it is made: its records would have no address.
+    /// Refused, reserving nothing (`Invalid`, `Problem::ResourceId`): a texture or sampler state
+    /// ID of 2^28 or more, which ends Metal's process, and an indirect command buffer ID of 2^31
+    /// or more, at which Metal's reservation never returns; and a texture ID no set-1 array of
+    /// the device can hold (`Unsupported`, naming the limit). Plain indirect command buffer IDs
+    /// past a reservation are Metal's, to 2^31 - 1; a buffer at an ID of 2^26 or more whose
+    /// records pass
+    /// [`records_span`](metal2vulkan::bind::indirect_commands::records_span) of it (2 GiB) is
+    /// refused `OutOfMemory` as it is made: its records would have no address.
     pub fn reserve_resource_ids(
         &self,
         kind: ResourceIdKind,

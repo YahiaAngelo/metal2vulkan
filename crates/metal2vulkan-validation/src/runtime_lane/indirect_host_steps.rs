@@ -20,7 +20,8 @@
 //!   records may name may encode, and never where none may;
 //! - the blit encoder's copy, reset and optimize act on the commands as they run;
 //! - a kernel reaches the buffer made last with the ID it encodes through, placed or not, and
-//!   none once that one is gone;
+//!   none once that one is gone, and the buffer at an ID a reservation leaves next, in either
+//!   range of records addresses;
 //! - a command buffer's executed-commands handler sees each execution where its records are read:
 //!   in `commit` for the CPU's, in the host step (or on the GPU alone) for the kernel's, with each
 //!   command's state's ability to encode indirect commands and the buffers made resident for
@@ -50,7 +51,7 @@ use metal2vulkan_runtime::{
     Error, EventRef, ExecutedCommands, ExecutedCommandsHandler, ExecutedPipeline, Execution,
     IdPlacement, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor,
     IndirectCommandBufferProblem, IndirectCommandCheckNeeds, Invalid, PipelineOptions, Problem,
-    RecordsRead, ResourceId, ResourceOptions, Size,
+    RecordsRead, ResourceId, ResourceIdKind, ResourceOptions, Size,
 };
 use std::ptr::NonNull;
 use std::sync::{mpsc, Arc, Mutex};
@@ -680,6 +681,35 @@ fn a_kernel_reaches_the_buffer_made_last_with_its_id() {
             "the earlier buffer, written after the placed one is gone"
         );
     });
+}
+
+/// A kernel encoding through the ID a reservation leaves next reaches its buffer's records, and
+/// the commands it writes run, as Metal's do (on an M3 Max, each buffer made past a reservation
+/// of 2^23 + 5, 2^30 + 5 or 2^31 - 2 ran): at an ID below 2^26, whose records lie at
+/// `2^63 + id * 2^36`, the last such ID among them, and from 2^26, at `2^63 + 2^62 + id * 2^31`,
+/// the last ID, 2^31 - 1, among them.
+#[test]
+fn a_kernel_reaches_the_records_of_a_buffer_past_a_reservation() {
+    for reserved in [(1 << 23) + 5, (1 << 26) - 2, (1 << 26) + 5, (1 << 31) - 2] {
+        on_device(|device| {
+            device
+                .reserve_resource_ids(
+                    ResourceIdKind::IndirectCommandBuffer,
+                    &[ResourceId(reserved)],
+                )
+                .unwrap();
+            let setup = Setup::new(device, 2);
+            assert_eq!(setup.icb.gpu_resource_id(), ResourceId(reserved + 1));
+            let queue = device.new_command_queue().unwrap();
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut encoder = command_buffer.compute_command_encoder().unwrap();
+            setup.write(&mut encoder);
+            setup.execute(&mut encoder);
+            encoder.end_encoding().unwrap();
+            complete(&command_buffer);
+            assert_eq!(setup.output(), expected(), "{reserved}");
+        });
+    }
 }
 
 /// The commands run on another queue after an event the writer signals, the executing command

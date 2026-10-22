@@ -14,12 +14,11 @@
 //! the [`RegisteredBuffer`] whose interval holds a buffer's address. The device replay (`replay_preprocess`)
 //! reads the same records on the GPU.
 
-pub use crate::indirect_commands::records_address;
+pub use crate::indirect_commands::{records_address, records_span};
 pub use crate::indirect_commands::{
     Action, AddressError, BindingError, Bindings, BufferBinding, BufferStage, CommandBuffer,
     CommandBufferError, CommandDescriptor, CommandRecord, ComputeDispatch, Inheritance,
     RecordError, RecordField, RecordView, RegisteredBuffer, RenderDraws, ResolvedBindings,
     ResolvedBuffer, StateSource, BINDING_COUNT, COMMAND_BUFFER_HEADER_BYTES, COMMAND_BYTES,
-    RECORDS_ADDRESS_BASE, RECORDS_ADDRESS_SHIFT, RECORDS_ID_LIMIT,
-    THREADGROUP_BUFFER_ARGUMENT_COUNT,
+    RECORDS_ADDRESS_BASE, RECORDS_ID_LIMIT, THREADGROUP_BUFFER_ARGUMENT_COUNT,
 };

@@ -796,10 +796,10 @@ surface! {
         const COMMAND_BUFFER_HEADER_BYTES;
         const COMMAND_BYTES;
         const RECORDS_ADDRESS_BASE;
-        const RECORDS_ADDRESS_SHIFT;
         const RECORDS_ID_LIMIT;
         const THREADGROUP_BUFFER_ARGUMENT_COUNT;
         fn records_address;
+        fn records_span;
     }
     "cache" => metal2vulkan::cache {
         type Hash256;

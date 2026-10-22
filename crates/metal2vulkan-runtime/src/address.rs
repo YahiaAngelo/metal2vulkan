@@ -50,8 +50,9 @@
 //! - **Indirect command buffers' records**: an indirect command buffer's ID is the one Metal's pool
 //!   of their own space hands out, from 1, as Metal's `gpuResourceID` is (an M3 Max and an M4; the
 //!   pool's rule, first 32 IDs, is `resource_ids.rs`'), or the one it is placed at, and its records
-//!   lie at `records_address` of it, `2^63 + id * 2^40`, the address a translated kernel encoding
-//!   through the ID reaches. So the records take no Metal address, as Metal's indirect command
+//!   lie at `records_address` of it (`2^63 + id * 2^36` below 2^26, else
+//!   `2^63 + 2^62 + id * 2^31`, `records_span` bytes each), the address a translated kernel
+//!   encoding through the ID reaches. So the records take no Metal address, as Metal's indirect command
 //!   buffers take none of its buffers' (four of 1024 commands moved no buffer made after them).
 //! - **Records IDs** (the M4 probe, plain Metal). The buffer holds its ID
 //!   ([`RecordsId`]), not its records' memory: the ID is free again once the buffer and every
@@ -70,9 +71,7 @@ use super::exit_guard;
 use super::program_objects::ProgramObject;
 use super::range::RangeAllocator;
 use super::resource_ids::Pool;
-use metal2vulkan::bind::indirect_commands::{
-    records_address, RECORDS_ADDRESS_SHIFT, RECORDS_ID_LIMIT,
-};
+use metal2vulkan::bind::indirect_commands::{records_address, records_span, RECORDS_ID_LIMIT};
 use std::collections::BTreeMap;
 use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -494,11 +493,11 @@ impl AddressSpace {
         self.records.slots.get(&held.id) == Some(&held.serial)
     }
 
-    /// The records of an indirect command buffer of `length` bytes (at most 2^40) holding
-    /// records ID `id`: at `records_address` of it. `None` past either bound.
+    /// The records of an indirect command buffer of `length` bytes (at most `records_span` of
+    /// `id`) holding records ID `id`: at `records_address` of it. `None` past either bound.
     fn records(id: u64, length: u64) -> Option<(GpuAddress, Held)> {
         let size = Self::span(length)?;
-        if size > 1 << RECORDS_ADDRESS_SHIFT || id >= RECORDS_ID_LIMIT {
+        if id >= RECORDS_ID_LIMIT || size > records_span(id) {
             return None;
         }
         let start = records_address(id);

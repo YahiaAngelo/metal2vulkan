@@ -5,7 +5,8 @@
 //! indirect-command object. Its handle load (`memory::provenance::object_handle_load`) reads the
 //! member's field, 8 bytes, as data ([`EncodeStrategy::Word`], a `u64`): a command buffer's word is
 //! its resource ID, Metal's `gpuResourceID`, whose records lie at the guest address
-//! `indirect_commands::records_address` of it, `2^63 + id * 2^40`; a pipeline state's word is the
+//! `indirect_commands::records_address` of it (`2^63 + id * 2^36` below 2^26, else
+//! `2^63 + 2^62 + id * 2^31`); a pipeline state's word is the
 //! template's host-registered token. A handle load is admitted only when every use of its value is
 //! an encoder operand of its class ([`plan_objects`]): the command operand of an encoder operation,
 //! or the pipeline operand of `air.set_pipeline_state_{compute,render}_command`. Any other use (an
@@ -65,7 +66,8 @@ use crate::device::requirements::VkFeature;
 use crate::error::{Capability, Error, Feature, Unsupported};
 use crate::indirect_commands::{
     layout, BufferStage, CommandEncoderOperation, Policy, DYNAMIC_STRIDE, INHERIT_BUFFERS,
-    INHERIT_PIPELINE, RECORDS_ADDRESS_BASE, RECORDS_ADDRESS_SHIFT,
+    INHERIT_PIPELINE, RECORDS_ADDRESS_BASE, RECORDS_ADDRESS_SHIFT, RECORDS_HIGH_BASE,
+    RECORDS_HIGH_ID, RECORDS_HIGH_SHIFT,
 };
 use crate::lower::arith::{Form, Held};
 use crate::lower::emit::EmitCx;
@@ -674,11 +676,26 @@ fn k32(fb: &mut FunctionBuilder<'_>, v: u32) -> BResult<SValue> {
 
 /// The guest address of the records of the command buffer whose word (its resource ID, a `u64`)
 /// is `word`: `indirect_commands::records_address`, the ID shifted up `RECORDS_ADDRESS_SHIFT`
-/// bits past `RECORDS_ADDRESS_BASE`. No records lie at the null ID's.
+/// bits past `RECORDS_ADDRESS_BASE` below `RECORDS_HIGH_ID`, else `RECORDS_HIGH_SHIFT` bits past
+/// `RECORDS_HIGH_BASE`. No records lie at the null ID's.
 fn records(fb: &mut FunctionBuilder<'_>, word: SValue) -> BResult<SValue> {
-    let shift = k64(fb, u64::from(RECORDS_ADDRESS_SHIFT))?;
+    let low = shifted_past(fb, word, RECORDS_ADDRESS_SHIFT, RECORDS_ADDRESS_BASE)?;
+    let high = shifted_past(fb, word, RECORDS_HIGH_SHIFT, RECORDS_HIGH_BASE)?;
+    let high_id = k64(fb, RECORDS_HIGH_ID)?;
+    let is_low = fb.binary(BinOp::ULessThan, word, high_id)?;
+    fb.select(is_low, low, high)
+}
+
+/// `word` (a `u64`) shifted up `shift` bits, past `base`.
+fn shifted_past(
+    fb: &mut FunctionBuilder<'_>,
+    word: SValue,
+    shift: u32,
+    base: u64,
+) -> BResult<SValue> {
+    let shift = k64(fb, u64::from(shift))?;
     let at = fb.binary(BinOp::ShiftLeftLogical, word, shift)?;
-    let base = k64(fb, RECORDS_ADDRESS_BASE)?;
+    let base = k64(fb, base)?;
     fb.binary(BinOp::BitwiseOr, at, base)
 }
 

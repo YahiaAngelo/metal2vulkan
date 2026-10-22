@@ -2825,7 +2825,8 @@ each item named states the rule in full.
   buffer resident has not completed.
 - **Resource IDs are numbered as Metal numbers them**: textures', sampler states', pipeline states'
   and indirect command buffers' IDs follow Metal's allocator, around reservations
-  (`Device::reserve_resource_ids`) too. IDs that end Metal's process are refused.
+  (`Device::reserve_resource_ids`) too. IDs that end Metal's process, or whose reservation Metal
+  never returns from, are refused.
 - **The device counts the sampler IDs it holds** (`Device::sampler_ids_live`,
   `Device::sampler_id_pool_size`), runtime extensions for a consumer that models Metal's sampler
   heap.

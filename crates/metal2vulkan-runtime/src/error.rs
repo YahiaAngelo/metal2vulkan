@@ -1138,6 +1138,18 @@ pub enum RuntimeGap {
         /// The device's `max_buffer_length`.
         max_buffer_length: u64,
     },
+    /// An indirect command buffer at a resource ID of 2^26 or more (one a reservation leaves
+    /// next) whose records pass the 2 GiB its ID's records address holds
+    /// (`bind::indirect_commands::records_span`): the runtime places each ID's records where a
+    /// translated kernel finds them from the ID alone. Metal makes such a buffer.
+    IndirectCommandBufferRecordsPastIdSpan {
+        /// The buffer's resource ID.
+        id: u64,
+        /// The buffer's commands.
+        count: u64,
+        /// The bytes of records the ID's address holds.
+        span: u64,
+    },
     /// What indirect command buffers lack of their render commands: a command whose mesh draw's
     /// object function has threadgroup memory arguments, whose lengths (the command's
     /// `setObjectThreadgroupMemoryLength:atIndex:` or the encoder's) are not measured; an

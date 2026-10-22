@@ -41,10 +41,11 @@ use metal2vulkan_runtime::{
     BlitOption, Buffer, BufferContents, BufferDescriptor, CommandBuffer, CommandBufferError,
     CommandBufferStatus, CommandQueue, ComputePipelineState, Deallocator, DebugMessage,
     Degradation, Device, DeviceOptions, Error, EventRef, ExecutedPipeline, Fence, Heap,
-    HeapDescriptor, HeapType, HostMemory, IdPlacement, IndirectCommandBufferDescriptor, Invalid,
-    IoSurfacePlane, KeepAlive, MemoryKind, MessageSeverity, MessageSink, Origin, Problem, Region,
-    RenderPassDescriptor, ResourceId, ResourceIdKind, ResourceOptions, SamplerState,
-    SamplerStateOptions, SharedEvent, Size, Texture, TextureDescriptor, TextureSwizzleChannels,
+    HeapDescriptor, HeapType, HostMemory, IdPlacement, IndirectCommandBuffer,
+    IndirectCommandBufferDescriptor, Invalid, IoSurfacePlane, KeepAlive, MessageSeverity,
+    MessageSink, Origin, Problem, Region, RenderPassDescriptor, ResourceId, ResourceIdKind,
+    ResourceOptions, SamplerState, SamplerStateOptions, SharedEvent, Size, Texture,
+    TextureDescriptor, TextureSwizzleChannels,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -2279,8 +2280,9 @@ fn a_queue_or_buffer_made_before_a_texture_reservation_keeps_the_pool_s_first_ra
 
 /// Plain IDs after a reservation are the ones Metal hands out, for textures, sampler states,
 /// pipeline states and indirect command buffers, and an ID given back joins its free neighbours
-/// (each sequence measured on an M4): only a kind's first reservation with an ID counts, and IDs
-/// past Metal's placement limit are taken.
+/// (each sequence measured on an M4, those of indirect command buffers past 2^23 on an M3 Max):
+/// only a kind's first reservation with an ID counts, and IDs past Metal's placement limit are
+/// taken.
 #[test]
 fn plain_ids_after_a_reservation_are_metal_s() {
     let plain = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 4, 4, false);
@@ -2378,14 +2380,14 @@ fn plain_ids_after_a_reservation_are_metal_s() {
         let state = super::indirect_command_buffers::render_template_state(device, true);
         assert_eq!(state.gpu_resource_id(), ResourceId(18));
     });
-    // Refused, reserving nothing: a texture or sampler state ID of 2^28 or more, and an indirect
-    // command buffer ID of 2^30 or more, which ended Metal's process (`x_0_2p28p5`,
-    // `x_1_2p28p5`).
+    // Refused, reserving nothing: a texture or sampler state ID of 2^28 or more, which ended
+    // Metal's process (`x_0_2p28p5`, `x_1_2p28p5`), and an indirect command buffer ID of 2^31 or
+    // more, at which Metal's reservation never returned (an M3 Max).
     on_device(|device, _| {
         let refused = [
             (ResourceIdKind::Texture, 1 << 28),
             (ResourceIdKind::SamplerState, 1 << 28),
-            (ResourceIdKind::IndirectCommandBuffer, 1 << 30),
+            (ResourceIdKind::IndirectCommandBuffer, RECORDS_ID_LIMIT),
         ];
         for (kind, limit) in refused {
             let error = device
@@ -2405,18 +2407,24 @@ fn plain_ids_after_a_reservation_are_metal_s() {
             ResourceId(11)
         );
     });
-    // An indirect command buffer ID needs no records to be reserved: 2^23 + 5 is taken, and the
-    // buffer Metal numbers past it (2^23 + 6) has no records address,
-    // refused `OutOfMemory` as it is made; after 2^23 alone, 1 is handed out (`x_5_2p23`).
+    // Plain indirect command buffer IDs past a reservation are the ones Metal hands out, each
+    // buffer made (an M3 Max, macOS 27.0.1): 2^23 + 5, 16,000,000, 2^30 + 5 and 3 * 2^29 give the
+    // next IDs, 2^31 - 2 gives 2^31 - 1, then 1, and 2^23, 2^30 - 1, 2^30 and 2^31 - 1 give 1
+    // (`x_5_2p23`).
     let mut icb = IndirectCommandBufferDescriptor::new();
     icb.command_types = IndirectCommandType::CONCURRENT_DISPATCH;
-    for (reserved, made) in [
-        (
-            RECORDS_ID_LIMIT + 5,
-            Err(Error::OutOfMemory(MemoryKind::Device)),
-        ),
-        (RECORDS_ID_LIMIT, Ok(ResourceId(1))),
-    ] {
+    let made: [(u64, &[u64]); 9] = [
+        ((1 << 23) + 5, &[(1 << 23) + 6, (1 << 23) + 7]),
+        (16_000_000, &[16_000_001, 16_000_002, 16_000_003]),
+        (1 << 23, &[1, 2]),
+        ((1 << 30) - 1, &[1]),
+        (1 << 30, &[1]),
+        ((1 << 30) + 5, &[(1 << 30) + 6]),
+        (3 << 29, &[(3 << 29) + 1]),
+        (RECORDS_ID_LIMIT - 2, &[RECORDS_ID_LIMIT - 1, 1]),
+        (RECORDS_ID_LIMIT - 1, &[1, 2]),
+    ];
+    for (reserved, ids) in made {
         on_device(|device, _| {
             device
                 .reserve_resource_ids(
@@ -2424,8 +2432,16 @@ fn plain_ids_after_a_reservation_are_metal_s() {
                     &[ResourceId(reserved)],
                 )
                 .unwrap();
-            let buffer = device.new_indirect_command_buffer(&icb, 1, ResourceOptions::shared());
-            assert_eq!(buffer.map(|b| b.gpu_resource_id()), made, "{reserved}");
+            let buffers: Vec<IndirectCommandBuffer> = ids
+                .iter()
+                .map(|_| {
+                    device
+                        .new_indirect_command_buffer(&icb, 1, ResourceOptions::shared())
+                        .unwrap()
+                })
+                .collect();
+            let got: Vec<u64> = buffers.iter().map(|b| b.gpu_resource_id().0).collect();
+            assert_eq!(got, ids, "{reserved}");
         });
     }
 }

@@ -85,6 +85,7 @@ use super::{
     CpuCacheMode, Device, GpuAddress, HazardTrackingMode, PurgeableState, ResourceOptions,
     StorageMode,
 };
+use metal2vulkan::bind::indirect_commands::records_span;
 use metal2vulkan::bind::indirect_commands::{
     Action, BufferBinding, BufferStage, CommandBuffer, CommandBufferError, CommandDescriptor,
     CommandRecord, ComputeDispatch, Inheritance, RecordError, RecordField, RecordView, RenderDraws,
@@ -494,9 +495,11 @@ impl Device {
     /// compute types (a buffer of compute commands), more than 31 buffers or lengths. A placement
     /// at 16384 or more is refused `Invalid` (`Problem::ResourceId`): Metal writes past its table
     /// of IDs there. Refused `NotImplemented`: records past one buffer of the device's
-    /// `max_buffer_length` (`IndirectCommandBufferPastMaxBufferLength`). The device's memory can
-    /// refuse it too (`OutOfMemory`), and so can the IDs: a buffer whose own ID would be 2^23 or
-    /// more has no records address.
+    /// `max_buffer_length` (`IndirectCommandBufferPastMaxBufferLength`), and records past the
+    /// 2 GiB the ID's records address holds where the buffer's own ID is 2^26 or more, one a
+    /// reservation leaves next (`IndirectCommandBufferRecordsPastIdSpan`, `records_span`). The
+    /// device's memory can refuse it too (`OutOfMemory`), and so can the IDs, once every ID below
+    /// 2^31 is held.
     pub fn new_indirect_command_buffer(
         &self,
         descriptor: &IndirectCommandBufferDescriptor,
@@ -543,6 +546,17 @@ impl Device {
             device: self.clone(),
             held,
         };
+        // An ID past a reservation may hold fewer records than Metal makes (`records_span`).
+        let span = records_span(held.id);
+        if length > span {
+            return Err(Error::NotImplemented(
+                RuntimeGap::IndirectCommandBufferRecordsPastIdSpan {
+                    id: held.id,
+                    count: max_count,
+                    span,
+                },
+            ));
+        }
         let identifier = UniqueIdentifier::buffer(
             &self.shared().identifiers,
             metal_allocated_size(descriptor, size),
