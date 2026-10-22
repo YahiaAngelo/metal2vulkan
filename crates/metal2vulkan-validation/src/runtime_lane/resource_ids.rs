@@ -38,7 +38,13 @@ use metal2vulkan::metal::{
     SamplerMinMagFilter, TextureType, TextureUsage,
 };
 use metal2vulkan_runtime::{
-    BlitOption, Buffer, BufferContents, BufferDescriptor, CommandBuffer, CommandBufferError, CommandBufferStatus, CommandQueue, ComputePipelineState, Deallocator, DebugMessage, Degradation, Device, DeviceOptions, Error, EventRef, ExecutedPipeline, Fence, Heap, HeapDescriptor, HeapType, HostMemory, IdPlacement, IndirectCommandBuffer, IndirectCommandBufferDescriptor, Invalid, IoSurfacePlane, KeepAlive, MemoryKind, MessageSeverity, MessageSink, Origin, Problem, Region, RenderPassDescriptor, ResourceId, ResourceIdKind, ResourceOptions, SamplerState, SamplerStateOptions, SharedEvent, Size, Texture, TextureDescriptor, TextureSwizzleChannels,
+    BlitOption, Buffer, BufferContents, BufferDescriptor, CommandBuffer, CommandBufferStatus,
+    CommandQueue, ComputePipelineState, Deallocator, DebugMessage, Degradation, Device,
+    DeviceOptions, Error, EventRef, ExecutedPipeline, Fence, Heap, HeapDescriptor, HeapType,
+    HostMemory, IdPlacement, IndirectCommandBuffer, IndirectCommandBufferDescriptor, Invalid,
+    IoSurfacePlane, KeepAlive, MessageSeverity, MessageSink, Origin, Problem, Region,
+    RenderPassDescriptor, ResourceId, ResourceIdKind, ResourceOptions, SamplerState,
+    SamplerStateOptions, SharedEvent, Size, Texture, TextureDescriptor, TextureSwizzleChannels,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, Ordering};
