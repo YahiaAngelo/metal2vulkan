@@ -1970,9 +1970,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   gives the older release's: it can stop or refuse a texture or a dispatch the host's Metal makes,
   and never makes one the older release stops.
 - `metal2vulkan-degrade-unreached-tiles-rewritten` (precision). `UnreachedTilesRewritten`: A render
-  pass that loads a color attachment of an extended-range or padded 10-bit format (`BGR10_XR`,
-  `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and their sRGB twins, and
-  `RGB10A2Unorm_sRGB`), or under
+  pass that loads a color attachment of an extended-range, padded 10-bit or bfloat format
+  (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and their sRGB twins,
+  `RGB10A2Unorm_sRGB`, `R16Bfloat`, `RG16Bfloat` and `RGBA16Bfloat`), or under
   `TileStorePolicy::Exact` of a signed normalized format or `RGB9E5Float`, stores it and draws,
   whose load pass rewrites every 32 x 32 tile of its render area: Metal's pass rewrites
   only the tiles a draw's primitives reach, and every tile only where a color attachment of the pass
@@ -1981,7 +1981,8 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   (BGR10_XR's bits 30 and 31 ones, BGRA10_XR's low six bits of each field and the two-plane color
   word's top two bits zeros) and BGRA10_XR alpha codes clamped to [384, 894], so an out-of-range raw
   alpha reads back changed, a padded word's low six bits zeroed (an sRGB twin's code moved through
-  Metal's table) and, under the exact tile store, a signed normalized minimum code raised and an
+  Metal's table), a bfloat code moved through half (out of half's range to an infinity or zero, a
+  NaN to 0x7fc0) and, under the exact tile store, a signed normalized minimum code raised and an
   RGB9E5Float word normalized; the tiles a draw reaches are Metal's.
 - `metal2vulkan-degrade-zero-layer-map-after-release` (precision). `ZeroLayerMapAfterRelease`: A
   draw in a render pass over a rasterization-rate map of no layers that was made after the device

@@ -1413,9 +1413,10 @@ degradations! {
              dispatch of another dispatch type ends the process), the device gives the older \
              release's: it can stop or refuse a texture or a dispatch the host's Metal makes, and \
              never makes one the older release stops";
-        /// A render pass that loads a color attachment of an extended-range or padded 10-bit
-        /// format (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and
-        /// their sRGB twins, and `RGB10A2Unorm_sRGB`), or under
+        /// A render pass that loads a color attachment of an extended-range, padded 10-bit or
+        /// bfloat format (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`,
+        /// `RG10Unorm_X12` and their sRGB twins, `RGB10A2Unorm_sRGB`, `R16Bfloat`, `RG16Bfloat`
+        /// and `RGBA16Bfloat`), or under
         /// [`metal2vulkan::device::TileStorePolicy::Exact`] of a
         /// signed normalized format or `RGB9E5Float`, stores it and draws, whose load pass
         /// (`render/unused_bits_load.rs`) rewrites every 32 x 32 tile of its render area: Metal's
@@ -1429,9 +1430,10 @@ degradations! {
              canonical (BGR10_XR's bits 30 and 31 ones, BGRA10_XR's low six bits of each field \
              and the two-plane color word's top two bits zeros) and BGRA10_XR alpha codes \
              clamped to [384, 894], so an out-of-range raw alpha reads back changed, a padded \
-             word's low six bits zeroed (an sRGB twin's code moved through Metal's table) and, \
-             under the exact tile store, a signed normalized minimum code raised and an \
-             RGB9E5Float word normalized; the tiles a draw reaches are Metal's";
+             word's low six bits zeroed (an sRGB twin's code moved through Metal's table), a \
+             bfloat code moved through half (out of half's range to an infinity or zero, a NaN \
+             to 0x7fc0) and, under the exact tile store, a signed normalized minimum code raised \
+             and an RGB9E5Float word normalized; the tiles a draw reaches are Metal's";
         /// A draw in a render pass over a rasterization-rate map of no layers that was made after
         /// the device released a map of one or more layers, or reset from one of layers
         /// (`rate_mapped_pass.rs`). The draw
