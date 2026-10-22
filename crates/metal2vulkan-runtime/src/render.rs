@@ -1435,9 +1435,9 @@ impl LastRetained {
 
     /// Retain into `core` the samplers a draw's bind named, each unless an earlier draw of the
     /// encoder retained it: by another reference to it, the last first, so they go in their
-    /// order (`retained.rs`).
-    fn retain_samplers(&mut self, core: &mut EncoderCore, samplers: Vec<Arc<OwnedSampler>>) {
-        for sampler in samplers.into_iter().rev() {
+    /// order (`retained.rs`). `samplers` is left empty, its storage kept.
+    fn retain_samplers(&mut self, core: &mut EncoderCore, samplers: &mut Vec<Arc<OwnedSampler>>) {
+        for sampler in samplers.drain(..).rev() {
             if !self.samplers.holds(&sampler, Arc::ptr_eq) {
                 core.retain_shared(sampler.clone());
                 self.samplers.keep(sampler);
@@ -8030,19 +8030,20 @@ impl RenderLowering {
         // Set 0's writes and the heap set's, in the last draw's storage (`LiveBind::writes`),
         // emptied as the draw returns: their keepers hold nothing past it.
         let mut writes = Emptied::new(&mut live.writes);
+        // The samplers they name, in the last draw's storage (`LiveBind::samplers`), emptied as
+        // the draw returns likewise: its encoder retains them as it records.
+        let mut samplers = Emptied::new(&mut live.samplers);
         let objects = Arc::clone(variant.objects());
         // Set 1 the device's (written below, once nothing refuses).
         let bound = {
             let mut state = self.core.command_buffer().state();
             let memo = Some(&mut self.bind_memo);
-            binding::bind(
+            binding::bind_into(
                 call,
                 &device,
                 &mut state,
-                &plan,
-                &command,
-                &tables,
-                (memo, &mut writes),
+                (&plan, &command, &tables),
+                (memo, &mut writes, &mut samplers),
             )?
         };
         // The draw's push bytes, filled in place, over the last draw's (`LiveBind::pushes`).
@@ -8967,7 +8968,7 @@ impl RenderLowering {
             self.core.retain_shared(buffer.held());
         }
         self.last_retained
-            .retain_samplers(&mut self.core, bound.samplers);
+            .retain_samplers(&mut self.core, &mut samplers);
         if let Some(unlisted) = unlisted {
             heap_sets::degrade_unlisted(&device, unlisted, "a render pipeline state's draws");
             // A host step's draw, which no commit lists again, fails its command buffer.

@@ -68,6 +68,7 @@ use super::argument_table::Stamp;
 use super::binding::{CommandUses, PushWrite, SetWrite, Write};
 use super::device::lock;
 use super::noted_apart::NotedApart;
+use super::sampler::OwnedSampler;
 use super::work_counts::Counters;
 
 /// The most bind states a device keeps for its render encoders to start from: one per encoder
@@ -192,6 +193,9 @@ pub(super) struct LiveBind {
     pub(super) offsets: Vec<u32>,
     /// The last draw's vertex buffers, `(binding, buffer, offset, stride)`, kept likewise.
     pub(super) vertex_buffers: Vec<(u32, vk::Buffer, u64, u64)>,
+    /// The storage of the samplers the last draw's writes named (`binding::bind_into`), kept
+    /// likewise and empty between draws: its encoder retains them as the draw records.
+    pub(super) samplers: Vec<Arc<OwnedSampler>>,
 }
 
 /// A bind state a [`LiveBind`] set aside, with its shape, its listing's count and what its stage

@@ -1368,7 +1368,11 @@ impl<K: Copy + Ord + Hash> EncoderUses<K> {
         let mut summaries: Vec<Summary<K>> = parts
             .into_iter()
             .map(|part| {
-                let mut uses: Vec<Use<K>> = part.tracked.into_values().flatten().collect();
+                // Sized once: a flattened map's iterator tells no length, which would grow the
+                // vector use by use.
+                let count = part.tracked.values().map(Few::len).sum();
+                let mut uses: Vec<Use<K>> = Vec::with_capacity(count);
+                uses.extend(part.tracked.into_values().flatten());
                 uses.sort_by_key(|used| used.key);
                 Summary {
                     uses,

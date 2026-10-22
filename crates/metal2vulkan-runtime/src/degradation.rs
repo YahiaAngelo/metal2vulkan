@@ -4146,7 +4146,7 @@ impl HandedToMetal {
 
     /// Whether color attachment `index`, `color`, is stored as Metal's.
     pub(super) fn color(&self, index: usize, color: &ColorTarget) -> bool {
-        let pick = |h: &HandedDontCare| h.colors.get(index).copied().unwrap_or(false);
+        let pick = |h: &HandedDontCare| index < 32 && h.colors & 1 << index != 0;
         self.stores(&pick, color.load, color.store)
     }
 }

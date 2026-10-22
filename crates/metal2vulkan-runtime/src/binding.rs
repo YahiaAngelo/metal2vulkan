@@ -579,11 +579,37 @@ pub(super) fn bind(
     plan: &BindingPlan,
     command: &Command<'_>,
     tables: &Tables<'_>,
-    (mut memo, writes): (Option<&mut BindMemo>, &mut Vec<Write>),
+    (memo, writes): (Option<&mut BindMemo>, &mut Vec<Write>),
+) -> Result<Bound, Error> {
+    let mut samplers = Vec::new();
+    let mut bound = bind_into(
+        call,
+        device,
+        state,
+        (plan, command, tables),
+        (memo, writes, &mut samplers),
+    )?;
+    bound.samplers = samplers;
+    Ok(bound)
+}
+
+/// [`bind`]'s, the samplers the writes name in `samplers`, emptied first (its [`Bound`]'s
+/// `samplers` left empty), so a caller that keeps the vector fills each command's into the last
+/// one's storage (a draw's, `LiveBind::samplers`).
+pub(super) fn bind_into(
+    call: &'static str,
+    device: &Device,
+    state: &mut State,
+    (plan, command, tables): (&BindingPlan, &Command<'_>, &Tables<'_>),
+    (mut memo, writes, samplers): (
+        Option<&mut BindMemo>,
+        &mut Vec<Write>,
+        &mut Vec<Arc<OwnedSampler>>,
+    ),
 ) -> Result<Bound, Error> {
     writes.clear();
     writes.reserve(plan.descriptors.len());
-    let mut samplers = Vec::new();
+    samplers.clear();
     // The sampler tables, whose regions the command buffer writes again as it commits.
     let sampler_keys = plan.sampler_tables();
     let mut sampler_tables = Vec::with_capacity(sampler_keys.len());
@@ -635,7 +661,7 @@ pub(super) fn bind(
                     tables,
                     write,
                     ty,
-                    (&mut samplers, memo.as_deref_mut()),
+                    (samplers, memo.as_deref_mut()),
                 )?),
             },
         };
@@ -735,7 +761,7 @@ pub(super) fn bind(
     }
     Ok(Bound {
         holes,
-        samplers,
+        samplers: Vec::new(),
         sampler_tables,
     })
 }
