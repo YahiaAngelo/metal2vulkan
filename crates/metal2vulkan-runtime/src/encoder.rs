@@ -187,8 +187,15 @@ impl Segment {
 }
 
 /// The `VkCommandBuffer` an encoder goes on in after a segment, begun
-/// ([`EncoderCore::continuation`]).
-pub(super) struct Continuation(vk::CommandBuffer);
+/// ([`EncoderCore::continuation`]), and whether it goes on inside a predicated loop's laying.
+pub(super) struct Continuation(vk::CommandBuffer, Laid);
+
+/// Whether a [`Continuation`] goes on inside a predicated loop's laying (`predication.rs`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Laid {
+    Outside,
+    Inside,
+}
 
 /// A segment recorded: its `VkCommandBuffer`s, ended, in order, and what it used and ran. One,
 /// but for a render pass that executes render commands whose first instance recorded inline
@@ -1638,16 +1645,24 @@ impl EncoderCore {
     /// ([`defer`](Self::defer)), allocated from the command buffer's pool and begun. Left unused
     /// on a refusal, it goes with the pool.
     pub(super) fn continuation(&self) -> Result<Continuation, Error> {
-        let next = {
-            let command_buffer = &self.open.command_buffer;
+        let command_buffer = &self.open.command_buffer;
+        let (next, laying) = {
             let mut state = command_buffer.state();
-            // Work left apart inside a predicated loop's laying keeps it from running again alone
-            // (`predication.rs`).
-            state.predication.break_laying();
-            command_buffer.allocate_raw(&mut state)?
+            let next = command_buffer.allocate_raw(&mut state)?;
+            (next, state.predication.laying())
         };
-        self.begin(next, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
-        Ok(Continuation(next))
+        if !laying {
+            self.begin(next, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
+            return Ok(Continuation(next, Laid::Outside));
+        }
+        // Inside a predicated loop's laying, which its check may submit again
+        // (`command_buffer/rerun.rs`): begun to be submitted again, behind a barrier from
+        // everything before it, the work left apart before it among them.
+        self.begin(next, vk::CommandBufferUsageFlags::empty())?;
+        // SAFETY: just begun, and only this encoder records it.
+        unsafe { Barrier::everything().record(self.device().shared().vk(), next) };
+        command_buffer.state().predication.laid_into(next);
+        Ok(Continuation(next, Laid::Inside))
     }
 
     /// End the `VkCommandBuffer` the encoder records into and go on in a new one, begun to be
@@ -1740,6 +1755,11 @@ impl EncoderCore {
         }
         self.raw = next.0;
         self.recorded = false;
+        // Inside a predicated loop's laying, the work goes among its pieces, before the command
+        // buffer the encoder goes on in (`command_buffer/rerun.rs`).
+        if next.1 == Laid::Inside {
+            (self.open.command_buffer.state().predication).laid_apart(&work);
+        }
         let host = work.gpu_written();
         if host {
             self.uses.split();

@@ -1551,6 +1551,72 @@ fn every_dispatch_form_runs_in_each_pass() {
     });
 }
 
+/// Every dispatch form inside a loop that runs past its copies runs in each pass: the forms of
+/// [`every_dispatch_form_runs_as_its_block_says`], whose indirect dispatches of `prd_mark_group`
+/// and whose executions host steps record apart from the loop's command buffers, in a DoWhile of
+/// 100 passes (64 copies, run again once), and in a DoWhile of 20 passes, then one more, inside a
+/// DoWhile of two (16 copies of the inner loop). Each run again records the work apart again where
+/// it lies, as its first run did.
+#[test]
+fn every_dispatch_form_runs_in_each_pass_past_the_copies() {
+    on_device(|device| {
+        let queue = device.new_command_queue().unwrap();
+        let base = Forms::command_tag(2) - 6;
+        let again = || device.work_counts().predicated_loop_runs_again;
+        // One DoWhile of 100 passes.
+        let marks = Marks::new(device);
+        let forms = Forms::new(device, &marks);
+        let before = again();
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        forms.resident(&mut encoder, &marks);
+        encoder.encode_start_do_while().unwrap();
+        forms.encode(&mut encoder, &marks, 2);
+        marks.mark(&mut encoder, 0);
+        let end = encoder.encode_end_do_while(Some(&marks.log), 0, LESS, 100);
+        assert_eq!(end, Ok(true));
+        encoder.end_encoding().unwrap();
+        complete(&command_buffer);
+        let mut counts = vec![0; LOG_WORDS];
+        counts[0] = 100;
+        for tag in base..base + FORMS {
+            counts[tag as usize] = 100;
+        }
+        assert_eq!(marks.counts(), counts);
+        assert_eq!(
+            again() - before,
+            1,
+            "the 100 passes ran again past 64 copies"
+        );
+        // An inner DoWhile of 20 passes, then of one, in a DoWhile of two.
+        let marks = Marks::new(device);
+        let forms = Forms::new(device, &marks);
+        let before = again();
+        let command_buffer = queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.compute_command_encoder().unwrap();
+        forms.resident(&mut encoder, &marks);
+        encoder.encode_start_do_while().unwrap();
+        encoder.encode_start_do_while().unwrap();
+        forms.encode(&mut encoder, &marks, 2);
+        marks.mark(&mut encoder, 0);
+        let end = encoder.encode_end_do_while(Some(&marks.log), 0, LESS, 20);
+        assert_eq!(end, Ok(true));
+        marks.mark(&mut encoder, 1);
+        let end = encoder.encode_end_do_while(Some(&marks.log), 4, LESS, 2);
+        assert_eq!(end, Ok(true));
+        encoder.end_encoding().unwrap();
+        complete(&command_buffer);
+        let mut counts = vec![0; LOG_WORDS];
+        counts[0] = 21;
+        counts[1] = 2;
+        for tag in base..base + FORMS {
+            counts[tag as usize] = 21;
+        }
+        assert_eq!(marks.counts(), counts);
+        assert!(again() > before, "the inner loop ran past its 16 copies");
+    });
+}
+
 /// A loop that runs past the copies the runtime lays down (64, or 16 inside another loop) runs on
 /// as Metal's runs: its check runs its laying again until it ends, as many times as the passes past
 /// the copies need (counted), and its command buffer completes with every pass Metal ran (a While
@@ -1695,16 +1761,14 @@ fn a_loop_run_again_repeats_nothing_before_it() {
 
 /// A loop without bound (`while (log[1] != 1) mark 0`, log[1] staying 0) runs on, its laying run
 /// again and again, as Metal's runs (an M3 Max with macOS 27.0.1 ran one 180 s with no error),
-/// while the program holds a handle of its queue (one of two let go changes nothing); once it
-/// holds none, the check stops and the command buffer fails
-/// (`CommandBufferError::PredicatedLoopLetGo`), nothing after the loop run, its runs again
-/// stopped.
+/// after the program let go of its queue, and of its command buffer too: Metal's GPU runs it on
+/// until the process ends, the command buffer never completing. The process's exit, after the
+/// test, ends it.
 #[test]
-fn a_loop_without_bound_stops_once_its_queue_is_let_go() {
+fn a_loop_without_bound_runs_on_after_its_queue_is_let_go() {
     on_device(|device| {
         let marks = Marks::new(device);
         let queue = device.new_command_queue().unwrap();
-        let held = queue.clone();
         let command_buffer = queue.command_buffer().unwrap();
         let mut encoder = command_buffer.compute_command_encoder().unwrap();
         encoder
@@ -1736,16 +1800,8 @@ fn a_loop_without_bound_stops_once_its_queue_is_let_go() {
             CommandBufferStatus::Completed | CommandBufferStatus::Error
         );
         assert!(running, "{:?}", command_buffer.status());
-        drop(held);
-        command_buffer.wait_until_completed_for(WAIT).unwrap();
-        assert_eq!(command_buffer.status(), CommandBufferStatus::Error);
-        assert_eq!(
-            command_buffer.error(),
-            Some(CommandBufferError::PredicatedLoopLetGo)
-        );
-        let stopped = again();
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        assert_eq!(again(), stopped, "its runs again stopped");
+        drop(command_buffer);
+        ran(9);
         assert_eq!(marks.counts()[2], 0, "nothing after the loop ran");
     });
 }

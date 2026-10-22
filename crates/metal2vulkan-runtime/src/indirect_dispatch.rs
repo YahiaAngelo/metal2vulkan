@@ -425,6 +425,9 @@ pub(super) struct FlatPreprocess {
     push: [u8; FlatDispatchModule::PUSH_BYTES as usize],
     /// The device address of the region record the variant's dispatch reads.
     pub(super) record: u64,
+    /// It lies in a predicated loop's laying, which its check may submit again
+    /// (`command_buffer/rerun.rs`): its gated recording zeroes the variant's command first.
+    rerun: bool,
 }
 
 impl FlatPreprocess {
@@ -439,12 +442,13 @@ impl FlatPreprocess {
         let mut bytes = [0u8; FlatIndirect::SCRATCH_BYTES as usize];
         let inputs = FlatIndirect::INPUTS_OFFSET as usize;
         bytes[inputs..].copy_from_slice(&indirect.inputs());
-        let (scratch, status) = {
+        let (scratch, status, rerun) = {
             let mut state = core.command_buffer().state();
             let scratch = state
                 .uploads
                 .upload(&device, &bytes, FlatIndirect::SCRATCH_BYTES)?;
-            (scratch, state.status_address(&device)?)
+            let rerun = state.predication.laying();
+            (scratch, state.status_address(&device)?, rerun)
         };
         let (Some(address), Some(status)) = (scratch.device_address(), status) else {
             return Err(internal(
@@ -456,13 +460,15 @@ impl FlatPreprocess {
             push: FlatDispatchModule::push_constants(address, status),
             record: address + FlatIndirect::RECORD_OFFSET,
             scratch,
+            rerun,
         })
     }
 
     /// Record the preprocess, then the barrier from its writes to the variant's dispatch, which
     /// reads the command and the record. Inside a block of command predication it runs from its
     /// `gate` (`predication.rs`): where the block skips, it runs nothing, and the variant's command
-    /// stays zero.
+    /// stays zero, as the arena wrote it; inside a loop's laying, which may run again after a run
+    /// that wrote it, the recording zeroes it first.
     ///
     /// # Safety
     ///
@@ -478,6 +484,16 @@ impl FlatPreprocess {
         // SAFETY: the caller's contract; the kernel is the device's, and the scratch lies in the
         // command buffer's arena, which lives until it completes.
         unsafe {
+            if gate.is_some() && self.rerun {
+                raw.cmd_fill_buffer(
+                    command_buffer,
+                    self.scratch.raw(),
+                    self.scratch.offset() + FlatIndirect::COMMAND_OFFSET,
+                    std::mem::size_of::<vk::DispatchIndirectCommand>() as u64,
+                    0,
+                );
+                Barrier::after_fill().record(raw, command_buffer);
+            }
             raw.cmd_bind_pipeline(
                 command_buffer,
                 vk::PipelineBindPoint::COMPUTE,

@@ -93,6 +93,19 @@ pub(super) struct Prepared {
 }
 
 impl Deferred {
+    /// Whether `self` and `other` are the same work: one segment's.
+    pub(super) fn same(&self, other: &Deferred) -> bool {
+        match (self, other) {
+            (Deferred::Execute(a), Deferred::Execute(b)) => Arc::ptr_eq(a, b),
+            (Deferred::Dispatch(a), Deferred::Dispatch(b)) => Arc::ptr_eq(a, b),
+            (Deferred::SparseScrub(a), Deferred::SparseScrub(b)) => Arc::ptr_eq(a, b),
+            (Deferred::RenderPass(a), Deferred::RenderPass(b)) => Arc::ptr_eq(a, b),
+            (Deferred::Pending(a), Deferred::Pending(b)) => Arc::ptr_eq(a, b),
+            (Deferred::Loop(a), Deferred::Loop(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
     /// Whether the encoder copies back its shadowed textures before the work and forgets them
     /// (`EncoderCore::defer`): work recorded apart, with copies of its own. A render pass that
     /// executes render commands is not: its shadowed textures are its encoder's, copied in

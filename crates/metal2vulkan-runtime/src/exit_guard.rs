@@ -893,8 +893,9 @@ where
 /// with the utilization floor at its top on Linux, from its start ([`run_at_user_interactive`]):
 /// the scheduler's (`scheduler/`), each `VkQueue`'s waiter, which makes the completion turns
 /// (`command_buffer/completion.rs`), every thread of the handler
-/// pool (`contexts/`), and the device's recorder and lowering threads (`recorder`,
-/// `render/lowering_worker.rs`), whose work the program's command buffers wait for. A thread one
+/// pool (`contexts/`), the device's recorder and lowering threads (`recorder`,
+/// `render/lowering_worker.rs`), and a predicated loop's check's (`command_buffer/rerun.rs`),
+/// whose work the program's command buffers wait for. A thread one
 /// of them starts (the reaper a pipeline state's last release
 /// starts on a handler thread, a program's thread made in a handler) does not take either: it
 /// starts at the default class on macOS ([`spawn`]), and with no floor on Linux.

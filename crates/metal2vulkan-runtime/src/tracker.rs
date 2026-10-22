@@ -402,6 +402,23 @@ impl Barrier {
         }
     }
 
+    /// From a fill's writes (`vkCmdFillBuffer`) to the dispatches after it, which read or write
+    /// what it wrote, as an indirect command too.
+    pub(super) fn after_fill() -> Barrier {
+        Barrier {
+            src: Access::new(
+                vk::PipelineStageFlags2::ALL_TRANSFER,
+                vk::AccessFlags2::TRANSFER_WRITE,
+            ),
+            dst: Access::new(
+                vk::PipelineStageFlags2::COMPUTE_SHADER | vk::PipelineStageFlags2::DRAW_INDIRECT,
+                vk::AccessFlags2::SHADER_READ
+                    | vk::AccessFlags2::SHADER_WRITE
+                    | vk::AccessFlags2::INDIRECT_COMMAND_READ,
+            ),
+        }
+    }
+
     /// A compute encoder's memory barrier (`memoryBarrierWithScope:` and
     /// `memoryBarrierWithResources:`): every shader write of the earlier dispatches before every
     /// shader, uniform and indirect-argument access of the later ones.
