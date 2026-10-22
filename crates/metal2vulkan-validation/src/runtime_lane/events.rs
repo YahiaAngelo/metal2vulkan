@@ -597,7 +597,7 @@ fn listeners_hear_reached_and_later_values() {
     on_device(|device| {
         let queue = device.new_command_queue().unwrap();
         let event = device.new_shared_event().unwrap();
-        let listener = SharedEventListener::new().unwrap();
+        let listener = SharedEventListener::new();
         let (send, receive) = mpsc::channel();
         event.set_signaled_value(3);
         for (name, at) in [("passed", 2), ("later", 5)] {
