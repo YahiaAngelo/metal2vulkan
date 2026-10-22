@@ -811,7 +811,8 @@ fn a_scheduled_handler_signals_a_shared_event() {
 /// another queue's wait for the value. A value below the event's changes nothing, and two signals
 /// end at the higher. One held for an event the host has not set is not scheduled, and its signal
 /// waits with it. Encoded with an encoder open it is refused (Metal asserts); after the commit it
-/// does nothing, as Metal's.
+/// does nothing, as Metal's, until the command buffer completed, from which it is refused (Metal's
+/// process ends).
 #[test]
 fn a_scheduled_signal_sets_its_value_as_the_command_buffer_is_scheduled() {
     on_device(|device| {
@@ -924,6 +925,15 @@ fn a_scheduled_signal_sets_its_value_as_the_command_buffer_is_scheduled() {
             Ok(())
         );
         completed(&command_buffer);
+        assert_eq!(later.signaled_value(), 3);
+        // Once it completed, refused: Metal's process ends there.
+        assert_eq!(
+            command_buffer.encode_signal_event_scheduled(&later, 9),
+            Err(invalid(
+                "encode_signal_event_scheduled",
+                Problem::ScheduledSignalAfterCompletion
+            ))
+        );
         assert_eq!(later.signaled_value(), 3);
     });
 }
