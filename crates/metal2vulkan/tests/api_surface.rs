@@ -785,6 +785,8 @@ surface! {
         enum ComputeDispatch E;
         struct Inheritance E;
         enum RecordError E;
+        enum RecordField E;
+        struct RecordView<'static> O;
         struct RegisteredBuffer<'static, u8> O;
         struct RenderDraws E;
         struct ResolvedBindings O;

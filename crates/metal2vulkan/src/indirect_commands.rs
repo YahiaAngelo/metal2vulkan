@@ -7,10 +7,11 @@
 mod descriptor;
 pub use descriptor::{CommandDescriptor, ComputeDispatch, RenderDraws};
 mod host;
-pub use host::{BindingError, CommandBuffer, CommandBufferError, ResolvedBindings};
+pub use host::{BindingError, CommandBuffer, CommandBufferError, RecordView, ResolvedBindings};
 
 use std::fmt;
 use std::num::NonZeroU64;
+use std::ops::Range;
 
 /// Buffer namespace of an encoded command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -637,8 +638,9 @@ pub struct CommandRecord {
 }
 
 /// Why a record was refused: its length, an unknown action, a barrier flag other than 0 or 1,
-/// the all-ones attribute stride, which stands for the pipeline's static stride, or a stage-in
-/// region beside a draw whose arguments take its words.
+/// the all-ones attribute stride, which stands for the pipeline's static stride, a stage-in
+/// region beside a draw whose arguments take its words, or a field's index past what a record
+/// holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordError {
     Length {
@@ -662,6 +664,13 @@ pub enum RecordError {
     /// takes the first two lengths' words (`layout::CONTROL_POINT_INDICES`): a render command
     /// sets none.
     ThreadgroupMemoryLength,
+    /// A field's index past what a record holds ([`CommandRecord::write_field`]): a buffer slot
+    /// at or past [`BINDING_COUNT`], or a threadgroup length at or past
+    /// [`THREADGROUP_BUFFER_ARGUMENT_COUNT`].
+    Index {
+        index: usize,
+        count: usize,
+    },
 }
 
 impl fmt::Display for RecordError {
@@ -687,6 +696,10 @@ impl fmt::Display for RecordError {
                 "an indexed patch draw's control-point index buffer takes the threadgroup \
                  lengths' first words",
             ),
+            Self::Index { index, count } => write!(
+                f,
+                "indirect command field index {index} is past the record's {count}"
+            ),
         }
     }
 }
@@ -699,41 +712,7 @@ impl CommandRecord {
     /// of them), and its barrier. The pipeline state it names is the writer's to add: a CPU setter
     /// names one by the state itself.
     pub fn writes(&self) -> crate::pipeline::CommandWrites {
-        use crate::pipeline::CommandWrites;
-        let draw = |operations: u32, primitive_type: u32| CommandWrites {
-            operations,
-            primitive_types: if primitive_type < 5 {
-                1 << primitive_type
-            } else {
-                CommandWrites::ALL_PRIMITIVE_TYPES
-            },
-        };
-        let only = |operations: u32| CommandWrites {
-            operations,
-            primitive_types: 0,
-        };
-        let mut writes = match self.action {
-            Action::Empty => CommandWrites::NONE,
-            Action::DispatchThreadgroups { .. } | Action::DispatchThreads { .. } => {
-                only(CommandWrites::DISPATCH)
-            }
-            Action::DrawPrimitives { primitive_type, .. } => {
-                draw(CommandWrites::DRAW, primitive_type)
-            }
-            Action::DrawIndexedPrimitives { primitive_type, .. } => {
-                draw(CommandWrites::DRAW_INDEXED, primitive_type)
-            }
-            Action::DrawPatches { .. } | Action::DrawIndexedPatches { .. } => {
-                only(CommandWrites::DRAW_PATCHES)
-            }
-            Action::DrawMeshThreadgroups { .. } | Action::DrawMeshThreads { .. } => {
-                only(CommandWrites::DRAW_MESH)
-            }
-        };
-        if self.barrier {
-            writes.operations |= CommandWrites::BARRIER;
-        }
-        writes
+        writes_of(&self.action, self.barrier)
     }
 
     /// Encode a complete record without allocating. Invalid input leaves the destination unchanged.
@@ -770,147 +749,7 @@ impl CommandRecord {
             return Err(RecordError::PipelineState);
         }
         bytes.fill(0);
-        let (tag, arguments) = match self.action {
-            Action::Empty => (0, arguments([])),
-            Action::DispatchThreadgroups { grid, local_size } => (
-                1,
-                arguments([
-                    grid[0],
-                    grid[1],
-                    grid[2],
-                    local_size[0],
-                    local_size[1],
-                    local_size[2],
-                ]),
-            ),
-            Action::DispatchThreads { grid, local_size } => (
-                2,
-                arguments([
-                    grid[0],
-                    grid[1],
-                    grid[2],
-                    local_size[0],
-                    local_size[1],
-                    local_size[2],
-                ]),
-            ),
-            Action::DrawPrimitives {
-                primitive_type,
-                vertex_start,
-                vertex_count,
-                instance_count,
-                base_instance,
-            } => (
-                3,
-                arguments([
-                    primitive_type,
-                    vertex_start,
-                    vertex_count,
-                    instance_count,
-                    base_instance,
-                ]),
-            ),
-            Action::DrawIndexedPrimitives {
-                primitive_type,
-                index_count,
-                index_type,
-                index_buffer,
-                instance_count,
-                base_vertex,
-                base_instance,
-            } => (
-                4,
-                arguments([
-                    primitive_type,
-                    index_count,
-                    index_type,
-                    instance_count,
-                    index_buffer as u32,
-                    (index_buffer >> 32) as u32,
-                    base_vertex as u32,
-                    base_instance,
-                ]),
-            ),
-            Action::DrawPatches {
-                control_points,
-                patch_start,
-                patch_count,
-                patch_index_buffer,
-                instance_count,
-                base_instance,
-                factor_buffer,
-                factor_instance_stride,
-                factor_scale,
-            } => (
-                5,
-                arguments([
-                    control_points,
-                    patch_start,
-                    patch_count,
-                    instance_count,
-                    patch_index_buffer as u32,
-                    (patch_index_buffer >> 32) as u32,
-                    factor_buffer as u32,
-                    (factor_buffer >> 32) as u32,
-                    base_instance,
-                    factor_instance_stride,
-                    factor_scale,
-                ]),
-            ),
-            Action::DrawIndexedPatches {
-                control_points,
-                patch_start,
-                patch_count,
-                patch_index_buffer,
-                control_point_index_buffer: _,
-                instance_count,
-                base_instance,
-                factor_buffer,
-                factor_instance_stride,
-                factor_scale,
-            } => (
-                6,
-                arguments([
-                    control_points,
-                    patch_start,
-                    patch_count,
-                    instance_count,
-                    patch_index_buffer as u32,
-                    (patch_index_buffer >> 32) as u32,
-                    factor_buffer as u32,
-                    (factor_buffer >> 32) as u32,
-                    base_instance,
-                    factor_instance_stride,
-                    factor_scale,
-                ]),
-            ),
-            Action::DrawMeshThreadgroups {
-                threadgroups: grid,
-                object_threads,
-                mesh_threads,
-            }
-            | Action::DrawMeshThreads {
-                threads: grid,
-                object_threads,
-                mesh_threads,
-            } => (
-                match self.action {
-                    Action::DrawMeshThreadgroups { .. } => 7,
-                    _ => 8,
-                },
-                arguments([
-                    grid[0],
-                    grid[1],
-                    grid[2],
-                    object_threads[0],
-                    object_threads[1],
-                    object_threads[2],
-                    mesh_threads[0],
-                    mesh_threads[1],
-                    mesh_threads[2],
-                ]),
-            ),
-        };
+        let (tag, arguments) = action_words(&self.action);
         put_word(bytes, 0, tag);
         put_word(bytes, 1, u32::from(self.barrier));
         // The pipeline word holds the pipeline the command executes with; the state word says
@@ -955,6 +794,212 @@ impl CommandRecord {
     }
 }
 
+/// What a record of `action` and `barrier` holds ([`CommandRecord::writes`]).
+pub(crate) fn writes_of(action: &Action, barrier: bool) -> crate::pipeline::CommandWrites {
+    use crate::pipeline::CommandWrites;
+    let draw = |operations: u32, primitive_type: u32| CommandWrites {
+        operations,
+        primitive_types: if primitive_type < 5 {
+            1 << primitive_type
+        } else {
+            CommandWrites::ALL_PRIMITIVE_TYPES
+        },
+    };
+    let only = |operations: u32| CommandWrites {
+        operations,
+        primitive_types: 0,
+    };
+    let mut writes = match *action {
+        Action::Empty => CommandWrites::NONE,
+        Action::DispatchThreadgroups { .. } | Action::DispatchThreads { .. } => {
+            only(CommandWrites::DISPATCH)
+        }
+        Action::DrawPrimitives { primitive_type, .. } => draw(CommandWrites::DRAW, primitive_type),
+        Action::DrawIndexedPrimitives { primitive_type, .. } => {
+            draw(CommandWrites::DRAW_INDEXED, primitive_type)
+        }
+        Action::DrawPatches { .. } | Action::DrawIndexedPatches { .. } => {
+            only(CommandWrites::DRAW_PATCHES)
+        }
+        Action::DrawMeshThreadgroups { .. } | Action::DrawMeshThreads { .. } => {
+            only(CommandWrites::DRAW_MESH)
+        }
+    };
+    if barrier {
+        writes.operations |= CommandWrites::BARRIER;
+    }
+    writes
+}
+
+/// One field of a command's record, as one CPU setter writes it ([`CommandRecord::write_field`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordField {
+    /// The action ([`CommandRecord::action`]): a dispatch or a draw.
+    Action(Action),
+    /// The barrier flag ([`CommandRecord::barrier`]).
+    Barrier(bool),
+    /// The pipeline the command names ([`Bindings::pipeline`]), set: a pipeline a reset retained
+    /// goes ([`CommandRecord::retained_pipeline`]).
+    Pipeline(NonZeroU64),
+    /// Slot `slot` of `stage`'s buffers ([`Bindings::buffers`]), set, or unset with `None`.
+    Buffer {
+        stage: BufferStage,
+        slot: usize,
+        binding: Option<BufferBinding>,
+    },
+    /// Threadgroup-memory length `index` ([`CommandRecord::threadgroup_memory_lengths`]).
+    ThreadgroupMemoryLength { index: usize, length: u32 },
+    /// The stage-in region ([`CommandRecord::stage_in_region`]).
+    StageInRegion([u32; 6]),
+    /// The imageblock size ([`CommandRecord::imageblock_size`]).
+    ImageblockSize([u16; 2]),
+}
+
+impl CommandRecord {
+    /// Write `field` into the record `bytes` hold ([`COMMAND_BYTES`]), as `decode`, setting the
+    /// field and [`encode_into`](Self::encode_into) would, but touching no word the field does
+    /// not take: `bytes` then decode as what `encode_into` writes of the record
+    /// [`decode`](Self::decode) read from them with `field` set, and bytes `encode_into` wrote
+    /// stay what it writes. One setter's write, without decoding and encoding the rest. Refused,
+    /// leaving `bytes` unchanged: what `decode` refuses of `bytes`, what `encode_into` refuses of
+    /// the record with `field` set (an all-ones stride, a stage-in region beside a draw whose
+    /// arguments take its words, the first two threadgroup lengths beside an indexed patch
+    /// draw), and an index past the record's ([`RecordError::Index`]). Answers the bytes it may
+    /// have changed.
+    pub fn write_field(bytes: &mut [u8], field: RecordField) -> Result<Range<usize>, RecordError> {
+        let view = RecordView::new(bytes)?;
+        let (action, retained) = (view.action(), view.retained_pipeline().is_some());
+        let (stage_in, lengths) = (
+            view.stage_in_region(),
+            [0, 1].map(|index| view.threadgroup_memory_length(index).unwrap_or(0)),
+        );
+        let word_bytes = |word: usize, words: usize| word * 4..(word + words) * 4;
+        match field {
+            RecordField::Barrier(barrier) => {
+                put_word(bytes, 1, u32::from(barrier));
+                Ok(word_bytes(1, 1))
+            }
+            RecordField::Pipeline(pipeline) => {
+                put_u64(bytes, 2, pipeline.get());
+                if !retained {
+                    return Ok(word_bytes(2, 2));
+                }
+                let state = layout::STATE as usize;
+                put_word(bytes, state / 4, 0);
+                Ok(8..state + 4)
+            }
+            RecordField::Buffer {
+                stage,
+                slot,
+                binding,
+            } => {
+                if slot >= BINDING_COUNT {
+                    return Err(RecordError::Index {
+                        index: slot,
+                        count: BINDING_COUNT,
+                    });
+                }
+                let (address, stride) = match binding {
+                    None => (0, 0),
+                    Some(binding) if binding.attribute_stride == Some(u64::MAX) => {
+                        return Err(RecordError::ReservedStride);
+                    }
+                    Some(binding) => (
+                        binding.address,
+                        binding.attribute_stride.unwrap_or(u64::MAX),
+                    ),
+                };
+                let word = HEADER_WORDS + (stage.index() * BINDING_COUNT + slot) * BUFFER_WORDS;
+                put_u64(bytes, word, address);
+                put_u64(bytes, word + 2, stride);
+                Ok(word_bytes(word, BUFFER_WORDS))
+            }
+            RecordField::ThreadgroupMemoryLength { index, length } => {
+                if index >= THREADGROUP_COUNT {
+                    return Err(RecordError::Index {
+                        index,
+                        count: THREADGROUP_COUNT,
+                    });
+                }
+                // An indexed patch draw's control-point index buffer takes the first two
+                // lengths' words: a length of 0 there is the record's already.
+                if matches!(action, Action::DrawIndexedPatches { .. }) && index < 2 {
+                    return match length {
+                        0 => Ok(0..0),
+                        _ => Err(RecordError::ThreadgroupMemoryLength),
+                    };
+                }
+                put_word(bytes, THREADGROUP_WORD + index, length);
+                Ok(word_bytes(THREADGROUP_WORD + index, 1))
+            }
+            RecordField::StageInRegion(region) => {
+                // A draw whose arguments take the stage-in region's words has none.
+                if action.takes_stage_in_words() {
+                    return match region {
+                        [0, 0, 0, 0, 0, 0] => Ok(0..0),
+                        _ => Err(RecordError::StageInRegion),
+                    };
+                }
+                let first = layout::STAGE_IN as usize / 4;
+                for (index, &value) in region.iter().enumerate() {
+                    put_word(bytes, first + index, value);
+                }
+                Ok(word_bytes(first, 6))
+            }
+            RecordField::ImageblockSize(size) => {
+                let at = layout::IMAGEBLOCK as usize;
+                for (index, value) in size.iter().enumerate() {
+                    bytes[at + 2 * index..at + 2 * index + 2].copy_from_slice(&value.to_le_bytes());
+                }
+                Ok(at..at + 4)
+            }
+            RecordField::Action(new) => {
+                let wide = new.takes_stage_in_words();
+                if wide && stage_in != [0; 6] {
+                    return Err(RecordError::StageInRegion);
+                }
+                let control_point_indices = match new {
+                    Action::DrawIndexedPatches {
+                        control_point_index_buffer,
+                        ..
+                    } => Some(control_point_index_buffer),
+                    _ => None,
+                };
+                if control_point_indices.is_some() && lengths != [0; 2] {
+                    return Err(RecordError::ThreadgroupMemoryLength);
+                }
+                let (tag, arguments) = action_words(&new);
+                put_word(bytes, 0, tag);
+                let first = layout::ARGUMENTS as usize / 4;
+                for (index, value) in arguments.into_iter().enumerate() {
+                    put_word(bytes, first + index, value);
+                }
+                // The stage-in region keeps its words beside a dispatch or a draw of primitives;
+                // an indexed or patch draw's arguments took them, and leave it none.
+                if !wide {
+                    let stage_in_word = layout::STAGE_IN as usize / 4;
+                    for (index, &value) in stage_in.iter().enumerate() {
+                        put_word(bytes, stage_in_word + index, value);
+                    }
+                }
+                let mut end = (first + layout::DRAW_ARGUMENT_WORDS) * 4;
+                // The first two threadgroup lengths' words: the control-point index buffer of an
+                // indexed patch draw, else the lengths, which one took and leaves 0.
+                let taken = matches!(action, Action::DrawIndexedPatches { .. });
+                if let Some(address) = control_point_indices {
+                    put_u64(bytes, layout::CONTROL_POINT_INDICES as usize / 4, address);
+                    end = layout::CONTROL_POINT_INDICES as usize + 8;
+                } else if taken {
+                    put_word(bytes, THREADGROUP_WORD, lengths[0]);
+                    put_word(bytes, THREADGROUP_WORD + 1, lengths[1]);
+                    end = layout::THREADGROUP as usize + 8;
+                }
+                Ok(0..end)
+            }
+        }
+    }
+}
+
 fn require_length(bytes: &[u8]) -> Result<(), RecordError> {
     if bytes.len() == COMMAND_BYTES {
         Ok(())
@@ -971,6 +1016,152 @@ fn put_word(bytes: &mut [u8], word: usize, value: u32) {
 
 fn put_u64(bytes: &mut [u8], word: usize, value: u64) {
     bytes[word * 4..word * 4 + 8].copy_from_slice(&value.to_le_bytes());
+}
+
+/// The tag and the argument words ([`layout::DRAW_ARGUMENT_WORDS`], zero past the action's) a
+/// record of `action` holds.
+fn action_words(action: &Action) -> (u32, [u32; layout::DRAW_ARGUMENT_WORDS]) {
+    match *action {
+        Action::Empty => (0, arguments([])),
+        Action::DispatchThreadgroups { grid, local_size } => (
+            1,
+            arguments([
+                grid[0],
+                grid[1],
+                grid[2],
+                local_size[0],
+                local_size[1],
+                local_size[2],
+            ]),
+        ),
+        Action::DispatchThreads { grid, local_size } => (
+            2,
+            arguments([
+                grid[0],
+                grid[1],
+                grid[2],
+                local_size[0],
+                local_size[1],
+                local_size[2],
+            ]),
+        ),
+        Action::DrawPrimitives {
+            primitive_type,
+            vertex_start,
+            vertex_count,
+            instance_count,
+            base_instance,
+        } => (
+            3,
+            arguments([
+                primitive_type,
+                vertex_start,
+                vertex_count,
+                instance_count,
+                base_instance,
+            ]),
+        ),
+        Action::DrawIndexedPrimitives {
+            primitive_type,
+            index_count,
+            index_type,
+            index_buffer,
+            instance_count,
+            base_vertex,
+            base_instance,
+        } => (
+            4,
+            arguments([
+                primitive_type,
+                index_count,
+                index_type,
+                instance_count,
+                index_buffer as u32,
+                (index_buffer >> 32) as u32,
+                base_vertex as u32,
+                base_instance,
+            ]),
+        ),
+        Action::DrawPatches {
+            control_points,
+            patch_start,
+            patch_count,
+            patch_index_buffer,
+            instance_count,
+            base_instance,
+            factor_buffer,
+            factor_instance_stride,
+            factor_scale,
+        } => (
+            5,
+            arguments([
+                control_points,
+                patch_start,
+                patch_count,
+                instance_count,
+                patch_index_buffer as u32,
+                (patch_index_buffer >> 32) as u32,
+                factor_buffer as u32,
+                (factor_buffer >> 32) as u32,
+                base_instance,
+                factor_instance_stride,
+                factor_scale,
+            ]),
+        ),
+        Action::DrawIndexedPatches {
+            control_points,
+            patch_start,
+            patch_count,
+            patch_index_buffer,
+            control_point_index_buffer: _,
+            instance_count,
+            base_instance,
+            factor_buffer,
+            factor_instance_stride,
+            factor_scale,
+        } => (
+            6,
+            arguments([
+                control_points,
+                patch_start,
+                patch_count,
+                instance_count,
+                patch_index_buffer as u32,
+                (patch_index_buffer >> 32) as u32,
+                factor_buffer as u32,
+                (factor_buffer >> 32) as u32,
+                base_instance,
+                factor_instance_stride,
+                factor_scale,
+            ]),
+        ),
+        Action::DrawMeshThreadgroups {
+            threadgroups: grid,
+            object_threads,
+            mesh_threads,
+        }
+        | Action::DrawMeshThreads {
+            threads: grid,
+            object_threads,
+            mesh_threads,
+        } => (
+            match action {
+                Action::DrawMeshThreadgroups { .. } => 7,
+                _ => 8,
+            },
+            arguments([
+                grid[0],
+                grid[1],
+                grid[2],
+                object_threads[0],
+                object_threads[1],
+                object_threads[2],
+                mesh_threads[0],
+                mesh_threads[1],
+                mesh_threads[2],
+            ]),
+        ),
+    }
 }
 
 /// An action's argument words, zero past them ([`layout::DRAW_ARGUMENT_WORDS`]).
