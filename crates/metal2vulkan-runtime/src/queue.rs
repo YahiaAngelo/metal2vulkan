@@ -36,6 +36,7 @@ use super::contexts;
 use super::degradation::Degradation;
 use super::device::{lock, Device};
 use super::error::{Error, Invalid, Problem};
+use super::texture::copy_images::CopyImages;
 use super::texture::kept_image::KeptImages;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -95,6 +96,9 @@ struct QueueShared {
     /// The kept images its merges' keeps made, kept for its later keeps
     /// (`texture/kept_image.rs`).
     kept_images: KeptImages,
+    /// The images its heaps' multisample textures' moves made, kept for its later moves
+    /// (`texture/copy_images.rs`).
+    copy_images: CopyImages,
     /// Its command buffers Metal's GPU hangs at that are in flight, and those committed with an
     /// event wait meanwhile (`command_buffer/hang.rs`).
     hangs: Arc<QueueHangs>,
@@ -278,6 +282,7 @@ impl Device {
                 latest_gpu_end: Mutex::new(0),
                 memoryless_backings: Mutex::new(BackingPool::default()),
                 kept_images: KeptImages::default(),
+                copy_images: CopyImages::default(),
                 hangs: Arc::default(),
                 handles: AtomicUsize::new(1),
                 errors: QueueErrors::default(),
@@ -403,6 +408,12 @@ impl CommandQueue {
     /// The kept images the queue keeps for its merges' keeps (`texture/kept_image.rs`).
     pub(super) fn kept_images(&self) -> &KeptImages {
         &self.0.kept_images
+    }
+
+    /// The images the queue keeps for its heaps' multisample textures' moves
+    /// (`texture/copy_images.rs`).
+    pub(super) fn copy_images(&self) -> &CopyImages {
+        &self.0.copy_images
     }
 
     /// Its command buffers Metal's GPU hangs at that are in flight, and those committed with an

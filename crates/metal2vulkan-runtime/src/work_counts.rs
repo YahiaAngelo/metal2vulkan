@@ -90,6 +90,8 @@ pub(crate) struct Counters {
     heap_slots_rewritten: AtomicU64,
     heap_slot_writes_deferred: AtomicU64,
     heap_textures_tiled: AtomicU64,
+    heap_sample_move_images_made: AtomicU64,
+    heap_sample_move_images_lent: AtomicU64,
     requirement_images_made: AtomicU64,
     requirement_limits_asked: AtomicU64,
     arena_pools_made: AtomicU64,
@@ -2189,6 +2191,16 @@ impl Counters {
         self.heap_textures_tiled.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// A heap's multisample texture's moves took an image for a copy (`texture/copy_images.rs`):
+    /// `lent` one their queue kept, else made one.
+    pub(crate) fn heap_sample_move_image(&self, lent: bool) {
+        let counter = match lent {
+            true => &self.heap_sample_move_images_lent,
+            false => &self.heap_sample_move_images_made,
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// An image was made to ask its memory requirements alone (`texture/requirements.rs`).
     pub(crate) fn requirement_image_made(&self) {
         self.requirement_images_made.fetch_add(1, Ordering::Relaxed);
@@ -2621,6 +2633,15 @@ pub struct WorkCounts {
     /// from their memory or keeps them GPU-optimized (MoltenVK), and a multisample texture in any
     /// heap whose memory takes no image of it.
     pub heap_textures_tiled: u64,
+    /// The images a heap's multisample texture's moves between its image and Metal's tiles made
+    /// for a copy, as an encoder records it: each a wide, scratch or draw image of a band of one
+    /// aspect and slice, which the copy's later bands, aspects and slices of its shape take again,
+    /// and which the queue keeps for its later copies within its bound
+    /// (`texture/copy_images.rs`).
+    pub heap_sample_move_images_made: u64,
+    /// The images such moves took from those their queue kept, made by an earlier copy of any
+    /// texture of the queue.
+    pub heap_sample_move_images_lent: u64,
     /// The images heap textures' plans made only to ask their memory requirements, destroyed at
     /// once: none for a plan and tiling asked before on a device that enables `maintenance4`,
     /// which fixes the answer (`texture/requirements.rs`).
@@ -3961,6 +3982,12 @@ impl Device {
             heap_slot_writes_deferred: counters.heap_slot_writes_deferred.load(Ordering::Relaxed),
             host_range_lookups: self.shared().aliases.range_lookups(),
             heap_textures_tiled: counters.heap_textures_tiled.load(Ordering::Relaxed),
+            heap_sample_move_images_made: counters
+                .heap_sample_move_images_made
+                .load(Ordering::Relaxed),
+            heap_sample_move_images_lent: counters
+                .heap_sample_move_images_lent
+                .load(Ordering::Relaxed),
             requirement_images_made: counters.requirement_images_made.load(Ordering::Relaxed),
             requirement_limits_asked: counters.requirement_limits_asked.load(Ordering::Relaxed),
             arena_pools_made: counters.arena_pools_made.load(Ordering::Relaxed),

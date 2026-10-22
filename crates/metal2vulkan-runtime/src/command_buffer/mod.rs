@@ -4416,9 +4416,11 @@ fn scheduled(state: &State) -> bool {
         )
 }
 
-/// The command-buffer error of a barrier command buffer that could not be allocated, recording
-/// a lost device. `allocate_raw` fails only with a Vulkan result; any other error is internal.
-fn recording_error(device: &Device, error: Error) -> CommandBufferError {
+/// The command-buffer error of a barrier command buffer that could not be allocated, or of a
+/// recording that failed otherwise (a heap texture's moves' images, `EncoderCore::sample_moves`),
+/// recording a lost device. `allocate_raw` fails only with a Vulkan result; any other error is
+/// internal.
+pub(super) fn recording_error(device: &Device, error: Error) -> CommandBufferError {
     match error {
         Error::DeviceLost => submission_error(device, vk::Result::ERROR_DEVICE_LOST),
         Error::OutOfMemory(_) => CommandBufferError::OutOfMemory,

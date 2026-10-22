@@ -153,13 +153,18 @@
 //! (`sample_interleave.rs`, [`SampleMoves`]): each pixel's samples one element of all their bytes
 //! there, as Metal's blits lay them out in a buffer and its tiles hold them; a depth or stencil
 //! aspect's through the blits' own moves (maintenance8's copies, or the draws), whatever they
-//! refuse refusing the shadow. The moves are planned once, as the texture is made, holding their
-//! own images (a band of wide and scratch images, and the draws' images, for each slice of each
-//! aspect each way) for its life. Where they write a 32-bit float depth by the `FragDepth` draw on
-//! a driver measured to change some values, the texture announces `drawn-depth-copy` once, and a
-//! merge's keep holds the heap's bytes, not the image's (`ShadowCopies::record_kept`), so a byte
-//! the image holds otherwise than the heap is written back: every byte a command wrote, and the
-//! values the copy in changed.
+//! refuse refusing the shadow (tried as the texture is made, on one pixel of its format, usage
+//! and sample count: `Device::sample_moves_run`). The moves are planned as an encoder records a
+//! copy (`EncoderCore::sample_moves`), each way as the copy goes, their images (a band's wide and
+//! scratch images, and the draws' images) taken from those the encoder's queue keeps, and each
+//! band, aspect and slice of the copy going through the images of its first of its extent
+//! (`copy_images.rs`); the encoder's command buffer holds them until it completes. The texture
+//! holds none: before, it planned them as it was made and held their images for its life. Where
+//! they write a 32-bit float depth by the `FragDepth` draw on a driver measured to change some
+//! values, the texture announces `drawn-depth-copy` once, as it is made, and a merge's keep holds
+//! the heap's bytes, not the image's (`ShadowCopies::record_kept`), so a byte the image holds
+//! otherwise than the heap is written back: every byte a command wrote, and the values the copy
+//! in changed.
 
 use super::super::blit_plan::BufferLayout;
 use super::super::buffer::Buffer;
@@ -178,15 +183,16 @@ use super::super::texture_descriptor::TextureLayout;
 use super::super::tracker::Barrier;
 use super::super::values::{CpuCacheMode, HazardTrackingMode, ResourceOptions, StorageMode};
 use super::super::Device;
+use super::copy_images::{Reused, UseMaker};
 use super::heap::HeapPlane;
-use super::{copy_units, Texture};
+use super::{copy_units, Texture, TextureShared};
 use crate::device::functions::Vk;
 use ash::vk;
 use metal2vulkan::bind::{TiledLevelMove, TiledTexelsModule};
 use metal2vulkan::metal::format::{byte_format, is_depth_stencil, srgb_raw_twin};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::vk::{Format, ImageAspectFlags};
-use std::sync::OnceLock;
+use std::sync::{OnceLock, Weak};
 
 /// The bytes of Metal's largest tile, whatever its elements' size.
 const TILE_BYTES: u64 = 16 << 10;
@@ -1487,11 +1493,11 @@ pub(crate) struct HeapTiledCopies {
     _tight: Buffer,
     tight_raw: vk::Buffer,
     /// The tight buffer's copies to and from the image, one a level: a single-sample image's
-    /// copies; a multisample image's region, which `samples` moves.
+    /// copies; a multisample image's region, which its [`SampleMoves`] move.
     regions: Vec<vk::BufferImageCopy>,
-    /// A multisample image's moves to and from the tight buffer, made once its texture is
-    /// ([`plan_samples`](Self::plan_samples)); `None` for a single-sample image.
-    samples: Option<OnceLock<SampleMoves>>,
+    /// A multisample image's texture and what its moves into it change, known once the texture
+    /// is made ([`know_samples`](Self::know_samples)); `None` for a single-sample image.
+    samples: Option<OnceLock<MovedTexture>>,
     /// The tight buffer's planes and where it lies in its `VkBuffer`, which a multisample image's
     /// moves are planned over.
     planes: Vec<HeapPlane>,
@@ -1504,15 +1510,26 @@ pub(crate) struct HeapTiledCopies {
     sets: OwnedSets,
 }
 
-/// A multisample heap texture's moves between its image and the tight buffer, which Vulkan copies
-/// no multisampled image to or from: the interleave copies (`sample_interleave.rs`), each pixel's
-/// samples one after another in the tight buffer as one element of `S·B` bytes, as Metal's blits
-/// lay them out in a buffer and as its tiles hold them (the module docs). One a slice of each
-/// aspect, into the image, and out of it. Each holds its own images for the texture's life, and
-/// none holds the texture: its commands' encoders do while they record them.
+/// A multisample heap texture's moves between its image and the tight buffer, one way, which
+/// Vulkan copies no multisampled image to or from: the interleave copies
+/// (`sample_interleave.rs`), each pixel's samples one after another in the tight buffer as one
+/// element of `S·B` bytes, as Metal's blits lay them out in a buffer and as its tiles hold them
+/// (the module docs). One a slice of each aspect, planned for one copy as an encoder records it
+/// ([`HeapTiledCopies::sample_moves`]), the images it goes through taken from its queue's
+/// (`copy_images.rs`); the encoder's command buffer holds it until it completes, and the
+/// texture's commands hold the texture.
 pub(crate) struct SampleMoves {
-    into: Vec<InterleaveCopy>,
-    out: Vec<InterleaveCopy>,
+    copies: Vec<InterleaveCopy>,
+    into: bool,
+}
+
+/// A multisample heap texture whose moves are planned as its copies are recorded
+/// ([`HeapTiledCopies::sample_moves`]): the texture, which holds the moves' tiles and so is held
+/// weakly, and what the moves into its image change (`drawn-depth-copy`), `None` where they are
+/// exact.
+struct MovedTexture {
+    texture: Weak<TextureShared>,
+    inexact: Option<&'static str>,
 }
 
 impl HeapTiledCopies {
@@ -1755,28 +1772,22 @@ impl HeapTiledCopies {
         }
     }
 
-    /// Plan a multisample texture's moves between its image and the tight buffer
-    /// ([`SampleMoves`]), `texture` the texture whose image it is, made on `device` by `call`,
-    /// which announces what the moves into the image announce (a 32-bit float depth drawn
-    /// inexactly, `drawn-depth-copy`): `false` where the device cannot run one (its caller checked
-    /// it can, `Device::sample_moves_run`). Nothing for a single-sample texture, or once planned.
-    pub(crate) fn plan_samples(
+    /// Know `texture`, the multisample texture whose image it is, made on `device` by `call`, whose
+    /// moves into its image change what `inexact` names (a 32-bit float depth drawn inexactly,
+    /// `drawn-depth-copy`, which it announces as `call`'s), `None` where they are exact: its moves
+    /// are planned as its copies are recorded ([`sample_moves`](Self::sample_moves)). Nothing for
+    /// a single-sample texture, or once known.
+    pub(crate) fn know_samples(
         &self,
         device: &Device,
         call: &'static str,
         texture: &Texture,
-    ) -> Result<bool, Error> {
+        inexact: Option<&'static str>,
+    ) {
         let Some(slot) = &self.samples else {
-            return Ok(true);
+            return;
         };
-        if slot.get().is_some() {
-            return Ok(true);
-        }
-        let tight = (self.tight_raw, self.tight_at);
-        let Some(moves) = SampleMoves::plan(device, texture, tight, &self.planes)? else {
-            return Ok(false);
-        };
-        if let Some(changes) = moves.into.iter().find_map(InterleaveCopy::inexact_depth) {
+        if let Some(changes) = inexact {
             depth_copy::announce_changes(device, changes, || {
                 let format = texture.pixel_format();
                 format!(
@@ -1785,27 +1796,71 @@ impl HeapTiledCopies {
                 )
             });
         }
-        // A texture's copies are planned once, as it is made, before any command records them.
-        drop(slot.set(moves));
-        Ok(true)
+        let known = MovedTexture {
+            texture: texture.downgrade(),
+            inexact,
+        };
+        // A texture is known once, as it is made, before any command records its copies.
+        drop(slot.set(known));
+    }
+
+    /// A multisample texture's moves between its image and the tight buffer `into` the image or
+    /// out of it, for a copy an encoder records now ([`SampleMoves`]), their images taken through
+    /// `maker`, its queue's ([`UseMaker`]); `None` for a single-sample texture. Refused as the
+    /// images are made; internal where the texture is not known or gone, or the device no longer
+    /// moves its samples (its making tried them, `Device::sample_moves_run`).
+    pub(crate) fn sample_moves(
+        &self,
+        maker: &UseMaker,
+        into: bool,
+    ) -> Result<Option<SampleMoves>, Error> {
+        let Some(slot) = &self.samples else {
+            return Ok(None);
+        };
+        let known = (slot.get())
+            .ok_or_else(|| internal("a multisample heap texture's moves before it was made"))?;
+        let texture = Texture::upgrade(&known.texture)
+            .ok_or_else(|| internal("a multisample heap texture's moves after it went"))?;
+        let reused = Reused::new(maker);
+        let tight = (self.tight_raw, self.tight_at);
+        let moves = SampleMoves::plan(&reused, &texture, tight, &self.planes, into)?;
+        moves
+            .ok_or_else(|| {
+                internal("a multisample heap texture whose samples the device no longer moves")
+            })
+            .map(Some)
+    }
+
+    /// Whether the image is a multisample one, whose copies take moves
+    /// ([`sample_moves`](Self::sample_moves)).
+    pub(crate) fn moves_samples(&self) -> bool {
+        self.samples.is_some()
     }
 
     /// Whether the image takes the heap's bytes inexactly: a multisample depth whose moves into
     /// it draw values the driver's fragment depth changes (`drawn-depth-copy`), which a merge's
     /// keep then reads from the heap's bytes (`ShadowCopies::record_kept`).
     pub(crate) fn takes_inexactly(&self) -> bool {
-        let moves = self.samples.as_ref().and_then(OnceLock::get);
-        moves.is_some_and(|moves| moves.into.iter().any(|copy| copy.inexact_depth().is_some()))
+        let known = self.samples.as_ref().and_then(OnceLock::get);
+        known.is_some_and(|known| known.inexact.is_some())
     }
 
     /// Record the move of the image's elements into the tight buffer: a single-sample image's
-    /// copies, or a multisample one's moves out ([`SampleMoves`]).
+    /// copies, or a multisample one's `moves` out of it ([`SampleMoves`]; none where its encoder
+    /// planned none, failing its command buffer, `EncoderCore::sample_moves`).
     ///
     /// # Safety
     ///
     /// As `record`'s.
-    unsafe fn image_out(&self, device: &Vk, command_buffer: vk::CommandBuffer, image: vk::Image) {
-        // SAFETY: the caller's contract; the moves' images and objects are this texture's own.
+    unsafe fn image_out(
+        &self,
+        device: &Vk,
+        command_buffer: vk::CommandBuffer,
+        image: vk::Image,
+        moves: Option<&SampleMoves>,
+    ) {
+        // SAFETY: the caller's contract; the moves' images and objects are held until the
+        // command buffer completes.
         unsafe {
             match &self.samples {
                 None => device.cmd_copy_image_to_buffer(
@@ -1815,8 +1870,12 @@ impl HeapTiledCopies {
                     self.tight_raw,
                     &self.regions,
                 ),
-                Some(slot) => {
-                    for copy in slot.get().iter().flat_map(|moves| &moves.out) {
+                Some(_) => {
+                    for copy in moves
+                        .filter(|moves| !moves.into)
+                        .iter()
+                        .flat_map(|m| &m.copies)
+                    {
                         copy.record(device, command_buffer);
                     }
                 }
@@ -1825,13 +1884,21 @@ impl HeapTiledCopies {
     }
 
     /// Record the move of the tight buffer's elements into the image: a single-sample image's
-    /// copies, or a multisample one's moves into it ([`SampleMoves`]).
+    /// copies, or a multisample one's `moves` into it ([`SampleMoves`]; none where its encoder
+    /// planned none, failing its command buffer, `EncoderCore::sample_moves`).
     ///
     /// # Safety
     ///
     /// As `record`'s.
-    unsafe fn image_in(&self, device: &Vk, command_buffer: vk::CommandBuffer, image: vk::Image) {
-        // SAFETY: the caller's contract; the moves' images and objects are this texture's own.
+    unsafe fn image_in(
+        &self,
+        device: &Vk,
+        command_buffer: vk::CommandBuffer,
+        image: vk::Image,
+        moves: Option<&SampleMoves>,
+    ) {
+        // SAFETY: the caller's contract; the moves' images and objects are held until the
+        // command buffer completes.
         unsafe {
             match &self.samples {
                 None => device.cmd_copy_buffer_to_image(
@@ -1841,8 +1908,12 @@ impl HeapTiledCopies {
                     vk::ImageLayout::GENERAL,
                     &self.regions,
                 ),
-                Some(slot) => {
-                    for copy in slot.get().iter().flat_map(|moves| &moves.into) {
+                Some(_) => {
+                    for copy in moves
+                        .filter(|moves| moves.into)
+                        .iter()
+                        .flat_map(|m| &m.copies)
+                    {
                         copy.record(device, command_buffer);
                     }
                 }
@@ -1851,20 +1922,21 @@ impl HeapTiledCopies {
     }
 
     /// Record the move of the texture's `image` from `bytes` (the heap's `VkBuffer`) through
-    /// `staging` (`into`), or back, its rows back by `back` (`shadow::record_back`).
+    /// `staging` (`into`), or back, its rows back by `back` (`shadow::record_back`), a multisample
+    /// image's through `moves` that way ([`sample_moves`](Self::sample_moves)).
     ///
     /// # Safety
     ///
-    /// `command_buffer` is recording, outside a render pass; the image, the buffers and the
-    /// sets are live until it completes, and the image rests in `GENERAL`; `back` is the copy's
-    /// `ShadowCopy::staged_back`, over `bytes`.
+    /// `command_buffer` is recording, outside a render pass; the image, the buffers, the sets and
+    /// the moves are live until it completes, and the image rests in `GENERAL`; `back` is the
+    /// copy's `ShadowCopy::staged_back`, over `bytes`.
     pub(crate) unsafe fn record(
         &self,
         device: &Vk,
         command_buffer: vk::CommandBuffer,
         image: vk::Image,
         (bytes, staging): (vk::Buffer, &ShadowStaging),
-        into: bool,
+        (into, moves): (bool, Option<&SampleMoves>),
         back: Option<&RowCopies>,
     ) {
         // SAFETY: the caller's contract; the copies lie in the buffers and the image (planned
@@ -1875,11 +1947,11 @@ impl HeapTiledCopies {
             // between the elements are the heap's when they are copied back.
             device.cmd_copy_buffer(command_buffer, bytes, staging.raw(), &[staging.into]);
             if !into {
-                self.image_out(device, command_buffer, image);
+                self.image_out(device, command_buffer, image, moves);
             }
             self.dispatch(device, command_buffer, into);
             if into {
-                self.image_in(device, command_buffer, image);
+                self.image_in(device, command_buffer, image, moves);
             } else {
                 shadow::record_back(device, command_buffer, (staging, bytes), back);
             }
@@ -1888,8 +1960,9 @@ impl HeapTiledCopies {
 
     /// Record a copy of the texture's `image` into `to` from `at`, laid out as in the heap's
     /// bytes from the texture's first (a merge's kept or changed part, `shadow_merge.rs`): the
-    /// move back into `staging`, then its bytes on. A byte no element lies in is the staging
-    /// buffer's, the heap's as the last move left it, alike in each copy of one merge.
+    /// move back into `staging`, a multisample image's through `moves` out of it, then its bytes
+    /// on. A byte no element lies in is the staging buffer's, the heap's as the last move left it,
+    /// alike in each copy of one merge.
     ///
     /// # Safety
     ///
@@ -1898,14 +1971,14 @@ impl HeapTiledCopies {
         &self,
         device: &Vk,
         command_buffer: vk::CommandBuffer,
-        image: vk::Image,
+        (image, moves): (vk::Image, Option<&SampleMoves>),
         staging: &ShadowStaging,
         (to, at): (vk::Buffer, u64),
     ) {
         // SAFETY: the caller's contract, as `record`'s.
         unsafe {
             Barrier::everything().record(device, command_buffer);
-            self.image_out(device, command_buffer, image);
+            self.image_out(device, command_buffer, image, moves);
             self.dispatch(device, command_buffer, false);
             let region = vk::BufferCopy {
                 src_offset: staging.into.dst_offset,
@@ -1919,34 +1992,41 @@ impl HeapTiledCopies {
 
 impl HeapTiledCopies {
     /// Whether `device` runs the moves of `texture`'s multisample image to and from a tight
-    /// buffer laid out as `planes` ([`SampleMoves`]): planned over no buffer, and dropped.
+    /// buffer laid out as `planes` ([`SampleMoves`]), planned each way over no buffer and dropped:
+    /// `None` where it does not, else what the moves into the image change
+    /// (`drawn-depth-copy`), `None` where they are exact.
     pub(crate) fn samples_run(
         device: &Device,
         texture: &Texture,
         planes: &[HeapPlane],
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<Option<&'static str>>, Error> {
         let none = (vk::Buffer::null(), 0);
-        Ok(SampleMoves::plan(device, texture, none, planes)?.is_some())
+        let reused = Reused::new(device);
+        let Some(into) = SampleMoves::plan(&reused, texture, none, planes, true)? else {
+            return Ok(None);
+        };
+        let out = SampleMoves::plan(&reused, texture, none, planes, false)?;
+        let inexact = into.copies.iter().find_map(InterleaveCopy::inexact_depth);
+        Ok(out.map(|_| inexact))
     }
 }
 
 impl SampleMoves {
-    /// The moves of `texture`'s multisample image to and from the tight buffer (`tight`, its
-    /// `VkBuffer` and where it lies there) laid out as `planes` (one an aspect, its images the
-    /// texture's slices, each pixel's samples one element), its own images made on `device`.
-    /// `None` where the device cannot run one, as the blits' copies of such a texture refuse
+    /// The moves of `texture`'s multisample image to or from (`into` the image) the tight buffer
+    /// (`tight`, its `VkBuffer` and where it lies there) laid out as `planes` (one an aspect, its
+    /// images the texture's slices, each pixel's samples one element), each slice of each aspect
+    /// a step of `maker`, taking the images an earlier one took ([`Reused`]). `None` where the
+    /// device cannot run one, as the blits' copies of such a texture refuse
     /// (`sample_interleave.rs`).
     fn plan(
-        device: &Device,
+        maker: &Reused,
         texture: &Texture,
         (tight, tight_at): (vk::Buffer, u64),
         planes: &[HeapPlane],
+        into: bool,
     ) -> Result<Option<SampleMoves>, Error> {
         let samples = texture.record().samples;
-        let mut moves = SampleMoves {
-            into: Vec::new(),
-            out: Vec::new(),
-        };
+        let mut copies = Vec::new();
         for plane in planes {
             let [width, height, _] = plane.extent;
             for slice in 0..plane.images {
@@ -1962,31 +2042,27 @@ impl SampleMoves {
                     origin: [0; 3],
                     size: [width, height, 1],
                 };
-                for into in [true, false] {
-                    // The tight buffer's rows of this slice end within its image pitch.
-                    let planned = InterleaveCopy::plan(
-                        "a heap multisample texture's sample copy",
-                        device,
-                        tight,
-                        tight_at,
-                        layout.offset + plane.image_pitch,
-                        &layout,
-                        texture,
-                        &region,
-                        plane.aspect,
-                        samples,
-                        into,
-                    )?;
-                    let Some(copy) = planned else {
-                        return Ok(None);
-                    };
-                    match into {
-                        true => moves.into.push(copy),
-                        false => moves.out.push(copy),
-                    }
-                }
+                // The tight buffer's rows of this slice end within its image pitch.
+                let planned = InterleaveCopy::plan(
+                    "a heap multisample texture's sample copy",
+                    maker,
+                    tight,
+                    tight_at,
+                    layout.offset + plane.image_pitch,
+                    &layout,
+                    texture,
+                    &region,
+                    plane.aspect,
+                    samples,
+                    into,
+                )?;
+                let Some(copy) = planned else {
+                    return Ok(None);
+                };
+                copies.push(copy);
+                maker.next();
             }
         }
-        Ok(Some(moves))
+        Ok(Some(SampleMoves { copies, into }))
     }
 }

@@ -153,6 +153,7 @@ use wrapped::WrappedImage;
 
 mod attached_reads;
 mod attributes;
+pub(super) mod copy_images;
 pub(crate) mod decoded_twin;
 pub(crate) mod first_move;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
@@ -212,9 +213,10 @@ pub(super) struct TextureState {
     /// nothing, by its description (`framebuffer_fetch.rs`).
     pub(super) usage_answers: Mutex<UsageAnswers>,
     /// Whether the device moves a multisample image's samples to and from a buffer, by the
-    /// image's format, pixel format, usage and sample count: a heap texture's tiled shadow's
-    /// moves (`texture/heap.rs`, `Device::sample_moves_run`), one entry a kind of image.
-    pub(super) sample_moves: Mutex<Vec<(SampleMovesKey, bool)>>,
+    /// image's format, pixel format, usage and sample count, and what the moves into the image
+    /// change (`drawn-depth-copy`): a heap texture's tiled shadow's moves (`texture/heap.rs`,
+    /// `Device::sample_moves_run`), one entry a kind of image, `None` where it does not.
+    pub(super) sample_moves: Mutex<Vec<(SampleMovesKey, Option<Option<&'static str>>)>>,
     /// Each pixel format's texture capabilities, worked out at its first query
     /// (`families/formats.rs`).
     pub(super) format_answers: Mutex<HashMap<PixelFormat, FormatAnswers>>,
@@ -1525,13 +1527,20 @@ fn copy_error(call: &'static str, refusal: CopyRefusal) -> Error {
 }
 
 /// What the runtime makes its own images for ([`Device::new_planned_texture`]): an encoder's
-/// command buffer, which holds each until it completes, or the device, whose caller holds each as
-/// long as a command may use it (a heap's multisample texture's copies, `texture/heap_tiled.rs`).
+/// command buffer, which holds each until it completes; the device, whose caller holds each as
+/// long as a command may use it; or a maker that lends again images made before, to a later step
+/// of a copy or a later copy of a queue (`texture/copy_images.rs`).
 pub(super) trait ImageMaker {
     /// The device that makes them.
     fn device(&self) -> &Device;
-    /// Hold `texture`, one of them, as the maker holds them.
-    fn hold(&self, texture: Texture);
+    /// A texture of `descriptor` and `plan` it made before and lends again, held as
+    /// [`hold`](Self::hold) holds one; `None` where it lends none, and one is made.
+    fn lend(&self, descriptor: &TextureDescriptor, plan: &ImagePlan) -> Option<Texture> {
+        let _ = (descriptor, plan);
+        None
+    }
+    /// Hold `texture`, one of them, made of `descriptor` and `plan`, as the maker holds them.
+    fn hold(&self, texture: Texture, descriptor: &TextureDescriptor, plan: &ImagePlan);
 }
 
 impl ImageMaker for CommandBuffer {
@@ -1539,7 +1548,7 @@ impl ImageMaker for CommandBuffer {
         CommandBuffer::device(self)
     }
 
-    fn hold(&self, texture: Texture) {
+    fn hold(&self, texture: Texture, _: &TextureDescriptor, _: &ImagePlan) {
         self.hold_own_texture(texture);
     }
 }
@@ -1550,7 +1559,7 @@ impl ImageMaker for Device {
     }
 
     /// The caller holds it.
-    fn hold(&self, _: Texture) {}
+    fn hold(&self, _: Texture, _: &TextureDescriptor, _: &ImagePlan) {}
 }
 
 impl Device {
@@ -2318,14 +2327,18 @@ impl Device {
     /// caller rather than from the descriptor: an image only the runtime's commands use, such as
     /// the combined depth/stencil image a pass of separate depth and stencil textures renders
     /// into (`depth_stencil_scratch.rs`), made for `maker`, which holds it as its
-    /// [`ImageMaker`] says. Its image starts in `UNDEFINED`, which the device's next submission
-    /// leaves for `GENERAL` (`texture/first_move.rs`): making it waits for no GPU work. Refused
-    /// as `new_texture` refuses the image.
+    /// [`ImageMaker`] says, or the one of the same descriptor and plan `maker` lends again. Its
+    /// image starts in `UNDEFINED`, which the device's next submission leaves for `GENERAL`
+    /// (`texture/first_move.rs`): making it waits for no GPU work. Refused as `new_texture`
+    /// refuses the image.
     pub(super) fn new_planned_texture(
         maker: &dyn ImageMaker,
         descriptor: &TextureDescriptor,
         plan: ImagePlan,
     ) -> Result<Texture, Error> {
+        if let Some(texture) = maker.lend(descriptor, &plan) {
+            return Ok(texture);
+        }
         let device = maker.device();
         let layout = descriptor
             .check(device.properties().texture_rules())
@@ -2333,11 +2346,12 @@ impl Device {
         if descriptor.resource_options.storage_mode()? != StorageMode::Private {
             return Err(internal("an encoder's own image that is not `Private`"));
         }
+        let key = plan.clone();
         let image = device.new_image(plan, &layout, descriptor, HazardTrackingMode::Tracked)?;
         let record = ViewRecord::of_descriptor(&layout, descriptor);
         let storage = Storage::Image(image.shared());
         let texture = Texture::made(device, storage, record, None, IdUse::Runtime);
-        maker.hold(texture.clone());
+        maker.hold(texture.clone(), descriptor, &key);
         Ok(texture)
     }
 

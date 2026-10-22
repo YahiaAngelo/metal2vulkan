@@ -31,7 +31,7 @@ use super::binding::{self, LastSetZero, Write, WrittenSet};
 use super::buffer::Buffer;
 use super::churn_counts::KeepBy;
 use super::command_buffer::rebound_use::Unlogged;
-use super::command_buffer::CommandBuffer;
+use super::command_buffer::{recording_error, CommandBuffer};
 use super::deferred::{Deferred, StepInputs};
 use super::error::{internal, invalid, vulkan, CommandBufferError, Error, Problem};
 use super::execution::Execution;
@@ -1277,6 +1277,7 @@ impl EncoderCore {
                 return Err(refused);
             }
         };
+        let copies = self.sample_moves(copies);
         self.count_shadow_copies(&copies);
         let by = match Location::caller().file() {
             file if file.ends_with("compute.rs") => KeepBy::Compute,
@@ -1294,6 +1295,45 @@ impl EncoderCore {
             }
         }
         Ok(copies)
+    }
+
+    /// `copies` with the moves between each heap's multisample texture's image and Metal's tiles
+    /// their records take (`ShadowCopy::plan_moves`, `texture/heap_tiled.rs`), planned now from
+    /// the images the encoder's queue keeps (`texture/copy_images.rs`), each held until the
+    /// command buffer completes. Where they cannot be made (the device's memory, a broken
+    /// invariant), the command buffer fails from the encoder on, as a recording that fails does
+    /// (`command_buffer::recording_error`), and the copies record no moves.
+    fn sample_moves(&mut self, mut copies: Vec<ShadowCopy>) -> Vec<ShadowCopy> {
+        if !copies.iter().any(ShadowCopy::moves_samples) {
+            return copies;
+        }
+        let device = self.device().clone();
+        let mut planned = Vec::new();
+        let mut failed = None;
+        {
+            let images = self.open.command_buffer.command_queue().copy_images();
+            let maker = images.maker(&device);
+            for copy in &mut copies {
+                match copy.plan_moves(&maker) {
+                    Ok(Some(moves)) => {
+                        let moves = Arc::new(moves);
+                        planned.push(Arc::clone(&moves));
+                        copy.moves = Some(moves);
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        failed.get_or_insert(error);
+                    }
+                }
+            }
+        }
+        for moves in planned {
+            self.retain_shared(moves);
+        }
+        if let Some(error) = failed {
+            self.fail_command_buffer(recording_error(&device, error));
+        }
+        copies
     }
 
     /// Note that the encoder's pass takes the shadowed texture `key` as an attachment.
@@ -1577,6 +1617,7 @@ impl EncoderCore {
     /// current one does not end, or none can be made, which abandons the command buffer.
     pub(super) fn cut_reusable(&mut self) -> Result<vk::CommandBuffer, Error> {
         let copies = self.shadows.leave();
+        let copies = self.sample_moves(copies);
         self.shadow_copies(&copies);
         self.barrier(Barrier::everything());
         let next = {
@@ -1611,6 +1652,7 @@ impl EncoderCore {
     /// host, which reads the unit's halt word; the encoder goes on after the check.
     pub(super) fn end_laying(&mut self, work: Deferred) -> Result<(), Error> {
         let copies = self.shadows.leave();
+        let copies = self.sample_moves(copies);
         self.shadow_copies(&copies);
         self.barrier(Barrier::to_all());
         self.defer(work)
@@ -1643,6 +1685,7 @@ impl EncoderCore {
         self.flush_gathers();
         if work.leaves_shadows() {
             let copies = self.shadows.leave();
+            let copies = self.sample_moves(copies);
             self.shadow_copies(&copies);
         }
         // None where a pass handed its command buffer over to the work
@@ -1740,6 +1783,7 @@ impl EncoderCore {
             self.device().shared().counts.shadows_sharing_truth(sharing);
         }
         let copies = self.shadows.finish();
+        let copies = self.sample_moves(copies);
         self.count_shadow_copies(&copies);
         self.shadow_copies(&copies);
         // Whether it keeps its log, once its last commands, the copies back above among them,
@@ -1898,6 +1942,7 @@ impl EncoderCore {
     /// work that no longer runs on the GPU alone: its place stays as it was.
     pub(super) fn finish_replay(mut self) -> Result<Replayed, Error> {
         let copies = self.shadows.finish();
+        let copies = self.sample_moves(copies);
         self.count_shadow_copies(&copies);
         self.shadow_copies(&copies);
         if self.uses.broke_hold() {
@@ -2009,6 +2054,7 @@ impl EncoderCore {
     /// back are copied back, then a barrier to everything recorded after it.
     pub(super) fn end_segment(mut self) -> Result<RecordedSegment, Error> {
         let copies = self.shadows.finish();
+        let copies = self.sample_moves(copies);
         self.count_shadow_copies(&copies);
         self.shadow_copies(&copies);
         self.barrier(Barrier::everything());
