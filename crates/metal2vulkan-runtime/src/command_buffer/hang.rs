@@ -35,6 +35,26 @@
 //! encoder; the queue's command buffers committed meanwhile join its list, read `Scheduled`
 //! early ([`holding`]), and run.
 //!
+//! Metal's GPU that faulted at an encoder goes on, once it recovered, to the later encoders that
+//! fail too ([`Later`]): an indexed draw of type 9 then a direct one of 3 vertices, or another
+//! indexed one. Measured on the M3 Max (macOS 27.0.1, 88 such command buffers, each pass its own
+//! encoder, fresh processes and warm ones): the command buffer failed with the first fault's
+//! error (`PageFault`, 88 of 88), every event signal firing. It read `Scheduled` 14.3 to 21.0 ms
+//! after its commit, where one that faulted once read it 8.4 to 9.4 ms after and completed 6.1 to
+//! 9.0 ms after that: once the GPU recovered from the fault. It completed 25.8 to 29.1 ms after
+//! that where a hang followed the fault (56), 6.05 to 9.67 ms after it where a fault did (17), 12.7
+//! to 16.5 ms where two did (5), and 31.65 to 34.97 ms where a fault then a hang did (5); past a
+//! hang the GPU reached nothing (a fault after it added nothing, 27.0 to 27.2 ms, 5). The queue's
+//! command buffer committed right after it ran nothing where a hang followed the fault (6 of 6),
+//! and in 1 of 2 where a fault did. The encoders between the fault and the later failure ran in
+//! that shape, as the ones after a single fault there did. A command buffer whose GPU hangs first
+//! fails as a hang alone does (30 of 30: `GpuHang`, 27.0 to 28.1 ms after `Scheduled`, the fault
+//! after the hang never reached). The runtime answers: `Scheduled` [`FAULT_FROM_REACHED`] after
+//! the GPU reached the fault, its wait going [`FAULT_FROM_REACHED`] after that for each later
+//! fault, then [`FROM_REACHED`] for a hang ([`Held::after_recovered`]); the queue's command
+//! buffers committed meanwhile run nothing where a hang follows, as during a hang, and run where
+//! faults alone do; and from the fault on nothing runs, as after a single fault.
+//!
 //! - **The hold.** The hanging encoder's end signals an event of the hang's own to 1 after the
 //!   encoder, and adds the runtime's own wait ([`Batches::hold`]) for 2 after that, so what
 //!   follows it in the command buffer (its later event signals, its completion) waits; its commit
@@ -167,9 +187,9 @@ impl Verdict {
 impl QueueHangs {
     /// The count of holds in flight of `held`'s kind.
     fn counter(&self, held: Held) -> &AtomicUsize {
-        match held {
-            Held::Hang => &self.in_flight,
-            Held::Fault => &self.holding,
+        match held.discards() {
+            true => &self.in_flight,
+            false => &self.holding,
         }
     }
 
@@ -235,16 +255,33 @@ pub(super) enum Held {
     /// Metal's GPU hangs at its encoder (`CommandBufferError::GpuHang`).
     Hang,
     /// Metal's GPU faults at its encoder, or fails it as a victim of its recovery
-    /// (`CommandBufferError::PageFault`, `GpuRecoveryVictim`).
-    Fault,
+    /// (`CommandBufferError::PageFault`, `GpuRecoveryVictim`), then at the later encoders
+    /// [`Later`] counts, which it reaches once it recovered.
+    Fault(Later),
+}
+
+/// The ended encoders after a faulting one that Metal's GPU fails too, which it reaches once it
+/// recovered from the fault (the module docs): the faults (victims too) before the first hang,
+/// and whether a hang follows them, past which it reaches none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Later {
+    faults: u32,
+    hang: bool,
 }
 
 impl Held {
+    /// Whether the queue's command buffers committed meanwhile run nothing, as during a hang (a
+    /// hang's hold, and a fault's that a hang follows), or run (a fault's alone, or followed by
+    /// faults alone) (the module docs).
+    fn discards(self) -> bool {
+        matches!(self, Held::Hang | Held::Fault(Later { hang: true, .. }))
+    }
+
     /// When after its commit the command buffer reads `Scheduled` at the earliest.
     fn scheduled(self) -> Duration {
         match self {
             Held::Hang => SCHEDULED,
-            Held::Fault => Duration::ZERO,
+            Held::Fault(_) => Duration::ZERO,
         }
     }
 
@@ -252,7 +289,23 @@ impl Held {
     fn after_reached(self) -> Duration {
         match self {
             Held::Hang => FROM_REACHED,
-            Held::Fault => FAULT_FROM_REACHED,
+            Held::Fault(_) => FAULT_FROM_REACHED,
+        }
+    }
+
+    /// A fault's that later failures follow: how long after it read `Scheduled`, once the GPU
+    /// recovered from the fault, its wait goes: [`FAULT_FROM_REACHED`] for each later fault, then
+    /// [`FROM_REACHED`] for a hang. `None` for a hang's, and a fault's alone.
+    fn after_recovered(self) -> Option<Duration> {
+        match self {
+            Held::Fault(Later { faults, hang }) if faults > 0 || hang => {
+                let hang = match hang {
+                    true => FROM_REACHED,
+                    false => Duration::ZERO,
+                };
+                Some(FAULT_FROM_REACHED * faults + hang)
+            }
+            _ => None,
         }
     }
 }
@@ -306,6 +359,20 @@ impl Hang {
         self.encoder
     }
 
+    /// Metal's GPU fails a later ended encoder too, hanging there where `hangs`, else faulting:
+    /// a fault's hold counts it, the GPU reaching it once it recovered, unless a hang came before
+    /// it, past which the GPU reaches nothing (the module docs).
+    pub(super) fn fails_later(&mut self, hangs: bool) {
+        let Held::Fault(later) = &mut self.held else {
+            return;
+        };
+        match (later.hang, hangs) {
+            (true, _) => {}
+            (false, true) => later.hang = true,
+            (false, false) => later.faults += 1,
+        }
+    }
+
     /// The event of its signals and its wait.
     pub(super) fn event(&self) -> &SharedEvent {
         &self.event
@@ -317,15 +384,18 @@ impl Hang {
     }
 
     /// The command buffer `buffer`, of state `state`, committed at `committed`, runs its hold:
-    /// its queue counts it until its work signalled [`Hang::DONE`] (a hang's among those that
-    /// discard the queue's others, a fault's among those that do not); it reads `Scheduled`
-    /// [`SCHEDULED`] after the commit (a hang's) or at once (a fault's), or later once the batch
-    /// before its wait was taken ([`Scheduling::Hang`]), and the queue's command buffers committed
-    /// meanwhile follow ([`QueueHangs::schedule_early`]); its wait goes [`FROM_REACHED`] (a
-    /// hang's) or [`FAULT_FROM_REACHED`] (a fault's) after it read `Scheduled` and the GPU reached
-    /// the encoder. One with a switch of storage forms riding on its commit, which settles by its
-    /// last batch's submission, reads `Scheduled` with that batch, as do the queue's others. Where
-    /// no thread can be made for that, the wait goes at once, the queue not counting it.
+    /// its queue counts it until its work signalled [`Hang::DONE`] (a hang's, and a fault's that
+    /// a hang follows, among those that discard the queue's others; another fault's among those
+    /// that do not); it reads `Scheduled` [`SCHEDULED`] after the commit (a hang's) or at once (a
+    /// fault's), or later once the batch before its wait was taken ([`Scheduling::Hang`]), and the
+    /// queue's command buffers committed meanwhile follow ([`QueueHangs::schedule_early`]); its
+    /// wait goes [`FROM_REACHED`] (a hang's) or [`FAULT_FROM_REACHED`] (a fault's) after it read
+    /// `Scheduled` and the GPU reached the encoder. A fault's that later failures follow reads
+    /// `Scheduled` [`FAULT_FROM_REACHED`] after the GPU reached the encoder, and its wait goes
+    /// [`Held::after_recovered`] after that. One with a switch of storage forms riding on its
+    /// commit, which settles by its last batch's submission, reads `Scheduled` with that batch,
+    /// as do the queue's others. Where no thread can be made for that, the wait goes at once, the
+    /// queue not counting it.
     pub(super) fn start(
         self,
         buffer: &Arc<CommandBufferShared>,
@@ -353,15 +423,26 @@ impl Hang {
         let builder = std::thread::Builder::new().name("metal2vulkan-hang".to_owned());
         let ended = crate::exit_guard::spawn(builder, move || {
             sleep_until(committed + held.scheduled());
-            let scheduled = hang_scheduled(weak);
-            event.wait_until_signaled_value(Hang::REACHED, SIGNAL_BOUND);
-            let release = Instant::now() + held.after_reached();
+            let (scheduled, release) = match held.after_recovered() {
+                // A fault that later failures follow reads `Scheduled` once the GPU recovered
+                // from it, and its wait goes once the GPU recovered from them too.
+                Some(after) => {
+                    event.wait_until_signaled_value(Hang::REACHED, SIGNAL_BOUND);
+                    std::thread::sleep(FAULT_FROM_REACHED);
+                    (hang_scheduled(weak), Instant::now() + after)
+                }
+                None => {
+                    let scheduled = hang_scheduled(weak);
+                    event.wait_until_signaled_value(Hang::REACHED, SIGNAL_BOUND);
+                    (scheduled, Instant::now() + held.after_reached())
+                }
+            };
             match scheduled {
                 true => hangs.schedule_early(hang, release),
                 false => sleep_until(release),
             }
             let trail = trails.open();
-            if held == Held::Hang {
+            if held.discards() {
                 hangs.decide();
             }
             event.set_signaled_value(Hang::RELEASED);
@@ -374,7 +455,7 @@ impl Hang {
         });
         if ended.is_err() {
             state.hang_scheduling = None;
-            if held == Held::Hang {
+            if held.discards() {
                 queue.hangs().decide();
             }
             lock(&queue.hangs().early).joined.clear();

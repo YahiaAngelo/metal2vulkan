@@ -3137,6 +3137,14 @@ each item named states the rule in full.
   where the GPU ran just before (127 of 142), run where it was idle before (the first fault after
   3 s idle), and run in part in some shapes (an encoder after an event signal, a command buffer
   committed right after). The runtime does not model the GPU's idle state.
+- **A fault that later failing encoders follow fails with the fault's error, in their time**: it
+  reads `Scheduled` no sooner than 6.86 ms after the GPU reached the fault, and completes no
+  sooner than 6.86 ms after that for each later fault, then 27.5 ms for a hang, past which
+  nothing adds; its queue's command buffers committed meanwhile run nothing where a hang follows
+  the fault, as during a hang. On an M3 Max (macOS 27.0.1, 88 command buffers) Metal's read
+  `Scheduled` 14.3 to 21.0 ms after its commit, once the GPU recovered from the fault, and
+  completed 25.8 to 29.1 ms after that where a hang followed the fault. One that hangs first fails
+  as the hang alone does (30 of 30), the GPU never reaching the fault.
 - **A queue's second caused GPU error revokes it, as Metal's does**, and only an event wait held
   across the revocation is answered unmeasured. Measured on the M3 Max (macOS 27.0.1, about sixty
   command buffers): page faults and hangs (`CommandBufferError::PageFault`, `GpuHang`) count
