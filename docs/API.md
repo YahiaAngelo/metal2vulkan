@@ -2057,9 +2057,10 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-unmeasured-heap-texture-size` (precision). `UnmeasuredHeapTextureSize`: A
   heap texture sized or made (`heap_texture_size_and_align`, `Heap::new_texture`) whose size Metal's
   layout the runtime does not model: a format or a sample count whose layout in Metal's heaps is not
-  measured. Cost: heap_texture_size_and_align answers the device's own image's size and alignment,
-  which may be larger or smaller than Metal's, so a heap sized by Metal's answers may hold more or
-  fewer such textures and they lie at other offsets.
+  measured at the device's Metal level (8 samples; a PVRTC format at macOS 26.7's level, whose
+  blocks' placement only macOS 27.0.1's measures). Cost: heap_texture_size_and_align answers the
+  device's own image's size and alignment, which may be larger or smaller than Metal's, so a heap
+  sized by Metal's answers may hold more or fewer such textures and they lie at other offsets.
 - `metal2vulkan-degrade-plain-state-unique-identifier` (precision). `PlainStateUniqueIdentifier`: A
   program's call answered the `uniqueIdentifier` of a pipeline state made without
   `supportIndirectCommandBuffers` (`ComputePipelineState::unique_identifier`,
