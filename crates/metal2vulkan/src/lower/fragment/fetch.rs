@@ -257,9 +257,9 @@
 //! splits around the draw, whose blend is the device's. A factor of the second source reads the
 //! function's second (index 1) output, four `half` or `float` lanes, clamped as the first (Metal
 //! makes and draws a pipeline that fetches and blends so; one whose function writes no second
-//! output is refused, `ExtendedRangeBlend` `DualSource`). The generic blend also takes a 16-bit
-//! float or 8-bit unorm attachment's blend of the second source, or beside a second output, whose
-//! Metal arithmetic is not measured.
+//! output Metal refuses, and so is it refused, `DescriptorError::ColorAttachment`). The generic
+//! blend also takes a 16-bit float or 8-bit unorm attachment's blend of the second source, or
+//! beside a second output, whose Metal arithmetic is not measured.
 //!
 //! A blocked attachment is refused with the blocker's reason (what the device lacks, or
 //! `NotImplemented`): no ordered path exists there. The storage form
@@ -1568,6 +1568,21 @@ pub(super) fn plan(cx: &mut SelectCx<'_>) -> Result<(), Error> {
         // A blend of the second source reads the function's second (index 1) output, four `half`
         // or `float` lanes as the first's.
         let second = second_output4(cx, color)?;
+        // A blend of the second source whose function writes no second output: Metal refuses
+        // the pipeline ("Fragment shader does not write to render target color(0), index(1) that
+        // is required for blending"), as link refuses it where the device blends.
+        let reads_second = inputs
+            .attachments
+            .get(&color)
+            .copied()
+            .flatten()
+            .is_some_and(|a| {
+                a.blending_enabled && a.equation.is_some_and(|eq| eq.reads_second_source())
+            });
+        if reads_second && second.is_none() {
+            let invalid = DescriptorError::ColorAttachment { index: color };
+            return Err(Error::InvalidDescriptor(invalid));
+        }
         let generic_of = |view: StorageView, exact: &mut bool| {
             let reads_second = view
                 .blend
@@ -1575,9 +1590,6 @@ pub(super) fn plan(cx: &mut SelectCx<'_>) -> Result<(), Error> {
                 .is_some_and(|b| b.reads_second());
             match (fetched.contains(&color), reads_second, second) {
                 (false, _, _) => Err(not_implemented()),
-                (true, true, None) => Err(Unsupported::not_implemented(
-                    Feature::ExtendedRangeBlend(ExtendedRangeBlend::DualSource),
-                )),
                 (true, true, Some(None)) => Err(Unsupported::not_implemented(
                     Feature::ExtendedRangeBlend(ExtendedRangeBlend::Output),
                 )),
@@ -1651,15 +1663,13 @@ pub(super) fn plan(cx: &mut SelectCx<'_>) -> Result<(), Error> {
                 }
             }
             Ok(view) => match blend_of(&view, (outputs4.get(&color).copied(), blend_math(cx))) {
-                // A blend of the second source reads the function's index-1 output, four `half`
-                // or `float` lanes as the first's.
-                Ok(Some(b)) if b.reads_second() => match second_output4(cx, color)? {
+                // A blend of the second source reads the function's index-1 output (which it
+                // writes: Metal refuses the pipeline otherwise, above), four `half` or `float`
+                // lanes as the first's.
+                Ok(Some(b)) if b.reads_second() => match second {
                     Some(Some(_)) => Ok((view, Some(b))),
-                    Some(None) => Err(Unsupported::not_implemented(Feature::ExtendedRangeBlend(
+                    _ => Err(Unsupported::not_implemented(Feature::ExtendedRangeBlend(
                         ExtendedRangeBlend::Output,
-                    ))),
-                    None => Err(Unsupported::not_implemented(Feature::ExtendedRangeBlend(
-                        ExtendedRangeBlend::DualSource,
                     ))),
                 },
                 Ok(b) => Ok((view, b)),

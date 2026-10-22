@@ -540,9 +540,8 @@ driver's. Each is open work.
   `RG8Unorm`, `RGBA8Unorm`, `BGRA8Unorm`) of a four-lane output under any factor, operation,
   write mask and blend color; the generic `float` blend, announced (`UnmeasuredFetchBlend`, the
   row above), for every other format whose channels read as floats and for a blend of the second
-  source. Refused: a blend into an 8-bit `_sRGB` format (`FramebufferFetch`, `NotImplemented`),
-  and a blend of the second source by a function that writes no second output (`ExtendedRangeBlend`,
-  `DualSource`). A source-over survey on the M3 fits the 8-bit model to
+  source. Refused: a blend into an 8-bit `_sRGB` format (`FramebufferFetch`, `NotImplemented`). A
+  source-over survey on the M3 fits the 8-bit model to
   the 10-bit unorm and 8-bit snorm formats (with their clamps), and shows the 16-bit norms and
   `RGBA32Float` blending in `float` even for a `half4` output; their factor sets are not measured,
   so their exact forms are not built.

@@ -16,8 +16,8 @@
 //! carrying the note. Before, each was refused `NotImplemented(FramebufferFetch)` at its color.
 //! A blend that reads the second source, or any blend beside a second (index 1) output (the owned
 //! fixture `engine/fbl_fetch_dual`), takes the generic blend too, a 16-bit float and an 8-bit
-//! unorm attachment's among them; one of a function that writes no second output stays refused,
-//! `NotImplemented(ExtendedRangeBlend(DualSource))`. No GPU is used.
+//! unorm attachment's among them; one of a function that writes no second output is refused as
+//! Metal refuses its pipeline, `InvalidDescriptor(ColorAttachment)`. No GPU is used.
 //!
 //! `llvm-as` assembles the fixtures; a missing tool skips visibly.
 
@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use crate::budget::Budget;
 use crate::device::{Device, DeviceDescription, DevicePolicy, DeviceProfile};
-use crate::error::{Attachment, Error, ExtendedRangeBlend, Feature, Needs};
+use crate::error::{DescriptorError, Error, Needs};
 use crate::library::{FunctionArtifact, Library};
 use crate::metal::{BlendFactor, BlendOperation, ColorWriteMask, PixelFormat};
 use crate::pipeline::artifact::PrecisionNote;
@@ -434,10 +434,13 @@ fn a_second_source_blend_takes_the_generic_blend() {
     assert!(checked > 0, "no interlock profile took the storage form");
 }
 
-/// A blend of the second source of a function that writes no second output: refused
-/// `NotImplemented(ExtendedRangeBlend(DualSource))` at color 0, whatever the format.
+/// A blend of the second source of a function that writes no second output: Metal refuses the
+/// pipeline ("Fragment shader does not write to render target color(0), index(1) that is required
+/// for blending", plain Metal on the M3 Max under macOS 27.0.1, a fetching function and a plain
+/// one, `half4` and `float4`), and so is it refused, `InvalidDescriptor(ColorAttachment)` of color
+/// 0, whatever the format.
 #[test]
-fn a_second_source_blend_without_its_output_stays_refused() {
+fn a_second_source_blend_without_its_output_is_refused_as_metal_refuses_it() {
     let Some(fast) = assembled("fbl_fetch_blend8", false) else {
         return;
     };
@@ -475,17 +478,7 @@ fn a_second_source_blend_without_its_output_stays_refused() {
             let inputs = state(0, &r, &p);
             let what = format!("{stem} {pf:?} {eq:?}");
             match compile_with(&fast, "fbl8_over_loaded", &p, &inputs) {
-                Err(Error::Unsupported(u)) if u.needs == Needs::NotImplemented => {
-                    assert_eq!(
-                        u.feature,
-                        Feature::ExtendedRangeBlend(ExtendedRangeBlend::DualSource),
-                        "{what}"
-                    );
-                    assert_eq!(
-                        u.location.as_ref().and_then(|at| at.attachment()),
-                        Some(Attachment::Color(0)),
-                        "{what}"
-                    );
+                Err(Error::InvalidDescriptor(DescriptorError::ColorAttachment { index: 0 })) => {
                     checked += 1;
                 }
                 Err(Error::Unsupported(u)) => eprintln!("{what}: {u}"),

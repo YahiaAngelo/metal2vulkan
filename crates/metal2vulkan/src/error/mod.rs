@@ -1412,7 +1412,8 @@ pub enum Feature {
 pub enum ExtendedRangeBlend {
     /// Under fast math, a factor of the second source (`Source1Color`, `Source1Alpha` and their
     /// one-minus forms): dual-source blending into such an attachment is not built. (Without fast
-    /// math it is, but for a function that writes no second output to the attachment.)
+    /// math it is. A function that writes no second output to the attachment Metal refuses:
+    /// [`DescriptorError::ColorAttachment`].)
     DualSource,
     /// Under fast math, the color channels' `BlendColor` with `OneMinusBlendColor` (either as
     /// the source factor) under `Subtract` or `ReverseSubtract`: Metal's result there follows
@@ -1717,8 +1718,8 @@ pub enum DescriptorError {
     VertexLayout { layout: u32 },
     /// A color attachment format without a fragment output, or of the wrong type class; one a
     /// fragment output has fewer components for than its channels; one whose blend reads a
-    /// second output without the first; or an integer attachment 0 under alpha to coverage
-    /// (Metal refuses each pipeline).
+    /// second output the function does not write, or writes without the first; or an integer
+    /// attachment 0 under alpha to coverage (Metal refuses each pipeline).
     ColorAttachment { index: u32 },
     /// A raw Metal enum value outside the known set.
     UnknownEnumValue { ty: &'static str, value: u32 },
