@@ -1760,13 +1760,25 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   the texture's texels. Cost: its texels are copied into an image of its own before each command
   that binds it beyond its declared usage, and back after each write through it.
 - `metal2vulkan-degrade-heap-two-plane-texture` (precision). `HeapTwoPlaneTexture`: A texture of
-  `RGB10A8_2P_XR10` or its sRGB twin made in a heap other than a 2D texture of one level, whose
-  planes the heap's bytes keep: its one image holds each texel's colour word and alpha byte side by
-  side, more than Metal's two planes take in the heap, so it lies in memory of its own. Cost: the
-  texture's size and alignment answers are Metal's and its reads, writes and copies as outside a
-  heap, but its texels lie in memory of its own, apart from the heap's bytes: a buffer or texture
-  over its range of the heap neither sees nor changes them, where Metal's texture keeps its two
-  planes there.
+  `RGB10A8_2P_XR10` or its sRGB twin made in a heap whose planes no shadow of the heap's bytes
+  holds: a 3D texture of more than one depth slice (Metal's writes lay its depth slices over one
+  another), or one whose moves pass the device's limits. Its one image holds each texel's colour
+  word and alpha byte side by side, more than Metal's two planes take in the heap, so it lies in
+  memory of its own. Cost: the texture's size and alignment answers are Metal's and its reads,
+  writes and copies as outside a heap, but its texels lie in memory of its own, apart from the
+  heap's bytes: a buffer or texture over its range of the heap neither sees nor changes them, where
+  Metal's texture keeps its two planes there.
+- `metal2vulkan-degrade-heap-two-plane-layout` (precision). `HeapTwoPlaneLayout`: A texture of
+  `RGB10A8_2P_XR10` or its sRGB twin made in a heap whose first level's planes lie in the heap's
+  bytes, of more than one level, or a 1D array: Metal's paths address the texture's levels past the
+  first at bytes that differ by path (its CPU copies at its first level's rows from past that level,
+  its blits and an array's GPU writes over the first level's bytes, a 2D texture's GPU writes
+  nowhere, its GPU reads at other bytes again), and a 1D array's GPU reads every texel at the
+  texture's first word. The runtime keeps the first level's slices in the heap's bytes, as Metal's
+  CPU copies and GPU writes lay them, and the other levels in the texture's image alone. Cost: the
+  first level's texels lie in the heap's bytes as Metal's CPU copies and GPU writes lay them, and
+  read as written; the later levels' texels lie apart from the heap's bytes, and a 1D array's GPU
+  reads read each texel, where Metal's paths address those texels at bytes that differ by path.
 - `metal2vulkan-degrade-moltenvk-argument-buffers-unread` (precision).
   `MoltenVkArgumentBuffersUnread`: A MoltenVK device at a release whose `pipelineCacheUUID` layout
   the runtime has not read: whether MoltenVK binds through Metal argument buffers is unknown, so a

@@ -651,14 +651,19 @@ fn two_plane_textures_read_and_write_as_metal_does() {
     });
 }
 
-/// The kind a heap's two-plane texture announces where it lies apart from the heap's bytes: a
-/// mipmapped or array one.
-pub(super) const HEAP_PLANES: [Degradation; 1] = [Degradation::HeapTwoPlaneTexture];
+/// The kinds a heap's two-plane texture announces: where it lies apart from the heap's bytes (a 3D
+/// one of more than one depth slice), and where its first level's planes lie in them and its later
+/// levels apart (a mipmapped one).
+pub(super) const HEAP_PLANES: [Degradation; 2] = [
+    Degradation::HeapTwoPlaneTexture,
+    Degradation::HeapTwoPlaneLayout,
+];
 
 /// A texture of each two-plane format in an automatic and a placement heap of each storage mode,
 /// at the size and alignment the device answers, reads back Metal's values in the consumer's
-/// shape as a device texture does: a one-level 2D one, a shadow of its planes in the heap's
-/// bytes, announces `shadowed-texture`, and a mipmapped one, apart from them,
+/// shape as a device texture does: a one-level 2D one and a mipmapped one, shadows of their first
+/// level's planes in the heap's bytes, announce `shadowed-texture`, the mipmapped one
+/// `heap-two-plane-layout` once too; a 3D one of two depth slices, apart from them,
 /// `heap-two-plane-texture` once.
 #[test]
 fn two_plane_heap_textures_read_and_write_as_metal_does() {
@@ -718,13 +723,34 @@ fn two_plane_heap_textures_read_and_write_as_metal_does() {
         }
         report(device, &wrong);
         let notices = counts(&messages.take_notices());
+        assert_eq!(notices.get(&HEAP_PLANES[0]), None, "{notices:?}");
         assert_eq!(
-            notices.get(&HEAP_PLANES[0]).copied(),
+            notices.get(&HEAP_PLANES[1]).copied(),
             Some(1),
             "{notices:?}"
         );
         assert!(
             notices.contains_key(&Degradation::ShadowedTexture),
+            "{notices:?}"
+        );
+        // A 3D texture of two depth slices lies apart from the heap's bytes.
+        let mut volume = TextureDescriptor::texture_2d(PixelFormat::RGB10A82PXR10, 16, 8, false);
+        volume.texture_type = TextureType::Type3D;
+        volume.depth = 2;
+        volume.usage = TextureUsage::SHADER_READ;
+        let answer = device.heap_texture_size_and_align(&volume).unwrap();
+        let heap = device
+            .new_heap(&HeapDescriptor::new(
+                HeapType::Placement,
+                answer.size,
+                ResourceOptions::private(),
+            ))
+            .unwrap();
+        heap.new_texture_at_offset(&volume, 0).unwrap();
+        let notices = counts(&messages.take_notices());
+        assert_eq!(
+            notices.get(&HEAP_PLANES[0]).copied(),
+            Some(1),
             "{notices:?}"
         );
     });
@@ -781,8 +807,8 @@ pub(super) fn get(device: &Device, queue: &CommandQueue, buffer: &Buffer, length
 /// color word with bits 30 and 31 clear, and on no other byte; bytes written into the planes
 /// reach the texture's reads; and its CPU copies move plane 0's words there. A texture of the
 /// device's own, written alike, holds the same color words and alpha bytes, and, given the same
-/// color words, reads the same colors. The device announces `shadowed-texture`, and not
-/// `heap-two-plane-texture`.
+/// color words, reads the same colors. The device announces `shadowed-texture`, and neither
+/// `heap-two-plane-texture` nor `heap-two-plane-layout`.
 #[test]
 fn two_plane_heap_textures_keep_their_texels_in_the_heap_s_bytes() {
     on_device(|device, messages| {
@@ -904,8 +930,249 @@ fn two_plane_heap_textures_keep_their_texels_in_the_heap_s_bytes() {
             notices.contains_key(&Degradation::ShadowedTexture),
             "{notices:?}"
         );
+        for kind in HEAP_PLANES {
+            assert!(!notices.contains_key(&kind), "{notices:?}");
+        }
+    });
+}
+
+/// The fixture `xr_two_plane_arrays`'s kernel `name`.
+fn array_state(device: &Device, name: &str) -> ComputePipelineState {
+    let bitcode = llvm_assemble(&engine_dir().join("xr_two_plane_arrays.ll")).unwrap();
+    let library = device.new_library_with_air(&bitcode).unwrap();
+    let function = library.new_function_with_name(name).unwrap();
+    device
+        .new_compute_pipeline_state(
+            &ComputePipelineDescriptor::new(StageSource::Function(function.function_descriptor())),
+            &PipelineOptions::default(),
+        )
+        .unwrap_or_else(|e| panic!("{name}: {e}"))
+}
+
+/// Runs the array kernel `state` over slice `slice` of `texture`, a `[w, h]` texture array, with
+/// `buffer` at 0, one thread per texel.
+fn run_slice(
+    device: &Device,
+    queue: &CommandQueue,
+    state: &ComputePipelineState,
+    (texture, buffer): (&Texture, &Buffer),
+    [w, h]: [u64; 2],
+    slice: u64,
+) {
+    let shape: Vec<u8> = [w as u32, slice as u32]
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .collect();
+    let shape = buffer_with(device, &shape).unwrap();
+    let command_buffer = queue.command_buffer().unwrap();
+    let mut encoder = command_buffer.compute_command_encoder().unwrap();
+    encoder.set_compute_pipeline_state(state).unwrap();
+    encoder.set_texture(Some(texture), 0).unwrap();
+    encoder.set_buffer(Some(buffer), 0, 0).unwrap();
+    encoder.set_buffer(Some(&shape), 0, 1).unwrap();
+    encoder
+        .dispatch_threads(Size::new(w, h, 1), Size::new(32, 32, 1))
+        .unwrap();
+    encoder.end_encoding().unwrap();
+    command_buffer.commit().unwrap();
+    command_buffer.wait_until_completed_for(WAIT).unwrap();
+    assert_eq!(command_buffer.status(), CommandBufferStatus::Completed);
+    assert_eq!(command_buffer.error(), None);
+}
+
+/// The extent, slices and offset of the arrays of
+/// [`two_plane_heap_arrays_keep_their_slices_in_the_heap_s_bytes`], and their slices apart in the
+/// heap's bytes: `align(h · align(4 w, 16), 128)`.
+const ARRAY_EXTENT: [u64; 2] = [37, 5];
+const ARRAY_SLICES: u64 = 2;
+const ARRAY_AT: u64 = 128;
+const ARRAY_SLICE: u64 = 0x380;
+
+/// A 2D array of each two-plane format in a placement heap of each storage mode keeps its slices'
+/// color words in the heap's bytes as Metal does (an Apple M3 Max under macOS 27.0.1, a probe of
+/// kernel writes and reads, `replaceRegion` and `getBytes` through a buffer over the heap's bytes):
+/// slice `s`'s rows as a 2D texture's, `align(h · align(4 w, 16), 128)` bytes past slice `s - 1`'s,
+/// and no alpha plane. A kernel's writes of a slice land on that slice's color words alone, as a
+/// texture of the device's own written alike holds them, and no other byte; words written there
+/// reach the texture's reads, whose alpha reads 0; the CPU copies move each slice's words there.
+/// The device announces `shadowed-texture` and neither `heap-two-plane-texture` nor
+/// `heap-two-plane-layout`.
+#[test]
+fn two_plane_heap_arrays_keep_their_slices_in_the_heap_s_bytes() {
+    on_device(|device, messages| {
+        let queue = device.new_command_queue().unwrap();
+        let write = array_state(device, "xr2pa_write_float");
+        let read = array_state(device, "xr2pa_read_float");
+        let kernels = Kernels::new(device);
+        let [w, h] = ARRAY_EXTENT;
+        let texels = (w * h) as usize;
+        let color = (4 * w).next_multiple_of(16);
+        let at = |s: u64, x: u64, y: u64| (ARRAY_AT + s * ARRAY_SLICE + y * color + 4 * x) as usize;
+        for format in [PixelFormat::RGB10A82PXR10, PixelFormat::RGB10A82PXR10SRGB] {
+            let reference = texture(device, format, w, h);
+            for options in [ResourceOptions::shared(), ResourceOptions::private()] {
+                let what = format!("{format:?} {:?}", options.storage_mode().unwrap());
+                let mut descriptor = TextureDescriptor::texture_2d(format, w, h, false);
+                descriptor.texture_type = TextureType::Type2DArray;
+                descriptor.array_length = ARRAY_SLICES;
+                descriptor.usage = TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE;
+                descriptor.resource_options = options;
+                let answer = device.heap_texture_size_and_align(&descriptor).unwrap();
+                // Metal's answer: plane 0's slices rounded up to 16 KiB, then plane 1's, at 128.
+                assert_eq!((answer.size, answer.align), (0x4200, 128), "{what}");
+                let heap: Heap = device
+                    .new_heap(&HeapDescriptor::new(
+                        HeapType::Placement,
+                        PLANES_HEAP,
+                        options,
+                    ))
+                    .unwrap();
+                let t = heap
+                    .new_texture_at_offset(&descriptor, ARRAY_AT)
+                    .unwrap_or_else(|e| panic!("{what}: {e}"));
+                let bytes = heap.new_buffer_at_offset(PLANES_HEAP, options, 0).unwrap();
+                for slice in 0..ARRAY_SLICES {
+                    // A kernel's writes of the slice land on its color words alone.
+                    put(device, &queue, &bytes, &vec![0xee; PLANES_HEAP as usize]);
+                    let values = floats(texels, 37 + 11 * slice as usize);
+                    let input = buffer_with(device, &values).unwrap();
+                    run_slice(device, &queue, &write, (&t, &input), [w, h], slice);
+                    super::extended_range_two_planes::write(
+                        device,
+                        &queue,
+                        &kernels,
+                        &reference,
+                        (&values, false),
+                        Dispatch::Texels(w, h),
+                    );
+                    let mut words = vec![0; 4 * texels];
+                    reference
+                        .get_bytes(&mut words, 4 * w, 0, Region::new_2d(0, 0, w, h), 0, 0)
+                        .unwrap();
+                    let mut want = vec![0xee; PLANES_HEAP as usize];
+                    for y in 0..h {
+                        for x in 0..w {
+                            let i = (y * w + x) as usize;
+                            let o = at(slice, x, y);
+                            want[o..o + 4].copy_from_slice(&words[4 * i..4 * i + 4]);
+                        }
+                    }
+                    let got = get(device, &queue, &bytes, PLANES_HEAP);
+                    let differ = (0..got.len()).filter(|&k| got[k] != want[k]).count();
+                    assert_eq!(differ, 0, "{what}: slice {slice}: {differ} bytes differ");
+                    // Words written there reach the slice's reads, its alpha 0.
+                    let pattern: Vec<u8> = (0..PLANES_HEAP)
+                        .map(|k| (k * 131 + 7 + slice) as u8)
+                        .collect();
+                    put(device, &queue, &bytes, &pattern);
+                    let out = buffer_with(device, &vec![0xab; 16 * texels]).unwrap();
+                    run_slice(device, &queue, &read, (&t, &out), [w, h], slice);
+                    let got = read_buffer(&out, 0, 16 * texels as u64).unwrap();
+                    let mut words = vec![0; 4 * texels];
+                    for y in 0..h {
+                        for x in 0..w {
+                            let i = (y * w + x) as usize;
+                            let o = at(slice, x, y);
+                            words[4 * i..4 * i + 4].copy_from_slice(&pattern[o..o + 4]);
+                        }
+                    }
+                    reference
+                        .replace_region(Region::new_2d(0, 0, w, h), 0, 0, &words, 4 * w, 0)
+                        .unwrap();
+                    let [_, colors] =
+                        reads(device, &queue, &kernels, &reference, Dispatch::Texels(w, h));
+                    for i in 0..texels {
+                        assert_eq!(
+                            got[16 * i..16 * i + 12],
+                            colors[16 * i..16 * i + 12],
+                            "{what}: slice {slice}: colors of texel {i}"
+                        );
+                        assert_eq!(
+                            got[16 * i + 12..16 * i + 16],
+                            0f32.to_le_bytes(),
+                            "{what}: slice {slice}: alpha of texel {i}"
+                        );
+                    }
+                    // The CPU copies the slice's words where they lie in the heap.
+                    if options.storage_mode().unwrap() == StorageMode::Shared {
+                        let mut read = vec![0; 4 * texels];
+                        let region = Region::new_2d(0, 0, w, h);
+                        t.get_bytes(&mut read, 4 * w, 0, region, 0, slice).unwrap();
+                        assert_eq!(read, words, "{what}: slice {slice}: get_bytes");
+                        let replaced: Vec<u8> =
+                            (0..4 * texels).map(|k| (k * 7 + 1) as u8).collect();
+                        t.replace_region(region, 0, slice, &replaced, 4 * w, 0)
+                            .unwrap();
+                        let got = read_buffer(&bytes, 0, PLANES_HEAP).unwrap();
+                        let mut want = pattern.clone();
+                        for y in 0..h {
+                            for x in 0..w {
+                                let i = (y * w + x) as usize;
+                                let o = at(slice, x, y);
+                                want[o..o + 4].copy_from_slice(&replaced[4 * i..4 * i + 4]);
+                            }
+                        }
+                        assert!(got == want, "{what}: slice {slice}: replace_region");
+                    }
+                }
+            }
+        }
+        let notices = counts(&messages.take_notices());
         assert!(
-            !notices.contains_key(&Degradation::HeapTwoPlaneTexture),
+            notices.contains_key(&Degradation::ShadowedTexture),
+            "{notices:?}"
+        );
+        for kind in HEAP_PLANES {
+            assert!(!notices.contains_key(&kind), "{notices:?}");
+        }
+    });
+}
+
+/// A mipmapped two-plane texture in a placement heap keeps its first level's color words in the
+/// heap's bytes where Metal's CPU copies lay them (an Apple M3 Max under macOS 27.0.1: level 0's
+/// rows as a one-level texture's), and its second level apart from them: a CPU copy of level 1
+/// reads back what it wrote and changes none of the heap's bytes. The device announces
+/// `heap-two-plane-layout` once.
+#[test]
+fn a_mipmapped_two_plane_heap_texture_keeps_its_first_level_in_the_heap_s_bytes() {
+    on_device(|device, messages| {
+        let [w, h] = [16u64, 8];
+        let mut descriptor = TextureDescriptor::texture_2d(PixelFormat::RGB10A82PXR10, w, h, true);
+        descriptor.mipmap_level_count = 2;
+        descriptor.usage = TextureUsage::SHADER_READ;
+        descriptor.resource_options = ResourceOptions::shared();
+        let options = ResourceOptions::shared();
+        let heap = device
+            .new_heap(&HeapDescriptor::new(
+                HeapType::Placement,
+                PLANES_HEAP,
+                options,
+            ))
+            .unwrap();
+        let t = heap.new_texture_at_offset(&descriptor, 0).unwrap();
+        let bytes = heap.new_buffer_at_offset(PLANES_HEAP, options, 0).unwrap();
+        let before = read_buffer(&bytes, 0, PLANES_HEAP).unwrap();
+        let level0: Vec<u8> = (0..4 * w * h).map(|k| (k * 3 + 1) as u8).collect();
+        t.replace_region(Region::new_2d(0, 0, w, h), 0, 0, &level0, 4 * w, 0)
+            .unwrap();
+        let mut want = before.clone();
+        want[..(4 * w * h) as usize].copy_from_slice(&level0);
+        let got = read_buffer(&bytes, 0, PLANES_HEAP).unwrap();
+        assert!(got == want, "level 0's words at its rows (64 bytes apart)");
+        let level1: Vec<u8> = (0..w * h).map(|k| (k * 5 + 9) as u8).collect();
+        let region = Region::new_2d(0, 0, w / 2, h / 2);
+        t.replace_region(region, 1, 0, &level1, 2 * w, 0).unwrap();
+        assert!(
+            read_buffer(&bytes, 0, PLANES_HEAP).unwrap() == want,
+            "level 1 changes none of the heap's bytes"
+        );
+        let mut read = vec![0; (w * h) as usize];
+        t.get_bytes(&mut read, 2 * w, 0, region, 1, 0).unwrap();
+        assert_eq!(read, level1, "level 1 reads back");
+        let notices = counts(&messages.take_notices());
+        assert_eq!(
+            notices.get(&HEAP_PLANES[1]).copied(),
+            Some(1),
             "{notices:?}"
         );
     });

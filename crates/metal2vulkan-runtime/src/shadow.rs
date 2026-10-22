@@ -578,10 +578,14 @@ impl ShadowCopies {
             && a.image_extent == b.image_extent
     }
 
-    /// Whether the shadow is a heap's two-plane texture's, whose truth is its two planes in the
-    /// heap's bytes ([`ShadowTarget::Planes`]).
-    pub(super) fn holds_planes(&self) -> bool {
-        matches!(self.target(), Some(ShadowTarget::Planes { .. }))
+    /// Whether the shadow is a heap's one-level 2D two-plane texture's, whose truth is its two
+    /// planes in the heap's bytes ([`ShadowTarget::Planes`]) where Metal's blits address them
+    /// (`HeapPlaneCopies::layout`, `TwoPlaneHeapLayout::blit_rows`).
+    pub(super) fn holds_blit_rows(&self) -> bool {
+        matches!(
+            self.target(),
+            Some(ShadowTarget::Planes { planes, .. }) if planes.layout().blit_rows()
+        )
     }
 
     /// The truth's identity and the range of it the shadow copies.

@@ -56,14 +56,18 @@
 //!   bytes, rows at a multiple of 16, the last unpadded; a 2D or 1D array's slices at multiples of
 //!   128 in each plane; the first level and slice of a mipmapped or 3D texture alone; an alignment
 //!   of 16 (128 for a 2D array). Its image, one `R32G32_UINT` texel a texel
-//!   (`ExtendedRange::Planes`), is larger than that answer, so it lies in memory of its own. A
-//!   one-level 2D texture's image is a shadow of its two planes in the heap's bytes, where Metal
-//!   lays them (`AliasRoute::Planes`, `heap_two_planes.rs`): a buffer or texture over them meets
-//!   its texels as on Metal, and the device announces `shadowed-texture`. Any other's aliases none
-//!   of the heap's bytes (`AliasRoute::Unaliased`): two textures side by side at the answer keep
-//!   their texels, which Metal's mipmapped ones do not (its levels lie past its answer), and the
-//!   device announces `heap-two-plane-texture`. Metal answers a cube or cube array 0 bytes at 16
-//!   and makes neither.
+//!   (`ExtendedRange::Planes`), is larger than that answer, so it lies in memory of its own, a
+//!   shadow of its first level's planes in the heap's bytes, where Metal lays them
+//!   (`AliasRoute::Planes`, `heap_two_planes.rs`): a one-level 2D or 1D texture's two planes, an
+//!   array's slices of color words (Metal keeps no alpha byte of an array's, and reads its alpha
+//!   as 0), a mipmapped texture's first level as a one-level one's. A buffer or texture over them
+//!   meets its texels as on Metal, and the device announces `shadowed-texture`. A mipmapped
+//!   texture's later levels lie in its image alone, and a 1D array's GPU reads read each texel,
+//!   where Metal's paths address those at bytes that differ by path (`heap-two-plane-layout`). A
+//!   3D texture of more than one depth slice, whose depth slices Metal's GPU writes lay over one
+//!   another, and one whose moves pass the device's limits alias none of the heap's bytes
+//!   (`AliasRoute::Unaliased`, `heap-two-plane-texture`). Metal answers a cube or cube array 0
+//!   bytes at 16 and makes neither.
 //! - **`allowGPUOptimizedContents`**. A descriptor with it off plans its image as one of
 //!   `PixelFormatView` usage (`TextureDescriptor::image_usage`): Metal lays a color texture out
 //!   alike either way (16384 bytes for the 64x64 `RGBA8Unorm` texture only read), and MoltenVK
@@ -277,6 +281,37 @@ pub(crate) struct HeapUnaliased {
 }
 
 impl HeapShadow {
+    /// The plane of the heap's bytes that holds `region` of the shadowed image of `plan`, where
+    /// one does (not a tiled texture's, whose elements `pieces` places itself): a two-plane
+    /// texture's color words of its first level (`heap_two_planes.rs`), or the plane of the
+    /// region's aspect and level ([`heap_plane_layout`]).
+    fn plane(&self, plan: &ImagePlan, region: &ImageRegion) -> Option<HeapPlane> {
+        if let Some(ShadowTarget::Planes { planes, .. }) = self.copies.target() {
+            let plane = planes.layout().color_plane();
+            let held = plane.aspect == region.aspect && plane.level == region.level;
+            return held.then_some(plane);
+        }
+        let (planes, _) = heap_plane_layout(
+            plan.format,
+            plan.pixel_format,
+            plan.extent,
+            plan.levels,
+            plan.layers,
+        );
+        planes
+            .into_iter()
+            .find(|plane| plane.aspect == region.aspect && plane.level == region.level)
+    }
+
+    /// Whether a CPU copy of `region` of the shadowed image of `plan` moves the heap's bytes: a
+    /// region of a tiled texture, or one a plane of the heap's bytes holds
+    /// ([`plane`](Self::plane)); not one of a two-plane texture's levels past its first, which lie
+    /// in its image alone.
+    pub(super) fn holds(&self, plan: &ImagePlan, region: &ImageRegion) -> bool {
+        matches!(self.copies.target(), Some(ShadowTarget::Tiled { .. }))
+            || self.plane(plan, region).is_some()
+    }
+
     /// The heap's mapped bytes, from its first, which a CPU copy reaches: the texture copying
     /// keeps the heap (the place holds it weakly).
     fn contents(&self, call: &'static str) -> Result<NonNull<u8>, Error> {
@@ -328,16 +363,8 @@ impl HeapShadow {
             }
             return Ok(());
         }
-        let (planes, _) = heap_plane_layout(
-            plan.format,
-            plan.pixel_format,
-            plan.extent,
-            plan.levels,
-            plan.layers,
-        );
-        let plane = planes
-            .iter()
-            .find(|plane| plane.aspect == region.aspect && plane.level == region.level)
+        let plane = self
+            .plane(plan, region)
             .ok_or_else(|| internal("a heap shadow has no plane of a copy's aspect and level"))?;
         let [bw, bh] = plane.block.map(u64::from);
         let depth = u64::from(plane.extent[2]);
@@ -435,12 +462,14 @@ enum AliasRoute {
     /// (`shadowed-texture`).
     MemoryShadow,
     /// A two-plane extended-range texture's image, larger than Metal's answer
-    /// (`two_plane_heap_answer`), in memory of its own: it aliases none of the heap's bytes, and
-    /// no copy moves texels between them (`heap-two-plane-texture`).
+    /// (`two_plane_heap_answer`), in memory of its own, that no shadow of its planes serves (a 3D
+    /// texture of more than one depth slice, or moves past the device's limits): it aliases none
+    /// of the heap's bytes, and no copy moves texels between them (`heap-two-plane-texture`).
     Unaliased,
-    /// A one-level 2D two-plane extended-range texture's image, in memory of its own, whose
-    /// texels the encoders move from its two planes in the heap's bytes, as Metal lays them, and
-    /// back (`heap_two_planes.rs`): a shadow of them (`shadowed-texture`).
+    /// A two-plane extended-range texture's image, in memory of its own, whose first level's
+    /// texels the encoders move from its planes in the heap's bytes, as Metal lays them, and back
+    /// (`heap_two_planes.rs`): a shadow of them (`shadowed-texture`; `heap-two-plane-layout` for
+    /// a mipmapped one, whose later levels lie in the image alone, and a 1D array).
     Planes,
     /// A texture of a plain format in a heap over host pages: its optimal image in memory of its
     /// own, whose elements the encoders move from Metal's tiles in the heap's bytes and back
@@ -622,18 +651,22 @@ pub(crate) struct HeapPlane {
     /// The bytes from one row of blocks to the next: a row's, tightly packed, but for a 4:2:2
     /// texture's, which Metal lays at a multiple of 16 bytes (`FOUR_TWO_TWO_ALIGNMENT`).
     pub(crate) pitch: u64,
+    /// The bytes from one image to the next: its rows', but for a two-plane array's, whose
+    /// slices Metal lays at a multiple of 128 bytes (`heap_two_planes.rs`).
+    pub(crate) image_pitch: u64,
 }
 
 impl HeapPlane {
     /// The bytes from one image to the next.
     fn image_bytes(&self) -> u64 {
-        self.pitch * self.blocks[1]
+        self.image_pitch
     }
 
     /// The bytes the plane spans: its images, the last one's last row unpadded.
     fn span(&self) -> u64 {
-        let rows = self.images * self.blocks[1];
-        rows.saturating_sub(1) * self.pitch + self.blocks[0] * self.unit
+        self.images.saturating_sub(1) * self.image_pitch
+            + self.blocks[1].saturating_sub(1) * self.pitch
+            + self.blocks[0] * self.unit
     }
 
     /// Where row `row` of blocks of image `image` lies, from block column `column`, counted
@@ -659,24 +692,6 @@ pub(crate) fn heap_plane_layout(
     levels: u32,
     layers: u32,
 ) -> (Vec<HeapPlane>, u64) {
-    // A two-plane texture's CPU copies move plane 0's color words, at Metal's rows
-    // (`heap_two_planes.rs`; a one-level, one-slice texture's).
-    if two_planes::holds_planes(pf) {
-        let [width, height, _] = extent.map(u64::from);
-        let metal = TwoPlaneHeapLayout::of([width, height]);
-        let plane = HeapPlane {
-            aspect: ImageAspectFlags::COLOR,
-            level: 0,
-            offset: 0,
-            extent,
-            blocks: [width, height],
-            images: 1,
-            unit: two_planes::UNIT.bytes.into(),
-            block: [1, 1],
-            pitch: metal.color_pitch,
-        };
-        return (vec![plane], metal.span());
-    }
     let mut planes = Vec::new();
     let mut end = 0u64;
     for (aspect, bytes, [bw, bh]) in copy_units(format, pf) {
@@ -696,16 +711,18 @@ pub(crate) fn heap_plane_layout(
             } else {
                 packed
             };
+            let down = u64::from(height.div_ceil(bh.max(1)));
             let plane = HeapPlane {
                 aspect,
                 level,
                 offset: end.next_multiple_of(align.max(1)),
                 extent: level_extent,
-                blocks: [across, u64::from(height.div_ceil(bh.max(1)))],
+                blocks: [across, down],
                 images: u64::from(depth) * u64::from(layers),
                 unit,
                 block: [bw.max(1), bh.max(1)],
                 pitch,
+                image_pitch: pitch * down,
             };
             end = plane.offset + plane.span();
             planes.push(plane);
@@ -2788,24 +2805,33 @@ impl Device {
     }
 
     /// Metal's layout of the planes of a heap's two-plane texture of `layout` whose image is of
-    /// `plan`, where it is measured and the runtime holds the image as a shadow of them
-    /// (`heap_two_planes.rs`): a 2D texture of one level, one slice and one sample whose image
-    /// takes copies, whose moves fit the device. `None` for any other, which lies apart from the
-    /// heap's bytes.
+    /// `plan` (its first level's, `heap_two_planes.rs`), where the runtime holds the image as a
+    /// shadow of them: a 1D, 2D, 1D array or 2D array texture of any level count, or a 3D one of
+    /// one depth slice, of one sample, whose image takes copies, whose moves fit the device.
+    /// `None` for any other (a 3D texture of more depth slices, whose depth slices Metal's writes
+    /// lay over one another, or one past the device's limits), which lies apart from the heap's
+    /// bytes.
     fn two_plane_heap_layout(
         &self,
         layout: &TextureLayout,
         plan: &ImagePlan,
     ) -> Option<TwoPlaneHeapLayout> {
+        use TextureType as T;
         let copies = ImageUsageFlags::TRANSFER_SRC | ImageUsageFlags::TRANSFER_DST;
-        let one = layout.texture_type == TextureType::Type2D
-            && layout.levels == 1
-            && layout.layers == 1
-            && plan.samples == SampleCountFlags::COUNT_1
-            && plan.usage.contains(copies);
-        let [width, height, _] = layout.extent.map(u64::from);
-        let planes = TwoPlaneHeapLayout::of([width, height]);
-        (one && HeapPlaneCopies::fit(self, &planes)).then_some(planes)
+        let [width, height, depth] = layout.extent.map(u64::from);
+        let shape = match layout.texture_type {
+            T::Type1D | T::Type2D | T::Type1DArray | T::Type2DArray => true,
+            T::Type3D => depth == 1,
+            _ => false,
+        };
+        let held =
+            shape && plan.samples == SampleCountFlags::COUNT_1 && plan.usage.contains(copies);
+        let planes = TwoPlaneHeapLayout::of_texture(
+            layout.texture_type,
+            [width, height],
+            u64::from(layout.layers),
+        );
+        (held && HeapPlaneCopies::fit(self, &planes)).then_some(planes)
     }
 
     /// The image of a heap's two-plane texture on [`AliasRoute::Planes`]: `image`'s plan in
@@ -2834,10 +2860,11 @@ impl Device {
         let hazard = options.hazard_tracking_mode()?;
         let staging = HeapPlaneCopies::staging(self, &planes, start, hazard)?;
         let moves = Box::new(HeapPlaneCopies::new(self, &staging, &planes, hazard)?);
+        // The first level's slices; any later level lies in the image alone.
         let shadow_range = UseRange::Image {
             aspects: image_aspects(plan.format).into(),
             levels: 0..1,
-            layers: 0..1,
+            layers: 0..planes.slices as u32,
         };
         let identity = Identity {
             key: ResourceKey::new(),
@@ -3004,6 +3031,33 @@ impl Device {
                 });
             }
             AliasRoute::Planes => {
+                let levels = layout.levels > 1;
+                if levels || layout.texture_type == TextureType::Type1DArray {
+                    self.degrade(Degradation::HeapTwoPlaneLayout, || {
+                        let [width, height, depth] = layout.extent;
+                        let object = format!(
+                            "a {} {:?} texture of {width}x{height}x{depth}, {} levels, {} slices \
+                             in a heap",
+                            layout.pixel_format.name(),
+                            layout.texture_type,
+                            layout.levels,
+                            layout.layers
+                        );
+                        let why = match levels {
+                            true => {
+                                "Metal's paths address its levels past the first at bytes \
+                                     that differ by path: its first level's planes lie in the \
+                                     heap's bytes, its other levels apart from them"
+                            }
+                            false => {
+                                "Metal's GPU reads every texel of a 1D array at its first \
+                                      word: its texels lie in the heap's bytes as Metal's CPU \
+                                      copies and GPU writes lay them, and read as written"
+                            }
+                        };
+                        (object, why.to_owned())
+                    });
+                }
                 return self.degrade(Degradation::ShadowedTexture, || {
                     let [width, height, depth] = layout.extent;
                     let object = format!(
