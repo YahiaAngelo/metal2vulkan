@@ -43,7 +43,7 @@ use super::pending_dispatch::PendingDispatch;
 use super::pipeline::VariantObjects;
 use super::rebind::{Holds, Taken};
 use super::replay::Replay;
-use super::residency::Residency;
+use super::residency::{Residency, Used};
 use super::resource::ResourceKey;
 use super::retained::Retained;
 use super::row_copies::RowCopies;
@@ -247,6 +247,9 @@ pub(super) struct EncoderCore {
     /// open, so a use at that place of the same key, named only where that one was, is kept and
     /// named already.
     touched: Vec<(ResourceKey, bool)>,
+    /// The buffers the encoder made resident since its last command (`made_resident`), which its
+    /// next command holds.
+    resident_unheld: Vec<ResourceKey>,
     /// The shadowed textures its pass took as attachments (`render/shadows.rs`): `end` notes them
     /// in the command buffer (`WorkCounts::shadow_attachment_passes`).
     attachment_shadows: Vec<ResourceKey>,
@@ -435,6 +438,7 @@ impl EncoderCore {
             shadows: ShadowSync::default(),
             keys: BTreeSet::new(),
             touched: Vec::new(),
+            resident_unheld: Vec::new(),
             attachment_shadows: Vec::new(),
             first_copies: Vec::new(),
             kept_leases: Vec::new(),
@@ -516,6 +520,7 @@ impl EncoderCore {
             shadows: ShadowSync::default(),
             keys: BTreeSet::new(),
             touched: Vec::new(),
+            resident_unheld: Vec::new(),
             attachment_shadows: Vec::new(),
             first_copies: Vec::new(),
             kept_leases: Vec::new(),
@@ -1034,6 +1039,7 @@ impl EncoderCore {
     /// through the resident set alone: every other key is named (`Taken`), where the device has
     /// a buffer over host pages.
     fn touch_reaching(&mut self, uses: &[Use<ResourceKey>], resident: &BTreeSet<ResourceKey>) {
+        self.hold_resident();
         let rebinds = self.device().shared().rebinds.any();
         for (at, used) in uses.iter().enumerate() {
             let key = used.key;
@@ -1059,6 +1065,31 @@ impl EncoderCore {
         let rebinds = self.device().shared().rebinds.any();
         for key in keys {
             if self.keys.insert(key) && rebinds {
+                self.hold(key);
+            }
+        }
+    }
+
+    /// Retain `used`, a resource the encoder first made resident (`use_resource`, `use_heap`),
+    /// until the command buffer completes; and, where it is a buffer over host pages or a heap
+    /// whose bytes are, hold it from the encoder's next command on, whether or not a command
+    /// reaches it, as Metal holds every buffer an encoder made resident from the submission of a
+    /// command it encoded after, and fails that submission where the buffer is detached by then
+    /// (code 8). An encoder that encodes no command after it holds nothing of it, as Metal's.
+    pub(super) fn made_resident(&mut self, used: Used) {
+        if let Some(key) = used.bytes_key() {
+            if self.device().shared().rebinds.any() {
+                self.resident_unheld.push(key);
+            }
+        }
+        self.retain(used);
+    }
+
+    /// Hold the buffers the encoder made resident since its last command (`made_resident`), as
+    /// its commands' uses are held: once each, the keys kept.
+    fn hold_resident(&mut self) {
+        while let Some(key) = self.resident_unheld.pop() {
+            if self.keys.insert(key) {
                 self.hold(key);
             }
         }
@@ -1170,6 +1201,7 @@ impl EncoderCore {
             ));
         }
         self.observe_fresh(uses, &[]);
+        self.hold_resident();
         let Some(noted) = noted else {
             self.record_aliased(stages, uses);
             self.touch_reaching(uses, resident);

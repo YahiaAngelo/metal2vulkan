@@ -1,16 +1,20 @@
-//! A committed command buffer's encoders encoded again at a rebind, before its first submission
-//! (the logs are `replay.rs`'s).
+//! A committed command buffer's encoders encoded again at a rebind, before the submission of their
+//! event group (the logs are `replay.rs`'s).
 //!
 //! - **Marked under the rebind's lock.** Its commit notes the command buffer, with the keys of
 //!   the buffers over host pages its replayable encoders named, while its encoders' holds still
-//!   refuse a rebind of them (`Rebinds::wait_for_replay`). A rebind of one of them marks it
-//!   (`reencode`) under the device's lock of those buffers, the lock its first submission reads
-//!   the mark under (`State::first_submission`): that submission came before the rebind, and
-//!   keeps the old pages (Metal's table 3), or it waits, held at its place in the scheduler's
-//!   order, until the mark is gone.
+//!   refuse a rebind of them (`Rebinds::wait_for_replay`), until its last event group is
+//!   submitted or it completes. A rebind of one of them marks it (`reencode`) under the device's
+//!   lock of those buffers, the lock each group's submission reads the mark under
+//!   (`State::first_submission`, `State::later_group`): that submission came before the rebind,
+//!   and keeps the old pages (Metal's table 3), or it waits, held at its place in the
+//!   scheduler's order, until the mark is gone. A later group's encoders are encoded again as
+//!   the first's are: Metal's later submission of a command buffer whose earlier one ran reaches
+//!   the new pages (the M3 Max under macOS 27.0.1).
 //! - **Encoded again in the rebind's call.** The rebind then encodes again, on its own thread
-//!   (the program's call, under no lock of the runtime's), each encoder of the command buffer a
-//!   command of which named a buffer that lies elsewhere now than it took it, from its log, into
+//!   (the program's call, under no lock of the runtime's), each encoder of the command buffer's
+//!   groups not yet submitted a command of which named a buffer that lies elsewhere now than it
+//!   took it, from its log, into
 //!   new `VkCommandBuffer`s of the command buffer's pool, and puts what it recorded in the
 //!   encoder's place: its recordings, uses, executions, keys and what its commands took (held
 //!   weakly, as the commit holds them). The first recording is never submitted. No GPU work is
@@ -29,8 +33,8 @@
 //!   (`EncoderCore::finish_replay`), its own commands (a render pass's shadowed textures'
 //!   copies and its other steps among them) recorded again around them. Its commit notes the
 //!   keys that work named too (`State::keep_replays`): a rebind of one of them before the first
-//!   submission records the work of the encoders it does not encode again in its place, as the
-//!   commit did, over where the buffers lie now: its recording, what its commands took and what
+//!   submission (which alone points those tables) records the work of the encoders it does not
+//!   encode again in its place, as the commit did, over where the buffers lie now: its recording, what its commands took and what
 //!   its host step needs. Work a host step recorded again since (with the barriers between its
 //!   commands, `gpu_execute::Rerecord`, or as a route outgrew it, `DeferredPass::outgrown`)
 //!   keeps that step's recording.
@@ -51,28 +55,33 @@ use crate::replay::Replay;
 use crate::residency::Residency;
 use crate::resource::ResourceKey;
 use crate::used_resources::EncoderKind;
+use std::collections::BTreeSet;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 impl CommandBufferShared {
     /// A rebind since its commit, of a buffer one of its replayable encoders named, has them
-    /// to encode again ([`reencode`](Self::reencode)) before its first submission: marked under
+    /// to encode again ([`reencode`](Self::reencode)) before the submission of their event group:
+    /// marked under
     /// the device's lock of its buffers over host pages (`Rebinds::replace`).
     pub(crate) fn mark_reencode(&self) {
         self.reencode.fetch_add(1, Ordering::AcqRel);
     }
 
-    /// Whether its first submission waits for its encoders encoded again (the module docs).
+    /// Whether the submission of its next event group waits for its encoders encoded again (the
+    /// module docs).
     pub(crate) fn reencode_pending(&self) -> bool {
         self.reencode.load(Ordering::Acquire) > 0
     }
 
-    /// Encode again each of its encoders that a command of named a buffer over host pages that
-    /// lies elsewhere now than the command took it, and record again the work its commit
-    /// recorded on the GPU alone (the module docs), on the rebind's thread, with no lock of the
-    /// runtime's held; then its first submission may go, and the scheduler looks again. Nothing
-    /// here fails the rebind: an encoder it cannot encode again, or work it cannot record on the
-    /// GPU alone again, keeps its first recording, which its first submission fails.
+    /// Encode again each encoder of its event groups not yet submitted that a command of named a
+    /// buffer over host pages that lies elsewhere now than the command took it, and record again
+    /// the work its commit recorded on the GPU alone before the first submission (the module
+    /// docs), on the rebind's thread, with no lock of the runtime's held; then the submission of
+    /// its next group may go, and the scheduler looks again. Nothing here fails the rebind: an
+    /// encoder it cannot encode again, or work it cannot record on the GPU alone again, keeps its
+    /// first recording, which its group's submission fails. A command buffer that completed
+    /// encodes nothing again.
     pub(crate) fn reencode(self: &Arc<Self>) {
         let turn = lock(&self.reencoding);
         let marked = self.reencode.load(Ordering::Acquire);
@@ -80,16 +89,19 @@ impl CommandBufferShared {
             return;
         }
         let device = &self.device;
+        // The encoders of its event groups not submitted yet: those before were judged, and run
+        // over the pages they took.
         let moved: Vec<(usize, Arc<Replay>)> = {
             let state = lock(&self.state);
-            match state.submitted {
+            match state.finished() {
                 true => Vec::new(),
                 false => {
+                    let open: BTreeSet<usize> = (state.recorded[state.unjudged_parts()..].iter())
+                        .map(|part| part.encoder)
+                        .collect();
                     let submitting = device.shared().rebinds.submitting();
-                    state
-                        .ended
-                        .iter()
-                        .enumerate()
+                    (state.ended.iter().enumerate())
+                        .filter(|(at, _)| open.contains(at))
                         .filter_map(|(at, record)| {
                             let replay = record.replay.as_ref()?;
                             submitting
@@ -132,8 +144,9 @@ impl CommandBufferShared {
             }
         }
         // Its work recorded on the GPU alone in encoders not encoded again that named a buffer
-        // over host pages that lies elsewhere now, each segment by its part and its place
-        // there, which hold through this turn: only the first submission places segments, and
+        // over host pages that lies elsewhere now, before its first submission (which alone
+        // points their resident tables), each segment by its part and its place there, which
+        // hold through this turn: only the first submission places segments, and
         // it waits for the turn; a host step, which records one, takes the turn too. What it
         // reaches through its resident set its first submission points it at as it lies then.
         let alone: Vec<((usize, usize), Deferred)> = {
@@ -179,8 +192,8 @@ impl CommandBufferShared {
             }
         }
         drop(handle);
-        // Its first submission may go, unless a rebind marked it meanwhile: that rebind's turn
-        // comes next and encodes what moved since.
+        // Its next group's submission may go, unless a rebind marked it meanwhile: that rebind's
+        // turn comes next and encodes what moved since.
         let _ = self
             .reencode
             .compare_exchange(marked, 0, Ordering::AcqRel, Ordering::Acquire);
@@ -209,17 +222,17 @@ impl State {
     }
 
     /// Put `replayed`, ended encoder `at` encoded again, and what it made resident in its place,
-    /// before the first submission: each of its parts' recordings, uses and segments (recorded
-    /// on the GPU alone), its executions (the later encoders' and segments' places among them
-    /// moved by the difference), its keys, and what its commands and its segments' took (held
-    /// weakly until the first submission). What its first recording retained stays retained,
+    /// before the submission of its event group: each of its parts' recordings, uses and segments
+    /// (recorded on the GPU alone), its executions (the later encoders' and segments' places
+    /// among them moved by the difference), its keys, and what its commands and its segments'
+    /// took (held weakly until that submission). What its first recording retained stays retained,
     /// and so does what its first segments recorded and what their host steps needed; its
     /// `VkCommandBuffer`s go with the pool unsubmitted. Refused, changing nothing and giving
     /// `replayed` back, where its place holds other parts than the encoding again's, or a segment
     /// but a pending dispatch's (which goes, the encoding again having recorded it at once) or
-    /// work its commit recorded on the GPU alone, or the command buffer was submitted. Its
-    /// replays hold what its commands took with `device`, the device's functions
-    /// (`Replays::hold`).
+    /// work its commit recorded on the GPU alone, or its group was submitted, or the command
+    /// buffer completed. Its replays hold what its commands took with `device`, the device's
+    /// functions (`Replays::hold`).
     pub(super) fn splice_replay(
         &mut self,
         device: &Vk,
@@ -236,8 +249,10 @@ impl State {
             recorded.sparse.is_empty()
                 && (recorded.segments.iter()).all(|segment| segment.pends() || segment.gpu_alone)
         };
-        let fits = !self.submitted
+        let unjudged = self.unjudged_parts();
+        let fits = !self.finished()
             && !parts.is_empty()
+            && parts.iter().all(|&part| part >= unjudged)
             && parts.len() == replayed.parts.len()
             && parts.iter().all(replaces)
             && !self.unrunnable.contains(&at)
@@ -257,7 +272,7 @@ impl State {
             mut taken,
             heaps,
         } = replayed;
-        // Held weakly until the first submission, as the commit held what the first recording
+        // Held weakly until its group's submission, as the commit held what the first recording
         // and its segments took, and by its replays until they are replayed: what they held last
         // goes here, as it does without them (`Replays::hold`, with `device`, the device's
         // functions).

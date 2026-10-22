@@ -770,8 +770,11 @@ impl Device {
         if !stood_in.is_empty() {
             super::heap_sets::retire(self, Box::new(stood_in));
         }
-        // The old pages go now where no command buffer holds them, their deallocator with them.
+        // The old pages go now where no command buffer holds them, their deallocator with them;
+        // the deallocator a detach held back runs now, inside the call, as Metal runs it at the
+        // replace (`HostCell::release_held_back`).
         drop(old);
+        cell.release_held_back();
         // The command buffers committed before the rebind and not yet first submitted whose
         // encoders named the buffer are encoded again over the new pages, in this call, before
         // their first submission (`command_buffer/reencode.rs`), as Metal resolves them then.

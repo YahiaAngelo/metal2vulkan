@@ -1,15 +1,15 @@
-//! A detach waiting for a submitted command buffer settles when the device is lost (`detach.rs`): a
-//! no-copy buffer named by a command buffer whose first batch was submitted and whose next batch
-//! waits for an event is detached on another thread, which blocks; the device is then marked lost
-//! (as `device/relay.rs` marks it), the event never signaled, and the detach answers
-//! `Err(DeviceLost)` within its poll.
+//! A detach waiting for submitted work settles when the device is lost (`detach.rs`): a no-copy
+//! buffer a submitted kernel names, spinning until the host raises a word, is detached on another
+//! thread, which blocks; the device is then marked lost (as `device/relay.rs` marks it), the word
+//! not yet raised, and the detach answers `Err(DeviceLost)` within its poll.
 //!
 //! A device test: compiled only under the validation crate's GPU safety cfgs (`m2v_gpu`,
 //! `m2v_cpu_icd`), on the kind of device the cfg selects.
 
 use crate::error::Error;
 use crate::{
-    Device, DeviceKind, DeviceOptions, EventRef, HostMemory, ResourceOptions, ShaderCacheOptions,
+    ComputePipelineState, Device, DeviceKind, DeviceOptions, HostMemory, PipelineOptions,
+    ResourceOptions, ShaderCacheOptions, Size,
 };
 use std::alloc::Layout;
 use std::path::{Path, PathBuf};
@@ -83,10 +83,27 @@ fn device(cache: &Path) -> Device {
     Device::system_default_with(&options).unwrap()
 }
 
-/// A buffer's detach blocked on a submitted command buffer that took it answers
-/// `Err(DeviceLost)` once the device is lost, the command buffer never completing.
+/// The owned fixture's kernel that loads a word no one raises until its cap
+/// (`kernel_spin_on_an_unraised_word`).
+fn spin(device: &Device) -> ComputePipelineState {
+    let ll = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+        "../metal2vulkan-validation/fixtures/public/engine/kernel_spin_on_an_unraised_word.ll",
+    );
+    let bitcode = metal2vulkan_devtools::llvm_assemble(&ll).unwrap();
+    let library = metal2vulkan::library::Library::from_air(&bitcode).unwrap();
+    let library = device.new_library_with_compile_library(library);
+    let function = library
+        .new_function_with_name("spin_on_an_unraised_word")
+        .unwrap();
+    device
+        .new_compute_pipeline_state_with_function(&function, &PipelineOptions::default())
+        .unwrap()
+}
+
+/// A buffer's detach blocked on submitted work that took it answers `Err(DeviceLost)` once the
+/// device is lost, the work not yet complete.
 #[test]
-fn a_detach_waiting_for_a_submitted_command_buffer_settles_on_a_lost_device() {
+fn a_detach_waiting_for_submitted_work_settles_on_a_lost_device() {
     let host = Host::new();
     let scratch = Scratch::new();
     let device = device(&scratch.0);
@@ -108,19 +125,18 @@ fn a_detach_waiting_for_a_submitted_command_buffer_settles_on_a_lost_device() {
         }
     };
     let queue = device.new_command_queue().unwrap();
-    let copied = device.new_buffer(16, ResourceOptions::shared()).unwrap();
-    let event = device.new_shared_event().unwrap();
+    let state = spin(&device);
+    let flag = device.new_buffer(16, ResourceOptions::shared()).unwrap();
     let command_buffer = queue.command_buffer().unwrap();
-    let mut blit = command_buffer.blit_command_encoder().unwrap();
-    blit.copy_from_buffer_to_buffer(&buffer, 0, &copied, 0, 16)
+    let mut encoder = command_buffer.compute_command_encoder().unwrap();
+    encoder.set_compute_pipeline_state(&state).unwrap();
+    encoder.set_buffer(Some(&flag), 0, 0).unwrap();
+    encoder.set_buffer(Some(&buffer), 0, 1).unwrap();
+    encoder.set_bytes(&(1u32 << 25).to_le_bytes(), 2).unwrap();
+    encoder
+        .dispatch_threadgroups(Size::new(1, 1, 1), Size::new(1, 1, 1))
         .unwrap();
-    blit.end_encoding().unwrap();
-    command_buffer
-        .encode_wait_for_event(EventRef::from(&event), 1)
-        .unwrap();
-    let mut blit = command_buffer.blit_command_encoder().unwrap();
-    blit.fill_buffer(&copied, 0..16, 0x3c).unwrap();
-    blit.end_encoding().unwrap();
+    encoder.end_encoding().unwrap();
     command_buffer.commit().unwrap();
     let deadline = Instant::now() + WAIT;
     while command_buffer.kernel_start_time() == 0.0 {
@@ -130,14 +146,21 @@ fn a_detach_waiting_for_a_submitted_command_buffer_settles_on_a_lost_device() {
         );
         std::thread::sleep(Duration::from_millis(1));
     }
+    let raise = || {
+        let word = flag.contents().unwrap().as_ptr().cast::<u32>();
+        // SAFETY: the flag's `Shared` bytes are mapped for its life, aligned for a word, and the
+        // GPU only loads them.
+        unsafe { word.write_volatile(1) };
+    };
     std::thread::scope(|scope| {
         let detaching = scope.spawn(|| buffer.detach_backing());
         std::thread::sleep(Duration::from_millis(100));
-        assert!(
-            !detaching.is_finished(),
-            "the detach did not wait for the submitted command buffer"
-        );
+        let waited = !detaching.is_finished();
         device.mark_lost();
-        assert_eq!(detaching.join().unwrap(), Err(Error::DeviceLost));
+        let answer = detaching.join().unwrap();
+        // The GPU is never left spinning.
+        raise();
+        assert!(waited, "the detach did not wait for the submitted work");
+        assert_eq!(answer, Err(Error::DeviceLost));
     });
 }

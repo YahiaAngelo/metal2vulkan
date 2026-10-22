@@ -311,6 +311,15 @@ driver's. Each is open work.
   780M and the RX 7900 XTX under Mesa 26.2.4), but one whose Metal address was handed out, or any
   on a device not measured with the fact, stays live. 275 kept dma-buf imports of 512 KiB each
   cost 54-56 us per command buffer there (no other size measured).
+- **A detach or rebind between a command buffer's submissions.** A command buffer's later
+  submission, behind an event wait, reaches a no-copy buffer detached or rebound after its first
+  submission through an address (made resident, or unnamed) through the pages its first
+  submission found, where Metal's reads the new pages or zeros; those pages stay imported, and
+  their deallocator waits (announced), until the command buffer completes. Its commands that
+  named the buffer are encoded again over the new pages, as Metal runs them, and fail with code 8
+  where it is detached by then, as Metal's; those of an encoder that cannot be encoded again (a
+  command predication's command buffer, work on the GPU alone) fail `EncodedUseRebound`
+  (announced).
 - **A runtime sampler's nearest sample of an 8-bit sRGB texture under native sampling.** On a
   device that samples the format, the sample keeps the device's sRGB decode (announced as
   `SrgbTexelDecode`), where the table's exact decode of the one texel it reads would cost little:

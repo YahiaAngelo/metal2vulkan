@@ -32,7 +32,7 @@ use super::fresh_pages;
 use super::generated_commands::PREPROCESS_BUFFER;
 use super::heap::{Heap, HeapType};
 use super::host_aliases::Alias;
-use super::host_memory::{KeepAlive, Release};
+use super::host_memory::{HeldBack, KeepAlive, Release};
 #[cfg(unix)]
 use super::host_residency::{Again, Residency};
 use super::memory::{Mapped, MemoryClass, Placement, BLOCK_BYTES};
@@ -164,6 +164,9 @@ pub(super) struct HostCell {
     /// its pages are imported through a read-only view of them (`read_only_view.rs`), which a
     /// rebind's are too.
     drops_writes: bool,
+    /// The deallocator of the pages its last detach let go of (`detach.rs`), held back until its
+    /// next rebind or its release, as Metal runs it then ([`Release::hold_back`]).
+    held_back: Mutex<Option<Arc<HeldBack>>>,
 }
 
 /// The textures over a buffer's host pages ([`HostCell`]): their images, which a detach makes
@@ -415,6 +418,51 @@ impl HostCell {
             pages.let_go_by_buffer();
         }
         lay
+    }
+
+    /// A detach let go of `pages`: their deallocator is held back until the buffer's next rebind
+    /// or its release ([`HostCell::release_held_back`]), as Metal never runs it at a detach.
+    pub(super) fn hold_back(&self, pages: &HostPages) {
+        let Some(held) = pages.release.get().and_then(Release::hold_back) else {
+            return;
+        };
+        let earlier = lock(&self.held_back).replace(held);
+        // Never so: a detached buffer is detached again by no detach, and a rebind runs what
+        // was held back first. Were it to be, the earlier one is due now.
+        if let Some(earlier) = earlier {
+            self.held_back_due(&earlier);
+        }
+    }
+
+    /// The buffer's next rebind (inside the call, once its new pages are in place) or its release
+    /// came: the deallocator its last detach held back runs now, on this thread, as Metal runs it
+    /// there, or, where the pages it let go of are still imported (a texture's image over them
+    /// waits for a command buffer that may read it) and no keep-alive keeps them mapped, once
+    /// their import is freed, announced (`host-deallocator-delayed`).
+    pub(super) fn release_held_back(&self) {
+        let held = lock(&self.held_back).take();
+        if let Some(held) = held {
+            self.held_back_due(&held);
+        }
+    }
+
+    /// `held` is due ([`HostCell::release_held_back`]).
+    fn held_back_due(&self, held: &HeldBack) {
+        if !held.due() {
+            return;
+        }
+        let device = &self.device;
+        device.shared().counts.host_deallocator_delayed();
+        device.degrade_once(Degradation::HostDeallocatorDelayed, || {
+            (
+                "a detached no-copy buffer".to_owned(),
+                "the pages its detach let go of are still imported as it is rebound or released \
+                 (a texture's image over them may still be read through its resource ID by a \
+                 command buffer), and the caller gave no keep-alive: its deallocator runs once \
+                 their import is freed"
+                    .to_owned(),
+            )
+        });
     }
 
     /// Note `noted`, a texture over the buffer's bytes (`TexturesOver`), forgetting those
@@ -1655,6 +1703,8 @@ impl Drop for BufferShared {
             if let Lying::In(pages) = cell.lying() {
                 pages.released_listed(&self.device);
             }
+            // A detached buffer's deallocator runs at its release, as Metal's does.
+            cell.release_held_back();
         }
     }
 }
@@ -2355,6 +2405,7 @@ impl Device {
             exposed: AtomicU8::new(0),
             device: self.clone(),
             drops_writes,
+            held_back: Mutex::new(None),
         });
         self.shared().rebinds.register(key, &cell);
         Lie::Host(cell)

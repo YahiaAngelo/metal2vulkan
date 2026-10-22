@@ -113,7 +113,7 @@ use metal2vulkan::device::{EnableSet, VkExtension};
 use metal2vulkan::error::{Feature, Unsupported};
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Host memory a buffer or heap wraps without a copy: a pointer whose bytes the caller vouches for
 /// (the `pointer` of `newBufferWithBytesNoCopy:length:options:deallocator:`), and, as a runtime
@@ -317,6 +317,7 @@ impl HostRelease {
             length,
             deallocator: Mutex::new(deallocator),
             keep_alive: Mutex::new(keep_alive),
+            held_back: Mutex::new(None),
         })
     }
 }
@@ -809,6 +810,9 @@ pub(super) struct Release {
     length: u64,
     deallocator: Mutex<Option<ProgramObject<Deallocator>>>,
     keep_alive: Mutex<Option<ProgramObject<KeepAlive>>>,
+    /// Where a detach held both back ([`Release::hold_back`]): told as the release would have run
+    /// the deallocator.
+    held_back: Mutex<Option<Arc<HeldBack>>>,
 }
 
 // SAFETY: the pointer is only handed to the deallocator, which is `Send`; the deallocator and
@@ -850,14 +854,147 @@ impl Release {
         self.length
     }
 
-    /// Run the deallocator, once; a panic inside it is caught.
+    /// Run the deallocator, once; a panic inside it is caught. Where a detach held it back, the
+    /// [`HeldBack`] is told instead: the pages may be unmapped from now on.
     pub(super) fn run(&self) {
+        if let Some(held) = lock(&self.held_back).take() {
+            held.unmappable();
+            return;
+        }
         let deallocator = lock(&self.deallocator).take();
         if let Some(deallocator) = deallocator {
             let (pointer, length) = (self.pointer, self.length);
             exit_guard::program_release(move || {
                 deallocator.run(|deallocator| deallocator(pointer, length));
             });
+        }
+    }
+
+    /// Hold back its deallocator and its keep-alive for a detach (`detach.rs`): Metal runs a
+    /// no-copy buffer's deallocator at its next replace, inside the call, or at its release, never
+    /// at a detach (measured on the M3 Max, macOS 27.0.1). Both go to a [`HeldBack`], which this
+    /// release tells, in the deallocator's place, once the pages may be unmapped (their import
+    /// freed, or another buffer lying in it: [`HeldBack::unmappable`]); the keep-alive goes once
+    /// the deallocator ran and the pages may be unmapped, so the deallocator may read the bytes, as
+    /// with a release. `None` where it has no deallocator left to run.
+    pub(super) fn hold_back(&self) -> Option<Arc<HeldBack>> {
+        let deallocator = lock(&self.deallocator).take()?;
+        let keep_alive = lock(&self.keep_alive).take();
+        let held = Arc::new(HeldBack {
+            state: Mutex::new(Back {
+                deallocator: Some(deallocator),
+                keep_alive,
+                unmappable: false,
+                due: false,
+            }),
+            pointer: self.pointer,
+            length: self.length,
+        });
+        *lock(&self.held_back) = Some(Arc::clone(&held));
+        Some(held)
+    }
+}
+
+/// A no-copy buffer's deallocator and keep-alive a detach held back ([`Release::hold_back`]). The
+/// deallocator runs once the buffer's next rebind or its release came ([`HeldBack::due`]) and the
+/// pages are kept mapped or may be unmapped: at once where the caller gave a keep-alive, which
+/// keeps them mapped, as Metal runs it then; else once the pages' release reached it
+/// ([`HeldBack::unmappable`]), at once where nothing still holds the import. The keep-alive goes
+/// once both the deallocator ran and the pages may be unmapped, on the thread whose call came last.
+pub(super) struct HeldBack {
+    state: Mutex<Back>,
+    pointer: NonNull<u8>,
+    length: u64,
+}
+
+/// What a [`HeldBack`] holds, and what came.
+struct Back {
+    deallocator: Option<ProgramObject<Deallocator>>,
+    keep_alive: Option<ProgramObject<KeepAlive>>,
+    unmappable: bool,
+    due: bool,
+}
+
+// SAFETY: the pointer is only handed to the deallocator, which is `Send`; the deallocator and
+// the keep-alive are reached only through their lock.
+unsafe impl Send for HeldBack {}
+// SAFETY: as above.
+unsafe impl Sync for HeldBack {}
+
+/// What a [`HeldBack`] runs and drops now, taken under its lock.
+type Ready = (
+    Option<ProgramObject<Deallocator>>,
+    Option<ProgramObject<KeepAlive>>,
+);
+
+impl HeldBack {
+    /// What runs and goes now: the deallocator once due and the pages are mapped (a keep-alive)
+    /// or may be unmapped; the keep-alive once the deallocator ran and they may be unmapped.
+    fn ready(back: &mut Back) -> Ready {
+        let deallocator = match back.due && (back.unmappable || back.keep_alive.is_some()) {
+            true => back.deallocator.take(),
+            false => None,
+        };
+        let keep_alive = match back.unmappable && back.deallocator.is_none() {
+            true => back.keep_alive.take(),
+            false => None,
+        };
+        (deallocator, keep_alive)
+    }
+
+    /// Run the deallocator and drop the keep-alive of `ready`, in that order; the process
+    /// exiting runs and drops neither: the pages stay imported to its end.
+    fn run(&self, (deallocator, keep_alive): Ready) {
+        let Some(busy) = exit_guard::enter() else {
+            std::mem::forget(deallocator);
+            std::mem::forget(keep_alive);
+            return;
+        };
+        drop(busy);
+        let (pointer, length) = (self.pointer, self.length);
+        exit_guard::program_release(move || {
+            if let Some(deallocator) = deallocator {
+                deallocator.run(|deallocator| deallocator(pointer, length));
+            }
+            drop(keep_alive);
+        });
+    }
+
+    /// The pages' release reached the deallocator ([`Release::run`]): they may be unmapped from
+    /// now on.
+    fn unmappable(&self) {
+        let ready = {
+            let mut back = lock(&self.state);
+            back.unmappable = true;
+            HeldBack::ready(&mut back)
+        };
+        self.run(ready);
+    }
+
+    /// The buffer's next rebind, or its release, came: the deallocator runs now, but where no
+    /// keep-alive keeps the pages mapped and they are still imported; `true` where it waits so.
+    pub(super) fn due(&self) -> bool {
+        let (ready, waits) = {
+            let mut back = lock(&self.state);
+            back.due = true;
+            let ready = HeldBack::ready(&mut back);
+            (ready, back.deallocator.is_some())
+        };
+        self.run(ready);
+        waits
+    }
+}
+
+impl Drop for HeldBack {
+    /// The process exiting leaves what it still holds unrun and undropped (`exit_guard`).
+    fn drop(&mut self) {
+        let back = self
+            .state
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if exit_guard::enter().is_none() {
+            std::mem::forget(back.deallocator.take());
+            std::mem::forget(back.keep_alive.take());
         }
     }
 }

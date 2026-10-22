@@ -2188,9 +2188,11 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   with no keep-alive on MoltenVK (`RuntimeDriverDefect::FreedAddressMemoryFailsPendingWork`), while
   the batches submitted before the import's memory went, and the program's own submissions through
   `CommandQueue::with_vk_queue` before it, are in flight, as MoltenVK fails pending work that reads
-  device addresses where such memory is freed. With a keep-alive the deallocator runs at
-  the release, as Metal's, and the import keeps the keep-alive, which keeps the pages mapped, until
-  it is freed: not announced.
+  device addresses where such memory is freed; with no keep-alive, a detached buffer's or heap's
+  rebind or release while the pages its detach let go of are still so held (the deallocator its
+  detach held back, which Metal runs at the replace or the release). With a keep-alive the
+  deallocator runs at the release, as Metal's, and the import keeps the keep-alive, which keeps
+  the pages mapped, until it is freed: not announced.
   Cost: the deallocator runs once every such command buffer lets go of the pages, or those batches
   complete, where Metal's runs at the release; the pages stay mapped until then.
 - `metal2vulkan-degrade-read-only-pages-written` (precision). `ReadOnlyPagesWritten`: A no-copy

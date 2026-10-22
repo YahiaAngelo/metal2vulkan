@@ -70,7 +70,7 @@ impl RenderLowering {
         }
         for &resource in resources {
             if let Some(used) = self.residency.use_resource(resource, usage, stages) {
-                self.core.retain(used);
+                self.core.made_resident(used);
             }
             if let ResourceRef::IndirectCommandBuffer(icb) = resource {
                 if usage.contains(ResourceUsage::WRITE) {
@@ -107,7 +107,7 @@ impl RenderLowering {
         }
         for heap in heaps {
             for used in self.residency.use_heap(heap, stages) {
-                self.core.retain(used);
+                self.core.made_resident(used);
             }
         }
         Ok(())

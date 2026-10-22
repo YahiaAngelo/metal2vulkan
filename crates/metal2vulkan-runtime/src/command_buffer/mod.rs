@@ -668,6 +668,10 @@ pub(super) struct State {
     /// Its first batch was submitted: from then on it holds what its commands took and the
     /// live buffers' table its resident set was made of until it completes.
     submitted: bool,
+    /// The batches before this one lie in event groups judged as they were submitted
+    /// (`State::first_submission`, `State::later_group`): a rebind encodes again only encoders
+    /// of the groups from here (`reencode.rs`).
+    judged_to: usize,
     /// Metal's submissions (`checks::metal_submissions`, by their ended encoders) its first
     /// submission found to name a buffer rebound since, or to hold a detached one, each with
     /// its failure: each fails as its own batch is submitted, after its check
@@ -683,10 +687,12 @@ pub(super) struct State {
     /// The ended encoders whose submissions failed so: no part of one goes to a queue with work
     /// (`submit.rs` holds it to that).
     unrunnable: BTreeSet<usize>,
-    /// What its batches' commands took of buffers over host pages, held from its first
-    /// submission (`rebind::SubmittedHolds`): let go as its work completes, before its
-    /// completed handlers, so a detach waiting for it goes on once its GPU work ended.
-    submitted_holds: Vec<SubmittedHolds>,
+    /// What its batches' commands took of buffers over host pages, held from the submission of
+    /// their event group's first batch (`rebind::SubmittedHolds`, `State::event_group`), each with
+    /// the batch whose submission takes it ([`State::holds_until`]): let go as that batch's work
+    /// completed, or, for its last batch's, noted complete there and let go once its completed
+    /// handlers ran, as Metal answers a detach `NO` until then (measured on the M3 Max).
+    submitted_holds: Vec<(usize, SubmittedHolds)>,
     /// The encoders its commit's failure failed (`commit_failed`'s, Metal's own from a render
     /// pass, or a faulted encoder's: [`State::fail`]): a submission none of whose encoders
     /// runs so is spared its rebound verdict (`first_submission.rs`).
@@ -1286,6 +1292,29 @@ impl State {
         Ok(())
     }
 
+    /// The holds of what its commands took that batch `index`'s work lets go as it completes
+    /// (`State::submitted_holds`), for its submission to carry (`completion::Submitted`).
+    pub(super) fn holds_until(&mut self, index: usize) -> Vec<SubmittedHolds> {
+        if self.submitted_holds.is_empty() {
+            return Vec::new();
+        }
+        let (now, later): (Vec<_>, Vec<_>) = self
+            .submitted_holds
+            .drain(..)
+            .partition(|(until, _)| *until <= index);
+        self.submitted_holds = later;
+        now.into_iter().map(|(_, holds)| holds).collect()
+    }
+
+    /// The holds of its last batch, whose work completed: kept until its completed handlers ran
+    /// (`State::submitted_holds`).
+    pub(super) fn keep_holds(&mut self, holds: Vec<SubmittedHolds>) {
+        for mut held in holds {
+            held.ran();
+            self.submitted_holds.push((usize::MAX, held));
+        }
+    }
+
     /// The encoders (or parts of them) of batch `index`.
     pub(super) fn batch_range(&self, index: usize) -> Range<usize> {
         let batches = self.batches.all();
@@ -1716,6 +1745,7 @@ impl CommandBuffer {
                 stepped_tables: Vec::new(),
                 listing: None,
                 submitted: false,
+                judged_to: 0,
                 failing: Vec::new(),
                 rebound_use: None,
                 replay_tables: Vec::new(),
@@ -3834,6 +3864,7 @@ impl CommandBufferShared {
                 last: true,
                 fence,
                 signals: Vec::new(),
+                holds: Vec::new(),
             },
         );
     }
@@ -3957,6 +3988,8 @@ impl CommandBufferShared {
         let mut settled_pool = None;
         // The heap versions its commands bound, let go of once its completed handlers ran.
         let released_versions;
+        // No rebind encodes it again from here: a group that was never submitted runs nothing.
+        self.device.shared().rebinds.no_replays(self);
         {
             let mut state = lock(&self.state);
             // Every trail of the work it waited for (a pipeline's making, a twin's decode) was
@@ -4073,8 +4106,11 @@ impl CommandBufferShared {
             // Its heap versions, uploads, pools and descriptor pools go once its completed
             // handlers ran (below).
             released_versions = state.heaps.clear();
-            // Its work ended: a detach waiting for it goes on (`detach.rs`).
-            state.submitted_holds.clear();
+            // Its work ended: a buffer's detach waiting for it answers `false` (`detach.rs`), and
+            // a detach answers so until its completed handlers ran (below), as Metal's does.
+            for (_, held) in &mut state.submitted_holds {
+                held.ran();
+            }
             // Its work ended (its fences were signaled, or its queues drained after a failed
             // wait), so nothing of its pools is pending: its command pool goes to the device's
             // spares whatever its status, never released on this thread (`spares.rs`); its
@@ -4128,6 +4164,10 @@ impl CommandBufferShared {
                 exit_guard::program(|| handler(&buffer));
             }
         }
+        // Its holds of what its commands took go once its completed handlers ran: a detach
+        // detaches from now on (`detach.rs`). Let go without the lock.
+        let holds = lock(&self.state).holds_until(usize::MAX);
+        drop(holds);
         let handled = Instant::now();
         drop(buffer);
         // Its queue's slot comes back as its last completed handler returns, as Metal's does: a

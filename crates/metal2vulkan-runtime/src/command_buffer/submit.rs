@@ -256,8 +256,8 @@ pub(crate) enum Submitting {
     /// buffer's transition to `Scheduled` as it is held, where it ends it
     /// ([`Submission::schedule_held`]), the rest published once the group is submitted.
     Grouped,
-    /// Nothing submitted or changed: its first submission waits for encoders of it a rebind
-    /// encodes again (`reencode.rs`).
+    /// Nothing submitted or changed: the submission of its event group waits for encoders of it a
+    /// rebind encodes again (`reencode.rs`).
     Later,
     /// Nothing submitted or changed: the group held goes first, sent by what this says.
     AfterGroup(GroupEnd),
@@ -331,9 +331,9 @@ impl CommandBufferShared {
     /// batch is for the caller to [`publish`](Self::publish) once its section ended
     /// ([`Submitting::Submitted`]), or waits in the scheduler's group for one kernel submission
     /// with the batches after it, its submission's changes made ([`Submitting::Grouped`],
-    /// `group.rs`). Nothing submitted or changed while its first submission waits for encoders
-    /// of it a rebind encodes again (`reencode.rs`, [`Submitting::Later`]), or while the group
-    /// held must go first ([`Submitting::AfterGroup`]): the caller holds the batch back at its
+    /// `group.rs`). Nothing submitted or changed while the submission of its event group waits for
+    /// encoders of it a rebind encodes again (`reencode.rs`, [`Submitting::Later`]), or while the
+    /// group held must go first ([`Submitting::AfterGroup`]): the caller holds the batch back at its
     /// place. Where the group went in this batch's submission, its outcome is the group's
     /// (`Group::take_outcome`).
     pub(crate) fn submit_batch(
@@ -388,6 +388,11 @@ impl CommandBufferShared {
             if !first {
                 return Ok(Submitting::Later);
             }
+        }
+        // A later event group's, as its first batch is submitted, unless a rebind encodes
+        // encoders of it again.
+        if !state.later_group(device, self, index) {
+            return Ok(Submitting::Later);
         }
         // Each of Metal's submissions it found rebound, or holding a detached buffer, fails as
         // its own batch is submitted, after the batch's checks: one a check failed keeps the
@@ -1044,6 +1049,8 @@ impl CommandBufferShared {
         // set: the stale-reach degrade's trigger decides (`detach.rs`).
         let reaches = state.heaps.bound();
         let rebound_use = state.rebound_use.clone();
+        // The holds its completion lets go (`State::holds_until`).
+        let holds = state.holds_until(index);
         drop(state);
         if rebound {
             device.degrade_encoded_use_rebound(rebound_use);
@@ -1063,6 +1070,7 @@ impl CommandBufferShared {
                     .into_iter()
                     .map(|(event, signal, _)| (event, signal))
                     .collect(),
+                holds,
             },
             handlers,
             forms,
