@@ -24,7 +24,9 @@
 //!   the buffer a shadowed target lies over: the render encoder encoded again, its copies and its
 //!   merged draw into the new pages.
 
-use super::degrade_notices::{assert_made_once, assert_once, counts, expected_once, on_device};
+use super::degrade_notices::{
+    assert_made_once, assert_once, counts, expected_once, made_compute_kinds, on_device,
+};
 use super::host_memory::Mapping;
 use super::host_memory::Seen;
 use super::indirect_host_steps::{complete, HOST_STEPS};
@@ -38,7 +40,8 @@ use metal2vulkan::metal::{
     IndirectCommandType, PixelFormat, PrimitiveType, ResourceUsage, TextureUsage,
 };
 use metal2vulkan::pipeline::{
-    ColorAttachmentDescriptor, ComputePipelineDescriptor, RenderPipelineDescriptor, StageSource,
+    ColorAttachmentDescriptor, ComputePipelineDescriptor, FunctionDescriptor,
+    RenderPipelineDescriptor, StageSource,
 };
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
@@ -47,6 +50,7 @@ use metal2vulkan_runtime::{
     PipelineOptions, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions, Size,
     StoreAction, Texture, TextureDescriptor,
 };
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 /// The target's width and height, and the rows an instance moves its vertices down.
@@ -63,20 +67,45 @@ fn library(device: &Device) -> Library {
     device.new_library_with_air(&bitcode).unwrap()
 }
 
+/// The kernel of the writer of `kind` (`points`, `lines` or `triangles`).
+fn writer_function(library: &Library, kind: &str) -> FunctionDescriptor {
+    library
+        .new_function_with_name(&format!("icb_merged_{kind}"))
+        .unwrap()
+        .function_descriptor()
+}
+
 /// The writer of `kind` (`points`, `lines` or `triangles`).
 fn writer(device: &Device, library: &Library, kind: &str) -> ComputePipelineState {
-    let function = library
-        .new_function_with_name(&format!("icb_merged_{kind}"))
-        .unwrap();
     let descriptor =
-        ComputePipelineDescriptor::new(StageSource::Function(function.function_descriptor()));
+        ComputePipelineDescriptor::new(StageSource::Function(writer_function(library, kind)));
     device
         .new_compute_pipeline_state(&descriptor, &PipelineOptions::default())
         .unwrap()
 }
 
-/// The commands' state, made with `supportIndirectCommandBuffers`.
+/// The commands' state ([`state_descriptor`]).
 fn state(device: &Device, library: &Library) -> RenderPipelineState {
+    device
+        .new_render_pipeline_state(&state_descriptor(library), &PipelineOptions::default())
+        .unwrap()
+}
+
+/// The kinds the makings of the commands' state and of the writers of `writers` announce on
+/// `device` the first time, beside the device's own ([`forced_with`], [`made_compute_kinds`]):
+/// their translations' precision notes, which the device's arithmetic and point sizes decide
+/// (lavapipe's `device-arithmetic` and `device-point-size` for the vertex function; none on
+/// MoltenVK).
+fn made(device: &Device, library: &Library, writers: &[&str]) -> BTreeSet<Degradation> {
+    let mut kinds = forced_with(device, &[state_descriptor(library)]);
+    for kind in writers {
+        kinds.extend(made_compute_kinds(device, writer_function(library, kind)));
+    }
+    kinds
+}
+
+/// The descriptor of the commands' state, with `supportIndirectCommandBuffers`.
+fn state_descriptor(library: &Library) -> RenderPipelineDescriptor {
     let function = |name: &str| {
         StageSource::Function(
             library
@@ -89,9 +118,7 @@ fn state(device: &Device, library: &Library) -> RenderPipelineState {
     descriptor.fragment = Some(function("icb_merged_fragment"));
     descriptor.color_attachments[0] = Some(ColorAttachmentDescriptor::new(PixelFormat::RGBA32Uint));
     descriptor.support_indirect_command_buffers = true;
-    device
-        .new_render_pipeline_state(&descriptor, &PipelineOptions::default())
-        .unwrap()
+    descriptor
 }
 
 /// Draw commands of three vertex buffers that inherit the encoder's state.
@@ -330,7 +357,7 @@ fn merged_points_draw_each_command_s_own_vertices_and_instances() {
         });
         assert_eq!(scene.pixels(), drawn_points(&draws));
         assert_eq!((merged, gpu, read), (8, 8, 0), "drawn in one merged draw");
-        assert_made_once(messages, &[], &forced_with(device, &[]));
+        assert_made_once(messages, &[], &made(device, &library, &["points"]));
     });
 }
 
@@ -397,7 +424,8 @@ fn merged_draws_draw_what_the_host_step_draws() {
                 outputs.push(scene.pixels());
             }
             if !host_step {
-                assert_made_once(messages, &[], &forced_with(device, &[]));
+                let writers: Vec<&str> = kinds.iter().map(|(kind, _)| *kind).collect();
+                assert_made_once(messages, &[], &made(device, &library, &writers));
             }
         }
         let host_notices = counts(&messages.take_notices());
@@ -475,7 +503,8 @@ fn gpu_forms_draw_into_a_shadowed_target_what_the_host_step_draws() {
             }
             if !host_step {
                 let shadowed = [Degradation::ShadowedTexture];
-                assert_made_once(messages, &shadowed, &forced_with(device, &[]));
+                let first = made(device, &library, &["triangles"]);
+                assert_made_once(messages, &shadowed, &first);
             }
         }
         let host_notices = counts(&messages.take_notices());
@@ -551,7 +580,7 @@ fn rebound_run(
     command_buffer.wait_until_completed_for(WAIT).unwrap();
     let pointed = device.work_counts().replay_tables_pointed - before.replay_tables_pointed;
     let ended = (command_buffer.status(), command_buffer.error());
-    let expected = expected_once(messages, kinds, &forced_with(device, &[]));
+    let expected = expected_once(messages, kinds, &made(device, &library, &["points"]));
     let notices = messages.take_notices();
     let reasons: Vec<String> = (notices.iter())
         .filter_map(|message| message.degradation.as_ref())
@@ -719,7 +748,8 @@ fn a_rebind_of_a_shadowed_target_s_bytes_encodes_a_pass_that_draws_again() {
             return;
         };
         let scene = Scene::over(device, &[draw], &point_row(), bytes, rows);
-        let state = state(device, &library(device));
+        let library = library(device);
+        let state = state(device, &library);
         let mut pass = RenderPassDescriptor::new();
         let color = &mut pass.color_attachments[0];
         color.texture = Some(scene.target.clone());
@@ -776,7 +806,7 @@ fn a_rebind_of_a_shadowed_target_s_bytes_encodes_a_pass_that_draws_again() {
             "(encoders encoded again, refused), and the command buffer's end"
         );
         let shadowed = [Degradation::ShadowedTexture];
-        assert_made_once(messages, &shadowed, &forced_with(device, &[]));
+        assert_made_once(messages, &shadowed, &made(device, &library, &[]));
         let drawn = drawn_points(&[draw]);
         assert_rows(scene.over.as_ref().unwrap(), rows, &drawn);
         assert_eq!(scene.pixels(), drawn, "the texture over the new pages");
