@@ -1577,6 +1577,12 @@ engine/ob3_texture_array.air.ll	ob3_texture_array	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	
 engine/ob3_texture_array.ll	ob3_texture_array	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/ob3_vertex_input.air.ll	ob3_vertex_input	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{StageStoresAndAtomics; AnyOf[[Feature(VertexPipelineStoresAndAtomics)]]}	ok	Unsupported{StageStoresAndAtomics; AnyOf[[Feature(VertexPipelineStoresAndAtomics)]]}
 engine/ob3_vertex_input.ll	ob3_vertex_input	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{StageStoresAndAtomics; AnyOf[[Feature(VertexPipelineStoresAndAtomics)]]}	ok	Unsupported{StageStoresAndAtomics; AnyOf[[Feature(VertexPipelineStoresAndAtomics)]]}
+engine/pdc_post_depth_coverage.air.ll	pdc_vertex	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/pdc_post_depth_coverage.air.ll	pdc_after	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}	ok	ok	ok	ok	ok	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}
+engine/pdc_post_depth_coverage.air.ll	pdc_plain	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/pdc_post_depth_coverage.ll	pdc_vertex	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/pdc_post_depth_coverage.ll	pdc_after	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}	ok	ok	ok	ok	ok	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}
+engine/pdc_post_depth_coverage.ll	pdc_plain	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/primitive_ids.air.ll	pi_place	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/primitive_ids.air.ll	pi_points	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/primitive_ids.air.ll	pi_attrib	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok

@@ -1311,6 +1311,9 @@ pub enum ExecMode {
     /// `RequireFullQuadsKHR` (`SPV_KHR_quad_control`, fragment only): every quad starts with its
     /// four invocations, helpers included, and they take part in every group operation.
     RequireFullQuads,
+    /// `PostDepthCoverage` (`SPV_KHR_post_depth_coverage`, fragment only): `SampleMask` reads the
+    /// coverage after the early depth and stencil tests.
+    PostDepthCoverage,
     // ---- Tessellation ----
     /// The triangle patch domain.
     Triangles,

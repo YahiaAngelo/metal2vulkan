@@ -1396,6 +1396,9 @@ pub enum Feature {
     /// buffer's other such fences the translation keeps through an atomic of the command buffer's
     /// `ExecutionStatus` word: in a vertex or fragment stage without its stores and atomics.
     SeqCstFence,
+    /// The coverage after the depth and stencil tests (`[[sample_mask, post_depth_coverage]]`),
+    /// read through `VK_EXT_post_depth_coverage`.
+    PostDepthCoverage,
 }
 
 /// The part of a blend into an extended-range attachment that [`Feature::ExtendedRangeBlend`]

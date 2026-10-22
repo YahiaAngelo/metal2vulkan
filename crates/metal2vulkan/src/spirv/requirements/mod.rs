@@ -907,6 +907,11 @@ impl Deriver<'_> {
                     self.ext(SpirvExtension::KhrQuadControl);
                     self.feat(VkFeature::ShaderQuadControl);
                 }
+                ExecMode::PostDepthCoverage => {
+                    self.cap(Cap::SampleMaskPostDepthCoverage);
+                    self.ext(SpirvExtension::KhrPostDepthCoverage);
+                    self.r.extensions.insert(VkExtension::ExtPostDepthCoverage);
+                }
                 // A task or mesh entry's local size is bounded by the mesh shader limits, which no
                 // profile records yet: the stage's feature, which none enables, refuses it first.
                 ExecMode::LocalSize { x, y, z } if self.model == ExecModel::GLCompute => {
@@ -1518,6 +1523,7 @@ pub const ALL_SPIRV_EXTENSIONS: &[SpirvExtension] = &[
     SpirvExtension::KhrFma,
     SpirvExtension::ExtMeshShader,
     SpirvExtension::KhrQuadControl,
+    SpirvExtension::KhrPostDepthCoverage,
 ];
 
 /// The `OpExtension` name of a SPIR-V extension.
@@ -1549,5 +1555,6 @@ pub fn spirv_extension_name(e: SpirvExtension) -> &'static str {
         SpirvExtension::KhrFma => "SPV_KHR_fma",
         SpirvExtension::ExtMeshShader => "SPV_EXT_mesh_shader",
         SpirvExtension::KhrQuadControl => "SPV_KHR_quad_control",
+        SpirvExtension::KhrPostDepthCoverage => "SPV_KHR_post_depth_coverage",
     }
 }

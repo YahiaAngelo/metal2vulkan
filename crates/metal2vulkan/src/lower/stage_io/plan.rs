@@ -774,6 +774,23 @@ pub fn param(cx: &mut SelectCx<'_>, b: &ParamBinding) -> Result<(), Error> {
             refuse_int64_interface(cx.entry, ty)?;
             let f = form_on(cx.entry, cx.profile, ty)?;
             let (spirv, shape, place, contract, enabler) = input_builtin(cx, *bi, f, frag)?;
+            // `[[sample_mask, post_depth_coverage]]`: `SampleMask` read after the early depth and
+            // stencil tests, which the entry declares (the AIR decode requires them), through
+            // `VK_EXT_post_depth_coverage`.
+            if *bi == Builtin::PostDepthCoverage {
+                let ext = VkExtension::ExtPostDepthCoverage;
+                if !cx.profile.fields().enabled.extensions.contains(&ext) {
+                    return Err(Unsupported::needs(
+                        Feature::PostDepthCoverage,
+                        Capability::Extension(ext),
+                    )
+                    .into());
+                }
+                let modes = &mut cx.families.stage_io.modes;
+                if !modes.contains(&ExecMode::PostDepthCoverage) {
+                    modes.push(ExecMode::PostDepthCoverage);
+                }
+            }
             if matches!(
                 contract,
                 StageBuiltin::BaseVertex | StageBuiltin::BaseInstance
@@ -1831,7 +1848,9 @@ fn input_builtin(
                 None,
             )
         }
-        Bi::SampleMaskIn if !vertex => {
+        // The coverage after the early tests reads the same builtin under `PostDepthCoverage`
+        // (the entry's mode, `ParamRole::Builtin` in `plan`).
+        Bi::SampleMaskIn | Bi::PostDepthCoverage if !vertex => {
             int_scalar(f)?;
             (
                 B::SampleMask,

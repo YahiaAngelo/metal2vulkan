@@ -124,6 +124,7 @@ fn partition_builtin(b: Builtin) -> bool {
         | Builtin::PrimitiveId
         | Builtin::SampleId
         | Builtin::SampleMaskIn
+        | Builtin::PostDepthCoverage
         | Builtin::BarycentricCoord(_)
         | Builtin::RenderTargetArrayIndex
         | Builtin::ViewportArrayIndex => true,

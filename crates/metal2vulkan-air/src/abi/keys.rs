@@ -107,6 +107,9 @@ pub(super) enum Key {
     Invariant,
     ClipDistanceArraySize,
     DepthQualifier,
+    /// `air.post_depth_coverage` (on `air.sample_mask_in`): the coverage after the depth and
+    /// stencil tests.
+    PostDepthCoverage,
     // ---- Depth qualifier values ----
     Any,
     Less,
@@ -283,6 +286,7 @@ const KEYS: &[(&str, Key)] = &[
     ("air.invariant", Key::Invariant),
     ("air.clip_distance_array_size", Key::ClipDistanceArraySize),
     ("air.depth_qualifier", Key::DepthQualifier),
+    ("air.post_depth_coverage", Key::PostDepthCoverage),
     ("air.any", Key::Any),
     ("air.less", Key::Less),
     ("air.greater", Key::Greater),

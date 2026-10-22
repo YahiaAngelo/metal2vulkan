@@ -161,7 +161,12 @@ pub(super) fn plan(cx: &mut SelectCx<'_>) -> Result<(), Error> {
             .iter()
             .any(|b| role(&b.role) && arg_used(body, b.param))
     };
-    if !used(&|r| matches!(r, ParamRole::Builtin(Builtin::SampleMaskIn))) {
+    if !used(&|r| {
+        matches!(
+            r,
+            ParamRole::Builtin(Builtin::SampleMaskIn | Builtin::PostDepthCoverage)
+        )
+    }) {
         return Ok(());
     }
     // Off Apple's rasterizer, a multisampled read of the coverage meets no split of a clipped

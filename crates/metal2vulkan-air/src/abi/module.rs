@@ -5,9 +5,9 @@ use super::md::{abi_error, diag, kept_bytes, kept_diag, node_ops, tok, Ops, Site
 use super::sampler::decode_global;
 use super::structs::Structs;
 use super::{
-    AirAbi, CompileOptions, EntryPoint, FunctionConstantDecl, LanguageVersion, LinkageSignature,
-    LinkageSignatureKind, ModuleLimits, PatchInfo, PatchKind, Stage, StaticSampler, Version,
-    VisibleFunctionRef, VisibleSymbol, VisibleTarget,
+    AirAbi, Builtin, CompileOptions, EntryPoint, FunctionConstantDecl, LanguageVersion,
+    LinkageSignature, LinkageSignatureKind, ModuleLimits, ParamRole, PatchInfo, PatchKind, Stage,
+    StaticSampler, Version, VisibleFunctionRef, VisibleSymbol, VisibleTarget,
 };
 use crate::budget::Meter;
 use crate::error::Error;
@@ -476,6 +476,20 @@ fn entry(cx: &mut Cx<'_, '_>, stage: Named, id: MdId) -> Result<EntryPoint, Erro
     for &op in input_ids {
         let op = op.ok_or_else(|| site.err(AbiError::BadValue, None))?;
         params.push(cx.param(op, &name, &stage, types)?);
+    }
+    // Metal's compiler requires `[[early_fragment_tests]]` of a function that reads the coverage
+    // after the depth test ("'early_fragment_tests' is required ... by attribute
+    // 'post_depth_coverage'"): without it the coverage the input names is not defined.
+    let post_depth = params
+        .iter()
+        .any(|p| p.role == ParamRole::Builtin(Builtin::PostDepthCoverage));
+    if post_depth
+        && stage
+            != (Stage::Fragment {
+                early_fragment_tests: true,
+            })
+    {
+        return Err(site.err(AbiError::MissingKey, Some("early_fragment_tests")));
     }
     Ok(EntryPoint {
         func,

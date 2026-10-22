@@ -960,6 +960,7 @@ const EXTENSIONS: &[(VkExtension, &CStr)] = {
         (X::KhrShaderBfloat16, c"VK_KHR_shader_bfloat16"),
         (X::QcomTileShading, c"VK_QCOM_tile_shading"),
         (X::KhrFormatFeatureFlags2, c"VK_KHR_format_feature_flags2"),
+        (X::ExtPostDepthCoverage, c"VK_EXT_post_depth_coverage"),
     ]
 };
 

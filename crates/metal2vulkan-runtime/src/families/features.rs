@@ -34,7 +34,9 @@ use crate::capabilities::Query;
 use crate::error::RuntimeGap;
 use crate::framebuffer_fetch::{through_inputs, through_storage};
 use crate::rate_mapped_pass::RegionRefusal;
-use metal2vulkan::device::{OpBits, StageSimd, SubgroupOp, VkExtension, VkFeature, VkProperty};
+use metal2vulkan::device::{
+    DriverWorkaround, OpBits, StageSimd, SubgroupOp, VkExtension, VkFeature, VkProperty,
+};
 use metal2vulkan::error::{Capability, Feature, LowerFamily, Unsupported};
 use metal2vulkan::metal::format::storage_image_choice;
 use metal2vulkan::metal::{ArgumentBuffersTier, PixelFormat, ReadWriteTextureTier};
@@ -1201,9 +1203,27 @@ impl FeatureRow {
             F::Tessellation | F::IndirectTessellationArguments => {
                 first([not_implemented(Feature::Tessellation)])
             }
-            // Coverage after the depth test (`[[post_depth_coverage]]`): not lowered.
+            // Coverage after the depth test (`[[sample_mask, post_depth_coverage]]`): `SampleMask`
+            // under the `PostDepthCoverage` mode, which `VK_EXT_post_depth_coverage` provides. A
+            // driver that splits a clipped triangle's pixel-rate fragments refuses every coverage
+            // read of a multisampled pipeline (`pipeline::link`), the only one where it differs.
             F::PostDepthCoverage => {
-                first([not_implemented(Feature::Lowering(LowerFamily::Fragment))])
+                let split = DriverWorkaround::ClippedTrianglesSplitPixelFragments;
+                first([
+                    (!f.profile
+                        .enabled()
+                        .extensions
+                        .contains(&VkExtension::ExtPostDepthCoverage))
+                    .then(|| {
+                        refused(Unsupported::needs(
+                            Feature::PostDepthCoverage,
+                            Capability::Extension(VkExtension::ExtPostDepthCoverage),
+                        ))
+                    }),
+                    f.profile.workarounds().contains(&split).then(|| {
+                        refused(Unsupported::driver_defect(Feature::PixelCoverage, split))
+                    }),
+                ])
             }
             // Pre-raster per-vertex values, and global built-ins and bindings: not lowered.
             F::PreRasterVertexValues | F::GlobalBuiltinsAndBindings => {
