@@ -1397,6 +1397,12 @@ engine/mesh_draws.ll	mesh_draws_grid	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	o
 engine/mesh_draws.ll	mesh_draws_mesh	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/mesh_gated.air.ll	mesh_gated	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/mesh_gated.ll	mesh_gated	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/mesh_object_grid.air.ll	mesh_object_grid_fragment	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/mesh_object_grid.air.ll	mesh_object_grid_object	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/mesh_object_grid.air.ll	mesh_object_grid_mesh	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/mesh_object_grid.ll	mesh_object_grid_fragment	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/mesh_object_grid.ll	mesh_object_grid_object	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/mesh_object_grid.ll	mesh_object_grid_mesh	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/mesh_object_memory.air.ll	mesh_object_memory_sums	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/mesh_object_memory.ll	mesh_object_memory_sums	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/mesh_order.air.ll	mesh_order_fragment	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	ok	ok	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	ok	Unsupported{FramebufferFetch; AnyOf[[Feature(RasterizationOrderColorAttachmentAccess)], [Feature(FragmentShaderPixelInterlock)]]}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	NeedsInput{FramebufferFetch}	Unsupported{FramebufferFetch; AnyOf[[Feature(RasterizationOrderColorAttachmentAccess)], [Feature(FragmentShaderPixelInterlock)]]}	ok	Unsupported{FramebufferFetch; AnyOf[[Feature(RasterizationOrderColorAttachmentAccess)], [Feature(FragmentShaderPixelInterlock), Feature(FragmentStoresAndAtomics)]]}
