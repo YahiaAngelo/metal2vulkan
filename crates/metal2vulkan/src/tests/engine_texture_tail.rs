@@ -1135,54 +1135,106 @@ declare i32 @air.get_height_texture_2d(ptr addrspace(1), i32)
 !5 = !{i32 2, !"air.buffer", !"air.location_index", i32 1, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 4, !"air.arg_type_align_size", i32 4, !"air.arg_type_name", !"uint", !"air.arg_name", !"out"}
 "#;
 
-/// Under containment a size query at a dynamic level clamps the level below the level count (the
-/// interpreter traps a query past the last level), so level 5 of a 3-level 8x4 image reads level 2
-/// (2x1); an in-range level reads its own size, and the constant level 0 is not clamped.
+/// `texture3d<float, read_write>` slot 0: stores its width, height and depth at the level
+/// `buffer(0)` holds to buffer 1.
+const SIZE_AT_LEVEL_3D: &str = r#"define void @k(ptr addrspace(1) %t, ptr addrspace(1) %lod, ptr addrspace(1) %out) {
+  %l = load i32, ptr addrspace(1) %lod, align 4
+  %w = call i32 @air.get_width_texture_3d(ptr addrspace(1) %t, i32 %l)
+  %h = call i32 @air.get_height_texture_3d(ptr addrspace(1) %t, i32 %l)
+  %d = call i32 @air.get_depth_texture_3d(ptr addrspace(1) %t, i32 %l)
+  store i32 %w, ptr addrspace(1) %out, align 4
+  %o1 = getelementptr inbounds i32, ptr addrspace(1) %out, i64 1
+  store i32 %h, ptr addrspace(1) %o1, align 4
+  %o2 = getelementptr inbounds i32, ptr addrspace(1) %out, i64 2
+  store i32 %d, ptr addrspace(1) %o2, align 4
+  ret void
+}
+
+declare i32 @air.get_width_texture_3d(ptr addrspace(1), i32)
+declare i32 @air.get_height_texture_3d(ptr addrspace(1), i32)
+declare i32 @air.get_depth_texture_3d(ptr addrspace(1), i32)
+
+!air.kernel = !{!0}
+!0 = !{ptr @k, !1, !2}
+!1 = !{}
+!2 = !{!3, !4, !5}
+!3 = !{i32 0, !"air.texture", !"air.location_index", i32 0, i32 1, !"air.read_write", !"air.arg_type_name", !"texture3d<float, read_write>", !"air.arg_name", !"t"}
+!4 = !{i32 1, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read", !"air.address_space", i32 1, !"air.arg_type_size", i32 4, !"air.arg_type_align_size", i32 4, !"air.arg_type_name", !"uint", !"air.arg_name", !"lod"}
+!5 = !{i32 2, !"air.buffer", !"air.location_index", i32 1, i32 1, !"air.read_write", !"air.address_space", i32 1, !"air.arg_type_size", i32 4, !"air.arg_type_align_size", i32 4, !"air.arg_type_name", !"uint", !"air.arg_name", !"out"}
+"#;
+
+/// Metal's extent at level `l` of a texture whose first level's extent is `e`:
+/// `max(1, e >> (l & 255))`, a shift of 32 or more answering 1.
+fn metal_extent(e: u32, l: u32) -> u32 {
+    e.checked_shr(l & 255).unwrap_or(0).max(1)
+}
+
+/// A size query at a level answers Metal's extent there on every profile, past the level count
+/// too (`emit::level_extent`; measured on an Apple M3 Max under macOS 27.0.1): a 3-level 8x4
+/// sampled texture's width and height, and a 16x8x4 `read_write` 3D texture's width, height and
+/// depth, which needs no level views, at levels 0 to 6, 31 to 33, 255 to 258, 2^31 + 1 and
+/// 2^32 - 1. The interpreter traps a query of a level the image lacks, so none is made. The
+/// constant level 0 is a plain query.
 #[test]
-fn size_queries_clamp_their_level_under_containment() {
-    let Some(bc) = assemble("size_at_level", SIZE_AT_LEVEL) else {
+fn size_queries_answer_metal_s_extent_at_every_level() {
+    let Some(sampled) = assemble("size_at_level", SIZE_AT_LEVEL) else {
         return;
     };
-    let (mut clamped, mut not) = (0, 0);
+    let Some(storage) = assemble("size_at_level_3d", SIZE_AT_LEVEL_3D) else {
+        return;
+    };
+    let levels = [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        31,
+        32,
+        33,
+        255,
+        256,
+        257,
+        258,
+        0x8000_0001,
+        u32::MAX,
+    ];
+    let mut ran = 0;
     for (stem, p) in committed_profiles().expect("profiles") {
-        let contains = matches!(
-            p.fields().containment,
-            crate::device::profile::Containment::On { .. }
-        );
-        let a = ok(compile(&bc, "k", &p), &p, &stem);
-        assert_eq!(
-            uses(&a, "texture.query_clamped"),
-            if contains { 2 } else { 0 },
-            "{stem}"
-        );
-        assert_eq!(
-            uses(&a, "texture.query"),
-            if contains { 1 } else { 3 },
-            "{stem}"
-        );
-        let (plan, m) = typed_module(&bc, "k", &p).unwrap_or_else(|e| panic!("{stem}: {e}"));
-        let img = Image::new(texture(0), [8, 4, 1], 1, 3, 1);
-        let at = |level: u32| {
-            let res = resources(&plan, &[level.to_le_bytes().to_vec(), vec![0; 12]]);
-            let cfg = Config {
-                workgroups: [1, 1, 1],
-                ..Config::default()
-            };
-            run_with_images(&m, &cfg, res, vec![img.clone()]).map(|(o, _)| words(&o.buffers[1]))
-        };
-        assert_eq!(at(1).expect("level 1"), [4, 2, 8], "{stem}");
-        if contains {
-            assert_eq!(at(5).expect("level 5"), [2, 1, 8], "{stem}");
-            clamped += 1;
-        } else {
-            assert!(
-                at(5).is_err(),
-                "{stem}: an uncontained query past the levels traps"
+        for (what, bc, extent, image_levels, query_uses) in [
+            ("sampled", &sampled, [8, 4, 1], 3, (2, 1)),
+            ("storage", &storage, [16, 8, 4], 1, (3, 0)),
+        ] {
+            let what = format!("{what} on {stem}");
+            let a = ok(compile(bc, "k", &p), &p, &what);
+            assert_eq!(
+                (uses(&a, "texture.query_level"), uses(&a, "texture.query")),
+                query_uses,
+                "{what}"
             );
-            not += 1;
+            let (plan, m) = typed_module(bc, "k", &p).unwrap_or_else(|e| panic!("{what}: {e}"));
+            let img = Image::new(texture(0), extent, 1, image_levels, 1);
+            for l in levels {
+                let res = resources(&plan, &[l.to_le_bytes().to_vec(), vec![0; 12]]);
+                let cfg = Config {
+                    workgroups: [1, 1, 1],
+                    ..Config::default()
+                };
+                let (o, _) = run_with_images(&m, &cfg, res, vec![img.clone()])
+                    .unwrap_or_else(|e| panic!("{what}, level {l}: {e:?}"));
+                let [w, h, d] = extent;
+                let want = match image_levels {
+                    3 => [metal_extent(w, l), metal_extent(h, l), w],
+                    _ => [metal_extent(w, l), metal_extent(h, l), metal_extent(d, l)],
+                };
+                assert_eq!(words(&o.buffers[1]), want, "{what}, level {l}");
+            }
+            ran += 1;
         }
     }
-    assert!(clamped > 0, "clamped {clamped}, not {not}");
+    assert!(ran > 0);
 }
 
 // ---- A function's writes to a sparse texture ----

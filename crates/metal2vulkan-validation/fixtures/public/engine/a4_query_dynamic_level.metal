@@ -1,6 +1,6 @@
 // Owned fixture: size queries of a sampled texture at a level read from a
-// buffer (`texture.query_clamped`: under containment a level that is not the constant 0 is
-// clamped to the last level). A case passes level 0, which names a level of every texture:
+// buffer (`texture.query_level`: at a level that is not the constant 0 the query answers
+// Metal's max(1, e >> (level & 255)) of the first level's extent e). A case passes level 0:
 // out = (width, height, levels). Loop-free.
 #include <metal_stdlib>
 using namespace metal;

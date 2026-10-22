@@ -66,10 +66,10 @@
 //! argument sampler is refused.
 //!
 //! **Storage levels**. A storage access reaches its view's base level only
-//! (`OpImageRead`/`OpImageWrite` take no `Lod`). A storage slot that is read, written, or
-//! size-queried at a level other than the constant 0 is declared as an array of `N` storage images,
-//! `N` the most levels a texture of its type can have on the device (`⌊log2 maxImageDimension⌋ +
-//! 1`), which the binder fills with single-level views of the bound texture's levels and neutrals
+//! (`OpImageRead`/`OpImageWrite` take no `Lod`). A storage slot that is read or written at a level
+//! other than the constant 0 is declared as an array of `N` storage images, `N` the most levels a
+//! texture of its type can have on the device (`⌊log2 maxImageDimension⌋ + 1`), which the binder
+//! fills with single-level views of the bound texture's levels and neutrals
 //! past them (`RuntimeFact::StorageTextureLevelViews`). Every access of such a slot indexes the
 //! array: by a constant level below `N` as is (the neutral where the texture lacks that level),
 //! else by the level clamped below the bound texture's level count (`PushField::TextureLevels`,
@@ -78,12 +78,17 @@
 //! dropped; Metal reads zero components (alpha 1 where the format has none), and the read selects
 //! that texel on every profile, whatever the device's robustness, since the element it read is
 //! another level or a neutral (the out-of-bounds texel, its alpha from the slot's
-//! `OutOfBoundsAlpha` where the function observes it). A size query at such a level has no rule:
-//! a dynamic level reads the last level, a constant one below `N` the neutral (contained).
-//! `get_num_mip_levels` of a storage texture is the pushed count, 0 for a neutral; of a 1D
+//! `OutOfBoundsAlpha` where the function observes it). `get_num_mip_levels` of a storage texture
+//! is the pushed count, 0 for a neutral; of a 1D
 //! texture or 1D texture array, sampled or storage, always 0 (Metal has no mipmapped 1D
 //! textures). Heap storage images take only the constant 0, and a
 //! texture atomic on a slot with level views is not implemented.
+//!
+//! **Size queries at a level** (`emit::level_extent`). A width, height, or depth query at a level
+//! that is not the constant 0, of a sampled or storage texture, answers Metal's
+//! `max(1, e >> (l & 255))` of the extent `e` of the texture's first level, at every level `l`,
+//! past its level count too: it queries no other level, so a storage slot needs no level views
+//! for it. A heap storage element's query takes only the constant 0, as its other accesses.
 //!
 //! **Sampling.** Samples, gathers, and LOD queries take a sampler: they are the sampler family's
 //! (`lower::sampler`), selected here once the texture's candidates are known, as
@@ -582,11 +587,10 @@ pub enum QueryKind {
 pub struct QueryOp {
     pub image: ImageRef,
     pub kind: QueryKind,
-    /// The level of a size query on a sampled, single-sampled image; on a storage slot, the
-    /// level of its level views when it is not the constant 0.
+    /// The level of a size query of a single-sampled image other than a texel buffer, sampled or
+    /// storage, when it is not the constant 0: the query answers from the image's first level
+    /// (`emit::level_extent`).
     pub level: Option<ValueId>,
-    /// Clamp that level below the image's level count (containment).
-    pub clamp: bool,
     /// The query, of a sampled heap group, queries a member of a form a heap reads where the
     /// handle's class index names one through the group's unsigned integer class
     /// (`HeapPlan::raw`), which holds it, in place of the float array's neutral.
@@ -731,7 +735,7 @@ impl Switch {
             Some(TextureStrategy::Write(w)) if w.guard => "texture.write_guarded.switch",
             Some(TextureStrategy::Write(_)) => "texture.write.switch",
             Some(TextureStrategy::Atomic(a)) => return Cow::Owned(format!("{}.switch", a.name())),
-            Some(TextureStrategy::Query(q)) if q.clamp => "texture.query_clamped.switch",
+            Some(TextureStrategy::Query(q)) if q.level.is_some() => "texture.query_level.switch",
             Some(TextureStrategy::Query(_)) => "texture.query.switch",
             Some(TextureStrategy::IsNull { .. }) => "texture.is_null.switch",
             Some(TextureStrategy::Sampling(_)) if hoisted => "sampler.sample_hoisted_grad.switch",
@@ -873,9 +877,11 @@ impl TextureStrategy {
             TextureStrategy::Write(w) if w.guard => "texture.write_guarded",
             TextureStrategy::Write(_) => "texture.write",
             TextureStrategy::Atomic(a) => return Cow::Owned(a.name()),
-            TextureStrategy::Query(q) if q.image.heap() && q.clamp => "texture.query_clamped.heap",
+            TextureStrategy::Query(q) if q.image.heap() && q.level.is_some() => {
+                "texture.query_level.heap"
+            }
             TextureStrategy::Query(q) if q.image.heap() => "texture.query.heap",
-            TextureStrategy::Query(q) if q.clamp => "texture.query_clamped",
+            TextureStrategy::Query(q) if q.level.is_some() => "texture.query_level",
             TextureStrategy::Query(_) => "texture.query",
             TextureStrategy::Fence => "texture.fence",
             TextureStrategy::IsNull { .. } => "texture.is_null",
@@ -937,7 +943,7 @@ impl TextureStrategy {
             TextureStrategy::Query(q) => {
                 24 + if q.image.heap() { 32 } else { 0 }
                     + if q.volume { 72 } else { 0 }
-                    + if q.clamp { 16 } else { 0 }
+                    + if q.level.is_some() { 24 } else { 0 }
                     + if q.heap_raw { heap_raw::QUERY_WORDS } else { 0 }
                     + if q.heap_cross {
                         2 * heap_raw::QUERY_WORDS
@@ -3844,15 +3850,18 @@ fn select_query(
         Query::NumMipLevels => QueryKind::Levels,
         Query::NumSamples => QueryKind::Samples,
     };
+    // A size query at a level that is not the constant 0 answers from the image's first level
+    // (`emit::level_extent`), as Metal does at every level: it queries no level the image may
+    // lack, and a storage slot no level view. A heap storage element takes only the constant 0.
     let level = match kind {
-        QueryKind::Size { .. } if !storage && !shape.ms && shape.dim != ImageDim::Buffer => {
+        QueryKind::Size { .. } if !shape.ms && shape.dim != ImageDim::Buffer => {
             match ops.get(TexRole::Lod) {
+                Some(v) if const_int(cx, v) == Some(0) => None,
+                Some(_) if storage && image.heap() => return Err(refuse()),
                 Some(v) => Some(id(cx, v)?),
+                None if storage => None,
                 None => return Err(cx.invariant("a size query without a level")),
             }
-        }
-        QueryKind::Size { .. } if storage && !shape.ms && shape.dim != ImageDim::Buffer => {
-            storage_level(cx, ops, image)?
         }
         QueryKind::Size { .. } => {
             level_zero(cx, ops)?;
@@ -3860,16 +3869,6 @@ fn select_query(
         }
         _ => None,
     };
-    // A level at or past the level count names no level of the image (the interpreter traps it):
-    // under containment the size query reads the last level instead, whatever the robustness
-    // features, which concern accesses. The constant 0 is always a level.
-    let clamp = level.is_some()
-        && !storage
-        && ops.get(TexRole::Lod).and_then(|v| const_int(cx, v)) != Some(0)
-        && matches!(
-            cx.profile.fields().containment,
-            crate::device::profile::Containment::On { .. }
-        );
     // A sampled heap group's query of one sample reads a member of a form a heap reads through
     // the group's unsigned integer class, where its handle names one.
     let heap_raw = match image {
@@ -3909,7 +3908,6 @@ fn select_query(
         image,
         kind,
         level,
-        clamp,
         heap_raw,
         heap_cross,
         volume,

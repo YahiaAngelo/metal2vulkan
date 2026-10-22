@@ -400,7 +400,8 @@ fn decl_of(cx: &EmitCx<'_>, image: &ImageRef) -> Option<ImageDecl> {
 /// read and sample of it, at every coordinate and level, in bounds or not, takes its first
 /// texel; a write at `(x, y, z)` of level 0 stores texel `(x, y)` of its first slice whatever
 /// `z`, and one past the level's width or height or of another level stores nothing; its depth
-/// query answers `max(1, ⌈w / 4⌉ >> l)` of its first level's width `w`, and a one-level texture's
+/// query answers `⌈w / 4⌉` of its first level's width `w` at level 0, and at level `l`
+/// [`level_extent`] of that (`max(1, ⌈w / 4⌉ >> (l & 255))`), and a one-level texture's
 /// level count `1 - ⌊(w - 1) / 16⌋` (as a `uint`). Measured on an Apple M3 Max under macOS 27.0.1
 /// (`Shared` and `Private`, in a heap and of its own memory; depths 1 to 64; every width from 1
 /// to 130 at heights 1, 5, 64 and 300 for the queries). A mipmapped one's reads take bytes that
@@ -4198,16 +4199,12 @@ fn shares(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>) -> BResult<(SValue,
 }
 
 fn query(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, q: &QueryOp) -> BResult<SValue> {
-    // A storage size query's level is its level views'; a sampled one's, its `Lod`.
+    // A size query at a level answers from the image's first level ([`level_extent`]): a storage
+    // slot's first level view, a sampled image's level 0.
     let storage = decl_of(cx, &q.image).is_some_and(|d| d.usage == ImageUsage::Storage);
-    let (view, lod) = if storage {
-        (q.level, None)
-    } else {
-        (None, q.level)
-    };
     let Loaded {
         decl, img, live, ..
-    } = image(cx, fb, &q.image, view)?;
+    } = image(cx, fb, &q.image, None)?;
     // The unsigned integer class of a sampled float group, which holds its members of a form a
     // heap reads; an integer, depth, or storage group has none, and holds no such member. And
     // the group's arrays of the other numeric types, which hold the members of those classes.
@@ -4249,7 +4246,7 @@ fn query(cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>, q: &QueryOp) -> BRes
             held = Some(h);
         }
     }
-    let value = query_arms(cx, fb, q, (&decl, img, lod, storage), held, &arms)?;
+    let value = query_arms(cx, fb, q, (&decl, img, storage), held, &arms)?;
     live_or_zero(fb, live, value)
 }
 
@@ -4259,12 +4256,12 @@ fn query_arms(
     cx: &mut EmitCx<'_>,
     fb: &mut FunctionBuilder<'_>,
     q: &QueryOp,
-    (decl, img, lod, storage): (&ImageDecl, SValue, Option<ValueId>, bool),
+    (decl, img, storage): (&ImageDecl, SValue, bool),
     h: Option<SValue>,
     arms: &[(SValue, crate::spirv::ids::GlobalId)],
 ) -> BResult<SValue> {
     let (Some(h), Some((&(test, g), rest))) = (h, arms.split_first()) else {
-        return query_value(cx, fb, q, (decl, img, lod, storage));
+        return query_value(cx, fb, q, (decl, img, storage));
     };
     let decl = *decl;
     let then: ArmFn<'_, EmitCx<'_>> = Box::new(move |fb, cx| {
@@ -4272,11 +4269,11 @@ fn query_arms(
         let ptr = fb.module().global_value(g)?;
         let p = fb.access_chain_non_uniform(ptr, element)?;
         let other = fb.load(p, MemAccess::default())?;
-        let v = query_value(cx, fb, q, (&decl, other, lod, storage))?;
+        let v = query_value(cx, fb, q, (&decl, other, storage))?;
         Ok(ArmEnd::FallThrough(vec![v]))
     });
     let other: ArmFn<'_, EmitCx<'_>> = Box::new(move |fb, cx| {
-        let v = query_arms(cx, fb, q, (&decl, img, lod, storage), Some(h), rest)?;
+        let v = query_arms(cx, fb, q, (&decl, img, storage), Some(h), rest)?;
         Ok(ArmEnd::FallThrough(vec![v]))
     });
     let Merged(merged) = fb.if_(cx, test, then, Some(other))?;
@@ -4286,33 +4283,30 @@ fn query_arms(
     }
 }
 
-/// The value of query `q` of image `img` of `decl` (its size query's level `lod`, a storage
-/// image's where `storage`).
+/// The value of query `q` of image `img` of `decl` (a storage image's where `storage`, its first
+/// level's view).
 fn query_value(
     cx: &mut EmitCx<'_>,
     fb: &mut FunctionBuilder<'_>,
     q: &QueryOp,
-    (decl, img, lod, storage): (&ImageDecl, SValue, Option<ValueId>, bool),
+    (decl, img, storage): (&ImageDecl, SValue, bool),
 ) -> BResult<SValue> {
     let sampled_mips =
         decl.usage == ImageUsage::Sampled && !decl.multisampled && decl.dim != Dim::Buffer;
     let n = coord_len(decl);
-    let size = |cx: &mut EmitCx<'_>, fb: &mut FunctionBuilder<'_>| -> BResult<SValue> {
-        match lod {
-            Some(l) => {
-                let mut l = cx.operand(fb, l)?;
-                if q.clamp {
-                    let levels = fb.query(ImageQuery::Levels, img)?;
-                    l = clamp_below(fb, l, levels, 1)?;
-                }
-                fb.query(ImageQuery::SizeLod(l), img)
-            }
-            None if sampled_mips => {
+    // The size of the image's first level.
+    let size = |fb: &mut FunctionBuilder<'_>| -> BResult<SValue> {
+        match sampled_mips {
+            true => {
                 let zero = u32s(fb, 1, 0)?;
                 fb.query(ImageQuery::SizeLod(zero), img)
             }
-            None => fb.query(ImageQuery::Size, img),
+            false => fb.query(ImageQuery::Size, img),
         }
+    };
+    let level = match q.level {
+        Some(l) => Some(cx.operand(fb, l)?),
+        None => None,
     };
     let component = |fb: &mut FunctionBuilder<'_>, v: SValue, i: u8| -> BResult<SValue> {
         if n == 1 {
@@ -4323,29 +4317,28 @@ fn query_value(
     };
     let volume = q.volume && planes_volume(decl);
     Ok(match q.kind {
-        // A two-plane 3D texture's depth: `max(1, ⌈w / 4⌉ >> l)` ([`planes_volume`]).
+        // A two-plane 3D texture's depth: `⌈w / 4⌉` at its first level ([`planes_volume`]).
         QueryKind::Size { component: 2 } if volume => {
             let w = volume_width(cx, fb, q, decl, img)?;
             let three = u32s(fb, 1, 3)?;
             let w = fb.binary(BinOp::IAdd, w, three)?;
             let two = u32s(fb, 1, 2)?;
             let quarter = fb.binary(BinOp::ShiftRightLogical, w, two)?;
-            let l = match q.level {
-                Some(l) => cx.operand(fb, l)?,
-                None => u32s(fb, 1, 0)?,
-            };
-            let last = u32s(fb, 1, 31)?;
-            let l = umin(fb, l, last)?;
-            let d = fb.binary(BinOp::ShiftRightLogical, quarter, l)?;
-            let one = u32s(fb, 1, 1)?;
-            fb.glsl(GlslOp::UMax, &[d, one])?
+            match level {
+                Some(l) => level_extent(fb, quarter, l)?,
+                None => quarter,
+            }
         }
         QueryKind::Size { component: c } => {
-            let s = size(cx, fb)?;
-            component(fb, s, c)?
+            let s = size(fb)?;
+            let e = component(fb, s, c)?;
+            match level {
+                Some(l) => level_extent(fb, e, l)?,
+                None => e,
+            }
         }
         QueryKind::ArraySize => {
-            let s = size(cx, fb)?;
+            let s = size(fb)?;
             let layers = component(fb, s, n.saturating_sub(1))?;
             if decl.cube_as_array {
                 let six = u32s(fb, 1, 6)?;
@@ -4389,6 +4382,22 @@ fn query_value(
         QueryKind::NoLevels => u32s(fb, 1, 0)?,
         QueryKind::Samples => fb.query(ImageQuery::Samples, img)?,
     })
+}
+
+/// The extent Metal answers at level `l` of a texture whose first level's extent is `e`:
+/// `max(1, e >> (l & 255))`, at every level, past the texture's level count too, a shift of 32 or
+/// more answering 1. Measured on an Apple M3 Max under macOS 27.0.1: the width, height, and depth
+/// of 2D, 3D, cube, cube array, 2D array, and depth textures, sampled and `read` and
+/// `read_write`, of one level and of partial and full chains, at levels 0 to 1025 and up to
+/// 2^32 - 1, and a two-plane 3D texture's (whose depth is `⌈w / 4⌉`, [`planes_volume`]).
+fn level_extent(fb: &mut FunctionBuilder<'_>, e: SValue, l: SValue) -> BResult<SValue> {
+    let low = u32s(fb, 1, 255)?;
+    let l = fb.binary(BinOp::BitwiseAnd, l, low)?;
+    let last = u32s(fb, 1, 31)?;
+    let l = umin(fb, l, last)?;
+    let shifted = fb.binary(BinOp::ShiftRightLogical, e, l)?;
+    let one = u32s(fb, 1, 1)?;
+    fb.glsl(GlslOp::UMax, &[shifted, one])
 }
 
 /// The width of the first level of `q`'s two-plane 3D texture ([`planes_volume`]), a sampled

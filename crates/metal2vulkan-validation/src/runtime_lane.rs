@@ -553,6 +553,8 @@ mod late_resolves;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod layered_passes;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod level_sizes;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod level_writes_by_usage;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod linear_attachments;

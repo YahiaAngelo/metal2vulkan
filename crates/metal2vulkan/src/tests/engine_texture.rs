@@ -543,8 +543,8 @@ fn cube_reads_use_the_array_view() {
 }
 
 /// `is_null_texture` reads the slot's presence constant, a `ResourcePresence` fact; a storage
-/// slot only queried needs no format feature; a size query at a nonzero level clamps it under
-/// containment.
+/// slot only queried needs no format feature; a size query at a nonzero level answers from the
+/// first level on every profile.
 #[test]
 fn queries_and_null_checks() {
     let Some(bc) = fixture("texture_ops") else {
@@ -555,14 +555,9 @@ fn queries_and_null_checks() {
         let w = texture_slot(3);
         assert!(a.facts.contains(&RuntimeFact::ResourcePresence { slot: w }));
         assert!(a.interface.reads_key(SpecKey::Presence(w)));
-        // The two queries at level 1 clamp it under containment.
-        let contains = matches!(
-            p.fields().containment,
-            crate::device::profile::Containment::On { .. }
-        );
-        let clamped = uses(&a, "texture.query_clamped");
-        assert_eq!(clamped, if contains { 2 } else { 0 }, "{stem}");
-        assert_eq!(uses(&a, "texture.query") + clamped, 8, "{stem}");
+        // The two queries at level 1 answer from the first level.
+        assert_eq!(uses(&a, "texture.query_level"), 2, "{stem}");
+        assert_eq!(uses(&a, "texture.query"), 6, "{stem}");
         assert_eq!(uses(&a, "texture.is_null"), 1, "{stem}");
         // The kernel stores whether the texture is nil and keeps no arm for it.
         assert_eq!(uses(&a, crate::lower::texture::ABSENT_ARM), 0, "{stem}");

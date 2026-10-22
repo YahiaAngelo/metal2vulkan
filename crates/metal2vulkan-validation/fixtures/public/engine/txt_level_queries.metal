@@ -1,7 +1,8 @@
 // Owned fixture: the level count of storage textures, which a storage image
 // cannot query, and a storage texture's size at a level read from a buffer. The binder pushes the
-// bound texture's level count; the size query reads the level's view. out = (levels of t, width
-// and height of t at level `lod`, levels of the cube c). A case passes level 0. Loop-free.
+// bound texture's level count; the size query answers Metal's max(1, e >> (lod & 255)) of the
+// first level's extent e. out = (levels of t, width and height of t at level `lod`, levels of the
+// cube c). A case passes level 0. Loop-free.
 #include <metal_stdlib>
 using namespace metal;
 

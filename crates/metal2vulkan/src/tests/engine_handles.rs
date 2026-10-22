@@ -604,8 +604,9 @@ entry:
 /// (`robustBufferAccess2`, `robustImageAccess2`), and a write only where it discards the write
 /// (`robustBufferAccess2`, `robustImageAccess`). On `vk12-floor` (`robustBufferAccess` alone) every
 /// read and write is checked in the shader; on `moltenvk-m3` (`robustBufferAccess` and
-/// `robustImageAccess2`) a texel buffer's are and an image's are not. A size query clamps a level
-/// the thread names on every profile, and a texture atomic is guarded exactly without image
+/// `robustImageAccess2`) a texel buffer's are and an image's are not. A size query at a level the
+/// thread names answers from the first level on every profile, and a texture atomic is guarded
+/// exactly without image
 /// robustness. The floor, without formatless storage, compiles a storage slot under its format
 /// (`RGBA32Float`), as the runtime compiles the variant of the bound texture's format.
 #[test]
@@ -643,8 +644,8 @@ fn a_switch_is_named_by_the_check_its_arms_take() {
         ),
         (
             WidthAtLevel,
-            "texture.query_clamped.switch",
-            "texture.query_clamped.switch",
+            "texture.query_level.switch",
+            "texture.query_level.switch",
         ),
     ] {
         let Some(bc) = assemble("switched", &switched(op)) else {
@@ -693,8 +694,8 @@ fn without_robust_images(stem: &str) -> DeviceProfile {
 }
 
 /// A heap element's read, write, and query name the in-shader check they take, as a slot's do: a
-/// read clamps and a write is guarded exactly without image robustness, and a size query clamps a
-/// level the thread names on every profile.
+/// read clamps and a write is guarded exactly without image robustness, and a size query at a
+/// level the thread names answers from the first level on every profile.
 #[test]
 fn heap_operations_are_named_by_the_check_they_take() {
     let Some(bc) = assemble(
@@ -756,7 +757,7 @@ declare i32 @air.get_width_texture_2d(ptr addrspace(1), i32)
     assert_eq!(
         heap(&robust),
         named([
-            "texture.query_clamped.heap",
+            "texture.query_level.heap",
             "texture.read.heap",
             "texture.write.heap"
         ])
@@ -765,7 +766,7 @@ declare i32 @air.get_width_texture_2d(ptr addrspace(1), i32)
     assert_eq!(
         heap(&checked),
         named([
-            "texture.query_clamped.heap",
+            "texture.query_level.heap",
             "texture.read_clamped.heap",
             "texture.write_guarded.heap"
         ])
