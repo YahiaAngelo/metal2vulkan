@@ -26,8 +26,14 @@ use ash::vk;
 use metal2vulkan::bind::{YCbCrCodes, YCbCrOutput, YCbCrPlanes};
 use metal2vulkan::device::FormatUsage;
 use metal2vulkan::error::{Feature, Unsupported};
-use metal2vulkan::metal::format::{vk_format, ycbcr_format, ycbcr_renders, ChromaSubsampling};
-use metal2vulkan::metal::{PixelFormat, SamplerAddressMode, TextureType, TextureUsage};
+use metal2vulkan::metal::format::{
+    vk_format, ycbcr_format, ycbcr_renders, ChromaSubsampling, YCbCrReads,
+};
+use metal2vulkan::metal::TextureSwizzle as S;
+use metal2vulkan::metal::{
+    PixelFormat, SamplerAddressMode, TextureSwizzle, TextureSwizzleChannels, TextureType,
+    TextureUsage,
+};
 use metal2vulkan::vk::{
     ComponentMapping, Format, FormatFeatureFlags2, ImageAspectFlags, ImageCreateFlags,
     ImageUsageFlags, ImageViewType,
@@ -256,6 +262,111 @@ impl Texture {
                         (&planes, span),
                     )
                 }),
+        )
+    }
+}
+
+impl Texture {
+    /// The storage of a view presenting `record` of this two-plane YCbCr texture in its own
+    /// format as another type (a 2D array, which `view_plan::check_view` admits), and the format
+    /// and swizzle its bindings read that storage through (`ViewRecord::read_as`). `None` for a
+    /// texture whose texels are no conversion of planes, and a view in another format or of the
+    /// texture's own type.
+    ///
+    /// Metal's view reads the luma plane's codes alone (our probe `ycv`, the M3 Max under macOS
+    /// 27.0.1, `read()` and a linear `sample()` of every texel, bit for bit): a texture read
+    /// converted (and a packed one) reads `(Y, 0, 0, 1)`, one read as codes `(0, Y, 0, 1)`, `Y` the
+    /// code over `2^b - 1`, and its linear sample is the luma channel of the code-reading
+    /// format's sample over the same planes; a swizzle applies to that read. So the view is an
+    /// image of the codes over the same planes (the code-reading format of the texture's bits and
+    /// subsampling, `RGB8_420_2P` to `RGB10_444_2P`; a packed texture's codes held unpacked) read
+    /// through a swizzle that keeps its luma. An `_sRGB` twin's view reads no defined value on
+    /// Metal (its texels change from run to run) and reads as its converted format's here.
+    /// Refused (`NotImplemented(TextureView)`) for a texture over plane 1 of its surface, which
+    /// is not measured.
+    pub(super) fn luma_view(
+        &self,
+        call: &'static str,
+        record: &ViewRecord,
+    ) -> Option<Result<(Storage, (PixelFormat, TextureSwizzleChannels)), Error>> {
+        let Storage::Shadow { texels, copies, .. } = &self.0.storage else {
+            return None;
+        };
+        let ShadowSource::Converted { conversion, .. } = &copies.source else {
+            return None;
+        };
+        let own = &self.0.record;
+        if record.pixel_format != own.pixel_format || record.texture_type == own.texture_type {
+            return None;
+        }
+        let gap = || Error::Unsupported(Unsupported::not_implemented(Feature::TextureView));
+        if conversion.over_plane_one() {
+            return Some(Err(gap()));
+        }
+        let (planes, span) = conversion.source();
+        let read = planes.codes;
+        // The code-reading format of the texture's bits and subsampling, unpacked: its image
+        // holds the codes as the view reads them.
+        let code_format = PixelFormat::ALL.iter().copied().find(|&pf| {
+            ycbcr_format(pf).is_some_and(|f| {
+                f.reads == YCbCrReads::Codes
+                    && !f.packed
+                    && f.bits == read.bits
+                    && f.subsampling == read.subsampling
+            })
+        });
+        let Some(code_format) = code_format else {
+            return Some(Err(gap()));
+        };
+        let mut codes = read;
+        codes.output = YCbCrOutput::Codes;
+        let planes = YCbCrPlanes::new(
+            planes.size,
+            planes.luma,
+            planes.chroma,
+            (planes.range, planes.matrix),
+            codes,
+        );
+        let [w, h] = planes.size.map(u64::from);
+        let mut descriptor = TextureDescriptor::texture_2d(code_format, w, h, false);
+        descriptor.usage = record.usage;
+        descriptor.resource_options = texels.options();
+        descriptor.alpha_reads_one = true;
+        descriptor.address_mode_map = ycbcr_modes(codes);
+        // The luma, green of the codes, where the texture reads it: red read converted, green
+        // read as codes; then the view's swizzle over that read.
+        let luma = match read.output {
+            YCbCrOutput::Codes => [S::Zero, S::Green, S::Zero, S::One],
+            _ => [S::Green, S::Zero, S::Zero, S::One],
+        };
+        let of = |channel: TextureSwizzle| match channel {
+            S::Red => luma[0],
+            S::Green => luma[1],
+            S::Blue => luma[2],
+            S::Alpha => luma[3],
+            other => other,
+        };
+        let swizzle = TextureSwizzleChannels {
+            red: of(record.swizzle.red),
+            green: of(record.swizzle.green),
+            blue: of(record.swizzle.blue),
+            alpha: of(record.swizzle.alpha),
+        };
+        let device = self.device();
+        Some(
+            descriptor
+                .check_over_surface(device.properties().texture_rules())
+                .map_err(|_| internal("a luma view's descriptor past its texture's"))
+                .and_then(|layout| {
+                    device.converted_storage(
+                        call,
+                        Arc::clone(texels),
+                        &descriptor,
+                        &layout,
+                        (&planes, span),
+                    )
+                })
+                .map(|storage| (storage, (code_format, swizzle))),
         )
     }
 }

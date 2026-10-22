@@ -1962,18 +1962,22 @@ pub fn ycbcr(pf: PixelFormat) -> bool {
 }
 
 /// Whether Metal completes a function's writes to a texture of `pf` and stores nothing: the
-/// 4:2:2 formats and the YCbCr formats ([`ycbcr`]) whose chroma is subsampled, 4:2:0 and 4:2:2 (a
+/// 4:2:2 formats, the YCbCr formats ([`ycbcr`]) whose chroma is subsampled, 4:2:0 and 4:2:2 (a
 /// kernel's write leaves both planes' bytes as they were, and Metal's validation stops the
-/// binding). A storage slot a function only writes takes its neutral there (`bind::plan`), which
-/// the writes leave as Metal leaves the texture.
+/// binding), and the packed ones, `YCBCR10_444_2P_PACKED` and its `_sRGB` twin among them (the
+/// M3 Max under macOS 27.0.1, our probe `ycw` over `p444` and `pf44` surfaces: every byte of both
+/// planes kept, the command buffer completed; an Apple M4 stores them). A storage slot a function
+/// only writes takes its neutral there (`bind::plan`), which the writes leave as Metal leaves the
+/// texture.
 ///
-/// A 4:4:4 YCbCr format's writes are not dropped: Metal stores each texel's codes into both
-/// planes, which a slot that only writes one of [`ycbcr_writes_stored`]
+/// An unpacked 4:4:4 YCbCr format's writes are not dropped: Metal stores each texel's codes into
+/// both planes, which a slot that only writes one of [`ycbcr_writes_stored`]
 /// does as Metal does; a slot that writes another is refused (`storage_choice`).
 pub fn writes_dropped(pf: PixelFormat) -> bool {
     matches!(pf, PixelFormat::GBGR422 | PixelFormat::BGRG422)
         || (ycbcr(pf)
-            && ycbcr_format(pf).is_some_and(|f| f.subsampling != ChromaSubsampling::Chroma444))
+            && ycbcr_format(pf)
+                .is_some_and(|f| f.subsampling != ChromaSubsampling::Chroma444 || f.packed))
 }
 
 /// Whether a function's writes to a two-plane YCbCr texture of `pf` ([`ycbcr`]) store into its
@@ -1983,8 +1987,9 @@ pub fn writes_dropped(pf: PixelFormat) -> bool {
 /// `RGB8_444_2P` and `RGB10_444_2P`. Metal stores each written texel's luma code into the luma
 /// plane and its own chroma pair into the chroma plane, the codes `bind::ycbcr_write` states
 /// (an Apple M4 under macOS 27.0.1, and an Apple M3 Max under macOS 26.7, byte for byte the same).
-/// Not the `_sRGB` twins, whose writes no arithmetic found matches, nor the packed formats, whose
-/// writes the M3 drops and the M4 stores: a slot that writes one is refused (`storage_choice`).
+/// Not the `_sRGB` twins, whose writes no arithmetic found matches (a slot that writes one is
+/// refused, `storage_choice`), nor the packed formats, whose writes Metal drops
+/// ([`writes_dropped`]).
 pub fn ycbcr_writes_stored(pf: PixelFormat) -> bool {
     ycbcr(pf)
         && ycbcr_format(pf).is_some_and(|f| {

@@ -3172,6 +3172,11 @@ each item named states the rule in full.
   exit's status and one line on standard error: the exit handlers registered before the runtime's
   last registration (a terminal's restore, say) do not run, where Metal's exit runs them.
 
+**Two-plane YCbCr textures**
+
+- **A view of an `_sRGB` twin as a 2D array reads its luma codes**, as its converted format's
+  view does, where Metal's reads change from run to run.
+
 **Rasterization-rate maps**
 
 - **A map of no layers refuses its coordinate maps, and a mutable map not yet reset its

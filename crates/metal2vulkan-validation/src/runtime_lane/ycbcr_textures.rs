@@ -19,9 +19,9 @@
 //!   buffer, an earlier encoder of the same one, an earlier dispatch of the same encoder, and a
 //!   blit; and the CPU's writes between command buffers.
 //! - A kernel's writes to it are dropped, as Metal drops them; `get_bytes` reads the luma rows.
-//!   A 4:4:4 format's writes are stored into both planes as Metal stores them, every other byte
-//!   kept; those of the 4:4:4 formats whose writes are not known (the `_sRGB` twins, the packed
-//!   format) and over plane 1 are refused, typed.
+//!   An unpacked 4:4:4 format's writes are stored into both planes as Metal stores them, every
+//!   other byte kept, and a packed one's dropped; those of the `_sRGB` twins, whose writes are not
+//!   known, and over plane 1 are refused, typed.
 //! - Plain creation and a buffer's texture of the format answer Metal's nil (`Error::Nil`,
 //!   `NoTextureOfFormat`) and the heap query 0 bytes at 16; a surface without its facts, plane 1
 //!   and a matrix other than BT.601, BT.709 and BT.2020 are refused, typed. Every other two-plane
@@ -79,7 +79,8 @@ const FULL: u32 = u32::from_be_bytes(*b"420f");
 /// texture's size, samples point `gid` at the centre of texel `gid - size / 4`, a quarter of
 /// the points inside the texture and the rest outside it. `write_masked` writes buffer 0's
 /// `float4` element `gid.y * width + gid.x` to texel `gid` of texture 0 where buffer 1's `uint`
-/// element there is not 0, and `write_masked_half` the same of `half4`s.
+/// element there is not 0, and `write_masked_half` the same of `half4`s. `read_array` and
+/// `sample_array_between` are `read_texels` and `sample_between` of slice 0 of a 2D array.
 pub(super) const KERNELS: &str = r#"; Owned synthetic kernels.
 source_filename = "ycbcr_textures.metal"
 
@@ -328,8 +329,45 @@ done:
   ret void
 }
 
+define void @read_array(ptr addrspace(1) %t, ptr addrspace(1) noalias %out, <2 x i32> %gid, <2 x i32> %size) {
+entry:
+  %s = tail call ptr addrspace(2) @air.get_read_sampler()
+  %r = tail call { <4 x float>, i8 } @air.read_texture_2d_array.v4f32(ptr addrspace(1) %t, ptr addrspace(2) %s, <2 x i32> %gid, i32 0, <2 x i32> zeroinitializer, i32 0, i32 1)
+  %v = extractvalue { <4 x float>, i8 } %r, 0
+  %x = extractelement <2 x i32> %gid, i64 0
+  %y = extractelement <2 x i32> %gid, i64 1
+  %w = extractelement <2 x i32> %size, i64 0
+  %row = mul i32 %y, %w
+  %i = add i32 %row, %x
+  %j = zext i32 %i to i64
+  %p = getelementptr inbounds <4 x float>, ptr addrspace(1) %out, i64 %j
+  store <4 x float> %v, ptr addrspace(1) %p, align 16
+  ret void
+}
+
+define void @sample_array_between(ptr addrspace(1) %t, ptr addrspace(1) noalias %out, ptr addrspace(2) %smp, <2 x i32> %gid, <2 x i32> %size) {
+entry:
+  %g = tail call <2 x float> @air.convert.f.v2f32.u.v2i32(<2 x i32> %gid)
+  %n = tail call <2 x float> @air.convert.f.v2f32.u.v2i32(<2 x i32> %size)
+  %c = fadd <2 x float> %g, <float 9.062500e-01, float 7.187500e-01>
+  %uv = fdiv <2 x float> %c, %n
+  %r = tail call { <4 x float>, i8 } @air.sample_texture_2d_array.v4f32(ptr addrspace(1) %t, ptr addrspace(2) %smp, <2 x float> %uv, i32 0, i1 true, <2 x i32> zeroinitializer, i1 false, float 0.000000e+00, float 0.000000e+00, i32 0)
+  %v = extractvalue { <4 x float>, i8 } %r, 0
+  %x = extractelement <2 x i32> %gid, i64 0
+  %y = extractelement <2 x i32> %gid, i64 1
+  %w = extractelement <2 x i32> %size, i64 0
+  %row = mul i32 %y, %w
+  %i = add i32 %row, %x
+  %j = zext i32 %i to i64
+  %p = getelementptr inbounds <4 x float>, ptr addrspace(1) %out, i64 %j
+  store <4 x float> %v, ptr addrspace(1) %p, align 16
+  ret void
+}
+
 declare ptr addrspace(2) @air.get_read_sampler()
 declare <2 x float> @air.convert.f.v2f32.u.v2i32(<2 x i32>)
+declare { <4 x float>, i8 } @air.read_texture_2d_array.v4f32(ptr addrspace(1), ptr addrspace(2), <2 x i32>, i32, <2 x i32>, i32, i32)
+declare { <4 x float>, i8 } @air.sample_texture_2d_array.v4f32(ptr addrspace(1), ptr addrspace(2), <2 x float>, i32, i1, <2 x i32>, i1, float, float, i32)
 declare { <4 x float>, i8 } @air.read_texture_2d.v4f32(ptr addrspace(1), ptr addrspace(2), <2 x i32>, <2 x i32>, i32, i32)
 declare { <4 x float>, i8 } @air.sample_texture_2d.v4f32(ptr addrspace(1), ptr addrspace(2), <2 x float>, i1, <2 x i32>, i1, float, float, i32)
 declare { <4 x half>, i8 } @air.read_texture_2d.v4f16(ptr addrspace(1), ptr addrspace(2), <2 x i32>, <2 x i32>, i32, i32)
@@ -339,7 +377,7 @@ declare void @air.write_texture_2d.v4f16(ptr addrspace(1), <2 x i32>, <4 x half>
 declare { <4 x float>, i8 } @air.gather_texture_2d.v4f32(ptr addrspace(1), ptr addrspace(2), <2 x float>, i1, <2 x i32>, i32, i32)
 declare { <4 x half>, i8 } @air.gather_texture_2d.v4f16(ptr addrspace(1), ptr addrspace(2), <2 x float>, i1, <2 x i32>, i32, i32)
 
-!air.kernel = !{!0, !10, !20, !40, !50, !60, !70, !80, !81, !82, !83, !90, !96}
+!air.kernel = !{!0, !10, !20, !40, !50, !60, !70, !80, !81, !82, !83, !90, !96, !100, !110}
 !air.version = !{!30}
 !air.language_version = !{!31}
 !0 = !{ptr @read_texels, !1, !2}
@@ -382,6 +420,12 @@ declare { <4 x half>, i8 } @air.gather_texture_2d.v4f16(ptr addrspace(1), ptr ad
 !97 = !{!98, !99, !93, !94, !95}
 !98 = !{i32 0, !"air.texture", !"air.location_index", i32 0, i32 1, !"air.write", !"air.arg_type_name", !"texture2d<half, write>", !"air.arg_name", !"t"}
 !99 = !{i32 1, !"air.buffer", !"air.location_index", i32 0, i32 1, !"air.read", !"air.address_space", i32 1, !"air.arg_type_size", i32 8, !"air.arg_type_align_size", i32 8, !"air.arg_type_name", !"half4", !"air.arg_name", !"values"}
+!100 = !{ptr @read_array, !1, !101}
+!101 = !{!102, !4, !5, !6}
+!102 = !{i32 0, !"air.texture", !"air.location_index", i32 0, i32 1, !"air.read", !"air.arg_type_name", !"texture2d_array<float, read>", !"air.arg_name", !"t"}
+!110 = !{ptr @sample_array_between, !1, !111}
+!111 = !{!112, !4, !13, !14, !15}
+!112 = !{i32 0, !"air.texture", !"air.location_index", i32 0, i32 1, !"air.sample", !"air.arg_type_name", !"texture2d_array<float, sample>", !"air.arg_name", !"t"}
 !30 = !{i32 2, i32 8, i32 0}
 !31 = !{!"Metal", i32 4, i32 0, i32 0}
 "#;
@@ -400,6 +444,9 @@ struct Kernels {
     gathers: [[ComputePipelineState; 2]; 2],
     /// Writes of `float4` and of `half4` values to the texels a mask names.
     write_masked: [ComputePipelineState; 2],
+    /// `read_texels` and `sample_between` of slice 0 of a 2D array.
+    read_array: ComputePipelineState,
+    sample_array: ComputePipelineState,
 }
 
 impl Kernels {
@@ -431,6 +478,8 @@ impl Kernels {
                 [state("gather_blue"), state("gather_blue_half")],
             ],
             write_masked: [state("write_masked"), state("write_masked_half")],
+            read_array: state("read_array"),
+            sample_array: state("sample_array_between"),
         }
     }
 }
@@ -2190,9 +2239,9 @@ fn a_four_four_four_texture_s_writes_store_metal_s_codes() {
 
 /// The 4:4:4 writes whose codes are not known stay refused, typed (`Feature::Format`), and leave
 /// the surface's bytes as they were: the `_sRGB` twins' (no arithmetic found matches Metal's
-/// codes), the packed format's (the M3 drops them where the M4 stores them), and a texture's over
-/// plane 1 of a 4:4:4 surface (not measured). A 4:2:2 texture over its own surface still drops
-/// them, as Metal does.
+/// codes) and a texture's over plane 1 of a 4:4:4 surface (not measured). A 4:2:2 texture over
+/// its own surface drops them, as Metal does, and so does a packed 4:4:4 one, as the M3 Max
+/// under macOS 27.0.1 does (`metal::format::writes_dropped`).
 #[test]
 fn four_four_four_writes_of_unknown_codes_are_refused_typed() {
     on_device(|device, _| {
@@ -2202,7 +2251,8 @@ fn four_four_four_writes_of_unknown_codes_are_refused_typed() {
         for (seed, pf, ostype, plane, dropped) in [
             (141, PixelFormat::YCBCR84442PSRGB, "444v", 0, false),
             (142, PixelFormat::YCBCR104442PSRGB, "xf44", 0, false),
-            (143, PixelFormat::YCBCR104442PPACKED, "p444", 0, false),
+            (143, PixelFormat::YCBCR104442PPACKED, "p444", 0, true),
+            (147, PixelFormat::YCBCR104442PPACKEDSRGB, "pf44", 0, true),
             (144, PixelFormat::YCBCR84442P, "444f", 1, false),
             (145, PixelFormat::RGB104442P, "x444", 1, false),
             (146, PixelFormat::YCBCR84222P, "422v", 0, true),
@@ -4043,6 +4093,127 @@ fn packed_views_read_their_twins_texels() {
                 "{pf:?}"
             );
         }
+    });
+}
+
+/// A two-plane YCbCr texture's view in its own format as a 2D array reads its luma codes alone,
+/// as Metal's does (our probe `ycv`, the M3 Max under macOS 27.0.1, bit for bit over every texel):
+/// `(Y, 0, 0, 1)` of a texture read converted, packed or through the sRGB curve (whose view
+/// reads no defined value on Metal: its texels change from run to run), `(0, Y, 0, 1)` of one
+/// read as codes, `Y` the code over `2^b - 1`; a swizzle applies to that read; and a linear
+/// sample is the luma channel of the code-reading format's sample over the same planes. The
+/// texture itself still reads its own conversion; a texture over plane 1 refuses the view.
+#[test]
+fn retyped_views_read_their_luma_codes() {
+    use metal2vulkan::metal::TextureSwizzle as S;
+    on_device(|device, _| {
+        let kernels = Kernels::new(device);
+        let linear = sampler(device, SamplerMinMagFilter::Linear);
+        let array = |t: &Texture, swizzle: Option<TextureSwizzleChannels>| {
+            let (pf, array) = (t.pixel_format(), TextureType::Type2DArray);
+            match swizzle {
+                None => t.new_texture_view_with_levels_slices(pf, array, 0..1, 0..1),
+                Some(s) => t.new_texture_view_with_swizzle(pf, array, 0..1, 0..1, s),
+            }
+        };
+        let floats = |t: &[u8]| -> Vec<[f32; 4]> {
+            let channel = |t: &[u8; 16], i: usize| {
+                f32::from_le_bytes(t[4 * i..4 * i + 4].try_into().unwrap())
+            };
+            let chunks = t.as_chunks::<16>().0;
+            chunks
+                .iter()
+                .map(|t| std::array::from_fn(|i| channel(t, i)))
+                .collect()
+        };
+        let swizzle = TextureSwizzleChannels {
+            red: S::Blue,
+            green: S::Red,
+            blue: S::One,
+            alpha: S::Green,
+        };
+        for (seed, (pf, ostype)) in (380..).zip([
+            (PixelFormat::YCBCR84202P, "420v"),
+            (PixelFormat::YCBCR84222P, "422f"),
+            (PixelFormat::YCBCR84442P, "444v"),
+            (PixelFormat::YCBCR104202P, "xf20"),
+            (PixelFormat::YCBCR104222P, "x422"),
+            (PixelFormat::YCBCR104442P, "x444"),
+            (PixelFormat::RGB84202P, "420v"),
+            (PixelFormat::RGB104442P, "xf44"),
+            (PixelFormat::YCBCR104202PPACKED, "pf20"),
+            (PixelFormat::YCBCR104442PPACKED, "p444"),
+            (PixelFormat::YCBCR84202PSRGB, "420f"),
+        ]) {
+            let format = ycbcr_format(pf).unwrap();
+            let codes = YCbCrCodes::of(format).unwrap();
+            let bytes = family_bytes(seed, codes);
+            let surface = buffer_with(device, &bytes).unwrap();
+            let base = family_texture(&surface, pf, ostype, None).unwrap();
+            let own = texels_of(device, &kernels.read, &base, None);
+            let view = array(&base, None).unwrap();
+            assert_eq!(view.pixel_format(), pf);
+            assert_eq!(view.texture_type(), TextureType::Type2DArray);
+            let max = (1u32 << codes.bits) - 1;
+            let at_green = format.reads == YCbCrReads::Codes;
+            let want: Vec<[u16; 3]> = (0..H)
+                .flat_map(|y| (0..W).map(move |x| (y, x)))
+                .map(|(y, x)| {
+                    let luma = code_of(&bytes, codes, y * ROWQ, x);
+                    match at_green {
+                        true => [0, luma, 0],
+                        false => [luma, 0, 0],
+                    }
+                })
+                .collect();
+            let read = texels_of(device, &kernels.read_array, &view, None);
+            assert_eq!(grid_of(&read, max), want, "{pf:?}'s view");
+            // The swizzle (blue, red, one, green) over that read.
+            let swizzled = array(&base, Some(swizzle)).unwrap();
+            let mapped: Vec<[f32; 4]> = (floats(&read).iter())
+                .map(|&[r, g, b, _]| [b, r, 1.0, g])
+                .collect();
+            let swizzled = floats(&texels_of(device, &kernels.read_array, &swizzled, None));
+            assert_eq!(swizzled, mapped, "{pf:?}'s swizzled view");
+            // The texture reads its own conversion still.
+            assert_eq!(texels_of(device, &kernels.read, &base, None), own, "{pf:?}");
+            // A linear sample: the code-reading format's over the same planes, its luma.
+            if format.packed {
+                continue;
+            }
+            let code_format = PixelFormat::ALL.iter().copied().find(|&c| {
+                ycbcr_format(c).is_some_and(|f| {
+                    f.reads == YCbCrReads::Codes
+                        && !f.packed
+                        && (f.bits, f.subsampling) == (format.bits, format.subsampling)
+                })
+            });
+            let twin = family_texture(&surface, code_format.unwrap(), ostype, None).unwrap();
+            let sampled = texels_of(device, &kernels.sample_array, &view, Some(&linear));
+            let between = texels_of(device, &kernels.between, &twin, Some(&linear));
+            let want: Vec<[f32; 4]> = (floats(&between).iter())
+                .map(|&[_, y, _, _]| match at_green {
+                    true => [0.0, y, 0.0, 1.0],
+                    false => [y, 0.0, 0.0, 1.0],
+                })
+                .collect();
+            assert_eq!(floats(&sampled), want, "{pf:?}'s view sampled");
+        }
+        // Over plane 1, not measured: refused.
+        let pf = PixelFormat::YCBCR84442P;
+        let codes = ycbcr_format(pf).and_then(YCbCrCodes::of).unwrap();
+        let surface = buffer_with(device, &family_bytes(390, codes)).unwrap();
+        let mut d = TextureDescriptor::texture_2d(pf, W, H, false);
+        d.usage = TextureUsage::SHADER_READ;
+        d.resource_options = ResourceOptions::shared();
+        let code = u32::from_be_bytes(*b"444f");
+        let facts = IoSurfaceYCbCr::new(code, 1, [W, H], CHROMAQ_AT, ROWQ);
+        let at = IoSurfacePlane::new(CHROMAQ_AT, ROWQ, true).with_ycbcr(facts);
+        let plane_one = surface.new_texture_with_iosurface_plane(&d, at).unwrap();
+        assert!(matches!(
+            array(&plane_one, None),
+            Err(Error::Unsupported(_))
+        ));
     });
 }
 

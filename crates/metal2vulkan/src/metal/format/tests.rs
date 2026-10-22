@@ -2525,22 +2525,24 @@ fn ycbcr_formats_are_the_two_plane_family_as_named() {
     assert_eq!(described, 69);
 }
 
-/// Metal drops a function's writes to a 4:2:0 or 4:2:2 two-plane YCbCr format and stores a
-/// 4:4:4 one's into both planes: only the subsampled formats' writes are
-/// dropped, and a storage slot of a 4:4:4 format is refused, typed, as a read one is.
+/// Metal drops a function's writes to a 4:2:0, 4:2:2 or packed two-plane YCbCr format and
+/// stores an unpacked 4:4:4 one's into both planes: only the subsampled and packed formats'
+/// writes are dropped.
 #[test]
-fn only_subsampled_ycbcr_formats_drop_writes() {
+fn only_subsampled_and_packed_ycbcr_formats_drop_writes() {
     let mut four_four_four = 0;
     for &pf in PixelFormat::ALL {
         let Some(f) = ycbcr_format(pf).filter(|_| ycbcr(pf)) else {
             continue;
         };
-        let full = f.subsampling == ChromaSubsampling::Chroma444;
-        assert_eq!(writes_dropped(pf), !full, "{pf:?}");
-        four_four_four += usize::from(full);
+        let stored = f.subsampling == ChromaSubsampling::Chroma444 && !f.packed;
+        assert_eq!(writes_dropped(pf), !stored, "{pf:?}");
+        four_four_four += usize::from(stored);
     }
     assert!(four_four_four >= 6, "{four_four_four}");
     assert!(writes_dropped(PixelFormat::GBGR422) && writes_dropped(PixelFormat::YCBCR84202P));
+    assert!(writes_dropped(PixelFormat::YCBCR104442PPACKED));
+    assert!(writes_dropped(PixelFormat::YCBCR104442PPACKEDSRGB));
     assert!(!writes_dropped(PixelFormat::YCBCR84442P) && !writes_dropped(PixelFormat::RGB104442P));
 }
 
