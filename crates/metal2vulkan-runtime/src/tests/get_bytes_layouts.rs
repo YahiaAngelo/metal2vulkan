@@ -70,7 +70,7 @@ fn expected(
 fn get_bytes_reads_each_layout_its_rows_alone() {
     let scratch = Scratch::new("get-bytes-layouts");
     let device = device(&scratch.0);
-    let mut host_reads = 0;
+    let (mut host_reads, mut staged_reads) = (0, 0);
     // (texture size, region, bytes per row, bytes per image, the caller's bytes)
     let cases: [([u64; 3], Region, u64, u64, usize); 7] = [
         // Packed, whole: exactly its bytes, and with bytes past them.
@@ -88,11 +88,13 @@ fn get_bytes_reads_each_layout_its_rows_alone() {
     for (size, region, bytes_per_row, bytes_per_image, len) in cases {
         let texture = texture(&device, size);
         let mut bytes = vec![UNTOUCHED; len];
-        let before = device.work_counts().host_texel_copies;
+        let before = device.work_counts();
         texture
             .get_bytes(&mut bytes, bytes_per_row, bytes_per_image, region, 0, 0)
             .unwrap();
-        host_reads += device.work_counts().host_texel_copies - before;
+        let after = device.work_counts();
+        host_reads += after.host_texel_copies - before.host_texel_copies;
+        staged_reads += after.staging_submissions - before.staging_submissions;
         let wanted = expected(size, region, (bytes_per_row, bytes_per_image), len);
         assert_eq!(
             bytes, wanted,
@@ -101,7 +103,7 @@ fn get_bytes_reads_each_layout_its_rows_alone() {
     }
     let cases = cases.len();
     eprintln!(
-        "{}: {host_reads} of {cases} reads on the host",
+        "{}: {host_reads} of {cases} reads on the host, {staged_reads} on the staging queue",
         device.name()
     );
 }
