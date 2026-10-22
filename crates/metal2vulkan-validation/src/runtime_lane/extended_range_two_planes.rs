@@ -738,6 +738,7 @@ fn two_plane_heap_textures_read_and_write_as_metal_does() {
         volume.texture_type = TextureType::Type3D;
         volume.depth = 2;
         volume.usage = TextureUsage::SHADER_READ;
+        volume.resource_options = ResourceOptions::private();
         let answer = device.heap_texture_size_and_align(&volume).unwrap();
         let heap = device
             .new_heap(&HeapDescriptor::new(
