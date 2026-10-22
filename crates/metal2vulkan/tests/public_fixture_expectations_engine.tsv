@@ -1593,6 +1593,14 @@ engine/ob3_texture_array.air.ll	ob3_texture_array	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	
 engine/ob3_texture_array.ll	ob3_texture_array	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/ob3_vertex_input.air.ll	ob3_vertex_input	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{StageStoresAndAtomics; AnyOf[[Feature(VertexPipelineStoresAndAtomics)]]}	ok	Unsupported{StageStoresAndAtomics; AnyOf[[Feature(VertexPipelineStoresAndAtomics)]]}
 engine/ob3_vertex_input.ll	ob3_vertex_input	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{StageStoresAndAtomics; AnyOf[[Feature(VertexPipelineStoresAndAtomics)]]}	ok	Unsupported{StageStoresAndAtomics; AnyOf[[Feature(VertexPipelineStoresAndAtomics)]]}
+engine/pdc_compare_clamp.air.ll	pdc_vertex	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/pdc_compare_clamp.air.ll	pdc_slot	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/pdc_compare_clamp.air.ll	pdc_constexpr	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/pdc_compare_clamp.air.ll	pdc_argument	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{ArgumentBufferTextures; AnyOf[[Feature(RuntimeDescriptorArray), Feature(DescriptorBindingPartiallyBound), Feature(ShaderSampledImageArrayNonUniformIndexing), Feature(DescriptorBindingSampledImageUpdateAfterBind)]]}
+engine/pdc_compare_clamp.ll	pdc_vertex	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/pdc_compare_clamp.ll	pdc_slot	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/pdc_compare_clamp.ll	pdc_constexpr	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
+engine/pdc_compare_clamp.ll	pdc_argument	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{ArgumentBufferTextures; AnyOf[[Feature(RuntimeDescriptorArray), Feature(DescriptorBindingPartiallyBound), Feature(ShaderSampledImageArrayNonUniformIndexing), Feature(DescriptorBindingSampledImageUpdateAfterBind)]]}
 engine/pdc_post_depth_coverage.air.ll	pdc_vertex	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
 engine/pdc_post_depth_coverage.air.ll	pdc_after	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}	ok	ok	ok	ok	ok	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}	Unsupported{PostDepthCoverage; AnyOf[[Extension(ExtPostDepthCoverage)]]}
 engine/pdc_post_depth_coverage.air.ll	pdc_plain	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok	ok
