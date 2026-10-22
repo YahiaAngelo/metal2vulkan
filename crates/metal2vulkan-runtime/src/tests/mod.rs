@@ -57,6 +57,8 @@ mod descriptor_arena;
 mod detach_lost;
 mod device;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod device_registry;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod dispatch_pending;
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 mod draw_shape_notices;

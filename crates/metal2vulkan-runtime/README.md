@@ -144,7 +144,9 @@ Vulkan-side choices Metal has no counterpart for:
 
 While a handle lives, equal options give the same device for a physical device, as Metal has one
 `MTLDevice` per GPU. Nothing is read from the environment but the platform's default cache
-directory.
+directory. `Device::registry_ids_with` lists each qualifying physical device's `registryID`,
+preferred first, without making any device, and `Device::with_registry_id` makes only the device
+of one ID (runtime extensions).
 
 **Adopted from the consumer.** `unsafe Device::from_raw(RawDevice, DevicePolicy)` works on an
 instance and device the consumer made and keeps. `RawDevice` takes the `vkGetInstanceProcAddr`,

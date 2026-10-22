@@ -703,6 +703,32 @@ fn ranked(
     Ok(ranked.into_iter().map(|(_, physical)| physical).collect())
 }
 
+/// The registry ID (`Device::registry_id`) of each of `physical`, physical devices of `instance`,
+/// in their order: from its `deviceUUID` (`VkPhysicalDeviceIDProperties`, core in Vulkan 1.1);
+/// one below Vulkan 1.2, of which the runtime makes no device, is left out.
+fn identified(
+    instance: &InstanceShared,
+    physical: Vec<vk::PhysicalDevice>,
+) -> Vec<(u64, vk::PhysicalDevice)> {
+    physical
+        .into_iter()
+        .filter_map(|physical| {
+            // SAFETY: `physical` was enumerated from the instance.
+            let core = unsafe { instance.raw.get_physical_device_properties(physical) };
+            let api = metal2vulkan::vk::ApiVersion::from_packed(core.api_version);
+            if api < metal2vulkan::vk::ApiVersion::V1_2 {
+                return None;
+            }
+            let mut id = vk::PhysicalDeviceIDProperties::default();
+            let mut properties = vk::PhysicalDeviceProperties2::default().push_next(&mut id);
+            // SAFETY: as above; the instance is at Vulkan 1.2 or later, and the device too, so
+            // the structure (core in 1.1) may be chained.
+            unsafe { (instance.raw).get_physical_device_properties2(physical, &mut properties) };
+            Some((super::properties::registry_id(&id.device_uuid), physical))
+        })
+        .collect()
+}
+
 /// The most `VkQueue`s a created device takes: logical queues share them round robin.
 const MAX_QUEUES: u32 = 4;
 
@@ -1405,6 +1431,22 @@ impl Made {
     }
 }
 
+/// The live devices of the group of `options` (equal options and the same message sink), for the
+/// tests: none where no such group lives.
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+pub(crate) fn live_devices_with(options: &DeviceOptions) -> usize {
+    let made = lock(&MADE);
+    let of = made
+        .iter()
+        .find(|group| group.instance_for(options).is_some());
+    of.map_or(0, |group| {
+        let devices = group.devices.iter();
+        devices
+            .filter(|(_, device)| device.strong_count() > 0)
+            .count()
+    })
+}
+
 /// Whether `a` and `b` are equal options, but for their message sinks (compared by `Made`).
 fn same_options(a: &DeviceOptions, b: &DeviceOptions) -> bool {
     // Every field is named, so a field added later is compared or this fails to compile.
@@ -1537,6 +1579,51 @@ impl Device {
             }
         }
         Err(refusal.unwrap_or(Error::NoDevice))
+    }
+
+    /// The registry IDs ([`Device::registry_id`], `registryID`) of the physical devices
+    /// [`Device::all_with`] makes its devices of, in its order, read without making any device: a
+    /// runtime extension, no Metal call (Metal lists its devices, not their IDs). The physical
+    /// devices of `options.kinds` at Vulkan 1.2 or later are listed, each by its `deviceUUID`; one
+    /// the runtime refuses as it makes its device (unsupported, or without a graphics and compute
+    /// queue), which [`Device::all_with`] leaves out, is listed all the same, and
+    /// [`Device::with_registry_id`] answers its refusal. The instance is the one of the devices of
+    /// equal options while one lives (as [`Device::system_default_with`] takes it), else one made
+    /// for the call, which goes with it.
+    pub fn registry_ids_with(options: &DeviceOptions) -> Result<Vec<u64>, Error> {
+        let mut made = lock(&MADE);
+        let (_, instance) = group(&mut made, options)?;
+        let ranked = ranked(&instance, options)?;
+        let ids = identified(&instance, ranked).into_iter().map(|(id, _)| id);
+        let ids = ids.collect();
+        drop(made);
+        // The instance made for the call goes here, outside the lock.
+        drop(instance);
+        Ok(ids)
+    }
+
+    /// The device of the physical device whose registry ID ([`Device::registry_id`]) is
+    /// `registry_id`, among those [`Device::registry_ids_with`] lists for `options` (the first,
+    /// in its order, where two share one), making no device of any other: a runtime extension
+    /// (Metal's program finds the device of an ID among `MTLCopyAllDevices`'s, all of which exist
+    /// already). As [`Device::system_default_with`] makes its device: while a handle to the
+    /// device of equal options lives, it is that device, and the drivers stay loaded once a
+    /// device was made. [`Error::NoDevice`] where no listed physical device has the ID; the
+    /// refusal of the device where the runtime cannot make it.
+    pub fn with_registry_id(registry_id: u64, options: &DeviceOptions) -> Result<Device, Error> {
+        let cache = CacheSetup::of(&options.shader_cache, "with_registry_id")?;
+        let level = choose(options.metal_level, Host::this(), "with_registry_id")?;
+        let mut made = lock(&MADE);
+        let (at, instance) = group(&mut made, options)?;
+        let ranked = ranked(&instance, options)?;
+        let Some((_, physical)) =
+            (identified(&instance, ranked).into_iter()).find(|&(id, _)| id == registry_id)
+        else {
+            return Err(Error::NoDevice);
+        };
+        let device = device_of(&mut made[at], &instance, physical, options, &cache, level)?;
+        keep_drivers_loaded(&instance.entry);
+        Ok(device)
     }
 
     /// `MTLCopyAllDevices`: [`Device::all_with`] the default options.
