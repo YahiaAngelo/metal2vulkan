@@ -1393,6 +1393,17 @@ impl IndirectCommandBuffer {
             .answer(self.device(), "an indirect command buffer")
     }
 
+    /// Whether the buffer's [`unique_identifier`](Self::unique_identifier) is a number not
+    /// measured to be Metal's: a runtime query, with no Metal counterpart. True for a buffer made
+    /// after a command buffer of its device that encoded a render encoder was scheduled, after a
+    /// resource state encoder of its device opened, or after Metal's own encoders' ranges passed
+    /// what the runtime models, where `unique_identifier` announces
+    /// [`Degradation::UnmeasuredUniqueIdentifier`](crate::Degradation::UnmeasuredUniqueIdentifier);
+    /// false where it answers Metal's number. Fixed at the buffer's making; it announces nothing.
+    pub fn identifier_unmeasured(&self) -> bool {
+        self.0.identifier.degradation().is_some()
+    }
+
     /// Whether the buffer holds its ID's slot: whether a kernel encoding through the ID reaches
     /// its records, which it does only while no buffer made later holds the ID.
     pub(super) fn holds_id_slot(&self) -> bool {

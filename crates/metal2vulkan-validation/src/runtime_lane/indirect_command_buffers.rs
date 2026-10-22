@@ -1826,6 +1826,83 @@ fn buffer_identifiers_follow_metal_s_encoders() {
     });
 }
 
+/// `identifier_unmeasured` answers, without announcing, whether a buffer's `uniqueIdentifier` is
+/// one its getter announces `unmeasured-unique-identifier` for: false for a buffer made before
+/// any encoder, after a blit encoder's pieces, or while a render encoder is open (Metal's
+/// numbers); true for one made after a command buffer that encoded a render encoder was
+/// scheduled, or after a resource state encoder opened, each of whose getters then announces. It
+/// is fixed at the buffer's making: one made before stays false.
+#[test]
+fn identifier_unmeasured_answers_what_the_getter_announces() {
+    let one = |device: &Device| icb(device, &compute_descriptor(), 1);
+    let unmeasured = [Degradation::UnmeasuredUniqueIdentifier];
+    // Measured: before any encoder, past a blit encoder's pieces, inside a render encoder; then
+    // a render pass's run.
+    notices::on_device(|device, messages| {
+        messages.take_notices();
+        let first = one(device);
+        let queue = device.new_command_queue().unwrap();
+        let blit = queue.command_buffer().unwrap();
+        blit.blit_command_encoder().unwrap().end_encoding().unwrap();
+        blit.commit().unwrap();
+        blit.wait_until_completed_for(WAIT).unwrap();
+        let after_blit = one(device);
+        let mut target = TextureDescriptor::texture_2d(PixelFormat::RGBA8Unorm, 64, 64, false);
+        target.usage = TextureUsage::RENDER_TARGET;
+        let target = device.new_texture(&target).unwrap();
+        let mut pass = RenderPassDescriptor::new();
+        let color = &mut pass.color_attachments[0];
+        color.texture = Some(target);
+        color.load_action = LoadAction::Clear;
+        color.store_action = StoreAction::Store;
+        let command_buffer = queue.command_buffer().unwrap();
+        let encoder = command_buffer.render_command_encoder(&pass).unwrap();
+        let inside = one(device);
+        for (name, made) in [("first", &first), ("after_blit", &after_blit)] {
+            assert!(!made.identifier_unmeasured(), "{name}");
+        }
+        assert!(!inside.identifier_unmeasured(), "inside the render encoder");
+        encoder.end_encoding().unwrap();
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.error(), None);
+        let after_render = one(device);
+        assert!(after_render.identifier_unmeasured(), "after a render run");
+        assert!(!first.identifier_unmeasured(), "fixed at its making");
+        assert_eq!(
+            identifier_notices(messages),
+            [],
+            "the query announces nothing"
+        );
+        for made in [&first, &after_blit, &inside] {
+            made.unique_identifier();
+        }
+        assert_eq!(identifier_notices(messages), [], "Metal's numbers");
+        after_render.unique_identifier();
+        assert_eq!(identifier_notices(messages), unmeasured);
+    });
+    // A resource state encoder's opening.
+    notices::on_device(|device, messages| {
+        messages.take_notices();
+        let before = one(device);
+        let queue = device.new_command_queue().unwrap();
+        let command_buffer = queue.command_buffer().unwrap();
+        let encoder = command_buffer.resource_state_command_encoder().unwrap();
+        encoder.end_encoding().unwrap();
+        let after = one(device);
+        assert!(!before.identifier_unmeasured(), "made before");
+        assert!(
+            after.identifier_unmeasured(),
+            "after a resource state encoder"
+        );
+        assert_eq!(identifier_notices(messages), []);
+        before.unique_identifier();
+        assert_eq!(identifier_notices(messages), []);
+        after.unique_identifier();
+        assert_eq!(identifier_notices(messages), unmeasured);
+    });
+}
+
 /// A render command's setters write what Metal's getters read back: its
 /// pipeline state, kept alive while the command names it; each vertex and fragment buffer's
 /// address plus its offset, whatever the offset; a draw's values (the record's low 32 bits); a
