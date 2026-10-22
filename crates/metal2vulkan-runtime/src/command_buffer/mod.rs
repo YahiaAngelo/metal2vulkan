@@ -1827,6 +1827,12 @@ impl CommandBuffer {
         self.state().failures_injected = count;
     }
 
+    /// The bytes its upload arena's regions took: a device test's measure (`tests::rerun_arenas`).
+    #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+    pub(crate) fn upload_bytes(&self) -> u64 {
+        self.state().uploads.bytes()
+    }
+
     /// Whether `waiting` holds this command buffer.
     pub(crate) fn is(&self, waiting: &dyn Waiting) -> bool {
         self.0.address() == waiting.address()

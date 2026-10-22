@@ -588,7 +588,7 @@ impl EncoderCore {
                 self.device().shared().counts.set_zero_set_reused();
                 return Ok((Some(set), None));
             }
-            let found = (self.command_buffer().state().descriptors.sets()).find(layout, writes);
+            let found = (self.command_buffer().state().descriptors).find(layout, writes);
             if let Some(set) = found {
                 self.device().shared().counts.set_zero_set_found();
                 self.last_set_zero.keep(layout, set, writes);
@@ -613,11 +613,7 @@ impl EncoderCore {
     /// records, so every object its writes name is held until the command buffer completes.
     pub(super) fn keep_set_zero(&mut self, written: WrittenSet, writes: &[Write]) {
         self.last_set_zero.keep(written.layout, written.set, writes);
-        (self.command_buffer().state().descriptors.sets()).keep(
-            written.layout,
-            written.set,
-            writes,
-        );
+        (self.command_buffer().state().descriptors).keep(written.layout, written.set, writes);
     }
 
     /// The queue flags of the family its command buffer records for: its queue's `VkQueue`'s.

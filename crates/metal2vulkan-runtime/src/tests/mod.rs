@@ -166,6 +166,8 @@ mod recycle;
 mod released_programs;
 mod render;
 mod replays;
+#[cfg(any(m2v_gpu, m2v_cpu_icd))]
+mod rerun_arenas;
 mod resource;
 mod resource_ids;
 mod rotated;
