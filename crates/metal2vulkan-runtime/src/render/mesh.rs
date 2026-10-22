@@ -45,15 +45,20 @@
 //! - **Metal's grids**, measured on the M3 Max (macOS 27.0.1), direct and indirect alike: without
 //!   an object function a grid with an axis past 65,535 draws nothing, as does one of more than
 //!   1,048,575 threadgroups (`bind::mesh_arguments`); with one, every object grid its GPU finishes
-//!   draws (2^28 threadgroups in 2.5 seconds), and one of 2^29 or more fails the command buffer
-//!   after the GPU's watchdog. On a device with `VK_EXT_mesh_shader` an indirect draw reads the
-//!   counts its arguments pass writes (`render/mesh_arguments.rs`): Metal's, or none where Metal
-//!   draws nothing. Where the device folds object grids (device addresses, `shaderInt64`,
-//!   `multiDrawIndirect`, `drawIndirectCount`: every committed profile with the extension), an
-//!   object grid runs in pieces within the task stage's limits, its object function compiled
-//!   folded; one of 2^29 threadgroups or more draws nothing and fails the command buffer
-//!   (`CommandBufferError::MeshGridPastLimits`, Metal's code), and so, elsewhere, does an indirect
-//!   draw's grid past the device's task limits.
+//!   within its watchdog's 5 seconds draws (2^29 threadgroups of an object function that does next
+//!   to nothing in 4.98 seconds), and Metal's GPU discards a slower one. Every device draws an
+//!   object grid of up to 2^29 threadgroups (`bind::METAL_OBJECT_GRID_TOTAL`), and a larger one
+//!   draws nothing and fails the command buffer as Metal's GPU discards it
+//!   (`CommandBufferError::GpuRecoveryVictim`): a direct draw from its encoder on, as Metal's
+//!   (`DrawCommands::discards_command_buffer`), an indirect one as its arguments pass reports it.
+//!   On a device with `VK_EXT_mesh_shader` an indirect draw reads the counts its arguments pass
+//!   writes (`render/mesh_arguments.rs`): Metal's, or none where Metal draws nothing. Where the
+//!   device folds object grids (device addresses, `shaderInt64`, `multiDrawIndirect`,
+//!   `drawIndirectCount`: every committed profile with the extension), an object grid runs in
+//!   pieces within the task stage's limits, its object function compiled folded. Elsewhere an
+//!   indirect draw's grid past the device's task limits, which Metal draws, draws nothing and
+//!   fails the command buffer (`CommandBufferError::MeshGridPastLimits`), and a direct one is
+//!   refused as it is encoded.
 //! - **Emulated** on a device without `VK_EXT_mesh_shader`, whose pipeline's object and mesh
 //!   functions are compute stages and whose mesh function writes records
 //!   (`GraphicsState::mesh_records`): each draw has a work buffer ([`MeshWork`], uploaded per draw)
@@ -854,9 +859,11 @@ impl RenderCommandEncoder {
     /// [`draw_mesh_threadgroups`](Self::draw_mesh_threadgroups) is, as an indirect draw's
     /// arguments are (`render.rs`'s module docs), and for an indirect buffer of another device.
     /// On a device with `VK_EXT_mesh_shader` the draw's counts are an arguments pass's: Metal's
-    /// where Metal draws them, an object grid in pieces where the device folds object grids, and
-    /// an object grid past what runs fails the command buffer
-    /// (`CommandBufferError::MeshGridPastLimits`, the module docs). On one without it, a draw of a
+    /// where Metal draws them, an object grid in pieces where the device folds object grids; an
+    /// object grid Metal's GPU discards fails the command buffer as Metal's does
+    /// (`CommandBufferError::GpuRecoveryVictim`), and one past a device's task limits where it
+    /// does not fold them (`CommandBufferError::MeshGridPastLimits`, the module docs). On one
+    /// without it, a draw of a
     /// pipeline with an object function is `NotImplemented(MeshShading)` (the module docs).
     pub fn draw_mesh_threadgroups_indirect(
         &mut self,

@@ -1,7 +1,7 @@
 //! The mesh arguments module: valid on every committed profile with `VK_EXT_mesh_shader`, Metal's
-//! rule on the CPU interpreter (copied, zeroed, and zeroed with `MESH_GRID_PAST_LIMITS`), including
-//! the source residual and a short range, the unfolded object form's, and the folded object form's
-//! fold, word for word the CPU's (`fold_object_grid`).
+//! rule on the CPU interpreter (copied, zeroed, and zeroed with `MESH_GRID_PAST_LIMITS` or
+//! `MESH_GRID_DISCARDED`), including the source residual and a short range, the unfolded object
+//! form's, and the folded object form's fold, word for word the CPU's (`fold_object_grid`).
 
 use super::*;
 use crate::bind::status::{ExecutionStatus, StatusReport};
@@ -161,28 +161,37 @@ fn a_mesh_grid_draws_as_metal_s() {
         let want = if drawn { counts } else { [0; 3] };
         assert_eq!(out, want, "{counts:?}");
         assert!(!report.mesh_grid_past_limits, "{counts:?}");
+        assert!(!report.mesh_grid_discarded, "{counts:?}");
         assert_eq!(metal_mesh_grid_draws_nothing(counts), !drawn, "{counts:?}");
     }
 }
 
 /// An object grid on a device that does not fold object grids: copied within the task limits,
-/// else zeroed and reported.
+/// else zeroed and reported, as past the device's limits or, past what Metal runs, as Metal's
+/// discard.
 #[test]
 fn an_unfolded_object_grid_past_the_task_limits_is_reported() {
     let rule = MeshGridRule::of(MeshArgumentsForm::Object, &radv());
-    for (counts, within) in [
-        ([3, 1, 1], true),
-        ([65535, 64, 1], true),
-        ([2048, 2048, 1], true),
-        ([0, 70000, 1], false),
-        ([65536, 1, 1], false),
-        ([2048, 2049, 1], false),
-        ([u32::MAX, 2, 1], false),
+    for (counts, within, discarded) in [
+        ([3, 1, 1], true, false),
+        ([65535, 64, 1], true, false),
+        ([2048, 2048, 1], true, false),
+        ([0, 70000, 1], false, false),
+        ([65536, 1, 1], false, false),
+        ([2048, 2049, 1], false, false),
+        ([1 << 29, 1, 1], false, false),
+        ([(1 << 29) + 1, 1, 1], false, true),
+        ([u32::MAX, 2, 1], false, true),
     ] {
         let (scratch, report) = run_pass(MeshArgumentsForm::Object, rule, &counts, (0, 0));
         let want = if within { counts } else { [0; 3] };
         assert_eq!(scratch, want, "{counts:?}");
-        assert_eq!(report.mesh_grid_past_limits, !within, "{counts:?}");
+        assert_eq!(report.mesh_grid_discarded, discarded, "{counts:?}");
+        assert_eq!(
+            report.mesh_grid_past_limits,
+            !within && !discarded,
+            "{counts:?}"
+        );
     }
 }
 
@@ -306,8 +315,9 @@ fn metal_s_object_grid_wraps_its_threads_per_grid() {
 
 /// The folded object form folds any grid it runs within the task stage's limits, in the pieces that
 /// cover it, word for word as the CPU's fold of an indirect draw (and a direct draw's upload is
-/// the scratch through its pieces), and draws nothing for a zero count or a grid past what it runs
-/// (setting `MESH_GRID_PAST_LIMITS` for the latter).
+/// the scratch through its pieces), and draws nothing for a zero count, a grid Metal's GPU
+/// discards (setting `MESH_GRID_DISCARDED`), or one past the device's pieces (setting
+/// `MESH_GRID_PAST_LIMITS`).
 #[test]
 fn an_object_grid_folds_within_the_task_limits_as_the_cpu_does() {
     let nvidia = MeshGridLimits {
@@ -318,24 +328,43 @@ fn an_object_grid_folds_within_the_task_limits_as_the_cpu_does() {
         axes: [100, 100, 100],
         total: 5000,
     };
-    for (task, counts, threads, runs) in [
-        (radv_task(), [3, 1, 1], [1, 1, 1], true),
-        (radv_task(), [65535, 64, 1], [32, 1, 1], true),
-        (radv_task(), [70_000, 1, 1], [1, 1, 1], true),
-        (radv_task(), [2048, 2049, 1], [2, 2, 1], true),
-        (radv_task(), [1 << 24, 1, 1], [1, 1, 1], true),
-        (radv_task(), [65536, 4096, 1], [1, 1, 1], true),
-        (radv_task(), [7, 9, 11], [4, 4, 4], true),
-        (radv_task(), [1 << 23, 1, 1], [1024, 1, 1], true),
-        (radv_task(), [4_294_970, 1, 1], [1000, 1, 1], true),
-        (nvidia, [70_000, 3, 1], [1, 1, 1], true),
-        (nvidia, [1 << 24, 4, 1], [1, 1, 1], true),
-        (small, [600_000, 1, 1], [1, 1, 1], true),
-        (radv_task(), [0, 70_000, 1], [1, 1, 1], false),
-        (radv_task(), [65536, 8192, 1], [1, 1, 1], false),
-        (radv_task(), [u32::MAX, 2, 1], [1, 1, 1], false),
-        (radv_task(), [1 << 29, 1, 1], [1, 1, 1], false),
-        (small, [700_000, 1, 1], [1, 1, 1], false),
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Outcome {
+        Runs,
+        Nothing,
+        Discarded,
+        Past,
+    }
+    use Outcome::*;
+    // An `x` axis just past half of Vulkan's least task total: one row a piece, the fewest
+    // threadgroups a piece of such a device runs, so 2^29 takes all `OBJECT_PIECES`.
+    let wide = MeshGridLimits {
+        axes: [2_097_153, 65535, 65535],
+        total: 4_194_304,
+    };
+    for (task, counts, threads, outcome) in [
+        (radv_task(), [3, 1, 1], [1, 1, 1], Runs),
+        (radv_task(), [65535, 64, 1], [32, 1, 1], Runs),
+        (radv_task(), [70_000, 1, 1], [1, 1, 1], Runs),
+        (radv_task(), [2048, 2049, 1], [2, 2, 1], Runs),
+        (radv_task(), [1 << 24, 1, 1], [1, 1, 1], Runs),
+        (radv_task(), [65536, 4096, 1], [1, 1, 1], Runs),
+        (radv_task(), [7, 9, 11], [4, 4, 4], Runs),
+        (radv_task(), [1 << 23, 1, 1], [1024, 1, 1], Runs),
+        (radv_task(), [4_294_970, 1, 1], [1000, 1, 1], Runs),
+        (radv_task(), [65536, 8192, 1], [1, 1, 1], Runs),
+        (radv_task(), [1 << 29, 1, 1], [1, 1, 1], Runs),
+        (nvidia, [70_000, 3, 1], [1, 1, 1], Runs),
+        (nvidia, [1 << 24, 4, 1], [1, 1, 1], Runs),
+        (nvidia, [1 << 29, 1, 1], [1, 1, 1], Runs),
+        (wide, [1 << 29, 1, 1], [1, 1, 1], Runs),
+        (small, [600_000, 1, 1], [1, 1, 1], Runs),
+        (small, [1_280_000, 1, 1], [1, 1, 1], Runs),
+        (radv_task(), [0, 70_000, 1], [1, 1, 1], Nothing),
+        (radv_task(), [65536, 8193, 1], [1, 1, 1], Discarded),
+        (radv_task(), [(1 << 29) + 1, 1, 1], [1, 1, 1], Discarded),
+        (radv_task(), [u32::MAX, 2, 1], [1, 1, 1], Discarded),
+        (small, [1_280_001, 1, 1], [1, 1, 1], Past),
     ] {
         let rule = MeshGridRule {
             metal: None,
@@ -344,8 +373,10 @@ fn an_object_grid_folds_within_the_task_limits_as_the_cpu_does() {
         let packed = crate::lower::dispatch::pack_nominal(threads).expect("packs");
         let fold = fold_object_grid(counts, threads, task, false).expect("fold");
         let what = format!("{counts:?} of {threads:?} on {task:?}: {fold:?}");
+        let runs = outcome == Runs;
         assert_eq!(fold.pieces > 0, runs, "{what}");
-        assert_eq!(fold.past, !runs && !counts.contains(&0), "{what}");
+        assert_eq!(fold.discarded, outcome == Discarded, "{what}");
+        assert_eq!(fold.past, outcome == Past, "{what}");
         if runs {
             let [nx, ny, nz] = fold.dispatch;
             assert!(
@@ -366,6 +397,7 @@ fn an_object_grid_folds_within_the_task_limits_as_the_cpu_does() {
         let upload = 4 * (9 + 3 * fold.pieces as usize);
         assert_eq!(fold.bytes(), words_bytes(&scratch)[..upload], "{what}");
         assert_eq!(report.mesh_grid_past_limits, fold.past, "{what}");
+        assert_eq!(report.mesh_grid_discarded, fold.discarded, "{what}");
     }
 }
 

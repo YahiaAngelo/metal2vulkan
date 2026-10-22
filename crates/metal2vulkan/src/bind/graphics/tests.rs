@@ -1704,11 +1704,18 @@ fn object_draws_specialize_each_stage_within_its_limits() {
             limit(VkLimit::MaxTaskWorkGroupCount(2), 65536, 65535),
         ),
         (
-            groups([65535, 65535, 1], [1; 3], [1; 3]),
-            limit(VkLimit::MaxTaskWorkGroupTotalCount, 65535 * 65535, 1 << 22),
+            groups([2048, 2049, 1], [1; 3], [1; 3]),
+            limit(VkLimit::MaxTaskWorkGroupTotalCount, 2048 * 2049, 1 << 22),
         ),
     ] {
         assert_eq!(instantiate(&t, &state, &draw).err(), refusal, "{draw:?}");
+    }
+    // Past what Metal runs: nothing drawn, and the command buffer discarded, ahead of the task
+    // limits.
+    for counts in [[(1 << 29) + 1, 1, 1], [65535, 65535, 1]] {
+        let cmds = instantiate(&t, &state, &groups(counts, [1; 3], [2, 1, 1])).expect("discarded");
+        assert_eq!(cmds.draw, tasks(0, 0, 0), "{counts:?}");
+        assert!(cmds.discards_command_buffer, "{counts:?}");
     }
     // Threads per grid wrapped to 32 bits: the threadgroups they fill, rounded up (Metal's), none
     // where they wrap to 0, held to the task limits; the region reports them, read (`MultiRegion`
@@ -1828,11 +1835,20 @@ fn folded_object_draws_run_their_grid_in_pieces() {
     );
     assert_eq!(fold.bytes().len(), 36 + 2 * 12);
     assert!(cmds.mesh_arguments.is_none());
-    // Past what runs: 2^29 threadgroups or more, which Metal's GPU fails.
-    for counts in [[65535, 65535, 1], [1 << 29, 1, 1]] {
-        let cmds = instantiate(&t, &state, &groups(counts, [1; 3])).expect("past");
+    // 2^29 threadgroups run, in 129 pieces of these limits; more, which Metal's GPU discards,
+    // draw nothing and discard the command buffer.
+    let cmds = instantiate(&t, &state, &groups([1 << 29, 1, 1], [1; 3])).expect("2^29");
+    let fold = cmds.object_fold.expect("a fold");
+    assert_eq!((fold.pieces, fold.discarded), (129, false));
+    assert!(!cmds.discards_command_buffer);
+    for counts in [[65535, 65535, 1], [(1 << 29) + 1, 1, 1]] {
+        let cmds = instantiate(&t, &state, &groups(counts, [1; 3])).expect("discarded");
         assert_eq!(cmds.draw, tasks([0; 3]), "{counts:?}");
-        assert!(cmds.object_fold.is_some_and(|f| f.past), "{counts:?}");
+        assert!(
+            cmds.object_fold.is_some_and(|f| f.discarded && !f.past),
+            "{counts:?}"
+        );
+        assert!(cmds.discards_command_buffer, "{counts:?}");
     }
     // Threads per grid wrapped to 32 bits: a direct draw runs the threadgroups they fill, rounded
     // up (Metal's), none where they wrap to 0, and the record reports them.

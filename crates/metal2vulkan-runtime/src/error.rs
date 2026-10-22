@@ -1627,15 +1627,16 @@ pub enum CommandBufferError {
     /// the device's budget, so nothing is drawn short silently. The first records fault of the
     /// command buffer, where it is a tessellation draw's, as its scan saw it.
     TessellationRecordsOverflow(TessellationRecordsOverflow),
-    /// A mesh draw's object grid lay past what runs, and such draws drew nothing: 2^29 or more
-    /// threadgroups, whose draw Metal's GPU fails after its watchdog's 5 seconds
-    /// (`MTLCommandBufferErrorInternal`, measured on an M3 Max: 2^28 completes in 2.5 seconds),
-    /// so the code is Metal's. On a device that does not fold object grids (without device
-    /// addresses, `shaderInt64`, `multiDrawIndirect` or `drawIndirectCount`), an indirect draw's
-    /// grid, as the GPU wrote it, past the task stage's limits (`maxTaskWorkGroupCount`,
-    /// `maxTaskWorkGroupTotalCount`) too, which Metal draws: nothing is drawn short silently. A
-    /// direct draw of such a grid there is refused as it is encoded (`Unsupported{MeshShading}`
-    /// naming the limit).
+    /// The device cannot launch a mesh draw's grid that Metal draws, and such draws drew
+    /// nothing: on a device that does not fold object grids (without device addresses,
+    /// `shaderInt64`, `multiDrawIndirect` or `drawIndirectCount`), an indirect draw's object grid,
+    /// as the GPU wrote it, past the task stage's limits (`maxTaskWorkGroupCount`,
+    /// `maxTaskWorkGroupTotalCount`), or a mesh grid past the mesh stage's; on one that folds them,
+    /// a grid of more pieces than `MeshArguments::OBJECT_PIECES` (only under task limits below
+    /// Vulkan's required least). Nothing is drawn short silently. A direct draw of such a grid on
+    /// a device that does not fold is refused as it is encoded (`Unsupported{MeshShading}` naming
+    /// the limit). Not Metal's failure: an object grid Metal's GPU discards is
+    /// [`GpuRecoveryVictim`](Self::GpuRecoveryVictim).
     MeshGridPastLimits,
     /// A host step refused a command it recorded from an indirect command buffer's records
     /// (`Degradation::HostReplayedIndirectCommands`): what `commit` refuses where the CPU wrote
@@ -1714,6 +1715,16 @@ pub enum CommandBufferError {
     /// nothing, every event signal fired, and the queue ran on. The encoders after it, its
     /// completion and the runtime's answer are a [`PageFault`](Self::PageFault)'s. It does not
     /// count against its queue.
+    ///
+    /// Also an object grid of more than 2^29 threadgroups (`bind::METAL_OBJECT_GRID_TOTAL`), past
+    /// what Metal's GPU runs within its watchdog's 5 seconds (2^29 of an object function that does
+    /// next to nothing ran in 4.98 s on the M3 Max, 2^30 did not), which Metal fails with the same
+    /// error 5 seconds on: nothing of the command buffer ran from the draw's encoder on (its clear,
+    /// its draws before the grid's, the encoders after it), and a command buffer of the queue
+    /// committed while it ran failed too. The runtime fails a direct draw's command buffer from
+    /// its encoder on as its work completes, and an indirect draw's as its arguments pass reports
+    /// it, the rest of its work running; it runs the queue's other command buffers (docs/API.md,
+    /// "Accepted differences").
     GpuRecoveryVictim,
     /// Metal ignored the command buffer, committed on a queue whose second command buffer with a
     /// GPU error it caused ([`PageFault`](Self::PageFault), [`GpuHang`](Self::GpuHang), or

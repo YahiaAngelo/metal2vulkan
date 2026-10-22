@@ -1568,8 +1568,8 @@ impl State {
         Ok(self.status_words(device)?.device_address())
     }
 
-    /// A direct mesh draw's object grid lies past what runs (`render/mesh_arguments.rs`): the
-    /// command buffer fails as Metal's GPU fails it.
+    /// A direct mesh draw's object grid lies past what the device launches
+    /// (`render/mesh_arguments.rs`): the command buffer fails.
     pub(crate) fn mesh_grid_past_limits(&mut self) {
         self.mesh_grid_past = true;
     }
@@ -4098,8 +4098,14 @@ impl CommandBufferShared {
                             CommandBufferError::PREDICATION_OPEN_AT_UNIT_END_DESCRIPTION.to_owned(),
                         );
                     }
-                    // A mesh draw's object grid lay past what runs (`render/mesh_arguments.rs`):
-                    // the command buffer failed, as Metal's GPU fails it.
+                    // An indirect mesh draw's object grid was one Metal's GPU discards
+                    // (`render/mesh_arguments.rs`): the command buffer failed as Metal's.
+                    if report.mesh_grid_discarded && state.error.is_none() {
+                        state.status = CommandBufferStatus::Error;
+                        state.error = Some(CommandBufferError::GpuRecoveryVictim);
+                    }
+                    // A mesh draw's grid lay past what the device launches
+                    // (`render/mesh_arguments.rs`): the command buffer failed.
                     if (report.mesh_grid_past_limits || state.mesh_grid_past)
                         && state.error.is_none()
                     {

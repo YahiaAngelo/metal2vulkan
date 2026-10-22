@@ -1279,6 +1279,7 @@ mod bind_serde_round_trips {
             indirect_needs_arguments: false,
             mesh_arguments: None,
             object_fold: None,
+            discards_command_buffer: false,
             index_bounds_pass: false,
             extents: Vec::new(),
             push_holes: Vec::new(),

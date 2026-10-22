@@ -17,9 +17,15 @@
 //!   that Metal is erratic (17 by 61,681 and 65,535 by 24 drew, 1025 by 1025 and 33 by 32,768 did
 //!   not), and the module draws nothing, Metal's answer at 2^20 and above 2^21.
 //! - With an object function the counts are the object grid, which Metal runs at every count
-//!   that its GPU finishes in time: 16,777,216 along `x` in 0.14 s and 2^28 threadgroups in 2.5 s
-//!   complete; 2^29 and 2^32 fail the command buffer after 5 s (`MTLCommandBufferErrorInternal`,
-//!   the GPU's watchdog), none of its writes landing. Metal's threads per grid along an axis are
+//!   that its GPU finishes within its watchdog's 5 s. An object function that does next to nothing
+//!   ran 2^28 threadgroups in 2.4 s and 2^29 in 4.98 s, direct and indirect; 2^30 and 2^32 were
+//!   discarded at 5 s, as was 2^29 of a costlier function: the command buffer fails with
+//!   `MTLCommandBufferErrorInternal` (1, "Discarded (victim of GPU error/recovery)"), and nothing
+//!   of it runs from the draw's encoder on (its clear, its draws before the grid's, the encoders
+//!   after it; an encoder before it ran), nor does a command buffer of the queue committed while
+//!   it ran. [`METAL_OBJECT_GRID_TOTAL`] is the most Metal ran; past it the runtime fails the
+//!   command buffer so (`DrawCommands::discards_command_buffer`, `MESH_GRID_DISCARDED`). Metal's
+//!   threads per grid along an axis are
 //!   the axis's threadgroups times its threads per threadgroup wrapped to 32 bits, which its grid
 //!   builtins report (`threads_per_grid`, and `threadgroups_per_grid` those threads over the
 //!   threadgroup's, rounded up): an indirect draw runs every threadgroup of its arguments
@@ -54,14 +60,16 @@
 //!   `vkCmdDrawMeshTasksIndirectCountEXT` reads.
 //!
 //! A grid with a zero count draws nothing. One of more than [`METAL_OBJECT_GRID_TOTAL`]
-//! threadgroups (which Metal's GPU fails), or which more pieces than
-//! [`MeshArguments::OBJECT_PIECES`] would take (none on a device of the task limits Vulkan
-//! requires), draws nothing and sets `MESH_GRID_PAST_LIMITS`.
+//! threadgroups draws nothing and sets `MESH_GRID_DISCARDED`: Metal's GPU discards it. One that
+//! more pieces than [`MeshArguments::OBJECT_PIECES`] would take (none on a device of the task
+//! limits Vulkan requires) draws nothing and sets `MESH_GRID_PAST_LIMITS`: the device cannot
+//! launch it.
 //!
 //! **The unfolded object form** ([`MeshArgumentsForm::Object`], a device that does not fold
-//! object grids) is the mesh form's rule with no Metal limit: Metal's counts where they lie within
-//! the device's `maxTaskWorkGroupCount` and `maxTaskWorkGroupTotalCount`, else zero counts and
-//! `MESH_GRID_PAST_LIMITS`.
+//! object grids) is the mesh form's rule with Metal's discard as its limit: a grid of more than
+//! [`METAL_OBJECT_GRID_TOTAL`] threadgroups writes zero counts and sets `MESH_GRID_DISCARDED`;
+//! otherwise Metal's counts where they lie within the device's `maxTaskWorkGroupCount` and
+//! `maxTaskWorkGroupTotalCount`, else zero counts and `MESH_GRID_PAST_LIMITS`.
 //!
 //! **The module** (fixed per device and form): one `GLCompute` entry `main` with local size
 //! `(1, 1, 1)`, no loops, three storage buffers in set 0 and one push constant:
@@ -113,10 +121,11 @@ pub const METAL_MESH_GRID_AXIS: u32 = 65_535;
 /// docs).
 pub const METAL_MESH_GRID_TOTAL: u32 = 1_048_575;
 
-/// The most object threadgroups of a draw the runtime runs: Metal's GPU fails a draw of 2^29 or
-/// more after its watchdog's 5 seconds even where each threadgroup does nothing (the module docs),
-/// so a larger grid draws nothing and fails the command buffer.
-pub const METAL_OBJECT_GRID_TOTAL: u32 = (1 << 29) - 1;
+/// The most object threadgroups of a draw the runtime runs: the most Metal's GPU ran within its
+/// watchdog's 5 seconds, of an object function that does next to nothing (2^29 in 4.98 s on an
+/// M3 Max; 2^30 was discarded, the module docs). A larger grid draws nothing and fails the
+/// command buffer as Metal's GPU discards it.
+pub const METAL_OBJECT_GRID_TOTAL: u32 = 1 << 29;
 
 /// Whether Metal draws nothing for a mesh grid of `groups` without an object function: an axis
 /// past [`METAL_MESH_GRID_AXIS`], or more than [`METAL_MESH_GRID_TOTAL`] threadgroups.
@@ -201,9 +210,12 @@ pub struct ObjectFold {
     pub dispatch: [u32; 3],
     /// The pieces, each a draw whose `DrawIndex` is its number: 0 for a grid that draws nothing.
     pub pieces: u32,
-    /// The grid is past what the runtime runs ([`METAL_OBJECT_GRID_TOTAL`], or more than
-    /// [`MeshArguments::OBJECT_PIECES`] pieces): it draws nothing, and the command buffer fails as
-    /// Metal's does.
+    /// The grid has more than [`METAL_OBJECT_GRID_TOTAL`] threadgroups, which Metal's GPU
+    /// discards: it draws nothing, and the command buffer fails as Metal's does.
+    pub discarded: bool,
+    /// The grid takes more than [`MeshArguments::OBJECT_PIECES`] pieces (only on a device of task
+    /// limits below Vulkan's required least), which the device cannot launch: it draws nothing,
+    /// and the command buffer fails (not Metal's failure).
     pub past: bool,
 }
 
@@ -256,18 +268,19 @@ pub fn fold_object_grid(
 ) -> Option<ObjectFold> {
     let packed = crate::lower::dispatch::pack_nominal(threads)?;
     let (runs, reported) = metal_object_grid(groups, threads, direct)?;
-    let none = |past| ObjectFold {
+    let none = |discarded, past| ObjectFold {
         record: [0, 0, 0, packed, 0, 0, 0, 0],
         dispatch: [0; 3],
         pieces: 0,
+        discarded,
         past,
     };
     if runs.contains(&0) {
-        return Some(none(false));
+        return Some(none(false, false));
     }
     let n = runs.iter().map(|&c| u64::from(c)).product::<u64>();
     if n > u64::from(METAL_OBJECT_GRID_TOTAL) {
-        return Some(none(true));
+        return Some(none(true, false));
     }
     let n = n as u32;
     let total = object_total(task);
@@ -275,7 +288,7 @@ pub fn fold_object_grid(
     let ny = n.div_ceil(nx).min(task.axes[1]).min(total / nx).max(1);
     let pieces = n.div_ceil(nx * ny);
     if pieces > MeshArguments::OBJECT_PIECES {
-        return Some(none(true));
+        return Some(none(false, true));
     }
     let [rx, ry, rz] = runs;
     let [tx, ty, tz] = reported;
@@ -283,6 +296,7 @@ pub fn fold_object_grid(
         record: [rx, ry, rz, packed, tx, ty, tz, 0],
         dispatch: [nx, ny, 1],
         pieces,
+        discarded: false,
         past: false,
     })
 }
@@ -326,10 +340,11 @@ impl MeshArguments {
     pub const OBJECT_COUNT: u32 = 32;
     /// The folded object form's first command's byte offset in the scratch.
     pub const OBJECT_COMMANDS: u32 = 36;
-    /// The folded object form's commands, the most pieces a draw takes: 128 of the 2^22
+    /// The folded object form's commands, the most pieces a draw takes: a piece of `nx` by `ny`
+    /// workgroups, `ny` the rows of `nx` the task total holds, runs more than half of the 2^22
     /// threadgroups every task stage launches per draw (`maxTaskWorkGroupTotalCount`'s required
-    /// least) cover [`METAL_OBJECT_GRID_TOTAL`].
-    pub const OBJECT_PIECES: u32 = 128;
+    /// least), so 256 pieces cover [`METAL_OBJECT_GRID_TOTAL`] on every device.
+    pub const OBJECT_PIECES: u32 = 256;
 
     /// Bytes of the scratch the pass of `form` writes: the mesh and unfolded object forms'
     /// command, or the folded object form's region record, draw count and commands.
@@ -498,18 +513,19 @@ fn boolean(f: &mut FunctionBuilder<'_>, v: bool) -> BResult<Value> {
 }
 
 /// The mesh and unfolded object forms (the module docs): Metal's counts `v` into the scratch's
-/// command where Metal draws them and the device launches them, else zero. Whether Metal draws
-/// them and the device cannot.
+/// command where Metal draws them and the device launches them, else zero. Whether Metal's GPU
+/// discards them (the unfolded object form's grid of more than [`METAL_OBJECT_GRID_TOTAL`]
+/// threadgroups), and whether Metal draws them and the device cannot.
 fn mesh_counts(
     f: &mut FunctionBuilder<'_>,
     rule: MeshGridRule,
     v: [Value; 3],
     scratch: Value,
-) -> BResult<Value> {
+) -> BResult<(Value, Value)> {
     let zero = u32_value(f, 0)?;
     let metal = match rule.metal {
         Some(limits) => grid_within(f, v, limits)?,
-        None => boolean(f, true)?,
+        None => total_within(f, v, METAL_OBJECT_GRID_TOTAL)?,
     };
     let device = grid_within(f, v, rule.device)?;
     let drawn = f.binary(BinOp::LogicalAnd, metal, device)?;
@@ -519,19 +535,25 @@ fn mesh_counts(
         let out = f.access_chain(scratch, &[zero, i])?;
         f.store(out, count, MemAccess::default())?;
     }
-    f.binary(BinOp::LogicalNotEqual, metal, drawn)
+    let discarded = match rule.metal {
+        Some(_) => boolean(f, false)?,
+        None => f.unary(UnOp::LogicalNot, metal)?,
+    };
+    let past = f.binary(BinOp::LogicalNotEqual, metal, drawn)?;
+    Ok((discarded, past))
 }
 
 /// The folded object form ([`fold_object_grid`] of an indirect draw, step for step): Metal's counts
 /// `v` of threadgroups of the `packed` threads fold into the scratch's region record, draw count
-/// and commands. Whether the grid is past what the runtime runs.
+/// and commands. Whether Metal's GPU discards the grid ([`ObjectFold::discarded`]), and whether
+/// the device cannot launch it ([`ObjectFold::past`]).
 fn object_fold(
     f: &mut FunctionBuilder<'_>,
     u32_: TypeId,
     task: MeshGridLimits,
     (v, packed): ([Value; 3], Value),
     scratch: Value,
-) -> BResult<Value> {
+) -> BResult<(Value, Value)> {
     let zero = u32_value(f, 0)?;
     let one = u32_value(f, 1)?;
     let mut any_zero = f.binary(BinOp::IEqual, v[0], zero)?;
@@ -553,10 +575,10 @@ fn object_fold(
     // The threadgroups, at most `METAL_OBJECT_GRID_TOTAL`.
     let (xy, wraps_xy) = checked_mul(f, v[0], v[1], zero)?;
     let (n, wraps_n) = checked_mul(f, xy, v[2], zero)?;
-    let mut over = f.binary(BinOp::LogicalOr, wraps_xy, wraps_n)?;
+    let mut discarded = f.binary(BinOp::LogicalOr, wraps_xy, wraps_n)?;
     let most = u32_value(f, METAL_OBJECT_GRID_TOTAL)?;
     let many = f.binary(BinOp::UGreaterThan, n, most)?;
-    over = f.binary(BinOp::LogicalOr, over, many)?;
+    discarded = f.binary(BinOp::LogicalOr, discarded, many)?;
     // One piece's dispatch and the pieces, of at least one threadgroup (a zero count or a grid
     // past what runs draws nothing whatever they are).
     let n = f.glsl(GlslOp::UMax, &[n, one])?;
@@ -574,11 +596,14 @@ fn object_fold(
     let pieces = div_ceil(f, n, piece)?;
     let most = u32_value(f, MeshArguments::OBJECT_PIECES)?;
     let many = f.binary(BinOp::UGreaterThan, pieces, most)?;
-    over = f.binary(BinOp::LogicalOr, over, many)?;
+    let over = f.binary(BinOp::LogicalOr, discarded, many)?;
     let none = f.binary(BinOp::LogicalOr, any_zero, over)?;
     let runs = f.unary(UnOp::LogicalNot, none)?;
-    let past = f.unary(UnOp::LogicalNot, any_zero)?;
-    let past = f.binary(BinOp::LogicalAnd, past, over)?;
+    let some = f.unary(UnOp::LogicalNot, any_zero)?;
+    let discarded = f.binary(BinOp::LogicalAnd, some, discarded)?;
+    let kept = f.unary(UnOp::LogicalNot, discarded)?;
+    let past = f.binary(BinOp::LogicalAnd, some, many)?;
+    let past = f.binary(BinOp::LogicalAnd, past, kept)?;
     // The region record, the count and the commands.
     let word = |f: &mut FunctionBuilder<'_>, at: u32, value: Value| -> BResult<()> {
         let i = u32_value(f, at)?;
@@ -616,7 +641,7 @@ fn object_fold(
         }
         Ok(())
     })?;
-    Ok(past)
+    Ok((discarded, past))
 }
 
 /// The arguments module of `form` for `rule` as a typed module, before serialization: the module
@@ -662,7 +687,7 @@ pub fn typed_module(form: MeshArgumentsForm, rule: MeshGridRule) -> BResult<Type
         *out = f.select(inb, loaded, zero)?;
     }
     let scratch_value = f.module().global_value(scratch)?;
-    let past = match packed {
+    let (discarded, past) = match packed {
         None => mesh_counts(&mut f, rule, v, scratch_value)?,
         Some(packed) => {
             let member = u32_value(&mut f, packed.index)?;
@@ -673,13 +698,18 @@ pub fn typed_module(form: MeshArgumentsForm, rule: MeshGridRule) -> BResult<Type
     };
     let status_value = f.module().global_value(status)?;
     let word = u32_value(&mut f, StatusWord::Status.index())?;
-    let bit = u32_value(&mut f, StatusBits::MESH_GRID_PAST_LIMITS.0)?;
+    let discard_bit = u32_value(&mut f, StatusBits::MESH_GRID_DISCARDED.0)?;
+    let past_bit = u32_value(&mut f, StatusBits::MESH_GRID_PAST_LIMITS.0)?;
+    let discard_bit = f.select(discarded, discard_bit, zero)?;
+    let past_bit = f.select(past, past_bit, zero)?;
+    let bits = f.binary(BinOp::BitwiseOr, discard_bit, past_bit)?;
+    let set = f.binary(BinOp::INotEqual, bits, zero)?;
     let then: ArmFn<'_, ()> = Box::new(move |fb, _| {
         let p = fb.access_chain(status_value, &[zero, word])?;
-        fb.atomic(AtomicOp::Or, p, Scope::Device, Semantics::RELAXED, bit)?;
+        fb.atomic(AtomicOp::Or, p, Scope::Device, Semantics::RELAXED, bits)?;
         Ok(ArmEnd::FallThrough(Vec::new()))
     });
-    f.if_(&mut (), past, then, None)?;
+    f.if_(&mut (), set, then, None)?;
     f.ret(None)?;
     let id = f.finish()?;
     b.entry(

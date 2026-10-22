@@ -7393,8 +7393,12 @@ impl RenderLowering {
             || commands.mesh_dispatch.as_ref().is_some_and(|dispatch| {
                 matches!(dispatch.mesh, MeshGroups::Direct(groups) if groups.contains(&0))
             });
-        // A folded object function's direct draw of a grid past what runs draws nothing and fails
-        // the command buffer, as Metal's GPU fails it (`render/mesh_arguments.rs`).
+        // A direct draw of an object grid Metal's GPU discards draws nothing and fails the command
+        // buffer from its encoder on, as Metal's (`render/mesh_arguments.rs`); a folded object
+        // function's direct draw of a grid past the device's pieces fails it too.
+        if commands.discards_command_buffer && !culled {
+            self.core.discard();
+        }
         if commands.object_fold.is_some_and(|fold| fold.past) && !culled {
             self.core.command_buffer().state().mesh_grid_past_limits();
         }
