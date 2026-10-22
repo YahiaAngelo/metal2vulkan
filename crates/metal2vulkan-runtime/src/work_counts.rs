@@ -3229,9 +3229,10 @@ pub struct WorkCounts {
     /// Compute encoders' dispatches that took the bind state, variant, plan, commands and made
     /// `VkPipeline`s their encoder's last dispatch settled, rather than settling them again:
     /// those of the same pipeline state, dispatch, table (no call changed it since), threadgroup
-    /// lengths, imageblock size and stage-in region, in an encoder that made nothing resident, of
-    /// a state that made no visible-function table, while no no-copy buffer moved and no sampler
-    /// state was made or went (`compute::DispatchMemo`).
+    /// lengths, imageblock size and stage-in region, in an encoder whose residency did not change
+    /// since (no resource made resident, no usage widened, no heap used), of a state that made no
+    /// visible-function table, while no no-copy buffer moved, no sampler state was made or went
+    /// and no buffer took a resident indirect command buffer's ID (`compute::DispatchMemo`).
     pub dispatches_settled_as_before: u64,
     /// Dispatches of a kernel's variant whose layout bakes immutable samplers (constexpr
     /// samplers'), their pipelines made, recorded in a `VkCommandBuffer` of their own, as a

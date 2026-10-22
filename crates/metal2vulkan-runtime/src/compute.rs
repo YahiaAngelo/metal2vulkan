@@ -178,6 +178,9 @@ pub struct ComputeCommandEncoder {
     dispatches: usize,
     /// What its last dispatch settled ([`DispatchMemo`]).
     memo: DispatchMemo,
+    /// The residency's generation as a command last noted the heaps of what it made resident
+    /// (`command_encoded`): no command notes them again before it changes.
+    heaps_noted: Option<u64>,
 }
 
 /// The state of a compute encoder a command ran with, which a predicated loop's copies replay it
@@ -242,6 +245,7 @@ impl CommandBuffer {
                 .then(|| self.device().shared().scheduler.spare_logs().compute()),
             dispatches: 0,
             memo: DispatchMemo::default(),
+            heaps_noted: None,
         })
     }
 }
@@ -270,6 +274,7 @@ impl ComputeCommandEncoder {
             log: None,
             dispatches: 0,
             memo: DispatchMemo::default(),
+            heaps_noted: None,
         })
     }
 
@@ -1259,8 +1264,13 @@ impl ComputeCommandEncoder {
     /// Once a command was encoded, note the heaps the encoder used; and where it reads texture
     /// handles from memory (`reads`), the textures it reaches whose blocks a carrier holds.
     fn command_encoded(&mut self, reads: bool) {
-        // The command, encoded, used the heaps of what the encoder made resident.
-        self.core.touch_heaps(self.residency.heaps());
+        // The command, encoded, used the heaps of what the encoder made resident: noted once a
+        // change of it, as an earlier command noted those it held then.
+        let generation = self.residency.generation();
+        if self.heaps_noted != Some(generation) {
+            self.core.touch_heaps(self.residency.heaps());
+            self.heaps_noted = Some(generation);
+        }
         if !reads {
             return;
         }
@@ -1616,10 +1626,13 @@ fn settle_dispatch<'a>(
 ///   (a texture's and a sampler's facts, fixed as it is made; a buffer's length, base and
 ///   addresses, which only a no-copy buffer's move changes: `buffer::host_cells_moved`), of the
 ///   threadgroup lengths, imageblock size and stage-in region set, of what the encoder made
-///   resident (nothing: a dispatch of an encoder that made a resource or a heap resident takes no
-///   memo), of the device's live sampler states (`Device::sampler_slots_changed`), of the
-///   state's visible-function tables (none: a dispatch of a state that made one takes no memo),
-///   and of the sampler maps, which are the table's and the residency's.
+///   resident (its generation, which every change of it draws anew, `Residency::generation`;
+///   what a used resource states of it beyond that, its buffers' addresses, which only a no-copy
+///   buffer's move changes, and whether each indirect command buffer holds its ID's slot, which a
+///   buffer made later with the ID takes: `Residency::holds_slots_as`), of the device's live
+///   sampler states (`Device::sampler_slots_changed`), of the state's visible-function tables
+///   (none: a dispatch of a state that made one takes no memo), and of the sampler maps, which
+///   are the table's and the residency's.
 /// - **The variant and plan** are `ComputePipelineState::settle`'s of the shape, the dispatch and
 ///   the buffer forms; **the commands** are the plan's instantiation for the state and the
 ///   dispatch, their regions keyed by the variant for the device (`Variant::keyed_regions`).
@@ -1637,6 +1650,8 @@ pub(super) struct KeptDispatch {
     imageblock: ImageblockSize,
     stage_in_region: Option<StageInRegion>,
     forms: BufferForms,
+    /// The residency's generation (`Residency::generation`).
+    residency: u64,
     /// `buffer::host_cells_moved` and `Device::sampler_slots_changed` as it was settled.
     counted: (u64, u64),
     settled: SettledDispatch,
@@ -1662,7 +1677,9 @@ impl DispatchMemo {
             && kept.forms == tables.forms
             && kept.imageblock == tables.imageblock
             && kept.stage_in_region == tables.stage_in_region
-            && kept.threadgroup_lengths == *tables.threadgroup_lengths;
+            && kept.threadgroup_lengths == *tables.threadgroup_lengths
+            && kept.residency == tables.residency.generation()
+            && (tables.residency).holds_slots_as(&kept.settled.state.used_resources);
         same.then(|| Arc::clone(kept))
     }
 
@@ -1681,6 +1698,7 @@ impl DispatchMemo {
             imageblock: tables.imageblock,
             stage_in_region: tables.stage_in_region,
             forms: tables.forms,
+            residency: tables.residency.generation(),
             counted,
             settled,
             commands: OnceLock::new(),
@@ -1714,14 +1732,9 @@ fn record(
     // The live visible-function tables the pipeline state made: the encoder's, or an indirect
     // command's own state's.
     let function_tables = pipeline.function_tables();
-    // An encoder's own direct dispatch, of a state that made no table, in an encoder that made
-    // nothing resident, takes the memo.
+    // An encoder's own direct dispatch, of a state that made no table, takes the memo.
     let memo = match (memo, direct) {
-        (Some(memo), Some(dispatch))
-            if function_tables.is_empty() && tables.residency.is_empty() =>
-        {
-            Some((memo, dispatch))
-        }
+        (Some(memo), Some(dispatch)) if function_tables.is_empty() => Some((memo, dispatch)),
         _ => None,
     };
     let mut fresh = None;
