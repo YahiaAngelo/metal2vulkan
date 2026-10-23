@@ -346,7 +346,34 @@ pub(super) struct Affected {
 ///   Known broken through 1.4.2. Nothing is refused: such an image of more than one level or layer
 ///   takes device-local memory (`ImagePlan::memory_class`); one of a single level and layer is
 ///   viewed as its texture itself.
+///
+/// `HostTransferImagesCopiedAtBind`:
+/// - MoltenVK (`MOLTENVK`): an image with host-transfer usage lies in host-visible memory, which
+///   the driver takes as a linear array of the image's texels: `MVKImageMemoryBinding::flushToDevice`
+///   `replaceRegion:`s every subresource whose layout is `UNDEFINED`, `GENERAL` or `PREINITIALIZED`
+///   out of that memory, through `MVKImagePlane::getSubresourceLayout`'s own `rowPitch`, and
+///   `MVKImageMemoryBinding::bindDeviceMemory` ends in that call. So every such image is copied
+///   into whole as its memory is bound, out of bytes nothing has written. For an image whose
+///   texel block holds more than one texel Metal's own check of that copy fails:
+///   `agxaAssertBufferIsValid`, reached from
+///   `AGX::Texture<(AGXTextureMemoryLayout)3, AGX::G15::Encoders, AGX::G15::Classes>::writeRegionCommon`
+///   through `-[AGXG15XFamilyTexture replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:]`,
+///   prints `AGX: Texture read/write assertion failed: bytes_per_row >= used_bytes_per_row` once
+///   for each such image bound. Measured on 1.4.2 (driverVersion 10402) on an M3 Max under macOS
+///   27.0.1, by a backtrace off that `fprintf` through `vkBindImageMemory` into
+///   `Device::host_placed_image`: `metal2vulkan-conformance`'s `bc1-rgba` reported it 4 times, once
+///   a texture, while a record of the same case — plain Metal making the same descriptor and the
+///   same `replaceRegion:` the case asks for — reported it **0** times, so the copy is the
+///   driver's own and no call of the program's provokes it. Known broken through 1.4.2. Nothing is
+///   refused: such an image takes no host-transfer usage there (`Device::host_placed_image`), so it
+///   stays in memory of its own class and its CPU copies go through a submission; on every other
+///   driver a block-compressed texture's CPU copies stay on the host.
 pub(super) const AFFECTED: &[Affected] = &[
+    Affected {
+        defect: RuntimeDriverDefect::HostTransferImagesCopiedAtBind,
+        driver: DriverId::MOLTENVK,
+        clean: &[],
+    },
     Affected {
         defect: RuntimeDriverDefect::MultisampledDepthStencilColourCopies,
         driver: DriverId::MESA_LLVMPIPE,

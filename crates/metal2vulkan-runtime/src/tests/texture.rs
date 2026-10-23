@@ -116,6 +116,101 @@ fn copy_units_are_the_images_aspects_blocks() {
     );
 }
 
+/// Host copies reach a block format's image only where the driver's copies of such an image are
+/// its own: the usage puts the image in host-visible memory, and MoltenVK copies the whole image
+/// out of that memory as the memory is bound, through a pitch its own check then rejects
+/// (`RuntimeDriverDefect::HostTransferImagesCopiedAtBind`; `texture/host_copy.rs` and
+/// `driver_defects.rs` carry the backtrace). Every other driver keeps the fast path.
+///
+/// The row the image's own format gives is a row of **blocks**, which is the pitch that driver
+/// calls short: the bytes a row of a 16 x 16 `BC1_RGBA` level holds are its 4 blocks of 8 bytes,
+/// 32, not its 16 texels of 8, 128. The second half of this test holds the copy to that row, so a
+/// pitch that ever came out of the texels instead would fail here with no device.
+#[test]
+fn host_copies_reach_a_block_format_only_off_the_bind_copy_defect() {
+    use super::super::texture::host_copy::reaches_format as reaches;
+    use super::super::texture::{copy_units, zero_copies};
+    use metal2vulkan::error::RuntimeDriverDefect as D;
+    use metal2vulkan::metal::PixelFormat as P;
+    let none = std::collections::BTreeSet::new();
+    // A driver with the defect, and one with another defect, so the test fails if the set is
+    // consulted for the wrong member.
+    let bind: std::collections::BTreeSet<D> = [D::HostTransferImagesCopiedAtBind].into();
+    let other: std::collections::BTreeSet<D> = [D::LazilyAllocatedSubresourceViews].into();
+    // Every format whose block holds one texel, including the uncompressed carriers that hold a
+    // compressed format's blocks in their texels: the image is the carrier's, and so is its row.
+    for format in [
+        Format::R8_UNORM,
+        Format::R8G8B8A8_UNORM,
+        Format::B8G8R8A8_SRGB,
+        Format::R32G32B32A32_UINT,
+        Format::R16G16B16A16_SFLOAT,
+        Format::D16_UNORM,
+        Format::D32_SFLOAT,
+        Format::S8_UINT,
+        Format::D32_SFLOAT_S8_UINT,
+        Format::A2B10G10R10_UNORM_PACK32,
+        // The registry records the IMG PVRTC formats as one texel in a block of 8 bytes, which no
+        // other compressed format is, so the rule here lets them through. Nothing reaches it: a
+        // PVRTC texture's image never takes host-transfer usage (`Device::new_image_starting`
+        // leaves it out by `is_pvrtc`), and on a device without the format its blocks lie in an
+        // uncompressed carrier whose own block is one texel.
+        Format::PVRTC1_4BPP_UNORM_BLOCK_IMG,
+        Format::PVRTC2_2BPP_SRGB_BLOCK_IMG,
+    ] {
+        let block = format.block().expect("an image format has a block");
+        assert_eq!(block.texels, 1, "{format:?}");
+        for defects in [&none, &bind, &other] {
+            assert!(reaches(format, defects), "{format:?}");
+        }
+    }
+    // Every format whose block holds more than one texel, by family: BC, BC6H and BC7, ETC2 and
+    // EAC, ASTC. Each reaches host copies but on the one driver that copies such an image out of
+    // its memory as it is bound.
+    for format in [
+        Format::BC1_RGBA_UNORM_BLOCK,
+        Format::BC1_RGBA_SRGB_BLOCK,
+        Format::BC2_UNORM_BLOCK,
+        Format::BC3_SRGB_BLOCK,
+        Format::BC4_UNORM_BLOCK,
+        Format::BC4_SNORM_BLOCK,
+        Format::BC5_UNORM_BLOCK,
+        Format::BC5_SNORM_BLOCK,
+        Format::BC6H_SFLOAT_BLOCK,
+        Format::BC7_UNORM_BLOCK,
+        Format::ETC2_R8G8B8_UNORM_BLOCK,
+        Format::ETC2_R8G8B8A1_SRGB_BLOCK,
+        Format::EAC_R11_UNORM_BLOCK,
+        Format::EAC_R11G11_SNORM_BLOCK,
+        Format::ASTC_4X4_UNORM_BLOCK,
+        Format::ASTC_12X12_SRGB_BLOCK,
+    ] {
+        let block = format.block().expect("an image format has a block");
+        assert!(block.texels > 1, "{format:?}");
+        assert!(reaches(format, &none), "{format:?}");
+        assert!(reaches(format, &other), "{format:?}");
+        assert!(!reaches(format, &bind), "{format:?}");
+    }
+    // A format no image has takes no host copies on any driver.
+    for defects in [&none, &bind, &other] {
+        assert!(!reaches(Format::UNDEFINED, defects));
+    }
+    // The row of a block format's level is its blocks, not its texels: the copy a host write of a
+    // 16 x 16 `BC1_RGBA` level reads is 4 blocks of 8 bytes a row, and the whole level 128 bytes.
+    let units = copy_units(Format::BC1_RGBA_UNORM_BLOCK, P::BC1RGBA);
+    assert_eq!(units, vec![(ImageAspectFlags::COLOR, 8, [4, 4])]);
+    let (length, copies) = zero_copies([16, 16, 1], 1, 1, false, &units, 4 << 20);
+    assert_eq!(copies.len(), 1);
+    assert_eq!(copies[0].size, [16, 16, 1]);
+    let row_blocks = 16u64.div_ceil(u64::from(units[0].2[0]));
+    assert_eq!(row_blocks * u64::from(units[0].1), 32);
+    assert_eq!(length, 32 * 4);
+    assert_ne!(length, 16 * 8 * 16);
+    // The copy is tightly packed, so the row length Vulkan is given is the level's own.
+    let copy = buffer_image_copy(&copies[0]);
+    assert_eq!((copy.buffer_row_length, copy.buffer_image_height), (0, 0));
+}
+
 #[test]
 fn zero_copies_cover_every_texel_once_in_bands() {
     use super::super::texture::zero_copies;

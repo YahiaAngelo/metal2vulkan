@@ -11,6 +11,15 @@
 //!   or out of one, and Metal makes no CPU copy of such a texture; a clear writes its zeros.
 //!   Metal's `Shared` and `Managed` textures are laid out without lossless compression; the usage
 //!   may lay the image out so too (RADV leaves out DCC).
+//! - **An image whose texel block holds more than one texel takes the usage only where its
+//!   driver's copies of such an image are its own** ([`reaches_format`]). The usage puts the image
+//!   in host-visible memory, and a driver may then copy the whole image out of that memory as the
+//!   memory is bound, with no copy the program asked for, through a row pitch of its own whose own
+//!   check it then fails: `RuntimeDriverDefect::HostTransferImagesCopiedAtBind`, which
+//!   `driver_defects.rs` measures on MoltenVK with the backtrace and the numbers. There such an
+//!   image is made as before and its CPU copies go through a submission, as on a device without
+//!   `VK_EXT_host_image_copy`; on every other driver a block format's CPU copies stay on the
+//!   host.
 //! - **In host-cached memory where the device has it**. A host copy reads and writes through the
 //!   host's mapping of the image's memory, and the host reads uncached memory slowly
 //!   (`memory::host_cached`): NVIDIA places a texture's host-transfer image in resizable BAR, its
@@ -56,8 +65,27 @@ use crate::error::{vulkan, Error};
 use crate::exit_guard;
 use ash::ext::host_image_copy::DeviceFn;
 use ash::vk;
+use metal2vulkan::error::RuntimeDriverDefect;
+use metal2vulkan::vk::Format;
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+
+/// The defect that keeps a block format's image off host copies (the module docs): the driver
+/// copies such an image out of its host-visible memory as the memory is bound, through a row pitch
+/// of its own, and its own check of that copy fails.
+const COPIED_AT_BIND: RuntimeDriverDefect = RuntimeDriverDefect::HostTransferImagesCopiedAtBind;
+
+/// Whether host copies reach an image of `format` on a device whose driver has `defects`: every
+/// image, unless its texel block holds more than one texel and the driver copies such an image out
+/// of its memory as the memory is bound ([`COPIED_AT_BIND`], the module docs). A format with no
+/// block is no image format and takes none either.
+pub(crate) fn reaches_format(format: Format, defects: &BTreeSet<RuntimeDriverDefect>) -> bool {
+    let Some(block) = format.block() else {
+        return false;
+    };
+    block.texels == 1 || !defects.contains(&COPIED_AT_BIND)
+}
 
 /// Whether the device of `physical` copies on the host to and from images in `GENERAL`: both of
 /// its lists of layouts for host copies hold it.
