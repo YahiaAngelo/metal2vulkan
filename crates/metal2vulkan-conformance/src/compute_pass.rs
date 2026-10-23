@@ -368,81 +368,116 @@ mod tests {
         Handle(0)
     }
 
-    /// One step of every kind, for the guards that read all of them.
+    /// Every kind of one vocabulary, from `first` through the successor each kind names.
+    ///
+    /// This is where the exhaustiveness comes from: `after` is a `match` over every variant of its
+    /// enum with **no wildcard arm**, so a variant added to that enum does not compile until it is
+    /// given its own arm, and the arm of the kind it is placed after is what hands it to this
+    /// walk. The guards then read the walk rather than an array written out beside the enum, which
+    /// is the thing a new variant can be added without touching.
+    ///
+    /// It is [`crate::render`]'s mechanism, ported: the hand-written list that used to stand here
+    /// fed three guards, and a variant added to [`ComputeStep`] escaped all three in silence.
+    ///
+    /// The walk is checked to be a list and not a cycle, so an arm naming a kind already walked
+    /// fails here, by name, instead of running forever.
+    fn every_kind<T: std::fmt::Debug>(first: T, after: impl Fn(&T) -> Option<T>) -> Vec<T> {
+        let mut kinds = vec![first];
+        let mut walked = vec![std::mem::discriminant(&kinds[0])];
+        while let Some(next) = after(kinds.last().expect("the walk starts at its first kind")) {
+            assert!(
+                !walked.contains(&std::mem::discriminant(&next)),
+                "the walk of {} returns to {next:?}, so it is a cycle rather than each kind once",
+                std::any::type_name::<T>()
+            );
+            walked.push(std::mem::discriminant(&next));
+            kinds.push(next);
+        }
+        kinds
+    }
+
+    /// One step of every kind, in declaration order, through the compiler-kept walk.
     fn one_of_each() -> Vec<ComputeStep> {
-        vec![
-            ComputeStep::Pipeline(handle()),
-            ComputeStep::Buffer {
+        every_kind(ComputeStep::Pipeline(handle()), step_after)
+    }
+
+    /// The step that follows `step` in declaration order, or `None` after the last.
+    ///
+    /// One arm per variant and no wildcard: see [`every_kind`] for why that is the whole point.
+    fn step_after(step: &ComputeStep) -> Option<ComputeStep> {
+        Some(match step {
+            ComputeStep::Pipeline(_) => ComputeStep::Buffer {
                 buffer: handle(),
                 offset: 0,
                 index: 0,
             },
-            ComputeStep::BufferOffset {
+            ComputeStep::Buffer { .. } => ComputeStep::BufferOffset {
                 offset: 4,
                 index: 0,
             },
-            ComputeStep::Buffers {
+            ComputeStep::BufferOffset { .. } => ComputeStep::Buffers {
                 buffers: vec![(handle(), 0)],
                 first: 0,
             },
-            ComputeStep::Bytes {
+            ComputeStep::Buffers { .. } => ComputeStep::Bytes {
                 bytes: vec![1, 2, 3],
                 index: 1,
             },
-            ComputeStep::Texture {
+            ComputeStep::Bytes { .. } => ComputeStep::Texture {
                 texture: handle(),
                 index: 0,
             },
-            ComputeStep::Textures {
+            ComputeStep::Texture { .. } => ComputeStep::Textures {
                 textures: vec![handle()],
                 first: 0,
             },
-            ComputeStep::Sampler {
+            ComputeStep::Textures { .. } => ComputeStep::Sampler {
                 sampler: handle(),
                 index: 0,
             },
-            ComputeStep::Samplers {
+            ComputeStep::Sampler { .. } => ComputeStep::Samplers {
                 samplers: vec![handle()],
                 first: 0,
             },
-            ComputeStep::ClampedSampler {
+            ComputeStep::Samplers { .. } => ComputeStep::ClampedSampler {
                 sampler: handle(),
                 lod_min: 0.0,
                 lod_max: 1.0,
                 index: 0,
             },
-            ComputeStep::ClampedSamplers {
+            ComputeStep::ClampedSampler { .. } => ComputeStep::ClampedSamplers {
                 samplers: vec![(handle(), 0.0, 1.0)],
                 first: 0,
             },
-            ComputeStep::ThreadgroupMemory {
+            ComputeStep::ClampedSamplers { .. } => ComputeStep::ThreadgroupMemory {
                 length: 16,
                 index: 0,
             },
-            ComputeStep::UseResource {
+            ComputeStep::ThreadgroupMemory { .. } => ComputeStep::UseResource {
                 resource: PassResource::Buffer(handle()),
                 usage: USAGE_READ,
             },
-            ComputeStep::UseResources {
+            ComputeStep::UseResource { .. } => ComputeStep::UseResources {
                 resources: vec![PassResource::Texture(handle())],
                 usage: USAGE_READ,
             },
-            ComputeStep::BarrierScope {
+            ComputeStep::UseResources { .. } => ComputeStep::BarrierScope {
                 scope: SCOPE_BUFFERS,
             },
-            ComputeStep::BarrierResources {
+            ComputeStep::BarrierScope { .. } => ComputeStep::BarrierResources {
                 resources: vec![PassResource::Buffer(handle())],
             },
-            ComputeStep::DispatchThreadgroups {
+            ComputeStep::BarrierResources { .. } => ComputeStep::DispatchThreadgroups {
                 groups: [1, 1, 1],
                 threads: [8, 1, 1],
             },
-            ComputeStep::DispatchThreadgroupsIndirect {
+            ComputeStep::DispatchThreadgroups { .. } => ComputeStep::DispatchThreadgroupsIndirect {
                 buffer: handle(),
                 offset: 0,
                 threads: [8, 1, 1],
             },
-        ]
+            ComputeStep::DispatchThreadgroupsIndirect { .. } => return None,
+        })
     }
 
     /// One pass of `steps`, the way a case states one.
@@ -452,6 +487,9 @@ mod tests {
 
     /// Every step names a Metal call no other step names, so a refusal reads as the call we
     /// refused and the fingerprint keys each step by its own name.
+    ///
+    /// It reads the compiler-kept walk, so a variant added to [`ComputeStep`] is in this check —
+    /// and in the two below it — the moment it compiles.
     #[test]
     fn every_step_names_a_call_of_its_own() {
         let steps = one_of_each();

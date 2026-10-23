@@ -14,6 +14,7 @@ use crate::case::{
     RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion, StageInput,
     TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
+use crate::command_buffer_facts::CommandBufferFacts;
 use crate::compute_descriptors::{
     ComputeDescriptorFacts, DescriptorSpec as ComputeDescriptorSpec,
     SuppliedLists as ComputeSuppliedLists, AWAY as COMPUTE_AWAY,
@@ -53,6 +54,9 @@ use crate::render_descriptors::{
     LinkedCounts, RenderDescriptorFacts, SuppliedLists, VertexDescriptorFacts, AWAY, READ_BUFFERS,
     READ_COLORS, READ_VERTEX_SLOTS,
 };
+use crate::sparse_mapping::{
+    MappingMode, MappingStep, SparseMapped, SparseMappingProgram, TileRect,
+};
 use crate::sparse_query::{
     HeapFacts, QueryPage, SparseHeapSpec, SparseTextureFacts, SparseTextureSpec, SparseTileQuery,
     TileSize,
@@ -65,7 +69,7 @@ use crate::tile_descriptors::{
 };
 use crate::transcript::{Negative, Value};
 use metal2vulkan::bind::{
-    ArgumentDescriptor, RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor,
+    ArgumentDescriptor, RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor, TileMapping,
 };
 use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{
@@ -80,16 +84,16 @@ use metal2vulkan::pipeline::{
 };
 use metal2vulkan_runtime::{
     ArgumentEncoder, BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus,
-    CommandQueue, ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, Heap,
+    CommandQueue, ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, Fence, Heap,
     HeapDescriptor, HeapType, HostMemory, IndirectCommand, IndirectCommandBuffer,
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
     LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, Origin,
     PipelineOption, PipelineOptions, PurgeableState, RasterizationRateMap, Region,
     RenderPassColorAttachmentDescriptor, RenderPassDepthAttachmentDescriptor, RenderPassDescriptor,
     RenderPassStencilAttachmentDescriptor, RenderPipelineState, ResourceOptions, ResourceRef,
-    SamplePosition, SamplerState, SamplerStateOptions, ScissorRect, Size,
-    SparseTextureRegionAlignmentMode, StoreAction, StoreActionOptions, Texture, TextureDescriptor,
-    Viewport,
+    ResourceStateCommandEncoder, SamplePosition, SamplerState, SamplerStateOptions, ScissorRect,
+    Size, SparseTextureRegionAlignmentMode, StoreAction, StoreActionOptions, Texture,
+    TextureDescriptor, Viewport,
 };
 use std::time::Duration;
 
@@ -1470,6 +1474,134 @@ fn our_pointer(held: &metal2vulkan::reflection::PointerType, depth: u32) -> Poin
 }
 
 /// The variant a command buffer's status records as.
+/// Bytes the command buffer whose timings [`Side::command_buffer_facts`] reads fills: a few, so
+/// the GPU ran and nothing else did.
+const TIMED_BYTES: usize = 256;
+
+/// The labels the two queues of [`Side::command_buffer_facts`] take: distinct, so a command
+/// buffer that answered the other queue reads as the other label.
+const QUEUE_LABELS: [&str; 2] = ["conformance-queue-a", "conformance-queue-b"];
+
+/// The byte a read-back buffer of a sparse mapping program is made holding, so a byte no copy
+/// wrote is a value the side put there rather than whatever the allocator left.
+const READ_GUARD: u8 = 0x7e;
+
+/// Whether a step of a sparse mapping program closed its command buffer.
+enum Committed {
+    No,
+    Yes,
+}
+
+/// A sparse mapping program's command buffer and the one encoder of it that is open.
+///
+/// Two `Option`s rather than one enum, because the runtime's `end_encoding` consumes its encoder,
+/// which is what [`Option::take`] hands over. Only one is ever `Some`:
+/// [`Mapping::blit`] and [`Mapping::state`] close the other first, as the runtime refuses a second
+/// encoder of one command buffer.
+struct Mapping {
+    queue: CommandQueue,
+    command_buffer: Option<CommandBuffer>,
+    blit: Option<metal2vulkan_runtime::BlitCommandEncoder>,
+    state: Option<ResourceStateCommandEncoder>,
+}
+
+impl Mapping {
+    /// The command buffer the next command goes into, made on first use.
+    fn command_buffer(&mut self) -> Answer<CommandBuffer> {
+        if self.command_buffer.is_none() {
+            self.command_buffer = Some(self.queue.command_buffer().map_err(Failure::from_error)?);
+        }
+        Ok(self
+            .command_buffer
+            .clone()
+            .expect("the command buffer was just made"))
+    }
+
+    /// End whichever encoder is open, leaving none.
+    fn close_encoders(&mut self) -> Answer<()> {
+        if let Some(encoder) = self.blit.take() {
+            encoder.end_encoding().map_err(Failure::from_error)?;
+        }
+        if let Some(encoder) = self.state.take() {
+            encoder.end_encoding().map_err(Failure::from_error)?;
+        }
+        Ok(())
+    }
+
+    /// The program's blit encoder, ending a resource state encoder first where one is open.
+    fn blit(&mut self) -> Answer<&mut metal2vulkan_runtime::BlitCommandEncoder> {
+        if self.blit.is_none() {
+            self.close_encoders()?;
+            let buffer = self.command_buffer()?;
+            self.blit = Some(buffer.blit_command_encoder().map_err(Failure::from_error)?);
+        }
+        Ok(self.blit.as_mut().expect("the encoder was just opened"))
+    }
+
+    /// The program's resource state encoder, ending a blit encoder first where one is open.
+    fn state(&mut self) -> Answer<&mut ResourceStateCommandEncoder> {
+        if self.state.is_none() {
+            self.close_encoders()?;
+            let buffer = self.command_buffer()?;
+            self.state = Some(
+                buffer
+                    .resource_state_command_encoder()
+                    .map_err(Failure::from_error)?,
+            );
+        }
+        Ok(self.state.as_mut().expect("the encoder was just opened"))
+    }
+}
+
+/// The runtime's `TileMapping` for a case's mapping mode, by its raw value, so the two spellings
+/// cannot drift apart.
+fn tile_mapping(mode: MappingMode) -> TileMapping {
+    match mode {
+        MappingMode::Map => TileMapping::Map,
+        MappingMode::Unmap => TileMapping::Unmap,
+    }
+}
+
+/// Three axes as the runtime's size.
+fn long_size(axes: [u64; 3]) -> Size {
+    Size {
+        width: axes[0],
+        height: axes[1],
+        depth: axes[2],
+    }
+}
+
+/// Three axes as the runtime's origin.
+fn long_origin(axes: [u64; 3]) -> Origin {
+    Origin {
+        x: axes[0],
+        y: axes[1],
+        z: axes[2],
+    }
+}
+
+/// A region of tiles as the `Region` the mapping calls take: a mapping region is stated in
+/// **tiles**, not texels, so the numbers pass through unchanged.
+fn tile_region(region: &TileRect) -> Region {
+    Region {
+        origin: long_origin(region.origin),
+        size: long_size(region.size),
+    }
+}
+
+/// `GPUStartTime` and `GPUEndTime`, or the runtime's typed refusal of them: a device whose queue
+/// family writes no timestamps has no answer, and that is a fact the facts record as a refusal
+/// rather than as two zeros.
+fn gpu_times(command_buffer: &CommandBuffer) -> Result<[f64; 2], Failure> {
+    let start = command_buffer
+        .gpu_start_time()
+        .map_err(|error| Failure::of(&error))?;
+    let end = command_buffer
+        .gpu_end_time()
+        .map_err(|error| Failure::of(&error))?;
+    Ok([start, end])
+}
+
 fn status_value(status: CommandBufferStatus) -> Value {
     Value::unit_variant(format!("{status:?}"))
 }
@@ -4992,6 +5124,378 @@ impl Side for RuntimeSide<'_> {
         // be a texture over memory a later row could still be asked about.
         keep(&mut self.textures, opened);
         Ok(facts)
+    }
+
+    fn sparse_mapping(&mut self, program: &SparseMappingProgram) -> Answer<SparseMapped> {
+        // The venue's own tile size, against the grid the program's regions are stated in. A
+        // disagreement stops the program **before anything is encoded**: a region in tiles means
+        // nothing without the grid it was written for.
+        for spec in &program.textures {
+            let query = SparseTileQuery {
+                texture_type: spec.texture_type,
+                format: spec.format,
+                samples: spec.samples,
+                page: Some(program.heap.page),
+            };
+            let held = self.sparse_tile_size(&query)?;
+            let stated = program.tile.tile;
+            if [held.width, held.height, held.depth] != stated {
+                return Err(Failure::named(
+                    "TileSize",
+                    format!(
+                        "{} tiles {}x{}x{} where the program states {}x{}x{}",
+                        spec.site(),
+                        held.width,
+                        held.height,
+                        held.depth,
+                        stated[0],
+                        stated[1],
+                        stated[2]
+                    ),
+                ));
+            }
+        }
+        let heap_handle = self.sparse_heap(&program.heap)?;
+        let heap = self.held_heap(heap_handle)?.clone();
+        let mut textures = Vec::new();
+        for spec in &program.textures {
+            let made = self.heap_texture(heap_handle, spec)?;
+            textures.push(self.held_texture(made)?.clone());
+        }
+        let mut buffers = Vec::new();
+        for bytes in &program.buffers {
+            let made = self.buffer(bytes)?;
+            buffers.push(self.held(made)?.clone());
+        }
+        let fences: Vec<Fence> = (0..program.fences)
+            .map(|_| self.device.new_fence())
+            .collect();
+        let tails: Vec<(u64, u64)> = textures
+            .iter()
+            .map(|texture| {
+                (
+                    texture.first_mipmap_in_tail().unwrap_or(0),
+                    texture.tail_size_in_bytes().unwrap_or(0),
+                )
+            })
+            .collect();
+        // A scratch buffer for each fill and each read, in the order the steps name them, so a
+        // read's bytes are the side's own and never one of the program's.
+        let mut scratch: Vec<Handle> = Vec::new();
+        for step in &program.steps {
+            let bytes = match step {
+                MappingStep::FillRegion { region, value, .. } => {
+                    let (_, length) = program.tile.bytes_of(region);
+                    vec![*value; length as usize]
+                }
+                MappingStep::ReadRegion { region, .. } => {
+                    let (_, length) = program.tile.bytes_of(region);
+                    vec![READ_GUARD; length as usize]
+                }
+                _ => continue,
+            };
+            scratch.push(self.buffer(&bytes)?);
+        }
+        let held_scratch: Vec<Buffer> = scratch
+            .iter()
+            .map(|handle| self.held(*handle).cloned())
+            .collect::<Answer<Vec<Buffer>>>()?;
+        let queue = self.queue()?.clone();
+        let mut run = Mapping {
+            queue,
+            command_buffer: None,
+            blit: None,
+            state: None,
+        };
+        let texture_at = |at: usize| -> Answer<&Texture> {
+            textures
+                .get(at)
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {at}")))
+        };
+        let mut used_size = vec![heap.used_size()];
+        let mut refused: Vec<Option<Failure>> = Vec::with_capacity(program.steps.len());
+        let mut statuses = Vec::new();
+        let mut reads = Vec::new();
+        let mut pending: Vec<(usize, usize)> = Vec::new();
+        let mut scratch_at = 0usize;
+        for step in &program.steps {
+            let answered: Answer<Committed> =
+                (|| match step {
+                    MappingStep::Commit => {
+                        run.close_encoders()?;
+                        match run.command_buffer.is_some() {
+                            true => Ok(Committed::Yes),
+                            false => Err(Failure::named("NoCommandBuffer", "a commit of nothing")),
+                        }
+                    }
+                    MappingStep::NextEncoder => {
+                        run.close_encoders()?;
+                        Ok(Committed::No)
+                    }
+                    MappingStep::FillRegion {
+                        texture,
+                        level,
+                        slice,
+                        region,
+                        ..
+                    } => {
+                        let held = texture_at(*texture)?.clone();
+                        let source = held_scratch[scratch_at].clone();
+                        let (per_row, bytes) = program.tile.bytes_of(region);
+                        let (origin, extent) = program.tile.texels_of(region);
+                        scratch_at += 1;
+                        run.blit()?
+                            .copy_from_buffer_to_texture(
+                                &source,
+                                0,
+                                per_row,
+                                bytes,
+                                long_size(extent),
+                                &held,
+                                *slice,
+                                *level,
+                                long_origin(origin),
+                                BlitOption::None,
+                            )
+                            .map_err(|error| Failure::of(&error))?;
+                        Ok(Committed::No)
+                    }
+                    MappingStep::ReadRegion {
+                        texture,
+                        level,
+                        slice,
+                        region,
+                    } => {
+                        let held = texture_at(*texture)?.clone();
+                        let into = held_scratch[scratch_at].clone();
+                        let (per_row, bytes) = program.tile.bytes_of(region);
+                        let (origin, extent) = program.tile.texels_of(region);
+                        pending.push((scratch_at, bytes as usize));
+                        scratch_at += 1;
+                        run.blit()?
+                            .copy_from_texture_to_buffer(
+                                &held,
+                                *slice,
+                                *level,
+                                long_origin(origin),
+                                long_size(extent),
+                                &into,
+                                0,
+                                per_row,
+                                bytes,
+                                BlitOption::None,
+                            )
+                            .map_err(|error| Failure::of(&error))?;
+                        Ok(Committed::No)
+                    }
+                    MappingStep::One {
+                        texture,
+                        mode,
+                        region,
+                        level,
+                        slice,
+                    } => {
+                        let held = texture_at(*texture)?.clone();
+                        run.state()?
+                            .update_texture_mapping(
+                                &held,
+                                tile_mapping(*mode),
+                                tile_region(region),
+                                *level,
+                                *slice,
+                            )
+                            .map_err(|error| Failure::of(&error))?;
+                        Ok(Committed::No)
+                    }
+                    MappingStep::Many {
+                        texture,
+                        mode,
+                        regions,
+                    } => {
+                        let held = texture_at(*texture)?.clone();
+                        let rects: Vec<Region> = regions
+                            .iter()
+                            .map(|(region, _, _)| tile_region(region))
+                            .collect();
+                        let levels: Vec<u64> = regions.iter().map(|(_, level, _)| *level).collect();
+                        let slices: Vec<u64> = regions.iter().map(|(_, _, slice)| *slice).collect();
+                        run.state()?
+                            .update_texture_mappings(
+                                &held,
+                                tile_mapping(*mode),
+                                &rects,
+                                &levels,
+                                &slices,
+                            )
+                            .map_err(|error| Failure::of(&error))?;
+                        Ok(Committed::No)
+                    }
+                    MappingStep::Indirect {
+                        texture,
+                        mode,
+                        buffer,
+                        offset,
+                    } => {
+                        let held = texture_at(*texture)?.clone();
+                        let arguments = buffers.get(*buffer).cloned().ok_or_else(|| {
+                            Failure::named("NoSuchHandle", format!("buffer {buffer}"))
+                        })?;
+                        run.state()?
+                            .update_texture_mapping_indirect(
+                                &held,
+                                tile_mapping(*mode),
+                                &arguments,
+                                *offset,
+                            )
+                            .map_err(|error| Failure::of(&error))?;
+                        Ok(Committed::No)
+                    }
+                    MappingStep::Move {
+                        from,
+                        from_slice,
+                        from_level,
+                        from_origin,
+                        size,
+                        to,
+                        to_slice,
+                        to_level,
+                        to_origin,
+                    } => {
+                        let source = texture_at(*from)?.clone();
+                        let destination = texture_at(*to)?.clone();
+                        run.state()?
+                            .move_texture_mappings(
+                                &source,
+                                *from_slice,
+                                *from_level,
+                                long_origin(*from_origin),
+                                long_size(*size),
+                                &destination,
+                                *to_slice,
+                                *to_level,
+                                long_origin(*to_origin),
+                            )
+                            .map_err(|error| Failure::of(&error))?;
+                        Ok(Committed::No)
+                    }
+                    MappingStep::UpdateFence { fence } => {
+                        let held = fences.get(*fence).cloned().ok_or_else(|| {
+                            Failure::named("NoSuchHandle", format!("fence {fence}"))
+                        })?;
+                        run.state()?
+                            .update_fence(&held)
+                            .map_err(|error| Failure::of(&error))?;
+                        Ok(Committed::No)
+                    }
+                    MappingStep::WaitForFence { fence } => {
+                        let held = fences.get(*fence).cloned().ok_or_else(|| {
+                            Failure::named("NoSuchHandle", format!("fence {fence}"))
+                        })?;
+                        run.state()?
+                            .wait_for_fence(&held)
+                            .map_err(|error| Failure::of(&error))?;
+                        Ok(Committed::No)
+                    }
+                })();
+            let committed = matches!(answered, Ok(Committed::Yes));
+            refused.push(answered.err());
+            if !committed {
+                continue;
+            }
+            let status = match run.command_buffer.take() {
+                Some(buffer) => {
+                    buffer.commit().map_err(|error| Failure::of(&error))?;
+                    match buffer.wait_until_completed_for(WAIT) {
+                        Ok(()) => status_value(buffer.status()),
+                        Err(_) => Value::Nothing(Negative::NeverReturned),
+                    }
+                }
+                None => Value::Absent,
+            };
+            statuses.push(status);
+            used_size.push(heap.used_size());
+            for &(slot, length) in &pending {
+                reads.push(self.read_buffer(scratch[slot], 0, length)?);
+            }
+            pending.clear();
+        }
+        // A program that left an encoder open closes it: its steps' answers stand, and the case's
+        // own guard holds every program to ending on a commit.
+        let _ = run.close_encoders();
+        Ok(SparseMapped {
+            refused,
+            used_size,
+            tails,
+            statuses,
+            reads,
+        })
+    }
+
+    fn command_buffer_facts(&mut self) -> Answer<CommandBufferFacts> {
+        let scratch = self.buffer(&[0u8; TIMED_BYTES])?;
+        let target = self.held(scratch)?.clone();
+        let queue = self.queue()?.clone();
+        // Two queues with distinct labels, a command buffer on each: whether each command
+        // buffer's `command_queue` answers **its own** queue's label. Neither API compares two
+        // queues for identity publicly, so this is the strongest fact both legs compute alike.
+        let mut queue_label_is_its_own = [false; 2];
+        for (at, label) in QUEUE_LABELS.iter().enumerate() {
+            let labelled: CommandQueue = self
+                .device
+                .new_command_queue()
+                .map_err(Failure::from_error)?;
+            labelled.set_label(label);
+            let buffer: CommandBuffer = labelled.command_buffer().map_err(Failure::from_error)?;
+            let answered = buffer.command_queue();
+            queue_label_is_its_own[at] = answered.label().as_deref() == Some(*label);
+        }
+        let held: CommandBuffer = queue.command_buffer().map_err(Failure::from_error)?;
+        let device_is_the_queues = held.device().registry_id() == queue.device().registry_id();
+        let kernel_before = [held.kernel_start_time(), held.kernel_end_time()];
+        let gpu_before = gpu_times(&held);
+        // One blit of a few bytes of the side's own buffer: enough work that the GPU ran, and no
+        // shader, draw or dispatch at all.
+        let mut encoder = held.blit_command_encoder().map_err(Failure::from_error)?;
+        encoder
+            .fill_buffer(&target, 0..TIMED_BYTES as u64, 0xa5)
+            .map_err(Failure::from_error)?;
+        encoder.end_encoding().map_err(Failure::from_error)?;
+        held.commit().map_err(Failure::from_error)?;
+        let status = match held.wait_until_completed_for(WAIT) {
+            Ok(()) => status_value(held.status()),
+            Err(_) => Value::Nothing(Negative::NeverReturned),
+        };
+        let kernel_after = [held.kernel_start_time(), held.kernel_end_time()];
+        let gpu_after = gpu_times(&held);
+
+        // A command buffer of its own for the encoder, so the timings above are of a command
+        // buffer that only blitted and this one only opens an encoder.
+        let state_buffer: CommandBuffer = queue.command_buffer().map_err(Failure::from_error)?;
+        let opened = state_buffer.resource_state_command_encoder();
+        let resource_state_encoder_opened = opened.is_ok();
+        // Ended with nothing encoded into it: it maps nothing and takes no heap memory.
+        if let Ok(encoder) = opened {
+            encoder.end_encoding().map_err(Failure::from_error)?;
+        }
+        state_buffer.commit().map_err(Failure::from_error)?;
+        let state_encoder_status = match state_buffer.wait_until_completed_for(WAIT) {
+            Ok(()) => status_value(state_buffer.status()),
+            Err(_) => Value::Nothing(Negative::NeverReturned),
+        };
+        let gpu = match (gpu_before, gpu_after) {
+            (Ok(before), Ok(after)) => Ok((before, after)),
+            (Err(failure), _) | (_, Err(failure)) => Err(failure),
+        };
+        Ok(CommandBufferFacts::new(
+            device_is_the_queues,
+            queue_label_is_its_own,
+            kernel_before,
+            kernel_after,
+            gpu,
+            resource_state_encoder_opened,
+            status,
+            state_encoder_status,
+        ))
     }
 }
 

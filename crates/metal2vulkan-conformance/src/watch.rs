@@ -606,6 +606,19 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.sparse_tile_size(query)
     }
 
+    fn sparse_mapping(
+        &mut self,
+        program: &crate::sparse_mapping::SparseMappingProgram,
+    ) -> Answer<crate::sparse_mapping::SparseMapped> {
+        let _span = self.watch("sparse_mapping");
+        self.inner.sparse_mapping(program)
+    }
+
+    fn command_buffer_facts(&mut self) -> Answer<crate::command_buffer_facts::CommandBufferFacts> {
+        let _span = self.watch("command_buffer_facts");
+        self.inner.command_buffer_facts()
+    }
+
     fn sparse_tile_size_in_bytes(&mut self, page: crate::sparse_query::QueryPage) -> Answer<u64> {
         let _span = self.watch("sparse_tile_size_in_bytes");
         self.inner.sparse_tile_size_in_bytes(page)

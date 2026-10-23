@@ -1479,6 +1479,39 @@ pub trait Side {
         Err(Failure::unavailable("sparse_texture_facts"))
     }
 
+    /// One sparse mapping program: the heap, the textures over it, and every command of
+    /// `program` encoded in order through `MTLResourceStateCommandEncoder` and
+    /// `MTLBlitCommandEncoder` ([`crate::sparse_mapping`]).
+    ///
+    /// The whole program is one call because what it measures is a **sequence**: the heap's
+    /// `usedSize` after a map, after an unmap and after a move is three numbers of one experiment,
+    /// and a case that made them three independent calls would be measuring three heaps.
+    ///
+    /// Every command is encoded whatever an earlier one answered, as
+    /// [`compute_pass`](Side::compute_pass) does, and the answer names which one refused. **Every
+    /// region is in tiles**, bounded by the texture's own grid, and the side checks the venue's
+    /// tile size against the program's stated one before it encodes anything: a venue whose tiles
+    /// are another size answers a typed refusal rather than being handed a region past its grid.
+    fn sparse_mapping(
+        &mut self,
+        program: &crate::sparse_mapping::SparseMappingProgram,
+    ) -> Answer<crate::sparse_mapping::SparseMapped> {
+        let _ = program;
+        Err(Failure::unavailable("sparse_mapping"))
+    }
+
+    /// What one command buffer answers about itself
+    /// ([`crate::command_buffer_facts::CommandBufferFacts`]): its `device` and its `commandQueue`,
+    /// the four timing getters before and after it ran, and whether a
+    /// `resourceStateCommandEncoder` could be opened on one.
+    ///
+    /// The timings are recorded as **orderings and signs**, never as times: a recording holding a
+    /// machine's clock would decay on its next run. What is durable is whether each getter answers
+    /// zero before the work ran, whether it is positive after, and the order of the four.
+    fn command_buffer_facts(&mut self) -> Answer<crate::command_buffer_facts::CommandBufferFacts> {
+        Err(Failure::unavailable("command_buffer_facts"))
+    }
+
     /// A command queue's limit on uncompleted command buffers, by the probe both sides run
     /// ([`crate::queue_slots`]): the queue is made with `max` as its
     /// `maxCommandBufferCount` (`newCommandQueue` where `max` is `None`), and at most `cap` command

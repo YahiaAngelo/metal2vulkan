@@ -19,6 +19,7 @@ use crate::case::{
     ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
     TilePipelineSpec, TileStep, Venue,
 };
+use crate::command_buffer_facts::CommandBufferFacts;
 use crate::compute_descriptors::{
     ComputeDescriptorFacts, DescriptorSpec as ComputeDescriptorSpec,
     SuppliedLists as ComputeSuppliedLists, AWAY as COMPUTE_AWAY,
@@ -58,6 +59,9 @@ use crate::render_descriptors::{
     LinkedCounts, RenderDescriptorFacts, SuppliedLists, VertexDescriptorFacts, AWAY, READ_BUFFERS,
     READ_COLORS, READ_VERTEX_SLOTS,
 };
+use crate::sparse_mapping::{
+    MappingMode, MappingStep, SparseMapped, SparseMappingProgram, TileRect,
+};
 use crate::sparse_query::{
     HeapFacts, QueryPage, SparseHeapSpec, SparseTextureFacts, SparseTextureSpec, SparseTileQuery,
     TileSize,
@@ -88,14 +92,15 @@ use objc2_metal::{
     MTLComputeCommandEncoder, MTLComputePipelineDescriptor, MTLComputePipelineReflection,
     MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLCullMode, MTLDataType,
     MTLDepthClipMode, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLDispatchType,
-    MTLDynamicLibrary, MTLEvent, MTLFunction, MTLFunctionConstant, MTLFunctionConstantValues,
-    MTLFunctionDescriptor, MTLFunctionOptions, MTLHazardTrackingMode, MTLHeap, MTLHeapDescriptor,
-    MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
-    MTLIndirectCommandType, MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary,
-    MTLLinkedFunctions, MTLLoadAction, MTLMeshRenderPipelineDescriptor,
-    MTLMultisampleDepthResolveFilter, MTLMultisampleStencilResolveFilter, MTLMutability, MTLOrigin,
-    MTLPipelineBufferDescriptor, MTLPipelineBufferDescriptorArray, MTLPipelineOption,
-    MTLPixelFormat, MTLPointerType, MTLPrimitiveTopologyClass, MTLPrimitiveType, MTLPurgeableState,
+    MTLDynamicLibrary, MTLEvent, MTLFence, MTLFunction, MTLFunctionConstant,
+    MTLFunctionConstantValues, MTLFunctionDescriptor, MTLFunctionOptions, MTLHazardTrackingMode,
+    MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer,
+    MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectComputeCommand,
+    MTLIndirectRenderCommand, MTLLibrary, MTLLinkedFunctions, MTLLoadAction,
+    MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
+    MTLMultisampleStencilResolveFilter, MTLMutability, MTLOrigin, MTLPipelineBufferDescriptor,
+    MTLPipelineBufferDescriptorArray, MTLPipelineOption, MTLPixelFormat, MTLPointerType,
+    MTLPrimitiveTopologyClass, MTLPrimitiveType, MTLPurgeableState,
     MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder,
     MTLRenderPassAttachmentDescriptor, MTLRenderPassColorAttachmentDescriptor,
@@ -103,12 +108,13 @@ use objc2_metal::{
     MTLRenderPassDescriptor, MTLRenderPassStencilAttachmentDescriptor,
     MTLRenderPipelineColorAttachmentDescriptor, MTLRenderPipelineColorAttachmentDescriptorArray,
     MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
-    MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplePosition,
-    MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
-    MTLSamplerState, MTLScissorRect, MTLSharedEvent, MTLSharedEventHandle, MTLSize,
-    MTLSparsePageSize, MTLSparseTextureRegionAlignmentMode, MTLStageInputOutputDescriptor,
-    MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction,
-    MTLStoreActionOptions, MTLStructMember, MTLStructType, MTLTessellationControlPointIndexType,
+    MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceStateCommandEncoder,
+    MTLResourceUsage, MTLSamplePosition, MTLSamplerAddressMode, MTLSamplerBorderColor,
+    MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLScissorRect, MTLSharedEvent,
+    MTLSharedEventHandle, MTLSize, MTLSparsePageSize, MTLSparseTextureMappingMode,
+    MTLSparseTextureRegionAlignmentMode, MTLStageInputOutputDescriptor, MTLStencilDescriptor,
+    MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLStoreActionOptions,
+    MTLStructMember, MTLStructType, MTLTessellationControlPointIndexType,
     MTLTessellationFactorFormat, MTLTessellationFactorStepFunction, MTLTessellationPartitionMode,
     MTLTexture, MTLTextureBinding, MTLTextureDescriptor, MTLTextureReferenceType,
     MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage,
@@ -760,6 +766,291 @@ impl MetalSide {
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("heap {}", handle.0)))
     }
 
+    /// Encode step `at` of `program`, answering whether it closed its command buffer.
+    ///
+    /// Each arm is one Metal call, with the program's indices resolved through the handles it
+    /// made. The open encoder is passed in rather than held on the side, because a program's
+    /// encoders live exactly as long as its own run.
+    #[allow(clippy::too_many_arguments)]
+    fn sparse_step(
+        &mut self,
+        program: &SparseMappingProgram,
+        at: usize,
+        textures: &[Handle],
+        buffers: &[Handle],
+        fences: &[Retained<ProtocolObject<dyn MTLFence>>],
+        scratch: &[Handle],
+        scratch_at: &mut usize,
+        pending: &mut Vec<(usize, usize)>,
+        command_buffer: &mut Option<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
+        open: &mut OpenEncoder,
+    ) -> Answer<Commits> {
+        let texture_at = |at: usize| -> Answer<Handle> {
+            textures
+                .get(at)
+                .copied()
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {at}")))
+        };
+        let step = &program.steps[at];
+        match step {
+            MappingStep::Commit => {
+                open.end();
+                if command_buffer.is_none() {
+                    return Err(Failure::named("NoCommandBuffer", "a commit of nothing"));
+                }
+                Ok(Commits::Yes)
+            }
+            MappingStep::NextEncoder => {
+                open.end();
+                Ok(Commits::No)
+            }
+            MappingStep::FillRegion {
+                texture,
+                level,
+                slice,
+                region,
+                ..
+            } => {
+                let held = Retained::from(self.held_texture(texture_at(*texture)?)?);
+                let source = Retained::from(self.held(scratch[*scratch_at])?);
+                let (per_row, bytes) = program.tile.bytes_of(region);
+                let (origin, extent) = program.tile.texels_of(region);
+                let encoder = self.open_blit(command_buffer, open)?;
+                // SAFETY: the buffer holds the region's rows at `per_row`, the side just made it
+                // that long, and the region lies inside the level's own tiles, which the case's
+                // guard holds against the grid this side checked against the device.
+                unsafe {
+                    encoder.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                        &source,
+                        0,
+                        per_row as usize,
+                        bytes as usize,
+                        long_size(extent),
+                        &held,
+                        *slice as usize,
+                        *level as usize,
+                        long_origin(origin),
+                    );
+                }
+                *scratch_at += 1;
+                Ok(Commits::No)
+            }
+            MappingStep::ReadRegion {
+                texture,
+                level,
+                slice,
+                region,
+            } => {
+                let held = Retained::from(self.held_texture(texture_at(*texture)?)?);
+                let into = Retained::from(self.held(scratch[*scratch_at])?);
+                let (per_row, bytes) = program.tile.bytes_of(region);
+                let (origin, extent) = program.tile.texels_of(region);
+                let encoder = self.open_blit(command_buffer, open)?;
+                // SAFETY: as the fill's, the other way round.
+                unsafe {
+                    encoder.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                        &held,
+                        *slice as usize,
+                        *level as usize,
+                        long_origin(origin),
+                        long_size(extent),
+                        &into,
+                        0,
+                        per_row as usize,
+                        bytes as usize,
+                    );
+                }
+                pending.push((*scratch_at, bytes as usize));
+                *scratch_at += 1;
+                Ok(Commits::No)
+            }
+            MappingStep::One {
+                texture,
+                mode,
+                region,
+                level,
+                slice,
+            } => {
+                let held = Retained::from(self.held_texture(texture_at(*texture)?)?);
+                let encoder = self.open_state(command_buffer, open)?;
+                // SAFETY: the region lies inside the level's own tiles, which the case's guard
+                // holds against the grid this side checked against the device, and the encoder
+                // outlives the call.
+                unsafe {
+                    encoder.updateTextureMapping_mode_region_mipLevel_slice(
+                        &held,
+                        mapping_mode(*mode),
+                        tile_region(region),
+                        *level as usize,
+                        *slice as usize,
+                    );
+                }
+                Ok(Commits::No)
+            }
+            MappingStep::Many {
+                texture,
+                mode,
+                regions,
+            } => {
+                let held = Retained::from(self.held_texture(texture_at(*texture)?)?);
+                let rects: Vec<MTLRegion> = regions
+                    .iter()
+                    .map(|(region, _, _)| tile_region(region))
+                    .collect();
+                let levels: Vec<usize> = regions
+                    .iter()
+                    .map(|(_, level, _)| *level as usize)
+                    .collect();
+                let slices: Vec<usize> = regions
+                    .iter()
+                    .map(|(_, _, slice)| *slice as usize)
+                    .collect();
+                let encoder = self.open_state(command_buffer, open)?;
+                // SAFETY: the three arrays each hold `numRegions` elements, every region lies
+                // inside its level's tiles, and the encoder outlives the call.
+                unsafe {
+                    encoder.updateTextureMappings_mode_regions_mipLevels_slices_numRegions(
+                        &held,
+                        mapping_mode(*mode),
+                        array_head(&rects)?,
+                        array_head(&levels)?,
+                        array_head(&slices)?,
+                        rects.len(),
+                    );
+                }
+                Ok(Commits::No)
+            }
+            MappingStep::Indirect {
+                texture,
+                mode,
+                buffer,
+                offset,
+            } => {
+                let held = Retained::from(self.held_texture(texture_at(*texture)?)?);
+                let named = buffers
+                    .get(*buffer)
+                    .copied()
+                    .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {buffer}")))?;
+                let arguments = Retained::from(self.held(named)?);
+                let encoder = self.open_state(command_buffer, open)?;
+                // SAFETY: the buffer holds a 32-bit count and that many
+                // `MTLMapIndirectArguments` at `offset`, which the case states as its own input
+                // and its guard checks, and the encoder outlives the call.
+                unsafe {
+                    encoder.updateTextureMapping_mode_indirectBuffer_indirectBufferOffset(
+                        &held,
+                        mapping_mode(*mode),
+                        &arguments,
+                        *offset as usize,
+                    );
+                }
+                Ok(Commits::No)
+            }
+            MappingStep::Move {
+                from,
+                from_slice,
+                from_level,
+                from_origin,
+                size,
+                to,
+                to_slice,
+                to_level,
+                to_origin,
+            } => {
+                let source = Retained::from(self.held_texture(texture_at(*from)?)?);
+                let destination = Retained::from(self.held_texture(texture_at(*to)?)?);
+                let encoder = self.open_state(command_buffer, open)?;
+                // SAFETY: both regions lie inside their level's own tiles, which the case's guard
+                // holds, and the encoder outlives the call.
+                unsafe {
+                    encoder.moveTextureMappingsFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                        &source,
+                        *from_slice as usize,
+                        *from_level as usize,
+                        long_origin(*from_origin),
+                        long_size(*size),
+                        &destination,
+                        *to_slice as usize,
+                        *to_level as usize,
+                        long_origin(*to_origin),
+                    );
+                }
+                Ok(Commits::No)
+            }
+            MappingStep::UpdateFence { fence } => {
+                let held = fences
+                    .get(*fence)
+                    .cloned()
+                    .ok_or_else(|| Failure::named("NoSuchHandle", format!("fence {fence}")))?;
+                let encoder = self.open_state(command_buffer, open)?;
+                encoder.updateFence(&held);
+                Ok(Commits::No)
+            }
+            MappingStep::WaitForFence { fence } => {
+                let held = fences
+                    .get(*fence)
+                    .cloned()
+                    .ok_or_else(|| Failure::named("NoSuchHandle", format!("fence {fence}")))?;
+                let encoder = self.open_state(command_buffer, open)?;
+                encoder.waitForFence(&held);
+                Ok(Commits::No)
+            }
+        }
+    }
+
+    /// The command buffer a sparse mapping program's next command goes into, opened on first use.
+    fn open_command_buffer(
+        &self,
+        command_buffer: &mut Option<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
+    ) -> Answer<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
+        if command_buffer.is_none() {
+            *command_buffer = Some(
+                self.queue
+                    .commandBuffer()
+                    .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?,
+            );
+        }
+        Ok(command_buffer
+            .clone()
+            .expect("the command buffer was just opened"))
+    }
+
+    /// The program's blit encoder, ending a resource state encoder first where one is open.
+    fn open_blit(
+        &self,
+        command_buffer: &mut Option<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
+        open: &mut OpenEncoder,
+    ) -> Answer<Retained<ProtocolObject<dyn MTLBlitCommandEncoder>>> {
+        if let OpenEncoder::Blit(encoder) = open {
+            return Ok(encoder.clone());
+        }
+        open.end();
+        let buffer = self.open_command_buffer(command_buffer)?;
+        let encoder = buffer
+            .blitCommandEncoder()
+            .ok_or_else(|| Failure::named("BlitCommandEncoder", "returned nil".to_owned()))?;
+        *open = OpenEncoder::Blit(encoder.clone());
+        Ok(encoder)
+    }
+
+    /// The program's resource state encoder, ending a blit encoder first where one is open.
+    fn open_state(
+        &self,
+        command_buffer: &mut Option<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
+        open: &mut OpenEncoder,
+    ) -> Answer<Retained<ProtocolObject<dyn MTLResourceStateCommandEncoder>>> {
+        if let OpenEncoder::State(encoder) = open {
+            return Ok(encoder.clone());
+        }
+        open.end();
+        let buffer = self.open_command_buffer(command_buffer)?;
+        let encoder = buffer.resourceStateCommandEncoder().ok_or_else(|| {
+            Failure::named("ResourceStateCommandEncoder", "returned nil".to_owned())
+        })?;
+        *open = OpenEncoder::State(encoder.clone());
+        Ok(encoder)
+    }
+
     /// The rasterization-rate map `handle` names.
     fn held_rate_map(
         &self,
@@ -938,6 +1229,80 @@ impl MetalSide {
         encoder.endEncoding();
         command_buffer.commit();
         Ok(keep(&mut self.command_buffers, command_buffer))
+    }
+}
+
+/// Bytes the command buffer whose timings [`Side::command_buffer_facts`] reads fills: a few, so
+/// the GPU ran and nothing else did.
+const TIMED_BYTES: usize = 256;
+
+/// The labels the two queues of [`Side::command_buffer_facts`] take: distinct, so a command
+/// buffer that answered the other queue reads as the other label.
+const QUEUE_LABELS: [&str; 2] = ["conformance-queue-a", "conformance-queue-b"];
+
+/// The byte a read-back buffer of a sparse mapping program is made holding, so a byte no copy
+/// wrote is a value the side put there rather than whatever the allocator left.
+const READ_GUARD: u8 = 0x7e;
+
+/// Which encoder of a sparse mapping program's command buffer is open.
+///
+/// Metal takes one encoder at a time of a command buffer, so a program whose next command needs
+/// the other kind ends this one first. The variants hold the encoder itself rather than a flag,
+/// because ending it is a call on the object.
+enum OpenEncoder {
+    None,
+    Blit(Retained<ProtocolObject<dyn MTLBlitCommandEncoder>>),
+    State(Retained<ProtocolObject<dyn MTLResourceStateCommandEncoder>>),
+}
+
+impl OpenEncoder {
+    /// End whichever encoder is open, leaving none.
+    fn end(&mut self) {
+        match self {
+            OpenEncoder::None => {}
+            OpenEncoder::Blit(encoder) => encoder.endEncoding(),
+            OpenEncoder::State(encoder) => encoder.endEncoding(),
+        }
+        *self = OpenEncoder::None;
+    }
+}
+
+/// Whether a step of a sparse mapping program closed its command buffer.
+enum Commits {
+    No,
+    Yes,
+}
+
+/// Metal's `MTLSparseTextureMappingMode` for a case's mode, by its raw value, so the two spellings
+/// cannot drift apart.
+fn mapping_mode(mode: MappingMode) -> MTLSparseTextureMappingMode {
+    MTLSparseTextureMappingMode(mode.as_raw() as usize)
+}
+
+/// Three axes as Metal's size.
+fn long_size(axes: [u64; 3]) -> MTLSize {
+    MTLSize {
+        width: axes[0] as usize,
+        height: axes[1] as usize,
+        depth: axes[2] as usize,
+    }
+}
+
+/// Three axes as Metal's origin.
+fn long_origin(axes: [u64; 3]) -> MTLOrigin {
+    MTLOrigin {
+        x: axes[0] as usize,
+        y: axes[1] as usize,
+        z: axes[2] as usize,
+    }
+}
+
+/// A region of tiles as the `MTLRegion` the mapping calls take: Metal states a mapping region in
+/// **tiles**, not texels, so the numbers pass through unchanged.
+fn tile_region(region: &TileRect) -> MTLRegion {
+    MTLRegion {
+        origin: long_origin(region.origin),
+        size: long_size(region.size),
     }
 }
 
@@ -5478,6 +5843,204 @@ impl Side for MetalSide {
             keep(&mut self.textures, opened);
         }
         Ok(facts)
+    }
+
+    fn sparse_mapping(&mut self, program: &SparseMappingProgram) -> Answer<SparseMapped> {
+        // The venue's own tile size, against the grid the program's regions are stated in. A
+        // disagreement stops the program **before anything is encoded**: a region in tiles means
+        // nothing without the grid it was written for, and a region past a level's tiles is the
+        // one shape in this family that could fault a device.
+        for spec in &program.textures {
+            let query = SparseTileQuery {
+                texture_type: spec.texture_type,
+                format: spec.format,
+                samples: spec.samples,
+                page: Some(program.heap.page),
+            };
+            let held = self.sparse_tile_size(&query)?;
+            let stated = program.tile.tile;
+            if [held.width, held.height, held.depth] != stated {
+                return Err(Failure::named(
+                    "TileSize",
+                    format!(
+                        "{} tiles {}x{}x{} where the program states {}x{}x{}",
+                        spec.site(),
+                        held.width,
+                        held.height,
+                        held.depth,
+                        stated[0],
+                        stated[1],
+                        stated[2]
+                    ),
+                ));
+            }
+        }
+        let heap_handle = self.sparse_heap(&program.heap)?;
+        let mut textures = Vec::new();
+        for spec in &program.textures {
+            textures.push(self.heap_texture(heap_handle, spec)?);
+        }
+        let mut buffers = Vec::new();
+        for bytes in &program.buffers {
+            buffers.push(self.buffer(bytes)?);
+        }
+        let mut fences = Vec::new();
+        for at in 0..program.fences {
+            fences.push(
+                self.device.newFence().ok_or_else(|| {
+                    Failure::named("NewFence", format!("fence {at} returned nil"))
+                })?,
+            );
+        }
+        let mut tails = Vec::new();
+        for texture in &textures {
+            let facts = self.sparse_texture_facts(*texture)?;
+            tails.push((facts.first_mipmap_in_tail, facts.tail_size_in_bytes));
+        }
+        // A scratch buffer for each fill and each read, in the order the steps name them, so a
+        // read's bytes are the side's own and never one of the program's.
+        let mut scratch: Vec<Handle> = Vec::new();
+        for step in &program.steps {
+            match step {
+                MappingStep::FillRegion { region, value, .. } => {
+                    let (_, bytes) = program.tile.bytes_of(region);
+                    scratch.push(self.buffer(&vec![*value; bytes as usize])?);
+                }
+                MappingStep::ReadRegion { region, .. } => {
+                    let (_, bytes) = program.tile.bytes_of(region);
+                    scratch.push(self.buffer(&vec![READ_GUARD; bytes as usize])?);
+                }
+                _ => {}
+            }
+        }
+        // The baseline: the heap with its textures made and nothing mapped.
+        let mut used_size = vec![self.heap_facts(heap_handle)?.used_size];
+        let mut refused: Vec<Option<Failure>> = Vec::with_capacity(program.steps.len());
+        let mut statuses = Vec::new();
+        let mut reads = Vec::new();
+        let mut pending: Vec<(usize, usize)> = Vec::new();
+        let mut scratch_at = 0usize;
+        let mut command_buffer: Option<Retained<ProtocolObject<dyn MTLCommandBuffer>>> = None;
+        let mut open = OpenEncoder::None;
+        for at in 0..program.steps.len() {
+            let answered = self.sparse_step(
+                program,
+                at,
+                &textures,
+                &buffers,
+                &fences,
+                &scratch,
+                &mut scratch_at,
+                &mut pending,
+                &mut command_buffer,
+                &mut open,
+            );
+            refused.push(match answered {
+                Ok(Commits::No) => None,
+                Ok(Commits::Yes) => {
+                    let status = match command_buffer.take() {
+                        Some(buffer) => {
+                            buffer.commit();
+                            buffer.waitUntilCompleted();
+                            Value::unit_variant(status_word(buffer.status()))
+                        }
+                        None => Value::Absent,
+                    };
+                    statuses.push(status);
+                    used_size.push(self.heap_facts(heap_handle)?.used_size);
+                    for &(slot, length) in &pending {
+                        reads.push(self.read_buffer(scratch[slot], 0, length)?);
+                    }
+                    pending.clear();
+                    None
+                }
+                Err(failure) => Some(failure),
+            });
+        }
+        // A program that left an encoder open closes it and does not commit: its steps' answers
+        // stand, and the case's own guard holds every program to ending on a commit.
+        open.end();
+        Ok(SparseMapped {
+            refused,
+            used_size,
+            tails,
+            statuses,
+            reads,
+        })
+    }
+
+    fn command_buffer_facts(&mut self) -> Answer<CommandBufferFacts> {
+        let scratch = self.buffer(&[0u8; TIMED_BYTES])?;
+        let target = Retained::from(self.held(scratch)?);
+        let made = self
+            .queue
+            .commandBuffer()
+            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+        // Each getter is read through a binding of its own declared type, never as the scrutinee
+        // of an expression: the coverage derivation types a call's receiver from the expression
+        // before the dot, and a receiver it cannot type is attributed to no item at all.
+        let held: Retained<ProtocolObject<dyn MTLCommandBuffer>> = made;
+        let answered_device = held.device();
+        let queues_device = self.queue.device();
+        let device_is_the_queues = answered_device.registryID() == queues_device.registryID();
+        // Two queues with distinct labels, a command buffer on each: whether each command
+        // buffer's `commandQueue` answers **its own** queue's label. Neither API compares two
+        // queues for identity publicly, so this is the strongest fact both legs compute alike.
+        let mut queue_label_is_its_own = [false; 2];
+        for (at, label) in QUEUE_LABELS.iter().enumerate() {
+            let made = self.device.newCommandQueue().ok_or_else(|| {
+                Failure::named("NewCommandQueue", format!("{label} returned nil"))
+            })?;
+            let labelled: Retained<ProtocolObject<dyn MTLCommandQueue>> = made;
+            labelled.setLabel(Some(&NSString::from_str(label)));
+            let buffer: Retained<ProtocolObject<dyn MTLCommandBuffer>> =
+                labelled.commandBuffer().ok_or_else(|| {
+                    Failure::named("CommandBuffer", format!("on {label} returned nil"))
+                })?;
+            let answered = buffer.commandQueue();
+            queue_label_is_its_own[at] =
+                answered.label().map(|held| held.to_string()).as_deref() == Some(*label);
+        }
+        let kernel_before = [held.kernelStartTime(), held.kernelEndTime()];
+        let gpu_before = [held.GPUStartTime(), held.GPUEndTime()];
+        // One blit of a few bytes of the side's own buffer: enough work that the GPU ran, and no
+        // shader, draw or dispatch at all.
+        let encoder = held
+            .blitCommandEncoder()
+            .ok_or_else(|| Failure::named("BlitCommandEncoder", "returned nil".to_owned()))?;
+        encoder.fillBuffer_range_value(&target, NSRange::new(0, TIMED_BYTES), 0xa5);
+        encoder.endEncoding();
+        held.commit();
+        held.waitUntilCompleted();
+        let status = Value::unit_variant(status_word(held.status()));
+        let kernel_after = [held.kernelStartTime(), held.kernelEndTime()];
+        let gpu_after = [held.GPUStartTime(), held.GPUEndTime()];
+
+        // A command buffer of its own for the encoder, so the timings above are of a command
+        // buffer that only blitted and this one only opens an encoder.
+        let state_buffer: Retained<ProtocolObject<dyn MTLCommandBuffer>> = self
+            .queue
+            .commandBuffer()
+            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+        let opened = state_buffer.resourceStateCommandEncoder();
+        let resource_state_encoder_opened = opened.is_some();
+        if let Some(encoder) = opened {
+            // Ended with nothing encoded into it: it maps nothing and takes no heap memory.
+            encoder.endEncoding();
+        }
+        state_buffer.commit();
+        state_buffer.waitUntilCompleted();
+        let state_encoder_status = Value::unit_variant(status_word(state_buffer.status()));
+        Ok(CommandBufferFacts::new(
+            device_is_the_queues,
+            queue_label_is_its_own,
+            kernel_before,
+            kernel_after,
+            Ok((gpu_before, gpu_after)),
+            resource_state_encoder_opened,
+            status,
+            state_encoder_status,
+        ))
     }
 }
 

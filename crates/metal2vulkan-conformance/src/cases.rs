@@ -53,6 +53,7 @@ pub mod buffer_texture_blits;
 pub mod buffer_textures;
 pub mod chroma_pairs;
 pub mod color_write_masks;
+pub mod command_buffer_facts;
 pub mod command_queues;
 pub mod compressed_blits;
 pub mod compressed_decode;
@@ -129,6 +130,7 @@ pub mod shared_exponent_storage;
 pub mod simdgroup_lockstep;
 pub mod snorm_tile_store;
 pub mod sparse_heaps;
+pub mod sparse_mappings;
 pub mod sparse_tiles;
 pub mod srgb_fetch;
 pub mod stage_in_regions;
@@ -375,6 +377,8 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in sparse_heaps::all() {
         cases.push(Box::new(case));
     }
+    cases.extend(sparse_mappings::all());
+    cases.extend(command_buffer_facts::all());
     cases.extend(fresh_contents::all());
     cases.extend(sample_positions::all());
     cases.extend(
