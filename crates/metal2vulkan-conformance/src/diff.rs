@@ -84,6 +84,9 @@ pub enum DivergenceKind {
     Digest { metal: String, ours: String },
     /// A site one side holds and the other does not.
     Site { held_by: Side },
+    /// The case loosened this site, and the allowance does not hold: the difference it would have
+    /// covered is one nobody is accounting for.
+    Unjustified { why: String },
     /// The site's fields differ in which fields they hold.
     Field { name: String, held_by: Side },
 }
@@ -173,6 +176,9 @@ impl std::fmt::Display for DivergenceKind {
                 write!(out, "the digest is {metal} on Metal and {ours} here")
             }
             DivergenceKind::Site { held_by } => write!(out, "only {held_by} observed this site"),
+            DivergenceKind::Unjustified { why } => {
+                write!(out, "the case loosens this site, and {why}")
+            }
             DivergenceKind::Field { name, held_by } => {
                 write!(out, "only {held_by} holds the field {name}")
             }

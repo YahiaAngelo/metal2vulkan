@@ -35,7 +35,7 @@ pub fn replay_on(venues: Venues, cases: &[Box<dyn Case>]) -> Result<Report, Stri
     // line, and the sink is cleared so a case's own notices site holds only what its work
     // announced.
     let mut report = Report::new();
-    report.venue_announced(&device.name().to_owned(), notices.take());
+    report.venue_announced(device.name(), notices.take());
     for case in cases {
         let taker = notices.clone();
         let mut side = RuntimeSide::new(&device, move || taker.take());

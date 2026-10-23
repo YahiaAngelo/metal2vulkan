@@ -46,9 +46,8 @@ impl Verdict {
             for bad in &found.bad_allowances {
                 diverged.push(Divergence::new(
                     bad.path.clone(),
-                    crate::diff::DivergenceKind::Value {
-                        metal: crate::transcript::Value::Lines(vec![bad.why.to_string()]),
-                        ours: crate::transcript::Value::Absent,
+                    crate::diff::DivergenceKind::Unjustified {
+                        why: bad.why.to_string(),
                     },
                 ));
             }
@@ -71,7 +70,16 @@ impl Verdict {
             fields: found
                 .announced
                 .iter()
-                .map(|announced| format!("{} ({})", announced.path, announced.justified_by))
+                .map(|announced| {
+                    let largest = match announced.largest {
+                        Some(largest) => format!(", the largest difference {largest}"),
+                        None => String::new(),
+                    };
+                    format!(
+                        "{} x{} ({}{largest})",
+                        announced.path, announced.count, announced.justified_by
+                    )
+                })
                 .collect(),
         }
     }

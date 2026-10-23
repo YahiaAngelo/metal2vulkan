@@ -321,6 +321,11 @@ pub struct ByteLayout {
     pub region: Region,
     /// What one element is.
     pub element: Element,
+    /// Bytes from a row's start to its first element: a column of an interleaved layout, where a
+    /// case compares one of a thread's words apart from the others because only that one is
+    /// loosened.
+    #[serde(default)]
+    pub row_offset: u32,
     /// Elements in a row.
     pub row_elements: u32,
     /// Bytes from one row's start to the next: the row pitch, at least
@@ -345,6 +350,7 @@ impl ByteLayout {
         Self {
             region: Region::Buffer { offset, length },
             element,
+            row_offset: 0,
             row_elements: pitch / element.size(),
             row_pitch: pitch,
             rows: 1,
@@ -358,7 +364,8 @@ impl ByteLayout {
     pub fn extent(&self) -> usize {
         let images = self.images.saturating_sub(1) as usize * self.image_pitch as usize;
         let rows = self.rows.saturating_sub(1) as usize * self.row_pitch as usize;
-        let row = self.row_elements as usize * self.element.size() as usize;
+        let row =
+            self.row_offset as usize + self.row_elements as usize * self.element.size() as usize;
         images + rows + row
     }
 
@@ -366,6 +373,7 @@ impl ByteLayout {
     pub fn at(&self, image: u32, row: u32, index: u32) -> usize {
         image as usize * self.image_pitch as usize
             + row as usize * self.row_pitch as usize
+            + self.row_offset as usize
             + index as usize * self.element.size() as usize
     }
 }

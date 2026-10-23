@@ -15,7 +15,7 @@
 //!   and per venue "lacks the device feature".
 //! - **Record mode** ([`record`]) takes Metal's answer on this Mac and writes one recording per
 //!   case, keyed by chip, macOS build and Metal level, with the runs behind it and the set of
-//!   outcomes where behaviour varies. **Replay** ([`replay`]) reads the recording, runs our side
+//!   outcomes where behaviour varies. **Replay** ([`mod@replay`]) reads the recording, runs our side
 //!   and compares, and needs no Metal at all.
 //! - A **report** ([`report`]) over a selection gives the verdict counts and the matrix of case
 //!   against venue.

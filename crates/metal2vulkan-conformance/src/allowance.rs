@@ -196,6 +196,22 @@ fn within_ulps(expected: &Value, actual: &Value, ulps: u32) -> bool {
     (ordered(*a) - ordered(*b)).unsigned_abs() <= u128::from(ulps)
 }
 
+/// How far apart two numbers of one kind are, where both are numbers.
+pub fn difference(expected: &Value, actual: &Value) -> Option<f64> {
+    let number = |value: &Value| match *value {
+        Value::Uint(word) => Some(word as f64),
+        Value::Int(word) => Some(word as f64),
+        Value::Float { bits, width } => Some(match width {
+            FloatWidth::Half => half_to_f64(bits as u16),
+            FloatWidth::Single => f32::from_bits(bits as u32) as f64,
+            FloatWidth::Double => f64::from_bits(bits),
+        }),
+        _ => None,
+    };
+    let (a, b) = (number(expected)?, number(actual)?);
+    Some((a - b).abs())
+}
+
 /// Whether two numbers of one kind are within `bound` of each other.
 fn within_absolute(expected: &Value, actual: &Value, bound: f64) -> bool {
     let number = |value: &Value| match *value {

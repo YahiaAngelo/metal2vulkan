@@ -22,6 +22,12 @@ pub struct Announced {
     pub how: Loosening,
     /// What justifies it, in words.
     pub justified_by: String,
+    /// How many sites, or elements of one site, the allowance covered.
+    pub count: usize,
+    /// The largest difference the allowance let through, where the values are numbers: so a bound
+    /// is read off a run rather than guessed, and a bound far above what the device needs shows as
+    /// one.
+    pub largest: Option<f64>,
 }
 
 /// A site where Metal answered a call and we returned a typed error.
@@ -191,7 +197,10 @@ impl Walk<'_> {
 
     /// Compare a byte region element by element, and its gaps where the layout asks.
     fn bytes(&mut self, path: &str, layout: &ByteLayout, metal: &Value, ours: &Value) {
-        if self.allowed(path, metal, ours) {
+        // Only a difference consults an allowance. A site that matched must not fire one: an
+        // allowance that fires where nothing moved would fail every exact run whose device
+        // announced no notice.
+        if metal != ours && self.allowed(path, metal, ours) {
             return;
         }
         let (Value::Bytes(recorded), Value::Bytes(read)) = (metal, ours) else {
@@ -257,8 +266,10 @@ impl Walk<'_> {
         let covered = |at: usize| -> bool {
             let image = at % layout.image_pitch.max(1) as usize;
             let row = image % layout.row_pitch.max(1) as usize;
+            let first = layout.row_offset as usize;
             image < layout.rows as usize * layout.row_pitch as usize
-                && row < layout.row_elements as usize * layout.element.size() as usize
+                && row >= first
+                && row < first + layout.row_elements as usize * layout.element.size() as usize
         };
         for (at, (expected, actual)) in metal.iter().zip(ours).enumerate() {
             if expected != actual && !covered(at) {
@@ -435,11 +446,25 @@ impl Walk<'_> {
             });
             return false;
         }
-        self.found.announced.push(Announced {
-            path: path.to_owned(),
-            how: allowance.loosening.clone(),
-            justified_by: allowance.justified_by.describe(),
-        });
+        let difference = crate::allowance::difference(metal, ours);
+        match self.found.announced.iter_mut().find(|held| {
+            held.path == path && held.justified_by == allowance.justified_by.describe()
+        }) {
+            Some(held) => {
+                held.count += 1;
+                held.largest = match (held.largest, difference) {
+                    (Some(held), Some(found)) => Some(held.max(found)),
+                    (held, found) => held.or(found),
+                };
+            }
+            None => self.found.announced.push(Announced {
+                path: path.to_owned(),
+                how: allowance.loosening.clone(),
+                justified_by: allowance.justified_by.describe(),
+                count: 1,
+                largest: difference,
+            }),
+        }
         true
     }
 }
