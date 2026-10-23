@@ -23,6 +23,24 @@
 //! as they were.
 //!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
+//!
+//! # A coverage gap, named here because no case can see it
+//!
+//! **A pipeline's declared depth and stencil formats are not tested by anything.** Metal requires
+//! `MTLRenderPipelineDescriptor` to declare them before a pipeline may test or write either, while
+//! our runtime derives the attachment from the render pass descriptor at encode time and does not
+//! need the declaration. The two sides therefore disagreed on those two fields for as long as they
+//! existed -- the Metal side set them, our side set neither -- and **no case's verdict moved when
+//! that was fixed**: `visibility`'s depth rows and `shader_stencil`'s stencil rows answer the same
+//! with the formats forwarded and without, and [`srgb_fetch`]'s depth row answers exactly what its
+//! three-draw row answers.
+//!
+//! So those families cover less than their names suggest: none of them distinguishes a pipeline
+//! with depth from one without. The case that would is a **refusal** case -- state a format that
+//! disagrees with the pass's attachment, or omit it where the pass has one, and compare our typed
+//! error against Metal's, with Metal's own API validation beside it where it also refuses. Nobody
+//! has written it. Until somebody does, those two fields are held by construction alone, by
+//! `tests::the_runtime_side_forwards_every_field_of_a_pipeline_spec`.
 
 pub mod astc_textures;
 pub mod border_swizzles;
@@ -81,6 +99,7 @@ pub mod simdgroup_lockstep;
 pub mod snorm_tile_store;
 pub mod sparse_heaps;
 pub mod sparse_tiles;
+pub mod srgb_fetch;
 pub mod stage_in_regions;
 pub mod surface_fills;
 pub mod swizzled_storage;
@@ -276,6 +295,11 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(sample_positions::all());
     cases.extend(
         fetch_ordered::all()
+            .into_iter()
+            .map(|case| Box::new(case) as Box<dyn Case>),
+    );
+    cases.extend(
+        srgb_fetch::all()
             .into_iter()
             .map(|case| Box::new(case) as Box<dyn Case>),
     );

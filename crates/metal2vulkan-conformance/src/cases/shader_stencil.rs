@@ -48,7 +48,7 @@ use crate::transcript::{
 };
 use metal2vulkan::metal::state::{DepthStencilDescriptor, StencilDescriptor};
 use metal2vulkan::metal::{CompareFunction, PixelFormat, StencilOperation};
-use metal2vulkan_runtime::{LoadAction, StoreAction};
+use metal2vulkan_runtime::LoadAction;
 
 /// The fixture the vertex function comes from: Metal's fullscreen triangle at a depth its vertex
 /// buffer holds.
@@ -215,19 +215,15 @@ impl ShaderStencil {
     fn attachment(&self, target: Handle) -> PassStencil {
         match self.start {
             Start::Cleared => PassStencil::cleared(target, CLEARED),
-            Start::Loaded => PassStencil {
-                texture: target,
-                load: LoadAction::Load,
-                store: StoreAction::Store,
-                // Not read under `Load`, and stated as the clear the earlier pass used so the two
-                // rows' attachments differ in their load action alone.
-                clear: CLEARED,
-                resolve: None,
-                filter: PassStencil::cleared(target, CLEARED).filter,
-                // Metal's default, which these rows say nothing about; the fingerprint writes the
-                // options only where they are not it, so stating it moves no recording.
-                options: PassStencil::cleared(target, CLEARED).options,
-            },
+            // Built from the cleared attachment with the load action changed, rather than stated
+            // field by field: the two rows then differ in their load action alone by construction,
+            // and a field added to `PassStencil` by another family reaches both rows instead of
+            // failing to compile here.
+            Start::Loaded => {
+                let mut stencil = PassStencil::cleared(target, CLEARED);
+                stencil.load = LoadAction::Load;
+                stencil
+            }
         }
     }
 }
