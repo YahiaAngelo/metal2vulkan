@@ -114,7 +114,8 @@ fn morton(x: u64, y: u64, blocks: [u64; 2]) -> u64 {
 }
 
 /// The position Metal's host copies give block (`x`, `y`) of a whole level `blocks` across and
-/// down: Z order with the **y** bit lowest, which is [`morton`] with the axes swapped.
+/// down: Z order with the **y** bit lowest, which is the Morton order above with the axes
+/// swapped.
 pub fn cpu_order(x: u64, y: u64, blocks: [u64; 2]) -> u64 {
     morton(y, x, [blocks[1], blocks[0]])
 }

@@ -25,7 +25,7 @@
 //! **Every row here is valid Metal usage** — the option with a nonzero `bytesPerRow` — so Metal's
 //! own API validation layer lets the whole program run, and the case needs no recorded-only row.
 //! The lane's `bytesPerRow`-of-0 rows, which validation stops and whose order is Metal's own Morton
-//! order, are [`crate::cases::pvrtc_block_order`]; its CPU copies are
+//! order, are not ported and are named as their own packet below; its host copies are
 //! [`crate::cases::pvrtc_cpu_order`].
 //!
 //! **One case per format**, so a venue that holds no texture of one answers its typed refusal there
