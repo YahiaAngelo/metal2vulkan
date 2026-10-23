@@ -414,7 +414,7 @@ narrow refusal that the call's rustdoc describes.
 | `SetFrontFacingWinding` | `setFrontFacingWinding:` | `RenderCommandEncoder::set_front_facing_winding` |
 | `SetLineWidth` | `setLineWidth:` (SPI) | `RenderCommandEncoder::set_line_width`: 1 accepted; anything else refused `AppleOnly::LineWidth` *(partial)* |
 | `SetPointSize` | `setPointSize:` (SPI) | `RenderCommandEncoder::set_point_size`: a no-op, as on Metal |
-| `SetProvokingVertexMode` | `setProvokingVertexMode:` (SPI) | `RenderCommandEncoder::set_provoking_vertex_mode`: modes 0 and 1 drawn as Metal draws them; every other mode, which Metal draws a third way, drawn as 1 and announced (`provoking-vertex-unmatched`) *(partial)* |
+| `SetProvokingVertexMode` | `setProvokingVertexMode:` (SPI) | `RenderCommandEncoder::set_provoking_vertex_mode`: modes 0 and 1 drawn as Metal draws them; every other mode, which Metal draws a third way, drawn as 1 (patches as 0), each draw Metal's third way draws otherwise announced (`provoking-vertex-unmatched`) *(partial)* |
 | `SetRenderPipelineState` | `setRenderPipelineState:` | `RenderCommandEncoder::set_render_pipeline_state` |
 | `SetScissorRect` | `setScissorRect:` | `RenderCommandEncoder::set_scissor_rect` |
 | `SetScissorRects` | `setScissorRects:count:` | `RenderCommandEncoder::set_scissor_rects` |

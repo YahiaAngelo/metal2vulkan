@@ -834,7 +834,7 @@ fn div_ceil(f: &mut FunctionBuilder<'_>, a: Value, b: Value) -> BResult<Value> {
 }
 
 /// Run `each(f, i)` for `i` from `lo` below `hi`, `step` apart (`step` not 0).
-fn for_range<'a>(
+pub(crate) fn for_range<'a>(
     f: &mut FunctionBuilder<'_>,
     u32_: TypeId,
     (lo, hi, step): (Value, Value, Value),
@@ -860,7 +860,7 @@ fn for_range<'a>(
 }
 
 /// Run `then(f)` where `c` holds.
-fn when<'a>(
+pub(crate) fn when<'a>(
     f: &mut FunctionBuilder<'_>,
     c: Value,
     then: impl FnOnce(&mut FunctionBuilder<'_>) -> BResult<()> + 'a,

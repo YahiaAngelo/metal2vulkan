@@ -293,8 +293,8 @@ driver's. Each is open work.
   indexed strip of up to a few thousand positions. On MoltenVK on the M3 Max that is 0.16, 0.24,
   0.65 and 0.71 us more frame time per direct, indexed, indexed strip and indirect draw of two
   triangles than at mode 0 (1.58, 1.72, 1.73 and 1.71 us; host_ab's `provoking`, 2000 draws, 3
-  rounds), and 2.6 us per indexed indirect draw against mode 0's 55 (the index bounds pass's, which
-  a gathered list does not need). A draw no run takes (a longer strip, an indexed indirect strip,
+  rounds), and 2.5 us per indexed indirect draw against mode 0's 4.1 (a run of the index bounds
+  pass, which a gathered list does not need). A draw no run takes (a longer strip, an indexed indirect strip,
   indices an earlier draw of the encoder wrote) takes the index rewrite pass's three dispatches
   between barriers before its render pass: there 77 us per draw.
 

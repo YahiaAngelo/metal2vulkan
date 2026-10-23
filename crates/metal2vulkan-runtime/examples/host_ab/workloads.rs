@@ -3149,6 +3149,7 @@ pub fn provoking<G: Gpu>(g: &G, library: &G::Library, sizes: &Sizes) {
                     "provoking_last_pipeline_draws"
                         | "provoking_listed_draws"
                         | "gathered_draws"
+                        | "bounded_run_draws"
                         | "dispatches"
                         | "pipeline_barriers"
                 ) {

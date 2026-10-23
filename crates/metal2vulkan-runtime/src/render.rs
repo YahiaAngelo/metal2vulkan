@@ -294,7 +294,7 @@ use super::framebuffer_fetch;
 use super::fresh_unwritten::FreshUnwritten;
 use super::function_table::VisibleFunctionTable;
 use super::heap_sets;
-use super::index_bounds::{self, BoundsPass, BoundsSteps};
+use super::index_bounds::{self, Bounded, BoundsPass, BoundsSteps};
 use super::index_rewrite::{self, Listed, RewritePass, RewriteSteps, WrittenList};
 use super::kept_bytes;
 use super::linear_attachment;
@@ -7767,13 +7767,35 @@ impl RenderLowering {
                 {
                     return Err(Error::NotImplemented(RuntimeGap::IndirectDrawArguments));
                 }
-                Some(BoundsPass::new(
-                    &mut self.core,
-                    index,
-                    indirect,
-                    size,
-                    reads,
-                )?)
+                // A draw that reads both in place, which nothing of the encoder wrote behind a
+                // memory barrier, joins a run of the pass, one plan and one fill for the run's
+                // draws; any other takes its own pass, which records before the draw's render
+                // pass instance where it must.
+                let joined = match !self.replaying
+                    && index.in_place()
+                    && indirect.in_place()
+                    && !self.core.uses().written(&reads)
+                {
+                    true => self.core.bounds_run(
+                        index_bounds::BoundsRunRequest {
+                            index,
+                            indirect,
+                            index_size: size,
+                        },
+                        &reads,
+                    )?,
+                    false => None,
+                };
+                Some(match joined {
+                    Some(slot) => Bounded::Run(slot),
+                    None => Bounded::Pass(Box::new(BoundsPass::new(
+                        &mut self.core,
+                        index,
+                        indirect,
+                        size,
+                        reads,
+                    )?)),
+                })
             }
         };
         // The dynamic states the pipeline holds, which the draw records and its secondary's record
@@ -8772,7 +8794,11 @@ impl RenderLowering {
                 .into_iter()
                 .chain(indirect)
                 .filter_map(DrawSource::copy_reads)
-                .chain(bounds.iter().flat_map(|pass| pass.uses().iter().cloned()))
+                .chain(
+                    bounds
+                        .iter()
+                        .flat_map(|bounded| bounded.uses().iter().cloned()),
+                )
                 .chain(rewrite.iter().flat_map(|pass| pass.uses().iter().cloned()))
                 .collect();
             self.core.uses().written(&reads) && !self.unordered.written(&reads)
@@ -9238,12 +9264,16 @@ impl RenderLowering {
                 }
             }
             self.current.tile_memory |= reads_tile_memory;
-            if let Some(pass) = bounds {
-                let pass = pass.into_steps(&mut self.core);
-                match before_instance {
-                    true => self.steps_before().push(Before::Bounds(pass)),
-                    false => pass.record(&mut self.core),
+            match bounds {
+                Some(Bounded::Pass(pass)) => {
+                    let pass = pass.into_steps(&mut self.core);
+                    match before_instance {
+                        true => self.steps_before().push(Before::Bounds(pass)),
+                        false => pass.record(&mut self.core),
+                    }
                 }
+                Some(Bounded::Run(slot)) => slot.announce(self.core.device()),
+                None => {}
             }
             if let Some(pass) = rewrite {
                 let pass = pass.into_steps(&mut self.core);

@@ -416,8 +416,9 @@ degradations! {
         IndirectIndexBoundsPass = "indirect-index-bounds-pass", Performance,
             "two dispatches before the pass write two draws' arguments and the indices past the \
              buffer into the command buffer's index pool (a sixty-fourth of the device's largest \
-             device-local heap), between barriers, and the draw is two indirect draws; a draw \
-             the pool cannot hold fails the command buffer";
+             device-local heap), between barriers, two for a run of such draws over one arguments \
+             and one index buffer, and the draw is two indirect draws; a draw the pool cannot \
+             hold fails the command buffer";
         /// A mesh render pipeline's draws on a device without `VK_EXT_mesh_shader`
         /// (`render/mesh.rs`).
         EmulatedMeshDraws = "emulated-mesh-draws", Performance,
@@ -2040,9 +2041,11 @@ degradations! {
         /// viewport a vertex function selects where the pipeline selects it in a synthesized
         /// geometry stage (a device without `shaderOutputLayer` or `shaderOutputViewportIndex`, an
         /// index that differs between a primitive's vertices, or weights the stage writes), from
-        /// each primitive's first vertex. And on every device, a mode past 1, its top bit set or
-        /// not, which Metal draws a third way that differs between pipeline states (every line's
-        /// flat inputs and `[[primitive_id]]` 0) and the runtime as mode 1: announced at the call.
+        /// each primitive's first vertex. And on every device, a draw at a mode past 1, which
+        /// Metal draws a third way and the runtime as mode 1, whose shape and pipeline state Metal
+        /// draws otherwise than mode 1 (a strip's odd triangles, every line's flat inputs and
+        /// `[[primitive_id]]` 0, sized points, the middle vertex of a triangle whose pipeline
+        /// selects its slice or viewport, mesh draws unmeasured): announced at the draw.
         ProvokingVertexUnmatched = "provoking-vertex-unmatched", Precision,
             "flat inputs or a computed primitive ID read another vertex than Metal's, or \
              barycentric weights come in another order than Metal's or round otherwise";

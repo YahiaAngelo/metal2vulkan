@@ -919,54 +919,74 @@ fn draws_take_metal_s_last_vertex_listed_through_a_geometry_stage() {
     run(true, Weights::Withheld);
 }
 
-/// A mode past 1, its top bit set or not, which Metal draws a third way, is drawn as mode 1, bit
-/// for bit, and announced at the call (`provoking-vertex-unmatched`), on the cfg's device.
+/// The modes past 1 of [`the_third_way_is_drawn_as_mode_1_announced_where_metal_differs`], its
+/// top bit set or not.
+const THIRD: [u64; 6] = [
+    2,
+    0xffff_ffff,
+    i64::MAX as u64,
+    1 << 63,
+    u64::MAX - 1,
+    u64::MAX,
+];
+
+/// A mode past 1, which Metal draws a third way, is drawn as mode 1, bit for bit, on the cfg's
+/// device, under `pv_flat` (flat inputs and the primitive ID). A triangle list and a fan, which
+/// Metal's third way draws as mode 1 there, announce nothing; a triangle strip and a line strip,
+/// which it draws otherwise, are announced at their draws (`provoking-vertex-unmatched`), each on
+/// a device of its own, as a device announces a kind once.
 #[test]
-fn the_third_way_is_drawn_as_mode_1_announced() {
-    let cache = ScratchCache::new().unwrap();
-    let messages = Messages::default();
+fn the_third_way_is_drawn_as_mode_1_announced_where_metal_differs() {
+    use DrawPrimitiveType::{Public, TriangleFan};
+    let silent = vec![
+        Case::direct(Public(PrimitiveType::Triangle), Form::Direct, 12, 2),
+        Case::direct(TriangleFan, Form::Direct, 9, 1),
+    ];
+    let announced = [
+        Case::direct(Public(PrimitiveType::TriangleStrip), Form::Direct, 12, 2),
+        Case::direct(Public(PrimitiveType::LineStrip), Form::Direct, 9, 1),
+    ];
+    let third = |messages: &Messages| {
+        messages
+            .take_notices()
+            .iter()
+            .filter_map(|m| m.degradation.as_ref())
+            .filter(|notice| notice.degradation == Degradation::ProvokingVertexUnmatched)
+            .filter(|notice| notice.object.contains("a mode past 1"))
+            .count()
+    };
+    for (cases, announces) in [(silent, false)]
+        .into_iter()
+        .chain(announced.into_iter().map(|case| (vec![case], true)))
     {
-        let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), |_| {}).unwrap();
-        let name = device.name().to_owned();
-        let lane = Lane::new(device);
-        let pipeline = lane.pipeline(FRAGMENTS[0]);
-        let strip = DrawPrimitiveType::Public(PrimitiveType::TriangleStrip);
-        let line_strip = DrawPrimitiveType::Public(PrimitiveType::LineStrip);
-        let cases = [
-            Case::direct(strip, Form::Direct, 12, 2),
-            Case::direct(line_strip, Form::Direct, 9, 1),
-        ];
-        let at = |case: &Case, mode| lane.draw(&pipeline, case, mode).unwrap();
-        let last: Vec<Texels> = cases.iter().map(|case| at(case, 1)).collect();
-        let third = |messages: &Messages| {
-            messages
-                .take_notices()
-                .iter()
-                .filter_map(|m| m.degradation.as_ref())
-                .filter(|notice| notice.degradation == Degradation::ProvokingVertexUnmatched)
-                .filter(|notice| notice.object.contains("a mode past 1"))
-                .count()
-        };
-        assert_eq!(third(&messages), 0, "{name}");
-        for mode in [
-            2,
-            0xffff_ffff,
-            i64::MAX as u64,
-            1 << 63,
-            u64::MAX - 1,
-            u64::MAX,
-        ] {
-            for (case, last) in cases.iter().zip(&last) {
-                assert!(at(case, mode) == *last, "{case:?} at {mode:#x} on {name}");
+        let cache = ScratchCache::new().unwrap();
+        let messages = Messages::default();
+        {
+            let device =
+                validated_device_with(TEST_DEVICE, &messages, cache.path(), |_| {}).unwrap();
+            let name = device.name().to_owned();
+            let lane = Lane::new(device);
+            let pipeline = lane.pipeline(FRAGMENTS[0]);
+            let at = |case: &Case, mode| lane.draw(&pipeline, case, mode).unwrap();
+            let last: Vec<Texels> = cases.iter().map(|case| at(case, 1)).collect();
+            assert_eq!(third(&messages), 0, "{name}");
+            for mode in THIRD {
+                for (case, last) in cases.iter().zip(&last) {
+                    assert!(at(case, mode) == *last, "{case:?} at {mode:#x} on {name}");
+                }
             }
+            assert_eq!(
+                third(&messages) > 0,
+                announces,
+                "{cases:?} on {name}: announced"
+            );
         }
-        assert!(third(&messages) > 0, "{name}: not announced");
+        let reported = messages.take();
+        assert!(
+            reported.is_empty(),
+            "the validation layer reported: {reported:#?}"
+        );
     }
-    let reported = messages.take();
-    assert!(
-        reported.is_empty(),
-        "the validation layer reported: {reported:#?}"
-    );
 }
 
 /// A draw that makes no primitive, too few vertices or indices for one (a line of one vertex,

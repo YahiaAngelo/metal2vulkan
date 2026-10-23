@@ -433,7 +433,7 @@ impl ShapeInputs<'_> {
             bias,
             compensation,
         );
-        let provoking_last = provoking::natively_last(device, self.state, pipeline);
+        let provoking_last = provoking::natively_last(device, self.state, (pipeline, assembly));
         Ok(DrawSettings {
             unsized_points,
             topology,
