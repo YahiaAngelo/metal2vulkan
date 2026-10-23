@@ -349,6 +349,161 @@ pub trait Side {
         let _ = work;
         Err(Failure::unavailable("work"))
     }
+
+    /// `newRenderPipelineStateWithMeshDescriptor:options:reflection:error:` of the library's
+    /// functions, over `functions.attachments` color attachments of [`TARGET_FORMAT`].
+    fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {
+        let _ = (library, functions);
+        Err(Failure::unavailable("mesh_pipeline"))
+    }
+
+    /// `newTextureWithDescriptor:` of a 2D [`TARGET_FORMAT`] render target of `width` by
+    /// `height`, whose bytes the host reads.
+    ///
+    /// The target joins the same handle space as [`texture_2d`](Side::texture_2d), so
+    /// [`read_texture`](Side::read_texture) reads it back and a texture has one pool however it
+    /// was made. Only the descriptor differs: a target is a render target of
+    /// [`TARGET_FORMAT`], not a shader-read-and-write texture of the case's format.
+    fn render_target(&mut self, width: u32, height: u32) -> Answer<Handle> {
+        let _ = (width, height);
+        Err(Failure::unavailable("render_target"))
+    }
+
+    /// One command buffer with one render pass over `targets`, each cleared to zero and stored,
+    /// whose commands are `steps` in order, then `endEncoding`, `commit` and a bounded wait.
+    ///
+    /// Every step is encoded, whatever an earlier one answered, because that is what the probe
+    /// does: a refused draw leaves the pass and its other commands as they were, and the answer
+    /// names which step refused ([`PassOutcome::refused`]).
+    fn mesh_pass(&mut self, targets: &[Handle], steps: &[MeshStep]) -> Answer<PassOutcome> {
+        let _ = (targets, steps);
+        Err(Failure::unavailable("mesh_pass"))
+    }
+}
+
+/// The color format every mesh case's attachments take: `MTLPixelFormatRGBA32Uint`, whose texel is
+/// four 32-bit words, so what a shader stores is read back as the words it stored and a diff names
+/// the word rather than a byte.
+pub const TARGET_FORMAT: &str = "RGBA32Uint";
+
+/// The bytes one [`TARGET_FORMAT`] texel takes.
+pub const TARGET_TEXEL: u32 = 16;
+
+/// The functions of a mesh render pipeline, as a case names them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MeshFunctions<'a> {
+    /// The object function, where the pipeline has one.
+    pub object: Option<&'a str>,
+    pub mesh: &'a str,
+    pub fragment: &'a str,
+    /// The color attachments of [`TARGET_FORMAT`] the pipeline writes.
+    pub attachments: u32,
+}
+
+/// One command a case encodes into a render pass.
+///
+/// The stage and scope fields are the raw `MTLRenderStages` and `MTLBarrierScope` bits, so the
+/// vocabulary names neither API's types and a case reads as the Metal call it makes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MeshStep {
+    /// `setRenderPipelineState:`.
+    Pipeline(Handle),
+    /// `setObjectBuffer:offset:atIndex:`.
+    ObjectBuffer {
+        buffer: Handle,
+        offset: u64,
+        index: u32,
+    },
+    /// `setObjectBytes:length:atIndex:`.
+    ObjectBytes { bytes: Vec<u8>, index: u32 },
+    /// `setMeshBuffer:offset:atIndex:`.
+    MeshBuffer {
+        buffer: Handle,
+        offset: u64,
+        index: u32,
+    },
+    /// `setFragmentBuffer:offset:atIndex:`.
+    FragmentBuffer {
+        buffer: Handle,
+        offset: u64,
+        index: u32,
+    },
+    /// `drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`.
+    DrawThreadgroups {
+        groups: [u32; 3],
+        object: [u32; 3],
+        mesh: [u32; 3],
+    },
+    /// `drawMeshThreads:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`.
+    DrawThreads {
+        threads: [u32; 3],
+        object: [u32; 3],
+        mesh: [u32; 3],
+    },
+    /// `drawMeshThreadgroupsWithIndirectBuffer:indirectBufferOffset:
+    /// threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`.
+    DrawIndirect {
+        buffer: Handle,
+        offset: u64,
+        object: [u32; 3],
+        mesh: [u32; 3],
+    },
+    /// `memoryBarrierWithScope:afterStages:beforeStages:`.
+    BarrierScope { scope: u64, after: u64, before: u64 },
+    /// `memoryBarrierWithResources:count:afterStages:beforeStages:` over buffers.
+    BarrierResources {
+        buffers: Vec<Handle>,
+        after: u64,
+        before: u64,
+    },
+}
+
+impl MeshStep {
+    /// The site name the step's answer is emitted at: the call it makes, so a refusal reads as the
+    /// Metal call we refused.
+    pub fn call(&self) -> &'static str {
+        match self {
+            MeshStep::Pipeline(_) => "setRenderPipelineState",
+            MeshStep::ObjectBuffer { .. } => "setObjectBuffer",
+            MeshStep::ObjectBytes { .. } => "setObjectBytes",
+            MeshStep::MeshBuffer { .. } => "setMeshBuffer",
+            MeshStep::FragmentBuffer { .. } => "setFragmentBuffer",
+            MeshStep::DrawThreadgroups { .. } => "drawMeshThreadgroups",
+            MeshStep::DrawThreads { .. } => "drawMeshThreads",
+            MeshStep::DrawIndirect { .. } => "drawMeshThreadgroupsWithIndirectBuffer",
+            MeshStep::BarrierScope { .. } => "memoryBarrierWithScope",
+            MeshStep::BarrierResources { .. } => "memoryBarrierWithResources",
+        }
+    }
+}
+
+/// `MTLBarrierScopeBuffers`.
+pub const SCOPE_BUFFERS: u64 = 0x1;
+
+/// `MTLRenderStageVertex`.
+pub const STAGE_VERTEX: u64 = 0x1;
+
+/// `MTLRenderStageFragment`.
+pub const STAGE_FRAGMENT: u64 = 0x2;
+
+/// `MTLRenderStageObject`.
+pub const STAGE_OBJECT: u64 = 0x8;
+
+/// `MTLRenderStageMesh`.
+pub const STAGE_MESH: u64 = 0x10;
+
+/// What one render pass came to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PassOutcome {
+    /// What each step of the pass answered, in the order the case gave them: `None` where the call
+    /// answered, the typed error where it did not. A side whose calls cannot refuse (Metal's
+    /// encoder methods return nothing) answers `None` throughout, so a refusal of ours compares
+    /// against Metal's answer and reads as a refusal rather than a divergence.
+    pub refused: Vec<Option<Failure>>,
+    /// The command buffer's status after the bounded wait, as the variant of its name.
+    pub status: Value,
+    /// The command buffer's error after it completed, where it reported one.
+    pub error: Option<Value>,
 }
 
 /// What an indirect render command's getters answered, beside what the whole record holds.

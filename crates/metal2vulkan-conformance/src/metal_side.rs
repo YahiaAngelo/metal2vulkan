@@ -13,7 +13,8 @@
 //! ours, and a case that holds one must name what justifies it.
 
 use crate::case::{
-    Answer, Bindings, Failure, Handle, ShaderSource, Side, StageInRegion, StageInput, Venue,
+    Answer, Bindings, Failure, Handle, MeshFunctions, MeshStep, PassOutcome, ShaderSource, Side,
+    StageInRegion, StageInput, Venue,
 };
 use crate::transcript::Value;
 use metal2vulkan::metal::PixelFormat;
@@ -21,11 +22,13 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSString, NSURL};
 use objc2_metal::{
-    MTLAttributeFormat, MTLBuffer, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder,
-    MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineDescriptor,
-    MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDevice, MTLIndexType, MTLLibrary,
-    MTLOrigin, MTLPipelineOption, MTLPixelFormat, MTLRegion, MTLResourceOptions, MTLSize,
-    MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode, MTLTexture,
+    MTLAttributeFormat, MTLBarrierScope, MTLBuffer, MTLClearColor, MTLCommandBuffer,
+    MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder,
+    MTLComputePipelineDescriptor, MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDevice,
+    MTLIndexType, MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLOrigin,
+    MTLPipelineOption, MTLPixelFormat, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
+    MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLSize,
+    MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLTexture,
     MTLTextureDescriptor, MTLTextureUsage,
 };
 
@@ -42,6 +45,8 @@ pub struct MetalSide {
     buffers: Vec<Retained<ProtocolObject<dyn MTLBuffer>>>,
     textures: Vec<Retained<ProtocolObject<dyn MTLTexture>>>,
     command_buffers: Vec<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
+    /// The mesh render pipeline states the case has made.
+    mesh_pipelines: Vec<Retained<ProtocolObject<dyn MTLRenderPipelineState>>>,
     /// The scratch directory the metallibs are built in, removed when the side is dropped.
     scratch: Scratch,
 }
@@ -62,6 +67,7 @@ impl MetalSide {
             buffers: Vec::new(),
             textures: Vec::new(),
             command_buffers: Vec::new(),
+            mesh_pipelines: Vec::new(),
             scratch: Scratch::new()?,
         })
     }
@@ -505,6 +511,265 @@ impl Side for MetalSide {
 
     fn announced(&mut self) -> Vec<String> {
         Vec::new()
+    }
+
+    fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = |name: &str| {
+            library
+                .newFunctionWithName(&NSString::from_str(name))
+                .ok_or_else(|| Failure::named("NoSuchFunction", name.to_owned()))
+        };
+        let descriptor = MTLMeshRenderPipelineDescriptor::new();
+        // SAFETY: each function is of this library, and the descriptor is this call's own.
+        unsafe {
+            descriptor.setMeshFunction(Some(&*function(functions.mesh)?));
+            if let Some(object) = functions.object {
+                descriptor.setObjectFunction(Some(&*function(object)?));
+            }
+            descriptor.setFragmentFunction(Some(&*function(functions.fragment)?));
+            let attachments = descriptor.colorAttachments();
+            for at in 0..functions.attachments as usize {
+                attachments
+                    .objectAtIndexedSubscript(at)
+                    .setPixelFormat(TARGET_PIXEL_FORMAT);
+            }
+        }
+        let state = self
+            .device
+            .newRenderPipelineStateWithMeshDescriptor_options_reflection_error(
+                &descriptor,
+                MTLPipelineOption::None,
+                None,
+            )
+            .map_err(|error| Failure::named("NewMeshRenderPipelineState", error.to_string()))?;
+        Ok(keep(&mut self.mesh_pipelines, state))
+    }
+
+    fn render_target(&mut self, width: u32, height: u32) -> Answer<Handle> {
+        // SAFETY: the extent is a case's own small one, and the descriptor is this call's own.
+        let descriptor = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                TARGET_PIXEL_FORMAT,
+                width as usize,
+                height as usize,
+                false,
+            )
+        };
+        descriptor.setUsage(MTLTextureUsage::RenderTarget);
+        descriptor.setStorageMode(MTLStorageMode::Shared);
+        let texture = self
+            .device
+            .newTextureWithDescriptor(&descriptor)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewTextureWithDescriptor",
+                    format!("{width}x{height} returned nil"),
+                )
+            })?;
+        Ok(keep(&mut self.textures, texture))
+    }
+
+    fn mesh_pass(&mut self, targets: &[Handle], steps: &[MeshStep]) -> Answer<PassOutcome> {
+        let attachments: Vec<Retained<ProtocolObject<dyn MTLTexture>>> = targets
+            .iter()
+            .map(|handle| self.held_texture(*handle).map(Retained::from))
+            .collect::<Answer<Vec<_>>>()?;
+        let pass = MTLRenderPassDescriptor::renderPassDescriptor();
+        for (at, target) in attachments.iter().enumerate() {
+            // SAFETY: `at` is below the eight attachments every Metal pass holds.
+            let attachment = unsafe { pass.colorAttachments().objectAtIndexedSubscript(at) };
+            attachment.setTexture(Some(target));
+            attachment.setLoadAction(MTLLoadAction::Clear);
+            attachment.setClearColor(MTLClearColor {
+                red: 0.0,
+                green: 0.0,
+                blue: 0.0,
+                alpha: 0.0,
+            });
+            attachment.setStoreAction(MTLStoreAction::Store);
+        }
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+        let encoder = command_buffer
+            .renderCommandEncoderWithDescriptor(&pass)
+            .ok_or_else(|| Failure::named("RenderCommandEncoder", "returned nil".to_owned()))?;
+        // Metal's encoder methods answer nothing, so no step of this side can refuse. A refusal
+        // of ours then compares against Metal's answer and reads as a refusal.
+        let refused = vec![None; steps.len()];
+        for step in steps {
+            self.encode_step(&encoder, step)?;
+        }
+        encoder.endEncoding();
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        let error = command_buffer
+            .error()
+            .map(|error| Value::unit_variant(format!("code {}", error.code())));
+        let status = Value::unit_variant(status_word(command_buffer.status()));
+        keep(&mut self.command_buffers, command_buffer);
+        Ok(PassOutcome {
+            refused,
+            status,
+            error,
+        })
+    }
+}
+
+/// The pixel format [`crate::case::TARGET_FORMAT`] names, as Metal spells it.
+const TARGET_PIXEL_FORMAT: MTLPixelFormat = MTLPixelFormat::RGBA32Uint;
+
+impl MetalSide {
+    /// Encode one of a case's render-pass steps into `encoder`.
+    fn encode_step(
+        &self,
+        encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
+        step: &MeshStep,
+    ) -> Answer<()> {
+        let size = |axes: [u32; 3]| MTLSize {
+            width: axes[0] as usize,
+            height: axes[1] as usize,
+            depth: axes[2] as usize,
+        };
+        match step {
+            MeshStep::Pipeline(state) => {
+                let state = self.mesh_pipelines.get(state.0 as usize).ok_or_else(|| {
+                    Failure::named("NoSuchHandle", format!("mesh pipeline {}", state.0))
+                })?;
+                encoder.setRenderPipelineState(state);
+            }
+            MeshStep::ObjectBuffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let buffer = self.held(*buffer)?;
+                // SAFETY: the buffer is at least as long as the function's binding, and the
+                // encoder outlives the call.
+                unsafe {
+                    encoder.setObjectBuffer_offset_atIndex(
+                        Some(buffer),
+                        *offset as usize,
+                        *index as usize,
+                    )
+                };
+            }
+            MeshStep::ObjectBytes { bytes, index } => {
+                let pointer =
+                    std::ptr::NonNull::new(bytes.as_ptr().cast::<std::ffi::c_void>().cast_mut())
+                        .ok_or_else(|| Failure::named("NoBytes", "an empty inline binding"))?;
+                // SAFETY: `bytes` lives for the call, which copies them.
+                unsafe {
+                    encoder.setObjectBytes_length_atIndex(pointer, bytes.len(), *index as usize)
+                };
+            }
+            MeshStep::MeshBuffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let buffer = self.held(*buffer)?;
+                // SAFETY: as the object buffer's.
+                unsafe {
+                    encoder.setMeshBuffer_offset_atIndex(
+                        Some(buffer),
+                        *offset as usize,
+                        *index as usize,
+                    )
+                };
+            }
+            MeshStep::FragmentBuffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let buffer = self.held(*buffer)?;
+                // SAFETY: as the object buffer's.
+                unsafe {
+                    encoder.setFragmentBuffer_offset_atIndex(
+                        Some(buffer),
+                        *offset as usize,
+                        *index as usize,
+                    )
+                };
+            }
+            MeshStep::DrawThreadgroups {
+                groups,
+                object,
+                mesh,
+            } => encoder
+                .drawMeshThreadgroups_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
+                    size(*groups),
+                    size(*object),
+                    size(*mesh),
+                ),
+            MeshStep::DrawThreads {
+                threads,
+                object,
+                mesh,
+            } => encoder.drawMeshThreads_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
+                size(*threads),
+                size(*object),
+                size(*mesh),
+            ),
+            MeshStep::DrawIndirect {
+                buffer,
+                offset,
+                object,
+                mesh,
+            } => {
+                let buffer = self.held(*buffer)?;
+                // SAFETY: the buffer holds three 32-bit counts at the offset, which the case
+                // wrote before the pass.
+                unsafe {
+                    encoder.drawMeshThreadgroupsWithIndirectBuffer_indirectBufferOffset_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
+                        buffer,
+                        *offset as usize,
+                        size(*object),
+                        size(*mesh),
+                    );
+                }
+            }
+            MeshStep::BarrierScope {
+                scope,
+                after,
+                before,
+            } => encoder.memoryBarrierWithScope_afterStages_beforeStages(
+                MTLBarrierScope(*scope as usize),
+                MTLRenderStages(*after as usize),
+                MTLRenderStages(*before as usize),
+            ),
+            MeshStep::BarrierResources {
+                buffers,
+                after,
+                before,
+            } => {
+                let over: Vec<&ProtocolObject<dyn MTLResource>> = buffers
+                    .iter()
+                    .map(|handle| self.held(*handle).map(ProtocolObject::from_ref))
+                    .collect::<Answer<Vec<_>>>()?;
+                let mut pointers: Vec<std::ptr::NonNull<ProtocolObject<dyn MTLResource>>> =
+                    over.iter().map(|resource| (*resource).into()).collect();
+                let first = std::ptr::NonNull::new(pointers.as_mut_ptr())
+                    .ok_or_else(|| Failure::named("NoResources", "an empty barrier"))?;
+                // SAFETY: `pointers` holds exactly `pointers.len()` resource pointers, each
+                // retained by `over` for the whole call.
+                unsafe {
+                    encoder.memoryBarrierWithResources_count_afterStages_beforeStages(
+                        first,
+                        pointers.len(),
+                        MTLRenderStages(*after as usize),
+                        MTLRenderStages(*before as usize),
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 }
 
