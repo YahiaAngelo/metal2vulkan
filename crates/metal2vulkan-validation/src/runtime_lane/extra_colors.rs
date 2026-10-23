@@ -16,10 +16,19 @@
 //! - **A color of the pipeline the pass lacks** is dropped: `fc_fragment_gated_color` with both
 //!   outputs on, in a pass of color 0 alone, stores in color 0 what the same function with its
 //!   second output off stores.
+//! - **A state that rasterizes nothing** (`rasterizationEnabled` NO, so a `void` vertex function
+//!   and no fragment stage) binds in a pass of any colors it does not name, at any sample count,
+//!   and its draws store into none of them: it covers no sample. Metal's API validation accepts it
+//!   and its stored bytes and visibility counts are those of the pass without the draw (measured
+//!   on an M3 Max under macOS 27.0.1, through the consumer's Metal platform, over passes of 1 and
+//!   8 colors of mixed formats, 2 and 4 samples, depth, stencil or both, a two-slice target,
+//!   vertex amplification, two viewports, a memoryless attachment, imageblocks and a tile
+//!   dispatch; empty draws alone). A non-empty draw of such a state is unmeasured, and draws
+//!   nothing here either.
 //! - **Refused** as Metal's validation refuses them: a color of the pass in another format than
 //!   the pipeline's (plain Metal stores the pipeline's encoding into the pass's bytes, which no
-//!   Vulkan attachment does), and a color of the pass a pipeline without a fragment function
-//!   lacks (unmeasured).
+//!   Vulkan attachment does), and a color of the pass a pipeline that rasterizes without a
+//!   fragment function lacks (unmeasured).
 
 use super::memoryless::memoryless_msaa;
 use super::resolves::{lane, quiet, Lane, Shape, MSAA, ONE};
@@ -394,6 +403,59 @@ fn colors_metal_stores_otherwise_are_refused() {
         },
     )
     .unwrap();
+    quiet(lane, &messages);
+}
+
+/// A state that rasterizes nothing binds in a pass of colours it does not name, at any sample
+/// count, and its draws store into none of them (the module docs): a state of no colour, one
+/// sample and a `void` vertex function binds in a one-colour pass of one sample and of four, and a
+/// draw of no vertex leaves the pass's colour as its clear.
+#[test]
+fn a_state_that_rasterizes_nothing_binds_in_a_pass_of_any_color() {
+    let (messages, _cache, lane) = lane();
+    let name = lane.device.name().to_owned();
+    let vertex = library(&lane, "rvc_draw_bases")
+        .new_function_with_name("draw_bases_in_a_vertex_function")
+        .unwrap()
+        .function_descriptor();
+    let mut descriptor = RenderPipelineDescriptor::new(StageSource::Function(vertex));
+    descriptor.rasterization_enabled = false;
+    let unrasterized = lane
+        .device
+        .new_render_pipeline_state(&descriptor, &PipelineOptions::default())
+        .unwrap();
+    // The void vertex function's buffer: a draw of no vertex never runs it, and never writes.
+    let empty_draw = |lane: &Lane, descriptor: &RenderPassDescriptor| {
+        lane.run(descriptor, |lane, encoder, held: &mut Vec<Buffer>| {
+            let out = super::buffer_with(&lane.device, &[0; 512]).unwrap();
+            encoder.set_vertex_buffer(Some(&out), 0, 0).unwrap();
+            encoder.set_render_pipeline_state(&unrasterized).unwrap();
+            encoder
+                .draw_primitives(PrimitiveType::Triangle, 0, 0, 1, 0)
+                .unwrap();
+            held.push(out);
+        })
+        .unwrap();
+    };
+    // One sample: the pass's colour keeps its clear.
+    let color = target(&lane, ONE);
+    empty_draw(&lane, &pass(&[(&color, green(), StoreAction::Store, None)]));
+    let cleared = vec![[0, 0xff, 0, 0xff]; 16];
+    assert_eq!(texels(&lane, &color), cleared, "one sample on {name}");
+    // Four samples, the state's one: it binds there too, and the resolve is the clear.
+    let msaa = target(&lane, MSAA);
+    let resolved = target(&lane, ONE);
+    empty_draw(
+        &lane,
+        &pass(&[(
+            &msaa,
+            green(),
+            StoreAction::MultisampleResolve,
+            Some(&resolved),
+        )]),
+    );
+    assert_eq!(texels(&lane, &resolved), cleared, "four samples on {name}");
+    eprintln!("an unrasterized state of no color binds in both passes on {name}, storing nothing");
     quiet(lane, &messages);
 }
 

@@ -2174,12 +2174,14 @@ impl ShapeInputs<'_> {
         }
         // A color of the pass at no place of the state's record: zeroed at each draw's covered
         // samples or kept, as plain Metal stores it (`zeroed_colors`); refused for a state that
-        // writes no color and a mesh render pipeline's state (unmeasured). A color of the
-        // pipeline at no place of the pass's: its output is dropped, as plain Metal drops it, by
-        // the variant `dropped_colors` names, unless the fragment function reads that color or
-        // the state is a mesh render pipeline's (not built).
+        // rasterizes and writes no color, and a mesh render pipeline's state (unmeasured). A state
+        // that rasterizes nothing covers no sample, so it stores into no attachment: it binds in a
+        // pass of any colors it does not name, and its draws leave every one of them as they were
+        // (`unrasterized.rs`). A color of the pipeline at no place of the pass's: its output is
+        // dropped, as plain Metal drops it, by the variant `dropped_colors` names, unless the
+        // fragment function reads that color or the state is a mesh render pipeline's (not built).
         if let Some(&index) = routing.uncovered.values().next() {
-            if !draw_shape::writes_colors(pipeline) || mesh {
+            if mesh || (!draw_shape::writes_colors(pipeline) && !graphics.rasterizer_discard) {
                 return Err(refused(index));
             }
             // A pass color the draw keeps takes a blend element that writes nothing
@@ -2254,8 +2256,9 @@ impl ShapeInputs<'_> {
         // (one the state lacks, or another format), and a draw whose state names one the pass
         // lacks against the pass's hidden ones, as the pass's render pass instance does here (Metal
         // probes). A state of more samples in a pass of one is its single-sample twin here where
-        // Metal draws it as one (`drawn_as`).
-        if descriptor.raster_sample_count() != self.layout.samples {
+        // Metal draws it as one (`drawn_as`). A state that rasterizes nothing has no samples to
+        // draw at, and Metal binds it in a pass of any sample count (`unrasterized.rs`).
+        if descriptor.raster_sample_count() != self.layout.samples && !graphics.rasterizer_discard {
             return Err(draw_problem(call, DrawProblem::SampleCount));
         }
         // Its formats are the pass's, so a state without an explicit imageblock packs as the
