@@ -44,6 +44,7 @@ use crate::runtime_lane::resolves::{lane_with, quiet, Lane};
 use crate::runtime_lane::WAIT;
 use crate::runtime_lane::{buffer_with, Messages};
 use metal2vulkan::error::Needs;
+use metal2vulkan::metal::format::WordAttachment;
 use metal2vulkan::metal::{
     BlendFactor, BlendOperation, ColorWriteMask, PixelFormat, PrimitiveType, TextureUsage,
 };
@@ -899,7 +900,11 @@ fn srgb_blends(formats: &[(PixelFormat, &[usize])]) {
             }
         }
     }
-    assert!(drawn > 0, "no draw on {device}");
+    // A device that renders none of the formats but through its word view refuses each pipeline
+    // (printed); one that renders any draws.
+    let profile = lane.device.compile_device().profile();
+    let renders = (formats.iter()).any(|&(pf, _)| WordAttachment::of(pf, profile).is_none());
+    assert!(drawn > 0 || !renders, "no draw on {device}");
     let _ = messages.take_notices();
     quiet(lane, &messages);
 }
