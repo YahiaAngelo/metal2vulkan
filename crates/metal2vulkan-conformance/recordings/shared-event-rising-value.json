@@ -1,0 +1,211 @@
+{
+  "format": 1,
+  "case": "shared-event-rising-value",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "label",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "42ae984671b4be2a00ba84afac4613d28c462c2a2f869cd27f2860351f8b5668"
+                        }
+                      }
+                    },
+                    {
+                      "name": "host-sets",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "54373e62517bcc41fba89fac4b9a8f42fd67996719600607a68fcdb772f283b8"
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu-signals",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ccc0b60854286198c25702db8a8d08387e4d2d3b198cc8218b543c5030249963"
+                        }
+                      }
+                    },
+                    {
+                      "name": "host-waits-for",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "c0dc12cf03e40dfbeabdfb14fbd68710b3cdd28707cab5d20bf921fec4f8e896"
+                        }
+                      }
+                    },
+                    {
+                      "name": "wait-bound-millis",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a111f275cc2e7588000001d300a31e76336d15b9d314cd1a1d8f3d3556975eed"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "rising-value",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "label",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Some",
+                            "payload": {
+                              "lines": [
+                                "conformance-rising-value"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "signaled-value/new",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "signaled-value/after-host-sets",
+                      "observed": {
+                        "value": {
+                          "uint": 5
+                        }
+                      }
+                    },
+                    {
+                      "name": "signaled-value/after-gpu-signal-0-of-3",
+                      "observed": {
+                        "value": {
+                          "uint": 5
+                        }
+                      }
+                    },
+                    {
+                      "name": "signaled-value/after-gpu-signal-1-of-5",
+                      "observed": {
+                        "value": {
+                          "uint": 5
+                        }
+                      }
+                    },
+                    {
+                      "name": "wait-until-signaled-value/3",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    },
+                    {
+                      "name": "wait-until-signaled-value/5",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    },
+                    {
+                      "name": "wait-until-signaled-value/6",
+                      "observed": {
+                        "value": {
+                          "bool": false
+                        }
+                      }
+                    },
+                    {
+                      "name": "signaled-value/after-gpu-signal-of-u64-max",
+                      "observed": {
+                        "value": {
+                          "uint": 18446744073709551615
+                        }
+                      }
+                    },
+                    {
+                      "name": "wait-until-signaled-value/u64-max",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

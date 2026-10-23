@@ -44,6 +44,7 @@ pub mod pixel_samplers;
 pub mod rate_maps;
 pub mod rgb10a2_srgb;
 pub mod sample_fills;
+pub mod shared_events;
 pub mod stage_in_regions;
 pub mod surface_fills;
 pub mod texture_accesses;
@@ -137,6 +138,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in handler_waits::all() {
         cases.push(Box::new(case));
     }
+    cases.push(Box::new(shared_events::rising_value()));
     cases
 }
 
