@@ -94,6 +94,10 @@ pub struct MetalSide {
     /// another name for one of the pools above, and not another name for the depth and stencil
     /// states either.
     heaps: Vec<Retained<ProtocolObject<dyn MTLHeap>>>,
+    /// The IOSurfaces the case's plane textures lie over. Not a pool a handle names: a surface is
+    /// not a case's object at all — the case states a buffer, and this side turns it into the
+    /// surface Metal needs. They are kept so a surface outlives the texture that reads it.
+    surfaces: Vec<crate::metal_surface::Surface>,
     /// The scratch directory the metallibs are built in, removed when the side is dropped.
     scratch: Scratch,
 }
@@ -144,6 +148,7 @@ impl MetalSide {
             argument_residents: Vec::new(),
             depth_stencil_states: Vec::new(),
             heaps: Vec::new(),
+            surfaces: Vec::new(),
             scratch: Scratch::new()?,
         })
     }
@@ -2279,6 +2284,120 @@ impl Side for MetalSide {
                 handler_order,
             })
         })
+    }
+
+    /// A texture over one plane of a real IOSurface laid out as the case says its stand-in buffer
+    /// is (`newTextureWithDescriptor:iosurface:plane:`), or over the buffer itself.
+    ///
+    /// The surface is the only way Metal makes a texture of a two-plane YCbCr format at all: the
+    /// descriptor alone answers nil for every one of the 69, which is what
+    /// `ycbcr-two-plane-format-descriptors` records. So this is where the buffer the case states
+    /// becomes the thing Metal takes — same plane offsets, same row pitches, same bytes from byte
+    /// 0 — and the surface is kept beside the texture so it outlives it.
+    fn plane_texture(
+        &mut self,
+        buffer: Handle,
+        over: &crate::case::PlaneTexture,
+    ) -> Answer<Handle> {
+        let bytes = {
+            let held = self.held(buffer)?;
+            let length = held.length() as usize;
+            // SAFETY: the buffer's own shared storage, whole, and no command uses it yet.
+            unsafe {
+                std::slice::from_raw_parts(held.contents().as_ptr().cast::<u8>(), length).to_vec()
+            }
+        };
+        let [width, height] = over.size;
+        // The descriptor and the texture are autoreleased, and a case may make several over a 24
+        // MiB surface, so they are made inside a pool rather than left to a thread that drains
+        // none.
+        let made = objc2::rc::autoreleasepool(|_| {
+            let descriptor = MTLTextureDescriptor::new();
+            descriptor.setTextureType(MTLTextureType::Type2D);
+            descriptor.setPixelFormat(MTLPixelFormat(over.format as usize));
+            // SAFETY: the case's own extent; the setters read nothing but the value given.
+            unsafe {
+                descriptor.setWidth(width as usize);
+                descriptor.setHeight(height as usize);
+            }
+            descriptor.setStorageMode(MTLStorageMode::Shared);
+            match over.ostype {
+                Some(ostype) => {
+                    // The usage the runtime side's plane texture takes: a surface's plane is read.
+                    descriptor.setUsage(MTLTextureUsage::ShaderRead);
+                    let format = PixelFormat::try_from(over.format).map_err(|problem| {
+                        Failure::named("NoSuchPixelFormat", format!("{}: {problem}", over.format))
+                    })?;
+                    let planes = crate::metal_surface::planes_of(format, over.size, over.planes)
+                        .map_err(|why| Failure::named("NoSuchPlaneLayout", why))?;
+                    crate::metal_surface::planes_hold_their_texels(&planes, bytes.len())
+                        .map_err(|why| Failure::named("PlanesPastTheBuffer", why))?;
+                    let surface = crate::metal_surface::Surface::two_plane(
+                        ostype,
+                        over.size,
+                        &planes,
+                        bytes.len(),
+                    )
+                    .map_err(|why| Failure::named("NoSurface", why))?;
+                    surface
+                        .planes_are_as_asked(&planes)
+                        .map_err(|why| Failure::named("SurfaceLaidOtherwise", why))?;
+                    surface
+                        .fill(&bytes)
+                        .map_err(|why| Failure::named("SurfaceNotFilled", why))?;
+                    let device: &ProtocolObject<dyn MTLDevice> = &self.device;
+                    let descriptor: &MTLTextureDescriptor = &descriptor;
+                    let plane = over.plane as usize;
+                    // SAFETY: `newTextureWithDescriptor:iosurface:plane:` of a live surface whose
+                    // planes it states, at one of them; the surface is kept below, so it outlives
+                    // the texture that reads it.
+                    let texture: Option<Retained<ProtocolObject<dyn MTLTexture>>> = unsafe {
+                        objc2::msg_send![device, newTextureWithDescriptor: descriptor, iosurface: surface.as_ptr(), plane: plane]
+                    };
+                    let texture = texture.ok_or_else(|| {
+                        Failure::named(
+                            "NewTextureWithIOSurfacePlane",
+                            format!(
+                                "format {} over plane {} of a {width}x{height} '{}' surface \
+                                 returned nil",
+                                over.format,
+                                over.plane,
+                                crate::metal_surface::four_cc(ostype)
+                            ),
+                        )
+                    })?;
+                    Ok((texture, Some(surface)))
+                }
+                None => {
+                    // The usage the runtime side's texture over a buffer takes.
+                    descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite);
+                    let (offset, row) = over.planes[0];
+                    let held = self.held(buffer)?;
+                    let texture = held
+                        .newTextureWithDescriptor_offset_bytesPerRow(
+                            &descriptor,
+                            offset as usize,
+                            row as usize,
+                        )
+                        .ok_or_else(|| {
+                            Failure::named(
+                                "NewTextureWithDescriptorOffsetBytesPerRow",
+                                format!(
+                                    "format {} {width}x{height} at {offset} of {row} a row \
+                                     returned nil",
+                                    over.format
+                                ),
+                            )
+                        })?;
+                    Ok((texture, None))
+                }
+            }
+        })?;
+        let (texture, surface) = made;
+        if let Some(surface) = surface {
+            self.surfaces.push(surface);
+        }
+        Ok(keep(&mut self.textures, texture))
     }
 
     fn makes_texture(&mut self, query: &HeapTextureQuery) -> Answer<bool> {
