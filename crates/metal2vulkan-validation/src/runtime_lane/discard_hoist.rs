@@ -21,7 +21,11 @@
 //! noted residue. A device whose fragment subgroups hold fewer than two quads
 //! (`AnswerGap::FragmentSubgroupUnderTwoQuads`, decided from its description as C3 decides it)
 //! cannot place a dropped quad beside the kept one, so every shape answers `(0, 0, 0, 0)` there:
-//! a valid Metal answer for a partly occupied simdgroup, and that gap. `RECORDED` holds a measured
+//! a valid Metal answer for a partly occupied simdgroup, and that gap. The answer is announced:
+//! the sums run over the device's own fragment subgroups, so every shape records
+//! `PrecisionNote::FragmentSimdgroupGrouping` and the runtime announces
+//! `Degradation::FragmentSimdgroupGrouping` wherever the driver does not run the fragment on
+//! Metal, which covers every device with the gap; the test asserts it. `RECORDED` holds a measured
 //! venue's answers where they differ from these.
 //!
 //! Measured: RADV (Radeon 780M, subgroup 64), RTX 3090 and RTX 5080 (32), ANV
