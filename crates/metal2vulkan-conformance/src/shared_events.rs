@@ -77,3 +77,108 @@ impl EventRise {
         ))
     }
 }
+
+/// What one run of the handle round trip observed: a shared event, the in-process handle it answers,
+/// and the event the device opens from that handle.
+///
+/// The question is whether the handle names the **same** event rather than a copy of its value, and
+/// one field settles it: [`EventHandleRoundTrip::value_on_the_first_after_the_second_was_set`] is
+/// read on the first event after the host set a value on the second.
+///
+/// Nothing here reaches the GPU: every value is set and read by the host, and the two waits are the
+/// bounded ones [`EventRise`] already uses — one for a value the event has reached, one for a value
+/// nothing will ever signal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EventHandleRoundTrip {
+    /// `label` of the event, after `setLabel:`.
+    pub label: Option<String>,
+    /// Whether the event's `device` is the one the case's other objects were made on. The device
+    /// object is not comparable, so this is the one portable question the getter answers.
+    pub device_is_the_cases: bool,
+    /// `signaledValue` of the new event, before anything set it.
+    pub value_at_first: u64,
+    /// `signaledValue` after the host set [`HANDLE_FIRST_VALUE`].
+    pub value_after_the_host_set_it: u64,
+    /// `label` of the handle `newSharedEventHandle` answered.
+    pub handle_label: Option<String>,
+    /// `label` of the event `newSharedEventWithHandle:` answered.
+    pub reopened_label: Option<String>,
+    /// Whether that event's `device` is the case's.
+    pub reopened_device_is_the_cases: bool,
+    /// `signaledValue` of that event: the first event's value, if the handle names the same event.
+    pub reopened_value: u64,
+    /// `signaledValue` of the **first** event after the host set [`HANDLE_SECOND_VALUE`] on the
+    /// reopened one. One event means the first reads the new value; two would leave it where it
+    /// was.
+    pub value_on_the_first_after_the_second_was_set: u64,
+    /// `waitUntilSignaledValue:timeoutMS:` on the reopened event for a value it has reached, and
+    /// for one nothing will ever signal, each with [`WAIT_MS`].
+    pub reopened_waits: [bool; 2],
+}
+
+/// The value the host sets on the event before taking its handle.
+pub const HANDLE_FIRST_VALUE: u64 = 7;
+
+/// The value the host sets on the **reopened** event, which the first event then reads if the two
+/// are one event.
+pub const HANDLE_SECOND_VALUE: u64 = 11;
+
+/// The value the reopened event is asked to wait for and will never reach.
+pub const HANDLE_UNREACHED_VALUE: u64 = 12;
+
+impl EventHandleRoundTrip {
+    /// The observations as the sites a case emits under one node, so both sides emit one shape.
+    pub fn node(&self, name: impl Into<NodeName>) -> Node {
+        let label = |held: &Option<String>| match held {
+            Some(held) => Value::Variant {
+                name: "Some".to_owned(),
+                payload: Box::new(Value::Lines(vec![held.clone()])),
+            },
+            None => Value::unit_variant("None"),
+        };
+        Node::branch(name, Vec::new())
+            .with(Node::leaf("label", Observed::value(label(&self.label))))
+            .with(Node::leaf(
+                "device",
+                Observed::value(Value::Bool(self.device_is_the_cases)),
+            ))
+            .with(Node::leaf(
+                "signaled-value/new",
+                Observed::value(Value::Uint(self.value_at_first)),
+            ))
+            .with(Node::leaf(
+                "signaled-value/after-the-host-set-it",
+                Observed::value(Value::Uint(self.value_after_the_host_set_it)),
+            ))
+            .with(Node::leaf(
+                "handle/label",
+                Observed::value(label(&self.handle_label)),
+            ))
+            .with(Node::leaf(
+                "reopened/label",
+                Observed::value(label(&self.reopened_label)),
+            ))
+            .with(Node::leaf(
+                "reopened/device",
+                Observed::value(Value::Bool(self.reopened_device_is_the_cases)),
+            ))
+            .with(Node::leaf(
+                "reopened/signaled-value",
+                Observed::value(Value::Uint(self.reopened_value)),
+            ))
+            .with(Node::leaf(
+                "signaled-value/after-the-reopened-was-set",
+                Observed::value(Value::Uint(
+                    self.value_on_the_first_after_the_second_was_set,
+                )),
+            ))
+            .with(Node::leaf(
+                "reopened/wait-for-a-value-it-reached",
+                Observed::value(Value::Bool(self.reopened_waits[0])),
+            ))
+            .with(Node::leaf(
+                "reopened/wait-for-a-value-nothing-signals",
+                Observed::value(Value::Bool(self.reopened_waits[1])),
+            ))
+    }
+}

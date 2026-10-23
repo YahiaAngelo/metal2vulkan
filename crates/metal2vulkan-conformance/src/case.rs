@@ -1520,6 +1520,25 @@ pub trait Side {
     /// One call rather than a dozen, because the facts are a **sequence** — a value that did not
     /// fall when a lower one was set — and a case cannot state that as independent calls whose
     /// order nothing fixes.
+    /// `newSharedEventHandle` of a shared event, then `newSharedEventWithHandle:` of what it
+    /// answered, and what the two events then say about themselves
+    /// ([`EventHandleRoundTrip`](crate::shared_events::EventHandleRoundTrip)).
+    ///
+    /// One call, because the fact under test is a **relation** between two objects: that the event
+    /// the device opens from the handle is the one the handle came from, which only a value set on
+    /// one and read on the other can say. Two independent calls over a handle space would be two
+    /// objects whose identity nothing compares.
+    ///
+    /// Nothing here reaches the GPU: every value is set and read by the host, and both waits are
+    /// bounded.
+    fn shared_event_handle_round_trip(
+        &mut self,
+        label: &str,
+    ) -> Answer<crate::shared_events::EventHandleRoundTrip> {
+        let _ = label;
+        Err(Failure::unavailable("shared_event_handle_round_trip"))
+    }
+
     fn shared_event_rises(&mut self, label: &str) -> Answer<crate::shared_events::EventRise> {
         let _ = label;
         Err(Failure::unavailable("shared_event_rises"))

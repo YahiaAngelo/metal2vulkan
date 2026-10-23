@@ -313,6 +313,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(shared_events::rising_value()));
+    cases.push(Box::new(shared_events::handle_round_trip()));
     cases.extend(
         event_orders::all()
             .into_iter()

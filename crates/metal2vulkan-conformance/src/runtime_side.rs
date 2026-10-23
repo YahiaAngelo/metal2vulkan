@@ -3692,6 +3692,55 @@ impl Side for RuntimeSide<'_> {
         Ok(DetachedInHandler { detached, status })
     }
 
+    fn shared_event_handle_round_trip(
+        &mut self,
+        label: &str,
+    ) -> Answer<crate::shared_events::EventHandleRoundTrip> {
+        use crate::shared_events::{
+            EventHandleRoundTrip, HANDLE_FIRST_VALUE, HANDLE_SECOND_VALUE, HANDLE_UNREACHED_VALUE,
+            WAIT_MS,
+        };
+        let bound = Duration::from_millis(WAIT_MS);
+        let registry = self.device.registry_id();
+        let event = self
+            .device
+            .new_shared_event()
+            .map_err(Failure::from_error)?;
+        event.set_label(label);
+        let read_label = event.label();
+        let device_is_the_cases = event.device().registry_id() == registry;
+        let value_at_first = event.signaled_value();
+        event.set_signaled_value(HANDLE_FIRST_VALUE);
+        let value_after_the_host_set_it = event.signaled_value();
+        let handle = event.new_shared_event_handle();
+        let handle_label = handle.label();
+        let reopened = self
+            .device
+            .new_shared_event_with_handle(&handle)
+            .map_err(Failure::from_error)?;
+        let reopened_label = reopened.label();
+        let reopened_device_is_the_cases = reopened.device().registry_id() == registry;
+        let reopened_value = reopened.signaled_value();
+        reopened.set_signaled_value(HANDLE_SECOND_VALUE);
+        let value_on_the_first_after_the_second_was_set = event.signaled_value();
+        let reopened_waits = [
+            reopened.wait_until_signaled_value(HANDLE_SECOND_VALUE, bound),
+            reopened.wait_until_signaled_value(HANDLE_UNREACHED_VALUE, bound),
+        ];
+        Ok(EventHandleRoundTrip {
+            label: read_label,
+            device_is_the_cases,
+            value_at_first,
+            value_after_the_host_set_it,
+            handle_label,
+            reopened_label,
+            reopened_device_is_the_cases,
+            reopened_value,
+            value_on_the_first_after_the_second_was_set,
+            reopened_waits,
+        })
+    }
+
     fn shared_event_rises(&mut self, label: &str) -> Answer<crate::shared_events::EventRise> {
         use crate::shared_events::{EventRise, WAIT_MS};
         let bound = Duration::from_millis(WAIT_MS);

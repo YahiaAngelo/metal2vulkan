@@ -81,10 +81,10 @@ use objc2_metal::{
     MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
     MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplePosition,
     MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
-    MTLSamplerState, MTLScissorRect, MTLSharedEvent, MTLSize, MTLSparsePageSize,
-    MTLSparseTextureRegionAlignmentMode, MTLStageInputOutputDescriptor, MTLStencilDescriptor,
-    MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLStoreActionOptions,
-    MTLStructMember, MTLStructType, MTLTessellationControlPointIndexType,
+    MTLSamplerState, MTLScissorRect, MTLSharedEvent, MTLSharedEventHandle, MTLSize,
+    MTLSparsePageSize, MTLSparseTextureRegionAlignmentMode, MTLStageInputOutputDescriptor,
+    MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction,
+    MTLStoreActionOptions, MTLStructMember, MTLStructType, MTLTessellationControlPointIndexType,
     MTLTessellationFactorFormat, MTLTessellationFactorStepFunction, MTLTessellationPartitionMode,
     MTLTexture, MTLTextureBinding, MTLTextureDescriptor, MTLTextureReferenceType,
     MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage,
@@ -3751,6 +3751,60 @@ impl Side for MetalSide {
             },
             || objc2::rc::autoreleasepool(|_| other.commandBuffer().is_some()),
         )
+    }
+
+    fn shared_event_handle_round_trip(
+        &mut self,
+        label: &str,
+    ) -> Answer<crate::shared_events::EventHandleRoundTrip> {
+        use crate::shared_events::{
+            EventHandleRoundTrip, HANDLE_FIRST_VALUE, HANDLE_SECOND_VALUE, HANDLE_UNREACHED_VALUE,
+            WAIT_MS,
+        };
+        let registry = self.device.registryID();
+        let event = self
+            .device
+            .newSharedEvent()
+            .ok_or_else(|| Failure::named("NewSharedEvent", "returned nil".to_owned()))?;
+        event.setLabel(Some(&NSString::from_str(label)));
+        let read_label = event.label().map(|label| label.to_string());
+        // The registry ID is each host's own number, so only the **comparison** is portable; an
+        // event that answers no device at all is recorded as not being the case's.
+        let device_is_the_cases = event
+            .device()
+            .is_some_and(|held| held.registryID() == registry);
+        let value_at_first = event.signaledValue();
+        event.setSignaledValue(HANDLE_FIRST_VALUE);
+        let value_after_the_host_set_it = event.signaledValue();
+        let handle: Retained<MTLSharedEventHandle> = event.newSharedEventHandle();
+        let handle_label = handle.label().map(|label| label.to_string());
+        let reopened = self
+            .device
+            .newSharedEventWithHandle(&handle)
+            .ok_or_else(|| Failure::named("NewSharedEventWithHandle", "returned nil".to_owned()))?;
+        let reopened_label = reopened.label().map(|label| label.to_string());
+        let reopened_device_is_the_cases = reopened
+            .device()
+            .is_some_and(|held| held.registryID() == registry);
+        let reopened_value = reopened.signaledValue();
+        reopened.setSignaledValue(HANDLE_SECOND_VALUE);
+        let value_on_the_first_after_the_second_was_set = event.signaledValue();
+        let reopened_waits = [
+            reopened.waitUntilSignaledValue_timeoutMS(HANDLE_SECOND_VALUE, WAIT_MS),
+            reopened.waitUntilSignaledValue_timeoutMS(HANDLE_UNREACHED_VALUE, WAIT_MS),
+        ];
+        Ok(EventHandleRoundTrip {
+            label: read_label,
+            device_is_the_cases,
+            value_at_first,
+            value_after_the_host_set_it,
+            handle_label,
+            reopened_label,
+            reopened_device_is_the_cases,
+            reopened_value,
+            value_on_the_first_after_the_second_was_set,
+            reopened_waits,
+        })
     }
 
     fn shared_event_rises(&mut self, label: &str) -> Answer<crate::shared_events::EventRise> {

@@ -29,11 +29,22 @@
 //! vocabulary, which nothing has yet.
 
 use crate::case::{Abort, Case, Input, MetalSource, Side};
-use crate::shared_events::WAIT_MS;
+use crate::shared_events::{
+    HANDLE_FIRST_VALUE, HANDLE_SECOND_VALUE, HANDLE_UNREACHED_VALUE, WAIT_MS,
+};
 use crate::transcript::{Node, Observed, Sites};
 
 /// The case's name.
 pub const RISING_VALUE: &str = "shared-event-rising-value";
+
+/// The handle case's name.
+pub const HANDLE_ROUND_TRIP: &str = "shared-event-handle-round-trip";
+
+/// The label the handle case sets.
+const HANDLE_LABEL: &str = "conformance-handle-round-trip";
+
+/// The site the handle case's row sits at.
+const HANDLE_AT: &str = "handle-round-trip";
 
 /// The label the case sets, so `label` has something of ours to answer with.
 const LABEL: &str = "conformance-rising-value";
@@ -91,6 +102,85 @@ impl Case for RisingValue {
             // The row records the failure and the run ends: every fact the case has is in the one
             // call, so there is nothing after it to read.
             Err(failure) => sites.push(Node::leaf(AT, Observed::value(failure.recorded()))),
+        }
+        Ok(())
+    }
+}
+
+/// A case over the handle a shared event answers, and the event the device opens from it.
+///
+/// `MTLSharedEventHandle` is a container **no case of the suite touched**, and
+/// `newSharedEventWithHandle:` one of `MTLDevice`'s untouched calls. The handle is what a Metal
+/// program passes between processes, and in one process it is the way to ask for the event again:
+/// the question is whether the device opens the **same** event or a copy of its value, and one
+/// field settles it — the value the host sets on the reopened event, read back on the first.
+///
+/// The event's `label` travels with it, which is the other thing the pair says: the handle carries
+/// its event's label, and the reopened event answers it too.
+///
+/// # What it found
+///
+/// **A Metal shared event answers nil for `device`**, where a plain `MTLEvent` answers the device
+/// it was made on. Measured on the oracle, and confirmed by a one-off Objective-C probe outside the
+/// suite: `[[dev newEvent] device]` is the device and `[[dev newSharedEvent] device]` is nil, as is
+/// the event reopened from the handle. The runtime answers the device for both, so the two device
+/// sites of this case are a divergence and `known-gaps.tsv` carries them as the open bug they are.
+/// Everything else of the pair compares exactly, which is what makes the row the whole of the
+/// difference rather than the first thing a reader notices.
+///
+/// # Why it is safe
+///
+/// Nothing reaches the GPU: no command buffer is made, no signal is encoded, and every value is
+/// set and read by the host. Both waits are bounded by [`WAIT_MS`] — one for a value the event has
+/// already reached, which answers at once, and one for a value nothing in the case will ever
+/// signal, which runs out.
+pub struct HandleRoundTrip {
+    name: &'static str,
+}
+
+/// The case.
+pub fn handle_round_trip() -> HandleRoundTrip {
+    HandleRoundTrip {
+        name: HANDLE_ROUND_TRIP,
+    }
+}
+
+impl Case for HandleRoundTrip {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::Run
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        // What the case feeds: the label, the value set on the first event, the value set on the
+        // reopened one, the value nothing signals, and the bound each wait is given. The bound is
+        // an input because it decides what a wait's answer means.
+        let mut values = Vec::new();
+        for value in [
+            HANDLE_FIRST_VALUE,
+            HANDLE_SECOND_VALUE,
+            HANDLE_UNREACHED_VALUE,
+        ] {
+            values.extend(value.to_le_bytes());
+        }
+        Ok(vec![
+            Input::bytes("label", HANDLE_LABEL.as_bytes()),
+            Input::bytes("values", &values),
+            Input::bytes("wait-bound-millis", &WAIT_MS.to_le_bytes()),
+        ])
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        match side.shared_event_handle_round_trip(HANDLE_LABEL) {
+            Ok(held) => sites.push(held.node(HANDLE_AT)),
+            // Every fact the case has is in the one call, so the row records the failure and there
+            // is nothing after it to read.
+            Err(failure) => {
+                sites.push(Node::leaf(HANDLE_AT, Observed::value(failure.recorded())));
+            }
         }
         Ok(())
     }

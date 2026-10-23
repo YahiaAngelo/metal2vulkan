@@ -669,6 +669,14 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.detach_in_a_completed_handler(buffer, after)
     }
 
+    fn shared_event_handle_round_trip(
+        &mut self,
+        label: &str,
+    ) -> Answer<crate::shared_events::EventHandleRoundTrip> {
+        let _span = self.watch("shared_event_handle_round_trip");
+        self.inner.shared_event_handle_round_trip(label)
+    }
+
     fn shared_event_rises(&mut self, label: &str) -> Answer<crate::shared_events::EventRise> {
         let _span = self.watch("shared_event_rises");
         self.inner.shared_event_rises(label)
