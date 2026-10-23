@@ -43,14 +43,15 @@
 //! multisample resolve filters by its raw ordinal on the Metal side, and reaches the runtime's
 //! descriptor unchanged. There is no second spelling to keep in step.
 
+use crate::case::Failure;
 use crate::case::Handle;
 use metal2vulkan::metal::{
     BlendFactor, BlendOperation, ColorWriteMask, IndexType, PixelFormat, PrimitiveType,
     VertexFormat, VertexStepFunction,
 };
 use metal2vulkan_runtime::{
-    LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, StoreAction,
-    VisibilityResultMode,
+    LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, SamplePosition,
+    StoreAction, StoreActionOptions, VisibilityResultMode,
 };
 
 /// A render target a case makes: `MTLTextureDescriptor`'s facts a render case states.
@@ -545,6 +546,9 @@ pub struct PassDepth {
     pub resolve: Option<Handle>,
     /// `depthResolveFilter`.
     pub filter: MultisampleDepthResolveFilter,
+    /// `storeActionOptions`: Metal's default is none, and
+    /// `MTLStoreActionOptionCustomSamplePositions` is the one option it defines.
+    pub options: StoreActionOptions,
 }
 
 impl PassDepth {
@@ -557,6 +561,7 @@ impl PassDepth {
             clear,
             resolve: None,
             filter: MultisampleDepthResolveFilter::Sample0,
+            options: StoreActionOptions::NONE,
         }
     }
 
@@ -580,14 +585,27 @@ impl PassDepth {
         self
     }
 
+    /// The attachment with `storeActionOptions` set to `options`.
+    #[must_use]
+    pub const fn with_options(mut self, options: StoreActionOptions) -> Self {
+        self.options = options;
+        self
+    }
+
     /// The words a case's input fingerprint covers. Nothing of a handle is fingerprinted: a
     /// side's handle numbers are its own.
+    ///
+    /// The store-action options are written **only where they are not Metal's default**, so an
+    /// attachment that states none fingerprints to the bytes it always has.
     pub fn words(&self) -> Vec<u8> {
         let mut bytes = vec![u8::from(self.resolve.is_some())];
         bytes.extend(self.load.raw().to_le_bytes());
         bytes.extend(self.store.raw().to_le_bytes());
         bytes.extend(self.clear.to_bits().to_le_bytes());
         bytes.extend(self.filter.raw().to_le_bytes());
+        if self.options != StoreActionOptions::NONE {
+            bytes.extend(self.options.raw().to_le_bytes());
+        }
         bytes
     }
 }
@@ -604,6 +622,10 @@ pub struct PassStencil {
     pub resolve: Option<Handle>,
     /// `stencilResolveFilter`.
     pub filter: MultisampleStencilResolveFilter,
+    /// `storeActionOptions`. **The stencil attachment is the one Metal checks**: its validation
+    /// stops `CustomSamplePositions` here without positions, or under a store action that keeps no
+    /// samples, where a color or a depth attachment's options change nothing.
+    pub options: StoreActionOptions,
 }
 
 impl PassStencil {
@@ -616,6 +638,7 @@ impl PassStencil {
             clear,
             resolve: None,
             filter: MultisampleStencilResolveFilter::Sample0,
+            options: StoreActionOptions::NONE,
         }
     }
 
@@ -639,13 +662,24 @@ impl PassStencil {
         self
     }
 
-    /// The words a case's input fingerprint covers.
+    /// The attachment with `storeActionOptions` set to `options`.
+    #[must_use]
+    pub const fn with_options(mut self, options: StoreActionOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// The words a case's input fingerprint covers; the options only where they are not Metal's
+    /// default.
     pub fn words(&self) -> Vec<u8> {
         let mut bytes = vec![u8::from(self.resolve.is_some())];
         bytes.extend(self.load.raw().to_le_bytes());
         bytes.extend(self.store.raw().to_le_bytes());
         bytes.extend(self.clear.to_le_bytes());
         bytes.extend(self.filter.raw().to_le_bytes());
+        if self.options != StoreActionOptions::NONE {
+            bytes.extend(self.options.raw().to_le_bytes());
+        }
         bytes
     }
 }
@@ -663,6 +697,9 @@ pub struct PassColor {
     pub clear: [f64; 4],
     /// `resolveTexture`: the single-sampled texture a resolving store action writes.
     pub resolve: Option<Handle>,
+    /// `storeActionOptions`: Metal's default is none, and
+    /// `MTLStoreActionOptionCustomSamplePositions` is the one option it defines.
+    pub options: StoreActionOptions,
 }
 
 impl PassColor {
@@ -674,6 +711,7 @@ impl PassColor {
             store: StoreAction::Store,
             clear: [0.0, 0.0, 0.0, 1.0],
             resolve: None,
+            options: StoreActionOptions::NONE,
         }
     }
 
@@ -685,6 +723,7 @@ impl PassColor {
             store: StoreAction::Store,
             clear,
             resolve: None,
+            options: StoreActionOptions::NONE,
         }
     }
 
@@ -696,6 +735,7 @@ impl PassColor {
             store: StoreAction::Store,
             clear: [0.0, 0.0, 0.0, 1.0],
             resolve: None,
+            options: StoreActionOptions::NONE,
         }
     }
 
@@ -708,6 +748,7 @@ impl PassColor {
             store: StoreAction::Store,
             clear: [0.0, 0.0, 0.0, 1.0],
             resolve: None,
+            options: StoreActionOptions::NONE,
         }
     }
 
@@ -727,6 +768,13 @@ impl PassColor {
         self
     }
 
+    /// The attachment with `storeActionOptions` set to `options`.
+    #[must_use]
+    pub const fn with_options(mut self, options: StoreActionOptions) -> Self {
+        self.options = options;
+        self
+    }
+
     /// The words a case's input fingerprint covers: the actions and the clear color's bits, so a
     /// clear value that moves by one `f64` step is a change to the case's inputs. Nothing of a
     /// handle is fingerprinted: a side's handle numbers are its own.
@@ -739,6 +787,11 @@ impl PassColor {
         bytes.extend(self.store.raw().to_le_bytes());
         for channel in self.clear {
             bytes.extend(channel.to_bits().to_le_bytes());
+        }
+        // Only where they are not Metal's default, so an attachment that states none fingerprints
+        // to the bytes it always has.
+        if self.options != StoreActionOptions::NONE {
+            bytes.extend(self.options.raw().to_le_bytes());
         }
         bytes
     }
@@ -995,6 +1048,61 @@ impl RenderStep {
     }
 }
 
+/// The Metal call a pass's custom sample positions are keyed by in a case's input fingerprint:
+/// `MTLRenderPassDescriptor`'s own selector, so the positions key by their call's name rather than
+/// by a place in the words.
+pub const SAMPLE_POSITIONS_CALL: &str = "setSamplePositions";
+
+/// The two sample-position shapes the **Metal leg** must never encode, refused before anything is
+/// made, decided from the positions themselves and the pass's sample count alone.
+///
+/// Both come from a measurement rather than from caution, and both are shapes a case is forbidden
+/// to hand Metal:
+///
+/// - **More positions than the pass's samples.** Measured on an Apple M3 Max: plain Metal ends the
+///   process past the pass's samples
+///   (`metal2vulkan_runtime::RenderPassProblem::SamplePositionsSamples`). There is no safe way to
+///   ask Metal this, so there is no answer to record and the shape may not be built.
+/// - **A coordinate outside `[0, 1)`.** Metal documents the range and its API validation asserts on
+///   another coordinate; what plain Metal's driver programs for one is unmeasured, and the value
+///   reaches the rasterizer's own sample grid. The suite does not find that out by trying it.
+///
+/// It refuses **nothing** where the limit does not apply: no positions at all is Metal's default,
+/// and a count at or below the pass's samples with every coordinate inside the pixel is a shape the
+/// probes behind this family already ran on plain Metal. Fewer positions than samples is one of
+/// those: Metal puts the samples past them at the pixel's corner, which is a recorded answer rather
+/// than a hazard.
+///
+/// Our own leg is not guarded here and must not be: the runtime refuses both shapes typed, and that
+/// typed refusal is what a case compares.
+pub fn forbidden_positions(positions: &[SamplePosition], samples: u32) -> Option<Failure> {
+    if positions.len() as u64 > u64::from(samples) {
+        return Some(Failure::named(
+            "MorePositionsThanSamples",
+            format!(
+                "{} custom sample positions in a pass of {samples} sample(s), past which plain \
+                 Metal ends the process",
+                positions.len()
+            ),
+        ));
+    }
+    if let Some((at, position)) = positions
+        .iter()
+        .enumerate()
+        .find(|(_, p)| !(0.0..1.0).contains(&p.x) || !(0.0..1.0).contains(&p.y))
+    {
+        return Some(Failure::named(
+            "SamplePositionOutsideThePixel",
+            format!(
+                "sample position {at} at ({}, {}), outside the [0, 1) Metal documents and asserts \
+                 on",
+                position.x, position.y
+            ),
+        ));
+    }
+    None
+}
+
 /// One render pass: its color attachments by index, and the commands encoded into it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderPass {
@@ -1013,6 +1121,13 @@ pub struct RenderPass {
     /// The commands, in order. **A pass of none is a pass with no draw call**, which is one of the
     /// facts Metal's clear route reads, so the empty list is a case rather than an oversight.
     pub steps: Vec<RenderStep>,
+    /// `setSamplePositions:count:`: where each sample lies in its pixel, or **empty** for the
+    /// device's own positions, which is Metal's default.
+    ///
+    /// It is the pass descriptor's field and not an encoder step, because that is where Metal puts
+    /// it: `MTLRenderPassDescriptor` takes the positions and `MTLRenderCommandEncoder` has no such
+    /// call, so a pass cannot move its samples once it is open.
+    pub positions: Vec<SamplePosition>,
 }
 
 impl RenderPass {
@@ -1025,6 +1140,7 @@ impl RenderPass {
             visibility: None,
             size: None,
             steps: Vec::new(),
+            positions: Vec::new(),
         }
     }
 
@@ -1064,6 +1180,19 @@ impl RenderPass {
         self
     }
 
+    /// The pass that states `positions` as its samples' places in the pixel
+    /// (`setSamplePositions:count:`).
+    ///
+    /// A case may state fewer positions than the pass has samples, which is a question of its own:
+    /// Metal puts the samples past them at the pixel's corner. It may state **more** only through
+    /// the field, never through this method, because the guard that keeps the suite off Metal's
+    /// fatal shapes ([`forbidden_positions`]) is the one place that decides it.
+    #[must_use]
+    pub fn at(mut self, positions: Vec<SamplePosition>) -> Self {
+        self.positions = positions;
+        self
+    }
+
     /// The words a case's input fingerprint covers: every attachment's actions and clear color,
     /// the depth, stencil and visibility attachments **where the pass has them**, and the shape of
     /// every step. A pipeline or a buffer a step names is fingerprinted by the case through the
@@ -1095,6 +1224,18 @@ impl RenderPass {
         for step in &self.steps {
             bytes.extend(step.call().as_bytes());
             bytes.extend(step.parameters());
+        }
+        // Appended, keyed by the Metal call's own name and written **only where the pass states
+        // positions**, so a pass at the device's own positions fingerprints to the bytes it always
+        // has and every recording already committed still reads. Each coordinate by its bits: a
+        // position one `f32` step away is a different input, and Metal rounds it to a sixteenth of
+        // a pixel, so two positions that round alike are still two inputs.
+        if !self.positions.is_empty() {
+            bytes.extend(SAMPLE_POSITIONS_CALL.as_bytes());
+            for position in &self.positions {
+                bytes.extend(position.x.to_bits().to_le_bytes());
+                bytes.extend(position.y.to_bits().to_le_bytes());
+            }
         }
         bytes
     }
@@ -1262,6 +1403,149 @@ mod tests {
         assert_ne!(texture(0), texture(1));
         assert_ne!(sampler(0), sampler(1));
         assert_eq!(texture(3), sampler(3));
+    }
+
+    /// The variant name of the guard's refusal, so a test names the shape rather than the words.
+    fn refused_as(failure: &Failure) -> String {
+        match &failure.value {
+            crate::transcript::Value::Variant { name, payload } if name == "Err" => {
+                match payload.as_ref() {
+                    crate::transcript::Value::Variant { name, .. } => name.clone(),
+                    other => panic!("not an error variant: {other:?}"),
+                }
+            }
+            other => panic!("not an error: {other:?}"),
+        }
+    }
+
+    /// A position at `(x, y)`, as a case states one.
+    fn at(x: f32, y: f32) -> SamplePosition {
+        SamplePosition { x, y }
+    }
+
+    /// Four positions at `(x, 0.5)`, the shape the coverage family states.
+    fn four(x: f32) -> Vec<SamplePosition> {
+        vec![at(x, 0.5); 4]
+    }
+
+    /// **Invariant 1 for the pass's positions**: a pass at the device's own positions writes none
+    /// of them, so every recording of a pass already committed still reads.
+    ///
+    /// Stated as the whole pass's words rather than one field's: the positions are appended after
+    /// the steps, and a pass that states none must end at its last step's parameters.
+    #[test]
+    fn a_pass_at_the_devices_own_positions_fingerprints_as_it_always_did() {
+        let steps = vec![
+            RenderStep::fragment_buffer(handle(), 1),
+            RenderStep::triangle(),
+        ];
+        let mut expected = PassColor::cleared(handle(), [0.0; 4]).words();
+        for step in &steps {
+            expected.extend(step.call().as_bytes());
+            expected.extend(step.parameters());
+        }
+        let pass = RenderPass::clearing(vec![PassColor::cleared(handle(), [0.0; 4])])
+            .drawing(steps.clone());
+        assert!(pass.positions.is_empty());
+        assert_eq!(pass.words(), expected);
+        // And stating the empty list is the same pass, not a pass with a sentinel in it.
+        assert_eq!(pass.clone().at(Vec::new()).words(), expected);
+        // While stating positions appends, and appends only at the end.
+        let moved = pass.at(four(0.25));
+        assert!(moved.words().starts_with(&expected));
+        assert!(moved.words().len() > expected.len());
+    }
+
+    /// The positions are keyed by their Metal call's own name and then their bits, so no place in
+    /// the words is load-bearing and a coordinate one `f32` step away is a different input.
+    #[test]
+    fn positions_are_keyed_by_their_call_name_and_their_bits() {
+        let words =
+            |positions: Vec<SamplePosition>| RenderPass::clearing(Vec::new()).at(positions).words();
+        let four_at_a_quarter = words(four(0.25));
+        assert!(four_at_a_quarter.starts_with(SAMPLE_POSITIONS_CALL.as_bytes()));
+        assert_eq!(
+            four_at_a_quarter.len(),
+            SAMPLE_POSITIONS_CALL.len() + 4 * 2 * 4
+        );
+        // Two coordinates Metal rounds to the same sixteenth are still two inputs.
+        assert_ne!(words(four(0.53)), words(four(0.5625)));
+        assert_ne!(words(four(0.25)), words(four(0.25f32.next_up())));
+        // The order the case states them in is the case's own statement.
+        assert_ne!(
+            words(vec![at(0.25, 0.5), at(0.75, 0.5)]),
+            words(vec![at(0.75, 0.5), at(0.25, 0.5)])
+        );
+        // And a count that moved is a different input, not the same positions.
+        assert_ne!(words(four(0.25)), words(vec![at(0.25, 0.5); 2]));
+    }
+
+    /// **Invariant 1 for the store-action options**: an attachment that states Metal's default
+    /// writes nothing of them, and one that states the option appends exactly its word.
+    #[test]
+    fn store_action_options_are_written_only_where_an_attachment_states_them() {
+        let custom = StoreActionOptions::CUSTOM_SAMPLE_POSITIONS;
+        let color = PassColor::cleared(handle(), [0.0; 4]);
+        let depth = PassDepth::cleared(handle(), 1.0);
+        let stencil = PassStencil::cleared(handle(), 0x11);
+        for (plain, optioned) in [
+            (color.words(), color.with_options(custom).words()),
+            (depth.words(), depth.with_options(custom).words()),
+            (stencil.words(), stencil.with_options(custom).words()),
+        ] {
+            assert_eq!(optioned.len(), plain.len() + 8, "the option's one word");
+            assert!(optioned.starts_with(&plain), "appended, nothing shifted");
+        }
+        assert_eq!(
+            color.with_options(StoreActionOptions::NONE).words(),
+            color.words()
+        );
+    }
+
+    /// The Metal leg's guard refuses exactly the two shapes it names, and refuses nothing where the
+    /// limit does not apply.
+    ///
+    /// Each refusal is reached with **no device**: the decision is the positions' own shape and the
+    /// pass's sample count, so the shape that ends Metal's process is never built to watch the
+    /// guard hold.
+    #[test]
+    fn the_guard_refuses_more_positions_than_samples_and_a_coordinate_outside_the_pixel() {
+        // Nothing to refuse: the device's own positions, and a count at or below the samples with
+        // every coordinate inside the pixel.
+        assert!(forbidden_positions(&[], 1).is_none());
+        assert!(forbidden_positions(&[], 4).is_none());
+        assert!(forbidden_positions(&four(0.25), 4).is_none());
+        assert!(forbidden_positions(&four(0.9375), 4).is_none());
+        // Fewer positions than samples is a recorded answer, not a hazard.
+        assert!(forbidden_positions(&[at(0.75, 0.5); 2], 4).is_none());
+        assert!(forbidden_positions(&[at(0.5, 0.5)], 4).is_none());
+        // One past the pass's samples, which is where plain Metal ends the process.
+        let refusal = forbidden_positions(&[at(0.25, 0.5); 5], 4)
+            .expect("five positions in a pass of four samples");
+        assert_eq!(refused_as(&refusal), "MorePositionsThanSamples");
+        assert!(forbidden_positions(&four(0.25), 2).is_some());
+        assert!(forbidden_positions(&[at(0.5, 0.5)], 0).is_some());
+        // A coordinate outside [0, 1), on either axis and at either end.
+        for outside in [
+            at(1.0, 0.5),
+            at(-0.1, 0.5),
+            at(0.5, 1.0),
+            at(0.5, 0.0f32.next_down()),
+            at(f32::NAN, 0.5),
+        ] {
+            let refusal = forbidden_positions(&[outside; 4], 4)
+                .unwrap_or_else(|| panic!("({}, {}) is outside the pixel", outside.x, outside.y));
+            assert_eq!(
+                refused_as(&refusal),
+                "SamplePositionOutsideThePixel",
+                "({}, {})",
+                outside.x,
+                outside.y
+            );
+        }
+        // The count is read first, because a shape that is both is the fatal one.
+        let refusal = forbidden_positions(&[at(1.0, 0.5); 5], 4).expect("both");
+        assert_eq!(refused_as(&refusal), "MorePositionsThanSamples");
     }
 
     /// A pass keys each step by its call name and then its parameters, so adding a variant

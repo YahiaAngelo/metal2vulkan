@@ -37,12 +37,7 @@ use metal2vulkan::pipeline::{
 };
 use metal2vulkan_runtime::{
     BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue,
-    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, Heap, HeapDescriptor,
-    HeapType, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor,
-    IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption,
-    PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState,
-    ResourceOptions, ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture,
-    TextureDescriptor, Viewport,
+    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, Heap, HeapDescriptor, HeapType, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor, Viewport,
 };
 use std::time::Duration;
 
@@ -2515,6 +2510,7 @@ fn encode_pass(
             color.clear[2],
             color.clear[3],
         );
+        attachment.store_action_options = color.options;
         if let Some(resolve) = color.resolve {
             attachment.resolve_texture = Some(texture(resolve)?.clone());
         }
@@ -2526,6 +2522,7 @@ fn encode_pass(
         attachment.store_action = depth.store;
         attachment.clear_depth = depth.clear;
         attachment.depth_resolve_filter = depth.filter;
+        attachment.store_action_options = depth.options;
         if let Some(resolve) = depth.resolve {
             attachment.resolve_texture = Some(texture(resolve)?.clone());
         }
@@ -2537,6 +2534,7 @@ fn encode_pass(
         attachment.store_action = stencil.store;
         attachment.clear_stencil = stencil.clear;
         attachment.stencil_resolve_filter = stencil.filter;
+        attachment.store_action_options = stencil.options;
         if let Some(resolve) = stencil.resolve {
             attachment.resolve_texture = Some(texture(resolve)?.clone());
         }
@@ -2544,6 +2542,10 @@ fn encode_pass(
     if let Some(held) = pass.visibility {
         descriptor.visibility_result_buffer = Some(buffer(held)?.clone());
     }
+    // The runtime takes Metal's own positions where the case states none, and refuses what Metal
+    // refuses, typed: no guard of the suite's stands between a case and that refusal, because the
+    // refusal is what the case compares.
+    descriptor.sample_positions = pass.positions.clone();
     let mut encoder = command_buffer
         .render_command_encoder(&descriptor)
         .map_err(Failure::from_error)?;
