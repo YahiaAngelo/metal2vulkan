@@ -11,7 +11,13 @@ Mac, once per case, and **replayed** anywhere — the replay leg needs no Metal 
 
 Comparison is exact by default. A loosened field names either a degrade notice's code or an entry of
 `docs/API.md`'s accepted differences, and the comparison fails where that entry is gone or the
-notice did not fire.
+notice did not fire. A site may name several, because a notice is announced once per device per
+kind: the difference is justified where any of them holds.
+
+A replay holds the runtime to exact answers. `conformance replay --default-policy` replays under
+the runtime's own defaults instead — the fast form of every speed-for-accuracy choice, which is
+what a consumer runs — so the suite can say whether a difference is the policy's or the
+implementation's.
 
 ## This crate is not the validation suite
 
@@ -23,6 +29,11 @@ public API, `metal2vulkan-devtools` for fixture paths and `llvm_assemble`, and, 
 
 The suite's own cases are its **case set** (`src/cases/`). Its recordings are its own, in
 `recordings/`, in its own format; they are not observations and they enter no census.
+
+A case ported from a runtime lane restates that lane's measured Metal values and reads the lane's
+committed measurement files under `fixtures/public/`. Those are our own measurements over our own
+fixtures, which is what the boundary allows; the lanes stay where they are and a ported case never
+edits one.
 
 ## Layout
 
@@ -38,3 +49,5 @@ The suite's own cases are its **case set** (`src/cases/`). Its recordings are it
 | `metal_side` | Native Metal as a side (macOS only), which record mode runs |
 | `record`, `replay` | Taking Metal's answer, and comparing a run against it |
 | `report` | Verdict counts and the matrix of case against venue |
+| `work`, `runtime_work` | The copy-and-fill vocabulary a case states as data, and the runtime side that runs it |
+| `measured` | The committed Metal measurements a ported case reads, under the public fixtures |
