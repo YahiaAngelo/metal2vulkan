@@ -464,14 +464,6 @@ driver's. Each is open work.
   the command buffer of an indirect one past the compute limits with
   `CommandBufferError::MeshGridPastLimits` (ANV's y and z axes stop at 65,535; MoltenVK's limits
   pass every grid Metal runs).
-- **Two mesh draws of one pass with no barrier between them are ordered by the emulation and not
-  by Metal.** Where a later draw's object or mesh function reads a buffer an earlier draw wrote,
-  and no `memoryBarrier` stands between them, Metal orders nothing: on the M3 Max (macOS 27.0.1)
-  the reader read the host's words in 30 runs of 30, through an indirect command buffer's two
-  commands. The emulation (MoltenVK, ANV on the Iris Xe) records the reader's dispatches after the
-  writer's, so the reader reads the writer's words every run. Nothing announces it. The
-  conformance case `mesh-commands-unordered-draws` holds Metal's measurement and compares the
-  fields the pass does determine, not the reader's texels.
 - **An object threadgroup that sets a mesh grid Metal launches nothing for keeps its own writes.**
   On the M3 Max such a threadgroup's device writes (an atomic add before the set) do not land
   either, while the draw's other threadgroups run; the runtime runs the threadgroup and launches

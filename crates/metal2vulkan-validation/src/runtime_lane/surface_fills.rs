@@ -6,8 +6,10 @@
 //! - **Over a surface's plane, or a buffer.** A two-plane YCbCr texture over plane 0 or 1 of a
 //!   CoreVideo surface, the buffer here standing for the surface with its planes where the
 //!   surface's lie, and a padded 10-bit texture over a buffer, every byte first `0xEE`: the runs
-//!   of bytes one fill changed, as the probe printed them. A YCbCr texture's unit is its plane's
-//!   code, and a packed one's texels each take one zero byte at the texel's `x` of its row.
+//!   of bytes one fill changed, every byte of every run. A YCbCr texture's unit is its plane's
+//!   code, and a packed one's texels each take one zero byte at the texel's `x` of its row. The
+//!   `579 p70` row's bytes are `probes/surface_buffer_fills.m`'s, because `surface.m` printed at
+//!   most 24 bytes of a run and that row's runs are 32 bytes each.
 //! - **Two-plane extended-range.** A `Shared` texture of its own memory, or at byte 0 of a
 //!   placement heap of Metal's size, every texel's color word set to its index (each slice's and
 //!   level's own top bits) by `replace_region`, one fill of `a1 a2 a3 a4`, and the texels whose
@@ -129,8 +131,11 @@ const OVER: [Over; 19] = [
     buf(577, [7, 3], 32, "b4",
         " [0+14: 01 02 01 02 01 02 01 02 01 02 01 02 01 02] [0x20+14: 01 02 01 02 01 02 01 02 01 02 01 02 01 02] [0x40+14: 01 02 01 02 01 02 01 02 01 02 01 02 01 02]"),
     buf(578, [8, 4], 64, "r3", " [0x44+8: 01 02 03 01 01 02 03 01]"),
+    // Each row's 32 bytes are the packed color eight times. `surface.m`'s form cut every run at
+    // 24, so the last eight bytes of each were in no comparison; `probes/surface_buffer_fills.m`
+    // measured the row whole on this chip (three runs, the same bytes each time).
     buf(579, [8, 4], 64, "p70",
-        " [0+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff ..] [0x40+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff ..] [0x80+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff ..] [0xc0+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff ..]"),
+        " [0+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff] [0x40+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff] [0x80+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff] [0xc0+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff]"),
 ];
 
 /// One fill of a two-plane extended-range texture (`tp.m`'s arguments): its format, extent,
@@ -210,8 +215,10 @@ fn format(raw: u32) -> PixelFormat {
     PixelFormat::try_from(raw).unwrap()
 }
 
-/// `bytes`' runs of bytes other than `0xEE`, as `surface.m` prints them: each ` [<at>+<n>:`,
-/// at most 24 of its bytes, ` ..` past them, and `]`.
+/// `bytes`' runs of bytes other than `0xEE`, as `probes/surface_buffer_fills.m` prints them: each
+/// ` [<at>+<n>:`, every one of its bytes, and `]`. Printing all of them is the point: the form
+/// `surface.m` printed cut each run at 24 bytes and wrote ` ..`, so the bytes past the 24th of a
+/// 32-byte run were compared by nothing, inside a passing test.
 fn runs(bytes: &[u8]) -> String {
     let mut out = String::new();
     let mut i = 0;
@@ -230,16 +237,39 @@ fn runs(bytes: &[u8]) -> String {
             format!("{i:#x}")
         };
         out += &format!(" [{at}+{}:", j - i);
-        for b in &bytes[i..j.min(i + 24)] {
+        for b in &bytes[i..j] {
             out += &format!(" {b:02x}");
-        }
-        if j - i > 24 {
-            out += " ..";
         }
         out += "]";
         i = j;
     }
     out
+}
+
+/// Every byte of `bytes` that a fill changed has a two-digit number in `runs`' `text`: the
+/// property a truncating formatter breaks.
+fn covers(text: &str, bytes: &[u8], case: &str) {
+    // A run prints ` [<at>+<n>:` and then one number a byte, so the numbers after a run's colon
+    // are the bytes of it the comparison holds.
+    let printed: usize = text
+        .split('[')
+        .skip(1)
+        .map(|run| {
+            run.split_once(':').map_or(0, |(_, listed)| {
+                (listed.split_whitespace())
+                    .filter(|word| {
+                        let word = word.strip_suffix(']').unwrap_or(word);
+                        word.len() == 2 && word.bytes().all(|b| b.is_ascii_hexdigit())
+                    })
+                    .count()
+            })
+        })
+        .sum();
+    let changed = bytes.iter().filter(|&&b| b != 0xee).count();
+    assert_eq!(
+        printed, changed,
+        "{case}: the compared runs print {printed} of the {changed} bytes the fill changed"
+    );
 }
 
 /// The fill `case` (as [`Over::case`] reads) into `texture` of `width` by `height`.
@@ -336,7 +366,9 @@ fn fills_over_surfaces_and_buffers_write_metal_s_bytes() {
             blit.end_encoding().unwrap();
             command_buffer.commit().unwrap();
             command_buffer.wait_until_completed_for(WAIT).unwrap();
-            let ours = runs(&read_buffer(&surface, 0, over.length).unwrap());
+            let read = read_buffer(&surface, 0, over.length).unwrap();
+            let ours = runs(&read);
+            covers(&ours, &read, over.case);
             if ours != over.metal {
                 println!(
                     "SURFACE-FILLS-DIFFERS {} {}:{ours} (Metal's{})",

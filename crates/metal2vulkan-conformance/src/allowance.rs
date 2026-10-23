@@ -346,12 +346,28 @@ pub fn accepted_differences() -> &'static [String] {
             .split_once(ACCEPTED_HEADING)
             .map(|(_, rest)| rest.split("\n## ").next().unwrap_or(rest))
             .unwrap_or_default();
-        section
-            .lines()
-            .filter_map(|line| line.strip_prefix("- **"))
-            .filter_map(|rest| rest.split_once("**"))
-            .map(|(lead, _)| accepted_slug(lead))
-            .collect()
+        // An entry's bold lead-in may wrap onto the next lines, so the words are taken until the
+        // closing `**` rather than from the first line alone. Reading only the first line made
+        // every wrapped entry invisible, and an allowance naming one of those could never be
+        // justified.
+        let mut entries = Vec::new();
+        let mut lead_in: Option<String> = None;
+        for line in section.lines() {
+            let rest = match (&mut lead_in, line.strip_prefix("- **")) {
+                (None, Some(start)) => start,
+                (Some(_), _) => line.trim_start(),
+                (None, None) => continue,
+            };
+            let words = lead_in.take().map_or_else(String::new, |mut so_far| {
+                so_far.push(' ');
+                so_far
+            });
+            match rest.split_once("**") {
+                Some((last, _)) => entries.push(accepted_slug(&(words + last))),
+                None => lead_in = Some(words + rest),
+            }
+        }
+        entries
     })
 }
 

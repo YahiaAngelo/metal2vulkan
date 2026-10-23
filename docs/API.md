@@ -3178,6 +3178,16 @@ each item named states the rule in full.
   which decides it. A pass that renders such a texture in place otherwise announces
   `dont-care-store`.
 
+- **Two mesh draws of one pass with no barrier between them run in order.** Where a later draw's
+  object or mesh function reads a buffer an earlier draw wrote, and no `memoryBarrier` stands
+  between them, Metal orders nothing: on an M3 Max (macOS 27.0.1) the reader read the host's words
+  in 30 runs of 30, through an indirect command buffer's two commands. The runtime's emulation of
+  mesh draws (MoltenVK, ANV on the Iris Xe) records the reader's dispatches after the writer's, so
+  the reader reads the writer's words every run. Nothing is slower or approximate for the order, so
+  no notice says so, and every field the pass does determine is Metal's: the conformance case
+  `mesh-commands-unordered-draws` compares those exactly and keeps Metal's own texels beside them,
+  for the next macOS to be read against.
+
 **GPU hangs and faults** (a draw of private primitive type 9, `DrawPrimitiveType::Nine`)
 
 - **A hang reads `Scheduled` 5.06 ms after its commit and completes no sooner than 27.5 ms after

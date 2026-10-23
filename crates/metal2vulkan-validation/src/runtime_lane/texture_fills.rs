@@ -394,6 +394,9 @@ fn two_plane_case(
         while j < got.len() && got[j] != 0xee {
             j += 1;
         }
+        // The digest holds the run's first 64 bytes and its length. The `b5` cases of 550 and
+        // 551 have a 92-byte run, so 28 of its bytes are in no comparison; Metal's words there
+        // were never recorded and closing it needs a probe of the whole run, not a guess.
         let shown = hex(&got[i..j.min(i + 64)]);
         let more = if j - i > 64 {
             format!("...({})", j - i)
@@ -519,6 +522,18 @@ fn texture_case(
         panic!("{raw} {name}: a fill refused: {error}");
     }
     let got = read_buffer(&readback, 0, total).unwrap();
+    // Every byte of the readback lies in a part, whose line digests it, or in the 16-byte
+    // padding between parts, which no copy writes and which stays as the buffer was made: a
+    // part the lines missed would leave device bytes in no comparison.
+    let mut digested = vec![false; total as usize];
+    for &(_, _, _, unit, _, _, (across, down), at) in &parts {
+        let n = (across * down * unit) as usize;
+        digested[at as usize..at as usize + n].fill(true);
+    }
+    assert!(
+        (0..total as usize).all(|i| digested[i] || got[i] == 0),
+        "{raw} {name}: a byte outside the digested parts changed"
+    );
     let lines: Vec<String> = parts
         .iter()
         .map(|&(level, slice, _, unit, aspect, _, (across, down), at)| {

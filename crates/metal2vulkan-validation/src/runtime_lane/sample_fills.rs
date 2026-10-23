@@ -327,6 +327,13 @@ fn printed(bytes: &[u8]) -> String {
 /// The probe's lines of every sample `bytes` holds (the readback's layout: texels in rows, each
 /// texel's samples, `unit` bytes each) of slice `slice`, labelled `label`.
 fn lines(label: &str, slice: u64, bytes: &[u8], samples: usize, unit: usize) -> Vec<String> {
+    // The lines print every sample of every texel: a readback longer than that would hold bytes
+    // the digest never saw.
+    assert_eq!(
+        bytes.len(),
+        HEIGHT as usize * WIDTH as usize * samples * unit,
+        "{label}s{slice}: the printed samples do not cover every byte read back"
+    );
     (0..HEIGHT as usize)
         .map(|y| {
             let mut line = format!("{label} s{slice} y{y}:");

@@ -21,6 +21,7 @@ mod fast_trig_within_apples_bound;
 mod fixtures_assemble_with_the_pinned_llvm;
 mod linux_gate_policy;
 mod metal_coverage;
+mod no_conflict_markers;
 mod pipeline_selection;
 mod private_corpus_root;
 mod public_entry_rows;

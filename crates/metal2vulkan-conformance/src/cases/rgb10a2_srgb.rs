@@ -21,13 +21,14 @@
 //!
 //! - A 64-bit projection of a formatted string is weaker than the bytes. These cases record the
 //!   words and the results themselves, so the comparison names the code or the sample.
-//! - **The writes question never compared 4,079 of the words the kernel wrote.** The lane dispatches
-//!   a 4096 by 5 grid, so the kernel writes all 20,480 texels, but the lane formats only
+//! - **The writes question compared 4,079 fewer words than the kernel wrote.** The lane dispatches
+//!   a 4096 by 5 grid, so the kernel writes all 20,480 texels, and the lane formatted only
 //!   `got.iter().take(n)` of them, `n` being 16,401 — the 16,385 ramp values plus the sixteen
-//!   specials. The remaining 4,079 texels are written from the input buffer's zero padding and never
-//!   appear in the digest, inside a passing test. This case records all 20,480 words, so what the
-//!   padding stores is Metal's measured answer rather than a gap. (It is the same shape batch 1a
-//!   found in `surface_fills`, whose formatter truncated each run at 24 bytes.)
+//!   specials. The remaining 4,079 texels are written from the input buffer's zero padding and
+//!   appeared in no digest, inside a passing test. This case records all 20,480 words, so what the
+//!   padding stores is Metal's measured answer rather than a gap; the lane now digests the whole
+//!   grid too, against the digest of these recorded words. (It is the same shape batch 1a found in
+//!   `surface_fills`, whose formatter truncated each run at 24 bytes.)
 //!
 //! Left to the lane, and why: the clears, the stores and the loads, which are render passes, and the
 //! `isRGB10A2GammaSupported` check, which is a device property rather than an observation. The case
@@ -610,8 +611,8 @@ mod tests {
         assert_eq!(padding.len(), 4);
     }
 
-    /// The write case's grid is larger than its sweep, which is the defect the port closes: the
-    /// kernel writes 20,480 texels and the lane's formatter looks at 16,401 of them.
+    /// The write case's grid is larger than its sweep, which is the defect the port closed: the
+    /// kernel writes 20,480 texels and the lane's formatter looked at 16,401 of them.
     #[test]
     fn the_write_grid_covers_more_texels_than_the_sweep() {
         let texels = (WRITE_WIDTH * WRITE_HEIGHT) as usize;
@@ -621,7 +622,7 @@ mod tests {
         assert_eq!(texels - WRITE_VALUES, 4_079);
         // The input buffer covers the whole grid, so every one of those texels is written.
         assert_eq!(write_values().len(), texels * 16);
-        // The site's layout covers all of them, where the lane's digest covers 16,401.
+        // The site's layout covers all of them, as the lane's digest now does.
         assert_eq!(
             texture_layout(WRITE_WIDTH, WRITE_HEIGHT).extent(),
             texels * WORD_BYTES as usize
