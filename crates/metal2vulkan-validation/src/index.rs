@@ -3214,6 +3214,7 @@ mod tests {
         };
         assert_eq!(state(&row, &keys(&base)), EvidenceState::Current);
         let mut refusal = crate::refusal::RefusalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -3415,6 +3416,7 @@ mod tests {
         let mut environment = candidate.environment.clone();
         environment["robustness"] = serde_json::json!({"leg": "stated"});
         let refusal = crate::refusal::RefusalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -3627,6 +3629,7 @@ mod tests {
 
         // A refusal the venue's run made after it compiled is held to the same digest.
         let mut refusal = crate::refusal::RefusalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),

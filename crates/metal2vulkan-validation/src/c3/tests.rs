@@ -3139,6 +3139,7 @@ fn refusal_of(
     let mut recorded = recorded_environment(environment);
     recorded["robustness"] = serde_json::json!({ "leg": leg });
     RefusalObservation {
+        timing: Some(crate::observation::test_timing()),
         case_id: case.case_id.clone(),
         air_sha256: case.air_sha256.clone(),
         input_sha256: case.computed_input_sha256().unwrap(),

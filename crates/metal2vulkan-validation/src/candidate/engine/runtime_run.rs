@@ -72,6 +72,7 @@ use super::artifact::Planned;
 use super::graphics::{self, RenderCase};
 use super::guards::{with_escaped, Placement};
 use super::tables::TableBuffers;
+use super::RefusedOn;
 use super::{
     bind_refusal, companion_source, compute_case, draw_out_of_bounds_run, engine_fingerprint,
     index_padding_agrees, linked_modules, out_of_bounds_run, product_refusal, report_verdict,
@@ -97,7 +98,6 @@ use crate::executor_contract::out_of_bounds::{self, OutOfBoundsRun};
 use crate::gpu::wait::{with_submission_label, SubmissionBackend, SubmissionLabel};
 use crate::hash::sha256_bytes;
 use crate::observation::{Backend, TRANSLATOR_FINGERPRINT};
-use crate::worker::device::OpenedDevice;
 use metal2vulkan::device::VkFeature;
 use metal2vulkan::error::{Needs, Unsupported};
 use metal2vulkan::pipeline::{Stage as ShaderStage, StageModule};
@@ -670,8 +670,8 @@ impl Opened {
     /// The opened device a typed refusal names, with what the run had compiled when it refused
     /// (`artifact`: empty for a refusal before the dispatch took its pipeline, which compiled
     /// nothing the census can cover).
-    fn refused_on(&self, artifact: &CaseArtifact) -> OpenedDevice {
-        OpenedDevice {
+    fn refused_on(&self, artifact: &CaseArtifact) -> RefusedOn {
+        RefusedOn {
             environment: self.environment.clone(),
             translator_fingerprint: self.translator_fingerprint.clone(),
             artifact: Some(artifact.executed()),

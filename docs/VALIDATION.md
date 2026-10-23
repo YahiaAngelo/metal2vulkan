@@ -273,9 +273,10 @@ cargo run -p metal2vulkan-validation --release --bin corpus-moltenvk -- \
   reference gap rather than a pass.
 - **What it cost.** Every row records what its case cost in time: how many executions the figure
   covers, what they took in all, and the least one of them took, in microseconds. A Metal row's
-  figure is its three executions, a candidate row's its one run on the device, each read by the
-  clock the pipeline-creation ceiling is checked against. The store refuses a row that records
-  none, so the figure is there for every case either side runs. It is not semantics: no verdict,
+  figure is its three executions, a candidate row's its one run on the device, and a refusal's the
+  attempt it refused on, each read by the clock the pipeline-creation ceiling is checked against.
+  The store refuses a row or a refusal that records none, so the figure is there for every case
+  either side runs, whether it produced output or a typed refusal. It is not semantics: no verdict,
   digest, fingerprint or census key reads it, two rows that differ only in their figures are one
   row, and a row recorded before the figure existed carries none.
 

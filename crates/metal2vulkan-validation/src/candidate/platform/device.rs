@@ -1464,7 +1464,7 @@ impl RuntimeRestriction {
     pub(crate) fn refused_on(
         &self,
         executor: &str,
-    ) -> Result<crate::worker::device::OpenedDevice, String> {
+    ) -> Result<crate::candidate::engine::RefusedOn, String> {
         let layer = serde_json::json!({
             "profile": self.restriction.stem,
             "profile_name": self.restriction.profile_name,

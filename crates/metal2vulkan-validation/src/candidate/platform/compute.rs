@@ -157,7 +157,7 @@ pub(crate) fn native_refused_on(
     identity: &serde_json::Value,
     executor: &str,
     profiles_layer: serde_json::Value,
-) -> Result<crate::worker::device::OpenedDevice, String> {
+) -> Result<crate::candidate::engine::RefusedOn, String> {
     let device = WorkerDevice::new(native.clone(), crate::candidate::requested_policy())
         .map_err(|error| format!("its own description derives no profile: {error}"))?;
     let profile = device.device().profile();
@@ -183,7 +183,7 @@ pub(crate) fn native_refused_on(
             object.insert(key.into(), value);
         }
     }
-    Ok(crate::worker::device::OpenedDevice {
+    Ok(crate::candidate::engine::RefusedOn {
         environment,
         translator_fingerprint: engine_fingerprint(profile),
         artifact: None,
@@ -202,7 +202,7 @@ pub(super) fn attempt(
         Err(ExecutorError::NotSupported(_)) => {
             opened_device(context)
                 .ok()
-                .map(|target| crate::worker::device::OpenedDevice {
+                .map(|target| crate::candidate::engine::RefusedOn {
                     environment: environment(context, target.device(), executor),
                     translator_fingerprint: engine_fingerprint(target.device().profile()),
                     artifact: None,

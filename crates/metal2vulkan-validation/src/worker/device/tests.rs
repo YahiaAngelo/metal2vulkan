@@ -118,6 +118,25 @@ fn a_reported_run_carries_what_it_cost() {
         least_micros: 9_000_000,
     };
     assert_eq!(slower, run());
+
+    // A refused attempt is reported the same way: an opened device implies a figure, because the
+    // worker reads its clock around everything after the case was prepared.
+    let opened = OpenedDevice {
+        environment: serde_json::json!({}),
+        translator_fingerprint: "cd".repeat(32),
+        artifact: None,
+        timing: crate::observation::test_timing(),
+    };
+    let reported = serde_json::to_value(&opened).unwrap();
+    assert!(reported.get("timing").is_some());
+    let mut without = reported.clone();
+    without.as_object_mut().unwrap().remove("timing");
+    let refused = serde_json::from_value::<OpenedDevice>(without).unwrap_err();
+    assert!(refused.to_string().contains("timing"), "{refused}");
+    assert_eq!(
+        serde_json::from_value::<OpenedDevice>(reported).unwrap(),
+        opened
+    );
 }
 
 /// What this build's worker reports for `result`.
@@ -475,6 +494,7 @@ fn a_worker_run_under_another_venue_profile_is_refused() {
         let refused = outcome(
             &DeviceOutput {
                 refused_on: Some(OpenedDevice {
+                    timing: crate::observation::test_timing(),
                     environment: recorded(profile),
                     translator_fingerprint: "cd".repeat(32),
                     artifact: None,
@@ -605,6 +625,7 @@ fn a_refusal_names_the_device_it_was_refused_on() {
     }
     .into());
     let opened = |leg: &str, profile: Option<&str>| OpenedDevice {
+        timing: crate::observation::test_timing(),
         environment: serde_json::json!({
             "device": "AMD Radeon 780M Graphics (RADV PHOENIX)",
             "robustness": {"leg": leg},

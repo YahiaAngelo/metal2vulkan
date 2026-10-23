@@ -17,7 +17,7 @@
 use crate::c1::reviewed::GapClass;
 use crate::candidate::engine::artifact::ExecutedArtifact;
 use crate::check::admission::NotSupported;
-use crate::observation::{validate_hash, Backend};
+use crate::observation::{validate_hash, Backend, CaseTiming};
 use serde::{Deserialize, Serialize};
 
 /// What a refusal says is missing.
@@ -164,6 +164,13 @@ pub struct RefusalObservation {
     /// executor before ABI v129.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact: Option<ExecutedArtifact>,
+    /// What the refused attempt cost in time ([`CaseTiming`]): the attempt prepared the case and
+    /// compiled before it refused, which is a case the suite ran, so the row records what that
+    /// cost. The figure is the device worker's reading around the attempt, as a run's is. Every
+    /// refusal this build records carries one ([`crate::store::CorpusStore::upsert_refusal`]
+    /// refuses one that does not); a refusal recorded before the figure existed holds none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<CaseTiming>,
 }
 
 impl RefusalObservation {
