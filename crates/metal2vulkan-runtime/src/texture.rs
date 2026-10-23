@@ -2909,7 +2909,8 @@ impl Device {
     }
 
     /// [`placed_image`](Self::placed_image)'s image of `plan` with host-transfer usage, and that
-    /// plan, where the device copies on the host (`texture/host_copy.rs`), the plan's format has
+    /// plan, where the device copies on the host (`texture/host_copy.rs`), host copies reach the
+    /// plan's format on this driver ([`host_copy::reaches_format`]), the plan's format has
     /// `HOST_IMAGE_TRANSFER` at optimal tiling, and the device makes and places the image so (in
     /// host-cached memory of `class` where the device has it; only there where the image would
     /// otherwise copy on the staging queue, `staged`); `None` elsewhere, the image made as before.
@@ -2922,6 +2923,12 @@ impl Device {
     ) -> Option<(ImagePlan, vk::Image, Placement)> {
         let shared = self.shared();
         shared.host_copies.as_ref()?;
+        // An image whose texel block holds more than one texel takes no host copies on a driver
+        // that copies such an image out of its host-visible memory as the memory is bound, through
+        // a row pitch whose own check it fails (`texture/host_copy.rs`, `driver_defects.rs`).
+        if !host_copy::reaches_format(plan.format, &self.properties().driver_defects) {
+            return None;
+        }
         // An image that would copy on the staging queue takes host copies only from host-cached
         // memory: the host reads uncached memory slowly (`texture/staging_copy.rs`).
         if staged && !lock(&shared.memory).has_host_cached(class) {

@@ -966,6 +966,14 @@ pub enum RuntimeDriverDefect {
     /// device-local memory, where, as in a memoryless texture, nothing a pass leaves is
     /// observable.
     LazilyAllocatedSubresourceViews,
+    /// Binding memory to an image with host-transfer usage copies the whole image **out of that
+    /// memory on the CPU** before anything has written it, through a row pitch of the driver's
+    /// own, and the driver's own check of that copy fails for an image whose texel block holds
+    /// more than one texel: it reports the pitch as short of the row it reads. Nothing is
+    /// refused: a block-compressed texture's image takes no host-transfer usage there and so
+    /// stays in memory of its own class, and its CPU copies go through a submission, as on a
+    /// device without `VK_EXT_host_image_copy`.
+    HostTransferImagesCopiedAtBind,
 }
 
 /// One device capability a refusal can name.
