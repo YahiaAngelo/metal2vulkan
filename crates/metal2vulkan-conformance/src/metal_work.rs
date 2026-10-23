@@ -66,6 +66,31 @@ fn fill_texture_selector() -> Sel {
 /// A fill of any other texture takes a pattern of any length.
 const LONGEST_TEXTURE_BUFFER_PATTERN: usize = 32_752;
 
+/// The pattern fill's two known hazards, refused before anything is encoded.
+///
+/// It decides from the pattern's length and the target's kind alone, so a test reaches both
+/// refusals without a device — and, for the second, without ever building the shape that ends
+/// Metal's process to watch the guard hold.
+fn refused_pattern(pattern: usize, texture_buffer: bool) -> Option<Failure> {
+    if pattern == 0 {
+        return Some(Failure::named(
+            "EmptyFillPattern",
+            "a fill of no pattern bytes: plain Metal reads a unit's bytes from the pattern's \
+             address all the same",
+        ));
+    }
+    if texture_buffer && pattern > LONGEST_TEXTURE_BUFFER_PATTERN {
+        return Some(Failure::named(
+            "LongTextureBufferFillPattern",
+            format!(
+                "a texture buffer's fill of {pattern} pattern bytes, past the \
+                 {LONGEST_TEXTURE_BUFFER_PATTERN} where Metal's process ends in the call"
+            ),
+        ));
+    }
+    None
+}
+
 /// A resource the program made on Metal.
 enum Made {
     Buffer(Retained<ProtocolObject<dyn MTLBuffer>>),
@@ -695,25 +720,12 @@ impl Run<'_> {
         region: &Rect,
         pattern: &[u8],
     ) -> Answer<()> {
-        if pattern.is_empty() {
-            return Err(Failure::named(
-                "EmptyFillPattern",
-                "a fill of no pattern bytes: plain Metal reads a unit's bytes from the pattern's \
-                 address all the same",
-            ));
-        }
         let held = self.texture(texture)?;
-        if held.textureType() == MTLTextureType::TypeTextureBuffer
-            && pattern.len() > LONGEST_TEXTURE_BUFFER_PATTERN
-        {
-            return Err(Failure::named(
-                "LongTextureBufferFillPattern",
-                format!(
-                    "a texture buffer's fill of {} pattern bytes, past the \
-                     {LONGEST_TEXTURE_BUFFER_PATTERN} where Metal's process ends in the call",
-                    pattern.len()
-                ),
-            ));
+        if let Some(refusal) = refused_pattern(
+            pattern.len(),
+            held.textureType() == MTLTextureType::TypeTextureBuffer,
+        ) {
+            return Err(refusal);
         }
         let encoder = self.encoder()?;
         let selector = fill_texture_selector();
@@ -826,5 +838,51 @@ fn option_of(plane: Plane) -> MTLBlitOption {
         Plane::Whole => MTLBlitOption::empty(),
         Plane::Depth => MTLBlitOption::DepthFromDepthStencil,
         Plane::Stencil => MTLBlitOption::StencilFromDepthStencil,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{refused_pattern, LONGEST_TEXTURE_BUFFER_PATTERN};
+    use crate::case::Failure;
+    use crate::transcript::Value;
+
+    /// The variant a refusal records as, so a test names the hazard rather than its prose.
+    fn variant(refusal: &Failure) -> String {
+        let Value::Variant { payload, .. } = &refusal.value else {
+            panic!("a refusal records as an error variant: {:?}", refusal.value);
+        };
+        match payload.as_ref() {
+            Value::Variant { name, .. } => name.clone(),
+            other => panic!("an error carries its variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_empty_fill_pattern_is_refused_for_every_target() {
+        for texture_buffer in [false, true] {
+            let refusal = refused_pattern(0, texture_buffer)
+                .expect("a fill of no pattern bytes is refused before it is encoded");
+            assert_eq!(variant(&refusal), "EmptyFillPattern");
+        }
+    }
+
+    /// The length that ends Metal's process is a texture buffer's alone, and the refusal starts one
+    /// byte past the longest pattern a texture buffer's fill is known to survive. This is the only
+    /// proof of that guard there can be: the round forbids a case that ends Metal's process, so the
+    /// shape itself is never built.
+    #[test]
+    fn a_texture_buffer_s_pattern_is_refused_one_byte_past_what_metal_survives() {
+        assert!(
+            refused_pattern(LONGEST_TEXTURE_BUFFER_PATTERN, true).is_none(),
+            "the longest measured pattern is the longest allowed, not the first refused"
+        );
+        let refusal = refused_pattern(LONGEST_TEXTURE_BUFFER_PATTERN + 1, true)
+            .expect("one byte more ends Metal's process, so it is refused");
+        assert_eq!(variant(&refusal), "LongTextureBufferFillPattern");
+        assert!(
+            refused_pattern(LONGEST_TEXTURE_BUFFER_PATTERN + 1, false).is_none(),
+            "the hazard is the texture buffer's; another texture's fill takes any length"
+        );
     }
 }
