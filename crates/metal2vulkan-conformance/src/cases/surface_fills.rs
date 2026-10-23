@@ -15,11 +15,12 @@
 //! rows and pitch, with [`Gaps::Compared`], so the bytes the fill must not have touched compare
 //! too and a difference names the byte's row, its index and both values.
 //!
-//! Which is why the one case whose table truncates, a color packed in `RGBA8Unorm` over a whole
-//! 8x4 buffer texture, is **not** here: the lane's expectation does not state Metal's bytes 24 to
-//! 31 of each row, so there is nothing to carry for them, and the suite does not invent a
-//! measurement. Re-probing that case on Metal is the way to close it, and it needs a probe this
-//! round did not run.
+//! The one row whose printed runs truncate, a color packed in `RGBA8Unorm` over the whole of an
+//! 8x4 `RG10Unorm_X12_sRGB` texture on a buffer, is carried here from a **second** measurement:
+//! `probes/surface_buffer_fills.m`, which calls the same SPI from Objective-C and prints every
+//! byte of every run. That probe is committed, so the bytes it found can be taken again rather
+//! than measured once and thrown away, which is how the gap arose. It re-measures the other three
+//! buffer rows of the table as its own control, and reproduced their carried bytes exactly.
 //!
 //! Nothing here can fault a GPU: every fill is of a small region, and no pattern is longer than
 //! four bytes (a texture-buffer fill pattern over 32752 bytes, which ends Metal's process, is a
@@ -39,10 +40,13 @@ pub const SURFACE_FILLS: &str = "surface-fills-over-planes-and-buffers";
 
 /// Where the carried bytes were measured.
 const MEASURED_IN: &str =
-    "the runtime lane's surface-fill table, from the probes surface.m and cases.sh (an Apple M3 \
-     Max, macOS 27.0.1)";
+    "the runtime lane's surface-fill table, from the probes surface.m and cases.sh, and for the \
+     RG10Unorm_X12_sRGB buffer row from probes/surface_buffer_fills.m (an Apple M3 Max, macOS \
+     27.0.1)";
 
-/// The runs the carried table stands on: the probe's own single pass over the cases.
+/// The runs the carried table stands on: the weakest row's, the lane probe's own single pass over
+/// the cases. (`probes/surface_buffer_fills.m` took the `579 p70` row over three passes, which
+/// printed the same bytes each time; the table's number is the one every row holds.)
 pub const MEASURED_RUNS: u32 = 1;
 
 /// Why record mode must not run the case on Metal.
@@ -174,8 +178,8 @@ const fn buf(
     }
 }
 
-/// Metal's fills over a surface's plane or a buffer, as the probe measured them (the lane's
-/// `OVER`, less its one row whose printed runs are truncated).
+/// Metal's fills over a surface's plane or a buffer, as the probes measured them: the lane's
+/// `OVER`, whole, its last row's 32-byte runs from `probes/surface_buffer_fills.m`.
 const ROWS: &[Row] = &[
     surf(b"420v", [8, 4], (500, 0), S8X4, "b4", FillOf::Whole(4),
         " [0x200+8: 01 01 01 01 01 01 01 01] [0x240+8: 01 01 01 01 01 01 01 01] [0x280+8: 01 01 01 01 01 01 01 01] [0x2c0+8: 01 01 01 01 01 01 01 01]"),
@@ -213,15 +217,13 @@ const ROWS: &[Row] = &[
     buf(577, [7, 3], 32, "b4", FillOf::Whole(4),
         " [0+14: 01 02 01 02 01 02 01 02 01 02 01 02 01 02] [0x20+14: 01 02 01 02 01 02 01 02 01 02 01 02 01 02] [0x40+14: 01 02 01 02 01 02 01 02 01 02 01 02 01 02]"),
     buf(578, [8, 4], 64, "r3", FillOf::Small(3), " [0x44+8: 01 02 03 01 01 02 03 01]"),
+    // The row the lane's formatter truncated at 24 of each run's 32 bytes, measured whole by
+    // `probes/surface_buffer_fills.m`: a 4-byte texel over eight texels a row, so each row's 32
+    // bytes are the packed color eight times. The last eight bytes of each run are the ones no
+    // passing test had ever compared.
+    buf(579, [8, 4], 64, "p70", FillOf::Color(70),
+        " [0+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff] [0x40+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff] [0x80+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff] [0xc0+32: 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff 40 80 bf ff]"),
 ];
-
-/// The row of the lane's table this case leaves out, and why, so the gap is where a reader of the
-/// case set finds it rather than only in a report: a color packed in `RGBA8Unorm` over the whole
-/// of an 8x4 buffer texture, whose printed runs are 32 bytes each and whose formatter stopped at
-/// 24, so the lane's expectation never stated Metal's last eight bytes of each row.
-pub const NOT_CARRIED: &str =
-    "buffer texture 579 p70: the lane's printed runs are truncated at 24 of each run's 32 bytes, \
-     so eight bytes a row of Metal's answer were never written down";
 
 /// The calls a row makes that answer an object or nothing of their own, by the site each is
 /// emitted at under the row: both legs emit these, so the carried answer is the shape a run

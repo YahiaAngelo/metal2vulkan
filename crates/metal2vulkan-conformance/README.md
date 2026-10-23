@@ -136,3 +136,13 @@ edits one.
 A carried answer is our own measurement of this chip, stated in the shape the case emits, and its
 case forbids re-recording with the reason why. Record mode refuses such a case rather than
 pretending it can ask Metal again.
+
+## `probes/`
+
+Where a carried answer came from a call record mode cannot make — Apple SPI, a private getter —
+the Objective-C probe that measured it is committed here, with the command that builds it in its
+header comment. A probe deleted after one run is how a measurement evaporates: the
+`RG10Unorm_X12_sRGB` row of `surface_fills` was missing for exactly that reason, because the
+original probe was thrown away and the lane that kept its number printed only the first 24 bytes
+of each 32-byte run. A probe that re-measures rows already carried, as a control, says whether its
+new rows can be trusted.

@@ -12,7 +12,7 @@
       },
       "provenance": {
         "carried": {
-          "from": "the runtime lane's surface-fill table, from the probes surface.m and cases.sh (an Apple M3 Max, macOS 27.0.1)"
+          "from": "the runtime lane's surface-fill table, from the probes surface.m and cases.sh, and for the RG10Unorm_X12_sRGB buffer row from probes/surface_buffer_fills.m (an Apple M3 Max, macOS 27.0.1)"
         }
       },
       "device": "apple-m3-max",
@@ -49,7 +49,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "422e96a566a5c4a2ddfae53cfae39d69a6e80643c77b2a57530a41a118143ad7"
+                          "hex": "e7105e857c1328781a98de994da9020651023be80e4752094c9515ee49658999"
                         }
                       }
                     }
@@ -1526,6 +1526,89 @@
                       "observed": {
                         "value": {
                           "bytes": "7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u4BAgMBAQIDAe7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u4="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 512
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 512,
+                            "row_pitch": 512,
+                            "rows": 1,
+                            "image_pitch": 512,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "579/p70/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "579/p70/texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "579/p70/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "579/p70",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "fillTextureColor",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "variant": {
+                                "name": "Completed",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "bytes",
+                      "observed": {
+                        "value": {
+                          "bytes": "QIC//0CAv/9AgL//QIC//0CAv/9AgL//QIC//0CAv//u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7kCAv/9AgL//QIC//0CAv/9AgL//QIC//0CAv/9AgL//7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u5AgL//QIC//0CAv/9AgL//QIC//0CAv/9AgL//QIC//+7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7uQIC//0CAv/9AgL//QIC//0CAv/9AgL//QIC//0CAv//u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u4="
                         },
                         "shape": {
                           "bytes": {
