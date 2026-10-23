@@ -173,6 +173,38 @@ fn layout(lanes: Lanes, threads: u32, offset: u64, length: u64) -> ByteLayout {
     }
 }
 
+/// How a dispatch covers its texture: the grid's row width, which the kernels read at buffer 1,
+/// the grid, and the threadgroups where the case dispatches threadgroups rather than threads.
+///
+/// One value rather than three arguments, so a write and the reads that follow it cannot drift
+/// apart on the shape they cover.
+#[derive(Clone, Copy)]
+struct Shape {
+    grid_width: u32,
+    grid: [u32; 3],
+    /// `Some` where the case dispatches threadgroups, so the grid reaches past the texture, as the
+    /// consumer's shape does; `None` where it dispatches one thread a texel.
+    threadgroups: Option<[u32; 3]>,
+}
+
+/// What one read-back reads: the texture, the lanes it reads them as, the grid's threads and the
+/// shape the grid covers.
+#[derive(Clone, Copy)]
+struct Read {
+    texture: Handle,
+    lanes: Lanes,
+    threads: usize,
+    shape: Shape,
+}
+
+/// What one dispatch runs: the kernel, the texture, the buffer 0 values, and the shape.
+struct Over<'a> {
+    pipeline: Handle,
+    texture: Handle,
+    values: &'a [u8],
+    shape: Shape,
+}
+
 /// A case: one two-plane format, its six outputs.
 pub struct ExtendedRangeTwoPlanes {
     name: &'static str,
@@ -231,19 +263,24 @@ impl ExtendedRangeTwoPlanes {
 
     /// Run one kernel over `texture`, with `values` at buffer 0 and the grid's row width at
     /// buffer 1, and wait for it.
-    #[allow(clippy::too_many_arguments)]
     fn run(
         &self,
         side: &mut dyn Side,
         sites: &mut Sites,
         at: &str,
-        pipeline: Handle,
-        texture: Handle,
-        values: &[u8],
-        grid_width: u32,
-        grid: [u32; 3],
-        threadgroups: Option<[u32; 3]>,
+        over: Over<'_>,
     ) -> Result<Handle, Abort> {
+        let Over {
+            pipeline,
+            texture,
+            values,
+            shape:
+                Shape {
+                    grid_width,
+                    grid,
+                    threadgroups,
+                },
+        } = over;
         let buffer = made(sites, &format!("{at}/buffer"), side.buffer(values))?;
         let width = made(
             sites,
@@ -282,31 +319,32 @@ impl ExtendedRangeTwoPlanes {
     }
 
     /// Read `texture` back `lanes`-wise over `threads` threads, and answer the bytes.
-    #[allow(clippy::too_many_arguments)]
     fn read_back(
         &self,
         side: &mut dyn Side,
         sites: &mut Sites,
         at: &str,
         pipelines: &Pipelines,
-        texture: Handle,
-        lanes: Lanes,
-        threads: usize,
-        grid_width: u32,
-        grid: [u32; 3],
-        threadgroups: Option<[u32; 3]>,
+        read: Read,
     ) -> Result<Vec<u8>, Abort> {
+        let Read {
+            texture,
+            lanes,
+            threads,
+            shape,
+        } = read;
         let length = threads * lanes.stride() as usize;
+        let blank = vec![BLANK; length];
         let output = self.run(
             side,
             sites,
             at,
-            pipelines.of(lanes.entry()),
-            texture,
-            &vec![BLANK; length],
-            grid_width,
-            grid,
-            threadgroups,
+            Over {
+                pipeline: pipelines.of(lanes.entry()),
+                texture,
+                values: &blank,
+                shape,
+            },
         )?;
         made(
             sites,
@@ -464,7 +502,11 @@ impl Case for ExtendedRangeTwoPlanes {
             "texture/square",
             side.texture_2d_in_role(&self.spec([SIDE, SIDE]), &[]),
         )?;
-        let grid = [SIDE, SIDE, 1];
+        let square_shape = Shape {
+            grid_width: SIDE,
+            grid: [SIDE, SIDE, 1],
+            threadgroups: None,
+        };
         for (step, entry, values) in [
             (
                 "half-written",
@@ -477,12 +519,12 @@ impl Case for ExtendedRangeTwoPlanes {
                 side,
                 sites,
                 &format!("{step}/write"),
-                pipelines.of(entry),
-                square,
-                &values,
-                SIDE,
-                grid,
-                None,
+                Over {
+                    pipeline: pipelines.of(entry),
+                    texture: square,
+                    values: &values,
+                    shape: square_shape,
+                },
             )?;
             let mut node = Node::branch(step, Vec::new());
             for lanes in [Lanes::Half, Lanes::Float] {
@@ -491,12 +533,12 @@ impl Case for ExtendedRangeTwoPlanes {
                     sites,
                     &format!("{step}/{}", lanes.name()),
                     &pipelines,
-                    square,
-                    lanes,
-                    TEXELS,
-                    SIDE,
-                    grid,
-                    None,
+                    Read {
+                        texture: square,
+                        lanes,
+                        threads: TEXELS,
+                        shape: square_shape,
+                    },
                 )?;
                 node = node.with(self.windowed_node(lanes.name(), lanes, TEXELS, bytes));
             }
@@ -509,18 +551,22 @@ impl Case for ExtendedRangeTwoPlanes {
             "texture/consumer",
             side.texture_2d_in_role(&self.spec([CONSUMER_WIDTH, CONSUMER_HEIGHT]), &[]),
         )?;
-        let groups = Some([2, 1, 1]);
-        let consumer_grid = [CONSUMER_GRID_WIDTH, GROUP, 1];
+        let consumer_shape = Shape {
+            grid_width: CONSUMER_GRID_WIDTH,
+            grid: [CONSUMER_GRID_WIDTH, GROUP, 1],
+            threadgroups: Some([2, 1, 1]),
+        };
+        let consumer_values = halves(CONSUMER_THREADS, |n, c| 0x3000 + n + 2048 * c);
         self.run(
             side,
             sites,
             "consumer-shape/write",
-            pipelines.of(WRITE_HALF),
-            consumer,
-            &halves(CONSUMER_THREADS, |n, c| 0x3000 + n + 2048 * c),
-            CONSUMER_GRID_WIDTH,
-            consumer_grid,
-            groups,
+            Over {
+                pipeline: pipelines.of(WRITE_HALF),
+                texture: consumer,
+                values: &consumer_values,
+                shape: consumer_shape,
+            },
         )?;
         let mut node = Node::branch("consumer-shape", Vec::new());
         for lanes in [Lanes::Half, Lanes::Float] {
@@ -529,12 +575,12 @@ impl Case for ExtendedRangeTwoPlanes {
                 sites,
                 &format!("consumer-shape/{}", lanes.name()),
                 &pipelines,
-                consumer,
-                lanes,
-                CONSUMER_THREADS,
-                CONSUMER_GRID_WIDTH,
-                consumer_grid,
-                groups,
+                Read {
+                    texture: consumer,
+                    lanes,
+                    threads: CONSUMER_THREADS,
+                    shape: consumer_shape,
+                },
             )?;
             node = node.with(self.whole_node(lanes.name(), lanes, CONSUMER_THREADS, bytes));
         }

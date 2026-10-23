@@ -33,6 +33,7 @@ pub mod texture_buffer_fills;
 pub mod texture_fills;
 pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
+pub mod two_plane_samples;
 
 use crate::case::Case;
 
@@ -54,6 +55,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in extended_range_two_planes::all() {
+        cases.push(Box::new(case));
+    }
+    for case in two_plane_samples::all() {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(texture_buffer_fills::streams()));

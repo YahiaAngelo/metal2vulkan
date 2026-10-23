@@ -280,6 +280,17 @@ impl<S: Side> Side for Announcing<S> {
         self.inner.texture_2d_in_role(spec, bytes)
     }
 
+    fn replace_region(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<()> {
+        self.at("replace_region");
+        self.inner.replace_region(texture, size, row_pitch, bytes)
+    }
+
     fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
         self.at("sampler");
         self.inner.sampler(spec)

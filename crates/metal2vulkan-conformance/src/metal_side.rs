@@ -525,6 +525,42 @@ impl Side for MetalSide {
         Ok(keep(&mut self.textures, texture))
     }
 
+    fn replace_region(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<()> {
+        if bytes.len() < row_pitch as usize * size[1] as usize {
+            return Err(Failure::named(
+                "TooFewBytes",
+                format!("{} bytes for {} rows of {row_pitch}", bytes.len(), size[1]),
+            ));
+        }
+        let texture: Retained<ProtocolObject<dyn MTLTexture>> =
+            Retained::from(self.held_texture(texture)?);
+        let region = MTLRegion {
+            origin: MTLOrigin { x: 0, y: 0, z: 0 },
+            size: MTLSize {
+                width: size[0] as usize,
+                height: size[1] as usize,
+                depth: 1,
+            },
+        };
+        // SAFETY: `bytes` holds `size[1]` rows of `row_pitch` bytes, checked just above, which is
+        // the region the call writes.
+        unsafe {
+            texture.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+                region,
+                0,
+                std::ptr::NonNull::from(bytes).cast(),
+                row_pitch as usize,
+            );
+        }
+        Ok(())
+    }
+
     fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
         let filter = |filter: metal2vulkan::metal::SamplerMinMagFilter| {
             MTLSamplerMinMagFilter(filter.as_raw() as usize)

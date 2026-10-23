@@ -432,6 +432,23 @@ pub trait Side {
         Err(Failure::unavailable("texture_2d_in_role"))
     }
 
+    /// `replaceRegion:mipmapLevel:withBytes:bytesPerRow:` of a texture's whole level 0, at
+    /// `row_pitch` bytes a row.
+    ///
+    /// A case that writes a texture twice in a stated order needs this: making it with its bytes
+    /// cannot say "the kernel wrote the alpha plane first, then the host wrote the colour words",
+    /// and that order is part of what such a case means.
+    fn replace_region(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<()> {
+        let _ = (texture, size, row_pitch, bytes);
+        Err(Failure::unavailable("replace_region"))
+    }
+
     /// `newSamplerStateWithDescriptor:` of the state the case describes ([`SamplerSpec`]).
     fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
         let _ = spec;

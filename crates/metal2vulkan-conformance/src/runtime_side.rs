@@ -434,6 +434,26 @@ impl Side for RuntimeSide<'_> {
         Ok(keep(&mut self.textures, texture))
     }
 
+    fn replace_region(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<()> {
+        let texture = self.held_texture(texture)?;
+        texture
+            .replace_region(
+                Region::new_2d(0, 0, size[0].into(), size[1].into()),
+                0,
+                0,
+                bytes,
+                row_pitch.into(),
+                0,
+            )
+            .map_err(Failure::from_error)
+    }
+
     fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
         let mut descriptor = SamplerDescriptor::new();
         descriptor.min_filter = spec.min_filter;
