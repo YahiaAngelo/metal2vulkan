@@ -56,7 +56,7 @@
 
 use crate::case::{Abort, Case, Input, MetalSource, Side};
 use crate::sparse_query::{page_word, page_words, QueryPage, SparseTileQuery as Q};
-use crate::transcript::{Node, Observed, Sites, Value};
+use crate::transcript::{Sites, Value};
 use metal2vulkan::metal::{PixelFormat, TextureType};
 use metal2vulkan_runtime::SparsePageSize;
 
@@ -283,19 +283,18 @@ impl Case for SparseTileCase {
             // at its site and the sweep goes on: one query the runtime refuses compares as a
             // refusal at that one site, and the other answers stay readable instead of being lost
             // behind an abort.
-            let answered = match side.sparse_tile_size(query) {
-                Ok(tile) => Value::ok(tile.value()),
-                Err(failure) => failure.value,
-            };
-            sites.push(Node::leaf(query.site(), Observed::value(answered)));
+            crate::case::probe(sites, &query.site(), side.sparse_tile_size(query), |tile| {
+                tile.value()
+            });
         }
         if self.asks_bytes {
             for page in PAGES {
-                let answered = match side.sparse_tile_size_in_bytes(page) {
-                    Ok(bytes) => Value::ok(Value::Uint(bytes)),
-                    Err(failure) => failure.value,
-                };
-                sites.push(Node::leaf(bytes_site(page), Observed::value(answered)));
+                crate::case::probe(
+                    sites,
+                    &bytes_site(page),
+                    side.sparse_tile_size_in_bytes(page),
+                    |bytes| Value::Uint(*bytes),
+                );
             }
         }
         Ok(())

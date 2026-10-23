@@ -1892,6 +1892,37 @@ pub fn call<T>(
     }
 }
 
+/// [`call`] for a **sweep that carries on** past a call that did not answer: the site records the
+/// answer either way, the venue's own gap is recorded with it, and nothing aborts.
+///
+/// A sweep over many queries wants one refused query to compare as a refusal at its own site while
+/// the rest stay readable, which an abort would lose. Written by hand that reads
+/// `Err(failure) => failure.value`, and then [`Failure::lacks`] — whether the typed refusal is the
+/// **venue's** honest gap rather than ours — is silently dropped, so a device that simply cannot
+/// run one query of the sweep has that site scored as a refusal of ours. That is the one thing the
+/// `lacks-feature` verdict exists to prevent, and it was happening on lavapipe for every
+/// multisampled sparse query. Use this rather than matching, so the fact cannot be forgotten.
+pub fn probe<T>(
+    sites: &mut Sites,
+    at: &str,
+    answer: Answer<T>,
+    observed: impl FnOnce(&T) -> Value,
+) -> Option<T> {
+    match answer {
+        Ok(value) => {
+            sites.value(at, Value::ok(observed(&value)));
+            Some(value)
+        }
+        Err(failure) => {
+            sites.push(Node::leaf(at, Observed::value(failure.value.clone())));
+            if let Some(needs) = &failure.lacks {
+                sites.device_gap(at, needs.clone());
+            }
+            None
+        }
+    }
+}
+
 /// [`call`] for a call that answers an object: the site records that it answered, and nothing of
 /// what it answered.
 pub fn made<T>(sites: &mut Sites, at: &str, answer: Answer<T>) -> Result<T, Abort> {
