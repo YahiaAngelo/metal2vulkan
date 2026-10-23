@@ -514,6 +514,16 @@ pub trait Gpu {
     /// Run `f` inside an autorelease pool (native), as a Metal program's frame runs.
     fn pool<R>(&self, f: impl FnOnce() -> R) -> R;
 
+    /// Time the driver's own calls under the side's, `windows` windows each, over `pages` of
+    /// host memory: the runtime's side alone (`vkfloor.rs`), which measures them on the Vulkan
+    /// device it holds. Metal has no such call, so the native side measures nothing.
+    ///
+    /// # Safety
+    ///
+    /// `pages` is read-write host memory of this process, at least eight megabytes, that
+    /// outlives the call.
+    unsafe fn driver_floor(&self, _windows: usize, _pages: *mut u8) {}
+
     /// The side's own counts of the work its calls made, by name, as they stand: the runtime's
     /// `WorkCounts` the compositing and burst workloads report; none natively.
     fn work_counts(&self) -> Vec<(&'static str, f64)> {
