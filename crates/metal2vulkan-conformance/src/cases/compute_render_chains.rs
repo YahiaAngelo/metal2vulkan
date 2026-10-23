@@ -1,22 +1,32 @@
 //! What crosses the boundary between a **compute dispatch and a render pass** of one command
 //! buffer, in both directions.
 //!
-//! One case in the whole suite puts a dispatch and a pass in the same command buffer
-//! ([`crate::cases::tile_threadgroups`]), and it is about a tile function rather than about the
-//! boundary. Programs cross that boundary constantly: a kernel builds a texture and a pass samples
-//! it; a pass renders a target and a kernel reads it. Both directions are a hazard our side has to
-//! turn into a barrier and an image-layout transition, and Metal states neither.
+//! Programs cross that boundary constantly: a kernel builds a texture and a pass samples it; a
+//! pass renders a target and a kernel reads it. Each direction is a hazard our side has to turn
+//! into a barrier and an image-layout transition, and Metal states neither.
+//!
+//! **What the suite already asked, and what it did not.** One direction is covered:
+//! [`crate::cases::extended_range_targets`] and [`crate::cases::extended_range_blends`] put a
+//! dispatch after a pass in one command buffer and read the just-rendered target with a kernel, so
+//! a colour attachment's store reaching a kernel's texture read is not new here. The other
+//! direction -- a kernel's writes reaching a **fragment stage's sampled read** -- was asked by
+//! nothing, and neither was a fragment function's own shader-write reaching a kernel.
+//! `pass-writes-then-kernel-reads` is therefore the row that adds least, and it is kept for a
+//! reason it earns rather than for symmetry: it is the one of the three whose answer is a
+//! **blit's** too, so it says the kernel read what a blit reads of the same texture, which is the
+//! control the other two rows' equalities are measured against.
 //!
 //! Three rows, one for each way the two kinds of work hand a texture over:
 //!
 //! - **`kernel-writes-then-fragment-samples`**: a kernel writes every texel of a private texture,
 //!   and a pass in the same command buffer samples that texture through a sampler. The sampled
 //!   target must come back equal to the written one, which it can only do if the dispatch's writes
-//!   are visible to the fragment stage and the image reached the layout a sampled read needs.
+//!   are visible to the fragment stage and the image reached the layout a sampled read needs. This
+//!   is the direction nothing asked.
 //! - **`pass-writes-then-kernel-reads`**: a pass draws four bands into a private render target,
-//!   and a kernel in the same command buffer reads every texel of it into a buffer. The kernel's
-//!   buffer must hold what a blit of the same target holds, which is the reverse hazard: a colour
-//!   attachment's store made visible to a kernel's texture read.
+//!   and a kernel in the same command buffer reads every texel of it into a buffer, which must
+//!   hold what a blit of the same target holds. The hazard is the one the extended-range families
+//!   already reach; what this row adds is the blit beside it.
 //! - **`fragment-writes-then-kernel-reads`**: a **fragment** function writes a texture through a
 //!   shader-write binding rather than through a colour attachment, and a kernel then reads it. The
 //!   write leaves the pass by a different door from the attachment's store, so it is its own
