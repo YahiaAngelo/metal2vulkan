@@ -853,6 +853,30 @@ pub trait Side {
         Err(Failure::unavailable("makes_texture"))
     }
 
+    /// `newTextureWithDescriptor:offset:bytesPerRow:` on a buffer of the request's own length and
+    /// storage mode, and what the made texture answers of itself
+    /// ([`crate::buffer_texture`]).
+    ///
+    /// The whole shape is one call because what it observes is a **rule**: whether Metal lays a
+    /// texture of this descriptor over a buffer at that offset and that row pitch at all. A case
+    /// cannot state that as a resource plus a step, because a resource that cannot be made stops a
+    /// program, and this family's subject is exactly the shapes that cannot.
+    ///
+    /// It allocates no texels: the texture's memory **is** the buffer's, and the buffer is the
+    /// request's own length. Nothing is encoded and nothing reaches the GPU.
+    ///
+    /// A request whose row pitch is below the texture's own row ends Metal's process, so the Metal
+    /// side refuses it before making the call
+    /// ([`crate::buffer_texture::ends_metals_process`]) and a case of that shape says
+    /// [`MetalSource::did_not_return`].
+    fn buffer_texture(
+        &mut self,
+        request: &crate::buffer_texture::BufferTextureRequest,
+    ) -> Answer<crate::buffer_texture::BufferTextureFacts> {
+        let _ = request;
+        Err(Failure::unavailable("buffer_texture"))
+    }
+
     /// `sparseTileSizeWithTextureType:pixelFormat:sampleCount:`, or its `sparsePageSize:` form
     /// where the query names a page ([`crate::sparse_query`]).
     ///

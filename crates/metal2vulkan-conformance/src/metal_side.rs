@@ -2450,6 +2450,55 @@ impl Side for MetalSide {
         Ok(keep(&mut self.textures, texture))
     }
 
+    fn buffer_texture(
+        &mut self,
+        request: &crate::buffer_texture::BufferTextureRequest,
+    ) -> Answer<crate::buffer_texture::BufferTextureFacts> {
+        // The guard first, and before any object is made: a row pitch below the texture's own row
+        // fails AGX's `bytes_per_row >= used_bytes_per_row` and ends this process, so the call is
+        // never made. A case of that shape says `MetalSource::did_not_return` and record mode
+        // refuses it; this is the second line, for a row somebody adds to a recorded table by
+        // mistake.
+        if let Some(why) = crate::buffer_texture::ends_metals_process(request) {
+            return Err(Failure::named("WouldEndMetalsProcess", why));
+        }
+        let (_, options) = storage_mode(request.buffer_storage);
+        let buffer = self
+            .device
+            .newBufferWithLength_options(request.buffer_length as usize, options)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewBufferWithLength",
+                    format!("{} bytes returned nil", request.buffer_length),
+                )
+            })?;
+        let descriptor = queried_descriptor(&request.descriptor);
+        let texture = buffer
+            .newTextureWithDescriptor_offset_bytesPerRow(
+                &descriptor,
+                request.offset as usize,
+                request.bytes_per_row as usize,
+            )
+            .ok_or_else(|| {
+                // Metal's own nil: the descriptor and the three numbers describe no texture over
+                // the buffer, and the process goes on. The runtime answers `Error::Nil` for the
+                // same shape, so the two sides say the same thing in their own spellings.
+                Failure::named(
+                    "Nil",
+                    format!(
+                        "newTextureWithDescriptor:offset:{}:bytesPerRow:{} returned nil",
+                        request.offset, request.bytes_per_row
+                    ),
+                )
+            })?;
+        let facts = buffer_texture_facts(&texture);
+        // The buffer and the texture are kept, so neither is freed while the sweep goes on and a
+        // later row cannot read memory a dropped texture handed back.
+        keep(&mut self.buffers, buffer);
+        keep(&mut self.textures, texture);
+        Ok(facts)
+    }
+
     fn makes_texture(&mut self, query: &HeapTextureQuery) -> Answer<bool> {
         let descriptor = queried_descriptor(query);
         // The texture, where Metal makes one, is released as this statement ends: the case asks
@@ -2620,6 +2669,28 @@ fn queried_descriptor(query: &HeapTextureQuery) -> Retained<MTLTextureDescriptor
     descriptor.setUsage(MTLTextureUsage(query.usage.as_raw() as usize));
     descriptor.setStorageMode(storage_mode(query.storage).0);
     descriptor
+}
+
+/// What a texture Metal laid over a buffer answers of itself: every getter the runtime's `Texture`
+/// has too, so a difference names the field rather than the object.
+fn buffer_texture_facts(
+    texture: &ProtocolObject<dyn MTLTexture>,
+) -> crate::buffer_texture::BufferTextureFacts {
+    crate::buffer_texture::BufferTextureFacts {
+        texture_type: texture.textureType().0 as u64,
+        pixel_format: texture.pixelFormat().0 as u64,
+        width: texture.width() as u64,
+        height: texture.height() as u64,
+        depth: texture.depth() as u64,
+        mipmap_level_count: texture.mipmapLevelCount() as u64,
+        array_length: texture.arrayLength() as u64,
+        sample_count: texture.sampleCount() as u64,
+        usage: texture.usage().0 as u64,
+        storage_mode: texture.storageMode().0 as u64,
+        cpu_cache_mode: texture.cpuCacheMode().0 as u64,
+        hazard_tracking_mode: texture.hazardTrackingMode().0 as u64,
+        gpu_optimized: texture.allowGPUOptimizedContents(),
+    }
 }
 
 /// The case's enumerations reach Metal's by their raw ordinals, which are Metal's own.

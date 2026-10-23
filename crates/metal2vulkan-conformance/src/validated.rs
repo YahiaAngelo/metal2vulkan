@@ -468,6 +468,14 @@ impl<S: Side> Side for Announcing<S> {
         self.inner.makes_texture(query)
     }
 
+    fn buffer_texture(
+        &mut self,
+        request: &crate::buffer_texture::BufferTextureRequest,
+    ) -> Answer<crate::buffer_texture::BufferTextureFacts> {
+        self.at("buffer_texture");
+        self.inner.buffer_texture(request)
+    }
+
     fn sparse_tile_size(
         &mut self,
         query: &crate::sparse_query::SparseTileQuery,

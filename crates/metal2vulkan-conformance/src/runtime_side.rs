@@ -2347,6 +2347,46 @@ impl Side for RuntimeSide<'_> {
         })
     }
 
+    fn buffer_texture(
+        &mut self,
+        request: &crate::buffer_texture::BufferTextureRequest,
+    ) -> Answer<crate::buffer_texture::BufferTextureFacts> {
+        let buffer = self
+            .device
+            .new_buffer(
+                request.buffer_length,
+                resource_options(request.buffer_storage),
+            )
+            .map_err(Failure::from_error)?;
+        let texture = buffer
+            .new_texture(
+                &queried_descriptor(&request.descriptor),
+                request.offset,
+                request.bytes_per_row,
+            )
+            .map_err(Failure::from_error)?;
+        let facts = crate::buffer_texture::BufferTextureFacts {
+            texture_type: u64::from(texture.texture_type().as_raw()),
+            pixel_format: u64::from(texture.pixel_format().as_raw()),
+            width: texture.width(),
+            height: texture.height(),
+            depth: texture.depth(),
+            mipmap_level_count: texture.mipmap_level_count(),
+            array_length: texture.array_length(),
+            sample_count: texture.sample_count(),
+            usage: u64::from(texture.usage().as_raw()),
+            storage_mode: texture.storage_mode().raw(),
+            cpu_cache_mode: texture.cpu_cache_mode().raw(),
+            hazard_tracking_mode: texture.hazard_tracking_mode().raw(),
+            gpu_optimized: texture.allow_gpu_optimized_contents(),
+        };
+        // Both are kept, as the Metal side keeps them: a texture over a buffer the case dropped
+        // would be a texture over freed memory, and a later row could read it.
+        self.buffers.push(buffer);
+        self.textures.push(texture);
+        Ok(facts)
+    }
+
     fn makes_texture(&mut self, query: &HeapTextureQuery) -> Answer<bool> {
         match self.device.new_texture(&queried_descriptor(query)) {
             Ok(_) => Ok(true),
