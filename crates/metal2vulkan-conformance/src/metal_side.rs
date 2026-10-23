@@ -19,6 +19,7 @@ use crate::case::{
     Venue,
 };
 use crate::queue_slots::QueueSlots;
+use crate::render::{Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, TargetSpec};
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
 use metal2vulkan::metal::{BindingAccess, PixelFormat, RenderStages};
@@ -27,13 +28,14 @@ use objc2::runtime::ProtocolObject;
 use objc2::AnyThread;
 use objc2_foundation::{NSString, NSURL};
 use objc2_metal::{
-    MTLAttributeFormat, MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType, MTLBuffer,
-    MTLClearColor, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
+    MTLAttributeFormat, MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType,
+    MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLClearColor,
+    MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
     MTLComputeCommandEncoder, MTLComputePipelineDescriptor, MTLComputePipelineState,
     MTLCreateSystemDefaultDevice, MTLDevice, MTLFunction, MTLIndexType, MTLIndirectCommandBuffer,
     MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand,
     MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLOrigin, MTLPipelineOption,
-    MTLPixelFormat, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
+    MTLPixelFormat, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
     MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
     MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerAddressMode,
@@ -1297,6 +1299,139 @@ impl Side for MetalSide {
         })
     }
 
+    fn target(&mut self, spec: &TargetSpec) -> Answer<Handle> {
+        // SAFETY: the descriptor constructor reads only the format and the size it is given.
+        let descriptor = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                MTLPixelFormat(spec.format.as_raw() as usize),
+                spec.size[0] as usize,
+                spec.size[1] as usize,
+                false,
+            )
+        };
+        let mut usage = MTLTextureUsage::RenderTarget;
+        if spec.shader_read {
+            usage |= MTLTextureUsage::ShaderRead;
+        }
+        if spec.shader_write {
+            usage |= MTLTextureUsage::ShaderWrite;
+        }
+        descriptor.setUsage(usage);
+        descriptor.setStorageMode(MTLStorageMode::Private);
+        if spec.samples > 1 {
+            descriptor.setTextureType(MTLTextureType::Type2DMultisample);
+            // SAFETY: the count is 2 or 4, which the case's own guard keeps it to, and Metal takes
+            // both on every device; the descriptor is this call's own.
+            unsafe { descriptor.setSampleCount(spec.samples as usize) };
+        }
+        let texture = self
+            .device
+            .newTextureWithDescriptor(&descriptor)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewTextureWithDescriptor",
+                    format!(
+                        "a {:?} {}x{} target at {} samples returned nil",
+                        spec.format, spec.size[0], spec.size[1], spec.samples
+                    ),
+                )
+            })?;
+        Ok(keep(&mut self.textures, texture))
+    }
+
+    fn render_pipeline(
+        &mut self,
+        library: Handle,
+        spec: &RenderPipelineSpec<'_>,
+    ) -> Answer<Handle> {
+        let held = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = |name: &str| {
+            held.newFunctionWithName(&NSString::from_str(name))
+                .ok_or_else(|| Failure::named("NoSuchFunction", name.to_owned()))
+        };
+        let descriptor = MTLRenderPipelineDescriptor::new();
+        descriptor.setVertexFunction(Some(&*function(spec.vertex)?));
+        descriptor.setFragmentFunction(Some(&*function(spec.fragment)?));
+        descriptor.setRasterSampleCount(spec.samples as usize);
+        for (at, color) in spec.colors.iter().enumerate() {
+            let Some(color) = color else { continue };
+            // SAFETY: `at` is below the eight color attachments every Metal pipeline holds, which
+            // the case's own guard keeps it to.
+            let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(at) };
+            attachment.setPixelFormat(MTLPixelFormat(color.format.as_raw() as usize));
+            if let Some(blend) = &color.blend {
+                let factor = |factor: metal2vulkan::metal::BlendFactor| {
+                    MTLBlendFactor(factor.as_raw() as usize)
+                };
+                let operation = |operation: metal2vulkan::metal::BlendOperation| {
+                    MTLBlendOperation(operation.as_raw() as usize)
+                };
+                attachment.setBlendingEnabled(true);
+                attachment.setSourceRGBBlendFactor(factor(blend.source_rgb));
+                attachment.setDestinationRGBBlendFactor(factor(blend.destination_rgb));
+                attachment.setRgbBlendOperation(operation(blend.rgb));
+                attachment.setSourceAlphaBlendFactor(factor(blend.source_alpha));
+                attachment.setDestinationAlphaBlendFactor(factor(blend.destination_alpha));
+                attachment.setAlphaBlendOperation(operation(blend.alpha));
+            }
+        }
+        let state = self
+            .device
+            .newRenderPipelineStateWithDescriptor_error(&descriptor)
+            .map_err(|error| Failure::named("NewRenderPipelineState", error.to_string()))?;
+        Ok(keep(
+            &mut self.render_pipelines,
+            RenderPipeline::unreflected(state),
+        ))
+    }
+
+    fn render(&mut self, work: &[RenderWork]) -> Answer<PassOutcome> {
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+        // Metal's encoder methods answer nothing, so no piece of this side's program can refuse. A
+        // refusal of ours then compares against Metal's answer and reads as a refusal.
+        let refused = vec![None; work.len()];
+        for piece in work {
+            match piece {
+                RenderWork::Pass(pass) => self.encode_pass(&command_buffer, pass)?,
+                RenderWork::ReadTexture {
+                    texture,
+                    into,
+                    offset,
+                    row_pitch,
+                    size,
+                } => self.encode_read_texture(
+                    &command_buffer,
+                    *texture,
+                    *into,
+                    *offset,
+                    *row_pitch,
+                    *size,
+                )?,
+                RenderWork::Dispatch(dispatch) => {
+                    self.encode_dispatch(&command_buffer, dispatch)?;
+                }
+            }
+        }
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        let error = command_buffer
+            .error()
+            .map(|error| Value::unit_variant(format!("code {}", error.code())));
+        let status = Value::unit_variant(status_word(command_buffer.status()));
+        keep(&mut self.command_buffers, command_buffer);
+        Ok(PassOutcome {
+            refused,
+            status,
+            error,
+        })
+    }
+
     fn heap_texture_size_and_align(&mut self, query: &HeapTextureQuery) -> Answer<SizeAndAlign> {
         let descriptor = queried_descriptor(query);
         let answered = self
@@ -1722,6 +1857,187 @@ impl MetalSide {
                 }
             }
         }
+        Ok(())
+    }
+}
+
+/// The render vocabulary ([`crate::render`]) on native Metal.
+impl MetalSide {
+    /// The render pipeline state `handle` names.
+    fn held_render_state(
+        &self,
+        handle: Handle,
+    ) -> Answer<Retained<ProtocolObject<dyn MTLRenderPipelineState>>> {
+        self.render_pipelines
+            .get(handle.0 as usize)
+            .map(|held| held.state.clone())
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("render pipeline {}", handle.0)))
+    }
+
+    /// Encode one render pass of a program into `command_buffer`.
+    fn encode_pass(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        pass: &RenderPass,
+    ) -> Answer<()> {
+        let descriptor = MTLRenderPassDescriptor::renderPassDescriptor();
+        for (at, color) in pass.colors.iter().enumerate() {
+            let Some(texture) = color.texture else {
+                continue;
+            };
+            let texture: Retained<ProtocolObject<dyn MTLTexture>> =
+                Retained::from(self.held_texture(texture)?);
+            // SAFETY: `at` is below the eight color attachments every Metal pass holds, which the
+            // case's own guard keeps it to.
+            let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(at) };
+            attachment.setTexture(Some(&texture));
+            attachment.setLoadAction(MTLLoadAction(color.load.raw() as usize));
+            attachment.setStoreAction(MTLStoreAction(color.store.raw() as usize));
+            attachment.setClearColor(MTLClearColor {
+                red: color.clear[0],
+                green: color.clear[1],
+                blue: color.clear[2],
+                alpha: color.clear[3],
+            });
+            if let Some(resolve) = color.resolve {
+                let resolve: Retained<ProtocolObject<dyn MTLTexture>> =
+                    Retained::from(self.held_texture(resolve)?);
+                attachment.setResolveTexture(Some(&resolve));
+            }
+        }
+        let encoder = command_buffer
+            .renderCommandEncoderWithDescriptor(&descriptor)
+            .ok_or_else(|| Failure::named("RenderCommandEncoder", "returned nil".to_owned()))?;
+        for step in &pass.steps {
+            match step {
+                RenderStep::Pipeline(state) => {
+                    encoder.setRenderPipelineState(&*self.held_render_state(*state)?);
+                }
+                RenderStep::FragmentBuffer {
+                    buffer,
+                    offset,
+                    index,
+                } => {
+                    let held = self.held(*buffer)?;
+                    // SAFETY: the buffer is at least as long as the fragment function's binding
+                    // from that offset, which the case states as one of its inputs, and the
+                    // encoder outlives the call.
+                    unsafe {
+                        encoder.setFragmentBuffer_offset_atIndex(
+                            Some(held),
+                            *offset as usize,
+                            *index as usize,
+                        );
+                    }
+                }
+                RenderStep::Draw {
+                    primitive,
+                    first,
+                    count,
+                    instances,
+                } => {
+                    // SAFETY: the draw names a vertex range of the case's own fullscreen triangle
+                    // and binds no vertex buffer, so nothing is read out of bounds.
+                    unsafe {
+                        encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
+                            MTLPrimitiveType(primitive.as_raw() as usize),
+                            *first as usize,
+                            *count as usize,
+                            *instances as usize,
+                            0,
+                        );
+                    }
+                }
+            }
+        }
+        encoder.endEncoding();
+        Ok(())
+    }
+
+    /// Encode one compute dispatch of a program into `command_buffer`.
+    fn encode_dispatch(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        dispatch: &Dispatch,
+    ) -> Answer<()> {
+        let state = self
+            .pipelines
+            .get(dispatch.pipeline.0 as usize)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NoSuchHandle",
+                    format!("compute pipeline {}", dispatch.pipeline.0),
+                )
+            })?
+            .clone();
+        let encoder = command_buffer
+            .computeCommandEncoder()
+            .ok_or_else(|| Failure::named("ComputeCommandEncoder", "returned nil".to_owned()))?;
+        encoder.setComputePipelineState(&state);
+        for (at, (buffer, offset)) in dispatch.buffers.iter().enumerate() {
+            let held = self.held(*buffer)?;
+            // SAFETY: the buffer is at least as long as the kernel's binding from that offset,
+            // which the case states as one of its inputs, and the encoder outlives the call.
+            unsafe { encoder.setBuffer_offset_atIndex(Some(held), *offset as usize, at) };
+        }
+        for (at, texture) in dispatch.textures.iter().enumerate() {
+            let held = self.held_texture(*texture)?;
+            // SAFETY: the texture is of the kind and access the kernel declares at that slot, and
+            // the encoder outlives the call.
+            unsafe { encoder.setTexture_atIndex(Some(held), at) };
+        }
+        encoder.dispatchThreads_threadsPerThreadgroup(size(dispatch.grid), size(dispatch.threads));
+        encoder.endEncoding();
+        Ok(())
+    }
+
+    /// Encode one texture-to-buffer blit of a program into `command_buffer`.
+    fn encode_read_texture(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        texture: Handle,
+        into: Handle,
+        offset: u64,
+        row_pitch: u32,
+        extent: [u32; 2],
+    ) -> Answer<()> {
+        let texture: Retained<ProtocolObject<dyn MTLTexture>> =
+            Retained::from(self.held_texture(texture)?);
+        let buffer: Retained<ProtocolObject<dyn MTLBuffer>> = Retained::from(self.held(into)?);
+        let bytes = row_pitch as u64 * u64::from(extent[1]);
+        if u64::try_from(buffer.length()).unwrap_or(0) < offset + bytes {
+            return Err(Failure::named(
+                "PastTheBuffer",
+                format!(
+                    "{bytes} bytes at {offset} of a buffer of {}",
+                    buffer.length()
+                ),
+            ));
+        }
+        let encoder = command_buffer
+            .blitCommandEncoder()
+            .ok_or_else(|| Failure::named("BlitCommandEncoder", "returned nil".to_owned()))?;
+        // SAFETY: the buffer holds `bytes` from `offset`, checked just above, and the region is
+        // level 0's whole extent of a texture the case made at that extent.
+        unsafe {
+            encoder
+                .copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                    &texture,
+                    0,
+                    0,
+                    MTLOrigin { x: 0, y: 0, z: 0 },
+                    MTLSize {
+                        width: extent[0] as usize,
+                        height: extent[1] as usize,
+                        depth: 1,
+                    },
+                    &buffer,
+                    offset as usize,
+                    row_pitch as usize,
+                    bytes as usize,
+                );
+        }
+        encoder.endEncoding();
         Ok(())
     }
 }

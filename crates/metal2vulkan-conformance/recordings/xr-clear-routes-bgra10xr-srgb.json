@@ -1,0 +1,1948 @@
+{
+  "format": 1,
+  "case": "xr-clear-routes-bgra10xr-srgb",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "rt6_samples.ll",
+      "entry": "rt6_fill_vertex",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    },
+    {
+      "fixture": "rt6_samples.air.ll",
+      "entry": "rt6_fill_vertex",
+      "source_sha256": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+    },
+    {
+      "fixture": "rt6_samples.ll",
+      "entry": "rt6_fill_rgba32float",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    },
+    {
+      "fixture": "rt6_samples.air.ll",
+      "entry": "rt6_fill_rgba32float",
+      "source_sha256": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "fills:air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "fills:air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "format",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "864c40623b03145ce67869dafdfddff484cb6b6922763d6acdcdcef5a33a6f1e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "pipeline",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "99e51983b0efdc37fd1c58f6c73167eb4410136d671474ebef9d720fdc6bcb51"
+                        }
+                      }
+                    },
+                    {
+                      "name": "clear-colors",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "c1f14bf56054a36e8da794785063d7f7319ee4f31d32bd4ac50653146dbfd703"
+                        }
+                      }
+                    },
+                    {
+                      "name": "route:plain-16",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9d20464c0dcf408342a21709cd6ba05af874f3cbe50c780950f3738b24624b05"
+                        }
+                      }
+                    },
+                    {
+                      "name": "route:plain-8",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "c957130749eb535ed43cb3f8c9738756768963a46b3aaa1a0535d96200cef287"
+                        }
+                      }
+                    },
+                    {
+                      "name": "route:written-16",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f7dad86c22fb5adad31426866ead424abff9d43b1a80df477699cd2bea241f65"
+                        }
+                      }
+                    },
+                    {
+                      "name": "route:drawn-16",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "d4556a7334310718b8d8ade108b7af6a7ed65421ca9011256aa7232bc52ca276"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library/fills",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/buffer/values",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/buffer/texels",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/target/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/other/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/render/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/program/0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-16/read-back/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/texels/0",
+                  "observed": {
+                    "value": {
+                      "bytes": "AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8AYIAbgKTAvwBggBuApMC/AGCAG4CkwL8="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/target/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/other/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/render/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/program/1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-16/read-back/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/texels/1",
+                  "observed": {
+                    "value": {
+                      "bytes": "gN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/target/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/other/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/render/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/program/2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-16/read-back/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/texels/2",
+                  "observed": {
+                    "value": {
+                      "bytes": "AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8AdkAAgHrAfwB2QACAesB/AHZAAIB6wH8="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/target/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/other/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/render/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/program/3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-16/read-back/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-16/texels/3",
+                  "observed": {
+                    "value": {
+                      "bytes": "wP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGDA/8DowBAAYMD/wOjAEABgwP/A6MAQAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/buffer/values",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/buffer/texels",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/target/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/other/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/render/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/program/0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-8/read-back/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/texels/0",
+                  "observed": {
+                    "value": {
+                      "bytes": "AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              8,
+                              8,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 32,
+                        "row_pitch": 64,
+                        "rows": 8,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/target/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/other/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/render/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/program/1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-8/read-back/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/texels/1",
+                  "observed": {
+                    "value": {
+                      "bytes": "gN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              8,
+                              8,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 32,
+                        "row_pitch": 64,
+                        "rows": 8,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/target/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/other/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/render/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/program/2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-8/read-back/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/texels/2",
+                  "observed": {
+                    "value": {
+                      "bytes": "AHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              8,
+                              8,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 32,
+                        "row_pitch": 64,
+                        "rows": 8,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/target/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/other/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/render/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/program/3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "plain-8/read-back/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "plain-8/texels/3",
+                  "observed": {
+                    "value": {
+                      "bytes": "wP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              8,
+                              8,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 32,
+                        "row_pitch": 64,
+                        "rows": 8,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/buffer/values",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/buffer/texels",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/target/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/other/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/render/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/program/0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "written-16/read-back/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/texels/0",
+                  "observed": {
+                    "value": {
+                      "bytes": "AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/target/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/other/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/render/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/program/1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "written-16/read-back/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/texels/1",
+                  "observed": {
+                    "value": {
+                      "bytes": "gN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/target/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/other/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/render/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/program/2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "written-16/read-back/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/texels/2",
+                  "observed": {
+                    "value": {
+                      "bytes": "AHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/target/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/other/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/render/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/program/3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "written-16/read-back/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "written-16/texels/3",
+                  "observed": {
+                    "value": {
+                      "bytes": "wP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/buffer/values",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/buffer/texels",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/target/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/other/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/render/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/program/0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "drawn-16/read-back/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/texels/0",
+                  "observed": {
+                    "value": {
+                      "bytes": "AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8AYIAbgKSAvwBggBuApIC/AGCAG4CkgL8="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/target/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/other/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/render/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/program/1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "drawn-16/read-back/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/texels/1",
+                  "observed": {
+                    "value": {
+                      "bytes": "gN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGCA38C9gGEAYIDfwL2AYQBggN/AvYBhAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/target/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/other/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/render/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/program/2",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "drawn-16/read-back/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/texels/2",
+                  "observed": {
+                    "value": {
+                      "bytes": "AHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIAAdoAAQHoAgAB2gABAegCAAHaAAEB6AIA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/target/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/other/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/render/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/program/3",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "drawn-16/read-back/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn-16/texels/3",
+                  "observed": {
+                    "value": {
+                      "bytes": "wP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGDA/wDpABEAYMD/AOkAEQBgwP8A6QARAGA="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              16,
+                              16,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u16",
+                        "row_offset": 0,
+                        "row_elements": 64,
+                        "row_pitch": 128,
+                        "rows": 16,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

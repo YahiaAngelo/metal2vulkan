@@ -14,12 +14,13 @@ use crate::case::{
     TileFacts, TilePipelineSpec, TileStep, Venue,
 };
 use crate::queue_slots::QueueSlots;
+use crate::render::{RenderPass, RenderPipelineSpec, RenderStep, RenderWork, TargetSpec};
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::{Negative, Value};
 use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor};
 use metal2vulkan::metal::{
     BarrierScope, BindingAccess, IndexType, IndirectCommandType, PixelFormat, PrimitiveType,
-    RenderStages, ResourceUsage, TextureUsage,
+    RenderStages, ResourceUsage, TextureType, TextureUsage,
 };
 use metal2vulkan::pipeline::{
     ColorAttachmentDescriptor, MeshPipelineDescriptor, RenderPipelineDescriptor,
@@ -30,7 +31,7 @@ use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue, ComputePipelineState,
     Device, DrawPrimitiveType, IndirectCommand, IndirectCommandBuffer,
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
-    LoadAction, PipelineOption, PipelineOptions, RasterizationRateMap, Region,
+    LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region,
     RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState,
     SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor,
 };
@@ -1266,6 +1267,77 @@ impl Side for RuntimeSide<'_> {
         Ok(keep(&mut self.render_pipelines, state))
     }
 
+    fn target(&mut self, spec: &TargetSpec) -> Answer<Handle> {
+        let mut descriptor = TextureDescriptor::texture_2d(
+            spec.format,
+            u64::from(spec.size[0]),
+            u64::from(spec.size[1]),
+            false,
+        );
+        let mut usage = TextureUsage::RENDER_TARGET;
+        if spec.shader_read {
+            usage |= TextureUsage::SHADER_READ;
+        }
+        if spec.shader_write {
+            usage |= TextureUsage::SHADER_WRITE;
+        }
+        descriptor.usage = usage;
+        descriptor.resource_options = ResourceOptions::private();
+        if spec.samples > 1 {
+            descriptor.texture_type = TextureType::Type2DMultisample;
+            descriptor.sample_count = u64::from(spec.samples);
+        }
+        let texture = self
+            .device
+            .new_texture(&descriptor)
+            .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.textures, texture))
+    }
+
+    fn render_pipeline(
+        &mut self,
+        library: Handle,
+        spec: &RenderPipelineSpec<'_>,
+    ) -> Answer<Handle> {
+        let held = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let stage = |name: &str| -> Answer<StageSource> {
+            Ok(StageSource::Function(
+                held.new_function_with_name(name)
+                    .map_err(Failure::from_error)?
+                    .function_descriptor(),
+            ))
+        };
+        let mut descriptor = RenderPipelineDescriptor::new(stage(spec.vertex)?);
+        descriptor.fragment = Some(stage(spec.fragment)?);
+        descriptor.raster_sample_count = spec.samples;
+        for (at, color) in spec.colors.iter().enumerate() {
+            let Some(color) = color else { continue };
+            let attachment = descriptor
+                .color_attachments
+                .get_mut(at)
+                .ok_or_else(|| Failure::named("NoSuchAttachment", format!("color {at}")))?;
+            let mut made = ColorAttachmentDescriptor::new(color.format);
+            if let Some(blend) = &color.blend {
+                made.blending_enabled = true;
+                made.source_rgb_blend_factor = blend.source_rgb;
+                made.destination_rgb_blend_factor = blend.destination_rgb;
+                made.rgb_blend_operation = blend.rgb;
+                made.source_alpha_blend_factor = blend.source_alpha;
+                made.destination_alpha_blend_factor = blend.destination_alpha;
+                made.alpha_blend_operation = blend.alpha;
+            }
+            *attachment = Some(made);
+        }
+        let state = self
+            .device
+            .new_render_pipeline_state(&descriptor, &PipelineOptions::default())
+            .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.render_pipelines, state))
+    }
+
     fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {
         let state = self
             .render_pipelines
@@ -1366,6 +1438,109 @@ impl Side for RuntimeSide<'_> {
         })
     }
 
+    fn render(&mut self, work: &[RenderWork]) -> Answer<PassOutcome> {
+        // The pools are cloned once, so each piece of the program can reach the case's objects
+        // while the command buffer is borrowed.
+        let textures: Vec<Texture> = self.textures.clone();
+        let buffers: Vec<Buffer> = self.buffers.clone();
+        let states: Vec<RenderPipelineState> = self.render_pipelines.clone();
+        let computes: Vec<ComputePipelineState> = self.pipelines.clone();
+        let texture = |handle: Handle| -> Answer<&Texture> {
+            textures
+                .get(handle.0 as usize)
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+        };
+        let buffer = |handle: Handle| -> Answer<&Buffer> {
+            buffers
+                .get(handle.0 as usize)
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
+        };
+        let command_buffer = self
+            .queue()?
+            .command_buffer()
+            .map_err(Failure::from_error)?;
+        let mut refused = Vec::with_capacity(work.len());
+        for piece in work {
+            let answered = match piece {
+                RenderWork::Pass(pass) => {
+                    encode_pass(&command_buffer, pass, &textures, &buffers, &states)
+                }
+                RenderWork::ReadTexture {
+                    texture: from,
+                    into,
+                    offset,
+                    row_pitch,
+                    size: extent,
+                } => texture(*from).and_then(|from| {
+                    let into = buffer(*into)?;
+                    let mut blit = command_buffer
+                        .blit_command_encoder()
+                        .map_err(Failure::from_error)?;
+                    blit.copy_from_texture_to_buffer(
+                        from,
+                        0,
+                        0,
+                        Origin::new(0, 0, 0),
+                        Size::new(u64::from(extent[0]), u64::from(extent[1]), 1),
+                        into,
+                        *offset,
+                        u64::from(*row_pitch),
+                        u64::from(*row_pitch) * u64::from(extent[1]),
+                        metal2vulkan_runtime::BlitOption::None,
+                    )
+                    .map_err(Failure::from_error)?;
+                    blit.end_encoding().map_err(Failure::from_error)
+                }),
+                RenderWork::Dispatch(dispatch) => computes
+                    .get(dispatch.pipeline.0 as usize)
+                    .ok_or_else(|| {
+                        Failure::named(
+                            "NoSuchHandle",
+                            format!("compute pipeline {}", dispatch.pipeline.0),
+                        )
+                    })
+                    .and_then(|state| {
+                        let mut encoder = command_buffer
+                            .compute_command_encoder()
+                            .map_err(Failure::from_error)?;
+                        encoder
+                            .set_compute_pipeline_state(state)
+                            .map_err(Failure::from_error)?;
+                        for (at, (held, offset)) in dispatch.buffers.iter().enumerate() {
+                            encoder
+                                .set_buffer(Some(buffer(*held)?), *offset, at as u32)
+                                .map_err(Failure::from_error)?;
+                        }
+                        for (at, held) in dispatch.textures.iter().enumerate() {
+                            encoder
+                                .set_texture(Some(texture(*held)?), at as u32)
+                                .map_err(Failure::from_error)?;
+                        }
+                        encoder
+                            .dispatch_threads(size(dispatch.grid), size(dispatch.threads))
+                            .map_err(Failure::from_error)?;
+                        encoder.end_encoding().map_err(Failure::from_error)
+                    }),
+            };
+            refused.push(answered.err());
+        }
+        command_buffer.commit().map_err(Failure::from_error)?;
+        if command_buffer.wait_until_completed_for(WAIT).is_err() {
+            return Ok(PassOutcome {
+                refused,
+                status: Value::Nothing(Negative::NeverReturned),
+                error: None,
+            });
+        }
+        Ok(PassOutcome {
+            refused,
+            status: status_value(command_buffer.status()),
+            error: command_buffer
+                .error()
+                .map(|error| Value::unit_variant(format!("{error:?}"))),
+        })
+    }
+
     fn heap_texture_size_and_align(&mut self, query: &HeapTextureQuery) -> Answer<SizeAndAlign> {
         let answered = self
             .device
@@ -1427,6 +1602,77 @@ fn queried_descriptor(query: &HeapTextureQuery) -> TextureDescriptor {
         Storage::Private => ResourceOptions::private(),
     };
     descriptor
+}
+
+/// Encode one render pass of a program into `command_buffer`, answering the first refusal it met.
+fn encode_pass(
+    command_buffer: &CommandBuffer,
+    pass: &RenderPass,
+    textures: &[Texture],
+    buffers: &[Buffer],
+    states: &[RenderPipelineState],
+) -> Answer<()> {
+    let texture = |handle: Handle| -> Answer<&Texture> {
+        textures
+            .get(handle.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+    };
+    let buffer = |handle: Handle| -> Answer<&Buffer> {
+        buffers
+            .get(handle.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
+    };
+    let mut descriptor = RenderPassDescriptor::new();
+    for (at, color) in pass.colors.iter().enumerate() {
+        let Some(held) = color.texture else { continue };
+        let attachment = descriptor
+            .color_attachments
+            .get_mut(at)
+            .ok_or_else(|| Failure::named("NoSuchAttachment", format!("color {at}")))?;
+        attachment.texture = Some(texture(held)?.clone());
+        attachment.load_action = color.load;
+        attachment.store_action = color.store;
+        attachment.clear_color = ClearColor::new(
+            color.clear[0],
+            color.clear[1],
+            color.clear[2],
+            color.clear[3],
+        );
+        if let Some(resolve) = color.resolve {
+            attachment.resolve_texture = Some(texture(resolve)?.clone());
+        }
+    }
+    let mut encoder = command_buffer
+        .render_command_encoder(&descriptor)
+        .map_err(Failure::from_error)?;
+    for step in &pass.steps {
+        match step {
+            RenderStep::Pipeline(state) => {
+                let state = states.get(state.0 as usize).ok_or_else(|| {
+                    Failure::named("NoSuchHandle", format!("render pipeline {}", state.0))
+                })?;
+                encoder
+                    .set_render_pipeline_state(state)
+                    .map_err(Failure::from_error)?;
+            }
+            RenderStep::FragmentBuffer {
+                buffer: held,
+                offset,
+                index,
+            } => encoder
+                .set_fragment_buffer(Some(buffer(*held)?), *offset, *index)
+                .map_err(Failure::from_error)?,
+            RenderStep::Draw {
+                primitive,
+                first,
+                count,
+                instances,
+            } => encoder
+                .draw_primitives(*primitive, *first, *count, *instances, 0)
+                .map_err(Failure::from_error)?,
+        }
+    }
+    encoder.end_encoding().map_err(Failure::from_error)
 }
 
 /// The pixel format [`crate::case::TARGET_FORMAT`] names, as the runtime spells it.
