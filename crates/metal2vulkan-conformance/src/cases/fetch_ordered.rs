@@ -212,15 +212,22 @@ impl Case for FetchOrdered {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // One, and it loosens the **notice set** alone: a device that reads a colour attachment
-        // through the pixel interlock may have to render the pass into a scratch image, which is a
-        // route that costs more and announces `fetch-through-scratch`. It is a performance notice,
-        // so it says nothing about the texels -- every byte still compares exactly, which is the
-        // owner's rule for this family: if Metal allows it we must allow it, so a byte that differs
-        // is a bug and a refusal is a bug, and neither gets a tolerance here.
-        vec![crate::replay::notice_allowance(
-            Degradation::FetchThroughScratch.code(),
-        )]
+        // Two, and both loosen the **notice set** alone: how a venue reaches the attachment is a
+        // route, and each route announces itself. Reading it through the pixel interlock may mean
+        // rendering the pass into a scratch image (`fetch-through-scratch`, MoltenVK here), and
+        // reading it through an input attachment may mean converting the colour in the shader
+        // (`shader-color-conversion`, lavapipe here). Both are performance notices, so neither says
+        // anything about the texels -- every byte still compares exactly, which is the owner's rule
+        // for this family: if Metal allows it we must allow it, so a byte that differs is a bug and
+        // a refusal is a bug, and neither gets a tolerance here. A venue announces one of the two,
+        // so the other is reported as having fired on no venue of that run, which is honest.
+        [
+            Degradation::FetchThroughScratch,
+            Degradation::ShaderColorConversion,
+        ]
+        .iter()
+        .map(|notice| crate::replay::notice_allowance(notice.code()))
+        .collect()
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
