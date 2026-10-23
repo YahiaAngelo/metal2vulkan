@@ -176,7 +176,13 @@ impl Case for BufferBlits {
                 }
                 Resource::UnwrittenBuffer { length, storage } => {
                     let mut words = length.to_le_bytes().to_vec();
-                    words.extend(storage.word().as_bytes());
+                    // The storage word is written **only where it is not private**, which is the
+                    // storage the resource spelled before it carried the mode at all. So a case
+                    // that means a private buffer fingerprints to the bytes it always has, and
+                    // naming the mode here did not move three committed recordings.
+                    if *storage != Storage::Private {
+                        words.extend(storage.word().as_bytes());
+                    }
                     inputs.push(Input::bytes(format!("private-buffer:{at}"), &words));
                 }
                 other => {

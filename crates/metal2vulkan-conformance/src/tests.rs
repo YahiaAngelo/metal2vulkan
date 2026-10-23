@@ -18,7 +18,8 @@ use crate::recording::{
 use crate::replay::{replay_against, NOTICES_SITE};
 use crate::report::Report;
 use crate::transcript::{
-    ByteLayout, Digest, Element, Gaps, Negative, Node, Observed, Region, Sites, Transcript, Value,
+    ByteLayout, Digest, DigestKind, Element, Gaps, Negative, Node, Observed, Region, Sites,
+    Transcript, Value,
 };
 use crate::verdict::Verdict;
 use metal2vulkan_runtime::{Degradation, MetalLevel};
@@ -1035,6 +1036,135 @@ fn every_seed_case_states_its_inputs_and_its_metal_source() {
         case.shaders()
             .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
     }
+}
+
+/// Every seed case's input fingerprint is still the one its committed recording was taken against,
+/// checked with no device.
+///
+/// This is the guard for the one regression the suite keeps suffering: a case's inputs are keyed by
+/// bytes, so **widening a shared type moves the key**, the recording stops being this case's
+/// recording, and the run reads `Unrecorded`. It has happened twice. Naming a buffer's storage mode
+/// where the resource had carried none moved three recordings; two new step fields moved
+/// eighty-four of another family's, because that family keys its programs by `Debug` text.
+///
+/// Both times the regression reached a landing branch, because the only check was a replay, which
+/// needs a device, and a grep of its log for `stale` — and a moved fingerprint is reported
+/// `unrecorded`, not `stale`, so the grep was clean through all eighty-seven. This test needs no
+/// device, no ICD and no Metal: it recomputes each case's digests and compares them with the ones
+/// in its recording, so the bytes moving fails at once and names the input that moved.
+///
+/// It deliberately says nothing about whether a recording's **answers** are current. A case whose
+/// inputs are unchanged may still have answers that want re-measuring, and that is the replay's
+/// question, not this one's.
+#[test]
+fn every_seed_cases_inputs_still_match_its_recording() {
+    let mut moved: Vec<String> = Vec::new();
+    let mut without_inputs: Vec<&'static str> = Vec::new();
+    for case in crate::cases::all() {
+        let stated = case
+            .inputs()
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        let recording = crate::recording::read(case.name())
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        let answer = recording
+            .answer(MetalLevel::NEWEST)
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        // The outcomes of one answer are the same program run again, so they carry the same inputs;
+        // the first is enough, and checking each would only repeat it.
+        let Some(outcome) = answer.outcomes.first() else {
+            panic!("{}: an answer with no outcome", case.name());
+        };
+        let Some(node) = find_node(&outcome.transcript.root, crate::case::INPUTS_SITE) else {
+            without_inputs.push(case.name());
+            continue;
+        };
+        let recorded: Vec<(&str, Option<&Digest>)> = node
+            .children
+            .iter()
+            .map(|child| (child.name.as_str(), child.observed.digest.as_ref()))
+            .collect();
+        if recorded.len() != stated.len() {
+            moved.push(format!(
+                "{}: states {} inputs, its recording holds {}",
+                case.name(),
+                stated.len(),
+                recorded.len()
+            ));
+            continue;
+        }
+        for (input, (name, digest)) in stated.iter().zip(recorded) {
+            if input.name != name {
+                moved.push(format!(
+                    "{}: input {:?} is recorded as {name:?}",
+                    case.name(),
+                    input.name
+                ));
+                continue;
+            }
+            let Some(digest) = digest else {
+                moved.push(format!("{}: {name} recorded no digest", case.name()));
+                continue;
+            };
+            // A recording taken from a probe that printed a prefix holds the prefix, so the
+            // comparison is the one the recording can bear, not always the full hash.
+            let (ours, theirs) = match digest.kind {
+                DigestKind::Sha256 => (input.digest.hex.clone(), digest.hex.clone()),
+                DigestKind::Sha256Prefix16 => (
+                    input.digest.hex.chars().take(16).collect(),
+                    digest.hex.clone(),
+                ),
+            };
+            if ours != theirs {
+                moved.push(format!(
+                    "{}: {name} fingerprints to {ours}, its recording was taken against {theirs}",
+                    case.name()
+                ));
+            }
+        }
+    }
+    assert!(
+        moved.is_empty(),
+        "{} input fingerprint(s) no longer match the recording they were taken against. \
+         Either a shared type was widened without keeping the bytes of a case that does not state \
+         the new field, or these cases genuinely changed and want re-recording:\n  {}",
+        moved.len(),
+        moved.join("\n  ")
+    );
+    // A case with no inputs branch at all would slip past the loop above, so it is named here
+    // rather than passing in silence. Metal never returning is the one honest reason for it.
+    let unexplained: Vec<&str> = without_inputs
+        .iter()
+        .copied()
+        .filter(|name| {
+            crate::cases::all()
+                .iter()
+                .find(|case| case.name() == *name)
+                .is_some_and(|case| {
+                    !matches!(case.metal_source(), MetalSource::DidNotReturn { .. })
+                })
+        })
+        .collect();
+    assert!(
+        unexplained.is_empty(),
+        "these cases' recordings hold no `{}` branch, so nothing checks what they fed Metal: {:?}",
+        crate::case::INPUTS_SITE,
+        unexplained
+    );
+}
+
+/// The first node named `name` in `root`, breadth-first.
+fn find_node<'a>(root: &'a Node, name: &str) -> Option<&'a Node> {
+    if root.name == name {
+        return Some(root);
+    }
+    let mut queue: std::collections::VecDeque<&Node> = root.children.iter().collect();
+    while let Some(node) = queue.pop_front() {
+        if node.name == name {
+            return Some(node);
+        }
+        queue.extend(node.children.iter());
+    }
+    None
 }
 
 /// A carried answer taken on another chip says so in its recording, in a field, and one taken on
