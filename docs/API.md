@@ -3054,7 +3054,10 @@ each item named states the rule in full.
   and attribute strides, as Metal's `get*` getters answer them. `IndirectComputeCommand` and
   `IndirectRenderCommand` read one field of their record alone (`command_type`, `has_barrier`,
   `dispatch` or `draw`, one buffer slot, `pipeline_unique_identifier`, and the rest), as
-  `IndirectCommandBuffer::commands` reads it, without decoding the whole command.
+  `IndirectCommandBuffer::commands` reads it, without decoding the whole command. Where Metal's
+  getters answer other than what the command runs, the read-back answers as they do: a render
+  command's `draw` of primitive type 7, 8 or 9 reads as one of points (0), and `command_type` of
+  an indexed draw of type 9 reads as none; `commands` keeps the type the command draws.
 - **Whether the GPU may have written the records** (`IndirectCommandBuffer::gpu_written`, no Metal
   counterpart) turns true at the first call that lets GPU work write them; from then on an
   execution runs the records as they stand once the work before it completed.

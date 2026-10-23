@@ -25,12 +25,12 @@ use metal2vulkan::reflection::LinkedUseGap;
 use metal2vulkan_devtools::{engine_dir, llvm_assemble, llvm_assemble_text};
 use metal2vulkan_runtime::{
     BlitCommandEncoder, Buffer, CommandBuffer, ComputePipelineState, CpuCacheMode, Degradation,
-    Device, DrawProblem, EncodedComputeCommand, EncodedRenderCommand, Error, EventRef, GpuAddress,
-    HazardTrackingMode, IndirectBufferBinding, IndirectCommand, IndirectCommandBuffer,
-    IndirectCommandBufferDescriptor, IndirectCommandBufferProblem, IndirectDispatch, IndirectDraw,
-    Invalid, LoadAction, MetalError, PipelineOptions, Problem, PurgeableState, Region,
-    RenderPassDescriptor, RenderPipelineState, ResourceId, ResourceOptions, RuntimeGap, Size,
-    StorageMode, StoreAction, TextureDescriptor,
+    Device, DrawPrimitiveType, DrawProblem, EncodedComputeCommand, EncodedRenderCommand, Error,
+    EventRef, GpuAddress, HazardTrackingMode, IndirectBufferBinding, IndirectCommand,
+    IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectCommandBufferProblem,
+    IndirectDispatch, IndirectDraw, Invalid, LoadAction, MetalError, PipelineOptions, Problem,
+    PurgeableState, Region, RenderPassDescriptor, RenderPipelineState, ResourceId, ResourceOptions,
+    RuntimeGap, Size, StorageMode, StoreAction, TextureDescriptor,
 };
 
 fn invalid(call: &'static str, problem: Problem) -> Error {
@@ -2289,6 +2289,86 @@ fn indexed_and_patch_draws_read_back_what_was_set() {
             panic!("not a patch draw");
         };
         assert_eq!(patch_index_buffer, None);
+    });
+}
+
+/// Metal's private getters answer a draw of each primitive type 0 to 9 the CPU set as an M3 Max
+/// (macOS 27.0.1) answered it: `drawArguments` and `drawIndexedArguments` read types 0 to 6 as
+/// set and 7, 8 and 9 as 0, and `getCommandType` reads 1 for every direct draw, 2 for every
+/// indexed one but type 9's, 0; the read-back of the whole command keeps the type it draws.
+#[test]
+fn private_types_read_back_as_metal_s_getters_answer() {
+    on_device(|device| {
+        let indices = device.new_buffer(4096, ResourceOptions::shared()).unwrap();
+        let mut descriptor = render_descriptor();
+        descriptor.command_types =
+            IndirectCommandType::DRAW.union(IndirectCommandType::DRAW_INDEXED);
+        let made = icb(device, &descriptor, 20);
+        let types = [
+            DrawPrimitiveType::Public(PrimitiveType::Point),
+            DrawPrimitiveType::Public(PrimitiveType::Line),
+            DrawPrimitiveType::Public(PrimitiveType::LineStrip),
+            DrawPrimitiveType::Public(PrimitiveType::Triangle),
+            DrawPrimitiveType::Public(PrimitiveType::TriangleStrip),
+            DrawPrimitiveType::LineLoop,
+            DrawPrimitiveType::TriangleFan,
+            DrawPrimitiveType::Quads,
+            DrawPrimitiveType::QuadStrip,
+            DrawPrimitiveType::Nine,
+        ];
+        for (at, set) in (0..).zip(types) {
+            let answered = if set.raw() < 7 {
+                set
+            } else {
+                PrimitiveType::Point.into()
+            };
+            let direct = made.indirect_render_command_at(2 * at).unwrap();
+            direct.draw_primitives(set, 0, 6, 1, 0).unwrap();
+            let indexed = made.indirect_render_command_at(2 * at + 1).unwrap();
+            indexed
+                .draw_indexed_primitives(set, 6, IndexType::UInt16, &indices, 0, 1, 0, 0)
+                .unwrap();
+            let direct_draw = |primitive_type| IndirectDraw::Primitives {
+                primitive_type,
+                vertex_start: 0,
+                vertex_count: 6,
+                instance_count: 1,
+                base_instance: 0,
+            };
+            let indexed_draw = |primitive_type| IndirectDraw::IndexedPrimitives {
+                primitive_type,
+                index_count: 6,
+                index_type: IndexType::UInt16,
+                index_buffer: indices.gpu_address(),
+                instance_count: 1,
+                base_vertex: 0,
+                base_instance: 0,
+            };
+            assert_eq!(
+                direct.draw().unwrap(),
+                Some(direct_draw(answered)),
+                "{set:?}"
+            );
+            assert_eq!(
+                indexed.draw().unwrap(),
+                Some(indexed_draw(answered)),
+                "{set:?}"
+            );
+            assert_eq!(
+                direct.command_type().unwrap(),
+                IndirectCommandType::DRAW,
+                "{set:?}"
+            );
+            let indexed_type = match set {
+                DrawPrimitiveType::Nine => IndirectCommandType::empty(),
+                _ => IndirectCommandType::DRAW_INDEXED,
+            };
+            assert_eq!(indexed.command_type().unwrap(), indexed_type, "{set:?}");
+            let read = render_command(&made, 2 * at + 1);
+            assert_eq!(read.draw, Some(indexed_draw(set)), "{set:?}");
+            assert_eq!(read.command_type, indexed_type, "{set:?}");
+            assert_eq!(render_command(&made, 2 * at).draw, Some(direct_draw(set)));
+        }
     });
 }
 
