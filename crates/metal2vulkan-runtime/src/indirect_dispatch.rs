@@ -447,7 +447,7 @@ impl FlatPreprocess {
             let scratch = state
                 .uploads
                 .upload(&device, &bytes, FlatIndirect::SCRATCH_BYTES)?;
-            let rerun = state.predication.laying();
+            let rerun = state.predication_mut().laying();
             (scratch, state.status_address(&device)?, rerun)
         };
         let (Some(address), Some(status)) = (scratch.device_address(), status) else {

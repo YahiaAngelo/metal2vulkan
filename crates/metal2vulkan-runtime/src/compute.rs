@@ -317,6 +317,9 @@ impl ComputeCommandEncoder {
     /// End an encoder made by [`replaying`](Self::replaying): what it recorded, and what it made
     /// resident.
     pub(super) fn finish_replay(mut self) -> Result<(Replayed, Option<Residency>), Error> {
+        // Its unit of command predication takes what it encoded again, as at its end
+        // (`predication.rs`).
+        self.end_predication()?;
         self.table.let_go_all(&mut self.core);
         let replayed = self.core.finish_replay()?;
         Ok((replayed, Some(self.residency)))
@@ -350,8 +353,26 @@ impl ComputeCommandEncoder {
         ran
     }
 
-    /// The encoder logs nothing more, and will not be encoded again: it used command
-    /// predication (`predication.rs`).
+    /// Note in the log the answer `result` of the call logged at `at` (`call` of it), or its
+    /// refusal: encoded again, the call must answer so (`replay.rs`).
+    pub(super) fn answered(
+        &mut self,
+        at: Option<usize>,
+        result: &Result<bool, Error>,
+        call: fn(bool) -> ComputeCall,
+    ) {
+        let (Some(at), Some(log)) = (at, &mut self.log) else {
+            return;
+        };
+        match result {
+            Ok(answer) => log.calls[at] = call(*answer),
+            Err(_) => log.refuse(at),
+        }
+    }
+
+    /// The encoder logs nothing more, and will not be encoded again: it records a loop of
+    /// command predication (`predication.rs`), whose laying its check submits again and whose
+    /// copies encode its own calls again.
     pub(super) fn stop_logging(&mut self) {
         self.log = None;
     }
@@ -1044,7 +1065,7 @@ impl ComputeCommandEncoder {
         // (`metal_level.rs`).
         let ends = (self.core.device().properties().metal_level)
             .ends_at_a_runs_first_indirect_of_another_type();
-        let goes = (self.core.command_buffer().state().predication)
+        let goes = (self.core.command_buffer().state().predication_mut())
             .indirect_dispatch(self.dispatch_type, ends);
         if !goes {
             return Err(invalid(call, Problem::IndirectDispatchOfAnotherType));
@@ -1102,7 +1123,12 @@ impl ComputeCommandEncoder {
             )?),
             None => None,
         };
-        let gate = self.core.command_buffer().state().predication.host_gate();
+        let gate = self
+            .core
+            .command_buffer()
+            .state()
+            .predication_mut()
+            .host_gate();
         self.core
             .defer(Deferred::Dispatch(Arc::new(ArgumentDispatch {
                 call,
@@ -1436,14 +1462,12 @@ impl ComputeCommandEncoder {
         let (gate, further, preprocess_gate) = {
             let device = self.core.device().clone();
             let mut state = self.core.command_buffer().state();
-            let held = &mut *state;
-            let gate = held.predication.host_gate();
+            let (predication, uploads) = state.predication_and_uploads();
+            let gate = predication.host_gate();
             let (further, preprocess_gate) = match (&gate, &range) {
                 (Some(_), ExecutionRange::Fixed(range)) if !range.is_empty() => {
                     let count = [range.len() as u32, 1, 1];
-                    let (further, mut gates) =
-                        held.predication
-                            .gates(&mut held.uploads, &device, &[count])?;
+                    let (further, mut gates) = predication.gates(uploads, &device, &[count])?;
                     (further, gates.pop())
                 }
                 _ => (None, None),
@@ -2212,8 +2236,8 @@ fn record(
             };
             let (further, gates) = {
                 let mut state = core.command_buffer().state();
-                let state = &mut *state;
-                (state.predication).gates(&mut state.uploads, &device, &counts)?
+                let (predication, uploads) = state.predication_and_uploads();
+                predication.gates(uploads, &device, &counts)?
             };
             if let Some(step) = further {
                 predication::record_further(core, &step)?;
@@ -2261,7 +2285,7 @@ fn record(
     // Inside a predicated loop's laying, it waits for them too, so the laying, which its check
     // may submit again (`command_buffer/rerun.rs`), is not split for it; but where its variant
     // records in one of its own.
-    let laying = core.command_buffer().state().predication.laying();
+    let laying = core.command_buffer().state().predication_mut().laying();
     let waits = core.encodes_again() || (laying && !apart_samplers(&device, &objects));
     let (pipelines, pending) = match (own.filter(|_| !waits), kept_made) {
         (Some(_), Some(made)) => {

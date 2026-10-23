@@ -38,8 +38,9 @@
 //!   its host step needs. Work a host step recorded again since (with the barriers between its
 //!   commands, `gpu_execute::Rerecord`, or as a route outgrew it, `DeferredPass::outgrown`)
 //!   keeps that step's recording.
-//! - **What cannot be encoded again stays as before.** An encoder whose log is gone (a command
-//!   predication's command buffer, failed at the commit) or whose second
+//! - **What cannot be encoded again stays as before.** An encoder whose log is gone (a compute
+//!   encoder of a command buffer that used command predication whose unit held other encoders, a
+//!   loop or work left out; one failed at the commit) or whose second
 //!   encoding is refused or records otherwise (`EncoderCore::finish_replay`), its work among
 //!   them where it no longer runs on the GPU alone, keeps its first recording, which the first
 //!   submission finds rebound: `CommandBufferError::EncodedUseRebound`, as before. So does work
@@ -127,10 +128,30 @@ impl CommandBufferShared {
         // The encoders encoded again, whose segments the encoding again recorded.
         let mut spliced = Vec::new();
         for (at, replay) in moved {
-            let residency = lock(&self.state).residency_before(at, replay.kind());
+            // A compute encoder of a command buffer that used command predication, its unit
+            // alone, encodes again in its unit begun anew (`Predication::replaying`).
+            let residency = {
+                let mut state = lock(&self.state);
+                state.replaying_predication = match state.predicated {
+                    true => state.predication.replaying(at),
+                    false => None,
+                };
+                state.residency_before(at, replay.kind())
+            };
             let run = replay.run(&handle, residency);
+            // Its steps' gates listed as the commit lists the first encoding's.
+            let run = {
+                let mut state = lock(&self.state);
+                let state = &mut *state;
+                match (run, state.replaying_predication.take()) {
+                    (Ok(replayed), Some(mut predication)) => predication
+                        .commit(&mut state.uploads, device)
+                        .map(|()| (replayed, Some(predication))),
+                    (run, _) => run.map(|replayed| (replayed, None)),
+                }
+            };
             let counts = &device.shared().counts;
-            let (replayed, residency) = match run {
+            let ((replayed, residency), predication) = match run {
                 Ok(replayed) => replayed,
                 Err(error) => {
                     counts.reencode_refused();
@@ -147,7 +168,14 @@ impl CommandBufferShared {
             };
             // What a refused splice held goes after the lock.
             let vk = device.shared().vk();
-            let spliced_now = lock(&self.state).splice_replay(vk, at, replayed, residency);
+            let spliced_now = {
+                let mut state = lock(&self.state);
+                let spliced = state.splice_replay(vk, at, replayed, residency);
+                if let (Ok(()), Some(predication)) = (&spliced, predication) {
+                    state.predication.take_checks(predication);
+                }
+                spliced
+            };
             match spliced_now {
                 Ok(()) => {
                     counts.encoder_reencoded();
@@ -418,7 +446,9 @@ impl State {
     }
 
     /// As it commits: the logs of encoders no rebind encodes again go, for the caller to let go
-    /// of without this lock: every log where an encoder used command predication, and those of
+    /// of without this lock: where an encoder used command predication, those of the compute
+    /// encoders that shared their unit, or laid a loop or left work out (`Predication::alone`: a
+    /// command of theirs encoded again after the commit would run outside its block); and those of
     /// encoders the commit's failure fails (they run nothing). The keys of buffers over host pages
     /// the encoders whose logs stay named, and the work its commit recorded on the GPU alone,
     /// sorted, each once, and the identities of the rasterization-rate maps its encoders' passes
@@ -428,13 +458,15 @@ impl State {
         let mut gone = Vec::new();
         let mut keys = Vec::new();
         let mut maps = Vec::new();
-        let predicated = self.predicated;
         for (at, record) in self.ended.iter_mut().enumerate() {
             let fails = self
                 .failed_at_commit
                 .as_ref()
                 .is_some_and(|failed| failed.fails(at));
             maps.extend(record.taken.rate_map_id());
+            let predicated = self.predicated
+                && record.kind == EncoderKind::Compute
+                && !self.predication.alone(at);
             if predicated || fails {
                 if let Some(log) = record.replay.take() {
                     gone.push(log);

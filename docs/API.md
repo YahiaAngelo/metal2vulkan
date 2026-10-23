@@ -2042,8 +2042,8 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-rate-map-reset-unencoded` (precision). `RateMapResetUnencoded`: A render
   pass over a rasterization-rate map reset (`RasterizationRateMap::reset_using_descriptor`) after
   the pass took it and before its command buffer was submitted, in an encoder the runtime could not
-  encode again (it kept no log: a command predication's command buffer, a render encoder opened
-  while a buffer of the device was detached, or one that left work for a host step). Announced at
+  encode again (it kept no log: a render encoder opened while a buffer of the device was detached,
+  or one that left work for a host step). Announced at
   the commit, or at the reset where the command buffer was committed. Cost: the pass draws by the
   map as it took it, where Metal's GPU draws by the map as reset.
 - `metal2vulkan-degrade-heap-texture-lossless-layout` (precision). `HeapTextureLosslessLayout`: A

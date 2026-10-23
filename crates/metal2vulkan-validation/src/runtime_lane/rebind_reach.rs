@@ -670,11 +670,13 @@ fn an_encoder_with_a_call_refused_at_its_encoding_is_encoded_again_with_it_refus
     });
 }
 
-/// What a rebind cannot encode again keeps the gap: an encoder of a command buffer that used
-/// command predication keeps no log (`replay.rs`), so a blit encoder's copy of the member, before a
-/// compute encoder's empty If block, keeps its first recording, which named the old pages: its
-/// submission runs nothing, the command buffer fails `EncodedUseRebound`, announced once, the
-/// notice naming why, and its signal fires.
+/// What a rebind cannot encode again keeps the gap: a compute encoder of a command buffer that
+/// used command predication whose unit held another encoder keeps no log (`replay.rs`), so its
+/// dispatch counting into the member, before the unit's next encoder's empty If block, keeps its
+/// first recording, which named the old pages: its submission runs nothing, the command buffer
+/// fails `EncodedUseRebound`, announced once, the notice naming why, and its signal fires. The blit
+/// encoder before it, which copies the member, is encoded again, and its own submission copies the
+/// new pages, as Metal's does.
 #[test]
 fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
     on_device_noticed(|device, messages| {
@@ -684,6 +686,7 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
         };
         let copied = buffer_with(device, &[0x5a; 16]).unwrap();
         let word = buffer_with(device, &[0; 4]).unwrap();
+        let mark = kernel(device, "prd_mark", false);
         let event = device.new_shared_event().unwrap();
         let done = device.new_shared_event().unwrap();
         let command_buffer = queue.command_buffer().unwrap();
@@ -694,6 +697,13 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
         blit.copy_from_buffer_to_buffer(&member, 0, &copied, 0, 16)
             .unwrap();
         blit.end_encoding().unwrap();
+        let mut compute = command_buffer.compute_command_encoder().unwrap();
+        compute.set_compute_pipeline_state(&mark).unwrap();
+        compute.set_bytes(&0u32.to_le_bytes(), 0).unwrap();
+        compute.set_buffer(Some(&member), 0, 1).unwrap();
+        let one = Size::new(1, 1, 1);
+        compute.dispatch_threads(one, one).unwrap();
+        compute.end_encoding().unwrap();
         let mut compute = command_buffer.compute_command_encoder().unwrap();
         compute.encode_start_if(Some(&word), 0, 0, 0).unwrap();
         assert!(compute.encode_end_if().unwrap());
@@ -713,8 +723,13 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
         );
         assert_eq!(
             read_buffer(&copied, 0, 16).unwrap(),
-            [0x5a; 16],
-            "ran nothing"
+            node(B),
+            "the blit's copy of the new pages"
+        );
+        assert_eq!(
+            read_buffer(&member, 0, 16).unwrap(),
+            node(B),
+            "the dispatch ran nothing"
         );
         assert_eq!(done.signaled_value(), 1, "its signal");
         let notices = made_once(messages, &REBOUND_USES, &shared_kinds(device));
@@ -724,8 +739,9 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
             .filter_map(|message| message.degradation.as_ref())
             .find(|notice| notice.degradation == Degradation::EncodedUseRebound)
             .map(|notice| notice.reason.clone());
-        let found = "(found in its blit encoder 0: a command of its own named it, not encoded \
-                     again as its command buffer used command predication";
+        let found = "(found in its compute encoder 1: a command of its own named it, not encoded \
+                     again as its unit of command predication held other encoders, a loop or \
+                     work left out";
         assert!(
             reason
                 .as_deref()
@@ -733,7 +749,8 @@ fn an_encoder_a_rebind_cannot_encode_again_fails_encoded_use_rebound() {
             "{reason:?}"
         );
         let after = device.work_counts();
-        assert_eq!(after.encoders_reencoded, before.encoders_reencoded);
+        // The blit encoder, alone, encoded again.
+        assert_eq!(after.encoders_reencoded, before.encoders_reencoded + 1);
         eprintln!("REBIND-REACH not encoded again: EncodedUseRebound, announced once");
     });
 }
@@ -1749,45 +1766,35 @@ fn a_buffer_released_after_a_rebind_before_the_first_submission_goes_at_once() {
 }
 
 /// The cases of [`a_dispatch_counts_into_the_pages_its_buffer_lies_in_at_the_first_submission`]:
-/// a dispatch plain, or inside an If whose condition holds.
-const REBOUND_DISPATCHES: [bool; 1] = [false];
+/// whether the dispatch lies inside an If, and whether it runs (the If's condition holds).
+const REBOUND_DISPATCHES: [(bool, bool); 3] = [(false, true), (true, true), (true, false)];
 
-/// A compute dispatch counting into a buffer over host pages, in a command buffer committed behind
-/// an event wait, its encoder ended, then the buffer rebound to other pages before the wait's
-/// signal: the dispatch counts into the new pages and the command buffer completes, as Metal's
-/// does (the consumer's `rebound_dispatch`, the M3 Max under macOS 27.0.1: status 4, no error,
-/// the old pages' word 0, the new pages' 1). Each case with the dispatch's pipeline still being
+/// A compute dispatch counting into a buffer over host pages, plain or inside an If (its encoder's
+/// unit of command predication alone), in a command buffer committed behind an event wait, its
+/// encoder ended, then the buffer rebound to other pages before the wait's signal: the dispatch
+/// counts into the new pages and the command buffer completes, as Metal's does (the consumer's
+/// `rebound_dispatch`, plain and inside an If whose condition holds, the M3 Max under macOS 27.0.1:
+/// status 4, no error, the old pages' word 0, the new pages' 1); inside an If whose condition
+/// fails it runs nothing, the new pages' word 0. Each case with the dispatch's pipeline still being
 /// made at its encoding (a state's first dispatch hands its making to the device's pool:
 /// `WorkCounts::dispatch_pipelines_pooled`), and made. The rebind encodes the encoder again
-/// (`WorkCounts::encoders_reencoded`) and refuses nothing.
+/// (`WorkCounts::encoders_reencoded`), its If among its calls, and refuses nothing.
 #[test]
 fn a_dispatch_counts_into_the_pages_its_buffer_lies_in_at_the_first_submission() {
-    on_device(|device| {
-        for predicated in REBOUND_DISPATCHES {
+    // A device of its own each, whose first state's first dispatch hands its making to the pool.
+    for (predicated, runs) in REBOUND_DISPATCHES {
+        on_device(|device| {
             let state = kernel(device, "prd_mark", false);
             for cold in [true, false] {
-                let what = format!("predicated {predicated}, pipeline being made {cold}");
-                let old = pages(buffer_len(), 0, &[0; 4]);
+                let what =
+                    format!("predicated {predicated}, runs {runs}, pipeline being made {cold}");
+                // Each mapping lives with its deallocator, which notes its first bytes as it runs.
                 let seen = Arc::new(Seen::default());
-                // SAFETY: the test holds the mapping past the buffer's last use of it.
-                let made = unsafe {
-                    no_copy(
-                        device,
-                        old.pointer(),
-                        buffer_len(),
-                        ResourceOptions::default(),
-                        Some(recording(&seen, ())),
-                    )
+                let Some(buffer) = buffer_over(device, pages(buffer_len(), 0, &[0; 4]), &seen)
+                else {
+                    return;
                 };
-                let buffer = match made {
-                    Ok(buffer) => buffer,
-                    Err(error) if not_importable(&error) => {
-                        eprintln!("REBIND-REACH: the device imports no host memory: {error:?}");
-                        return;
-                    }
-                    Err(error) => panic!("new_buffer_with_bytes_no_copy: {error:?}"),
-                };
-                let condition = buffer_with(device, &1u32.to_le_bytes()).unwrap();
+                let condition = buffer_with(device, &u32::from(runs).to_le_bytes()).unwrap();
                 let queue = device.new_command_queue().unwrap();
                 let gate = device.new_shared_event().unwrap();
                 let command_buffer = queue.command_buffer().unwrap();
@@ -1816,49 +1823,39 @@ fn a_dispatch_counts_into_the_pages_its_buffer_lies_in_at_the_first_submission()
                     u64::from(cold),
                     "{what}: its making handed to the pool"
                 );
-                let new = pages(buffer_len(), 0, &[0; 4]);
                 let new_seen = Arc::new(Seen::default());
-                let rebound = {
-                    let pointer = new.pointer();
-                    // SAFETY: the test holds the mapping past the buffer's last use of it.
-                    unsafe {
-                        buffer.rebind_bytes_no_copy(
-                            HostMemory::new(pointer),
-                            Some(recording(&new_seen, ())),
-                            None,
-                        )
-                    }
-                };
+                let rebound = rebind(&buffer, pages(buffer_len(), 0, &[0; 4]), &new_seen);
                 assert_eq!(rebound, Ok(()), "{what}: the rebind");
                 gate.set_signaled_value(1);
                 command_buffer.wait_until_completed_for(WAIT).unwrap();
                 let after = device.work_counts();
-                let word =
-                    |mapping: &Mapping| u32::from_le_bytes(mapping.read(0..4).try_into().unwrap());
+                let word = |bytes: &[u8]| u32::from_le_bytes(bytes[..4].try_into().unwrap());
+                let new_word = word(&read_buffer(&buffer, 0, 4).unwrap());
+                // The old pages go once nothing holds them, their word as the GPU left it.
+                deallocated(&seen);
+                let old_word = word(&seen.bytes.lock().unwrap());
                 let seen_now = (
                     command_buffer.status(),
                     command_buffer.error(),
-                    word(&old),
-                    word(&new),
+                    old_word,
+                    new_word,
                     after.encoders_reencoded - before.encoders_reencoded,
                     after.reencodes_refused - before.reencodes_refused,
                 );
+                let counted = u32::from(runs);
                 assert_eq!(
                     seen_now,
-                    (CommandBufferStatus::Completed, None, 0, 1, 1, 0),
+                    (CommandBufferStatus::Completed, None, 0, counted, 1, 0),
                     "{what}: (status, error, the old pages' word, the new pages', encoders encoded \
                      again, refused)"
                 );
-                // Both mappings outlive their deallocators, which read them.
-                drop(buffer);
-                deallocated(&seen);
-                deallocated(&new_seen);
             }
-        }
-        eprintln!(
-            "REBOUND-DISPATCH {}: dispatches rebound before the first submission counted into \
-             the new pages, their pipelines being made or made",
-            device.name()
-        );
-    });
+            eprintln!(
+                "REBOUND-DISPATCH {}: a dispatch (predicated {predicated}, runs {runs}) rebound \
+                 before the first submission counted into the new pages as its block said, its \
+                 pipeline being made or made",
+                device.name()
+            );
+        });
+    }
 }
