@@ -1707,6 +1707,13 @@ pub enum CommandBufferError {
     /// before the draw ran, and runs nothing of its queue's others: the outcome of Metal's
     /// slower submission (`command_buffer/hang.rs`). It counts against its queue as a
     /// [`PageFault`](Self::PageFault) does.
+    ///
+    /// Metal's GPU also hangs at a render pass of no draw call over a `Mutable`
+    /// rasterization-rate map where no command buffer with a draw call (one of nothing too) over
+    /// such a map was committed on the device before its own (the M3 Max under macOS 27.0.1, our
+    /// probe `rs`: maps of layers and of none, reset or not; a pass with only a pipeline state
+    /// set; one after a drawn pass in the same command buffer), failing it with the same error.
+    /// The runtime fails it from that pass on as at the draw.
     GpuHang,
     /// Metal failed the command buffer as a victim of its GPU's recovery, at an indirect draw of
     /// primitive type 9, indexed or not, whatever its arguments

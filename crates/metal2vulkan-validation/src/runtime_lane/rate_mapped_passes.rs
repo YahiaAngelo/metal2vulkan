@@ -36,10 +36,11 @@ use crate::store::CorpusStore;
 use metal2vulkan::metal::Mutability;
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
-    Buffer, ClearColor, CommandBufferStatus, Degradation, Device, Error, EventRef, Invalid,
-    LoadAction, Problem, RasterizationRateMap, Region, RegionRefusal, RenderCommandEncoder,
-    RenderPassDescriptor, RenderPassProblem, RenderPipelineState, ResourceOptions, RuntimeGap,
-    ScissorRect, StoreAction, Texture, TextureDescriptor, Viewport,
+    Buffer, ClearColor, CommandBuffer, CommandBufferError, CommandBufferStatus, CommandQueue,
+    Degradation, Device, Error, EventRef, Invalid, LoadAction, Problem, RasterizationRateMap,
+    Region, RegionRefusal, RenderCommandEncoder, RenderPassDescriptor, RenderPassProblem,
+    RenderPipelineState, ResourceOptions, RuntimeGap, ScissorRect, StoreAction, Texture,
+    TextureDescriptor, Viewport,
 };
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -682,6 +683,123 @@ fn a_reset_shows_in_every_pass_not_yet_submitted() {
         for (index, target) in targets.iter().enumerate() {
             assert_eq!(shaded(target), quarter, "pass {index}");
         }
+    });
+}
+
+/// A command buffer of `queue` with a pass over `map` into a target of its own for each of
+/// `draws` (a draw of a triangle where true, no draw call where false), committed and completed.
+fn passes(
+    fixture: &Fixture,
+    queue: &CommandQueue,
+    map: &RasterizationRateMap,
+    draws: &[bool],
+) -> CommandBuffer {
+    let command_buffer = queue.command_buffer().unwrap();
+    for &drawn in draws {
+        let target = fixture.target(64);
+        let mut encoder = command_buffer
+            .render_command_encoder(&pass(map, &target))
+            .unwrap();
+        if drawn {
+            encoder.set_render_pipeline_state(&fixture.state).unwrap();
+            encoder
+                .set_fragment_buffer(Some(&fixture.screen), 0, 0)
+                .unwrap();
+            encoder
+                .draw_primitives(PrimitiveType::Triangle, 0, 3, 1, 0)
+                .unwrap();
+        }
+        encoder.end_encoding().unwrap();
+    }
+    command_buffer.commit().unwrap();
+    command_buffer.wait_until_completed_for(WAIT).unwrap();
+    command_buffer
+}
+
+/// Our probe `rs`'s drawless cases (the M3 Max under macOS 27.0.1, each in a process of its own):
+/// Metal's GPU hangs at a pass of no draw call over a `Mutable` map, of layers or of none, failing
+/// its command buffer with `GpuHang`, until a command buffer with a draw call over a mutable map
+/// was committed on the device: a drawn pass before it in its own command buffer does not keep
+/// it from hanging, nor does a drawn pass over an immutable map; a pass over an immutable map
+/// runs. The runtime answers so, each hang on a queue of its own (a queue's second revokes it).
+#[test]
+fn a_pass_of_no_draw_call_over_a_mutable_map_hangs_until_one_drew() {
+    fresh(|fixture, _| {
+        let device = &fixture.device;
+        let hangs = |command_buffer: &CommandBuffer, case: &str| {
+            assert_eq!(
+                command_buffer.status(),
+                CommandBufferStatus::Error,
+                "{case}"
+            );
+            assert_eq!(
+                command_buffer.error(),
+                Some(CommandBufferError::GpuHang),
+                "{case}"
+            );
+        };
+        let runs = |command_buffer: &CommandBuffer, case: &str| {
+            assert_eq!(
+                command_buffer.status(),
+                CommandBufferStatus::Completed,
+                "{case}"
+            );
+        };
+        let queue = device.new_command_queue().unwrap();
+        let immutable = reset_map(fixture, 0.5, false);
+        runs(
+            &passes(fixture, &queue, &immutable, &[true]),
+            "immutable, drawn",
+        );
+        runs(&passes(fixture, &queue, &immutable, &[false]), "immutable");
+        let mutable = reset_map(fixture, 0.5, true);
+        hangs(
+            &passes(
+                fixture,
+                &device.new_command_queue().unwrap(),
+                &mutable,
+                &[false],
+            ),
+            "mutable, before any drew",
+        );
+        let mut none = descriptor(SCREEN, SCREEN, &[]);
+        none.mutability = Mutability::Mutable;
+        let made_none = device.new_rasterization_rate_map(&none).unwrap();
+        hangs(
+            &passes(
+                fixture,
+                &device.new_command_queue().unwrap(),
+                &made_none,
+                &[false],
+            ),
+            "mutable of no layers, before any drew",
+        );
+        hangs(
+            &passes(
+                fixture,
+                &device.new_command_queue().unwrap(),
+                &mutable,
+                &[true, false],
+            ),
+            "mutable, after a drawn pass of its own command buffer",
+        );
+        // That command buffer was committed: now none hangs.
+        let queue = device.new_command_queue().unwrap();
+        runs(
+            &passes(fixture, &queue, &mutable, &[false]),
+            "mutable, after one drew",
+        );
+        mutable
+            .reset_using_descriptor(&descriptor(SCREEN, SCREEN, &[]))
+            .unwrap();
+        runs(
+            &passes(fixture, &queue, &mutable, &[false]),
+            "reset to no layers, after one drew",
+        );
+        runs(
+            &passes(fixture, &queue, &made_none, &[false]),
+            "of no layers, after one drew",
+        );
     });
 }
 

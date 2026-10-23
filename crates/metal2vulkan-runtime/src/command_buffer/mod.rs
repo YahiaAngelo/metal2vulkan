@@ -501,6 +501,9 @@ pub(super) struct State {
     /// (`render/queued_commits.rs`), which has not run: to the program, the command buffer is
     /// committed.
     queued_commit: bool,
+    /// A render pass of it has a draw call over a `Mutable` rasterization-rate map: its commit
+    /// lets a later pass of no draw call over such a map run (`rate_mapped_pass.rs`).
+    pub(super) called_over_mutable_map: bool,
     /// `commit` is recording the encoders' segments (`encoder.rs`), outside this lock: nothing
     /// else may encode or commit meanwhile.
     committing: bool,
@@ -1718,6 +1721,7 @@ impl CommandBuffer {
                 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
                 failures_injected: 0,
                 queued_commit: false,
+                called_over_mutable_map: false,
                 committing: false,
                 pool: None,
                 replays: None,
@@ -2443,6 +2447,11 @@ impl CommandBuffer {
             let ended = state.ended.len();
             if let Some(problem) = failure.as_ref().and_then(|failure| failure.problem(ended)) {
                 return Err(invalid(call, problem));
+            }
+            // A pass with a draw call over a mutable map lets later passes of none run on Metal's
+            // GPU (`rate_mapped_pass.rs`).
+            if state.called_over_mutable_map {
+                (device.shared().mutable_rate_map_called).store(true, Ordering::Release);
             }
             // Metal's GPU fails a command buffer an encoder of which was made under protection
             // options as a failure given to `commit_failed` fails it, with no signal firing

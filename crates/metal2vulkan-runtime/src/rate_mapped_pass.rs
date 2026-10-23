@@ -93,6 +93,17 @@
 //!   mutability stops at the physical size. An identity map's pass stopped at its physical size
 //!   in every case measured, mutable or not. The runtime's pass stops at the physical size, inside
 //!   the near-equivalent the map's compile announces (`rasterization-rate-map`).
+//! - **A pass of no draw call over a mutable map** (the M3 Max under macOS 27.0.1, our probe
+//!   `rs`, each case in a process of its own): Metal's GPU hangs at it, failing its command
+//!   buffer with `GpuHang`, over a `Mutable` map of layers or of none, reset or never, with only a
+//!   pipeline state set; and runs it, its clear stored, over a map of any other mutability, and
+//!   over a mutable one once a command buffer with a draw call over a mutable map (that map or
+//!   another; a draw of no vertices too) was committed and ran before. A drawn pass earlier in
+//!   its own command buffer does not keep it from hanging, nor does one over an immutable map or
+//!   none. The runtime fails the command buffer from such a pass on as Metal's GPU hang at a draw
+//!   of primitive type 9 (`command_buffer/hang.rs`), where no command buffer of the device with a
+//!   draw call over a mutable map was committed before (`DeviceShared::mutable_rate_map_called`,
+//!   raised at that commit).
 //! - **What the plan refuses** is `NotImplemented(RuntimeGap::RateMapRegions)`, naming the
 //!   compile layer's reason ([`RegionRefusal`]): a viewport of no extent or a flipped one, a
 //!   scissor as above, a plan past its bound or past the device's viewport limits, a pipeline whose
@@ -108,6 +119,7 @@ use super::render_values::{ScissorRect, Viewport};
 use super::Device;
 use ash::vk;
 use metal2vulkan::bind::{RegionError, RegionLimits};
+use metal2vulkan::metal::Mutability;
 use metal2vulkan::pipeline::GraphicsState;
 use std::sync::Arc;
 
@@ -230,6 +242,12 @@ impl RateMappedPass {
     /// whichever slices it renders (the module docs).
     pub(super) fn layers_alike(&self) -> bool {
         self.alike
+    }
+
+    /// Whether the map is `Mutable`, over which Metal's GPU hangs at a pass of no draw call until
+    /// a command buffer with a draw call over such a map was committed (the module docs).
+    pub(super) fn mutable(&self) -> bool {
+        self.map.mutability() == Mutability::Mutable
     }
 
     /// The pass's screen area: the extent its encoder's viewports and scissor rectangles are read

@@ -3869,6 +3869,19 @@ impl RenderLowering {
     /// (`render/color_groups.rs`).
     fn end_pass(mut self: Box<Self>) -> Result<color_groups::Ended, Error> {
         const CALL: &str = "end_encoding";
+        // Over a mutable rasterization-rate map: Metal's GPU hangs at a pass of no draw call until
+        // a command buffer with a draw call over such a map was committed (`rate_mapped_pass.rs`).
+        if self.rate_map.as_ref().is_some_and(RateMappedPass::mutable) {
+            match self.called {
+                true => self.core.command_buffer().state().called_over_mutable_map = true,
+                false => {
+                    let called = &self.core.device().shared().mutable_rate_map_called;
+                    if !called.load(std::sync::atomic::Ordering::Acquire) {
+                        self.core.hang();
+                    }
+                }
+            }
+        }
         // What its tables bind is held until the command buffer completes, as Metal holds what an
         // encoder was handed (`ArgumentTable::let_go_all`).
         for table in [

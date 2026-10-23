@@ -3284,5 +3284,4 @@ each item named states the rule in full.
 - **A mutable map's pass stops at the physical size**, where Metal rasterizes past the screen edge
   (an M3 Max: a 64-pixel half-rate map's pass to 49 by 49 pixels); announced with
   `rasterization-rate-map`.
-- **A pass of no draws over a mutable map stores its clear**, where Metal's GPU hangs.
 - **A rate-mapped pass draws region by region, and refuses a cutting scissor.**
