@@ -21,12 +21,22 @@
 //! # The pattern, and why it is bands
 //!
 //! The first pass clears the target to a distinctive code and then draws **four vertical bands**,
-//! one draw each, each band a colour of its own out of one buffer at four offsets. Vertical
-//! because the mapping from a clip-space `x` to a pixel column is unambiguous, so the bands' places
-//! are a fact about the geometry rather than about which way Metal hands its `y` axis; four
-//! different colours because a sample that reaches the wrong texel then reads a different value
-//! rather than passing by coincidence; and a clear nothing covers nowhere, so a draw that did not
-//! happen at all shows as the clear code rather than as a colour.
+//! one draw each, each band a colour of its own out of one buffer at four offsets, and then a
+//! **fifth draw of a fifth colour over half the clip-space height**. Vertical bands because the
+//! mapping from a clip-space `x` to a pixel column is unambiguous, so their places are a fact about
+//! the geometry rather than about which way Metal hands its `y` axis; five different colours
+//! because a sample that reaches the wrong texel then reads a different value rather than passing
+//! by coincidence; and a clear nothing covers nowhere, so a draw that did not happen at all shows
+//! as the clear code rather than as a colour.
+//!
+//! The fifth draw is what makes the pattern **distinguishable by position on both axes**, and it is
+//! not decoration. Four column bands alone are the same in every row, so a sample that read the
+//! right column of the right texture at the wrong row would be invisible -- which is exactly the
+//! bug a chain of passes over shared handles exists to catch. With the half-height overdraw, the
+//! exact row's "the second target equals the first" and the magnified row's "each source texel is
+//! doubled on both axes" are checks in `y` as well as in `x`. Which half of the target the overdraw
+//! lands in is Metal's answer and this module does not state it: the cross-check asserts that the
+//! rows fall into two contiguous halves, one of them the overdraw's, and tests the rest relatively.
 //!
 //! Every colour channel is a whole code over 255, so `RGBA8Unorm` stores exactly what the fragment
 //! function returned and the texels are exact on this venue.
@@ -93,6 +103,18 @@ const COLORS: [[u8; 4]; BANDS as usize] = [
     [112, 128, 144, 220],
     [160, 176, 192, 230],
 ];
+
+/// The fifth colour, which the fifth draw puts over half the target's height, so the pattern is
+/// distinguishable by **row** as well as by column and a sample that read the wrong row cannot
+/// pass. Its channels differ from every band's and from both clears, as the bands' do from each
+/// other.
+const OVERDRAW: [u8; 4] = [208, 224, 240, 240];
+
+/// The rectangle the fifth draw covers: half the clip-space height, over every column.
+///
+/// Which half of the target that is -- the first rows or the last -- is Metal's answer, and nothing
+/// here states it ([`tests::metal_drew_the_bands_and_then_the_half_overdraw`]).
+const HALF: [f32; 4] = [-1.0, -1.0, 1.0, 0.0];
 
 /// The owned fixture whose `tob_rect` draws a rectangle from a buffer's two corners, whose
 /// `tob_solid` returns a colour from a buffer, and whose `tob_sample` samples texture 0 at the
@@ -232,11 +254,12 @@ fn rect_bytes(rect: [f32; 4]) -> Vec<u8> {
     rect.iter().flat_map(|edge| edge.to_le_bytes()).collect()
 }
 
-/// The buffer the solid fragment function reads its colour out of: the four colours as `float4`s,
-/// each channel a whole code over 255.
+/// The buffer the solid fragment function reads its colour out of: the four band colours and the
+/// overdraw's, as `float4`s, each channel a whole code over 255.
 fn colors_buffer() -> Vec<u8> {
     COLORS
         .iter()
+        .chain(std::iter::once(&OVERDRAW))
         .flat_map(|color| {
             color
                 .iter()
@@ -428,6 +451,7 @@ impl Case for RenderChain {
         inputs.push(Input::bytes("sampler", &subject.sampler().words()));
         inputs.push(Input::bytes("buffer:colors", &colors_buffer()));
         let mut rects: Vec<u8> = (0..BANDS).flat_map(|at| rect_bytes(band(at))).collect();
+        rects.extend(rect_bytes(HALF));
         rects.extend(rect_bytes(WHOLE));
         inputs.push(Input::bytes("rects", &rects));
         inputs.push(Input::bytes("clears", &[SOURCE_CLEAR, TARGET_CLEAR, 0, 0]));
@@ -490,9 +514,12 @@ impl Case for RenderChain {
         // The first pass fills the source target, band by band: one pipeline, then a rectangle and
         // a colour offset a draw.
         let mut fill = vec![RenderStep::Pipeline(fill_state)];
-        for at in 0..BANDS {
+        for at in 0..=BANDS {
+            // The bands, and then the overdraw over half the height, whose colour is the one after
+            // the bands' in the same buffer.
+            let rect = if at < BANDS { band(at) } else { HALF };
             fill.push(RenderStep::VertexBytes {
-                bytes: rect_bytes(band(at)),
+                bytes: rect_bytes(rect),
                 index: 0,
             });
             fill.push(RenderStep::FragmentBuffer {
@@ -640,18 +667,29 @@ mod tests {
     fn the_rows_name_distinct_questions_over_a_geometry_that_tiles() {
         let named: BTreeSet<&str> = SUBJECTS.iter().map(|subject| subject.name).collect();
         assert_eq!(named.len(), SUBJECTS.len());
-        // Every band's colour differs from every other's in every channel, so a sample that
-        // reached the wrong band cannot read as the right one.
-        for (at, color) in COLORS.iter().enumerate() {
-            for other in &COLORS[at + 1..] {
+        // Every drawn colour, the overdraw's included, differs from every other's in **every
+        // channel**, and from both clears, so a sample that reached the wrong texel cannot read as
+        // the right one: a copy or a sample that moved the right number of bytes from the wrong
+        // place is invisible unless the bytes differ by position, which is why this is channel by
+        // channel rather than whole-value.
+        let drawn: Vec<[u8; 4]> = COLORS.iter().copied().chain([OVERDRAW]).collect();
+        for (at, color) in drawn.iter().enumerate() {
+            for channel in color {
+                assert_ne!(*channel, SOURCE_CLEAR, "colour {at}");
+                assert_ne!(*channel, TARGET_CLEAR, "colour {at}");
+            }
+            for other in &drawn[at + 1..] {
                 for (channel, (ours, theirs)) in color.iter().zip(other).enumerate() {
-                    assert_ne!(ours, theirs, "band {at}, channel {channel}");
+                    assert_ne!(ours, theirs, "colour {at}, channel {channel}");
                 }
-                assert_ne!(color, &[SOURCE_CLEAR; 4]);
-                assert_ne!(color, &[TARGET_CLEAR; 4]);
             }
         }
         assert_ne!(SOURCE_CLEAR, TARGET_CLEAR);
+        // And the overdraw covers exactly half the clip-space height over every column, which is
+        // what makes the pattern vary by row.
+        assert_eq!(HALF[0], -1.0);
+        assert_eq!(HALF[2], 1.0);
+        assert_eq!(HALF[3] - HALF[1], 1.0);
         for subject in SUBJECTS {
             assert_eq!(
                 subject.source_side % BANDS,
@@ -728,15 +766,17 @@ mod tests {
         }
     }
 
-    /// Metal's recorded first target holds the four bands where the geometry puts them, in every
-    /// row, and the clear nowhere.
+    /// Metal's recorded first target holds the four bands where the geometry puts them and the
+    /// overdraw over exactly half the rows, with the clear nowhere.
     ///
-    /// This is the cross-check the first pass owes: band `x * BANDS / side` of column `x`, which
-    /// follows from the rectangles the case states and from nothing Metal was asked. A row that
-    /// drew a band in the wrong column, or dropped one, fails here rather than being carried into
-    /// the sampled target as "Metal's answer".
+    /// This is the cross-check the first pass owes, and it is written so that **which** half the
+    /// overdraw landed in is Metal's answer rather than this module's: every row is either all
+    /// overdraw or the four bands, the two groups are half the rows each, and each group is
+    /// contiguous. A row that is neither, a band in the wrong column, a dropped draw (the clear) or
+    /// an overdraw that covered the wrong number of rows all fail here rather than being carried
+    /// into the sampled target as "Metal's answer".
     #[test]
-    fn metal_drew_each_band_in_its_own_columns() {
+    fn metal_drew_the_bands_and_then_the_half_overdraw() {
         let mut checked = 0usize;
         for subject in SUBJECTS {
             let Some(recorded) = only_outcome(subject.name) else {
@@ -744,21 +784,48 @@ mod tests {
                 continue;
             };
             let drawn = bytes(&recorded, "drawn/texels");
+            let side = subject.source_side;
             assert_eq!(drawn.len(), subject.source_bytes() as usize);
-            for y in 0..subject.source_side {
-                for x in 0..subject.source_side {
-                    let expected = COLORS[(x * BANDS / subject.source_side) as usize];
-                    assert_eq!(
-                        texel(&drawn, subject.source_side, x, y),
-                        expected,
-                        "{}: ({x}, {y})",
-                        subject.name
-                    );
+            // Which rows the overdraw took, read off the bytes rather than assumed.
+            let mut overdrawn = Vec::new();
+            for y in 0..side {
+                let all_overdraw = (0..side).all(|x| texel(&drawn, side, x, y) == OVERDRAW);
+                let banded = (0..side)
+                    .all(|x| texel(&drawn, side, x, y) == COLORS[(x * BANDS / side) as usize]);
+                assert!(
+                    all_overdraw ^ banded,
+                    "{}: row {y} is neither the overdraw nor the bands: {:?}",
+                    subject.name,
+                    (0..side)
+                        .map(|x| texel(&drawn, side, x, y))
+                        .collect::<Vec<_>>()
+                );
+                if all_overdraw {
+                    overdrawn.push(y);
                 }
             }
+            assert_eq!(
+                overdrawn.len() as u32,
+                side / 2,
+                "{}: the overdraw covered {} of {side} rows",
+                subject.name,
+                overdrawn.len()
+            );
+            // Contiguous, so it is a half and not a scatter; which half is Metal's to say.
+            assert!(
+                overdrawn.windows(2).all(|pair| pair[1] == pair[0] + 1),
+                "{}: the overdrawn rows are not contiguous: {overdrawn:?}",
+                subject.name
+            );
+            assert!(
+                overdrawn[0] == 0 || overdrawn[0] == side / 2,
+                "{}: the overdrawn rows start at {}",
+                subject.name,
+                overdrawn[0]
+            );
             checked += 1;
         }
-        println!("metal_drew_each_band_in_its_own_columns: {checked} rows checked");
+        println!("metal_drew_the_bands_and_then_the_half_overdraw: {checked} rows checked");
     }
 
     /// The exact row's sampled target is its drawn target, texel for texel.
@@ -783,12 +850,24 @@ mod tests {
         );
     }
 
-    /// The magnified nearest row's sampled target is its drawn target doubled on both axes.
+    /// The magnified nearest row's sampled target is its drawn target doubled on both axes, and
+    /// **mirrored in `y`**.
     ///
-    /// `tgp_rect` runs the texture coordinates across the drawn rectangle, so the sample for pixel
-    /// `x` of a 16-wide target lands at `(x + 0.5) / 2` texels into an 8-wide source, whose nearest
-    /// texel is `x / 2`. That is arithmetic the case states and Metal was not asked, so a
-    /// disagreement is a finding about the geometry rather than a number to adopt.
+    /// `tgp_rect` runs the texture coordinates across the drawn rectangle: `uv` is the unit-square
+    /// parameter of the rectangle's corners, so `uv.x` is `(x + 0.5) / 16` across a 16-wide target
+    /// and the nearest texel of an 8-wide source is `x / 2`. In `y` it is not: a rectangle's
+    /// `uv.y` is 0 at its clip-space `y` of -1, Metal's viewport puts clip `y` of **+1** at pixel
+    /// row 0, and a sampled `v` of 0 is the texture's **first** row -- so `uv.y` at pixel row `y`
+    /// is `1 - (y + 0.5) / 16`, the sampled source row is `(side - 1) - y / 2`, and the sample sees
+    /// the source's rows in the order opposite to the one a blit reads them in.
+    ///
+    /// The exact row does not mirror, because `tob_sample` divides the **pixel's own position** by
+    /// the sampled texture's extent and so carries no clip-space orientation at all. Two sampling
+    /// conventions, two answers, and the pattern varying by row is what makes the difference
+    /// visible: with four column bands alone, both rows would have passed an identity in `y`.
+    ///
+    /// All of it is arithmetic the case states and Metal was not asked, so a disagreement is a
+    /// finding about the geometry rather than a number to adopt.
     #[test]
     fn the_magnified_nearest_row_doubles_each_source_texel() {
         let subject = SUBJECTS[1];
@@ -806,7 +885,12 @@ mod tests {
             for x in 0..subject.target_side {
                 assert_eq!(
                     texel(&sampled, subject.target_side, x, y),
-                    texel(&drawn, subject.source_side, x / 2, y / 2),
+                    texel(
+                        &drawn,
+                        subject.source_side,
+                        x / 2,
+                        subject.source_side - 1 - y / 2
+                    ),
                     "{}: ({x}, {y})",
                     subject.name
                 );
@@ -847,14 +931,18 @@ mod tests {
                 if here != texel(&bytes(&near, "sampled/texels"), linear.target_side, x, y) {
                     moved += 1;
                 }
-                // The four source texels the sample at ((x + 0.5) / 2, (y + 0.5) / 2) texels can
-                // be a blend of, with the edge clamp folding a neighbour outside the source back
-                // onto the edge.
+                // The four source texels the sample can be a blend of, with the edge clamp folding
+                // a neighbour outside the source back onto the edge. `u` runs with the pixel
+                // column and `v` against the pixel row, for the reason
+                // `the_magnified_nearest_row_doubles_each_source_texel` sets out: a rectangle's
+                // `uv.y` carries Metal's clip-space orientation and the pixel row does not, so the
+                // sample's `v` is `(side - 1) - y / 2` and its second neighbour lies on the other
+                // side of the texel from `u`'s.
                 let clamp = |at: i32| at.clamp(0, linear.source_side as i32 - 1) as u32;
-                let (u, v) = (x as i32 / 2, y as i32 / 2);
+                let (u, v) = (x as i32 / 2, linear.source_side as i32 - 1 - y as i32 / 2);
                 let (du, dv) = (
                     if x % 2 == 0 { -1 } else { 1 },
-                    if y % 2 == 0 { -1 } else { 1 },
+                    if y % 2 == 0 { 1 } else { -1 },
                 );
                 let neighbours = [
                     texel(&drawn, linear.source_side, clamp(u), clamp(v)),
