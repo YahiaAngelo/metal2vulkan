@@ -8469,5 +8469,49 @@
       ],
       "validated": "not_run"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 5,
+      "measured": "5 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "bounds": {
+        "bare_starts": 226,
+        "batches_with_none_pending": 226,
+        "command_barriers": 16,
+        "command_buffers_begun": 226,
+        "command_buffers_begun_encoders": 226,
+        "command_buffers_deferred": 226,
+        "command_buffers_replayed_inline": 226,
+        "command_buffers_submitted": 226,
+        "commands_replayed.begin_command_buffer": 226,
+        "commands_replayed.cmd_copy_buffer": 326,
+        "commands_replayed.cmd_pipeline_barrier": 242,
+        "commands_replayed.end_command_buffer": 226,
+        "commits_handed_off": 226,
+        "completed_waits": 229,
+        "completed_where_seen": 226,
+        "encoder_command_buffers_begun": 226,
+        "finales_folded": 226,
+        "new_buffer_bytes_cleared": 127520,
+        "object_churn.buffers_evicted": 215,
+        "object_churn.buffers_parked": 552,
+        "object_churn.buffers_recycled": 337,
+        "object_churn.textures_texels": 226,
+        "object_churn.vk_buffer_bindings": 215,
+        "object_churn.vk_buffers_destroyed": 215,
+        "object_churn.vk_buffers_made": 215,
+        "queue_submissions": 226,
+        "scheduled_where_submitted": 226,
+        "scheduler_passes": 226,
+        "scheduler_sleeps": 226,
+        "scheduler_wakes_commit": 226,
+        "slot_returns": 226,
+        "spare_command_pools_taken": 452,
+        "submit_infos": 226,
+        "wakes_completion_waiters": 226,
+        "wakes_spared": 1356
+      }
+    }
   ]
 }

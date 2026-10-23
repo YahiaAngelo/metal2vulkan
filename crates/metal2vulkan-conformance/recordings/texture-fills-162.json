@@ -118,5 +118,67 @@
       ],
       "validated": "not_run"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 5,
+      "measured": "5 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "degraded": [
+        "metal2vulkan-degrade-carried-decoded-twin",
+        "metal2vulkan-degrade-unpacked-fill-color"
+      ],
+      "bounds": {
+        "bare_starts": 25,
+        "batches_with_none_pending": 25,
+        "block_decode_passes": 51,
+        "command_barriers": 97,
+        "command_buffers_begun": 50,
+        "command_buffers_begun_batch_work": 25,
+        "command_buffers_begun_encoders": 25,
+        "command_buffers_deferred": 25,
+        "command_buffers_replayed_inline": 25,
+        "command_buffers_submitted": 50,
+        "commands_replayed.begin_command_buffer": 25,
+        "commands_replayed.cmd_bind_descriptor_sets": 51,
+        "commands_replayed.cmd_bind_pipeline": 51,
+        "commands_replayed.cmd_copy_buffer_to_image": 102,
+        "commands_replayed.cmd_copy_image_to_buffer": 81,
+        "commands_replayed.cmd_dispatch": 51,
+        "commands_replayed.cmd_pipeline_barrier": 326,
+        "commands_replayed.end_command_buffer": 25,
+        "commits_handed_off": 25,
+        "completed_waits": 28,
+        "completed_where_seen": 25,
+        "encoder_command_buffers_begun": 25,
+        "finales_folded": 25,
+        "new_buffer_bytes_cleared": 12736,
+        "object_churn.buffers_evicted": 8,
+        "object_churn.buffers_parked": 173,
+        "object_churn.buffers_recycled": 165,
+        "object_churn.images_evicted": 6,
+        "object_churn.images_own_memory": 50,
+        "object_churn.images_parked": 50,
+        "object_churn.images_recycled": 44,
+        "object_churn.textures_image": 25,
+        "object_churn.vk_buffer_bindings": 8,
+        "object_churn.vk_buffers_destroyed": 8,
+        "object_churn.vk_buffers_made": 8,
+        "object_churn.vk_image_bindings": 6,
+        "object_churn.vk_images_destroyed": 6,
+        "object_churn.vk_images_made": 6,
+        "owned_descriptor_pools": 51,
+        "queue_submissions": 25,
+        "scheduled_where_submitted": 25,
+        "scheduler_passes": 25,
+        "scheduler_sleeps": 25,
+        "scheduler_wakes_commit": 25,
+        "slot_returns": 25,
+        "spare_command_pools_taken": 50,
+        "submit_infos": 25,
+        "wakes_completion_waiters": 25,
+        "wakes_spared": 150
+      }
+    }
   ]
 }
