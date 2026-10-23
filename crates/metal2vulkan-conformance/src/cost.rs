@@ -184,9 +184,54 @@ const POOL_STATE: &str = "a reading of how many pieces the device's pipeline poo
 /// inside the 393-case set where the measurement's most was 0, and **0** when each runs alone --
 /// the opposite direction to a pooled making, and the reason a bound measured alone would fail
 /// them for ever.
+///
+/// `primaries_begun_ahead` is the same work counted a step earlier, and the runtime's doc gives it
+/// a second race of its own on top: it counts a primary "taken by an encoder or not yet", "once its
+/// pool is among the spares again". So it moves when a pool comes back, which is a thread of ours
+/// finishing something an earlier case submitted. Measured over the 541-case set: it reached 1
+/// where the measurement's most was 0 in **seven** cases of one whole-set replay —
+/// `border-swizzles-bgra8unorm`, `pixel-downscales-1536x1080`, `two-plane-row-blits`,
+/// `texture-fills-30`, `texture-fills-134`, `texture-fills-236` and `shared-event-rising-value` —
+/// and in **none** of the replay before it.
 const AHEAD: &str = "whether this case's first encoder found a primary command buffer already \
      begun, which the thread that completed an earlier command buffer does ahead when nothing \
      waits for it. Its total, encoder_command_buffers_begun, stays gated, so nothing is lost";
+
+/// Why `completed_where_seen` is reported and never gated: it is the **complement of a count the
+/// rule already names**, so it cannot be deterministic while that one is not.
+///
+/// The runtime documents it as the command buffers whose transition to `Completed` "ran on the queue
+/// waiter that saw their work complete, **with no handler thread woken**". The other outcome of that
+/// same transition is a handler thread being woken, which `wakes_handler_threads` counts and the
+/// rule reports. A count that is one side of a coin whose other side is a thread-arrival count is
+/// the same question asked the other way round.
+///
+/// Measured: it reached 2 where the measurement's most was 1 on `event-held-command-buffer` in one
+/// whole-set replay and stayed within bound in the replay before it.
+///
+/// `scheduled_where_submitted` is the same shape one transition earlier — "ran on the scheduler's
+/// thread as their last batch went, with no handler thread woken" — and is **deliberately left
+/// gated**, because nothing has yet been seen to move it and a row here would be a claim with no
+/// measurement behind it. It is the next false alarm this half is likely to raise; when it raises
+/// one, it belongs here with that reading, and neither it nor `completed_where_seen` has a gated
+/// total covering it, so reporting them is a real loss of reach rather than a free move.
+const COMPLEMENT: &str = "which of our own threads ran a command buffer's transition: this counts \
+     the ones no handler thread was woken for, and waking one is itself a thread-arrival count the \
+     rule reports";
+
+/// Why `pooled_memory_blocks_freed` is reported and never gated: the runtime frees such a block
+/// when it has been "kept empty **past their quiet period**", so whether one is freed inside a
+/// case's window is a question about elapsed time.
+///
+/// Its partner `pooled_memory_blocks_made` stays gated, at the reading of the lone run
+/// ([`MONOTONE`]), so what a case *allocates* is still held; only what the pool got round to
+/// handing back is not.
+///
+/// Measured: it reached 1 where the measurement's most was 0 on `sample-positions-custom-2x` in two
+/// whole-set replays, and both measurement shapes read 0 — a release that lands in the replay's
+/// timing and not in the measurement's is exactly what a quiet period does.
+const QUIET: &str = "a pooled memory block freed because it had been kept empty past its quiet \
+     period, which is a question about elapsed time rather than about the case's work";
 
 /// Why a count of an object made because no spare was free is reported and never gated.
 const POOLED: &str = "an object made because no spare was free, where a spare comes back on \
@@ -221,7 +266,7 @@ const POOLED: &str = "an object made because no spare was free, where a spare co
 /// replays of a larger case set — which reads like a regression and is not one. See [`BORROWED`].
 /// `slot_returns` beside it stays gated: it counts work items, one a command buffer, and has held
 /// still alone and in both case sets.
-const RACY: [(&str, &str); 27] = [
+const RACY: [(&str, &str); 30] = [
     ("fences_made", POOLED),
     // What is alive, parked or waiting at the instant the counts were read.
     ("memory_blocks_live", INSTANTANEOUS),
@@ -247,6 +292,9 @@ const RACY: [(&str, &str); 27] = [
     ("completed_waits", BORROWED),
     ("pipeline_pool_busy", POOL_STATE),
     ("encoder_primaries_begun_ahead", AHEAD),
+    ("primaries_begun_ahead", AHEAD),
+    ("completed_where_seen", COMPLEMENT),
+    ("pooled_memory_blocks_freed", QUIET),
     ("command_pools_made", POOLED),
     ("spare_command_pools_", POOLED),
     ("live_tables_uploaded", POOLED),

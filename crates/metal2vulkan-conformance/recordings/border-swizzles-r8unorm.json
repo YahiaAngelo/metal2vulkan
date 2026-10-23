@@ -6093,7 +6093,7 @@
         "commands_replayed.cmd_push_constants": 60,
         "commands_replayed.end_command_buffer": 62,
         "commits_handed_off": 60,
-        "completed_waits": 63,
+        "completed_waits": 64,
         "completed_where_seen": 60,
         "creation_pipelines_made": 1,
         "dedicated_memory_blocks_live": 2,

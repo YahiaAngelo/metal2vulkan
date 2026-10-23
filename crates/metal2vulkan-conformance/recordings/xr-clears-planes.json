@@ -500,7 +500,7 @@
         "command_buffers_begun_segments": 64,
         "command_buffers_deferred": 1580,
         "command_buffers_replayed": 320,
-        "command_buffers_replayed_inline": 1538,
+        "command_buffers_replayed_inline": 1260,
         "command_buffers_submitted": 2058,
         "commands_replayed.begin_command_buffer": 1580,
         "commands_replayed.cmd_begin_render_pass": 484,
@@ -553,7 +553,7 @@
         "variant_pipelines_made": 2,
         "variants_taken_back": 2,
         "wakes_completion_waiters": 8,
-        "wakes_spared": 91
+        "wakes_spared": 80
       },
       "moving": {
         "command_buffers_begun": 2448,

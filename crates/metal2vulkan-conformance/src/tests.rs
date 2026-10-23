@@ -2996,14 +2996,28 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
     ] {
         assert!(racy(count).is_none(), "{count}");
     }
-    // The two the contrast run caught over the 393-case set, each for a reason the runtime's own
-    // doc comment gives: the pool's state at an instant, and what a completion thread began ahead
-    // for a pool an earlier case gave back.
-    for count in ["pipeline_pool_busy", "encoder_primaries_begun_ahead"] {
+    // The ones whole-set replays caught, each for a reason the runtime's own doc comment gives
+    // before any measurement does: the pool's state at an instant, what a completion thread began
+    // ahead for a pool an earlier case gave back, the same thing counted again once that pool is
+    // back among the spares, which of our threads ran a transition, and a block freed because its
+    // quiet period elapsed.
+    for count in [
+        "pipeline_pool_busy",
+        "encoder_primaries_begun_ahead",
+        "primaries_begun_ahead",
+        "completed_where_seen",
+        "pooled_memory_blocks_freed",
+    ] {
         assert!(racy(count).is_some(), "{count}");
     }
-    // And the total the second of those splits stays gated, so no work escapes by it.
+    // And the total `encoder_primaries_begun_ahead` splits stays gated, so no work escapes by it,
+    // as does what a case allocates even though what the pool hands back does not.
     assert!(racy("encoder_command_buffers_begun").is_none());
+    assert!(racy("pooled_memory_blocks_made").is_none());
+    // `scheduled_where_submitted` is the same shape as `completed_where_seen` one transition
+    // earlier and is deliberately still gated: nothing has been seen to move it, and a row with no
+    // measurement behind it is a claim this half does not make.
+    assert!(racy("scheduled_where_submitted").is_none());
     // A record that bounds both at 1, with neither seen to move.
     let record = crate::cost::CostRecord {
         venue: "a venue".to_owned(),

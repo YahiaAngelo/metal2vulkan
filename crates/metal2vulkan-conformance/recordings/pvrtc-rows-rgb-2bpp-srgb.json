@@ -648,5 +648,75 @@
       ],
       "validated": "ran"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
+      "degraded": [
+        "metal2vulkan-degrade-carried-decoded-twin"
+      ],
+      "bounds": {
+        "addressable_buffers_made": 2,
+        "arena_pools_made": 5,
+        "bare_starts": 10,
+        "batches_with_none_pending": 10,
+        "block_decode_passes": 22,
+        "command_barriers": 36,
+        "command_buffers_begun": 20,
+        "command_buffers_begun_batch_work": 10,
+        "command_buffers_begun_encoders": 10,
+        "command_buffers_deferred": 10,
+        "command_buffers_replayed_inline": 10,
+        "command_buffers_submitted": 20,
+        "commands_replayed.begin_command_buffer": 10,
+        "commands_replayed.cmd_bind_descriptor_sets": 22,
+        "commands_replayed.cmd_bind_pipeline": 22,
+        "commands_replayed.cmd_copy_buffer_to_image": 42,
+        "commands_replayed.cmd_copy_image": 2,
+        "commands_replayed.cmd_copy_image_to_buffer": 42,
+        "commands_replayed.cmd_dispatch": 22,
+        "commands_replayed.cmd_pipeline_barrier": 134,
+        "commands_replayed.end_command_buffer": 10,
+        "commits_handed_off": 10,
+        "completed_waits": 13,
+        "completed_where_seen": 10,
+        "device_memory_allocated": 201326592,
+        "encoder_command_buffers_begun": 10,
+        "finales_folded": 10,
+        "new_buffer_bytes_cleared": 3904,
+        "object_churn.buffers_evicted": 6,
+        "object_churn.buffers_parked": 84,
+        "object_churn.buffers_recycled": 78,
+        "object_churn.images_evicted": 12,
+        "object_churn.images_own_memory": 24,
+        "object_churn.images_parked": 24,
+        "object_churn.images_recycled": 12,
+        "object_churn.textures_image": 12,
+        "object_churn.vk_buffer_bindings": 6,
+        "object_churn.vk_buffers_destroyed": 6,
+        "object_churn.vk_buffers_made": 6,
+        "object_churn.vk_image_bindings": 12,
+        "object_churn.vk_images_destroyed": 12,
+        "object_churn.vk_images_made": 12,
+        "owned_descriptor_pools": 22,
+        "pooled_memory_blocks_made": 3,
+        "queue_submissions": 10,
+        "scheduled_where_submitted": 10,
+        "scheduler_passes": 10,
+        "scheduler_sleeps": 10,
+        "scheduler_wakes_commit": 10,
+        "slot_returns": 10,
+        "spare_command_pools_taken": 20,
+        "submit_infos": 10,
+        "wakes_completion_waiters": 10,
+        "wakes_spared": 60
+      },
+      "composed": {
+        "device_memory_allocated": 201326592
+      }
+    }
   ]
 }

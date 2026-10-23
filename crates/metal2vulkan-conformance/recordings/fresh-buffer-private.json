@@ -647,5 +647,64 @@
       ],
       "validated": "ran"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
+      "bounds": {
+        "addressable_buffers_made": 3,
+        "bare_starts": 15,
+        "batches_with_none_pending": 15,
+        "command_buffers_begun": 25,
+        "command_buffers_begun_batch_work": 10,
+        "command_buffers_begun_encoders": 15,
+        "command_buffers_deferred": 15,
+        "command_buffers_replayed_inline": 15,
+        "command_buffers_submitted": 25,
+        "commands_replayed.begin_command_buffer": 15,
+        "commands_replayed.cmd_copy_buffer": 10,
+        "commands_replayed.cmd_fill_buffer": 5,
+        "commands_replayed.cmd_pipeline_barrier": 15,
+        "commands_replayed.end_command_buffer": 15,
+        "commits_handed_off": 15,
+        "completed_waits": 18,
+        "completed_where_seen": 15,
+        "device_memory_allocated": 268435456,
+        "empty_memory_blocks_live": 1,
+        "encoder_command_buffers_begun": 15,
+        "fills_recorded": 5,
+        "finales_folded": 15,
+        "new_buffer_bytes_cleared": 35790880,
+        "object_churn.buffers_evicted": 5,
+        "object_churn.buffers_parked": 20,
+        "object_churn.buffers_recycled": 15,
+        "object_churn.vk_buffer_bindings": 5,
+        "object_churn.vk_buffers_destroyed": 5,
+        "object_churn.vk_buffers_made": 5,
+        "pooled_memory_blocks_made": 4,
+        "queue_submissions": 15,
+        "scheduled_where_submitted": 15,
+        "scheduler_passes": 15,
+        "scheduler_sleeps": 15,
+        "scheduler_wakes_commit": 15,
+        "slot_returns": 15,
+        "spare_command_pools_taken": 30,
+        "submit_infos": 15,
+        "wakes_completion_waiters": 15,
+        "wakes_spared": 90
+      },
+      "composed": {
+        "command_buffers_deferred": 0,
+        "commands_replayed.begin_command_buffer": 0,
+        "commands_replayed.cmd_copy_buffer": 0,
+        "commands_replayed.cmd_fill_buffer": 0,
+        "commands_replayed.cmd_pipeline_barrier": 0,
+        "commands_replayed.end_command_buffer": 0,
+        "device_memory_allocated": 268435456
+      }
+    }
   ]
 }

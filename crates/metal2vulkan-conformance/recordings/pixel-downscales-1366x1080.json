@@ -1143,7 +1143,6 @@
         "dispatch_pipelines_pooled": 2,
         "dispatches_planned_as_before": 4,
         "encoder_command_buffers_begun": 10,
-        "encoder_primaries_begun_ahead": 1,
         "finales_apart": 2,
         "finales_folded": 6,
         "host_texel_copies": 1,
