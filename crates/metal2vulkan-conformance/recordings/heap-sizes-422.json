@@ -642,5 +642,18 @@
       ],
       "validated": "ran"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 3,
+      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "bounds": {
+        "object_churn.vk_images_destroyed": 10,
+        "object_churn.vk_images_made": 10,
+        "requirement_images_made": 10,
+        "requirement_limits_asked": 10
+      }
+    }
   ]
 }

@@ -1844,8 +1844,8 @@
   "costs": [
     {
       "venue": "Apple M3 Max",
-      "runs": 5,
-      "measured": "5 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "runs": 3,
+      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-shadowed-texture"
       ],
@@ -1876,7 +1876,6 @@
         "completed_where_seen": 24,
         "copy_regions_split": 4,
         "encoder_command_buffers_begun": 24,
-        "fences_made": 1,
         "finales_folded": 24,
         "images_started_on_the_host": 18,
         "internal_submissions": 52,
@@ -1884,7 +1883,7 @@
         "object_churn.buffers_evicted": 37,
         "object_churn.buffers_parked": 95,
         "object_churn.buffers_recycled": 58,
-        "object_churn.images_evicted": 6,
+        "object_churn.images_evicted": 4,
         "object_churn.images_other": 4,
         "object_churn.images_own_memory": 18,
         "object_churn.images_parked": 4,
@@ -1894,7 +1893,7 @@
         "object_churn.vk_buffers_destroyed": 72,
         "object_churn.vk_buffers_made": 72,
         "object_churn.vk_image_bindings": 22,
-        "object_churn.vk_images_destroyed": 50,
+        "object_churn.vk_images_destroyed": 48,
         "object_churn.vk_images_made": 48,
         "owned_descriptor_pools": 32,
         "queue_submissions": 128,
@@ -1909,9 +1908,6 @@
         "submit_infos": 76,
         "wakes_completion_waiters": 24,
         "wakes_spared": 144
-      },
-      "moving": {
-        "fences_made": 0
       }
     }
   ]

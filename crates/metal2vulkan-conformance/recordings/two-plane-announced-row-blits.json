@@ -867,8 +867,8 @@
   "costs": [
     {
       "venue": "Apple M3 Max",
-      "runs": 5,
-      "measured": "5 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "runs": 3,
+      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-two-plane-buffer-blit",
         "metal2vulkan-degrade-two-plane-buffer-blit-order"

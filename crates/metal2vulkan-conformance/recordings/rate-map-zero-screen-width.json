@@ -257,5 +257,20 @@
         }
       }
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 3,
+      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "degraded": [
+        "metal2vulkan-degrade-rasterization-rate-map"
+      ],
+      "bounds": {
+        "new_buffer_bytes_cleared": 24624,
+        "object_churn.buffers_parked": 1,
+        "object_churn.buffers_recycled": 1
+      }
+    }
   ]
 }

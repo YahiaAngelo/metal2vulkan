@@ -161,8 +161,8 @@
   "costs": [
     {
       "venue": "Apple M3 Max",
-      "runs": 5,
-      "measured": "5 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "runs": 3,
+      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-texture-buffer-fill-leftover"
       ],
@@ -179,7 +179,7 @@
         "commands_replayed.cmd_pipeline_barrier": 6,
         "commands_replayed.end_command_buffer": 6,
         "commits_handed_off": 6,
-        "completed_waits": 9,
+        "completed_waits": 10,
         "completed_where_seen": 6,
         "copy_regions_split": 2,
         "encoder_command_buffers_begun": 6,

@@ -122,8 +122,19 @@ const RELEASED: &str = "what a release got round to destroying, which runs on wh
 /// the case. Its partner stays gated and loses nothing: finding one only ever **lowers** the
 /// `_made` count, and the gate is an upper bound.
 ///
-/// Measured: `depth16-texel-reads` run alone makes 2 pipeline layouts and shares none; inside the
-/// 350-case set it makes 1 and shares 1. Two and two.
+/// Measured, in the one direction that matters. `depth16-texel-reads` run alone makes 2 pipeline
+/// layouts and shares none; inside the 350-case set it makes 1 and shares 1. Two and two.
+/// `xr-two-planes-rgb10a8-2p-xr10-srgb` run alone makes 8 pipeline variants and takes none back;
+/// inside the set it makes 4 and takes 4 back — and `variants_taken_back` is the one count of this
+/// family measured to go **up** with more cases around it, from 0 to 4, which is the direction an
+/// upper bound cannot survive.
+///
+/// Every other count that moved between the two readings moved the safe way, higher when the case
+/// ran alone: `addressable_buffers_made`, `pooled_memory_blocks_made`, `arena_pools_made`,
+/// `device_memory_allocated`, `creation_pipelines_made`, `variant_pipelines_made`,
+/// `shader_modules_made`, `pipeline_layouts_made`, `command_buffers_begun` and
+/// `command_buffers_submitted` are all first-case-pays counts, so the whole-set bound sits at or
+/// under what a lone run would do and more cases can only lower them. They stay gated.
 const FOUND: &str = "an object found already made rather than made, which depends on what every \
      case before it in the same process made. Its `_made` partner stays gated, and loses nothing: \
      finding one only lowers that count, and the gate is an upper bound";
@@ -175,7 +186,7 @@ const POOLED: &str = "an object made because no spare was free, where a spare co
 /// replays of a larger case set — which reads like a regression and is not one. See [`BORROWED`].
 /// `slot_returns` beside it stays gated: it counts work items, one a command buffer, and has held
 /// still alone and in both case sets.
-const RACY: [(&str, &str); 24] = [
+const RACY: [(&str, &str); 25] = [
     ("fences_made", POOLED),
     // What is alive, parked or waiting at the instant the counts were read.
     ("memory_blocks_live", INSTANTANEOUS),
@@ -197,6 +208,7 @@ const RACY: [(&str, &str); 24] = [
     ("pipeline_layouts_shared", FOUND),
     ("shader_modules_shared", FOUND),
     ("sampler_sets_shared", FOUND),
+    ("variants_taken_back", FOUND),
     ("completed_waits", BORROWED),
     ("command_pools_made", POOLED),
     ("spare_command_pools_", POOLED),

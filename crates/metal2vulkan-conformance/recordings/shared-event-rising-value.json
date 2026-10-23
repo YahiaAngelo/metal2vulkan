@@ -207,5 +207,28 @@
       ],
       "validated": "ran"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 3,
+      "measured": "3 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "bounds": {
+        "batches_with_none_pending": 3,
+        "commits_handed_off": 3,
+        "completed_where_seen": 3,
+        "queue_submissions": 3,
+        "scheduled_where_submitted": 3,
+        "scheduler_passes": 4,
+        "scheduler_sleeps": 4,
+        "scheduler_wakes_commit": 3,
+        "scheduler_wakes_host": 1,
+        "slot_returns": 3,
+        "spare_command_pools_taken": 3,
+        "submit_infos": 3,
+        "wakes_completion_waiters": 3,
+        "wakes_spared": 20
+      }
+    }
   ]
 }
