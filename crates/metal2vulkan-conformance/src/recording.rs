@@ -33,6 +33,13 @@ pub const SUITE_VERSION: u32 = 1;
 /// The chip this round records on.
 pub const ORACLE_CHIP: &str = "apple-m3-max";
 
+/// The other chip a carried table in this tree was measured on, named here so the two families
+/// that hold its values spell it the same way and a check can find them.
+///
+/// That machine is gone, so those tables cannot be re-taken: they are carried, and their
+/// recordings say which chip they came from rather than implying the oracle's.
+pub const APPLE_M4: &str = "apple-m4";
+
 /// The macOS release this round records on, as macOS names it.
 pub const ORACLE_OS_VERSION: &str = "27.0.1";
 
@@ -93,7 +100,46 @@ pub enum Provenance {
     /// The answer is a Metal measurement this tree already holds, carried over rather than
     /// re-probed: the module whose table it came from. Its measurement is as old as that table,
     /// and re-recording it on Metal replaces it.
-    Carried { from: String },
+    Carried {
+        from: String,
+        /// The chip the measurement was **taken on**, which need not be the chip the answer is
+        /// keyed to.
+        ///
+        /// A recording's key is the oracle it is compared under, and this round's oracle is one
+        /// M3 Max; a carried table may predate it. Two families here hold an Apple M4's values,
+        /// and until this field existed that fact lived in the `from` prose alone, where nothing
+        /// could read it. It is written only when it differs from [`ORACLE_CHIP`], and read as
+        /// [`ORACLE_CHIP`] when absent, so a recording taken on the oracle says nothing extra and
+        /// the files that do carry another chip's values say so in a field.
+        #[serde(default = "oracle_chip", skip_serializing_if = "is_oracle_chip")]
+        measured_on: String,
+    },
+}
+
+/// The chip a carried answer was measured on where its recording names none: the oracle's.
+fn oracle_chip() -> String {
+    ORACLE_CHIP.to_owned()
+}
+
+/// Whether a carried answer's chip is the oracle's, and so left out of the file.
+fn is_oracle_chip(chip: &String) -> bool {
+    chip == ORACLE_CHIP
+}
+
+impl Provenance {
+    /// The chip a carried answer was measured on, where that is not the chip it is keyed to.
+    ///
+    /// The report says so, because a carried answer from another chip is weaker evidence than one
+    /// taken here: the suite's rule is that a recording from another oracle is stale, and this is
+    /// the one place that rule is relaxed, so it must be visible rather than implied.
+    pub fn measured_elsewhere(&self) -> Option<&str> {
+        match self {
+            Provenance::Carried { measured_on, .. } if measured_on != ORACLE_CHIP => {
+                Some(measured_on)
+            }
+            Provenance::Carried { .. } | Provenance::MetalRun => None,
+        }
+    }
 }
 
 /// What Metal's API validation layer did with the case: a fact of its own, never compared with the

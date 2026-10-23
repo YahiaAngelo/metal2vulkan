@@ -12,7 +12,8 @@
       },
       "provenance": {
         "carried": {
-          "from": "runtime_lane::two_plane_heap_blits, from the probe tph: the heap digests on an Apple M4 under macOS 27.0.1 and an Apple M3 Max under macOS 26.7 alike, and the run shape recovered on an Apple M3 Max under MoltenVK"
+          "from": "runtime_lane::two_plane_heap_blits, from the probe tph: the heap digests on an Apple M4 under macOS 27.0.1 and an Apple M3 Max under macOS 26.7 alike, and the run shape recovered on an Apple M3 Max under MoltenVK",
+          "measured_on": "apple-m4"
         }
       },
       "device": "apple-m3-max",

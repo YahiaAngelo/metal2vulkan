@@ -101,10 +101,11 @@ pub fn record(
 }
 
 /// The answer a case carries from a measurement this tree already holds: one outcome, the runs the
-/// measurement stands on, and where it came from.
+/// measurement stands on, where it came from, and the chip it was taken on.
 pub fn carried(
     level: MetalLevel,
     from: &str,
+    measured_on: &str,
     device: &str,
     runs: u32,
     transcript: Transcript,
@@ -114,6 +115,7 @@ pub fn carried(
         key: recording::OracleKey::current(level),
         provenance: Provenance::Carried {
             from: from.to_owned(),
+            measured_on: measured_on.to_owned(),
         },
         device: device.to_owned(),
         runs,

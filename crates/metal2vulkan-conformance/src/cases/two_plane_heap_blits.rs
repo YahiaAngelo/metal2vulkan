@@ -351,6 +351,9 @@ fn random_bytes(count: u64, seed: u64) -> Vec<u8> {
         .collect()
 }
 
+/// The case's name.
+pub const HEAP_BLITS: &str = "two-plane-heap-blits";
+
 /// The case of the suite.
 pub struct HeapBlits {
     name: &'static str,
@@ -358,9 +361,7 @@ pub struct HeapBlits {
 
 /// The ported case.
 pub fn heap_blits() -> HeapBlits {
-    HeapBlits {
-        name: "two-plane-heap-blits",
-    }
+    HeapBlits { name: HEAP_BLITS }
 }
 
 /// The program one case runs: the heap, its two textures, the seed's bytes written through a
@@ -504,6 +505,7 @@ impl Case for HeapBlits {
 
     fn metal_source(&self) -> MetalSource {
         MetalSource::carried_only(MEASURED_IN, NO_PUBLIC_CALL)
+            .measured_on(crate::recording::APPLE_M4)
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
