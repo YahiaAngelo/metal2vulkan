@@ -707,28 +707,29 @@ impl Side for RuntimeSide<'_> {
                 format!("{}: {problem:?}", request.format),
             )
         })?;
-        let mut descriptor = TextureDescriptor::texture_2d(
-            format,
-            request.size[0].into(),
-            request.size[1].into(),
-            false,
-        );
-        descriptor.texture_type = request.texture_type;
-        descriptor.depth = request.size[2].max(1).into();
-        descriptor.mipmap_level_count = request.levels.max(1).into();
-        descriptor.array_length = request.slices.max(1).into();
-        descriptor.usage = request.usage;
-        descriptor.resource_options = if request.private {
-            ResourceOptions::private()
-        } else {
-            ResourceOptions::shared()
-        };
-        descriptor.allow_gpu_optimized_contents = request.gpu_optimized;
-        descriptor.swizzle = request.swizzle;
-        let texture = self
-            .device
-            .new_texture(&descriptor)
-            .map_err(|error| Failure::of(&error))?;
+        let descriptor = texture_descriptor(request, format);
+        // One of the three Metal calls that answers a texture of this descriptor, as the request
+        // says: the device's own, a buffer's, or a parent texture's view.
+        let texture = match request.over {
+            None => self.device.new_texture(&descriptor),
+            Some(crate::texture::Over::Buffer {
+                buffer,
+                offset,
+                bytes_per_row,
+            }) => self
+                .held(buffer)?
+                .new_texture(&descriptor, offset, bytes_per_row),
+            Some(crate::texture::Over::View { texture }) => {
+                self.held_texture(texture)?.new_texture_view_with_swizzle(
+                    format,
+                    request.texture_type,
+                    0..u64::from(request.levels.max(1)),
+                    0..u64::from(request.slices.max(1)),
+                    request.swizzle,
+                )
+            }
+        }
+        .map_err(|error| Failure::of(&error))?;
         for upload in request.uploads {
             texture
                 .replace_region(
@@ -2430,6 +2431,43 @@ impl Side for RuntimeSide<'_> {
 
 /// The runtime's descriptor for a case's sparse texture: the case's vocabulary is Metal's own, so
 /// every field reaches the descriptor unchanged.
+/// The runtime's texture descriptor for the one a case states: every field of
+/// [`TextureRequest`](crate::texture::TextureRequest) reaches it.
+///
+/// A function of its own, and not inlined in the call, so that
+/// `both_sides_state_every_field_of_a_texture_request` can hold it to that field by field with no
+/// device — the swizzle most of all. A swizzle this side dropped while the Metal side set it would
+/// leave every swizzle case passing for the wrong reason: both legs would be reading the texture's
+/// unswizzled texels, and the comparison would be of two answers to a question neither leg was
+/// asked.
+///
+/// [`crate::texture::Over`] is **not** here: it is which object the call is sent to, not a field of
+/// the descriptor, and both sides send it in their own API's spelling.
+pub(crate) fn texture_descriptor(
+    request: &crate::texture::TextureRequest<'_>,
+    format: PixelFormat,
+) -> TextureDescriptor {
+    let mut descriptor = TextureDescriptor::texture_2d(
+        format,
+        request.size[0].into(),
+        request.size[1].into(),
+        false,
+    );
+    descriptor.texture_type = request.texture_type;
+    descriptor.depth = request.size[2].max(1).into();
+    descriptor.mipmap_level_count = request.levels.max(1).into();
+    descriptor.array_length = request.slices.max(1).into();
+    descriptor.usage = request.usage;
+    descriptor.resource_options = if request.private {
+        ResourceOptions::private()
+    } else {
+        ResourceOptions::shared()
+    };
+    descriptor.allow_gpu_optimized_contents = request.gpu_optimized;
+    descriptor.swizzle = request.swizzle;
+    descriptor
+}
+
 fn sparse_texture_descriptor(spec: &SparseTextureSpec) -> TextureDescriptor {
     let mut descriptor = TextureDescriptor::default();
     descriptor.texture_type = spec.texture_type;

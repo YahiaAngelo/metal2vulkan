@@ -16,6 +16,7 @@
 //! Nothing here reads a device name, a vendor or an environment variable: a case that asks for a
 //! texture the venue cannot make finds out from the typed refusal the call answers.
 
+use crate::case::Handle;
 use metal2vulkan::metal::{TextureSwizzleChannels, TextureType, TextureUsage};
 
 /// One `replaceRegion:mipmapLevel:slice:withBytes:bytesPerRow:bytesPerImage:` a texture is loaded
@@ -80,6 +81,33 @@ impl Upload<'_> {
     }
 }
 
+/// What a texture is made **over**, where it is not made of memory of its own.
+///
+/// Both forms are one Metal call that answers a texture, so they belong to
+/// [`Side::texture`](crate::case::Side::texture) rather than to methods of their own: the
+/// descriptor a case states is the same descriptor, and what changes is which object the call is
+/// sent to. A request that names neither is `newTextureWithDescriptor:` as before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Over {
+    /// `newTextureWithDescriptor:offset:bytesPerRow:` of a buffer the case made: the texture's
+    /// texels **are** the buffer's bytes from `offset`, its rows `bytes_per_row` apart.
+    ///
+    /// A texture buffer's one row is its texels, so its `bytes_per_row` is the whole run of them,
+    /// which is what Metal takes and what the probes passed.
+    Buffer {
+        buffer: Handle,
+        offset: u64,
+        bytes_per_row: u64,
+    },
+    /// `newTextureViewWithPixelFormat:textureType:levels:slices:swizzle:` of a texture the case
+    /// made: the view takes **this request's** format, texture type, swizzle, `0..levels` and
+    /// `0..slices`, replacing the parent texture's.
+    ///
+    /// A view holds no memory, so a request that names one loads nothing: the case loads the
+    /// parent and then views it, which is the order a swizzled view's answer depends on.
+    View { texture: Handle },
+}
+
 /// A texture a case makes, as `MTLTextureDescriptor` describes one, with the bytes it starts from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TextureRequest<'a> {
@@ -99,6 +127,9 @@ pub struct TextureRequest<'a> {
     /// `allowGPUOptimizedContents`.
     pub gpu_optimized: bool,
     pub swizzle: TextureSwizzleChannels,
+    /// What the texture is made over, where it is not made of its own memory ([`Over`]). `None` is
+    /// `newTextureWithDescriptor:`.
+    pub over: Option<Over>,
     /// The `replaceRegion:` calls the texture is loaded with, in order.
     pub uploads: &'a [Upload<'a>],
 }
@@ -118,8 +149,48 @@ impl<'a> TextureRequest<'a> {
             private: false,
             gpu_optimized: true,
             swizzle: TextureSwizzleChannels::DEFAULT,
+            over: None,
             uploads: &[],
         }
+    }
+
+    /// A one-level texture buffer of `format` over `texels` texels of `buffer` from `offset`, read
+    /// by a shader, with the default swizzle: Metal's
+    /// `textureBufferDescriptorWithPixelFormat:width:resourceOptions:usage:` over a buffer.
+    ///
+    /// `bytes_per_row` is the whole run of texels, which is what a texture buffer's one row is.
+    pub const fn texel_buffer(
+        format: u32,
+        texels: u32,
+        buffer: Handle,
+        offset: u64,
+        bytes_per_row: u64,
+    ) -> Self {
+        Self {
+            format,
+            texture_type: TextureType::TextureBuffer,
+            size: [texels, 1, 1],
+            levels: 1,
+            slices: 1,
+            usage: TextureUsage::SHADER_READ,
+            private: false,
+            gpu_optimized: true,
+            swizzle: TextureSwizzleChannels::DEFAULT,
+            over: Some(Over::Buffer {
+                buffer,
+                offset,
+                bytes_per_row,
+            }),
+            uploads: &[],
+        }
+    }
+
+    /// The same texture as a view of `texture`: this request's format, type, levels, slices and
+    /// swizzle, over the parent's memory.
+    #[must_use]
+    pub const fn viewing(mut self, texture: Handle) -> Self {
+        self.over = Some(Over::View { texture });
+        self
     }
 
     /// The same texture with `levels` mip levels.
@@ -168,6 +239,12 @@ impl<'a> TextureRequest<'a> {
     /// The words the request fingerprints as: every field of the descriptor and every upload, so a
     /// texture whose shape or starting bytes move is a change to the case's inputs rather than a
     /// quiet pass against a recording of other bytes.
+    ///
+    /// [`TextureRequest::over`] is written **only where the case states one**, and a handle's
+    /// number never is: a handle is a side's own counter, and a case states the resource underneath
+    /// as an input of its own. So a request made as it was before this field existed fingerprints
+    /// as it did, and every committed recording of one stays the answer to the inputs it was taken
+    /// from.
     pub fn words(&self) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend(self.format.to_le_bytes());
@@ -187,6 +264,19 @@ impl<'a> TextureRequest<'a> {
             self.swizzle.alpha,
         ] {
             out.extend(channel.as_raw().to_le_bytes());
+        }
+        match self.over {
+            None => {}
+            Some(Over::Buffer {
+                offset,
+                bytes_per_row,
+                buffer: _,
+            }) => {
+                out.extend(b"over-buffer");
+                out.extend(offset.to_le_bytes());
+                out.extend(bytes_per_row.to_le_bytes());
+            }
+            Some(Over::View { texture: _ }) => out.extend(b"view-of"),
         }
         for upload in self.uploads {
             out.extend(upload.words());

@@ -3684,3 +3684,86 @@ fn a_multisampled_sparse_texture_without_the_sample_count_is_the_devices_gap() {
         Needs::DeviceCapability("sparseResidency4Samples")
     ));
 }
+
+/// Every field of a [`crate::texture::TextureRequest`] reaches **both** sides' texture
+/// descriptors, checked field by field with no device, each at a value no other field holds.
+///
+/// It is written for the swizzle families, where a dropped harness field is the easiest way to
+/// measure nothing at all: if one side set the swizzle and the other did not, both legs would be
+/// reading the texture's *unswizzled* texels, every swizzle case would compare equal, and the
+/// suite would report a sweep of the question neither leg was asked. The four channels therefore
+/// take four **different** sources, so a dropped, duplicated or transposed channel cannot pass by
+/// coincidence.
+///
+/// The Metal half runs wherever Metal's frameworks are: making an `MTLTextureDescriptor` asks
+/// nothing of a device.
+#[test]
+fn both_sides_state_every_field_of_a_texture_request() {
+    use crate::texture::TextureRequest;
+    use metal2vulkan::metal::{PixelFormat, TextureSwizzle, TextureSwizzleChannels, TextureType};
+
+    // Four different sources, so no channel can take another's and still compare equal.
+    let swizzle = TextureSwizzleChannels::new(
+        TextureSwizzle::Blue,
+        TextureSwizzle::Alpha,
+        TextureSwizzle::Zero,
+        TextureSwizzle::Red,
+    );
+    let request = TextureRequest::read_2d(PixelFormat::RG16Uint.as_raw(), 7, 5)
+        .levels(3)
+        .used(metal2vulkan::metal::TextureUsage::SHADER_WRITE)
+        .swizzled(swizzle)
+        .private();
+
+    let ours = crate::runtime_side::texture_descriptor(&request, PixelFormat::RG16Uint);
+    assert_eq!(ours.pixel_format, PixelFormat::RG16Uint);
+    assert_eq!(ours.texture_type, TextureType::Type2D);
+    assert_eq!([ours.width, ours.height, ours.depth], [7, 5, 1]);
+    assert_eq!(ours.mipmap_level_count, 3);
+    assert_eq!(ours.array_length, 1);
+    assert_eq!(
+        ours.usage,
+        metal2vulkan::metal::TextureUsage::SHADER_WRITE,
+        "the usage the case stated, and nothing added to it"
+    );
+    assert!(ours.allow_gpu_optimized_contents);
+    assert_eq!(ours.swizzle, swizzle, "every channel's own source");
+
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_metal::{MTLStorageMode, MTLTextureDescriptor, MTLTextureSwizzle};
+        let theirs: objc2::rc::Retained<MTLTextureDescriptor> =
+            crate::metal_side::texture_descriptor(&request);
+        assert_eq!(
+            theirs.pixelFormat().0 as u32,
+            PixelFormat::RG16Uint.as_raw()
+        );
+        assert_eq!(theirs.textureType().0 as u32, TextureType::Type2D.as_raw());
+        assert_eq!([theirs.width(), theirs.height(), theirs.depth()], [7, 5, 1]);
+        assert_eq!(theirs.mipmapLevelCount(), 3);
+        assert_eq!(theirs.arrayLength(), 1);
+        assert_eq!(
+            theirs.usage().0 as u32,
+            metal2vulkan::metal::TextureUsage::SHADER_WRITE.as_raw()
+        );
+        assert_eq!(
+            theirs.storageMode(),
+            MTLStorageMode::Private,
+            "the case asked for private storage"
+        );
+        assert!(theirs.allowGPUOptimizedContents());
+        // The one field the whole family turns on, channel by channel against the case's own.
+        let held = theirs.swizzle();
+        let raw = |source: TextureSwizzle| MTLTextureSwizzle(source.as_raw() as u8);
+        assert_eq!(held.red, raw(swizzle.red), "red");
+        assert_eq!(held.green, raw(swizzle.green), "green");
+        assert_eq!(held.blue, raw(swizzle.blue), "blue");
+        assert_eq!(held.alpha, raw(swizzle.alpha), "alpha");
+        // And the four are really four different sources, so the four assertions above are four
+        // facts rather than one repeated.
+        let sources = [held.red, held.green, held.blue, held.alpha];
+        let distinct: std::collections::BTreeSet<u8> =
+            sources.iter().map(|source| source.0).collect();
+        assert_eq!(distinct.len(), 4, "{sources:?}");
+    }
+}

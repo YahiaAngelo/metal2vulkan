@@ -73,6 +73,7 @@ pub mod sparse_heaps;
 pub mod sparse_tiles;
 pub mod stage_in_regions;
 pub mod surface_fills;
+pub mod texel_swizzles;
 pub mod texture_accesses;
 pub mod texture_buffer_fills;
 pub mod texture_fills;
@@ -252,6 +253,8 @@ pub fn all() -> Vec<Box<dyn Case>> {
             .into_iter()
             .map(|case| Box::new(case) as Box<dyn Case>),
     );
+
+    cases.extend(texel_swizzles::all());
     cases
 }
 
