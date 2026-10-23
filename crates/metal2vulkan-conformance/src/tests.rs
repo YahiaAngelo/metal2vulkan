@@ -1199,3 +1199,47 @@ fn announcing_a_side_changes_no_transcript() {
         );
     }
 }
+
+/// The committed recordings hold the second Metal oracle, and hold all three of its answers.
+///
+/// This ties the recordings to the cases: a re-record that lost the validated leg, or an Apple
+/// release whose wording moved, fails here with no device and no Metal, instead of surfacing as a
+/// puzzling verdict later. It is also the standing proof that the axis has been exercised — the
+/// thing the suite could not say before these cases existed.
+#[test]
+fn the_committed_recordings_carry_all_three_validated_answers() {
+    let validated = |case: &str| {
+        crate::recording::read(case)
+            .unwrap_or_else(|why| panic!("{case}: {why}"))
+            .answer(MetalLevel::NEWEST)
+            .unwrap_or_else(|why| panic!("{case}: {why}"))
+            .validated
+            .clone()
+    };
+    let says = |case: &str, words: &str| match validated(case) {
+        Validated::Stopped { call, message } => {
+            assert_eq!(call, "rate_map", "{case}");
+            assert!(message.contains(words), "{case}: {message}");
+        }
+        other => panic!("{case}: {other:?}"),
+    };
+    // Stopped: Metal's own API validation refuses what plain Metal answered, in its own words.
+    says(
+        crate::cases::rate_maps::NO_LAYERS,
+        crate::cases::rate_maps::NO_LAYERS_SAYS,
+    );
+    says(
+        crate::cases::rate_maps::ZERO_SCREEN_WIDTH,
+        crate::cases::rate_maps::ZERO_WIDTH_SAYS,
+    );
+    // Ran: the layer had nothing to say about a compute case, and the plain answer stood.
+    for case in crate::cases::pass_bytes::all() {
+        assert_eq!(validated(case.name()), Validated::Ran, "{}", case.name());
+    }
+    // NotRun: a carried answer was never run here at all, and the file says so rather than
+    // implying Metal's validation was content with it.
+    assert_eq!(
+        validated(crate::cases::indirect_private_types::PRIVATE_TYPE_GETTERS),
+        Validated::NotRun
+    );
+}
