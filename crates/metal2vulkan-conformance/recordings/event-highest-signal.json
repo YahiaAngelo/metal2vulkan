@@ -147,7 +147,7 @@
         "queue_submissions": 4,
         "scheduled_where_submitted": 4,
         "scheduler_passes": 4,
-        "scheduler_sleeps": 3,
+        "scheduler_sleeps": 2,
         "scheduler_wakes_commit": 4,
         "slot_returns": 4,
         "spare_command_pools_taken": 8,

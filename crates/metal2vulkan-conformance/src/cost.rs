@@ -233,6 +233,32 @@ const COMPLEMENT: &str = "which of our own threads ran a command buffer's transi
 const QUIET: &str = "a pooled memory block freed because it had been kept empty past its quiet \
      period, which is a question about elapsed time rather than about the case's work";
 
+/// Why `finales_folded` is reported and never gated: it is one half of a split the **submission
+/// path** decides as it runs, not a count of what the case asked for.
+///
+/// A batch's end is either folded into its last command buffer or submitted in one of its own, and
+/// the runtime's doc for the other half, `finales_apart`, lists what forces it apart: an event
+/// signal that waits for another `VkQueue`'s earlier one, a submission left a segment or a sparse
+/// update, a texture that moves between layouts, or a last command buffer that "does not go to the
+/// queue as recorded". Several of those are about what the queue did with work submitted **before
+/// this case**.
+///
+/// Measured, in both ways it moves. Across the case set it reads 3 with the case alone and 4 in
+/// company in 76 cases. And it moves between replays of the *identical* selection, which
+/// composition alone cannot explain: it reached 2 where the measurement's most was 0 on
+/// `tile-order-even-threadgroups` in one whole-set replay and stayed within bound in the other of
+/// the same pair.
+///
+/// `finales_apart` is its partner and stays **gated**, for the same reason
+/// `scheduled_where_submitted` does: nothing has been seen to move it, and a row here with no
+/// measurement behind it is a claim this half does not make. So work moving from folded to apart
+/// still fires the gate, and work moving the other way fires nothing — the asymmetry is worth
+/// knowing rather than papering over.
+const FOLDED: &str =
+    "whether a batch's end was folded into its last command buffer or sent in one \
+     of its own, which the submission path decides from what the queue did with work submitted \
+     before this case";
+
 /// Why a count of an object made because no spare was free is reported and never gated.
 const POOLED: &str = "an object made because no spare was free, where a spare comes back on \
      another thread: which case has to make one depends on when that thread returned the one \
@@ -266,7 +292,7 @@ const POOLED: &str = "an object made because no spare was free, where a spare co
 /// replays of a larger case set — which reads like a regression and is not one. See [`BORROWED`].
 /// `slot_returns` beside it stays gated: it counts work items, one a command buffer, and has held
 /// still alone and in both case sets.
-const RACY: [(&str, &str); 30] = [
+const RACY: [(&str, &str); 31] = [
     ("fences_made", POOLED),
     // What is alive, parked or waiting at the instant the counts were read.
     ("memory_blocks_live", INSTANTANEOUS),
@@ -295,6 +321,7 @@ const RACY: [(&str, &str); 30] = [
     ("primaries_begun_ahead", AHEAD),
     ("completed_where_seen", COMPLEMENT),
     ("pooled_memory_blocks_freed", QUIET),
+    ("finales_folded", FOLDED),
     ("command_pools_made", POOLED),
     ("spare_command_pools_", POOLED),
     ("live_tables_uploaded", POOLED),
@@ -756,6 +783,18 @@ pub struct CostRecord {
     /// disagreement is.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub composed: BTreeMap<String, u64>,
+    /// What each count read with the case **alone**, where that reading is the count's ceiling and
+    /// so its bound: the lone run made the object itself where company finds it already made, and
+    /// nothing in the `MONOTONE` table's direction can exceed that.
+    ///
+    /// Such a count is **gated**, unlike one in `composed`, so this map is not a list of
+    /// exemptions — it is where the bound came from. It has to be written down rather than left
+    /// implicit in `bounds`, because a later measurement of the gate's own shape reads a *lower*
+    /// number for exactly these counts: without this map, re-measuring the whole set alone would
+    /// drop every ceiling bound and quietly weaken the gate on the one family the contrast gives
+    /// back.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ceilings: BTreeMap<String, u64>,
 }
 
 impl CostRecord {
@@ -778,6 +817,64 @@ impl CostRecord {
             .keys()
             .filter_map(|count| self.bound(count))
             .collect()
+    }
+
+    /// This record, a fresh measurement of the gate's own shape, carrying everything `held`'s
+    /// contrast established.
+    ///
+    /// **Every piece of evidence a bound rests on is written in the record rather than derivable
+    /// from it**, and this is the method that depends on that. Re-measuring the whole case set says
+    /// nothing new about what each case does alone, so what the lone run established has to survive
+    /// the re-measure — and it can only survive if it was written down. Three kinds of evidence are
+    /// carried:
+    ///
+    /// - `moving`, so a count the new runs happened not to see move is not re-gated at zero;
+    /// - `ceilings`, the sharp one: those counts are **gated**, and the gate's own shape reads a
+    ///   *lower* number for every one of them by construction, so dropping them replaces a real
+    ///   ceiling with whatever this composition happened to share. Measured, by re-measuring in
+    ///   this order before `ceilings` existed: 389 such bounds vanished across 149 cases, almost
+    ///   all `addressable_buffers_made` and `pooled_memory_blocks_made`, with nothing in any output
+    ///   saying so;
+    /// - `composed`, so a count the selection decides is not re-gated on this composition's
+    ///   reading.
+    ///
+    /// A bound only ever rises here from a *named* piece of the contrast, never because it was
+    /// higher last time. Keeping `max(new, held)` for every count would ratchet bounds upward for
+    /// ever and hide a genuine reduction, and a gate that can only loosen eventually passes
+    /// everything.
+    ///
+    /// It is idempotent, and `a_second_measurement_of_the_same_shape_changes_nothing` holds it to
+    /// that: applying it to a record that already carries a contrast changes no byte.
+    pub fn carrying_the_contrast_of(mut self, held: &CostRecord) -> CostRecord {
+        self.contrasted = held.contrasted.clone();
+        for (count, least) in &held.moving {
+            if racy(count).is_some() {
+                continue;
+            }
+            let most = held.bounds.get(count).copied().unwrap_or(0);
+            let bound = self.bounds.entry(count.clone()).or_insert(most);
+            *bound = (*bound).max(most);
+            let seen = self.moving.entry(count.clone()).or_insert(*least);
+            *seen = (*seen).min(*least);
+        }
+        for (count, apart) in &held.ceilings {
+            if racy(count).is_some() {
+                continue;
+            }
+            self.ceilings.insert(count.clone(), *apart);
+            let bound = self.bounds.entry(count.clone()).or_insert(*apart);
+            *bound = (*bound).max(*apart);
+        }
+        for (count, apart) in &held.composed {
+            if racy(count).is_some() {
+                continue;
+            }
+            let most = held.bounds.get(count).copied().unwrap_or(0);
+            let bound = self.bounds.entry(count.clone()).or_insert(most);
+            *bound = (*bound).max(most).max(*apart);
+            self.composed.entry(count.clone()).or_insert(*apart);
+        }
+        self
     }
 
     /// How many of its bounds are gated rather than only reported.
@@ -1017,6 +1114,7 @@ impl CaseCost {
             bounds,
             moving,
             composed: BTreeMap::new(),
+            ceilings: BTreeMap::new(),
         }
     }
 
@@ -1039,6 +1137,15 @@ impl CaseCost {
         // ceiling the lone run is — lives there alone.
         for (count, _, apart) in self.apart_from(held) {
             folded.composed.insert(count.to_owned(), apart);
+        }
+        // And the counts this run read *above* the gate's own shape for the one reason that is a
+        // ceiling rather than a disagreement. They stay gated, at this reading, and it is written
+        // down so a later measurement of the gate's own shape cannot drop it.
+        for (count, apart) in self.counts.iter() {
+            let inside = held.bounds.get(count).copied().unwrap_or(0);
+            if monotone(count).is_some() && apart > inside {
+                folded.ceilings.insert(count.to_owned(), apart);
+            }
         }
         // The bound stays the largest either shape saw, so the record's own number is honest about
         // what was observed. For a gated count the two shapes agree, so only the bounds of counts

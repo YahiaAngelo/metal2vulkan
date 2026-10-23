@@ -246,7 +246,6 @@
         "dispatch_pipelines_pooled": 1,
         "encoder_command_buffers_begun": 9,
         "finales_apart": 1,
-        "finales_folded": 0,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 3,
         "render_passes_made": 2,

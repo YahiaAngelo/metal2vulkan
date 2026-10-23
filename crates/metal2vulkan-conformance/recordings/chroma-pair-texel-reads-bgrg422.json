@@ -332,7 +332,7 @@
         "variant_pipelines_made": 2,
         "variants_taken_back": 1,
         "wakes_completion_waiters": 1,
-        "wakes_spared": 6
+        "wakes_spared": 7
       },
       "moving": {
         "host_texel_copies": 2
@@ -355,7 +355,6 @@
         "dispatch_pipelines_pooled": 1,
         "encoder_command_buffers_begun": 3,
         "finales_apart": 1,
-        "finales_folded": 0,
         "host_texel_copies": 2,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 4,

@@ -727,7 +727,6 @@
         "dispatch_pipelines_pooled": 3,
         "encoder_command_buffers_begun": 10,
         "finales_apart": 3,
-        "finales_folded": 1,
         "pipeline_layouts_made": 3,
         "pooled_memory_blocks_made": 4,
         "sampler_sets_made": 1,

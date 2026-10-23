@@ -1107,7 +1107,7 @@
         "command_buffers_begun_segments": 4,
         "command_buffers_deferred": 17,
         "command_buffers_replayed": 12,
-        "command_buffers_replayed_inline": 6,
+        "command_buffers_replayed_inline": 7,
         "command_buffers_submitted": 22,
         "commands_replayed.begin_command_buffer": 17,
         "commands_replayed.cmd_bind_descriptor_sets": 9,

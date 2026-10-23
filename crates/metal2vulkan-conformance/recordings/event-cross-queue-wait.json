@@ -200,7 +200,7 @@
         "slot_returns": 2,
         "spare_command_pools_taken": 4,
         "submit_infos": 2,
-        "wakes_completion_waiters": 2,
+        "wakes_completion_waiters": 3,
         "wakes_spared": 13
       },
       "composed": {

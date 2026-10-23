@@ -1422,7 +1422,7 @@
         "command_buffers_begun_segments": 1,
         "command_buffers_deferred": 15,
         "command_buffers_replayed": 3,
-        "command_buffers_replayed_inline": 13,
+        "command_buffers_replayed_inline": 12,
         "command_buffers_submitted": 17,
         "commands_replayed.begin_command_buffer": 15,
         "commands_replayed.cmd_bind_descriptor_sets": 13,

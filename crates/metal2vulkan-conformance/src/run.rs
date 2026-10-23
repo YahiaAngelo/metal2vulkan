@@ -379,35 +379,7 @@ fn record_one_cost(
     }
     let mut record = cost.record(venue, words.to_owned());
     if let Some(held) = recording.costs.iter().find(|held| held.venue == venue) {
-        // The contrast an earlier command took is kept: re-measuring the gate's own shape says
-        // nothing new about the other one, and dropping it would silently re-gate every count the
-        // selection decides.
-        record.contrasted = held.contrasted.clone();
-        for (count, least) in &held.moving {
-            if crate::cost::racy(count).is_some() {
-                continue;
-            }
-            // A count the new measurement never saw move at all is the sharpest case: without
-            // this it would be bounded at zero and gated, and the next run that happened to see
-            // the race would read as a regression. It keeps the larger of the two bounds.
-            let most = held.bounds.get(count).copied().unwrap_or(0);
-            let bound = record.bounds.entry(count.clone()).or_insert(most);
-            *bound = (*bound).max(most);
-            let seen = record.moving.entry(count.clone()).or_insert(*least);
-            *seen = (*seen).min(*least);
-        }
-        // The same for a count an earlier measurement found the selection decides. A measurement
-        // that took only one shape has nothing to say about the contrast, so what an earlier one
-        // established is kept rather than silently dropped and the count re-gated.
-        for (count, apart) in &held.composed {
-            if crate::cost::racy(count).is_some() {
-                continue;
-            }
-            let most = held.bounds.get(count).copied().unwrap_or(0);
-            let bound = record.bounds.entry(count.clone()).or_insert(most);
-            *bound = (*bound).max(most).max(*apart);
-            record.composed.entry(count.clone()).or_insert(*apart);
-        }
+        record = record.carrying_the_contrast_of(held);
     }
     recording.costs.retain(|held| held.venue != venue);
     recording.costs.push(record);

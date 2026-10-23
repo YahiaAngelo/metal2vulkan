@@ -498,7 +498,6 @@
         "driver_diagnostics_withheld": 2,
         "encoder_command_buffers_begun": 8,
         "finales_apart": 1,
-        "finales_folded": 0,
         "graphics_pipelines_looked_up": 2,
         "new_buffer_bytes_cleared": 4304,
         "owned_descriptor_pools": 1,

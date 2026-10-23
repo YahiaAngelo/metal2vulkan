@@ -650,7 +650,6 @@
         "draw_shapes_made": 1,
         "encoder_command_buffers_begun": 11,
         "finales_apart": 2,
-        "finales_folded": 0,
         "pipeline_layouts_made": 3,
         "pooled_memory_blocks_made": 4,
         "render_passes_made": 4,

@@ -665,7 +665,6 @@
         "dispatch_pipelines_pooled": 1,
         "encoder_command_buffers_begun": 6,
         "finales_apart": 1,
-        "finales_folded": 3,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 4,
         "shader_modules_made": 1,
