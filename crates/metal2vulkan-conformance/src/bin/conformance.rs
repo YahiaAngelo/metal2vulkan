@@ -623,6 +623,7 @@ fn times(
         let held = metal2vulkan_conformance::slow_calls::held(
             &metal2vulkan_conformance::times::paired(metal, ours),
             &ledger,
+            metal2vulkan_conformance::slow_calls::Mode::of(shaders),
         );
         println!();
         for one in &held {
