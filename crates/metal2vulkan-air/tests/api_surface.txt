@@ -156,6 +156,7 @@ canon::rate_map_data INDEX_CAP const
 canon::rate_map_data INV_GRANULARITY const
 canon::rate_map_data LAST_ENTRY const
 canon::rate_map_data LAYERS const
+canon::rate_map_data LEAST_SCALE_STEPS const
 canon::rate_map_data MAX_EXTENT const
 canon::rate_map_data NO_BOUNDARY const
 canon::rate_map_data OFFSET_SHIFT const
