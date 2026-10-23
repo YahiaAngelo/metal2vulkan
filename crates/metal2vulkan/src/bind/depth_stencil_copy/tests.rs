@@ -239,5 +239,8 @@ fn every_16_bit_code_survives_the_depth_pair_in_both_directions() {
         worst = worst.max((scaled - f64::from(code)).abs());
     }
     // The half-step budget is 0.5; the docs quote this margin, so it is held to it.
-    assert!(worst < 2.0e-3, "the largest |depth * 65535 - code| is {worst}");
+    assert!(
+        worst < 2.0e-3,
+        "the largest |depth * 65535 - code| is {worst}"
+    );
 }
