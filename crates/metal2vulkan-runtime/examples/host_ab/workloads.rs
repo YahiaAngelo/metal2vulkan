@@ -82,7 +82,7 @@ const RECT_STRIDE: usize = 256;
 const TEXTURES: usize = 16;
 const TEXTURE_SIDE: usize = 64;
 /// The small draws' target's side.
-const TARGET_SIDE: usize = 512;
+pub const TARGET_SIDE: usize = 512;
 /// The heavy fragment's target's side, its texture's side, and the heavy kernel's texture's.
 const HEAVY_TARGET_SIDE: usize = 2048;
 const HEAVY_TEXTURE_SIDE: usize = 1024;
@@ -1478,7 +1478,7 @@ pub fn drag<G: Gpu>(g: &G, s: &Scene<G>, sizes: &Sizes) {
 /// # Safety
 ///
 /// Never unmapped: the caller keeps it for the process's life.
-unsafe fn host_pages(size: usize) -> *mut u8 {
+pub unsafe fn host_pages(size: usize) -> *mut u8 {
     // SAFETY: a new anonymous mapping, which nothing else holds.
     let pointer = unsafe {
         libc::mmap(
