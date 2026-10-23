@@ -7,6 +7,7 @@
 pub mod extended_range_planes;
 pub mod indirect_private_types;
 pub mod math_routines;
+pub mod mesh_barriers;
 pub mod mesh_draws;
 pub mod pass_bytes;
 pub mod sample_fills;
@@ -46,6 +47,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in mesh_draws::all() {
+        cases.push(Box::new(case));
+    }
+    for case in mesh_barriers::all() {
         cases.push(Box::new(case));
     }
     cases
