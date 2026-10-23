@@ -7,13 +7,18 @@
 //! No wait here can hang: a command buffer is waited for with a bound, and a wait that runs out
 //! answers `NeverReturned` as a recorded fact rather than blocking the suite.
 
-use crate::case::{Answer, Failure, Handle, IndirectReadBack, ShaderSource, Side, Venue};
+use crate::case::{
+    Answer, Failure, Handle, IndirectReadBack, ShaderSource, Side, StageInRegion, StageInput, Venue,
+};
 use crate::transcript::{Negative, Value};
 use metal2vulkan::metal::{IndexType, IndirectCommandType, PrimitiveType};
+use metal2vulkan::pipeline::{
+    StageInputAttributeDescriptor, StageInputDescriptor, StageInputLayoutDescriptor,
+};
 use metal2vulkan_runtime::{
     Buffer, CommandBuffer, CommandBufferStatus, CommandQueue, ComputePipelineState, Device,
-    DrawPrimitiveType, IndirectCommand, IndirectDraw, Library, PipelineOptions, ResourceOptions,
-    Size,
+    DrawPrimitiveType, IndirectCommand, IndirectDraw, Library, PipelineOptions, Region,
+    ResourceOptions, Size,
 };
 use std::time::Duration;
 
@@ -71,6 +76,96 @@ impl<'a> RuntimeSide<'a> {
             .get(handle.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
     }
+
+    /// One command buffer with one compute encoder: the pipeline set, `buffers` bound at 0 up,
+    /// each of `stage_in` set in order, `dispatch` encoded, and `commit`. The two dispatch calls
+    /// differ in that one line alone, so they share this body and a case cannot pick up a
+    /// different binding order with one of them.
+    fn encode(
+        &mut self,
+        pipeline: Handle,
+        buffers: &[Handle],
+        stage_in: &[StageInRegion],
+        dispatch: impl FnOnce(
+            &mut metal2vulkan_runtime::ComputeCommandEncoder,
+        ) -> Result<(), metal2vulkan_runtime::Error>,
+    ) -> Answer<Handle> {
+        let bound: Vec<Buffer> = buffers
+            .iter()
+            .map(|handle| self.held(*handle).cloned())
+            .collect::<Answer<Vec<Buffer>>>()?;
+        let state = self
+            .pipelines
+            .get(pipeline.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", pipeline.0)))?
+            .clone();
+        let command_buffer = self
+            .queue()?
+            .command_buffer()
+            .map_err(Failure::from_error)?;
+        let mut encoder = command_buffer
+            .compute_command_encoder()
+            .map_err(Failure::from_error)?;
+        encoder
+            .set_compute_pipeline_state(&state)
+            .map_err(Failure::from_error)?;
+        for (at, buffer) in bound.iter().enumerate() {
+            encoder
+                .set_buffer(Some(buffer), 0, at as u32)
+                .map_err(Failure::from_error)?;
+        }
+        for region in stage_in {
+            match region {
+                StageInRegion::Direct { origin, size } => encoder
+                    .set_stage_in_region(Region::new_3d(
+                        origin[0].into(),
+                        origin[1].into(),
+                        origin[2].into(),
+                        size[0].into(),
+                        size[1].into(),
+                        size[2].into(),
+                    ))
+                    .map_err(Failure::from_error)?,
+                StageInRegion::Indirect { buffer, offset } => encoder
+                    .set_stage_in_region_indirect(self.held(*buffer)?, *offset)
+                    .map_err(Failure::from_error)?,
+            }
+        }
+        dispatch(&mut encoder).map_err(Failure::from_error)?;
+        encoder.end_encoding().map_err(Failure::from_error)?;
+        command_buffer.commit().map_err(Failure::from_error)?;
+        Ok(keep(&mut self.command_buffers, command_buffer))
+    }
+}
+
+/// Three axes as the runtime's size.
+fn size(axes: [u32; 3]) -> Size {
+    Size::new(axes[0].into(), axes[1].into(), axes[2].into())
+}
+
+/// The runtime's stage-input descriptor for `stage_input`: the same attribute indices, buffer
+/// indices, formats, strides, steps and rates, since the case's vocabulary is Metal's own.
+fn stage_input_descriptor(stage_input: &StageInput) -> StageInputDescriptor {
+    let mut descriptor = StageInputDescriptor::new();
+    for attribute in &stage_input.attributes {
+        descriptor.attributes.insert(
+            attribute.index,
+            StageInputAttributeDescriptor::new(
+                attribute.format,
+                attribute.offset,
+                attribute.buffer_index,
+            ),
+        );
+    }
+    for layout in &stage_input.layouts {
+        let mut written = StageInputLayoutDescriptor::new(layout.stride);
+        written.step_function = layout.step_function;
+        written.step_rate = layout.step_rate;
+        descriptor.layouts.insert(layout.buffer_index, written);
+    }
+    descriptor.index_type = stage_input.index_type;
+    descriptor.index_buffer_index = stage_input.index_buffer_index;
+    descriptor
 }
 
 /// `device`'s library of AIR bitcode: the translator parses it, and the device takes the parsed
@@ -170,37 +265,46 @@ impl Side for RuntimeSide<'_> {
         threadgroups: [u32; 3],
         threads: [u32; 3],
     ) -> Answer<Handle> {
-        let bound: Vec<Buffer> = buffers
-            .iter()
-            .map(|handle| self.held(*handle).cloned())
-            .collect::<Answer<Vec<Buffer>>>()?;
-        let state = self
-            .pipelines
-            .get(pipeline.0 as usize)
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", pipeline.0)))?
-            .clone();
-        let command_buffer = self
-            .queue()?
-            .command_buffer()
-            .map_err(Failure::from_error)?;
-        let mut encoder = command_buffer
-            .compute_command_encoder()
-            .map_err(Failure::from_error)?;
-        encoder
-            .set_compute_pipeline_state(&state)
-            .map_err(Failure::from_error)?;
-        for (at, buffer) in bound.iter().enumerate() {
-            encoder
-                .set_buffer(Some(buffer), 0, at as u32)
-                .map_err(Failure::from_error)?;
-        }
-        let size = |axes: [u32; 3]| Size::new(axes[0].into(), axes[1].into(), axes[2].into());
-        encoder
-            .dispatch_threadgroups(size(threadgroups), size(threads))
-            .map_err(Failure::from_error)?;
-        encoder.end_encoding().map_err(Failure::from_error)?;
-        command_buffer.commit().map_err(Failure::from_error)?;
-        Ok(keep(&mut self.command_buffers, command_buffer))
+        self.encode(pipeline, buffers, &[], |encoder| {
+            encoder.dispatch_threadgroups(size(threadgroups), size(threads))
+        })
+    }
+
+    fn compute_pipeline_with_stage_input(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        stage_input: &StageInput,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .new_function_with_name(entry)
+            .map_err(|error| Failure::of(&error))?;
+        let mut descriptor = metal2vulkan::pipeline::ComputePipelineDescriptor::new(
+            metal2vulkan::pipeline::StageSource::Function(function.function_descriptor()),
+        );
+        descriptor.stage_input = Some(stage_input_descriptor(stage_input));
+        let pipeline = self
+            .device
+            .new_compute_pipeline_state(&descriptor, &PipelineOptions::default())
+            .map_err(|error| Failure::of(&error))?;
+        Ok(keep(&mut self.pipelines, pipeline))
+    }
+
+    fn dispatch_threads(
+        &mut self,
+        pipeline: Handle,
+        buffers: &[Handle],
+        stage_in: &[StageInRegion],
+        grid: [u32; 3],
+        threads: [u32; 3],
+    ) -> Answer<Handle> {
+        self.encode(pipeline, buffers, stage_in, |encoder| {
+            encoder.dispatch_threads(size(grid), size(threads))
+        })
     }
 
     fn wait(&mut self, command_buffer: Handle) -> Answer<Value> {

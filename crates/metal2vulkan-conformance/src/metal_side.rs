@@ -12,15 +12,17 @@
 //! Metal announces no degrade notice, so this side announces none: a notice in a transcript is
 //! ours, and a case that holds one must name what justifies it.
 
-use crate::case::{Answer, Failure, Handle, ShaderSource, Side, Venue};
+use crate::case::{Answer, Failure, Handle, ShaderSource, Side, StageInRegion, StageInput, Venue};
 use crate::transcript::Value;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSString, NSURL};
 use objc2_metal::{
-    MTLBuffer, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
-    MTLComputeCommandEncoder, MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDevice,
-    MTLLibrary, MTLResourceOptions, MTLSize,
+    MTLAttributeFormat, MTLBuffer, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder,
+    MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineDescriptor,
+    MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDevice, MTLIndexType, MTLLibrary,
+    MTLOrigin, MTLPipelineOption, MTLRegion, MTLResourceOptions, MTLSize,
+    MTLStageInputOutputDescriptor, MTLStepFunction,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -65,6 +67,118 @@ impl MetalSide {
             .map(|buffer| &**buffer)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
     }
+
+    /// One command buffer with one compute encoder: the pipeline set, `buffers` bound at 0 up,
+    /// each of `stage_in` set in order, `dispatch` encoded, and `commit`. The two dispatch calls
+    /// share this body, so neither side can pick up a different binding order with one of them.
+    fn encode(
+        &mut self,
+        pipeline: Handle,
+        buffers: &[Handle],
+        stage_in: &[StageInRegion],
+        dispatch: impl FnOnce(&ProtocolObject<dyn MTLComputeCommandEncoder>),
+    ) -> Answer<Handle> {
+        let bound: Vec<Retained<ProtocolObject<dyn MTLBuffer>>> = buffers
+            .iter()
+            .map(|handle| self.held(*handle).map(Retained::from))
+            .collect::<Answer<Vec<_>>>()?;
+        let state = self
+            .pipelines
+            .get(pipeline.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", pipeline.0)))?
+            .clone();
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+        let encoder = command_buffer
+            .computeCommandEncoder()
+            .ok_or_else(|| Failure::named("ComputeCommandEncoder", "returned nil".to_owned()))?;
+        encoder.setComputePipelineState(&state);
+        for (at, buffer) in bound.iter().enumerate() {
+            // SAFETY: the buffer is at least as long as the kernel's binding, and the encoder
+            // outlives the call.
+            unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, at) };
+        }
+        for region in stage_in {
+            match region {
+                StageInRegion::Direct { origin, size } => {
+                    encoder.setStageInRegion(MTLRegion {
+                        origin: MTLOrigin {
+                            x: origin[0] as usize,
+                            y: origin[1] as usize,
+                            z: origin[2] as usize,
+                        },
+                        size: MTLSize {
+                            width: size[0] as usize,
+                            height: size[1] as usize,
+                            depth: size[2] as usize,
+                        },
+                    });
+                }
+                StageInRegion::Indirect { buffer, offset } => {
+                    let held = self.held(*buffer)?;
+                    // SAFETY: the buffer holds the region's six words from `offset`, which the
+                    // case states as one of its inputs, and the encoder outlives the call.
+                    unsafe {
+                        encoder.setStageInRegionWithIndirectBuffer_indirectBufferOffset(
+                            held,
+                            *offset as usize,
+                        );
+                    }
+                }
+            }
+        }
+        dispatch(&encoder);
+        encoder.endEncoding();
+        command_buffer.commit();
+        Ok(keep(&mut self.command_buffers, command_buffer))
+    }
+}
+
+/// Three axes as Metal's size.
+fn size(axes: [u32; 3]) -> MTLSize {
+    MTLSize {
+        width: axes[0] as usize,
+        height: axes[1] as usize,
+        depth: axes[2] as usize,
+    }
+}
+
+/// `MTLBufferLayoutStrideDynamic`, the stride a layout takes from the encoder's binding.
+const STRIDE_DYNAMIC: usize = usize::MAX;
+
+/// Metal's stage-input descriptor for `stage_input`. The case's enumerations are Metal's own, so
+/// each reaches `MTLAttributeFormat`, `MTLStepFunction` and `MTLIndexType` by its raw ordinal.
+fn stage_input_descriptor(stage_input: &StageInput) -> Retained<MTLStageInputOutputDescriptor> {
+    let descriptor = MTLStageInputOutputDescriptor::stageInputOutputDescriptor();
+    let attributes = descriptor.attributes();
+    for attribute in &stage_input.attributes {
+        // SAFETY: `objectAtIndexedSubscript:` is Metal's own accessor for an attribute index the
+        // device's attribute limit covers, which the case's indices are inside.
+        let written = unsafe { attributes.objectAtIndexedSubscript(attribute.index as usize) };
+        written.setFormat(MTLAttributeFormat(attribute.format.as_raw() as usize));
+        written.setOffset(attribute.offset as usize);
+        // SAFETY: the buffer index is inside the device's buffer argument table, which the
+        // case's indices are.
+        unsafe { written.setBufferIndex(attribute.buffer_index as usize) };
+    }
+    let layouts = descriptor.layouts();
+    for layout in &stage_input.layouts {
+        // SAFETY: as above, for a buffer index inside the device's buffer limit.
+        let written = unsafe { layouts.objectAtIndexedSubscript(layout.buffer_index as usize) };
+        written.setStride(
+            layout
+                .stride
+                .map_or(STRIDE_DYNAMIC, |stride| stride as usize),
+        );
+        written.setStepFunction(MTLStepFunction(layout.step_function.as_raw() as usize));
+        written.setStepRate(layout.step_rate as usize);
+    }
+    descriptor.setIndexType(MTLIndexType(stage_input.index_type.as_raw() as usize));
+    // SAFETY: as above, for the index buffer's own slot.
+    unsafe { descriptor.setIndexBufferIndex(stage_input.index_buffer_index as usize) };
+    descriptor
 }
 
 /// `kept` with `value` pushed on, answering its index.
@@ -202,37 +316,49 @@ impl Side for MetalSide {
         threadgroups: [u32; 3],
         threads: [u32; 3],
     ) -> Answer<Handle> {
-        let bound: Vec<Retained<ProtocolObject<dyn MTLBuffer>>> = buffers
-            .iter()
-            .map(|handle| self.held(*handle).map(Retained::from))
-            .collect::<Answer<Vec<_>>>()?;
-        let state = self
-            .pipelines
-            .get(pipeline.0 as usize)
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", pipeline.0)))?
-            .clone();
-        let command_buffer = self
-            .queue
-            .commandBuffer()
-            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
-        let encoder = command_buffer
-            .computeCommandEncoder()
-            .ok_or_else(|| Failure::named("ComputeCommandEncoder", "returned nil".to_owned()))?;
-        encoder.setComputePipelineState(&state);
-        for (at, buffer) in bound.iter().enumerate() {
-            // SAFETY: the buffer is at least as long as the kernel's binding, and the encoder
-            // outlives the call.
-            unsafe { encoder.setBuffer_offset_atIndex(Some(buffer), 0, at) };
-        }
-        let size = |axes: [u32; 3]| MTLSize {
-            width: axes[0] as usize,
-            height: axes[1] as usize,
-            depth: axes[2] as usize,
-        };
-        encoder.dispatchThreadgroups_threadsPerThreadgroup(size(threadgroups), size(threads));
-        encoder.endEncoding();
-        command_buffer.commit();
-        Ok(keep(&mut self.command_buffers, command_buffer))
+        self.encode(pipeline, buffers, &[], |encoder| {
+            encoder.dispatchThreadgroups_threadsPerThreadgroup(size(threadgroups), size(threads));
+        })
+    }
+
+    fn compute_pipeline_with_stage_input(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        stage_input: &StageInput,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .newFunctionWithName(&NSString::from_str(entry))
+            .ok_or_else(|| Failure::named("NoSuchFunction", entry.to_owned()))?;
+        let descriptor = MTLComputePipelineDescriptor::new();
+        descriptor.setComputeFunction(Some(&function));
+        descriptor.setStageInputDescriptor(Some(&stage_input_descriptor(stage_input)));
+        let pipeline = self
+            .device
+            .newComputePipelineStateWithDescriptor_options_reflection_error(
+                &descriptor,
+                MTLPipelineOption::None,
+                None,
+            )
+            .map_err(|error| Failure::named("NewComputePipelineState", error.to_string()))?;
+        Ok(keep(&mut self.pipelines, pipeline))
+    }
+
+    fn dispatch_threads(
+        &mut self,
+        pipeline: Handle,
+        buffers: &[Handle],
+        stage_in: &[StageInRegion],
+        grid: [u32; 3],
+        threads: [u32; 3],
+    ) -> Answer<Handle> {
+        self.encode(pipeline, buffers, stage_in, |encoder| {
+            encoder.dispatchThreads_threadsPerThreadgroup(size(grid), size(threads));
+        })
     }
 
     fn wait(&mut self, command_buffer: Handle) -> Answer<Value> {
