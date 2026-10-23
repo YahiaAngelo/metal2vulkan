@@ -4819,7 +4819,9 @@ fn a_device_gap_reads_the_same_through_every_variant_that_carries_a_refusal() {
         Capability::Feature(VkFeature::ShaderInt8),
     );
     let ours = Unsupported::not_implemented(Feature::FramebufferFetch);
-    let carriers: [(&str, fn(Unsupported) -> Error); 3] = [
+    /// One variant that carries a typed refusal: what to call it, and how it wraps one.
+    type Carrier = (&'static str, fn(Unsupported) -> Error);
+    let carriers: [Carrier; 3] = [
         ("Error::Unsupported", Error::Unsupported),
         ("Error::Bind", |u| Error::Bind(BindError::Unsupported(u))),
         ("Error::Compile", |u| {
