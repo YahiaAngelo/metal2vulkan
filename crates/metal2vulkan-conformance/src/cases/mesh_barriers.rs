@@ -18,10 +18,11 @@
 //! and the command buffer's status and error. The lane folded all of that into one list of
 //! formatted strings.
 //!
-//! The row whose reader is an indirect draw of an object function is a case of its own: the
-//! runtime refuses it where a device emulates mesh draws (`NotImplemented(MeshShading)`), and a
-//! refused call stops a run, so holding it beside the others would lose their rows. The lane
-//! printed that refusal to stderr and passed.
+//! The row whose reader is an indirect draw of an object function is a case of its own, so that a
+//! refusal at its draw — a refused call stops a run — cannot cost the other six rows their sites.
+//! **It is not refused on any device we have:** the claim that an emulating device refuses it
+//! (`NotImplemented(MeshShading)`) was true until `bind::mesh_object_arguments_module` landed, and
+//! the lane that still said so has been corrected. On MoltenVK 1.4.2 it draws Metal's words.
 //!
 //! Nothing here can fault a GPU: every grid is one or two threadgroups.
 

@@ -22,16 +22,17 @@
 //!
 //! On a device without `VK_EXT_mesh_shader` the reader's compute work (its object function, the
 //! scan, its mesh function) reads what the writer wrote behind the barrier, so it records before
-//! the reader's own render pass instance, which the barrier began, after the writer's. There the
-//! indirect draw of the object reader is refused (`NotImplemented(MeshShading)`). On a device with
-//! the extension an indirect draw's arguments pass reads the arguments where the emulation's scan
-//! does (`render/mesh_arguments.rs`).
+//! the reader's own render pass instance, which the barrier began, after the writer's. The
+//! indirect draw of the object reader draws there too, through the object arguments pass that
+//! reads Metal's arguments (`render/mesh.rs`). On a device with the extension an indirect draw's
+//! arguments pass reads the arguments where the emulation's scan does
+//! (`render/mesh_arguments.rs`). So every case of this lane runs to completion on every device,
+//! and each is compared with Metal's lines.
 
 use super::render_state::{texels, texture};
 use super::{buffer_with, read_buffer, validated_device, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
-use metal2vulkan::error::{BindError, Feature, Needs};
 use metal2vulkan::metal::{BarrierScope, PixelFormat, RenderStages};
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, MeshPipelineDescriptor, StageSource};
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
@@ -324,8 +325,8 @@ impl Lane {
 }
 
 /// Each case draws the pixels and leaves the control words Metal did, behind a barrier after the
-/// mesh stage and after the fragment stage (the module docs), but the emulation's indirect draw
-/// of the object reader, refused, as the module docs say.
+/// mesh stage and after the fragment stage (the module docs), the indirect draw of the object
+/// reader among them: every case runs, so every case is compared.
 #[test]
 fn readers_behind_a_barrier_read_the_writers_words() {
     let cache = ScratchCache::new().unwrap();
@@ -335,17 +336,9 @@ fn readers_behind_a_barrier_read_the_writers_words() {
         let name = device.name().to_owned();
         let lane = Lane::new(device);
         for (case, writer, barrier, reader) in CASES {
-            let metals = metals(case);
-            match (reader, lane.run(case, (writer, barrier, reader))) {
-                (_, Ok(lines)) => assert_eq!(lines, metals, "{case} on {name}"),
-                (Reader::ObjectIndirect, Err(Error::Bind(BindError::Unsupported(u))))
-                    if u.feature == Feature::MeshShading
-                        && u.needs == Needs::NotImplemented
-                        && super::mesh_draws::emulates(&lane.device) =>
-                {
-                    eprintln!("{case} on {name}: refused, emulated; Metal's: {metals:?}")
-                }
-                (_, Err(error)) => panic!("{case} on {name}: {error}"),
+            match lane.run(case, (writer, barrier, reader)) {
+                Ok(lines) => assert_eq!(lines, metals(case), "{case} on {name}"),
+                Err(error) => panic!("{case} on {name}: {error}"),
             }
         }
     }
