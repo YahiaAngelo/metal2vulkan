@@ -57,6 +57,7 @@ pub mod diff;
 pub mod event_orders;
 pub mod fixture;
 pub mod function_bindings;
+pub mod function_facts;
 pub mod handler_waits;
 pub mod known_gaps;
 pub mod measured;

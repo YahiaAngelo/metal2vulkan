@@ -21,6 +21,9 @@ use crate::function_bindings::{
     ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
     TextureFacts, ThreadgroupFacts, TypeFacts, DEPTH,
 };
+use crate::function_facts::{
+    AttributeFacts, ConstantAt, ConstantFacts, ConstantValue, FunctionFacts,
+};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
     ColorState, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
@@ -520,6 +523,52 @@ struct EncoderAt {
     encoder: ArgumentEncoder,
     /// The argument buffer and the offset of the arguments in it; `None` until one is set.
     target: Option<(Handle, u64)>,
+}
+
+/// One stage-input attribute of ours, in the vocabulary both sides answer in.
+fn our_attribute(attribute: &metal2vulkan::reflection::Attribute) -> AttributeFacts {
+    AttributeFacts {
+        name: attribute.name().to_owned(),
+        attribute_index: attribute.attribute_index(),
+        attribute_type: attribute.attribute_type(),
+        active: attribute.is_active(),
+        patch_data: attribute.is_patch_data(),
+        patch_control_point_data: attribute.is_patch_control_point_data(),
+    }
+}
+
+/// The constant values the case states, as the runtime's `MTLFunctionConstantValues`.
+///
+/// The runtime holds values by index and by name, which is the two single setters; a range is
+/// **expanded** into one value an index from its first, which is what
+/// `setConstantValues:type:withRange:` means. The bytes are split by the type's own size, so a
+/// range of three `bool`s is three one-byte values at three indices.
+fn our_constants(values: &[ConstantValue]) -> metal2vulkan::library::FunctionConstantValues {
+    let mut built = metal2vulkan::library::FunctionConstantValues::defaults();
+    for value in values {
+        let one = |bytes: &[u8]| {
+            metal2vulkan::library::FunctionConstantValue::new(value.data_type, bytes.to_vec())
+        };
+        match &value.at {
+            ConstantAt::Index(index) => built = built.with_index(*index, one(&value.bytes)),
+            ConstantAt::Name(name) => built = built.with_name(name.clone(), one(&value.bytes)),
+            ConstantAt::Range { first, count } => {
+                let count = *count as usize;
+                let each = match count {
+                    0 => 0,
+                    count => value.bytes.len() / count,
+                };
+                for step in 0..count {
+                    let at = step * each;
+                    built = built.with_index(
+                        first + step as u32,
+                        one(&value.bytes[at..at.saturating_add(each).min(value.bytes.len())]),
+                    );
+                }
+            }
+        }
+    }
+    built
 }
 
 /// One reflected binding of ours, in the vocabulary both sides answer in.
@@ -1311,6 +1360,63 @@ impl Side for RuntimeSide<'_> {
             )
         })?;
         Ok(reflection.bindings().iter().map(our_binding).collect())
+    }
+
+    fn function_facts(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        constants: &[ConstantValue],
+    ) -> Answer<FunctionFacts> {
+        let registry = self.device.registry_id();
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = match constants.is_empty() {
+            true => library.new_function_with_name(entry),
+            false => {
+                library.new_function_with_name_constant_values(entry, &our_constants(constants))
+            }
+        }
+        .map_err(|error| Failure::of(&error))?;
+        let dictionary = function
+            .function_constants_dictionary()
+            .map_err(|error| Failure::of(&error))?;
+        Ok(FunctionFacts {
+            name: function.name().to_owned(),
+            function_type: function
+                .function_type()
+                .map_err(|error| Failure::of(&error))?,
+            patch_type: function.patch_type().map_err(|error| Failure::of(&error))?,
+            patch_control_point_count: function
+                .patch_control_point_count()
+                .map_err(|error| Failure::of(&error))?,
+            vertex_attributes: function
+                .vertex_attributes()
+                .map_err(|error| Failure::of(&error))?
+                .map(|held| held.iter().map(our_attribute).collect()),
+            stage_input_attributes: function
+                .stage_input_attributes()
+                .map_err(|error| Failure::of(&error))?
+                .map(|held| held.iter().map(our_attribute).collect()),
+            // A `BTreeMap`, so the names are already in the order the Metal side sorts its own
+            // into: the comparison is of two sorted lists of a dictionary's entries.
+            constants: dictionary
+                .iter()
+                .map(|(name, constant)| ConstantFacts {
+                    name: name.clone(),
+                    data_type: constant.data_type(),
+                    index: constant.index(),
+                    required: constant.is_required(),
+                })
+                .collect(),
+            options: function.options(),
+            // The registry ID is each host's own number, so only the **comparison** is portable:
+            // the two sides agree that the function came from the case's device, never on the
+            // number that says so.
+            device_is_the_cases: function.device().registry_id() == registry,
+        })
     }
 
     fn constant_data_offset(&mut self, encoder: Handle, index: u32) -> Answer<u64> {

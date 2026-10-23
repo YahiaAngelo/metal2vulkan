@@ -232,6 +232,16 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.encode_argument(encoder, write)
     }
 
+    fn function_facts(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        constants: &[crate::function_facts::ConstantValue],
+    ) -> Answer<crate::function_facts::FunctionFacts> {
+        let _span = self.watch("function_facts");
+        self.inner.function_facts(library, entry, constants)
+    }
+
     fn compute_pipeline_bindings(
         &mut self,
         library: Handle,

@@ -750,6 +750,32 @@ pub trait Side {
         Err(Failure::unavailable("compute_pipeline_bindings"))
     }
 
+    /// `newFunctionWithName:` of `entry`, or `newFunctionWithName:constantValues:error:` where
+    /// `constants` holds a value, and what the function then answers about **itself**
+    /// ([`crate::function_facts::FunctionFacts`]).
+    ///
+    /// One call, because what it observes is a **tree** whose shape one getter decides: which of
+    /// `vertexAttributes` and `stageInputAttributes` answers an array at all is a fact about the
+    /// function type, and each element is an object with six getters of its own. A case cannot
+    /// state that as independent calls.
+    ///
+    /// The function is made and read inside the call rather than kept in a pool of its own: every
+    /// fact here is the function's, no case holds one past reading it, and the two sides then need
+    /// no handle space for an object whose identity nothing compares.
+    ///
+    /// `constants` is the whole of `MTLFunctionConstantValues`' own surface, as three setters
+    /// ([`ConstantAt`](crate::function_facts::ConstantAt)). A side whose constant values have no
+    /// range form expands the range into one value an index, which is what the range setter means.
+    fn function_facts(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        constants: &[crate::function_facts::ConstantValue],
+    ) -> Answer<crate::function_facts::FunctionFacts> {
+        let _ = (library, entry, constants);
+        Err(Failure::unavailable("function_facts"))
+    }
+
     /// Where `constantDataAtIndex:` of `index` points, as a byte offset inside the encoder's
     /// arguments.
     ///

@@ -77,6 +77,7 @@ pub mod format_copies;
 pub mod frame_chains;
 pub mod fresh_contents;
 pub mod function_bindings;
+pub mod function_facts;
 pub mod half_output_blends;
 pub mod half_read_nans;
 pub mod half_storage_writes;
@@ -157,6 +158,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in function_bindings::all() {
+        cases.push(Box::new(case));
+    }
+    for case in function_facts::all() {
         cases.push(Box::new(case));
     }
     for case in compressed_blits::all() {
