@@ -139,5 +139,77 @@
       ],
       "validated": "ran"
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 9.90 when the measurement started and 9.56 when it finished, and the per-call margin is judged only when both are 26.0 or under",
+      "instrument": 307,
+      "times": {
+        "case": "blit-synchronized-managed-texture",
+        "calls": 1,
+        "in_calls": 5150583,
+        "on_cpu": 266209,
+        "blocked": 4875999,
+        "elsewhere": 4446291,
+        "spend": 9590749,
+        "spend_least": 9368334,
+        "spend_most": 10751293,
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 5150583,
+            "on_cpu": 266209,
+            "blocked": 4875999,
+            "wall_least": 4817250,
+            "wall_most": 5722709,
+            "wall_total": 5150583,
+            "on_cpu_total": 266209,
+            "blocked_total": 4875999
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 9.90 when the measurement started and 9.56 when it finished, and the per-call margin is judged only when both are 26.0 or under",
+      "instrument": 286,
+      "times": {
+        "case": "blit-synchronized-managed-texture",
+        "calls": 1,
+        "in_calls": 2260625,
+        "on_cpu": 1596500,
+        "blocked": 674124,
+        "elsewhere": 289959,
+        "spend": 2558750,
+        "spend_least": 2454750,
+        "spend_most": 2770833,
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 2260625,
+            "on_cpu": 1596500,
+            "blocked": 674124,
+            "wall_least": 2225833,
+            "wall_most": 2518750,
+            "wall_total": 2260625,
+            "on_cpu_total": 1596500,
+            "blocked_total": 674124
+          }
+        ]
+      }
+    }
   ]
 }
