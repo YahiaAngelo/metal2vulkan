@@ -233,5 +233,158 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "sparse-heap-facts",
+        "calls": 7,
+        "in_calls": 53501,
+        "on_cpu": 54542,
+        "blocked": 0,
+        "elsewhere": 708,
+        "spend": 55001,
+        "spend_least": 43626,
+        "spend_most": 63208,
+        "per_call": [
+          {
+            "call": "heap_facts",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 83,
+            "on_cpu": 167,
+            "blocked": 0,
+            "wall_least": 42,
+            "wall_most": 375,
+            "wall_total": 375,
+            "on_cpu_total": 625,
+            "blocked_total": 0
+          },
+          {
+            "call": "heap_texture",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 5416,
+            "on_cpu": 5542,
+            "blocked": 0,
+            "wall_least": 5041,
+            "wall_most": 6292,
+            "wall_total": 26167,
+            "on_cpu_total": 26542,
+            "blocked_total": 0
+          },
+          {
+            "call": "sparse_heap",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 24000,
+            "on_cpu": 24167,
+            "blocked": 0,
+            "wall_least": 16667,
+            "wall_most": 29417,
+            "wall_total": 24000,
+            "on_cpu_total": 24167,
+            "blocked_total": 0
+          },
+          {
+            "call": "sparse_texture_facts",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 125,
+            "on_cpu": 250,
+            "blocked": 0,
+            "wall_least": 83,
+            "wall_most": 167,
+            "wall_total": 1208,
+            "on_cpu_total": 1459,
+            "blocked_total": 0
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "sparse-heap-facts",
+        "calls": 7,
+        "in_calls": 52791,
+        "on_cpu": 53833,
+        "blocked": 0,
+        "elsewhere": 833,
+        "spend": 53457,
+        "spend_least": 40708,
+        "spend_most": 71127,
+        "degraded": [
+          "metal2vulkan-degrade-emulated-sparse-texture"
+        ],
+        "per_call": [
+          {
+            "call": "heap_facts",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 41,
+            "on_cpu": 167,
+            "blocked": 0,
+            "wall_least": 41,
+            "wall_most": 84,
+            "wall_total": 583,
+            "on_cpu_total": 833,
+            "blocked_total": 0
+          },
+          {
+            "call": "heap_texture",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 10750,
+            "on_cpu": 10958,
+            "blocked": 0,
+            "wall_least": 9500,
+            "wall_most": 12084,
+            "wall_total": 50625,
+            "on_cpu_total": 51083,
+            "blocked_total": 0
+          },
+          {
+            "call": "sparse_heap",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 1375,
+            "on_cpu": 1500,
+            "blocked": 0,
+            "wall_least": 1209,
+            "wall_most": 1667,
+            "wall_total": 1375,
+            "on_cpu_total": 1500,
+            "blocked_total": 0
+          },
+          {
+            "call": "sparse_texture_facts",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 0,
+            "on_cpu": 125,
+            "blocked": 0,
+            "wall_least": 0,
+            "wall_most": 42,
+            "wall_total": 166,
+            "on_cpu_total": 375,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
   ]
 }

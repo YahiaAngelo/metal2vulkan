@@ -213,5 +213,77 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "scheduled-handler-order",
+        "calls": 1,
+        "in_calls": 165620250,
+        "on_cpu": 1786584,
+        "blocked": 163995417,
+        "elsewhere": 4424083,
+        "spend": 169826250,
+        "spend_least": 162415209,
+        "spend_most": 178181167,
+        "per_call": [
+          {
+            "call": "scheduled_handler_order",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 165620250,
+            "on_cpu": 1786584,
+            "blocked": 163995417,
+            "wall_least": 158203000,
+            "wall_most": 169894667,
+            "wall_total": 165620250,
+            "on_cpu_total": 1786584,
+            "blocked_total": 163995417
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "scheduled-handler-order",
+        "calls": 1,
+        "in_calls": 160196041,
+        "on_cpu": 115333,
+        "blocked": 160099041,
+        "elsewhere": 386917,
+        "spend": 160509749,
+        "spend_least": 151605709,
+        "spend_most": 162660709,
+        "per_call": [
+          {
+            "call": "scheduled_handler_order",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 160196041,
+            "on_cpu": 115333,
+            "blocked": 160099041,
+            "wall_least": 151314584,
+            "wall_most": 160915292,
+            "wall_total": 160196041,
+            "on_cpu_total": 115333,
+            "blocked_total": 160099041
+          }
+        ]
+      }
+    }
   ]
 }

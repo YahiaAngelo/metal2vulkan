@@ -1676,5 +1676,132 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "sparse-tails-wide-and-short",
+        "calls": 101,
+        "in_calls": 136958,
+        "on_cpu": 148455,
+        "blocked": 0,
+        "elsewhere": 917,
+        "spend": 137999,
+        "spend_least": 134715,
+        "spend_most": 188035,
+        "per_call": [
+          {
+            "call": "heap_texture",
+            "least_calls": 50,
+            "most_calls": 50,
+            "wall": 2500,
+            "on_cpu": 2584,
+            "blocked": 0,
+            "wall_least": 2375,
+            "wall_most": 2958,
+            "wall_total": 126292,
+            "on_cpu_total": 132123,
+            "blocked_total": 0
+          },
+          {
+            "call": "sparse_heap",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 8042,
+            "on_cpu": 8166,
+            "blocked": 0,
+            "wall_least": 7792,
+            "wall_most": 22667,
+            "wall_total": 8042,
+            "on_cpu_total": 8166,
+            "blocked_total": 0
+          },
+          {
+            "call": "sparse_texture_facts",
+            "least_calls": 50,
+            "most_calls": 50,
+            "wall": 42,
+            "on_cpu": 167,
+            "blocked": 0,
+            "wall_least": 42,
+            "wall_most": 42,
+            "wall_total": 2708,
+            "on_cpu_total": 8496,
+            "blocked_total": 0
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "sparse-tails-wide-and-short",
+        "calls": 101,
+        "in_calls": 285875,
+        "on_cpu": 298711,
+        "blocked": 0,
+        "elsewhere": 542,
+        "spend": 286041,
+        "spend_least": 280296,
+        "spend_most": 307294,
+        "degraded": [
+          "metal2vulkan-degrade-emulated-sparse-texture"
+        ],
+        "per_call": [
+          {
+            "call": "heap_texture",
+            "least_calls": 50,
+            "most_calls": 50,
+            "wall": 5750,
+            "on_cpu": 5875,
+            "blocked": 0,
+            "wall_least": 5667,
+            "wall_most": 6125,
+            "wall_total": 284210,
+            "on_cpu_total": 291460,
+            "blocked_total": 0
+          },
+          {
+            "call": "sparse_heap",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 417,
+            "on_cpu": 542,
+            "blocked": 0,
+            "wall_least": 334,
+            "wall_most": 458,
+            "wall_total": 417,
+            "on_cpu_total": 542,
+            "blocked_total": 0
+          },
+          {
+            "call": "sparse_texture_facts",
+            "least_calls": 50,
+            "most_calls": 50,
+            "wall": 0,
+            "on_cpu": 125,
+            "blocked": 0,
+            "wall_least": 0,
+            "wall_most": 41,
+            "wall_total": 1002,
+            "on_cpu_total": 6829,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
   ]
 }

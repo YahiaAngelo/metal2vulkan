@@ -21544,5 +21544,81 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "two-plane-heap-blits",
+        "calls": 25,
+        "in_calls": 36275084,
+        "on_cpu": 6934252,
+        "blocked": 29367872,
+        "elsewhere": 8950041,
+        "spend": 45750209,
+        "spend_least": 43867918,
+        "spend_most": 53825373,
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 25,
+            "most_calls": 25,
+            "wall": 1258417,
+            "on_cpu": 264416,
+            "blocked": 987334,
+            "wall_least": 1231500,
+            "wall_most": 1355833,
+            "wall_total": 36275084,
+            "on_cpu_total": 6934252,
+            "blocked_total": 29367872
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "two-plane-heap-blits",
+        "calls": 25,
+        "in_calls": 38905498,
+        "on_cpu": 5878747,
+        "blocked": 32401331,
+        "elsewhere": 8680959,
+        "spend": 47382873,
+        "spend_least": 46710254,
+        "spend_most": 52910040,
+        "degraded": [
+          "metal2vulkan-degrade-shadowed-texture",
+          "metal2vulkan-degrade-two-plane-texture-copy"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 25,
+            "most_calls": 25,
+            "wall": 1416291,
+            "on_cpu": 156583,
+            "blocked": 1197917,
+            "wall_least": 1314375,
+            "wall_most": 1455083,
+            "wall_total": 38905498,
+            "on_cpu_total": 5878747,
+            "blocked_total": 32401331
+          }
+        ]
+      }
+    }
   ]
 }

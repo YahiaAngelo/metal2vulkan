@@ -143,5 +143,64 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "handler-waits-completed-until-completed",
+        "calls": 0,
+        "in_calls": 0,
+        "on_cpu": 0,
+        "blocked": 0,
+        "elsewhere": 0,
+        "spend": 0,
+        "spend_least": 0,
+        "spend_most": 0,
+        "stopped": "Metal does not return from addCompletedHandler/waitUntilCompleted: a completed handler's wait for its own command buffer's completion never returns: the transition it waits for is the one it is itself inside",
+        "per_call": []
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "handler-waits-completed-until-completed",
+        "calls": 1,
+        "in_calls": 610541,
+        "on_cpu": 13958,
+        "blocked": 597000,
+        "elsewhere": 109250,
+        "spend": 741708,
+        "spend_least": 659543,
+        "spend_most": 854167,
+        "per_call": [
+          {
+            "call": "handler_wait",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 610541,
+            "on_cpu": 13958,
+            "blocked": 597000,
+            "wall_least": 567959,
+            "wall_most": 729458,
+            "wall_total": 610541,
+            "on_cpu_total": 13958,
+            "blocked_total": 597000
+          }
+        ]
+      }
+    }
   ]
 }

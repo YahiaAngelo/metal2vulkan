@@ -9612,5 +9612,103 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "ycbcr-two-plane-format-descriptors",
+        "calls": 414,
+        "in_calls": 182376,
+        "on_cpu": 230089,
+        "blocked": 0,
+        "elsewhere": 1792,
+        "spend": 184378,
+        "spend_least": 180462,
+        "spend_most": 195536,
+        "per_call": [
+          {
+            "call": "heap_texture_size_and_align",
+            "least_calls": 276,
+            "most_calls": 276,
+            "wall": 375,
+            "on_cpu": 500,
+            "blocked": 0,
+            "wall_least": 375,
+            "wall_most": 375,
+            "wall_total": 113249,
+            "on_cpu_total": 144925,
+            "blocked_total": 0
+          },
+          {
+            "call": "makes_texture",
+            "least_calls": 138,
+            "most_calls": 138,
+            "wall": 500,
+            "on_cpu": 625,
+            "blocked": 0,
+            "wall_least": 500,
+            "wall_most": 500,
+            "wall_total": 70499,
+            "on_cpu_total": 86501,
+            "blocked_total": 0
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "ycbcr-two-plane-format-descriptors",
+        "calls": 414,
+        "in_calls": 37672,
+        "on_cpu": 87179,
+        "blocked": 0,
+        "elsewhere": 833,
+        "spend": 37839,
+        "spend_least": 34009,
+        "spend_most": 40299,
+        "per_call": [
+          {
+            "call": "heap_texture_size_and_align",
+            "least_calls": 276,
+            "most_calls": 276,
+            "wall": 42,
+            "on_cpu": 167,
+            "blocked": 0,
+            "wall_least": 42,
+            "wall_most": 42,
+            "wall_total": 14627,
+            "on_cpu_total": 48012,
+            "blocked_total": 0
+          },
+          {
+            "call": "makes_texture",
+            "least_calls": 138,
+            "most_calls": 138,
+            "wall": 166,
+            "on_cpu": 250,
+            "blocked": 0,
+            "wall_least": 125,
+            "wall_most": 166,
+            "wall_total": 22751,
+            "on_cpu_total": 39290,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
   ]
 }

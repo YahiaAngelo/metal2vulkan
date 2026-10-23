@@ -937,5 +937,81 @@
         "pooled_memory_blocks_made": 4
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "two-plane-announced-row-blits",
+        "calls": 2,
+        "in_calls": 4985500,
+        "on_cpu": 231125,
+        "blocked": 4714875,
+        "elsewhere": 4331584,
+        "spend": 9355958,
+        "spend_least": 8506165,
+        "spend_most": 11982001,
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 264167,
+            "on_cpu": 57250,
+            "blocked": 198250,
+            "wall_least": 228291,
+            "wall_most": 290917,
+            "wall_total": 4985500,
+            "on_cpu_total": 231125,
+            "blocked_total": 4714875
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "two-plane-announced-row-blits",
+        "calls": 2,
+        "in_calls": 2629208,
+        "on_cpu": 224209,
+        "blocked": 2400292,
+        "elsewhere": 759292,
+        "spend": 3422582,
+        "spend_least": 3288542,
+        "spend_most": 3527125,
+        "degraded": [
+          "metal2vulkan-degrade-two-plane-buffer-blit",
+          "metal2vulkan-degrade-two-plane-buffer-blit-order"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 1269750,
+            "on_cpu": 108750,
+            "blocked": 1147583,
+            "wall_least": 1222875,
+            "wall_most": 1310125,
+            "wall_total": 2629208,
+            "on_cpu_total": 224209,
+            "blocked_total": 2400292
+          }
+        ]
+      }
+    }
   ]
 }

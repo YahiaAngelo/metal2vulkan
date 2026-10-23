@@ -297,5 +297,207 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "simdgroup-lockstep-divergent-loop",
+        "calls": 7,
+        "in_calls": 29406125,
+        "on_cpu": 944584,
+        "blocked": 28462749,
+        "elsewhere": 3762250,
+        "spend": 33476083,
+        "spend_least": 31226417,
+        "spend_most": 41070750,
+        "per_call": [
+          {
+            "call": "buffer",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 3250,
+            "on_cpu": 3375,
+            "blocked": 0,
+            "wall_least": 2459,
+            "wall_most": 3583,
+            "wall_total": 26583,
+            "on_cpu_total": 26833,
+            "blocked_total": 0
+          },
+          {
+            "call": "compute_pipeline",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 102208,
+            "on_cpu": 102375,
+            "blocked": 0,
+            "wall_least": 82750,
+            "wall_most": 107750,
+            "wall_total": 102208,
+            "on_cpu_total": 102375,
+            "blocked_total": 0
+          },
+          {
+            "call": "dispatch",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 126875,
+            "on_cpu": 127042,
+            "blocked": 0,
+            "wall_least": 97625,
+            "wall_most": 138000,
+            "wall_total": 126875,
+            "on_cpu_total": 127042,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 24434791,
+            "on_cpu": 665375,
+            "blocked": 23769416,
+            "wall_least": 23515375,
+            "wall_most": 32295542,
+            "wall_total": 24434791,
+            "on_cpu_total": 665375,
+            "blocked_total": 23769416
+          },
+          {
+            "call": "read_buffer",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 1166,
+            "on_cpu": 1334,
+            "blocked": 0,
+            "wall_least": 500,
+            "wall_most": 1750,
+            "wall_total": 1166,
+            "on_cpu_total": 1334,
+            "blocked_total": 0
+          },
+          {
+            "call": "wait",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 4230458,
+            "on_cpu": 10250,
+            "blocked": 4218542,
+            "wall_least": 3784875,
+            "wall_most": 4708125,
+            "wall_total": 4230458,
+            "on_cpu_total": 10250,
+            "blocked_total": 4218542
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "simdgroup-lockstep-divergent-loop",
+        "calls": 7,
+        "in_calls": 3085708,
+        "on_cpu": 1826418,
+        "blocked": 1337250,
+        "elsewhere": 846750,
+        "spend": 3922791,
+        "spend_least": 3787750,
+        "spend_most": 4440626,
+        "per_call": [
+          {
+            "call": "buffer",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 1416,
+            "on_cpu": 1500,
+            "blocked": 0,
+            "wall_least": 1083,
+            "wall_most": 1875,
+            "wall_total": 4292,
+            "on_cpu_total": 4500,
+            "blocked_total": 0
+          },
+          {
+            "call": "compute_pipeline",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 1769250,
+            "on_cpu": 1630708,
+            "blocked": 138542,
+            "wall_least": 1627333,
+            "wall_most": 2013834,
+            "wall_total": 1769250,
+            "on_cpu_total": 1630708,
+            "blocked_total": 138542
+          },
+          {
+            "call": "dispatch",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 49041,
+            "on_cpu": 49250,
+            "blocked": 0,
+            "wall_least": 37167,
+            "wall_most": 74750,
+            "wall_total": 49041,
+            "on_cpu_total": 49250,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 136959,
+            "on_cpu": 137500,
+            "blocked": 0,
+            "wall_least": 116000,
+            "wall_most": 163167,
+            "wall_total": 136959,
+            "on_cpu_total": 137500,
+            "blocked_total": 0
+          },
+          {
+            "call": "read_buffer",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 250,
+            "on_cpu": 417,
+            "blocked": 0,
+            "wall_least": 208,
+            "wall_most": 417,
+            "wall_total": 250,
+            "on_cpu_total": 417,
+            "blocked_total": 0
+          },
+          {
+            "call": "wait",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 1194208,
+            "on_cpu": 3834,
+            "blocked": 1190583,
+            "wall_least": 1106083,
+            "wall_most": 1292500,
+            "wall_total": 1194208,
+            "on_cpu_total": 3834,
+            "blocked_total": 1190583
+          }
+        ]
+      }
+    }
   ]
 }

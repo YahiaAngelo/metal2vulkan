@@ -191,5 +191,69 @@
         "requirement_limits_asked": 4
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "texture-fills-550",
+        "calls": 0,
+        "in_calls": 0,
+        "on_cpu": 0,
+        "blocked": 0,
+        "elsewhere": 0,
+        "spend": 0,
+        "spend_least": 0,
+        "spend_most": 0,
+        "stopped": "the case forbids running its Metal leg here: Metal fills a texture through private API alone, so no public call exists to record it from",
+        "per_call": []
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "texture-fills-550",
+        "calls": 25,
+        "in_calls": 19595248,
+        "on_cpu": 1385419,
+        "blocked": 18262079,
+        "elsewhere": 6368792,
+        "spend": 26133915,
+        "spend_least": 24267586,
+        "spend_most": 27812876,
+        "degraded": [
+          "metal2vulkan-degrade-heap-two-plane-layout",
+          "metal2vulkan-degrade-shadowed-texture",
+          "metal2vulkan-degrade-unpacked-fill-color"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 25,
+            "most_calls": 25,
+            "wall": 775333,
+            "on_cpu": 48875,
+            "blocked": 718916,
+            "wall_least": 724667,
+            "wall_most": 857125,
+            "wall_total": 19595248,
+            "on_cpu_total": 1385419,
+            "blocked_total": 18262079
+          }
+        ]
+      }
+    }
   ]
 }

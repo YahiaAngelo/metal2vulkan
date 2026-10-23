@@ -1274,5 +1274,82 @@
         "pooled_memory_blocks_made": 4
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "chroma-pair-copies-gbgr422",
+        "calls": 1,
+        "in_calls": 9433833,
+        "on_cpu": 654166,
+        "blocked": 8825083,
+        "elsewhere": 5402209,
+        "spend": 14836042,
+        "spend_least": 14148000,
+        "spend_most": 23576833,
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 9433833,
+            "on_cpu": 654166,
+            "blocked": 8825083,
+            "wall_least": 8754125,
+            "wall_most": 14393708,
+            "wall_total": 9433833,
+            "on_cpu_total": 654166,
+            "blocked_total": 8825083
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "chroma-pair-copies-gbgr422",
+        "calls": 1,
+        "in_calls": 11388458,
+        "on_cpu": 898083,
+        "blocked": 10512166,
+        "elsewhere": 4888083,
+        "spend": 16220625,
+        "spend_least": 14917834,
+        "spend_most": 40501291,
+        "degraded": [
+          "metal2vulkan-degrade-carried-decoded-twin",
+          "metal2vulkan-degrade-cpu-block-decode",
+          "metal2vulkan-degrade-staged-texture-copy"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 11388458,
+            "on_cpu": 898083,
+            "blocked": 10512166,
+            "wall_least": 10597917,
+            "wall_most": 24351416,
+            "wall_total": 11388458,
+            "on_cpu_total": 898083,
+            "blocked_total": 10512166
+          }
+        ]
+      }
+    }
   ]
 }

@@ -225,5 +225,129 @@
         "pooled_memory_blocks_made": 4
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "texture-round-trip-53",
+        "calls": 4,
+        "in_calls": 5873,
+        "on_cpu": 6293,
+        "blocked": 0,
+        "elsewhere": 708,
+        "spend": 6457,
+        "spend_least": 5500,
+        "spend_most": 9709,
+        "per_call": [
+          {
+            "call": "read_texture_over",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 167,
+            "on_cpu": 250,
+            "blocked": 0,
+            "wall_least": 125,
+            "wall_most": 291,
+            "wall_total": 1082,
+            "on_cpu_total": 1250,
+            "blocked_total": 0
+          },
+          {
+            "call": "replace_region",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 708,
+            "on_cpu": 875,
+            "blocked": 0,
+            "wall_least": 666,
+            "wall_most": 917,
+            "wall_total": 708,
+            "on_cpu_total": 875,
+            "blocked_total": 0
+          },
+          {
+            "call": "texture_2d_in_role",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 4083,
+            "on_cpu": 4209,
+            "blocked": 0,
+            "wall_least": 3708,
+            "wall_most": 6084,
+            "wall_total": 4083,
+            "on_cpu_total": 4209,
+            "blocked_total": 0
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "texture-round-trip-53",
+        "calls": 4,
+        "in_calls": 12583,
+        "on_cpu": 13042,
+        "blocked": 0,
+        "elsewhere": 208,
+        "spend": 13541,
+        "spend_least": 12210,
+        "spend_most": 14542,
+        "per_call": [
+          {
+            "call": "read_texture_over",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 375,
+            "on_cpu": 459,
+            "blocked": 0,
+            "wall_least": 333,
+            "wall_most": 500,
+            "wall_total": 1541,
+            "on_cpu_total": 1750,
+            "blocked_total": 0
+          },
+          {
+            "call": "replace_region",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 417,
+            "on_cpu": 542,
+            "blocked": 0,
+            "wall_least": 416,
+            "wall_most": 500,
+            "wall_total": 417,
+            "on_cpu_total": 542,
+            "blocked_total": 0
+          },
+          {
+            "call": "texture_2d_in_role",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 10791,
+            "on_cpu": 10916,
+            "blocked": 0,
+            "wall_least": 10250,
+            "wall_most": 12167,
+            "wall_total": 10791,
+            "on_cpu_total": 10916,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
   ]
 }

@@ -180,5 +180,64 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "texture-fills-103",
+        "calls": 0,
+        "in_calls": 0,
+        "on_cpu": 0,
+        "blocked": 0,
+        "elsewhere": 0,
+        "spend": 0,
+        "spend_least": 0,
+        "spend_most": 0,
+        "stopped": "the case forbids running its Metal leg here: Metal fills a texture through private API alone, so no public call exists to record it from",
+        "per_call": []
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "texture-fills-103",
+        "calls": 20,
+        "in_calls": 10024039,
+        "on_cpu": 439662,
+        "blocked": 9616790,
+        "elsewhere": 2770625,
+        "spend": 13050415,
+        "spend_least": 12347376,
+        "spend_most": 13441042,
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 20,
+            "most_calls": 20,
+            "wall": 482375,
+            "on_cpu": 17166,
+            "blocked": 462333,
+            "wall_least": 469875,
+            "wall_most": 506375,
+            "wall_total": 10024039,
+            "on_cpu_total": 439662,
+            "blocked_total": 9616790
+          }
+        ]
+      }
+    }
   ]
 }

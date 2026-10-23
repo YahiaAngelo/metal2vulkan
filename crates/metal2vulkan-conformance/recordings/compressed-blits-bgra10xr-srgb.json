@@ -604,5 +604,81 @@
         "pooled_memory_blocks_made": 4
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "compressed-blits-bgra10xr-srgb",
+        "calls": 1,
+        "in_calls": 6136541,
+        "on_cpu": 432291,
+        "blocked": 5770583,
+        "elsewhere": 4191584,
+        "spend": 10253833,
+        "spend_least": 9697500,
+        "spend_most": 11621667,
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 6136541,
+            "on_cpu": 432291,
+            "blocked": 5770583,
+            "wall_least": 5714875,
+            "wall_most": 6793500,
+            "wall_total": 6136541,
+            "on_cpu_total": 432291,
+            "blocked_total": 5770583
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "compressed-blits-bgra10xr-srgb",
+        "calls": 1,
+        "in_calls": 5676000,
+        "on_cpu": 295834,
+        "blocked": 5380166,
+        "elsewhere": 1906708,
+        "spend": 7582708,
+        "spend_least": 6985000,
+        "spend_most": 8979126,
+        "degraded": [
+          "metal2vulkan-degrade-shadowed-texture",
+          "metal2vulkan-degrade-staged-texture-copy"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 5676000,
+            "on_cpu": 295834,
+            "blocked": 5380166,
+            "wall_least": 5118125,
+            "wall_most": 6892459,
+            "wall_total": 5676000,
+            "on_cpu_total": 295834,
+            "blocked_total": 5380166
+          }
+        ]
+      }
+    }
   ]
 }

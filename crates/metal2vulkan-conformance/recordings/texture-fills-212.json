@@ -185,23 +185,45 @@
   ],
   "times": [
     {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "texture-fills-212",
+        "calls": 0,
+        "in_calls": 0,
+        "on_cpu": 0,
+        "blocked": 0,
+        "elsewhere": 0,
+        "spend": 0,
+        "spend_least": 0,
+        "spend_most": 0,
+        "stopped": "the case forbids running its Metal leg here: Metal fills a texture through private API alone, so no public call exists to record it from",
+        "per_call": []
+      }
+    },
+    {
       "leg": "ours",
       "venue": "Apple M3 Max",
       "chip": "apple-m3-max",
       "os_build": "26A434",
-      "rounds": 2,
-      "measured": "2 round(s) of the whole selection, in the case set's own order, each round on a fresh device; a figure is the median of the rounds' own medians",
-      "instrument": 240,
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
       "times": {
         "case": "texture-fills-212",
         "calls": 25,
-        "in_calls": 15892082,
-        "on_cpu": 1053712,
-        "blocked": 14838370,
-        "elsewhere": 5865542,
-        "spend": 21757624,
-        "spend_least": 21757624,
-        "spend_most": 27571336,
+        "in_calls": 7787333,
+        "on_cpu": 471832,
+        "blocked": 7238750,
+        "elsewhere": 2674750,
+        "spend": 10488249,
+        "spend_least": 9762751,
+        "spend_most": 10831500,
         "degraded": [
           "metal2vulkan-degrade-unpacked-fill-color"
         ],
@@ -210,14 +232,14 @@
             "call": "work",
             "least_calls": 25,
             "most_calls": 25,
-            "wall": 622958,
-            "on_cpu": 26208,
-            "blocked": 586833,
-            "wall_least": 622958,
-            "wall_most": 732000,
-            "wall_total": 15892082,
-            "on_cpu_total": 1053712,
-            "blocked_total": 14838370
+            "wall": 303500,
+            "on_cpu": 17708,
+            "blocked": 284708,
+            "wall_least": 280500,
+            "wall_most": 326417,
+            "wall_total": 7787333,
+            "on_cpu_total": 471832,
+            "blocked_total": 7238750
           }
         ]
       }

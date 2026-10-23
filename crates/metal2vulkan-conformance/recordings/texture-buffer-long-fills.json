@@ -213,5 +213,67 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 244,
+      "times": {
+        "case": "texture-buffer-long-fills",
+        "calls": 0,
+        "in_calls": 0,
+        "on_cpu": 0,
+        "blocked": 0,
+        "elsewhere": 0,
+        "spend": 0,
+        "spend_least": 0,
+        "spend_most": 0,
+        "stopped": "the case forbids running its Metal leg here: Metal fills a texture through private API alone, so no public call exists to record it from",
+        "per_call": []
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
+      "instrument": 226,
+      "times": {
+        "case": "texture-buffer-long-fills",
+        "calls": 1,
+        "in_calls": 1897750,
+        "on_cpu": 454917,
+        "blocked": 1427792,
+        "elsewhere": 495750,
+        "spend": 2474083,
+        "spend_least": 2320791,
+        "spend_most": 2862250,
+        "degraded": [
+          "metal2vulkan-degrade-texture-buffer-fill-leftover"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 1897750,
+            "on_cpu": 454917,
+            "blocked": 1427792,
+            "wall_least": 1825666,
+            "wall_most": 2098583,
+            "wall_total": 1897750,
+            "on_cpu_total": 454917,
+            "blocked_total": 1427792
+          }
+        ]
+      }
+    }
   ]
 }
