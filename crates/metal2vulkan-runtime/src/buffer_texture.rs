@@ -383,17 +383,18 @@ impl Buffer {
     ///
     /// A two-plane YCbCr texture of 8 or 10 bits, converted (`YCBCR8_420_2P`,
     /// `YCBCR10_444_2P`, ...), through the sRGB curve (their `_sRGB` twins) or read as codes
-    /// (`RGB8_420_2P`, `RGB10_420_2P`), over plane 0 of a CoreVideo surface of its bits whose
-    /// chroma plane holds its own (`420v` to `444f`, `x420` to `xf44`), given the surface's facts
-    /// ([`IoSurfacePlane::ycbcr`]), samples the texels Metal reads of the two planes, and its
-    /// copies and CPU calls move the luma codes, as Metal's do (`ycbcr.rs` states its rules and
-    /// refusals). The packed 10-bit ones, converted (`YCBCR10_420_2P_PACKED`, ...) and their
-    /// `_sRGB` twins, over `p420` to `pf44`, sample the same way, and their CPU calls move nothing,
-    /// as Metal's; their blits with a buffer are refused (`NotImplemented(Format)`). Over plane 1
-    /// of an unpacked 4:2:2 or 4:4:4 surface (the plane's offset and `bytes_per_row` here and in
-    /// the facts, the facts' `plane` 1), it reads plane 1's codes as its luma with chroma codes 0,
-    /// and its copies move them, as Metal's do. Metal makes every two-plane YCbCr format over a
-    /// surface's plane; another is the runtime's gap (`NotImplemented(Format)`).
+    /// (`RGB8_420_2P`, `RGB10_420_2P`), and the packed 10-bit ones (`YCBCR10_420_2P_PACKED`, ...)
+    /// and their `_sRGB` twins, over any plane of a surface of any OSType but the lossless
+    /// compressed ones, or over plane 0 of a surface without planes, given the surface's facts
+    /// ([`IoSurfacePlane::ycbcr`]), samples the texels Metal reads of the planes, and its copies
+    /// and CPU calls move the luma codes, as Metal's do (`ycbcr.rs` states its rules and
+    /// refusals: the luma plane the call's, the chroma plane the facts' plane 1 under plane 0 of a
+    /// surface with planes, chroma codes 0 under any other, bytes past the buffer zeros). A packed
+    /// texture's CPU calls move nothing, as Metal's; its blits with a buffer are refused
+    /// (`NotImplemented(Format)`). A render target of a 4:2:0 or 4:2:2 format of an odd width or
+    /// height is Metal's nil (`TextureProblem::ExtentForFormat`). Metal makes every two-plane
+    /// YCbCr format over a surface's plane; another is the runtime's gap
+    /// (`NotImplemented(Format)`).
     ///
     /// An `RGB10A8_2P_XR10` or `RGB10A8_2P_XR10_sRGB` texture over plane 0 of a two-plane
     /// `'b3a8'` surface, given plane 1's offset and `bytesPerRow` in the surface's facts
@@ -532,16 +533,27 @@ impl Buffer {
         let buffer = BufferFacts {
             length: self.length(),
         };
+        let planar = matches!(form, BufferTextureCall::IoSurfacePlane { planar: true });
         let converted = match &ycbcr_surface {
             Some(facts) => Some(surface_planes(
                 &layout,
-                [offset, bytes_per_row],
+                ([offset, bytes_per_row], planar),
                 facts,
                 self.length(),
                 device,
             )?),
             None => None,
         };
+        // Metal makes no render target of a 4:2:0 or 4:2:2 format whose chroma blocks do not
+        // tile it (an odd width, or an odd height; plain Metal answers nil, the M3 Max under
+        // macOS 27.0.1), and makes any other.
+        if let Some((planes, _)) = &converted {
+            let halved = planes.codes.subsampling.halved() != [false, false];
+            let odd = planes.size.iter().any(|n| n % 2 != 0);
+            if halved && odd && descriptor.usage.contains(TextureUsage::RENDER_TARGET) {
+                return Err(Refused::Nil(TextureProblem::ExtentForFormat).error(call));
+            }
+        }
         // A two-plane extended-range texture over a surface's plane 0 keeps its color words in
         // the plane and its alpha bytes in the surface's plane 1 (`texture/surface_two_planes.rs`).
         let alpha_plane = match form {

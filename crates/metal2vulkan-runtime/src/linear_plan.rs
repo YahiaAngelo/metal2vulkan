@@ -89,6 +89,12 @@
 //!   in a kernel the later row's on the M4 and others on the M3 Max. The runtime refuses such a
 //!   plane of more than one row (`NotImplemented`, `RuntimeGap::OverlappingSurfaceRows`;
 //!   [`BufferRefusal::OverlappingRows`]).
+//! - **Two-plane YCbCr codes** (an M3 Max under macOS 27.0.1; `ycbcr.rs`'s **Surfaces**). Metal
+//!   makes a two-plane YCbCr texture over any plane, its codes at the plane's rows however wide
+//!   they are: a 10-bit format over an 8-bit plane, whose rows of codes overlap where
+//!   `bytesPerRow` is under twice the width, and a texture taller than its plane, whose rows run
+//!   past the surface, where its reads are zeros. The runtime refuses rows that overlap as above,
+//!   and codes past the buffer `NotImplemented` (`TexelsPastBufferLength`).
 //! - **Depth and stencil over a planar surface** (an M4 under macOS 27.0.1, the format scout's
 //!   cells: TTG2's scout, `scout4-metal-vs.tsv`). Metal makes, samples or reads, and draws a
 //!   `Depth16Unorm`, `Depth32Float`, `Depth32Float_Stencil8`, `Stencil8` or `X32_Stencil8` texture
@@ -130,7 +136,7 @@ use super::metal_level::MetalLevel;
 use super::texture_descriptor::TextureLayout;
 use super::values::StorageMode;
 use metal2vulkan::error::LinearNeed;
-use metal2vulkan::metal::format::is_depth_stencil;
+use metal2vulkan::metal::format::{is_depth_stencil, ycbcr};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::vk::{
     Format, FormatFeatureFlags2, ImageCreateFlags, ImageUsageFlags, SampleCountFlags,
@@ -418,7 +424,10 @@ pub(super) fn plan_buffer_texture(
     let [width, height, _] = layout.extent.map(u64::from);
     let (offset, bytes_per_row) = (texture.offset, texture.bytes_per_row);
     let row_bytes = width.saturating_mul(texture.texel_bytes);
-    if bytes_per_row < row_bytes {
+    // A two-plane YCbCr texture reads its codes at the surface plane's rows whatever their width
+    // (the module docs): Metal checks no row against them.
+    let ycbcr = surface && ycbcr(layout.pixel_format);
+    if bytes_per_row < row_bytes && !ycbcr {
         return Err(P::RowPitch {
             bytes_per_row,
             row_bytes,
@@ -434,7 +443,12 @@ pub(super) fn plan_buffer_texture(
             rows: height,
             slices: 1,
         };
-        return plan_iosurface_plane(cpu, planar, buffer.length);
+        return match plan_iosurface_plane(cpu, planar, buffer.length) {
+            Err(BufferRefusal::Metal(P::PastBuffer { .. })) if ycbcr => {
+                Err(BufferRefusal::TexelsPastLength)
+            }
+            planned => planned,
+        };
     }
     let array = texture_type == T::Type2DArray;
     let alignment = if array {

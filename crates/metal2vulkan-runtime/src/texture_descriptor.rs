@@ -664,7 +664,9 @@ pub enum TextureProblem {
     /// stencil texture.)
     ViewOnlyFormat,
     /// An extent the pixel format does not take: a PVRTC texture that is not square with a
-    /// power-of-two side, or a 4:2:2 texture of odd width.
+    /// power-of-two side, or a 4:2:2 texture of odd width; and, an [`Error::Nil`](crate::Error::Nil)
+    /// of plain Metal, a render target of a 4:2:0 or 4:2:2 two-plane YCbCr format over a surface
+    /// whose width or height is odd.
     ExtentForFormat,
     /// A usage the pixel format does not take: `ShaderAtomic` of `RGB10A8_2P_XR10`, its sRGB
     /// twin or `Unspecialized` (measured on an Apple M4, macOS 27.0.1: Metal's descriptor
