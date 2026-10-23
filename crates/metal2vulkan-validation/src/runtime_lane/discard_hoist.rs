@@ -300,7 +300,7 @@ fn a_sum_before_a_discard_answers_as_metal_places_it() {
     let announced = counts(&messages.take_notices());
     let grouping = announced.contains_key(&Degradation::FragmentSimdgroupGrouping);
     assert_eq!(
-        grouping, !metal_simdgroups,
+        grouping, metal_simdgroups,
         "{name} (subgroup {size}, gap {gap}, Metal's simdgroups {metal_simdgroups}) announced \
          {announced:?}"
     );
