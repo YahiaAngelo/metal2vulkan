@@ -57,7 +57,7 @@ const COUNTERS: [&str; 16] = [
 /// (a driver call of `vkfloor.rs`, whose name starts with `vk_`, is no Metal call and is
 /// exempt), and `scripts/api-cost-coverage` reads it to say how much of the public surface the
 /// table times and how much is still untimed.
-pub const TIMED: [(&str, &str); 59] = [
+pub const TIMED: [(&str, &str); 60] = [
     ("command_buffer", "CommandQueue::command_buffer"),
     ("commit_empty", "CommandBuffer::commit"),
     ("commit_one_dispatch", "CommandBuffer::commit"),
@@ -120,6 +120,7 @@ pub const TIMED: [(&str, &str); 59] = [
         "RenderCommandEncoder::set_depth_stencil_state",
     ),
     ("draw_strip", "RenderCommandEncoder::draw_primitives"),
+    ("draw_strip_in_64", "RenderCommandEncoder::draw_primitives"),
     ("draw_triangles", "RenderCommandEncoder::draw_primitives"),
     (
         "draw_indexed",
@@ -726,8 +727,11 @@ pub fn percall<G: Gpu>(g: &G, s: &Scene<G>, library: &G::Library, sizes: &Sizes)
         g.use_buffers_drawn(e, &[&o.resident[0]])
     });
 
-    // The draws, each of a strip of four vertices, and the state they draw under set once.
+    // The draws, each of a strip of four vertices, and the state they draw under set once. The
+    // short encoder's draws cost what the long one's do, or the cost is not a call's but grows
+    // with the encoder's length.
     render("draw_strip", 512, &|e, _| g.draw_strip(e, 4));
+    render("draw_strip_in_64", 64, &|e, _| g.draw_strip(e, 4));
     render("draw_triangles", 512, &|e, _| g.draw_triangles(e, 0, 3));
     render("draw_indexed", 512, &|e, _| {
         g.draw_indexed(e, 3, &o.indices)
