@@ -26,6 +26,7 @@ pub mod mesh_commands;
 pub mod mesh_draws;
 pub mod pass_bytes;
 pub mod rate_maps;
+pub mod rgb10a2_srgb;
 pub mod sample_fills;
 pub mod stage_in_regions;
 pub mod surface_fills;
@@ -58,6 +59,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in two_plane_samples::all() {
+        cases.push(Box::new(case));
+    }
+    for case in rgb10a2_srgb::all() {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(texture_buffer_fills::streams()));
