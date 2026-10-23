@@ -232,3 +232,150 @@ fn an_argument_array_covers_its_own_span_alone() {
     }
     assert_eq!(at(5), SlotWritability::Never);
 }
+
+/// Over every kernel of the public reflection fixtures: the answer is never refused, and wherever
+/// the pipeline's reflection is not refused the two agree, slot for slot, on what may be stored
+/// through it. The reflection derives a type description and this does not, so the fixtures whose
+/// argument shapes refuse a reflection are the point: they still answer here.
+///
+/// It is the broad form of the claim the whole module exists for -- a state that compiles answers
+/// -- and the cross-check that the two derivations cannot drift apart, since `Binding::access` is
+/// held to Metal's recorded answers by `library_reflection_matches_metal` and the pipeline cases.
+#[test]
+fn every_fixture_kernel_answers_and_agrees_with_its_reflection() {
+    let stems = [
+        "argument_buffers",
+        "buffers",
+        "encoder_arrays",
+        "encoder_reads",
+        "encoder_types",
+        "encoders",
+        "leftovers",
+        "specialized_reads",
+        "tables",
+        "tables_in_arguments",
+        "texture_accesses",
+        "textures",
+        "tile",
+    ];
+    let mut answered = 0;
+    let mut compared = 0;
+    let mut refused_reflections = 0;
+    let mut unspecialized = 0;
+    // The recorded fixtures, then the synthetic kernel whose argument type refuses a reflection:
+    // the fixtures state the agreement over shapes Metal's answers are recorded for, and the
+    // synthetic one makes the refused leg run, since no recorded fixture kernel refuses.
+    for stem in stems.iter().copied().chain(["(synthetic)"]) {
+        let bitcode = if stem == "(synthetic)" {
+            match metal2vulkan_devtools::llvm_assemble_text(&module()) {
+                Ok(b) => b,
+                Err(metal2vulkan_devtools::AssembleError::Missing(why)) => {
+                    eprintln!("SKIPPED: {why}");
+                    return;
+                }
+                Err(metal2vulkan_devtools::AssembleError::Rejected(why)) => {
+                    panic!("llvm-as rejected the synthetic module: {why}")
+                }
+            }
+        } else {
+            let path =
+                crate::pipeline::testing::fixtures_dir().join(format!("reflection/{stem}.ll"));
+            match crate::pipeline::testing::llvm_assemble(&path) {
+                Ok(b) => b,
+                Err(crate::pipeline::testing::AssembleError::Missing(why)) => {
+                    eprintln!("SKIPPED: {why}");
+                    return;
+                }
+                Err(crate::pipeline::testing::AssembleError::Rejected(why)) => {
+                    panic!("llvm-as rejected {stem}.ll: {why}")
+                }
+            }
+        };
+        let library = Library::from_air(&bitcode).unwrap_or_else(|e| panic!("{stem}: {e:?}"));
+        let names: Vec<String> = library
+            .functions()
+            .filter(|info| info.stage == crate::library::FunctionStage::Kernel)
+            .map(|info| info.name.to_owned())
+            .collect();
+        for name in names {
+            let f = library
+                .function(&name)
+                .unwrap_or_else(|e| panic!("{stem} {name}: {e:?}"));
+            let at = format!("{stem} {name}");
+            let kernel =
+                ComputePipelineDescriptor::new(StageSource::Function(FunctionDescriptor::new(f)));
+            let writes = match kernel.slot_writes(&Budget::standard()) {
+                Ok(writes) => writes,
+                // A function whose constants no caller gave a required value for: no pipeline of
+                // it compiles, and the reflection refuses it too. What must never happen is a
+                // refusal over a reflection gap, which is what this asserts.
+                Err(error) => {
+                    assert!(
+                        !matches!(&error, Error::Unsupported(u) if u.feature == Feature::Reflection),
+                        "{at}: refused as a reflection gap: {error:?}"
+                    );
+                    assert!(
+                        kernel.reflection(&Budget::standard()).is_err(),
+                        "{at}: refused where the reflection answers: {error:?}"
+                    );
+                    unspecialized += 1;
+                    continue;
+                }
+            };
+            answered += 1;
+            let slots = writes.kernel_slots();
+            assert!(
+                slots.iter().all(|s| s.writes.gap().is_none()),
+                "{at}: an undetermined slot among {slots:?}"
+            );
+            let reflection = match kernel.reflection(&Budget::standard()) {
+                Ok(r) => r,
+                Err(Error::Unsupported(u)) if u.feature == Feature::Reflection => {
+                    refused_reflections += 1;
+                    continue;
+                }
+                Err(e) => panic!("{at}: {e:?}"),
+            };
+            // A kernel without a stage input descriptor reflects its own arguments alone, so the
+            // two lists line up one for one.
+            let bindings = reflection.bindings();
+            assert_eq!(bindings.len(), slots.len(), "{at}");
+            for (b, s) in bindings.iter().zip(slots) {
+                assert_eq!(
+                    (
+                        b.name(),
+                        Some(b.binding_type()),
+                        Some(b.index()),
+                        b.is_used()
+                    ),
+                    (s.name.as_str(), s.binding_type, s.index, s.used),
+                    "{at}: the two answers name different bindings"
+                );
+                let by_access = match b.access() {
+                    crate::metal::BindingAccess::ReadOnly => SlotWritability::Never,
+                    crate::metal::BindingAccess::WriteOnly
+                    | crate::metal::BindingAccess::ReadWrite => SlotWritability::Maybe,
+                };
+                assert_eq!(
+                    s.writes,
+                    by_access,
+                    "{at}: {} disagrees with its reflection's access",
+                    b.name()
+                );
+                compared += 1;
+            }
+        }
+    }
+    assert!(answered >= 20, "{answered} kernels answered");
+    assert!(
+        unspecialized > 0,
+        "no kernel needed a constant value, so the leg that proves such a refusal is not a \
+         reflection gap never ran"
+    );
+    assert!(compared >= 40, "{compared} bindings compared");
+    assert!(
+        refused_reflections > 0,
+        "no subject's reflection was refused, so this proves nothing about the gap it covers: \
+         the sweep needs a kernel whose argument shapes Metal's answer is unmeasured for"
+    );
+}

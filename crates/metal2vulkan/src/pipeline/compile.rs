@@ -702,8 +702,15 @@ pub(crate) fn stage_slot_writes(
                 }
                 let before = reflection::UnspecializedReads::of(&decoded.module, &decoded.abi, ep);
                 let spec = specialize_request(decoded, &req, r, m)?;
-                let read = reflection::specialized_reads(&spec, &before)?;
-                Ok(reflection::entry_slot_writes(&read))
+                match reflection::specialized_reads(&spec, &before) {
+                    Ok(read) => Ok(reflection::entry_slot_writes(&read)),
+                    // Refused over control-point inputs a function constant gates, which bind no
+                    // argument-table slot (`kept_reflection` says what that costs).
+                    Err(Error::Unsupported(u)) if u.feature == Feature::Reflection => {
+                        Ok(reflection::entry_slot_writes(&spec.ep))
+                    }
+                    Err(error) => Err(error),
+                }
             },
         )
     })
@@ -2266,12 +2273,12 @@ fn compile_kept<K>(
         )
     });
     let (numbered_samplers, numbering_differs) = numbered::samplers(&spec, unmeasured);
-    let reflection = kept_reflection(&spec, &before)?;
-    // Kept whatever the reflection could describe: it reads the specialized entry's roles,
-    // declared accesses and slots alone, so a pipeline of this function always answers what it
-    // may store through each of its slots.
-    let slot_writes =
-        reflection::entry_slot_writes(&reflection::specialized_reads(&spec, &before)?);
+    // The slot writes are kept whatever the reflection could describe, so a pipeline of this
+    // function always answers what it may store through each of its slots.
+    let KeptAnswers {
+        reflection,
+        slot_writes,
+    } = kept_reflection(&spec, &before)?;
     // Decoded AIR is not needed past emission.
     drop(spec);
     // The function's own side effects; the `ExecutionStatus` buffer's words (the resident-miss
@@ -2578,25 +2585,54 @@ fn compile_kept<K>(
 }
 
 /// What a pipeline's reflection states for the compiled entry `spec`, kept in its artifact for a
-/// `StageSource::Compiled` stage: its bindings as the pipeline channel answers them and the
-/// attributes it reads, as [`stage_reflection`] answers from the same specialized entry and what
-/// its code read before specialization (`before`); `None` where a binding's answer is unmeasured
-/// (`Feature::Reflection`).
+/// `StageSource::Compiled` stage, and what the stage may store through each slot its arguments
+/// bind, both from the same specialized entry and what its code read before specialization
+/// (`before`), as [`stage_reflection`] and [`stage_slot_writes`] answer them from a function.
+///
+/// The reflection is `None` where a binding's answer is unmeasured (`Feature::Reflection`). The
+/// slot writes are always kept: they read the entry's roles, declared accesses and slots alone.
 fn kept_reflection(
     spec: &air::Entry,
     before: &reflection::UnspecializedReads,
-) -> Result<Option<reflection::StageReflection>, Error> {
-    let answer = reflection::specialized_reads(spec, before).and_then(|read| {
+) -> Result<KeptAnswers, Error> {
+    let read = match reflection::specialized_reads(spec, before) {
+        Ok(read) => read,
+        // Refused over control-point inputs a function constant gates. Those bind no
+        // argument-table slot, so the entry's own parameters still state every slot's access;
+        // what the specialized read would have added is which arguments the constants leave
+        // unread.
+        Err(Error::Unsupported(u)) if u.feature == Feature::Reflection => {
+            return Ok(KeptAnswers {
+                reflection: None,
+                slot_writes: reflection::entry_slot_writes(&spec.ep),
+            })
+        }
+        Err(error) => return Err(error),
+    };
+    let slot_writes = reflection::entry_slot_writes(&read);
+    let answer = (|| {
         Ok(reflection::StageReflection {
             bindings: reflection::bindings(&read, &spec.structs, reflection::Channel::Pipeline)?,
             attributes: reflection::read_attributes(&read)?,
         })
-    });
+    })();
     match answer {
-        Ok(stage) => Ok(Some(stage)),
-        Err(Error::Unsupported(u)) if u.feature == Feature::Reflection => Ok(None),
+        Ok(stage) => Ok(KeptAnswers {
+            reflection: Some(stage),
+            slot_writes,
+        }),
+        Err(Error::Unsupported(u)) if u.feature == Feature::Reflection => Ok(KeptAnswers {
+            reflection: None,
+            slot_writes,
+        }),
         Err(error) => Err(error),
     }
+}
+
+/// What [`kept_reflection`] keeps of one compiled entry for its artifact.
+struct KeptAnswers {
+    reflection: Option<reflection::StageReflection>,
+    slot_writes: Vec<reflection::SlotWrite>,
 }
 
 fn census(plan: &Plan) -> StrategyCensus {
