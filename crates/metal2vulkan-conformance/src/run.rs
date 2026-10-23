@@ -4,7 +4,7 @@
 
 use crate::case::Case;
 use crate::device::{self, Notices, ScratchCache, Venues};
-use crate::replay::replay;
+use crate::replay::replay_known;
 use crate::report::Report;
 use crate::runtime_side::RuntimeSide;
 
@@ -36,10 +36,23 @@ pub fn replay_on(venues: Venues, cases: &[Box<dyn Case>]) -> Result<Report, Stri
     // announced.
     let mut report = Report::new();
     report.venue_announced(device.name(), notices.take());
+    // A notice is announced once per device per kind, so the codes a case provokes are the ones
+    // nothing earlier in the run provoked. The set carries forward: a case's own notices site
+    // holds its own work's notices alone, and the device's notices justify a loosened field in
+    // any case of the run.
+    let mut announced_on_device: Vec<String> = Vec::new();
     for case in cases {
         let taker = notices.clone();
         let mut side = RuntimeSide::new(&device, move || taker.take());
-        report.add_result(replay(case.as_ref(), &mut side));
+        let replayed = replay_known(case.as_ref(), &mut side, &announced_on_device);
+        if let Ok(replayed) = &replayed {
+            for code in replayed.ours.announced_notices().into_keys() {
+                if !announced_on_device.contains(&code) {
+                    announced_on_device.push(code);
+                }
+            }
+        }
+        report.add_result(replayed);
     }
     Ok(report)
 }
