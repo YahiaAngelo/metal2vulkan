@@ -350,6 +350,9 @@ fn tagged(out: &mut Vec<u8>, tag: &[u8], value: u64) {
 /// (`a_resource_this_family_does_not_declare_is_refused`).
 fn resource_words(resource: &Resource) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
+    // Every pattern below names every field it has, with no `..`, for the reason written at the
+    // destructuring in `descriptor_words`: a field added to one of these variants must be a
+    // compile error here rather than 87 recordings going quietly stale.
     match resource {
         Resource::Buffer { bytes } => {
             out.extend(b"newBufferWithBytes");
@@ -396,6 +399,17 @@ fn resource_words(resource: &Resource) -> Result<Vec<u8>, String> {
 /// the point: its arm then decides whether the field is part of what the descriptor asks for, and
 /// writing it only where it is not the default leaves every recording where it is.
 fn descriptor_words(spec: &TextureSpec) -> Vec<u8> {
+    // **Never add `..` here, and never add it to a variant's pattern in `resource_words` or
+    // `step_words`.** Naming every field is the whole protection: a field added to `TextureSpec`
+    // is then a *compile error in this file*, where before it was 87 recordings quietly going
+    // stale in a stream no longer running to re-record them. Whoever adds the field decides, here,
+    // whether it is part of what the descriptor is asked for, and writes it only where it is not
+    // the default — so the answer "it changes no call these cases make" costs no recording.
+    //
+    // The honest limit: a new *variant* of `Resource` or `Step` still compiles and writes nothing,
+    // because those matches end in a catch-all that refuses rather than keys. That is right — this
+    // family cannot construct a variant it does not name — but it means the compiler guards fields
+    // and not variants.
     let TextureSpec {
         format,
         kind,
@@ -470,6 +484,7 @@ fn texture_type(kind: TextureKind) -> &'static str {
 /// [`resource_words`] gives (`a_step_this_family_does_not_encode_is_refused`).
 fn step_words(step: &Step) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
+    // No `..` in any pattern here either; see `descriptor_words`.
     match step {
         Step::FillBuffer {
             buffer,
