@@ -80,6 +80,61 @@ host-specific.
 A Metal-less host reads the validated fact out of the recording like everything else, so the axis
 is as portable as the rest of a case.
 
+## The cost half: what our side did
+
+The transcript says what a case **observed**. The cost half says what our implementation **did** to
+produce it, over the same case set:
+
+```sh
+conformance cost --runs 8            # measure and print, write nothing
+conformance cost --runs 8 --write    # put the bounds in the cases' recordings
+conformance replay                   # hold each case to them, and report
+```
+
+A case's cost record lives in its own recording file, beside the Metal answers, so a host with no
+Metal reads it with the rest of the case.
+
+**Counts are ours, never Metal's.** Metal has no counterpart for any of them and a host with no
+Metal can have no answer, so a count never enters the comparison with Metal and never produces a
+correctness verdict. The cost half has its own three verdicts — `within`, `over`, `unmeasured` — its
+own section of the report, and its own line of the command's exit status.
+
+**It gates on counts, not times.** A count is deterministic, so it is assertable on any host under
+any load, and a regression reads "this case now does two allocations where it did none" rather than
+as a percentage nobody can reproduce. The mechanism is the runtime's own `WorkCounts`, read twice
+around each case; nothing here counts anything the runtime does not already count, and a cost run
+asks it for no more than an ordinary run does.
+
+Work is attributed to three regions, kept apart because moving work between them is not a win:
+**translation** (making a module, a layout or a pipeline — the one-time cost, which has its own
+ceilings), **the device API** (what a call does on the calling thread), and **submission** (what the
+commit path, our own other threads and the GPU do afterwards, so a call that returns at once while
+queueing work cannot score as a win). The device API is the residual.
+
+A count the measurement never saw move is bounded at **zero**, so a case that starts doing something
+it did not do before is `over` rather than unnoticed.
+
+Two kinds of count are reported and never gated, because holding them would give a gate that fires
+at random:
+
+- one whose readings **moved** between the measurement's own rounds, which the record keeps as the
+  range it was seen in;
+- one that says **which thread arrived first** — which thread replayed a deferred command buffer,
+  and everything on the asynchronous release path, whose counts may land in a later case's window.
+  Their totals are gated: `command_buffers_deferred` holds the two replay counts between them.
+
+**A device's gap is not a cost win.** A count that is lower because the device lacks the exact form,
+so the runtime announced a notice and did something cheaper, is the device's gap and not work we
+saved. A record carries the notices its measurement announced and refuses to compare a run that
+announced otherwise. Four things make a run `unmeasured` rather than a pass, each said in words: a
+venue the measurement was not taken on, a selection that is not the whole case set (a case's counts
+depend on what ran before it in the same process), a run that stopped part way, and a run the device
+degraded otherwise.
+
+Times are **advisory** here: a wall-clock figure is printed per case so a reader can see where the
+counts are large, and it is neither recorded nor gated. Per-call timing against Metal is the per-call
+cost table in `metal2vulkan-runtime/examples/host_ab`, which this half does not duplicate.
+
 ## This crate is not the validation suite
 
 The harvested corpus, the stored observations, the corpus index, the censuses and audits and the
@@ -111,6 +166,7 @@ edits one.
 | `validated` | The second oracle: the same case under Metal's API validation layer, in a child process |
 | `record`, `replay` | Taking Metal's answer, and comparing a run against it |
 | `report` | Verdict counts and the matrix of case against venue |
+| `cost` | The cost half: the counts our side moved, their regions, their bounds and the three cost verdicts |
 | `work`, `runtime_work` | The copy-and-fill vocabulary a case states as data, and the runtime side that runs it |
 | `measured` | The committed Metal measurements a ported case reads, under the public fixtures |
 | `known_refusals` | The ledger of open gaps, held in both directions; it sets the exit status, never a verdict |

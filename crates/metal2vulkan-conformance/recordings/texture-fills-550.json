@@ -118,5 +118,65 @@
       ],
       "validated": "not_run"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 5,
+      "measured": "5 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "degraded": [
+        "metal2vulkan-degrade-heap-two-plane-layout",
+        "metal2vulkan-degrade-shadowed-texture",
+        "metal2vulkan-degrade-unpacked-fill-color"
+      ],
+      "bounds": {
+        "bare_starts": 75,
+        "batches_with_none_pending": 75,
+        "command_buffers_begun": 100,
+        "command_buffers_begun_batch_work": 25,
+        "command_buffers_begun_encoders": 75,
+        "command_buffers_deferred": 75,
+        "command_buffers_replayed_inline": 75,
+        "command_buffers_submitted": 100,
+        "commands_replayed.begin_command_buffer": 75,
+        "commands_replayed.cmd_copy_buffer": 75,
+        "commands_replayed.cmd_pipeline_barrier": 75,
+        "commands_replayed.end_command_buffer": 75,
+        "commits_handed_off": 75,
+        "completed_waits": 78,
+        "completed_where_seen": 75,
+        "copy_regions_split": 24,
+        "encoder_command_buffers_begun": 75,
+        "finales_folded": 75,
+        "new_buffer_bytes_cleared": 13517952,
+        "object_churn.buffers_evicted": 9,
+        "object_churn.buffers_parked": 150,
+        "object_churn.buffers_recycled": 141,
+        "object_churn.images_evicted": 4,
+        "object_churn.images_other": 25,
+        "object_churn.images_parked": 25,
+        "object_churn.images_recycled": 21,
+        "object_churn.textures_in_heaps": 25,
+        "object_churn.vk_buffer_bindings": 34,
+        "object_churn.vk_buffers_destroyed": 34,
+        "object_churn.vk_buffers_made": 34,
+        "object_churn.vk_image_bindings": 4,
+        "object_churn.vk_images_destroyed": 7,
+        "object_churn.vk_images_made": 7,
+        "owned_descriptor_pools": 25,
+        "queue_submissions": 75,
+        "requirement_images_made": 3,
+        "requirement_limits_asked": 3,
+        "scheduled_where_submitted": 75,
+        "scheduler_passes": 75,
+        "scheduler_sleeps": 75,
+        "scheduler_wakes_commit": 75,
+        "slot_returns": 75,
+        "spare_command_pools_taken": 150,
+        "submit_infos": 75,
+        "wakes_completion_waiters": 75,
+        "wakes_spared": 450
+      }
+    }
   ]
 }

@@ -1069,5 +1069,52 @@
       ],
       "validated": "not_run"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 5,
+      "measured": "5 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "degraded": [
+        "metal2vulkan-degrade-texture-buffer-fill-leftover"
+      ],
+      "bounds": {
+        "bare_starts": 26,
+        "batches_with_none_pending": 26,
+        "command_barriers": 2,
+        "command_buffers_begun": 26,
+        "command_buffers_begun_encoders": 26,
+        "command_buffers_deferred": 26,
+        "command_buffers_replayed_inline": 26,
+        "command_buffers_submitted": 26,
+        "commands_replayed.begin_command_buffer": 26,
+        "commands_replayed.cmd_copy_buffer": 38,
+        "commands_replayed.cmd_pipeline_barrier": 28,
+        "commands_replayed.end_command_buffer": 26,
+        "commits_handed_off": 26,
+        "completed_waits": 29,
+        "completed_where_seen": 26,
+        "encoder_command_buffers_begun": 26,
+        "finales_folded": 26,
+        "new_buffer_bytes_cleared": 16000,
+        "object_churn.buffers_evicted": 40,
+        "object_churn.buffers_parked": 64,
+        "object_churn.buffers_recycled": 24,
+        "object_churn.textures_texels": 26,
+        "object_churn.vk_buffer_bindings": 40,
+        "object_churn.vk_buffers_destroyed": 40,
+        "object_churn.vk_buffers_made": 40,
+        "queue_submissions": 26,
+        "scheduled_where_submitted": 26,
+        "scheduler_passes": 26,
+        "scheduler_sleeps": 26,
+        "scheduler_wakes_commit": 26,
+        "slot_returns": 26,
+        "spare_command_pools_taken": 52,
+        "submit_infos": 26,
+        "wakes_completion_waiters": 26,
+        "wakes_spared": 156
+      }
+    }
   ]
 }

@@ -118,5 +118,63 @@
       ],
       "validated": "not_run"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 5,
+      "measured": "5 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "degraded": [
+        "metal2vulkan-degrade-carried-decoded-twin",
+        "metal2vulkan-degrade-unpacked-fill-color"
+      ],
+      "bounds": {
+        "bare_starts": 22,
+        "batches_with_none_pending": 22,
+        "block_decode_passes": 44,
+        "command_barriers": 88,
+        "command_buffers_begun": 44,
+        "command_buffers_begun_batch_work": 22,
+        "command_buffers_begun_encoders": 22,
+        "command_buffers_deferred": 22,
+        "command_buffers_replayed_inline": 22,
+        "command_buffers_submitted": 44,
+        "commands_replayed.begin_command_buffer": 22,
+        "commands_replayed.cmd_bind_descriptor_sets": 44,
+        "commands_replayed.cmd_bind_pipeline": 44,
+        "commands_replayed.cmd_copy_buffer_to_image": 88,
+        "commands_replayed.cmd_copy_image_to_buffer": 66,
+        "commands_replayed.cmd_dispatch": 44,
+        "commands_replayed.cmd_pipeline_barrier": 286,
+        "commands_replayed.end_command_buffer": 22,
+        "commits_handed_off": 22,
+        "completed_waits": 25,
+        "completed_where_seen": 22,
+        "encoder_command_buffers_begun": 22,
+        "finales_folded": 22,
+        "new_buffer_bytes_cleared": 4288,
+        "object_churn.buffers_parked": 154,
+        "object_churn.buffers_recycled": 154,
+        "object_churn.images_evicted": 2,
+        "object_churn.images_own_memory": 44,
+        "object_churn.images_parked": 44,
+        "object_churn.images_recycled": 42,
+        "object_churn.textures_image": 22,
+        "object_churn.vk_image_bindings": 2,
+        "object_churn.vk_images_destroyed": 2,
+        "object_churn.vk_images_made": 2,
+        "owned_descriptor_pools": 44,
+        "queue_submissions": 22,
+        "scheduled_where_submitted": 22,
+        "scheduler_passes": 22,
+        "scheduler_sleeps": 22,
+        "scheduler_wakes_commit": 22,
+        "slot_returns": 22,
+        "spare_command_pools_taken": 44,
+        "submit_infos": 22,
+        "wakes_completion_waiters": 22,
+        "wakes_spared": 132
+      }
+    }
   ]
 }
