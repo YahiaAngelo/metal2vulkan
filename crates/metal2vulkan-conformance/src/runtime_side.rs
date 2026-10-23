@@ -15,7 +15,7 @@ use crate::case::{
 };
 use crate::queue_slots::QueueSlots;
 use crate::render::{
-    RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
+    ColorState, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
 };
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::{Negative, Value};
@@ -33,7 +33,12 @@ use metal2vulkan::pipeline::{
 };
 use metal2vulkan_runtime::{
     BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue,
-    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor, Viewport,
+    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, IndirectCommand,
+    IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane,
+    IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption, PipelineOptions,
+    RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
+    ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor,
+    Viewport,
 };
 use std::time::Duration;
 
@@ -1606,17 +1611,7 @@ impl Side for RuntimeSide<'_> {
                 .color_attachments
                 .get_mut(at)
                 .ok_or_else(|| Failure::named("NoSuchAttachment", format!("color {at}")))?;
-            let mut made = ColorAttachmentDescriptor::new(color.format);
-            if let Some(blend) = &color.blend {
-                made.blending_enabled = true;
-                made.source_rgb_blend_factor = blend.source_rgb;
-                made.destination_rgb_blend_factor = blend.destination_rgb;
-                made.rgb_blend_operation = blend.rgb;
-                made.source_alpha_blend_factor = blend.source_alpha;
-                made.destination_alpha_blend_factor = blend.destination_alpha;
-                made.alpha_blend_operation = blend.alpha;
-            }
-            *attachment = Some(made);
+            *attachment = Some(color_descriptor(color));
         }
         let state = self
             .device
@@ -2309,6 +2304,30 @@ impl Side for RuntimeSide<'_> {
             Err(error) => Err(Failure::of(&error)),
         }
     }
+}
+
+/// The runtime's color attachment descriptor for one the case states: every field of
+/// [`ColorState`] reaches it, because the case's vocabulary is Metal's own and the two sides must
+/// give the two implementations the same descriptor.
+///
+/// It is a function of its own, and not inlined in the call, so that
+/// `the_runtime_side_forwards_every_field_of_a_color_state` can hold it to that field by field
+/// with no device. A field the Metal side sets and this one drops is a harness bug that reads as
+/// our implementation's: the write mask was dropped here, which made the tile-store family's
+/// masked draw write every channel on our side while Metal's wrote none.
+pub(crate) fn color_descriptor(color: &ColorState) -> ColorAttachmentDescriptor {
+    let mut made = ColorAttachmentDescriptor::new(color.format);
+    made.write_mask = color.write_mask;
+    if let Some(blend) = &color.blend {
+        made.blending_enabled = true;
+        made.source_rgb_blend_factor = blend.source_rgb;
+        made.destination_rgb_blend_factor = blend.destination_rgb;
+        made.rgb_blend_operation = blend.rgb;
+        made.source_alpha_blend_factor = blend.source_alpha;
+        made.destination_alpha_blend_factor = blend.destination_alpha;
+        made.alpha_blend_operation = blend.alpha;
+    }
+    made
 }
 
 /// The runtime's descriptor for a queried one: the case's vocabulary is Metal's own, so every

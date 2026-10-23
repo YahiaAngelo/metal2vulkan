@@ -27,6 +27,7 @@
 pub mod border_swizzles;
 pub mod buffer_blits;
 pub mod chroma_pairs;
+pub mod color_write_masks;
 pub mod command_queues;
 pub mod compressed_blits;
 pub mod compressed_decode;
@@ -182,6 +183,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in snorm_tile_store::all() {
+        cases.push(Box::new(case));
+    }
+    for case in color_write_masks::all() {
         cases.push(Box::new(case));
     }
     for case in visibility::all() {

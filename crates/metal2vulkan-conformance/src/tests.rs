@@ -2555,3 +2555,57 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
         "within"
     );
 }
+
+/// Every field of a [`crate::render::ColorState`] reaches the color attachment descriptor the
+/// runtime side gives the runtime (`runtime_side::color_descriptor`), checked field by field with
+/// no device.
+///
+/// It is a guard against the bug that wrote it: the write mask was never assigned there, so a case
+/// that asked for a mask of no channel got a pipeline that wrote every channel, and the family
+/// asking what Metal's tile store leaves behind read as our implementation ignoring a legal Metal
+/// state. The Metal side set the mask, so the two sides were asking two different questions and
+/// nothing in the suite noticed.
+#[test]
+fn the_runtime_side_forwards_every_field_of_a_color_state() {
+    use crate::render::{Blend, ColorState};
+    use metal2vulkan::metal::{BlendFactor, BlendOperation, ColorWriteMask, PixelFormat};
+
+    // The mask, at the three shapes that tell a dropped field from a kept one: none, some, all.
+    for mask in [
+        ColorWriteMask::NONE,
+        ColorWriteMask::RED | ColorWriteMask::ALPHA,
+        ColorWriteMask::ALL,
+    ] {
+        let made = crate::runtime_side::color_descriptor(
+            &ColorState::new(PixelFormat::RGBA8Unorm).masked(mask),
+        );
+        assert_eq!(made.write_mask, mask, "the write mask {mask:?}");
+        assert_eq!(made.pixel_format, PixelFormat::RGBA8Unorm);
+        assert!(!made.blending_enabled, "no blend was asked for");
+    }
+
+    // The blend's six factors and operations, each a different value so that a field taking
+    // another's value fails rather than passing by coincidence.
+    let blend = Blend {
+        source_rgb: BlendFactor::SourceColor,
+        destination_rgb: BlendFactor::DestinationAlpha,
+        rgb: BlendOperation::ReverseSubtract,
+        source_alpha: BlendFactor::OneMinusSourceAlpha,
+        destination_alpha: BlendFactor::BlendColor,
+        alpha: BlendOperation::Min,
+    };
+    let made = crate::runtime_side::color_descriptor(
+        &ColorState::new(PixelFormat::R16Snorm)
+            .masked(ColorWriteMask::GREEN)
+            .blended(blend),
+    );
+    assert_eq!(made.pixel_format, PixelFormat::R16Snorm);
+    assert_eq!(made.write_mask, ColorWriteMask::GREEN);
+    assert!(made.blending_enabled);
+    assert_eq!(made.source_rgb_blend_factor, blend.source_rgb);
+    assert_eq!(made.destination_rgb_blend_factor, blend.destination_rgb);
+    assert_eq!(made.rgb_blend_operation, blend.rgb);
+    assert_eq!(made.source_alpha_blend_factor, blend.source_alpha);
+    assert_eq!(made.destination_alpha_blend_factor, blend.destination_alpha);
+    assert_eq!(made.alpha_blend_operation, blend.alpha);
+}
