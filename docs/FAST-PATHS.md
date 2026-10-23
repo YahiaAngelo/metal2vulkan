@@ -278,6 +278,10 @@ recorded here.
 Open differences from Metal that no note announces yet, and runtime costs still above the
 driver's. Each is open work.
 
+- **A two-plane YCbCr texture over plane 1 of a three-plane surface** (`y420`, `v0a8`): Metal
+  reads plane 2's pairs as its chroma; the surface's facts (`IoSurfaceYCbCr`) name plane 1 alone,
+  so the runtime reads chroma codes 0 there, as over plane 1 of a two-plane surface.
+
 - **A mipmapped two-plane 3D texture's reads** (`RGB10A8_2P_XR10` and its sRGB twin): Metal's
   read and sample take bytes within the texture's first 4 KiB that vary from run to run, where a
   shader here reads its first texel, as of a one-level one (`lower::texture::emit::planes_volume`).

@@ -77,6 +77,53 @@ fn ycbcr_modes(codes: YCbCrCodes) -> AddressModeMap {
     }
 }
 
+/// Whether `planes` read each code alone where `pf` reads its codes converted or through the
+/// sRGB curve: a texture over a surface of a P3 matrix (`ycbcr.rs`), whose image holds the codes.
+fn codes_alone(pf: PixelFormat, planes: &YCbCrPlanes) -> bool {
+    planes.codes.output == YCbCrOutput::Codes
+        && ycbcr_format(pf).is_some_and(|f| f.reads != YCbCrReads::Codes)
+}
+
+/// The code-reading format of `codes`' bits and subsampling, unpacked (`RGB8_420_2P` to
+/// `RGB10_444_2P`), whose image holds the codes.
+fn code_format(codes: YCbCrCodes) -> Option<PixelFormat> {
+    PixelFormat::ALL.iter().copied().find(|&pf| {
+        ycbcr_format(pf).is_some_and(|f| {
+            f.reads == YCbCrReads::Codes
+                && !f.packed
+                && f.bits == codes.bits
+                && f.subsampling == codes.subsampling
+        })
+    })
+}
+
+/// Whether each row of `planes` ends before the next starts, so that a write of one row's codes
+/// changes no other's (a format's rows of wider codes than the surface's may overlap).
+fn rows_apart(planes: &YCbCrPlanes) -> bool {
+    let codes = planes.codes;
+    let [w, _] = planes.size;
+    let [cw, _] = planes.chroma_size();
+    let row = |n: u32| codes.units(u64::from(n)) * u64::from(codes.bytes);
+    row(w) <= u64::from(planes.luma[1]) && row(2 * cw) <= u64::from(planes.chroma[1])
+}
+
+/// `swizzle` over a read whose red, green and blue are `read`'s channels, alpha one.
+fn over_read(read: [TextureSwizzle; 3], swizzle: TextureSwizzleChannels) -> TextureSwizzleChannels {
+    let of = |channel: TextureSwizzle| match channel {
+        S::Red => read[0],
+        S::Green => read[1],
+        S::Blue => read[2],
+        S::Alpha => S::One,
+        other => other,
+    };
+    TextureSwizzleChannels {
+        red: of(swizzle.red),
+        green: of(swizzle.green),
+        blue: of(swizzle.blue),
+        alpha: of(swizzle.alpha),
+    }
+}
+
 impl Device {
     /// The two-plane YCbCr texture of `descriptor` (checked as `layout`) over `texels`, the luma
     /// plane, for Metal's `call`, whose planes `planes` lie in `span` of the texels' buffer: its
@@ -99,8 +146,30 @@ impl Device {
             ..*descriptor
         };
         let texels = Arc::new(texels);
-        let storage = self.converted_storage(call, texels, &descriptor, layout, (planes, span))?;
-        let record = ViewRecord::of_descriptor(layout, &descriptor);
+        let mut record = ViewRecord::of_descriptor(layout, &descriptor);
+        if !codes_alone(layout.pixel_format, planes) {
+            let storage =
+                self.converted_storage(call, texels, &descriptor, layout, (planes, span))?;
+            return Ok(Texture::made(self, storage, record, None, id_use));
+        }
+        // Over a surface of a P3 matrix: an image of the codes of the code-reading format, its
+        // luma, Cb and Cr (green, blue and red there) read as red, green and blue.
+        let code_format = code_format(planes.codes)
+            .ok_or_else(|| internal("a P3 texture of codes no format reads"))?;
+        let coded = TextureDescriptor {
+            pixel_format: code_format,
+            swizzle: TextureSwizzleChannels::DEFAULT,
+            ..descriptor
+        };
+        let coded_layout = coded
+            .check_over_surface(self.properties().texture_rules())
+            .map_err(|_| internal("a P3 texture's descriptor past its own"))?;
+        let storage =
+            self.converted_storage(call, texels, &coded, &coded_layout, (planes, span))?;
+        record.read_as = Some((
+            code_format,
+            over_read([S::Green, S::Blue, S::Red], descriptor.swizzle),
+        ));
         Ok(Texture::made(self, storage, record, None, id_use))
     }
 
@@ -229,6 +298,12 @@ impl Texture {
         };
         let pf = record.pixel_format;
         let (planes, span) = conversion.source();
+        // A twin's view of a texture over a surface of a P3 matrix reads no rule found.
+        if codes_alone(self.0.record.pixel_format, &planes) {
+            return Some(Err(Error::Unsupported(Unsupported::not_implemented(
+                Feature::TextureView,
+            ))));
+        }
         let Some(codes) = ycbcr_format(pf).and_then(YCbCrCodes::of) else {
             return Some(Err(internal(
                 "a converted view of a format no conversion reads",
@@ -300,22 +375,14 @@ impl Texture {
             return None;
         }
         let gap = || Error::Unsupported(Unsupported::not_implemented(Feature::TextureView));
-        if conversion.over_plane_one() {
+        let (planes, span) = conversion.source();
+        if conversion.reads_zeros() || codes_alone(own.pixel_format, &planes) {
             return Some(Err(gap()));
         }
-        let (planes, span) = conversion.source();
         let read = planes.codes;
         // The code-reading format of the texture's bits and subsampling, unpacked: its image
         // holds the codes as the view reads them.
-        let code_format = PixelFormat::ALL.iter().copied().find(|&pf| {
-            ycbcr_format(pf).is_some_and(|f| {
-                f.reads == YCbCrReads::Codes
-                    && !f.packed
-                    && f.bits == read.bits
-                    && f.subsampling == read.subsampling
-            })
-        });
-        let Some(code_format) = code_format else {
+        let Some(code_format) = code_format(read) else {
             return Some(Err(gap()));
         };
         let mut codes = read;
@@ -336,22 +403,10 @@ impl Texture {
         // The luma, green of the codes, where the texture reads it: red read converted, green
         // read as codes; then the view's swizzle over that read.
         let luma = match read.output {
-            YCbCrOutput::Codes => [S::Zero, S::Green, S::Zero, S::One],
-            _ => [S::Green, S::Zero, S::Zero, S::One],
+            YCbCrOutput::Codes => [S::Zero, S::Green, S::Zero],
+            _ => [S::Green, S::Zero, S::Zero],
         };
-        let of = |channel: TextureSwizzle| match channel {
-            S::Red => luma[0],
-            S::Green => luma[1],
-            S::Blue => luma[2],
-            S::Alpha => luma[3],
-            other => other,
-        };
-        let swizzle = TextureSwizzleChannels {
-            red: of(record.swizzle.red),
-            green: of(record.swizzle.green),
-            blue: of(record.swizzle.blue),
-            alpha: of(record.swizzle.alpha),
-        };
+        let swizzle = over_read(luma, record.swizzle);
         let device = self.device();
         Some(
             descriptor
@@ -372,6 +427,18 @@ impl Texture {
 }
 
 impl Texture {
+    /// Whether this two-plane YCbCr texture reads each code alone, over a surface of a P3 matrix
+    /// (`ycbcr.rs`): a pass that loads it loads nothing measured.
+    pub(crate) fn ycbcr_codes_alone(&self) -> bool {
+        let Storage::Shadow { copies, .. } = &self.0.storage else {
+            return false;
+        };
+        let ShadowSource::Converted { conversion, .. } = &copies.source else {
+            return false;
+        };
+        codes_alone(self.0.record.pixel_format, &conversion.source().0)
+    }
+
     /// The write shadow of a 4:4:4 two-plane YCbCr texture whose writes Metal stores into its
     /// planes (`metal::format::ycbcr_writes_stored`), for Metal's `call`: an `RGBA32Uint` image of
     /// the texture's size, which a function writes each texel to as its red, green and blue bits
@@ -393,10 +460,11 @@ impl Texture {
         let ShadowSource::Converted { conversion, .. } = &copies.source else {
             return Err(gap());
         };
-        if conversion.over_plane_one() {
+        let (planes, span) = conversion.source();
+        // Over a surface of a P3 matrix the writes are not measured.
+        if conversion.reads_zeros() || !rows_apart(&planes) || codes_alone(pf, &planes) {
             return Err(gap());
         }
-        let (planes, span) = conversion.source();
         let device = self.device();
         let [width, height] = planes.size;
         let layout = TextureLayout {
@@ -501,10 +569,21 @@ impl Texture {
         let ShadowSource::Converted { conversion, .. } = &copies.source else {
             return Err(gap());
         };
-        if !ycbcr_renders(pf) || conversion.over_plane_one() {
+        let (planes, span) = conversion.source();
+        if !ycbcr_renders(pf) || conversion.reads_zeros() || !rows_apart(&planes) {
             return Err(gap());
         }
-        let (planes, span) = conversion.source();
+        // Over a surface of a P3 matrix the pass stores by BT.601 as the format's codes (the
+        // planes' matrix), where the texture reads the codes alone; it loads nothing measured.
+        let loads = !codes_alone(pf, &planes);
+        let codes = ycbcr_format(pf).and_then(YCbCrCodes::of).ok_or_else(gap)?;
+        let planes = YCbCrPlanes::new(
+            planes.size,
+            planes.luma,
+            planes.chroma,
+            (planes.range, planes.matrix),
+            codes,
+        );
         let [width, height] = planes.size;
         let [across, down] = planes.codes.subsampling.halved();
         if (across && width % 2 != 0) || (down && height % 2 != 0) {
@@ -594,7 +673,7 @@ impl Texture {
             (&planes, span.clone()),
             at,
             (view, true),
-            Some(floats),
+            loads.then_some(floats),
         )?;
         let (bytes, tracked) = texels.buffer.tracked(span);
         let copies = ShadowCopies {

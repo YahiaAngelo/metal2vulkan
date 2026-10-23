@@ -17,11 +17,14 @@
 //!
 //! Each draw here, a fullscreen triangle at depth 0.5 into a 16 x 16 target (`RGBA8Unorm` color
 //! and `Depth32Float` depth cleared to 0 and 1, the depth written under `Always`), is checked
-//! against that rule sample by sample.
+//! against that rule sample by sample. A sample count the device lacks (2 is optional in Vulkan:
+//! lavapipe offers 1 and 4), refused as `Unsupported` with `Feature::RasterSampleCount`, is
+//! skipped with a printed line, and the other counts are checked.
 
 use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
+use metal2vulkan::error::Feature;
 use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{CompareFunction, PixelFormat, PrimitiveType, TextureType, TextureUsage};
 use metal2vulkan::pipeline::{
@@ -29,9 +32,9 @@ use metal2vulkan::pipeline::{
 };
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
-    ClearColor, CommandBufferStatus, CommandQueue, Device, Library, LoadAction, PipelineOptions,
-    RenderPassDescriptor, ResourceOptions, Size, StoreAction, Texture, TextureDescriptor, Viewport,
-    VisibilityResultMode,
+    ClearColor, CommandBufferStatus, CommandQueue, Device, Error, Library, LoadAction,
+    PipelineOptions, RenderPassDescriptor, ResourceOptions, Size, StoreAction, Texture,
+    TextureDescriptor, Viewport, VisibilityResultMode,
 };
 
 /// The target's side.
@@ -179,8 +182,9 @@ impl Lane {
             .collect()
     }
 
-    /// The draw of `case`.
-    fn draw(&self, case: Case) -> Drawn {
+    /// The draw of `case`; `None`, with a printed line, where the device refuses its sample count
+    /// as one it lacks (the module docs).
+    fn draw(&self, case: Case) -> Option<Drawn> {
         let n = case.samples;
         let mut d = RenderPipelineDescriptor::new(self.function("psc_vertex"));
         d.fragment = case.fragment.map(|f| self.function(f));
@@ -189,10 +193,17 @@ impl Lane {
         d.raster_sample_count = n;
         d.private.sample_coverage = case.coverage;
         d.private.sample_mask = case.sample_mask;
-        let pipeline = self
+        let pipeline = match self
             .device
             .new_render_pipeline_state(&d, &PipelineOptions::default())
-            .unwrap_or_else(|e| panic!("{case:?}: {e}"));
+        {
+            Ok(pipeline) => pipeline,
+            Err(Error::Unsupported(u)) if u.feature == Feature::RasterSampleCount => {
+                println!("{}: {n} samples refused: {u:?}", self.device.name());
+                return None;
+            }
+            Err(e) => panic!("{case:?}: {e}"),
+        };
         let mut state = DepthStencilDescriptor::default();
         state.depth_compare_function = CompareFunction::Always;
         state.depth_write_enabled = true;
@@ -252,12 +263,12 @@ impl Lane {
                 [word(0), word(1)]
             })
             .collect();
-        Drawn {
+        Some(Drawn {
             colors,
             depths,
             count,
             runs,
-        }
+        })
     }
 }
 
@@ -307,6 +318,7 @@ fn the_sample_coverage_keeps_the_samples_metal_keeps() {
         cases.push(offset);
     }
     let mut wrong = Vec::new();
+    let mut drawn = 0;
     for case in &cases {
         let all = (1u32 << case.samples) - 1;
         let masks =
@@ -315,7 +327,10 @@ fn the_sample_coverage_keeps_the_samples_metal_keeps() {
             .map(|i| want_at(&masks, i, case.origin))
             .collect();
         let count: u64 = want.iter().map(|m| u64::from(m.count_ones())).sum();
-        let got = lane.draw(*case);
+        let Some(got) = lane.draw(*case) else {
+            continue;
+        };
+        drawn += 1;
         if got.colors != want || got.depths != want || got.count != count {
             wrong.push(format!(
                 "{case:?}: count {} (Metal's {count}), colors {:x?}, depths {:x?}, Metal's {want:x?}",
@@ -325,14 +340,15 @@ fn the_sample_coverage_keeps_the_samples_metal_keeps() {
     }
     assert!(
         wrong.is_empty(),
-        "{name}: {} of {} draws differ from Metal's:\n{}",
+        "{name}: {} of {drawn} draws differ from Metal's:\n{}",
         wrong.len(),
-        cases.len(),
         wrong.join("\n")
     );
+    // One sample is never refused: its cases are the first, every coverage and three more.
+    assert!(drawn >= COVERAGES.len() + 3, "{name}: {drawn} draws");
     eprintln!(
-        "{name}: {} sample-coverage draws keep Metal's samples",
-        cases.len()
+        "{name}: {drawn} sample-coverage draws keep Metal's samples, {} refused",
+        cases.len() - drawn
     );
     drop(lane);
     let reported = messages.take();
@@ -363,7 +379,9 @@ fn the_sample_coverage_applies_after_the_fragment_function() {
         let total = u64::from(all.count_ones()) * PIXELS as u64;
         let mut counter = Case::new(samples, 0.3);
         counter.fragment = Some("psc_counter");
-        let got = lane.draw(counter);
+        let Some(got) = lane.draw(counter) else {
+            continue;
+        };
         let runs = vec![[samples, all]; PIXELS];
         let cleared = vec![0; PIXELS];
         if got.colors != cleared || got.depths != covered || got.count != count || got.runs != runs
@@ -372,13 +390,13 @@ fn the_sample_coverage_applies_after_the_fragment_function() {
         }
         let mut early = Case::new(samples, 0.3);
         early.fragment = Some("psc_early");
-        let got = lane.draw(early);
+        let got = lane.draw(early).expect("the sample count drawn");
         if got.colors != covered || got.depths != every || got.count != total {
             wrong.push(format!("{samples} samples, early tests: {got:x?}"));
         }
         let mut bare = Case::new(samples, 0.3);
         bare.fragment = None;
-        let got = lane.draw(bare);
+        let got = lane.draw(bare).expect("the sample count drawn");
         if got.depths != every || got.count != total {
             wrong.push(format!("{samples} samples, no fragment function: {got:x?}"));
         }

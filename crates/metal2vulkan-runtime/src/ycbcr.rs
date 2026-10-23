@@ -1,13 +1,12 @@
-//! Two-plane YCbCr textures over an IOSurface's two planes: `YCBCR8_420_2P` (format 500), the
-//! texture CoreVideo's `420v` and `420f` surfaces are sampled through, `RGB8_420_2P` (540), the
-//! 4:2:2 and 4:4:4 formats `YCBCR8_422_2P`, `YCBCR8_444_2P`, `RGB8_422_2P` and `RGB8_444_2P` (502,
-//! 503, 541, 542) over the 8-bit surfaces, `YCBCR10_420_2P` and `RGB10_420_2P` (505 and 543),
-//! `YCBCR10_422_2P`, `YCBCR10_444_2P`, `RGB10_422_2P` and `RGB10_444_2P` (506, 507, 544, 545) over
-//! the 10-bit ones, the packed `YCBCR10_420_2P_PACKED`, `YCBCR10_422_2P_PACKED` and
-//! `YCBCR10_444_2P_PACKED` (508, 509, 510) over the packed ones (`p420` to `pf44`), and the `_sRGB`
-//! twins of the converted formats (520, 522, 523, 525, 526, 527, 528, 529, 530), each over a
-//! surface whose chroma plane holds its own (`SURFACES`), which Metal makes only over a surface
-//! (`newTextureWithDescriptor:iosurface:plane:`; plain creation answers nil,
+//! Two-plane YCbCr textures over an IOSurface's planes: `YCBCR8_420_2P` (format 500), the texture
+//! CoreVideo's `420v` and `420f` surfaces are sampled through, `RGB8_420_2P` (540), the 4:2:2 and
+//! 4:4:4 formats `YCBCR8_422_2P`, `YCBCR8_444_2P`, `RGB8_422_2P` and `RGB8_444_2P` (502, 503,
+//! 541, 542), `YCBCR10_420_2P` and `RGB10_420_2P` (505 and 543), `YCBCR10_422_2P`,
+//! `YCBCR10_444_2P`, `RGB10_422_2P` and `RGB10_444_2P` (506, 507, 544, 545), the packed
+//! `YCBCR10_420_2P_PACKED`, `YCBCR10_422_2P_PACKED` and `YCBCR10_444_2P_PACKED` (508, 509, 510),
+//! and the `_sRGB` twins of the converted formats (520, 522, 523, 525, 526, 527, 528, 529, 530),
+//! each over any plane of a surface as **Surfaces** below says, which Metal makes only over a
+//! surface (`newTextureWithDescriptor:iosurface:plane:`; plain creation answers nil,
 //! `TextureProblem::NoTextureOfFormat`), or as a view of its converted format.
 //!
 //! - **What Metal reads** (an Apple M4 under macOS 27.0.1; for 4:2:2 and 4:4:4): each texel from
@@ -66,12 +65,15 @@
 //!   with a buffer, which move bytes at places that follow no rule found, are refused.
 //! - **Plane 1** (each of the 18 unpacked formats above over plane 1 of `422v`,
 //!   `422f`, `444v`, `444f`, `x422`, `xf22`, `x444` and `xf44` surfaces, without a matrix and with
-//!   BT.709, 7 x 5 to 64 x 64; `read()`, a `half` read and nearest samples, 0 texels off). Over
-//!   plane 1 of a surface whose plane 1 is as tall as plane 0 (4:2:2, 4:4:4), Metal reads plane 1's
-//!   codes as the luma plane, at plane 1's rows, with chroma codes 0, converted as over plane 0
-//!   (the surface's range and matrix); its copies move plane 1's codes. The runtime converts the
-//!   same: the luma plane is plane 1, and the chroma plane one row of zeros the conversion's
-//!   staging buffer holds past the plane's bytes, every row read from it.
+//!   BT.709, 7 x 5 to 64 x 64; `read()`, a `half` read and nearest samples, 0 texels off; and
+//!   **Surfaces** above). Over plane 1 of a two-plane surface Metal reads plane 1's codes as the
+//!   luma plane, at plane 1's rows (past the plane where it is shorter than the texture), with
+//!   chroma codes 0, converted as over plane 0 (the surface's range and matrix); its copies move
+//!   plane 1's codes. The runtime converts the same: the luma plane is plane 1, and the chroma
+//!   plane one row of zeros the conversion's staging buffer holds past the plane's bytes, every
+//!   row read from it. Over plane 1 of a three-plane surface (`y420`, `v0a8`) Metal reads plane
+//!   2's pairs as chroma, which the facts do not name: the runtime reads chroma codes 0 there
+//!   (docs/FAST-PATHS.md's known gaps).
 //! - **Views.** A converted texture's view as its `_sRGB` twin (Metal makes it with
 //!   `ShaderRead` usage alone) is a texture of the twin over the same planes, with a conversion
 //!   of its own: Metal's view reads what a texture of the twin over the surface reads, bit for
@@ -81,17 +83,38 @@
 //!   an image of the codes over the same planes read through a swizzle
 //!   (`Texture::luma_view`); an `_sRGB` twin's reads no defined value on Metal and reads as its
 //!   converted format's here.
+//! - **Surfaces** (an Apple M3 Max under macOS 27.0.1; our probe `ycr`: each of the 24 formats
+//!   above over each plane of CoreVideo surfaces of 35 OSTypes, 16 x 8, random bytes, every texel
+//!   of `read()`, 1320 textures; and textures of other sizes and matrices). Metal makes such a
+//!   texture over any plane of a surface with planes and over plane 0 of one without (a later
+//!   plane of one without asserts), at any size. It reads the luma codes from the asked plane at
+//!   its offset and rows (a surface without planes: its base and rows) and the chroma pairs from
+//!   the plane after it at that plane's rows, each in the format's own layout and subsampling
+//!   whatever the surface's, or chroma codes 0 where no plane follows; bytes past the surface's
+//!   allocation read as zeros. It converts by full range over the full-range OSTypes (`420f`,
+//!   `422f`, `444f`, `xf20`, `xf22`, `xf44`, `pf20`, `pf22`, `pf44`) and by video range over
+//!   every other. No matrix, and a value other than those named, read as BT.601. `DCI_P3` and
+//!   `P3_D65` read each code alone: a converted format's red, green and blue are its luma, Cb and
+//!   Cr codes over `2^b - 1` (a code format reads as under any matrix), and a pass stores by
+//!   BT.601. A render target of a 4:2:0 or 4:2:2 format of an odd width or height is nil. The
+//!   runtime reads the same (`surface_planes`): the luma plane the call's, the chroma plane the
+//!   facts' plane 1 under plane 0 of a surface with planes and a row of zeros otherwise, the bytes
+//!   past its buffer zeros the conversion holds; a texture over a P3 surface is an image of the
+//!   codes of the code-reading format, read through a swizzle (`texture/ycbcr_image.rs`).
 //! - **Refused** (`Unsupported`, `NotImplemented`, `Feature::Format`, naming what): a surface of
-//!   an OSType the format is not measured over (Metal makes 505 and 543 over plane 0 of many
-//!   more), or whose chroma plane is smaller than the format's (Metal reads past it), plane 1 of a
-//!   4:2:0 surface (Metal reads its rows past the plane, into the bytes after it), plane 1 of a
-//!   packed surface (not measured), a plane past 1, plane 1 at other bytes than the surface's facts
-//!   name, a matrix other than BT.601, BT.709, BT.2020 or SMPTE 240M, a texture of another size
-//!   than the surface's, planes at offsets or rows off 16 bytes, a row shorter than its codes,
-//!   planes past the buffer, and planes past one storage range; a packed texture's blit with a
-//!   buffer (above); a copy between two such textures (Metal copies both planes), a view in another
-//!   format than the twin (a twin's view as its converted format among them, unmeasured), and a
-//!   pass rendering into one but as **Passes** below say (Metal converts back into the planes). A
+//!   a lossless compressed OSType (`&8v0`, `&xv2` and their kin: Metal reads compressed blocks), a
+//!   plane past 0 of a surface without planes, plane 1 at other bytes than the surface's facts
+//!   name, an `_sRGB` twin over a P3 surface (its reads follow no rule found), a load of a pass
+//!   into a P3 texture, a write of one, and a view of one but in its own format and type (none
+//!   measured), planes at offsets or rows off 16 bytes, and planes past one storage range; the
+//!   writes and passes of a texture whose reads reach past its buffer or over plane 1, or whose
+//!   rows of codes overlap; a packed texture's blit with a buffer (above); a copy between two such
+//!   textures (Metal copies both planes), a view in another format than the twin (a twin's view
+//!   as its converted format among them, unmeasured), and a pass rendering into one but as
+//!   **Passes** below say (Metal converts back into the planes). The runtime's gaps besides
+//!   (`NotImplemented`, `linear_plan.rs`): luma rows of codes that overlap (a 10-bit format over
+//!   rows under twice its width, `OverlappingSurfaceRows`) and luma rows past the buffer (a
+//!   texture taller than its plane at the surface's end, `TexelsPastBufferLength`). A
 //!   function's writes to a 4:2:0, 4:2:2 or packed format are dropped, as Metal drops them (the
 //!   packed 4:4:4 ones on the M3 Max under macOS 27.0.1, where an M4 stores them;
 //!   `metal::format::writes_dropped`); a 4:4:4 `_sRGB` twin's are refused (the twins' encoding is
@@ -158,45 +181,22 @@ use super::Device;
 use crate::device::functions::Vk;
 use ash::vk;
 use metal2vulkan::bind::{
-    YCbCrCodes, YCbCrConvertModule, YCbCrMatrix, YCbCrPlanes, YCbCrRange, YCbCrRefreshModule,
-    YCbCrWriteModule,
+    YCbCrCodes, YCbCrConvertModule, YCbCrMatrix, YCbCrOutput, YCbCrPlanes, YCbCrRange,
+    YCbCrRefreshModule, YCbCrWriteModule,
 };
 use metal2vulkan::error::{DiagName, Feature, Unsupported};
-use metal2vulkan::metal::format::{ycbcr_format, ChromaSubsampling};
+use metal2vulkan::metal::format::ycbcr_format;
 use metal2vulkan::metal::PixelFormat;
 use std::ops::Range;
 
-/// The CoreVideo surfaces a texture is made over (the module docs): the OSType, the bits of its
-/// codes and whether they are packed, which the format's must be, its range, and how its chroma
-/// plane is subsampled. `420v` and `420f` are 8-bit 4:2:0, `422v` and `422f` 4:2:2, `444v` and
-/// `444f` 4:4:4; `x420`, `x422` and `x444` 10-bit 4:2:0, 4:2:2 and 4:4:4 in 16-bit words, video
-/// range, and `xf20`, `xf22` and `xf44` the same, full range; `p420`, `p422` and `p444`, and
-/// `pf20`, `pf22` and `pf44`, the same packed three to a 32-bit word. A format reads a surface
-/// whose chroma plane holds its own: a 4:2:0 format a 4:2:2 or 4:4:4 surface's, a 4:2:2 format a
-/// 4:4:4 one's, each at the surface's rows.
-const SURFACES: [(&[u8; 4], u32, bool, YCbCrRange, ChromaSubsampling); 18] = {
-    use ChromaSubsampling::{Chroma420 as C420, Chroma422 as C422, Chroma444 as C444};
-    [
-        (b"420v", 8, false, YCbCrRange::Video, C420),
-        (b"420f", 8, false, YCbCrRange::Full, C420),
-        (b"422v", 8, false, YCbCrRange::Video, C422),
-        (b"422f", 8, false, YCbCrRange::Full, C422),
-        (b"444v", 8, false, YCbCrRange::Video, C444),
-        (b"444f", 8, false, YCbCrRange::Full, C444),
-        (b"x420", 10, false, YCbCrRange::Video, C420),
-        (b"xf20", 10, false, YCbCrRange::Full, C420),
-        (b"x422", 10, false, YCbCrRange::Video, C422),
-        (b"xf22", 10, false, YCbCrRange::Full, C422),
-        (b"x444", 10, false, YCbCrRange::Video, C444),
-        (b"xf44", 10, false, YCbCrRange::Full, C444),
-        (b"p420", 10, true, YCbCrRange::Video, C420),
-        (b"pf20", 10, true, YCbCrRange::Full, C420),
-        (b"p422", 10, true, YCbCrRange::Video, C422),
-        (b"pf22", 10, true, YCbCrRange::Full, C422),
-        (b"p444", 10, true, YCbCrRange::Video, C444),
-        (b"pf44", 10, true, YCbCrRange::Full, C444),
-    ]
-};
+/// The OSTypes of the full-range surfaces (the module docs): a texture over a surface of any other
+/// OSType reads its codes as video range.
+const FULL_RANGE: [&[u8; 4]; 9] = [
+    b"420f", b"422f", b"444f", b"xf20", b"xf22", b"xf44", b"pf20", b"pf22", b"pf44",
+];
+/// The first byte of the OSTypes of CoreVideo's lossless compressed surfaces (`'&8v0'`, `'&xv2'`
+/// and their kin), whose planes hold compressed blocks, which Metal reads as nothing found here.
+const COMPRESSED: u8 = b'&';
 /// What the planes' offsets and rows are multiples of: Metal's GPU reads a plane from its offset
 /// rounded down to 16, rows `bytesPerRow` rounded down to 16 apart (`linear_plan.rs`), which
 /// the conversion is measured at only where the two agree.
@@ -227,7 +227,8 @@ pub struct IoSurfaceYCbCr {
     /// The plane the texture is asked of (`newTextureWithDescriptor:iosurface:plane:`'s
     /// `plane`).
     pub plane: u64,
-    /// `IOSurfaceGetWidth` and `IOSurfaceGetHeight`: the luma plane's size.
+    /// `IOSurfaceGetWidth` and `IOSurfaceGetHeight`: the luma plane's size. A two-plane YCbCr
+    /// texture reads its rows whatever its size against it, as Metal's does.
     pub size: [u64; 2],
     /// Plane 1's first byte in the buffer that stands for the surface:
     /// `IOSurfaceGetBaseAddressOfPlane(surface, 1)` less `IOSurfaceGetBaseAddress`. A two-plane
@@ -278,7 +279,12 @@ pub enum SurfaceYCbCrMatrix {
     Itu2020,
     /// `SMPTE_240M_1995`, which Metal reads as BT.709.
     Smpte240M,
-    /// Any other value.
+    /// `DCI_P3`, which Metal reads as each code alone, not converted, and stores by BT.601 (the
+    /// module docs).
+    DciP3,
+    /// `P3_D65`, which Metal reads and stores as `DCI_P3`.
+    P3D65,
+    /// Any other value, which Metal reads as BT.601.
     Other,
 }
 
@@ -290,6 +296,8 @@ impl SurfaceYCbCrMatrix {
             "ITU_R_709_2" => SurfaceYCbCrMatrix::Itu709,
             "ITU_R_2020" => SurfaceYCbCrMatrix::Itu2020,
             "SMPTE_240M_1995" => SurfaceYCbCrMatrix::Smpte240M,
+            "DCI_P3" => SurfaceYCbCrMatrix::DciP3,
+            "P3_D65" => SurfaceYCbCrMatrix::P3D65,
             _ => SurfaceYCbCrMatrix::Other,
         }
     }
@@ -307,21 +315,16 @@ fn refused(pf: PixelFormat, what: String) -> Error {
 /// byte, and the span, the bytes the planes lie in. Refused as the module docs say.
 pub(super) fn surface_planes(
     layout: &TextureLayout,
-    luma: [u64; 2],
+    (luma, planar): ([u64; 2], bool),
     surface: &IoSurfaceYCbCr,
     length: u64,
     device: &Device,
 ) -> Result<(YCbCrPlanes, Range<u64>), Error> {
     let pf = layout.pixel_format;
     let refused = |what: String| refused(pf, what);
-    let codes = ycbcr_format(pf)
+    let mut codes = ycbcr_format(pf)
         .and_then(YCbCrCodes::of)
         .ok_or_else(|| internal("a YCbCr texture of a layout the conversion does not read"))?;
-    // The format's chroma plane fits in the surface's: halved along each axis the surface's is.
-    let fits = |chroma: ChromaSubsampling| {
-        let [ours, its] = [codes.subsampling, chroma].map(ChromaSubsampling::halved);
-        ours.iter().zip(its).all(|(&ours, its)| ours || !its)
-    };
     let code = || {
         surface
             .pixel_format
@@ -329,42 +332,44 @@ pub(super) fn surface_planes(
             .map(|b| b.escape_ascii().to_string())
             .concat()
     };
-    let measured = SURFACES.iter().find(|&&(code, bits, packed, _, _)| {
-        u32::from_be_bytes(*code) == surface.pixel_format
-            && (bits, packed) == (codes.bits, codes.packed)
-    });
-    let Some(&(_, _, _, range, chroma)) = measured else {
+    if surface.pixel_format.to_be_bytes()[0] == COMPRESSED {
         return Err(refused(format!("over a surface of OSType '{}'", code())));
+    }
+    let full = FULL_RANGE
+        .iter()
+        .any(|&code| u32::from_be_bytes(*code) == surface.pixel_format);
+    let range = match full {
+        true => YCbCrRange::Full,
+        false => YCbCrRange::Video,
     };
-    let plane_one = match surface.plane {
-        0 if fits(chroma) => false,
-        0 => return Err(refused(format!("over a surface of OSType '{}'", code()))),
-        1 if codes.packed => {
-            return Err(refused(format!(
-                "of plane 1 of a surface of OSType '{}'",
-                code()
-            )))
-        }
-        1 if !chroma.halved()[1] => true,
-        1 => {
-            return Err(refused(format!(
-                "of plane 1 of a surface of OSType '{}', whose rows Metal reads past the plane",
-                code()
-            )))
-        }
-        plane => return Err(refused(format!("of plane {plane}"))),
+    // The chroma codes are plane 1's, of a texture over plane 0 of a surface with planes, and 0
+    // of any other.
+    let chroma_zero = match surface.plane {
+        0 => !planar,
+        _ if !planar => return Err(refused(format!("of plane {}", surface.plane))),
+        _ => true,
     };
     let matrix = match surface.matrix {
-        None | Some(SurfaceYCbCrMatrix::Itu601) => YCbCrMatrix::Bt601,
+        None | Some(SurfaceYCbCrMatrix::Itu601 | SurfaceYCbCrMatrix::Other) => YCbCrMatrix::Bt601,
         Some(SurfaceYCbCrMatrix::Itu709 | SurfaceYCbCrMatrix::Smpte240M) => YCbCrMatrix::Bt709,
         Some(SurfaceYCbCrMatrix::Itu2020) => YCbCrMatrix::Bt2020,
-        Some(other) => return Err(refused(format!("of YCbCr matrix {other:?}"))),
+        // A P3 matrix: a converted format reads each code alone, its luma, Cb and Cr as red,
+        // green and blue, which the codes read (the texture presents them swizzled,
+        // `texture/ycbcr_image.rs`), and stores by BT.601; an `_sRGB` twin's reads follow no rule
+        // found.
+        Some(p3 @ (SurfaceYCbCrMatrix::DciP3 | SurfaceYCbCrMatrix::P3D65)) => {
+            match codes.output {
+                YCbCrOutput::Srgb => return Err(refused(format!("of YCbCr matrix {p3:?}"))),
+                _ => codes.output = YCbCrOutput::Codes,
+            }
+            YCbCrMatrix::Bt601
+        }
     };
     let [width, height, _] = layout.extent.map(u64::from);
-    if [width, height] != surface.size || layout.levels != 1 || layout.layers != 1 {
+    if layout.levels != 1 || layout.layers != 1 {
         return Err(refused(format!(
-            "of {width}x{height}, {} levels, {} slices, over a surface of {}x{}",
-            layout.levels, layout.layers, surface.size[0], surface.size[1]
+            "of {} levels, {} slices",
+            layout.levels, layout.layers
         )));
     }
     let halved = codes.subsampling.halved();
@@ -372,27 +377,35 @@ pub(super) fn surface_planes(
         [(width, halved[0]), (height, halved[1])]
             .map(|(n, halved)| if halved { n.div_ceil(2) } else { n });
     let chroma = [surface.chroma_offset, surface.chroma_bytes_per_row];
-    let aligned = luma
+    let read = luma
         .iter()
-        .chain(&chroma)
-        .all(|v| v.is_multiple_of(PLANE_ALIGNMENT));
+        .chain(if chroma_zero { &[] } else { &chroma[..] });
+    let aligned = read.into_iter().all(|v| v.is_multiple_of(PLANE_ALIGNMENT));
     // A row of `n` codes is `units(n)` units of `bytes` bytes (three packed codes to a unit).
     let unit = u64::from(codes.bytes);
     let [luma_bytes, chroma_bytes] = [width, 2 * cw].map(|n| unit * codes.units(n));
     // Over plane 1, the call's plane is the surface's plane 1, and its codes the luma.
-    let chroma_short = !plane_one && chroma[1] < chroma_bytes;
-    if !aligned || luma[1] < luma_bytes || chroma_short || (plane_one && luma != chroma) {
+    if !aligned || (surface.plane == 1 && planar && luma != chroma) {
         return Err(refused(format!(
             "with planes at {luma:?} and {chroma:?} (offset, bytes per row)"
         )));
     }
+    // The bytes the planes' rows reach, read whether or not the surface's planes hold them;
+    // the buffer's from its first, the rest past its end read as zeros (`YCbCrConversion`).
     let end = |[offset, row]: [u64; 2], rows: u64, bytes: u64| offset + row * (rows - 1) + bytes;
-    let span = match plane_one {
+    let reach = match chroma_zero {
         true => luma[0]..end(luma, height, luma_bytes),
         false => {
             luma[0].min(chroma[0])..end(luma, height, luma_bytes).max(end(chroma, ch, chroma_bytes))
         }
     };
+    if reach.start >= length {
+        return Err(refused(format!(
+            "with planes from byte {} of a buffer of {length}",
+            reach.start
+        )));
+    }
+    let span = reach.start..reach.end.min(length);
     let limit = u64::from(
         device
             .properties()
@@ -401,20 +414,20 @@ pub(super) fn surface_planes(
             .max_storage_buffer_range,
     )
     .min(u64::from(u32::MAX));
-    // Over plane 1 the conversion holds a row of zeros past the span too.
-    let zeros = if plane_one { chroma_bytes + 4 } else { 0 };
-    if span.end > length || span.end - span.start + zeros > limit - BYTES_AT {
+    // With chroma codes 0, the conversion holds a row of zeros past the reach too.
+    let zeros = if chroma_zero { chroma_bytes + 4 } else { 0 };
+    if reach.end - reach.start + zeros > limit - BYTES_AT {
         return Err(refused(format!(
-            "with planes over bytes {span:?} of a buffer of {length}"
+            "with planes over bytes {reach:?}, past one storage range"
         )));
     }
-    // The span is under `u32::MAX`, so every offset and row in it is.
+    // The reach is under `u32::MAX`, so every offset and row in it is.
     let word = |v: u64| v as u32;
-    // Over plane 1, chroma codes 0: one row of zeros past the span's bytes, which the
-    // conversion holds (`YCbCrConversion::new`), every row read from it.
-    let chroma = match plane_one {
-        true => [(span.end - span.start).next_multiple_of(4), 0],
-        false => [chroma[0] - span.start, chroma[1]],
+    // Chroma codes 0: one row of zeros past the reach, which the conversion holds
+    // (`YCbCrConversion::new`), every row read from it.
+    let chroma = match chroma_zero {
+        true => [(reach.end - reach.start).next_multiple_of(4), 0],
+        false => [chroma[0] - reach.start, chroma[1]],
     };
     let planes = YCbCrPlanes::new(
         [word(width), word(height)],
@@ -424,6 +437,19 @@ pub(super) fn surface_planes(
         codes,
     );
     Ok((planes, span))
+}
+
+/// The end of the bytes `planes` read, from their first: the end of the luma plane's last row
+/// of codes, or of the chroma plane's.
+fn planes_end(planes: &YCbCrPlanes) -> u64 {
+    let [w, h] = planes.size.map(u64::from);
+    let [cw, ch] = planes.chroma_size().map(u64::from);
+    // A row of `n` codes: as many units, or a third of them packed.
+    let row = |n: u64| planes.codes.units(n) * u64::from(planes.codes.bytes);
+    let end = |[at, pitch]: [u32; 2], rows: u64, bytes: u64| {
+        u64::from(at) + u64::from(pitch) * (rows.max(1) - 1) + bytes
+    };
+    end(planes.luma, h, row(w)).max(end(planes.chroma, ch, row(2 * cw)))
 }
 
 /// The conversion of a two-plane YCbCr texture's planes into its image (the module docs): the
@@ -536,14 +562,9 @@ impl YCbCrConversion {
     ) -> Result<YCbCrConversion, Error> {
         let span = bytes_in.end - bytes_in.start;
         let bytes = span.next_multiple_of(4);
-        // The chroma bytes the planes read past their span, zeros (a texture over plane 1,
-        // whose chroma codes are 0), filled at every conversion.
-        let [cw, ch] = planes.chroma_size().map(u64::from);
-        // A row of `2 * cw` codes: as many units, or a third of them packed.
-        let chroma_row = planes.codes.units(2 * cw) * u64::from(planes.codes.bytes);
-        let [chroma_at, chroma_pitch] = planes.chroma.map(u64::from);
-        let chroma_end = chroma_at + chroma_pitch * (ch.max(1) - 1) + chroma_row;
-        let zeros = chroma_end.saturating_sub(bytes).next_multiple_of(4);
+        // The bytes the planes read past their span, zeros (the chroma of a texture whose chroma
+        // codes are 0, and rows past the end of the buffer), filled at every conversion.
+        let zeros = planes_end(planes).saturating_sub(bytes).next_multiple_of(4);
         let held = bytes + zeros;
         let staging = device.own_buffer(BYTES_AT + held, ResourceOptions::private())?;
         let (raw, start) = staging.at(0);
@@ -610,9 +631,10 @@ impl YCbCrConversion {
         self.groups[0]
     }
 
-    /// Whether the texture is over plane 1 of its surface, its chroma codes the zeros the
-    /// staging buffer holds past the planes' bytes.
-    pub(super) fn over_plane_one(&self) -> bool {
+    /// Whether the texture reads zeros the staging buffer holds past the planes' bytes: chroma
+    /// codes 0 (over plane 1 of its surface, or a surface without planes), or rows past the end
+    /// of its buffer. Its writes and passes, and its retyped views, are refused.
+    pub(super) fn reads_zeros(&self) -> bool {
         self.zeros.1 > 0
     }
 

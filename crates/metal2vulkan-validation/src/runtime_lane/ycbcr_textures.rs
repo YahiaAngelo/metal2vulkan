@@ -23,9 +23,11 @@
 //!   other byte kept, and a packed one's dropped; those of the `_sRGB` twins, whose writes are not
 //!   known, and over plane 1 are refused, typed.
 //! - Plain creation and a buffer's texture of the format answer Metal's nil (`Error::Nil`,
-//!   `NoTextureOfFormat`) and the heap query 0 bytes at 16; a surface without its facts, plane 1
-//!   and a matrix other than BT.601, BT.709 and BT.2020 are refused, typed. Every other two-plane
-//!   YCbCr format answers as Metal does without a surface, and is refused over one.
+//!   `NoTextureOfFormat`) and the heap query 0 bytes at 16; a surface without its facts is
+//!   refused, typed. A texture over any other surface reads what Metal reads of it (other
+//!   OSTypes, planes, codes wider than the surface's, zeros past the buffer, P3 matrices). Every
+//!   two-plane YCbCr format answers as Metal does without a surface, and those the runtime does
+//!   not hold are refused over one.
 
 use super::argument_linear_samples::{self, LINEAR_EDGE};
 use super::blits::SYSTEM_MEMORY;
@@ -2297,8 +2299,8 @@ fn four_four_four_writes_of_unknown_codes_are_refused_typed() {
     });
 }
 
-/// Metal makes no `YCBCR8_420_2P` texture from a descriptor alone; the runtime refuses, typed,
-/// what it does not hold over a surface.
+/// Metal makes no `YCBCR8_420_2P` texture from a descriptor alone; the runtime refuses, typed, a
+/// surface without its facts and plane 1 at other bytes than the facts name.
 #[test]
 fn ycbcr_textures_are_made_only_over_their_surfaces() {
     on_device(|device, _| {
@@ -2332,26 +2334,14 @@ fn ycbcr_textures_are_made_only_over_their_surfaces() {
             Some(plane_one),
             TextureUsage::SHADER_READ,
         ));
-        let other_matrix = facts(VIDEO, Some(SurfaceYCbCrMatrix::Other));
-        unsupported(ycbcr_texture(
-            &surface,
-            Some(other_matrix),
-            TextureUsage::SHADER_READ,
-        ));
-        let other = facts(u32::from_be_bytes(*b"x420"), None);
-        unsupported(ycbcr_texture(
-            &surface,
-            Some(other),
-            TextureUsage::SHADER_READ,
-        ));
     });
 }
 
 /// Every two-plane YCbCr format answers as Metal does on an M4 without a surface: Metal's nil from
 /// a descriptor alone, a 2D multisample texture or array stopped, and the heap query 0 bytes at 16,
-/// or 128 for a 2D array; over a `420v` surface the runtime refuses, typed, every one but
-/// `YCBCR8_420_2P`, its sRGB twin and `RGB8_420_2P` (the 10-bit ones it makes over 10-bit surfaces,
-/// `ten_bit_textures_read_what_metal_reads`).
+/// or 128 for a 2D array; over a `420v` surface the runtime makes every one it holds, as Metal
+/// makes it over any surface (`textures_over_any_surface_read_what_metal_reads`), and refuses,
+/// typed, the rest.
 #[test]
 fn two_plane_ycbcr_formats_answer_as_metal_does() {
     on_device(|device, _| {
@@ -2396,12 +2386,10 @@ fn two_plane_ycbcr_formats_answer_as_metal_does() {
             multisample.array_length = 2;
             refused(&multisample, stopped);
             d.resource_options = ResourceOptions::shared();
-            let plane = IoSurfacePlane::new(0, ROW, true).with_ycbcr(facts(VIDEO, None));
+            let wide = IoSurfaceYCbCr::new(VIDEO, 0, [W, H], CHROMA10_AT, ROW10);
+            let plane = IoSurfacePlane::new(0, ROW10, true).with_ycbcr(wide);
             let made = surface.new_texture_with_iosurface_plane(&d, plane);
-            if matches!(
-                pf,
-                PixelFormat::YCBCR84202P | PixelFormat::YCBCR84202PSRGB | PixelFormat::RGB84202P
-            ) {
+            if ycbcr_format(pf).and_then(YCbCrCodes::of).is_some() {
                 assert!(made.is_ok(), "{pf:?}: {:?}", made.err());
             } else {
                 assert!(
@@ -2629,39 +2617,270 @@ fn ten_bit_textures_copy_their_luma_words() {
     });
 }
 
-/// The runtime refuses, typed, naming the format, what it does not hold of the 10-bit formats
-/// over a surface: an OSType whose codes are not the format's (`420v` under `YCBCR10_420_2P`,
-/// `x420` under `YCBCR8_420_2P`), plane 1, and a matrix other than BT.601, BT.709 and BT.2020.
+/// What a texture of `codes` reads of the surface `bytes`, zeros past their end, as Metal reads
+/// any surface (`ycbcr.rs`'s **Surfaces**): its luma codes from `luma` (offset, bytes per row)
+/// and its chroma pairs from `chroma`, or codes 0 without, each in the format's own layout
+/// (unpacked) and filtered at its subsampling; each texel [`W`]x[`H`] `ycbcr_read` of them.
+fn read_anywhere(
+    bytes: &[u8],
+    codes: YCbCrCodes,
+    conversion: (YCbCrRange, YCbCrMatrix),
+    (luma, chroma): ([u64; 2], Option<[u64; 2]>),
+) -> Vec<[u16; 3]> {
+    let byte = |at: u64| bytes.get(at as usize).copied().unwrap_or(0);
+    let unit = u64::from(codes.bytes);
+    let code = |at: u64| match unit {
+        1 => u16::from(byte(at)),
+        _ => u16::from_le_bytes([byte(at), byte(at + 1)]) >> 6,
+    };
+    let [across, down] = codes.subsampling.halved();
+    let [cw, ch] = [(W, across), (H, down)].map(|(n, halved)| if halved { n / 2 } else { n });
+    // The pairs along one axis at texel `q` and their weights, 4 in all.
+    let taps = |q: u64, halved: bool, n: u64| -> Vec<(u64, u32)> {
+        match halved {
+            false => vec![(q, 4)],
+            true if q % 2 == 1 => vec![(q / 2, 3), ((q / 2 + 1).min(n - 1), 1)],
+            true => vec![((q / 2).saturating_sub(1), 1), (q / 2, 3)],
+        }
+    };
+    let mut out = Vec::new();
+    for y in 0..H {
+        for x in 0..W {
+            let mut sums = [0u32; 2];
+            if let Some([at, row]) = chroma {
+                for (cy, wy) in taps(y, down, ch) {
+                    for (cx, wx) in taps(x, across, cw) {
+                        let pair = at + cy * row + 2 * unit * cx;
+                        sums[0] += wx * wy * u32::from(code(pair));
+                        sums[1] += wx * wy * u32::from(code(pair + unit));
+                    }
+                }
+            }
+            let [cb, cr] = sums.map(|s| ((s + 8) >> 4) as u16);
+            let y_code = code(luma[0] + y * luma[1] + unit * x);
+            out.push(ycbcr_read(codes, conversion, [y_code, cb, cr]));
+        }
+    }
+    out
+}
+
+/// The `float4`s `texels` against `want`'s codes over `max` exactly, each texel's red, green and
+/// blue `want`'s channels in that order, alpha 1.
+fn assert_codes_read(texels: &[u8], want: &[[u16; 3]], max: u16, case: &str) {
+    for (i, (t, w)) in texels.as_chunks::<16>().0.iter().zip(want).enumerate() {
+        let c = |i: usize| f32::from_le_bytes(t[4 * i..4 * i + 4].try_into().unwrap());
+        let got = [c(0), c(1), c(2), c(3)];
+        let want = [w[0], w[1], w[2]].map(|v| f32::from(v) / f32::from(max));
+        assert_eq!(
+            got,
+            [want[0], want[1], want[2], 1.0],
+            "{case}: texel {i} ({w:?})"
+        );
+    }
+}
+
+/// A texture over any surface reads what Metal reads of it (the M3 Max under macOS 27.0.1, our
+/// probe `ycr` over 35 OSTypes, every plane and format, every texel; `ycbcr.rs`'s **Surfaces**):
+/// a 10-bit format over an 8-bit `420v` surface; a 4:2:2 format over plane 1 of a 10-bit 4:2:0 surface (chroma codes 0); a
+/// format over a surface without planes (`BGRA`); a 4:4:4 format over a 4:2:0 full-range surface
+/// under a matrix of no known name (BT.601); a 4:2:0 one whose chroma rows run past the buffer
+/// (zeros there); and `DCI_P3` and `P3_D65` surfaces, whose converted formats read each code
+/// alone, red, green and blue its luma, Cb and Cr over `2^b - 1`, and whose code formats read as
+/// under any matrix. What Metal refuses or the runtime does not hold is refused, typed: a
+/// lossless compressed OSType, plane 1 of a surface without planes, an `_sRGB` twin over a P3
+/// surface, rows of codes that overlap (a 10-bit format over 8-bit rows narrower than its codes)
+/// and luma rows past the buffer, the last two the runtime's gaps. Metal makes no render target of
+/// a 4:2:0 format of odd width: its nil.
 #[test]
-fn ten_bit_textures_refuse_what_is_not_held() {
+fn textures_over_any_surface_read_what_metal_reads() {
+    use PixelFormat as P;
+    use YCbCrMatrix::Bt601;
+    use YCbCrRange::{Full, Video};
     on_device(|device, _| {
-        let surface = buffer_with(device, &ten_bit_bytes(5)).unwrap();
-        let refused = |made: Result<Texture, Error>, pf: PixelFormat, what: &str| {
-            let error = made.err();
-            let named = format!("{error:?}");
-            assert!(
-                matches!(error, Some(Error::Unsupported(_))) && named.contains(pf.name()),
-                "{pf:?} {what}: {named}"
-            );
+        let kernels = Kernels::new(device);
+        let mut random = Random(91);
+        let bytes: Vec<u8> = (0..LENGTH10).map(|_| random.next()).collect();
+        let surface = buffer_with(device, &bytes).unwrap();
+        // A buffer ending inside the chroma plane of a 40x24 `420v` surface (rows 64 apart).
+        let short_bytes = &bytes[..2000];
+        let short = buffer_with(device, short_bytes).unwrap();
+        let ostype = |code: &[u8; 4]| u32::from_be_bytes(*code);
+        let texture = |buffer: &Buffer,
+                       pf: PixelFormat,
+                       (code, plane, planar): (&[u8; 4], u64, bool),
+                       (luma, chroma): ([u64; 2], [u64; 2]),
+                       matrix: Option<SurfaceYCbCrMatrix>| {
+            let mut d = TextureDescriptor::texture_2d(pf, W, H, false);
+            d.usage = TextureUsage::SHADER_READ;
+            d.resource_options = ResourceOptions::shared();
+            let facts = IoSurfaceYCbCr::new(ostype(code), plane, [W, H], chroma[0], chroma[1]);
+            let facts = match matrix {
+                Some(matrix) => facts.with_matrix(matrix),
+                None => facts,
+            };
+            let at = IoSurfacePlane::new(luma[0], luma[1], planar).with_ycbcr(facts);
+            buffer.new_texture_with_iosurface_plane(&d, at)
         };
-        for pf in [PixelFormat::YCBCR104202P, PixelFormat::RGB104202P] {
-            let made = ten_bit_texture(&surface, pf, (b"420v", 0), None);
-            refused(made, pf, "over 420v");
-            let made = ten_bit_texture(&surface, pf, (b"x420", 1), None);
-            refused(made, pf, "of plane 1");
-            let other = Some(SurfaceYCbCrMatrix::Other);
-            refused(
-                ten_bit_texture(&surface, pf, (b"x420", 0), other),
-                pf,
-                "another matrix",
+        let codes = |pf: PixelFormat| ycbcr_format(pf).and_then(YCbCrCodes::of).unwrap();
+        let plane0 = ([0, ROW], [CHROMA_AT, ROW]);
+        let wide = ([0, ROW10], [CHROMA10_AT, ROW10]);
+        let plane1 = ([CHROMA10_AT, ROW10], [CHROMA10_AT, ROW10]);
+        let p3 = Some(SurfaceYCbCrMatrix::DciP3);
+        let p3d65 = Some(SurfaceYCbCrMatrix::P3D65);
+        let other = Some(SurfaceYCbCrMatrix::Other);
+        let converted = [
+            // (format, buffer, surface, planes, matrix, range, chroma read)
+            (
+                P::YCBCR104202P,
+                &surface,
+                (b"420v", 0, true),
+                wide,
+                None,
+                Video,
+                true,
+            ),
+            (
+                P::YCBCR84222P,
+                &surface,
+                (b"x420", 1, true),
+                plane1,
+                None,
+                Video,
+                false,
+            ),
+            (
+                P::YCBCR84202P,
+                &surface,
+                (b"BGRA", 0, false),
+                plane0,
+                None,
+                Video,
+                false,
+            ),
+            (
+                P::YCBCR84442P,
+                &surface,
+                (b"420f", 0, true),
+                plane0,
+                other,
+                Full,
+                true,
+            ),
+            (
+                P::YCBCR84202P,
+                &short,
+                (b"420v", 0, true),
+                plane0,
+                None,
+                Video,
+                true,
+            ),
+        ];
+        for (pf, buffer, at, planes, matrix, range, read_chroma) in converted {
+            let case = format!(
+                "{pf:?} over {:?}",
+                (String::from_utf8_lossy(at.0), at.1, at.2)
+            );
+            let made = texture(buffer, pf, at, planes, matrix);
+            let made = made.unwrap_or_else(|e| panic!("{case}: {e:?}"));
+            let source = match buffer.length() {
+                2000 => short_bytes,
+                _ => &bytes[..],
+            };
+            let chroma = read_chroma.then_some(planes.1);
+            let want = read_anywhere(source, codes(pf), (range, Bt601), (planes.0, chroma));
+            let got = grid(&texels_of(device, &kernels.read, &made, None));
+            assert_eq!(got, want, "{case}");
+        }
+        // P3: a converted format reads its luma, Cb and Cr codes alone, a code format its codes.
+        for (pf, matrix) in [
+            (P::YCBCR84202P, p3),
+            (P::YCBCR104202P, p3d65),
+            (P::RGB84202P, p3),
+        ] {
+            let case = format!("{pf:?} under {matrix:?}");
+            let made = texture(&surface, pf, (b"420v", 0, true), wide, matrix);
+            let made = made.unwrap_or_else(|e| panic!("{case}: {e:?}"));
+            let mut read = codes(pf);
+            read.output = YCbCrOutput::Codes;
+            let raw = read_anywhere(&bytes, read, (Video, Bt601), (wide.0, Some(wide.1)));
+            // `ycbcr_read` of codes answers red Cr, green Y, blue Cb.
+            let want: Vec<[u16; 3]> = match ycbcr_format(pf).unwrap().reads {
+                YCbCrReads::Codes => raw,
+                _ => raw.iter().map(|&[cr, y, cb]| [y, cb, cr]).collect(),
+            };
+            let max = (1u16 << read.bits) - 1;
+            assert_codes_read(
+                &texels_of(device, &kernels.read, &made, None),
+                &want,
+                max,
+                &case,
             );
         }
-        let pf = PixelFormat::YCBCR84202P;
+        let refused = |made: Result<Texture, Error>, what: &str| {
+            assert!(
+                matches!(made, Err(Error::Unsupported(_))),
+                "{what}: {:?}",
+                made.err()
+            );
+        };
         refused(
-            ten_bit_texture(&surface, pf, (b"x420", 0), None),
-            pf,
-            "over x420",
+            texture(&surface, P::YCBCR84202P, (b"&8v0", 0, true), plane0, None),
+            "a compressed surface",
         );
+        refused(
+            texture(&surface, P::YCBCR84202P, (b"BGRA", 1, false), plane0, None),
+            "plane 1 of a surface without planes",
+        );
+        refused(
+            texture(&surface, P::YCBCR84202PSRGB, (b"420v", 0, true), plane0, p3),
+            "an sRGB twin over a P3 surface",
+        );
+        // The runtime's gaps: rows of codes that overlap (a 10-bit format over 8-bit rows of 64
+        // bytes), and luma rows past the buffer (plane 1 of a surface ending inside it).
+        assert_eq!(
+            texture(&surface, P::YCBCR104202P, (b"420v", 0, true), plane0, None).err(),
+            Some(Error::NotImplemented(RuntimeGap::OverlappingSurfaceRows)),
+            "rows of codes that overlap"
+        );
+        let short_plane1 = ([CHROMA_AT, ROW], [CHROMA_AT, ROW]);
+        assert_eq!(
+            texture(
+                &short,
+                P::YCBCR84202P,
+                (b"420v", 1, true),
+                short_plane1,
+                None
+            )
+            .err(),
+            Some(Error::NotImplemented(RuntimeGap::TexelsPastBufferLength)),
+            "luma rows past the buffer"
+        );
+        // Odd widths: a render target is Metal's nil, a texture to read is made.
+        for (usage, made) in [
+            (
+                TextureUsage::SHADER_READ | TextureUsage::RENDER_TARGET,
+                false,
+            ),
+            (TextureUsage::SHADER_READ, true),
+        ] {
+            let mut d = TextureDescriptor::texture_2d(P::YCBCR84202P, W - 1, H, false);
+            d.usage = usage;
+            d.resource_options = ResourceOptions::shared();
+            let facts = IoSurfaceYCbCr::new(ostype(b"420v"), 0, [W - 1, H], CHROMA_AT, ROW);
+            let at = IoSurfacePlane::new(0, ROW, true).with_ycbcr(facts);
+            let result = surface.new_texture_with_iosurface_plane(&d, at);
+            match made {
+                true => assert!(result.is_ok(), "{:?}", result.err()),
+                false => assert_eq!(
+                    result.err(),
+                    Some(Error::Nil(Nil::new(
+                        "new_texture_with_iosurface_plane",
+                        Problem::Texture(TextureProblem::ExtentForFormat),
+                    )))
+                ),
+            }
+        }
     });
 }
 
@@ -3374,7 +3593,7 @@ fn family_texture(
 /// with BT.709, with BT.2020 and with SMPTE 240M (read as BT.709): `read()`, a nearest and a linear
 /// sample at each texel's centre, and a `half` read (the twins' steps rounded with ties away from
 /// zero). No filter notice. A format over a surface whose chroma plane holds its own reads its
-/// pairs at the surface's rows; over one whose plane is smaller it is refused.
+/// pairs at the surface's rows, and over one whose plane is smaller the same, past the plane.
 #[test]
 fn four_two_two_and_four_four_four_textures_read_what_metal_reads() {
     on_device(|device, messages| {
@@ -3457,8 +3676,8 @@ fn four_two_two_and_four_four_four_textures_read_what_metal_reads() {
             let want = family_modelled(&bytes, codes, (range, YCbCrMatrix::Bt601));
             assert_eq!(read, want, "{pf:?} over {ostype}");
         }
-        // Over a surface whose chroma plane is smaller than the format's (Metal reads past it):
-        // refused.
+        // Over a surface whose chroma plane is smaller than the format's: the format's pairs at
+        // the surface's rows all the same, past the plane where it ends.
         for (pf, ostype) in [
             (PixelFormat::YCBCR84222P, "420v"),
             (PixelFormat::YCBCR84442P, "422v"),
@@ -3466,13 +3685,13 @@ fn four_two_two_and_four_four_four_textures_read_what_metal_reads() {
             (PixelFormat::YCBCR104442P, "x422"),
         ] {
             let codes = ycbcr_format(pf).and_then(YCbCrCodes::of).unwrap();
-            let surface = buffer_with(device, &family_bytes(1, codes)).unwrap();
-            let made = family_texture(&surface, pf, ostype, None);
-            let named = format!("{:?}", made.as_ref().err());
-            assert!(
-                matches!(made, Err(Error::Unsupported(_))) && named.contains(pf.name()),
-                "{pf:?} over {ostype}: {named}"
-            );
+            let bytes = family_bytes(1, codes);
+            let surface = buffer_with(device, &bytes).unwrap();
+            let texture = family_texture(&surface, pf, ostype, None)
+                .unwrap_or_else(|e| panic!("{pf:?} over {ostype}: {e:?}"));
+            let read = grid_of(&texels_of(device, &kernels.read, &texture, None), 2048);
+            let want = family_modelled(&bytes, codes, (YCbCrRange::Video, YCbCrMatrix::Bt601));
+            assert_eq!(read, want, "{pf:?} over {ostype}");
         }
     });
 }
@@ -3704,7 +3923,8 @@ fn ycbcr_half_gathers_round_ties_away() {
 /// `x444`, `xf44`), and the 4:2:2 ones over a 4:4:4 surface (whose plane theirs fits in), without
 /// a matrix, with BT.709 and with BT.2020: red Cr, green Y, blue Cb, each `code / (2^b - 1)`,
 /// alpha 1, after the format's chroma filter, whatever the matrix: `read()`, and a nearest and a
-/// linear sample at each texel's centre. No filter notice.
+/// linear sample at each texel's centre. No filter notice. Over a surface whose chroma plane
+/// theirs does not fit in, their pairs at the surface's rows, past the plane.
 #[test]
 fn four_two_two_and_four_four_four_codes_read_what_metal_reads() {
     on_device(|device, messages| {
@@ -3751,7 +3971,8 @@ fn four_two_two_and_four_four_four_codes_read_what_metal_reads() {
         ] {
             assert_eq!(notices.get(&kind), None, "{notices:?}");
         }
-        // Over a surface whose chroma plane theirs does not fit in (Metal reads past it): refused.
+        // Over a surface whose chroma plane theirs does not fit in: their pairs at the surface's
+        // rows all the same, past the plane where it ends.
         for (pf, ostype) in [
             (PixelFormat::RGB84222P, "420v"),
             (PixelFormat::RGB84442P, "422v"),
@@ -3759,26 +3980,27 @@ fn four_two_two_and_four_four_four_codes_read_what_metal_reads() {
             (PixelFormat::RGB104442P, "x422"),
         ] {
             let codes = ycbcr_format(pf).and_then(YCbCrCodes::of).unwrap();
-            let surface = buffer_with(device, &family_bytes(1, codes)).unwrap();
-            let made = family_texture(&surface, pf, ostype, None);
-            let named = format!("{:?}", made.as_ref().err());
-            assert!(
-                matches!(made, Err(Error::Unsupported(_))) && named.contains(pf.name()),
-                "{pf:?} over {ostype}: {named}"
-            );
+            let bytes = family_bytes(1, codes);
+            let surface = buffer_with(device, &bytes).unwrap();
+            let texture = family_texture(&surface, pf, ostype, None)
+                .unwrap_or_else(|e| panic!("{pf:?} over {ostype}: {e:?}"));
+            let max = (1u16 << codes.bits) - 1;
+            let read = code_grid(&texels_of(device, &kernels.read, &texture, None), max);
+            let want = family_modelled(&bytes, codes, (YCbCrRange::Video, YCbCrMatrix::Bt601));
+            assert_eq!(read, want, "{pf:?} over {ostype}");
         }
     });
 }
 
-/// A texture over plane 1 of a 4:2:2 or 4:4:4 surface reads plane 1's codes as its luma plane,
-/// at plane 1's rows, with chroma codes 0, as Metal does (every one of the 18
-/// formats over plane 1 of `422v`, `422f`, `444v`, `444f`, `x422`, `xf22`, `x444` and `xf44`,
-/// 0 texels off that model): each format over each such surface of its bits, without a matrix
-/// and with BT.709, reads (`read()`, a nearest sample, and the converted ones' `half` read) what
-/// it reads over plane 0 of a surface whose luma rows hold plane 1's codes and whose chroma
-/// plane holds 0; `get_bytes` moves plane 1's codes. Over plane 1 of a 4:2:0 surface (whose rows
-/// Metal reads past the plane), over plane 2, and over plane 1 at other bytes than the facts
-/// name, it is refused, naming the format.
+/// A texture over plane 1 of a two-plane surface reads plane 1's codes as its luma plane, at
+/// plane 1's rows, with chroma codes 0, as Metal does (every one of the 18 formats over plane 1
+/// of `422v`, `422f`, `444v`, `444f`, `x422`, `xf22`, `x444` and `xf44`, 0 texels off that
+/// model, and our probe `ycr`'s scan of every plane): each format over each such surface of its
+/// bits and over `420v`, `420f`, `x420` and `xf20` (whose plane 1 the rows here hold), without a
+/// matrix and with BT.709, reads (`read()`, a nearest sample, and the converted ones' `half`
+/// read) what it reads over plane 0 of a surface whose luma rows hold plane 1's codes and whose
+/// chroma plane holds 0; `get_bytes` moves plane 1's codes. Over plane 1 at other bytes than the
+/// facts name it is refused, naming the format.
 #[test]
 fn ycbcr_textures_over_plane_1_read_its_codes_as_luma() {
     on_device(|device, _| {
@@ -3826,10 +4048,12 @@ fn ycbcr_textures_over_plane_1_read_its_codes_as_luma() {
             let codes = ycbcr_format(pf).and_then(YCbCrCodes::of).unwrap();
             let unit = u64::from(codes.bytes);
             let ostypes = match codes.bits {
-                8 => ["422v", "422f", "444v", "444f"],
-                _ => ["x422", "xf22", "x444", "xf44"],
+                8 => ["422v", "422f", "444v", "444f", "420v", "420f"],
+                _ => ["x422", "xf22", "x444", "xf44", "x420", "xf20"],
             };
             for (ostype, range) in ostypes.into_iter().zip([
+                YCbCrRange::Video,
+                YCbCrRange::Full,
                 YCbCrRange::Video,
                 YCbCrRange::Full,
                 YCbCrRange::Video,
@@ -3896,14 +4120,9 @@ fn ycbcr_textures_over_plane_1_read_its_codes_as_luma() {
                 }
             }
         }
-        // Refused: plane 1 of a 4:2:0 surface, plane 2, plane 1 at other bytes than the facts'.
+        // Refused: plane 1 at other bytes than the facts'.
         let surface = buffer_with(device, &vec![0; (2 * ROWQ * H) as usize]).unwrap();
-        for (pf, ostype, plane, at) in [
-            (PixelFormat::YCBCR84202P, "420v", 1, CHROMAQ_AT),
-            (PixelFormat::YCBCR104222P, "x420", 1, CHROMAQ_AT),
-            (PixelFormat::YCBCR84222P, "422v", 2, CHROMAQ_AT),
-            (PixelFormat::YCBCR84442P, "444v", 1, CHROMAQ_AT + ROWQ),
-        ] {
+        for (pf, ostype, plane, at) in [(PixelFormat::YCBCR84442P, "444v", 1, CHROMAQ_AT + ROWQ)] {
             let made = over_plane_1(&surface, pf, ostype, plane, at, None);
             let named = format!("{:?}", made.as_ref().err());
             assert!(
@@ -3931,8 +4150,9 @@ const PACKED: [(PixelFormat, [&str; 2]); 6] = [
 /// centre, a `half` read (the twins' steps rounded with ties away from zero), and a linear sample
 /// between texels Metal's step (every case of the six formats). No filter notice. A 4:2:0 format
 /// over a packed 4:4:4 surface reads its pairs at the surface's rows; a format over a surface whose
-/// plane is smaller, a packed one over an unpacked surface, an unpacked one over a packed surface,
-/// and one over plane 1 of a packed surface are refused.
+/// plane is smaller, a packed one over an unpacked surface and an unpacked one over a packed
+/// surface read their own codes at the surface's rows by its range, and one over plane 1 of a
+/// packed surface plane 1's codes as its luma with chroma codes 0.
 #[test]
 fn packed_textures_read_what_metal_reads() {
     on_device(|device, messages| {
@@ -4016,41 +4236,56 @@ fn packed_textures_read_what_metal_reads() {
             let want = family_modelled(&bytes, codes, (range, YCbCrMatrix::Bt601));
             assert_eq!(read, want, "{pf:?} over {ostype}");
         }
-        // Over a surface whose chroma plane is smaller than the format's (Metal reads past it),
-        // or whose codes are held otherwise (not measured): refused.
-        for (pf, ostype) in [
-            (PixelFormat::YCBCR104222PPACKED, "p420"),
-            (PixelFormat::YCBCR104442PPACKEDSRGB, "pf22"),
-            (PixelFormat::YCBCR104202PPACKED, "x420"),
-            (PixelFormat::YCBCR104442PPACKED, "xf44"),
-            (PixelFormat::YCBCR104202P, "p420"),
-            (PixelFormat::YCBCR104442PSRGB, "pf44"),
+        // Over a surface whose chroma plane is smaller than the format's, or whose codes are
+        // held otherwise: the format's codes, in its own layout, at the surface's rows, by the
+        // surface's range.
+        for (pf, ostype, range) in [
+            (PixelFormat::YCBCR104222PPACKED, "p420", YCbCrRange::Video),
+            (
+                PixelFormat::YCBCR104442PPACKEDSRGB,
+                "pf22",
+                YCbCrRange::Full,
+            ),
+            (PixelFormat::YCBCR104202PPACKED, "x420", YCbCrRange::Video),
+            (PixelFormat::YCBCR104442PPACKED, "xf44", YCbCrRange::Full),
+            (PixelFormat::YCBCR104202P, "p420", YCbCrRange::Video),
+            (PixelFormat::YCBCR104442PSRGB, "pf44", YCbCrRange::Full),
         ] {
             let codes = ycbcr_format(pf).and_then(YCbCrCodes::of).unwrap();
-            let surface = buffer_with(device, &family_bytes(1, codes)).unwrap();
-            let made = family_texture(&surface, pf, ostype, None);
-            let named = format!("{:?}", made.as_ref().err());
-            assert!(
-                matches!(made, Err(Error::Unsupported(_))) && named.contains(pf.name()),
-                "{pf:?} over {ostype}: {named}"
-            );
+            let bytes = family_bytes(1, codes);
+            let surface = buffer_with(device, &bytes).unwrap();
+            let texture = family_texture(&surface, pf, ostype, None)
+                .unwrap_or_else(|e| panic!("{pf:?} over {ostype}: {e:?}"));
+            let grid = match codes.output {
+                YCbCrOutput::Srgb => 8192,
+                _ => 2048,
+            };
+            let read = grid_of(&texels_of(device, &kernels.read, &texture, None), grid);
+            let want = family_modelled(&bytes, codes, (range, YCbCrMatrix::Bt601));
+            assert_eq!(read, want, "{pf:?} over {ostype}");
         }
-        // Over plane 1 of a packed surface (not measured; only the unpacked ones' are read):
-        // refused.
+        // Over plane 1 of a packed surface: plane 1's codes as the luma, chroma codes 0.
         let pf = PixelFormat::YCBCR104442PPACKED;
         let codes = ycbcr_format(pf).and_then(YCbCrCodes::of).unwrap();
-        let surface = buffer_with(device, &family_bytes(2, codes)).unwrap();
+        let bytes = family_bytes(2, codes);
+        let surface = buffer_with(device, &bytes).unwrap();
         let mut d = TextureDescriptor::texture_2d(pf, W, H, false);
         d.usage = TextureUsage::SHADER_READ;
         d.resource_options = ResourceOptions::shared();
         let facts = IoSurfaceYCbCr::new(u32::from_be_bytes(*b"p444"), 1, [W, H], CHROMAQ_AT, ROWQ);
         let plane = IoSurfacePlane::new(CHROMAQ_AT, ROWQ, true).with_ycbcr(facts);
-        let made = surface.new_texture_with_iosurface_plane(&d, plane);
-        let named = format!("{:?}", made.as_ref().err());
-        assert!(
-            matches!(made, Err(Error::Unsupported(_))) && named.contains(pf.name()),
-            "{pf:?} over plane 1 of p444: {named}"
-        );
+        let texture = surface
+            .new_texture_with_iosurface_plane(&d, plane)
+            .unwrap_or_else(|e| panic!("{pf:?} over plane 1 of p444: {e:?}"));
+        let mut moved = vec![0; bytes.len()];
+        let row = row_bytes(codes, W) as usize;
+        for y in 0..H as usize {
+            let from = CHROMAQ_AT as usize + y * ROWQ as usize;
+            moved[y * ROWQ as usize..][..row].copy_from_slice(&bytes[from..from + row]);
+        }
+        let read = grid_of(&texels_of(device, &kernels.read, &texture, None), 2048);
+        let want = family_modelled(&moved, codes, (YCbCrRange::Video, YCbCrMatrix::Bt601));
+        assert_eq!(read, want, "{pf:?} over plane 1 of p444");
     });
 }
 

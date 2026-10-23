@@ -1205,8 +1205,9 @@ pub enum RuntimeGap {
     /// Render pipelines, passes and draws.
     Render,
     /// A 2D array over a buffer whose texels run past the buffer's length, which Metal makes
-    /// over bytes its buffer's allocation has past the length: the runtime's buffers have none
-    /// there.
+    /// over bytes its buffer's allocation has past the length, or a two-plane YCbCr texture over
+    /// a surface's plane whose luma codes run past the buffer, which Metal reads as zeros there:
+    /// the runtime's buffers have no bytes there.
     TexelsPastBufferLength,
     /// A texture of an IOSurface plane (`Buffer::new_texture_with_iosurface_plane`, the stand-in
     /// for `newTextureWithDescriptor:iosurface:plane:`) whose rows overlap on Metal's GPU: more
