@@ -1882,7 +1882,7 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   (`BGR10_XR`, `BGRA10_XR`, `RGB10A8_2P_XR10`, `R10Unorm_X6`, `RG10Unorm_X12` and their sRGB twins,
   and `RGB10A2Unorm_sRGB`) and does not discard it at the store, where the pass's load pass does
   not take it: a multisampled attachment, a texture held as a shadow of another image or of a
-  heap's bytes, a sparse one, or one whose image the device does not copy both ways (a padded format has none of these). Cost: the
+  heap's bytes, a sparse one, or one whose image the device does not copy both ways (a padded format takes no multisample texture). Cost: the
   texels the pass's draws do not write keep their bytes; Metal's pass keeps their codes but rewrites
   the bits they leave unused in each tile a draw reaches (BGR10_XR's bits 30 and 31 to ones,
   BGRA10_XR's low six bits of each field to zeros, the two-plane color word's top two bits to zeros)
@@ -3278,6 +3278,19 @@ each item named states the rule in full.
 
 - **A view of an `_sRGB` twin as a 2D array reads its luma codes**, as its converted format's
   view does, where Metal's reads change from run to run.
+
+**Padded 10-bit textures** (`R10Unorm_X6`, `RG10Unorm_X12` and their `_sRGB` twins)
+
+- **A texture of one in memory of its own round-trips its words at every extent.** Metal makes
+  such a texture from every creator but `newSharedTextureWithDescriptor:`, which answers nil, and
+  the runtime makes it from each of those too. Metal's own `replaceRegion:` and `getBytes:` on it
+  are exact only while it keeps the texture linear, and are silent no-ops where it picks its
+  compressed layout instead (`allocatedSize` 128 bytes or more beyond the tight linear size: on an
+  M3 Max under macOS 27.0.1, 16x16 and 64x64 under `ShaderRead` alone, where `getBytes:` left its
+  destination untouched and a shader read 0 at every texel after a `replaceRegion:`; exact at every
+  height to 8 at widths to 1024, and at 16x16 once the usage included `ShaderWrite`). A blit either
+  way moves the texels in both layouts. Which extents Metal compresses is an undocumented, per-chip
+  choice, so the runtime moves the caller's bytes at every extent rather than predict it.
 
 **Rasterization-rate maps**
 

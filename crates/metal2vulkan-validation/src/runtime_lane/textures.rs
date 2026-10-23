@@ -10,11 +10,11 @@ use crate::case::{TextureFormat as CaseFormat, TextureType as CaseType};
 use crate::executor_contract::multisample::{ReadbackView, SampleRead};
 use crate::gpu::TEST_DEVICE;
 use crate::literal::texture_layout;
-use metal2vulkan::error::{Feature, Unsupported};
+use metal2vulkan::error::Feature;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
     BlitOption, Buffer, CommandBufferStatus, CopyProblem, Device, Error, HeapDescriptor, HeapType,
-    Invalid, Origin, Problem, Region, ResourceOptions, Size, StorageMode, Texture,
+    Invalid, Nil, Origin, Problem, Region, ResourceOptions, Size, StorageMode, Texture,
     TextureDescriptor, TextureProblem, ViewProblem,
 };
 
@@ -51,14 +51,23 @@ pub(super) fn no_texture_alone(pf: PixelFormat) -> bool {
         )
 }
 
-/// `R10Unorm_X6` and `RG10Unorm_X12`, and their `_sRGB` twins, are made only over memory a texture
-/// is given, as Metal's textures of them store nothing in memory of their own: every creator of a
-/// texture in memory of its own refuses them `NotImplemented(Format)`
-/// naming the format (the device's `new_texture`, an automatic heap's `new_texture`,
-/// `new_shared_texture`, each for a 2D texture and a texture buffer, and the heap size query), and
-/// a caller's buffer's `new_texture` makes them.
+/// `R10Unorm_X6` and `RG10Unorm_X12`, and their `_sRGB` twins, are made in memory of their own as
+/// readily as over memory a texture is given, as Metal's are: the device's `new_texture`, an
+/// automatic heap's, a placement heap's `new_texture_at_offset`, the heap size query and a
+/// caller's buffer's all answer a texture, for a 2D texture and a texture buffer alike, and only
+/// `new_shared_texture` answers nil (`NoTextureOfFormat`), as plain
+/// `newSharedTextureWithDescriptor:` does for all four. A multisample one stays refused, Metal's
+/// validation stopping it ("does not support multisample textures").
+///
+/// Measured on an Apple M3 Max under macOS 27.0.1 (26A434) for all four formats: every one of
+/// those creators answered a texture in `Shared`, `Private` and `Memoryless` storage, under
+/// `ShaderRead`, `ShaderRead | ShaderWrite` and `ShaderRead | RenderTarget` usage, with four
+/// levels, as an array of three slices and as a texture buffer of 64 texels; a sparse heap placed
+/// one too; and the heap size query answered the tight linear size at an alignment of 128. The
+/// shareable creator answered nil for all four, and the multisample descriptor ended the process
+/// in Metal's validation.
 #[test]
-fn padded_formats_are_made_only_over_given_memory() {
+fn padded_formats_are_made_in_memory_of_their_own() {
     let cache = ScratchCache::new().unwrap();
     let messages = Messages::default();
     {
@@ -73,9 +82,6 @@ fn padded_formats_are_made_only_over_given_memory() {
             PixelFormat::R10UnormX6SRGB,
             PixelFormat::RG10UnormX12SRGB,
         ] {
-            let refused = Some(Error::Unsupported(
-                Unsupported::not_implemented(Feature::Format).naming_format(pf),
-            ));
             let usage = TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE;
             let mut plain = TextureDescriptor::texture_2d(pf, 16, 16, false);
             plain.usage = usage;
@@ -83,19 +89,46 @@ fn padded_formats_are_made_only_over_given_memory() {
             let texels = TextureDescriptor::texture_buffer(pf, 64, private, usage);
             for (what, d) in [("2D", &plain), ("texture buffer", &texels)] {
                 let what = format!("{pf:?} {what}");
-                assert_eq!(device.new_texture(d).err(), refused, "{what}: the device's");
-                assert_eq!(heap.new_texture(d).err(), refused, "{what}: the heap's");
+                let made = |r: Result<Texture, Error>, who: &str| {
+                    let texture = r.unwrap_or_else(|e| panic!("{what}: {who}: {e}"));
+                    assert_eq!(texture.pixel_format(), pf, "{what}: {who}");
+                };
+                made(device.new_texture(d), "the device's");
+                made(heap.new_texture(d), "an automatic heap's");
+                let answer = device
+                    .heap_texture_size_and_align(d)
+                    .unwrap_or_else(|e| panic!("{what}: the heap size query: {e}"));
+                assert!(answer.size > 0, "{what}: the heap size query: {answer:?}");
+                let placing =
+                    HeapDescriptor::new(HeapType::Placement, answer.size.max(1 << 16), private);
+                let placed = device.new_heap(&placing).unwrap();
+                made(
+                    placed.new_texture_at_offset(d, 0),
+                    "a placement heap's at 0",
+                );
+                // Only the shareable creator answers nil, as plain Metal's does.
                 assert_eq!(
                     device.new_shared_texture(d).err(),
-                    refused,
+                    Some(Error::Nil(Nil::new(
+                        "new_shared_texture",
+                        Problem::Texture(TextureProblem::NoTextureOfFormat),
+                    ))),
                     "{what}: a shareable one"
                 );
-                assert_eq!(
-                    device.heap_texture_size_and_align(d).err(),
-                    refused,
-                    "{what}: the heap size query"
-                );
             }
+            // A multisample one stays refused: Metal's validation stops it.
+            let mut multisample = plain;
+            multisample.texture_type = TextureType::Type2DMultisample;
+            multisample.sample_count = 4;
+            multisample.usage = TextureUsage::RENDER_TARGET;
+            assert_eq!(
+                device.new_texture(&multisample).err(),
+                Some(invalid(
+                    "new_texture",
+                    Problem::Texture(TextureProblem::TypeForFormat)
+                )),
+                "{pf:?} multisample"
+            );
             let bpr = 256;
             let buffer = device
                 .new_buffer(bpr * 16, ResourceOptions::shared())
@@ -106,6 +139,89 @@ fn padded_formats_are_made_only_over_given_memory() {
                 .new_texture(&over, 0, bpr)
                 .unwrap_or_else(|e| panic!("{pf:?} over a buffer: {e}"));
             assert_eq!(texture.pixel_format(), pf);
+        }
+    }
+    let messages = messages.take();
+    assert!(
+        messages.is_empty(),
+        "the validation layer reported: {messages:#?}"
+    );
+}
+
+/// A padded 10-bit texture in memory of its own reads zero when new and round-trips its words
+/// through `replace_region` and `get_bytes` at two extents, 8x8 and 64x64, with the bytes between
+/// its rows untouched both ways.
+///
+/// This is where the runtime is more exact than Metal, and it is an accepted difference
+/// (docs/API.md). Metal's own host copies of such a texture are exact only while it keeps the
+/// texture linear: measured on an Apple M3 Max under macOS 27.0.1, `replaceRegion:` then
+/// `getBytes:` returned the written bytes at 8x8 and at every height to 8 at widths to 1024, and
+/// at 16x16 once the usage included `ShaderWrite`; at 16x16 and 64x64 under `ShaderRead` alone,
+/// where `allocatedSize` carries 128 bytes or more beyond the tight linear size, both calls were
+/// silent no-ops — `getBytes:` left its destination untouched and a shader read 0 at every texel
+/// after a `replaceRegion:` — while a blit either way still moved the texels. Predicting which
+/// extents Metal compresses is predicting an undocumented, per-chip choice, so the runtime moves
+/// the caller's bytes at every extent instead.
+#[test]
+fn padded_textures_of_their_own_memory_round_trip_their_words() {
+    let cache = ScratchCache::new().unwrap();
+    let messages = Messages::default();
+    {
+        let device = validated_device(TEST_DEVICE, &messages, cache.path()).unwrap();
+        for pf in [
+            PixelFormat::R10UnormX6,
+            PixelFormat::RG10UnormX12,
+            PixelFormat::R10UnormX6SRGB,
+            PixelFormat::RG10UnormX12SRGB,
+        ] {
+            let bytes =
+                texel_bytes(pf).unwrap_or_else(|| panic!("{pf:?}: a padded word has a texel size"));
+            for side in [8u64, 64] {
+                let mut d = TextureDescriptor::texture_2d(pf, side, side, false);
+                d.usage = TextureUsage::SHADER_READ;
+                let texture = device
+                    .new_texture(&d)
+                    .unwrap_or_else(|e| panic!("{pf:?} {side}x{side}: {e}"));
+                // Rows of `side` texels, one texel of padding after each.
+                let row = side as usize * bytes;
+                let bpr = row + bytes;
+                let n = bpr * side as usize;
+                let region = Region::new_2d(0, 0, side, side);
+                let mut fresh = vec![0xeeu8; n];
+                texture
+                    .get_bytes(&mut fresh, bpr as u64, 0, region, 0, 0)
+                    .unwrap_or_else(|e| panic!("{pf:?} {side}: {e}"));
+                for y in 0..side as usize {
+                    assert!(
+                        fresh[y * bpr..y * bpr + row].iter().all(|&b| b == 0),
+                        "{pf:?} {side}x{side}: a new Shared texture reads zero"
+                    );
+                    assert!(
+                        fresh[y * bpr + row..(y + 1) * bpr]
+                            .iter()
+                            .all(|&b| b == 0xee),
+                        "{pf:?} {side}x{side}: the bytes between the rows were written"
+                    );
+                }
+                let src = pattern(n, pf.as_raw() as u8);
+                texture
+                    .replace_region(region, 0, 0, &src, bpr as u64, 0)
+                    .unwrap_or_else(|e| panic!("{pf:?} {side}: {e}"));
+                let mut back = vec![0xeeu8; n];
+                texture
+                    .get_bytes(&mut back, bpr as u64, 0, region, 0, 0)
+                    .unwrap_or_else(|e| panic!("{pf:?} {side}: {e}"));
+                for y in 0..side as usize {
+                    let r = y * bpr..y * bpr + row;
+                    assert_eq!(back[r.clone()], src[r], "{pf:?} {side}x{side} row {y}");
+                    assert!(
+                        back[y * bpr + row..(y + 1) * bpr]
+                            .iter()
+                            .all(|&b| b == 0xee),
+                        "{pf:?} {side}x{side}: the bytes between the rows were written"
+                    );
+                }
+            }
         }
     }
     let messages = messages.take();

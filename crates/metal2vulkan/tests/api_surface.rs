@@ -915,7 +915,7 @@ surface! {
         fn ycbcr_writes_stored;
         fn ycbcr_renders;
         fn ycbcr_pass_refused;
-        fn padded_only_over_memory;
+        fn padded_words;
         fn extended_range_blend;
         fn x_channel;
         fn half_write_nans_converted;

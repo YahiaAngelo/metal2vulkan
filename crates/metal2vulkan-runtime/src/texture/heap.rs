@@ -204,7 +204,7 @@ use crate::degradation::Degradation;
 use crate::device::lock;
 use crate::error::{internal, invalid, nil, vulkan, Error, MemoryKind, Nil, Problem, RuntimeGap};
 use crate::heap::{Heap, HeapProblem, HeapType, SizeAndAlign, WeakHeap};
-use crate::image_plan::{check_image_limits, plan_texture_images, ImagePlan};
+use crate::image_plan::{check_image_limits, plan_images, ImagePlan};
 use crate::key_hash::KeyMap;
 use crate::linear_plan::{check_linear_limits, linear_lack, LinearLack, LINEAR_ALIGNMENT};
 use crate::memory::{Memory, MemoryClass, Placement};
@@ -1367,7 +1367,7 @@ impl Device {
             .textures
             .facts(self.compile_device().profile());
         let usage = descriptor.image_usage();
-        let (plan, twin) = plan_texture_images(&layout, usage, false, &facts)
+        let (plan, twin) = plan_images(&layout, usage, false, &facts)
             .map_err(|refusal| image_error(call, refusal))?;
         // A heap texture's samples read what its bytes hold, which an ASTC carrier's decoded twin
         // would decode as it is placed (`astc.rs`): refused, its size query too.
@@ -1379,9 +1379,8 @@ impl Device {
         let (plan, twin, compressed) =
             match self.copy_exact_usage(descriptor, &layout, plan.format, usage) {
                 Some(exact) => {
-                    let (exact_plan, exact_twin) =
-                        plan_texture_images(&layout, exact, false, &facts)
-                            .map_err(|refusal| image_error(call, refusal))?;
+                    let (exact_plan, exact_twin) = plan_images(&layout, exact, false, &facts)
+                        .map_err(|refusal| image_error(call, refusal))?;
                     (exact_plan, exact_twin, Some(plan))
                 }
                 None => (plan, twin, None),
@@ -2069,7 +2068,7 @@ impl Device {
                 .shared()
                 .textures
                 .facts(self.compile_device().profile());
-            let (plan, _) = plan_texture_images(&p.layout, descriptor.image_usage(), false, &facts)
+            let (plan, _) = plan_images(&p.layout, descriptor.image_usage(), false, &facts)
                 .map_err(|refusal| image_error(call, refusal))?;
             let plan = self.with_free_usage(plan, p.layout.texture_type)?;
             let answer = Some(p.size_and_align);
@@ -2122,7 +2121,7 @@ impl Device {
             .shared()
             .textures
             .facts(self.compile_device().profile());
-        let (linear, _) = plan_texture_images(&p.layout, descriptor.image_usage(), false, &facts)
+        let (linear, _) = plan_images(&p.layout, descriptor.image_usage(), false, &facts)
             .map_err(|refusal| image_error(call, refusal))?;
         let SizeAndAlign { size, align } = p.size_and_align;
         // A driver that lays depth and stencil images apart from their memory makes no linear
@@ -2344,7 +2343,7 @@ impl Device {
             .shared()
             .textures
             .facts(self.compile_device().profile());
-        let (plan, _) = plan_texture_images(&p.layout, descriptor.image_usage(), false, &facts)
+        let (plan, _) = plan_images(&p.layout, descriptor.image_usage(), false, &facts)
             .map_err(|refusal| image_error(call, refusal))?;
         let optimal = self.with_free_usage(plan, p.layout.texture_type)?;
         let serves = self.tiles_serve(&optimal, tiled, p.size_and_align.size);

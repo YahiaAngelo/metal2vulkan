@@ -406,7 +406,7 @@ fn check_format(
     // `RGB10A2Unorm`, or the other order, which plain Metal makes (an Apple M3 Max under macOS
     // 27.0.1), its reads unmeasured.
     if [source, view].into_iter().any(|pf| {
-        metal2vulkan::metal::format::padded_only_over_memory(pf)
+        metal2vulkan::metal::format::padded_words(pf)
             || ExtendedRange::of(pf) == Some(ExtendedRange::Rgb10A2Srgb)
     }) {
         return Err(ViewRefusal::Unsupported(

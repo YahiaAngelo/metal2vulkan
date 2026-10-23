@@ -22,9 +22,8 @@
 //!   other plane kept, as its blits move it; a **packed** one's (`YCBCR10_420_2P_PACKED` to
 //!   `YCBCR10_444_2P_PACKED_sRGB`, over `p420` to `p444`) every fill writes one zero byte at each
 //!   texel's `x` of its row of the plane, whatever the pattern or color;
-//! - a **padded 10-bit** texture (`R10Unorm_X6`, `RG10Unorm_X12` and their `_sRGB` twins, which
-//!   Metal holds over memory alone) has its 2 or 4 bytes as its unit, at the buffer's or plane's
-//!   rows;
+//! - a **padded 10-bit** texture (`R10Unorm_X6`, `RG10Unorm_X12` and their `_sRGB` twins, each
+//!   code in the top bits of its own 16-bit word) has its 2 or 4 bytes as its unit, at its rows;
 //! - a **two-plane extended-range** texel (`RGB10A8_2P_XR10` and its sRGB twin) is its color word
 //!   in plane 0, 4 bytes, its alpha kept. Metal writes row `y` of the region `⌊4 w / 16⌋ · 16`
 //!   bytes apart (16 below a width of 4), its texel `x` at byte `4 x` of it, `w` level 0's width,
@@ -162,7 +161,7 @@ use super::values::{Origin, Region, Size};
 use super::{Buffer, Degradation};
 use ash::vk;
 use metal2vulkan::bind::{PlanesCopy, YCbCrCodes};
-use metal2vulkan::metal::format::{padded_only_over_memory, ycbcr_format, ExtendedRange};
+use metal2vulkan::metal::format::{padded_words, ycbcr_format, ExtendedRange};
 use metal2vulkan::metal::{PixelFormat, TextureType};
 use metal2vulkan::vk::ImageAspectFlags;
 use std::ops::Range;
@@ -208,8 +207,8 @@ pub(super) fn fill_unit(pf: PixelFormat) -> Option<FillUnit> {
         }
         return texels(codes.bytes, BlitOption::None);
     }
-    // A padded 10-bit texel (a texture over memory alone) is its 2 or 4 bytes.
-    if padded_only_over_memory(pf) {
+    // A padded 10-bit texel is its 2 or 4 bytes, the words holding its codes.
+    if padded_words(pf) {
         return texels(block_bytes(pf)?, BlitOption::None);
     }
     match pf {

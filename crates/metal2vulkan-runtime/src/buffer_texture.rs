@@ -31,7 +31,6 @@ use super::degradation::Degradation;
 use super::device::lock;
 use super::error::{internal, invalid, nil, vulkan, Error, Problem, RuntimeGap};
 use super::exit_guard;
-use super::image_plan::check_own_memory;
 use super::key_hash::KeyMap;
 use super::linear_plan::{
     is_linear, plan_buffer_texture, BufferFacts, BufferLayout, BufferRefusal, BufferTexture,
@@ -855,10 +854,8 @@ impl Device {
 
 /// The bytes of one texel of a texture buffer of `layout`, over a buffer of its own (a device's,
 /// a shareable texture's or a heap's). Refused (`Unsupported`) for a format without a texel
-/// size, which no texture buffer has, and for one Metal stores nothing of in such memory
-/// (`image_plan::check_own_memory`).
+/// size, which no texture buffer has.
 fn texture_buffer_texel(layout: &TextureLayout) -> Result<u64, Error> {
-    check_own_memory(layout.pixel_format).map_err(Error::Unsupported)?;
     texel_bytes(layout.pixel_format).ok_or(Error::Unsupported(
         Unsupported::not_implemented(Feature::Format).naming_format(layout.pixel_format),
     ))

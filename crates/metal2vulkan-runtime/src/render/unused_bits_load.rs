@@ -68,8 +68,9 @@
 //! - **Not here** (`degrade_unused_bits` announces `extended-range-bits-kept` at each draw): a
 //!   multisampled attachment (no copy reaches its samples), a texture held as a shadow of another
 //!   image or of a heap's bytes, a sparse one, and one whose image the device does not copy both
-//!   ways. A padded format has none of these (it is a buffer's or a surface's bytes, single
-//!   sampled).
+//!   ways. A padded format takes no multisample texture, Metal's validation stopping one, and
+//!   reaches the rest through a heap or a sparse heap, which make one of it as the device does
+//!   (`metal::format::padded_words`).
 
 use super::capture::CapturedReach;
 use crate::buffer_texture::Texels;
