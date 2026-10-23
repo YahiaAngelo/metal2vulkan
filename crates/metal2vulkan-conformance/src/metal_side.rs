@@ -42,7 +42,8 @@ use objc2_metal::{
     MTLSharedEvent, MTLSize, MTLStageInputOutputDescriptor, MTLStencilDescriptor,
     MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLTexture,
     MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType,
-    MTLTextureUsage, MTLTileRenderPipelineDescriptor, MTLViewport, MTLVisibilityResultMode,
+    MTLTextureUsage, MTLTileRenderPipelineDescriptor, MTLVertexDescriptor, MTLVertexFormat,
+    MTLVertexStepFunction, MTLViewport, MTLVisibilityResultMode,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -346,6 +347,44 @@ fn size(axes: [u32; 3]) -> MTLSize {
 
 /// `MTLBufferLayoutStrideDynamic`, the stride a layout takes from the encoder's binding.
 const STRIDE_DYNAMIC: usize = usize::MAX;
+
+/// Metal's vertex descriptor for `layout`. The case's enumerations are Metal's own, so each one
+/// crosses as its raw value.
+fn vertex_descriptor(layout: &crate::render::VertexLayout<'_>) -> Retained<MTLVertexDescriptor> {
+    let descriptor = MTLVertexDescriptor::vertexDescriptor();
+    for attribute in layout.attributes {
+        // SAFETY: the index is below the attribute array every descriptor holds, which the case's
+        // own guard keeps it to.
+        let held = unsafe {
+            descriptor
+                .attributes()
+                .objectAtIndexedSubscript(attribute.index as usize)
+        };
+        held.setFormat(MTLVertexFormat(attribute.format.as_raw() as usize));
+        // SAFETY: the offset and the buffer index are the case's own numbers, both inside the
+        // record the case binds and the buffer array the descriptor holds.
+        unsafe {
+            held.setOffset(attribute.offset as usize);
+            held.setBufferIndex(attribute.buffer as usize);
+        }
+    }
+    for buffer in layout.layouts {
+        // SAFETY: as the attributes', for the layout array.
+        let held = unsafe {
+            descriptor
+                .layouts()
+                .objectAtIndexedSubscript(buffer.index as usize)
+        };
+        held.setStepFunction(MTLVertexStepFunction(buffer.step.as_raw() as usize));
+        // SAFETY: the stride is the case's own record size and the rate is the step function's
+        // own, 0 for the constant step and 1 otherwise.
+        unsafe {
+            held.setStride(buffer.stride as usize);
+            held.setStepRate(buffer.rate as usize);
+        }
+    }
+    descriptor
+}
 
 /// Metal's stage-input descriptor for `stage_input`. The case's enumerations are Metal's own, so
 /// each reaches `MTLAttributeFormat`, `MTLStepFunction` and `MTLIndexType` by its raw ordinal.
@@ -1613,6 +1652,10 @@ impl Side for MetalSide {
             descriptor.setFragmentFunction(Some(&*function(fragment)?));
         }
         descriptor.setRasterSampleCount(spec.samples as usize);
+        descriptor.setRasterizationEnabled(spec.rasterization);
+        if let Some(layout) = &spec.vertex_layout {
+            descriptor.setVertexDescriptor(Some(&vertex_descriptor(layout)));
+        }
         if let Some(format) = spec.depth_format {
             descriptor.setDepthAttachmentPixelFormat(MTLPixelFormat(format.as_raw() as usize));
         }
@@ -2686,6 +2729,11 @@ impl MetalSide {
         }
         if let Some(buffer) = pass.visibility {
             descriptor.setVisibilityResultBuffer(Some(self.held(buffer)?));
+        }
+        if let Some(size) = pass.size {
+            descriptor.setRenderTargetWidth(size[0] as usize);
+            descriptor.setRenderTargetHeight(size[1] as usize);
+            descriptor.setDefaultRasterSampleCount(1);
         }
         let encoder = command_buffer
             .renderCommandEncoderWithDescriptor(&descriptor)

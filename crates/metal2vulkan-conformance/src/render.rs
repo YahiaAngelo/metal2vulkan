@@ -46,6 +46,7 @@
 use crate::case::Handle;
 use metal2vulkan::metal::{
     BlendFactor, BlendOperation, ColorWriteMask, IndexType, PixelFormat, PrimitiveType,
+    VertexFormat, VertexStepFunction,
 };
 use metal2vulkan_runtime::{
     LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, StoreAction,
@@ -301,6 +302,118 @@ impl<'a> StageFunction<'a> {
     }
 }
 
+/// One entry of `MTLVertexDescriptor`'s `attributes`:
+/// `MTLVertexAttributeDescriptor`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VertexAttribute {
+    /// The `[[attribute(n)]]` the vertex function declares.
+    pub index: u32,
+    pub format: VertexFormat,
+    /// `offset`, in bytes from the start of the buffer layout's element.
+    pub offset: u32,
+    /// `bufferIndex`: which vertex buffer the attribute is fetched from.
+    pub buffer: u32,
+}
+
+impl VertexAttribute {
+    /// The attribute `index` of `format` at `offset` of buffer `buffer`.
+    pub const fn new(index: u32, format: VertexFormat, offset: u32, buffer: u32) -> Self {
+        Self {
+            index,
+            format,
+            offset,
+            buffer,
+        }
+    }
+
+    /// The words a case's input fingerprint covers.
+    fn words(&self) -> Vec<u8> {
+        let mut bytes = self.index.to_le_bytes().to_vec();
+        bytes.extend(self.format.as_raw().to_le_bytes());
+        bytes.extend(self.offset.to_le_bytes());
+        bytes.extend(self.buffer.to_le_bytes());
+        bytes
+    }
+}
+
+/// One entry of `MTLVertexDescriptor`'s `layouts`: `MTLVertexBufferLayoutDescriptor`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VertexBufferLayout {
+    /// Which vertex buffer the layout describes.
+    pub index: u32,
+    /// `stride`, in bytes between elements.
+    pub stride: u32,
+    /// `stepFunction`.
+    pub step: VertexStepFunction,
+    /// `stepRate`.
+    pub rate: u32,
+}
+
+impl VertexBufferLayout {
+    /// Buffer `index` of `stride` bytes, stepped once per vertex.
+    pub const fn per_vertex(index: u32, stride: u32) -> Self {
+        Self {
+            index,
+            stride,
+            step: VertexStepFunction::PerVertex,
+            rate: 1,
+        }
+    }
+
+    /// Buffer `index` of `stride` bytes, fetched from the same element for every vertex: Metal's
+    /// constant step, whose rate is 0.
+    pub const fn constant(index: u32, stride: u32) -> Self {
+        Self {
+            index,
+            stride,
+            step: VertexStepFunction::Constant,
+            rate: 0,
+        }
+    }
+
+    /// The words a case's input fingerprint covers.
+    fn words(&self) -> Vec<u8> {
+        let mut bytes = self.index.to_le_bytes().to_vec();
+        bytes.extend(self.stride.to_le_bytes());
+        bytes.extend(self.step.as_raw().to_le_bytes());
+        bytes.extend(self.rate.to_le_bytes());
+        bytes
+    }
+}
+
+/// A pipeline's `vertexDescriptor`: how the fixed-function stage fetches each attribute the vertex
+/// function declares.
+///
+/// Borrowed rather than owned, so a case states one in a `const` beside its other tables and the
+/// spec stays [`Copy`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VertexLayout<'a> {
+    pub attributes: &'a [VertexAttribute],
+    pub layouts: &'a [VertexBufferLayout],
+}
+
+impl<'a> VertexLayout<'a> {
+    pub const fn new(attributes: &'a [VertexAttribute], layouts: &'a [VertexBufferLayout]) -> Self {
+        Self {
+            attributes,
+            layouts,
+        }
+    }
+
+    /// The words a case's input fingerprint covers: every attribute and every layout, in the order
+    /// the case states them, since that order is the case's own statement.
+    fn words(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for attribute in self.attributes {
+            bytes.extend(attribute.words());
+        }
+        for layout in self.layouts {
+            bytes.extend(layout.words());
+        }
+        bytes
+    }
+}
+
 /// A vertex-and-fragment render pipeline a case makes:
 /// `newRenderPipelineStateWithDescriptor:error:`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -317,6 +430,12 @@ pub struct RenderPipelineSpec<'a> {
     pub stencil_format: Option<PixelFormat>,
     /// `rasterSampleCount`.
     pub samples: u32,
+    /// `vertexDescriptor`, where the vertex function takes a stage input the fixed-function stage
+    /// fetches; `None` for a function that reads its buffers itself.
+    pub vertex_layout: Option<VertexLayout<'a>>,
+    /// `rasterizationEnabled`. A `vertex void` function has no position to rasterize, so its
+    /// pipeline must disable it and must carry no fragment stage.
+    pub rasterization: bool,
 }
 
 impl<'a> RenderPipelineSpec<'a> {
@@ -344,7 +463,20 @@ impl<'a> RenderPipelineSpec<'a> {
             depth_format: None,
             stencil_format: None,
             samples: 1,
+            vertex_layout: None,
+            rasterization: true,
         }
+    }
+
+    /// The pipeline of a `vertex void` function that writes its answer through a buffer: its stage
+    /// input fetched under `layout`, rasterization disabled and no fragment stage, which is the
+    /// one shape Metal accepts for such a function.
+    #[must_use]
+    pub const fn converting(vertex: StageFunction<'a>, layout: VertexLayout<'a>) -> Self {
+        let mut spec = Self::of(vertex, None, &[]);
+        spec.vertex_layout = Some(layout);
+        spec.rasterization = false;
+        spec
     }
 
     /// The pipeline at `samples` samples.
@@ -388,6 +520,15 @@ impl<'a> RenderPipelineSpec<'a> {
             bytes.extend(format.as_raw().to_le_bytes());
         }
         bytes.extend(self.samples.to_le_bytes());
+        // Appended, and only where the pipeline states them, so a pipeline that names neither
+        // fingerprints to the bytes it always has and every recording already committed still
+        // reads.
+        if !self.rasterization {
+            bytes.push(0xfe);
+        }
+        if let Some(layout) = &self.vertex_layout {
+            bytes.extend(layout.words());
+        }
         bytes
     }
 }
@@ -865,6 +1006,10 @@ pub struct RenderPass {
     pub stencil: Option<PassStencil>,
     /// `visibilityResultBuffer`: the buffer the pass's visibility results are written into.
     pub visibility: Option<Handle>,
+    /// `renderTargetWidth` and `renderTargetHeight`, where the pass states them. A pass with no
+    /// attachment at all must, because Metal takes the extent from the attachments otherwise and a
+    /// pass without one has none to take it from.
+    pub size: Option<[u32; 2]>,
     /// The commands, in order. **A pass of none is a pass with no draw call**, which is one of the
     /// facts Metal's clear route reads, so the empty list is a case rather than an oversight.
     pub steps: Vec<RenderStep>,
@@ -878,8 +1023,17 @@ impl RenderPass {
             depth: None,
             stencil: None,
             visibility: None,
+            size: None,
             steps: Vec::new(),
         }
+    }
+
+    /// A pass of `size` with no attachment of any kind: how a case runs a vertex stage that writes
+    /// its answer through a buffer rather than into a target.
+    pub fn sized(size: [u32; 2]) -> Self {
+        let mut pass = Self::clearing(Vec::new());
+        pass.size = Some(size);
+        pass
     }
 
     /// The pass with `steps` encoded into it.
@@ -932,6 +1086,11 @@ impl RenderPass {
         }
         if self.visibility.is_some() {
             bytes.push(3);
+        }
+        if let Some(size) = self.size {
+            bytes.push(4);
+            bytes.extend(size[0].to_le_bytes());
+            bytes.extend(size[1].to_le_bytes());
         }
         for step in &self.steps {
             bytes.extend(step.call().as_bytes());
