@@ -347,12 +347,19 @@ fn argument_bytes() -> Vec<u8> {
 /// a depth is enough, since a buffer a draw reads is read at the draw.
 fn depths(shape: &Shape) -> Vec<f32> {
     let mut found: Vec<f32> = Vec::new();
+    let hold = |z: f32, found: &mut Vec<f32>| {
+        if !found.iter().any(|held| held.to_bits() == z.to_bits()) {
+            found.push(z);
+        }
+    };
     for pass in shape.passes {
         for act in *pass {
-            if let Act::Draw { z, .. } = act {
-                if !found.iter().any(|held| held.to_bits() == z.to_bits()) {
-                    found.push(*z);
-                }
+            match act {
+                Act::Draw { z, .. } => hold(*z, &mut found),
+                // An indirect draw reads the same vertex buffer a direct one does, at [`DEPTH`];
+                // only its vertex and instance counts come from the arguments buffer.
+                Act::DrawIndirect => hold(DEPTH, &mut found),
+                Act::Mode(..) => {}
             }
         }
     }
@@ -715,16 +722,16 @@ mod tests {
         answer.outcomes[0].transcript.clone()
     }
 
-    /// The 64-bit words the site at `path` of `transcript` holds.
-    fn words(transcript: &Transcript, path: &str) -> Vec<u64> {
+    /// The 64-bit words the site at `path` of `case`'s `transcript` holds.
+    fn words(case: &str, transcript: &Transcript, path: &str) -> Vec<u64> {
         let mut node = &transcript.root;
         for name in path.trim_start_matches("case/").split('/') {
             node = node
                 .child(name)
-                .unwrap_or_else(|| panic!("no site {path} (stopped at {name})"));
+                .unwrap_or_else(|| panic!("{case}: no site {path} (stopped at {name})"));
         }
         let Value::Bytes(bytes) = &node.observed.value else {
-            panic!("{path} holds no bytes");
+            panic!("{case}: {path} holds no bytes");
         };
         bytes
             .as_chunks::<8>()
@@ -749,7 +756,7 @@ mod tests {
             let recorded = only_outcome(name);
             for (index, want) in passes.iter().enumerate() {
                 assert_eq!(
-                    words(&recorded, &format!("case/pass-{index}/words")),
+                    words(name, &recorded, &format!("case/pass-{index}/words")),
                     **want,
                     "{name}: pass {index}"
                 );

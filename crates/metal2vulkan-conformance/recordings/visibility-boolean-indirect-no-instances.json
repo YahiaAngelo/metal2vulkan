@@ -102,6 +102,16 @@
                       }
                     },
                     {
+                      "name": "buffer:0@1056964608",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f8165c9d0cf6c4ea37064066919ab06804e3fc92d92d84a32288f8e61d005b64"
+                        }
+                      }
+                    },
+                    {
                       "name": "arguments",
                       "observed": {
                         "value": "absent",
@@ -126,6 +136,17 @@
                 },
                 {
                   "name": "render-pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:0@1056964608",
                   "observed": {
                     "value": {
                       "variant": {
@@ -167,6 +188,86 @@
                       }
                     }
                   }
+                },
+                {
+                  "name": "pass-0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "calls",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "0-render",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "Ok",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "variant": {
+                                "name": "Completed",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "command-buffer-error",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "None",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "words",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 8
+                              }
+                            },
+                            "element": "u64",
+                            "row_offset": 0,
+                            "row_elements": 1,
+                            "row_pitch": 8,
+                            "rows": 1,
+                            "image_pitch": 8,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
                 },
                 {
                   "name": "notices",
