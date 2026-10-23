@@ -16,6 +16,14 @@
 //! The walk also counts the allowances it **did not** use ([`Unfired`]). A tolerance no site needed
 //! is not a failure — it may be venue-specific — but it is a claim no run has checked, and until it
 //! was counted a case could name one indefinitely without anybody noticing.
+//!
+//! One rule is checked beside the walk rather than in it: **every degrade notice our side announced
+//! must be one the case names**, reported as a
+//! [`DivergenceKind::UndeclaredNotice`](crate::diff::DivergenceKind::UndeclaredNotice). The notices
+//! site holds the whole announced set as one value, and a declaration unchecks that site, so the
+//! walk alone let one declaration excuse every other notice. The subset check is what makes the
+//! suite's central sentence — a difference is a bug unless we announced it — able to fail where it
+//! is stated.
 
 use crate::allowance::{Allowance, Loosening, Offered, Unjustified};
 use crate::diff::{Divergence, DivergenceKind, ElementAt, GapAt, LineAt, Side};
@@ -247,6 +255,12 @@ pub fn compare_run(
             found.note_bad(&allowance.path, why);
         }
     }
+    // The complement of the walk at the notices site, and the suite's central claim rests on it:
+    // every notice our side announced must be one the case names. Without it a case that declared
+    // any single notice could not fail at that site at all (see [`undeclared_notices`]).
+    for undeclared in undeclared_notices(ours, allowances) {
+        found.divergences.push(undeclared);
+    }
     let mut fired = vec![false; allowances.len()];
     let mut walk = Walk {
         allowances,
@@ -275,6 +289,55 @@ pub fn compare_run(
                 .unjustified(&offered)
                 .map(|why| why.to_string()),
         });
+    }
+    found
+}
+
+/// A divergence for every degrade notice `ours` announced that no allowance of the case names.
+///
+/// **Why this is a check of its own, and not something the walk does.** A notice declaration is an
+/// allowance at `case/notices/*` loosened [`Loosening::Unchecked`]
+/// ([`crate::replay::notice_allowance`]), and the notices site holds the whole announced **set** as
+/// one value. So the moment one declaration's justification holds, [`Walk::allowed`] passes that
+/// site whatever is in the set: one declaration unchecked every other notice, including ones
+/// nobody had justified. Measured at `f2fc351534`: a case declaring `carried-decoded-twin` while
+/// the run announced it *plus* `device-texel-conversion` *plus* `native-division` compared with
+/// **zero** divergences.
+///
+/// The honest rule is a subset: what we announce is covered by what the case declares. A code the
+/// case names nowhere is a difference with nothing accounting for it, and no allowance can reach
+/// this check — a declaration of one code must not excuse another's, which is the whole defect.
+///
+/// A declaration is any allowance justified by a [`crate::allowance::Justification::Degradation`],
+/// whatever its path: a case that loosens a value by a notice's code has named that code and had
+/// it checked against the catalogue, and making it write a second allowance would be bookkeeping
+/// rather than evidence. What is **not** required is that the declared notice fired — a notice is
+/// announced once per device per kind, and an unfired declaration is reported by [`Unfired`].
+fn undeclared_notices(ours: &Transcript, allowances: &[Allowance]) -> Vec<Divergence> {
+    let declared: Vec<&str> = allowances
+        .iter()
+        .filter_map(|allowance| match &allowance.justified_by {
+            crate::allowance::Justification::Degradation(code) => Some(code.as_str()),
+            _ => None,
+        })
+        .collect();
+    let mut found: Vec<Divergence> = Vec::new();
+    for announced in ours.announced_at() {
+        if declared.contains(&announced.code.as_str()) {
+            continue;
+        }
+        // One row per code, however many sites announced it: the code is the fact, and a row per
+        // site would report one undeclared notice as several.
+        let held = |divergence: &Divergence| matches!(&divergence.kind, DivergenceKind::UndeclaredNotice { code } if *code == announced.code);
+        if found.iter().any(held) {
+            continue;
+        }
+        found.push(Divergence::new(
+            &announced.path,
+            DivergenceKind::UndeclaredNotice {
+                code: announced.code,
+            },
+        ));
     }
     found
 }

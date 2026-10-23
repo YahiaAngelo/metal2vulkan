@@ -11,6 +11,10 @@
 //! - Comparison is **exact by default** ([`compare`]). A loosened field names either a degrade
 //!   notice's code or an entry of `docs/API.md`'s accepted differences, and the comparison fails
 //!   where that entry is gone or the notice did not fire ([`allowance`]).
+//! - **Every notice we announce is named by the case**, or the case is divergent. Metal announces
+//!   none, so a notice of ours that no declaration of the case names is a difference reaching a
+//!   consumer with nothing said about it. The declarations are a set and the announced notices
+//!   must be a subset of it: declaring one code never excuses another's.
 //! - The **verdicts** stay apart ([`verdict`]): exact, announced, divergent, refused, unrecorded,
 //!   and per venue "lacks the device feature".
 //! - **Two Metal oracles** ([`validated`]). Plain Metal is the behavioural oracle, because that is
