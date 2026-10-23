@@ -2125,6 +2125,7 @@ degradations! {
         DeviceAnisotropicFilter = "device-anisotropic-filter";
         DevicePointSize = "device-point-size";
         ClippedCoverageSplit = "clipped-coverage-split";
+        LoopedSampleOutputs = "looped-sample-outputs";
         DeviceUnorm8LinearFilter = "device-unorm8-linear-filter";
         HalfOutputFastMathBlend = "half-output-fast-math-blend";
         /// Class: native device sampling. The device's own sampler answers the pipeline's

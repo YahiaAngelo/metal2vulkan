@@ -1414,6 +1414,23 @@ pub enum PrecisionNote {
     /// Validation derives no tolerance and no explanation from it: C3 names it as the answer gap
     /// of a case that meets it (`ClippedPrimitiveSplit`).
     ClippedCoverageSplit,
+    /// A fragment function that reads `[[sample_mask]]`, runs once per covered sample on Metal
+    /// and writes an output (a color, depth, stencil or sample mask) is compiled for a
+    /// multisampled pipeline on a device that does not run it per sample itself: it runs once
+    /// per pixel and its body once per covered sample, lowest first, from a loop over the
+    /// coverage (`CoverageLoop::Looped`, `lower::fragment::coverage`). Metal writes each covered
+    /// sample's outputs from that sample's own run, which keeps the sample where its sample mask
+    /// output has the sample's bit (an M3 Max under macOS 27.0.1, our probe `co`). The invocation
+    /// writes the samples Metal's runs keep, each pass's sample mask ANDed with its sample's bit,
+    /// but every one of them takes the last pass's outputs, so a sample's output differs from
+    /// Metal's where the passes compute different outputs (from `[[sample_id]]`, a
+    /// sample-qualified varying, or memory an earlier pass wrote). Vulkan hands an invocation
+    /// under sample shading only its own sample's bit of the coverage, so no form runs each
+    /// sample's pass in its own invocation and reads the pixel's coverage.
+    ///
+    /// Validation derives no tolerance and no explanation from it: a difference stays a
+    /// mismatch for review.
+    LoopedSampleOutputs,
     /// The module hands an 8-bit unsigned normalized texture's linear sample to the device's
     /// filter, at the coordinate of Metal's footprint step (`lower::sampler::native`), on a
     /// device measured to filter that class within one code of Metal

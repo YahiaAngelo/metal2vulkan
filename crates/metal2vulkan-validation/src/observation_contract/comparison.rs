@@ -329,6 +329,7 @@ pub fn allowance(note: PrecisionNote) -> Allowance {
         | N::DeviceAnisotropicFilter
         | N::DevicePointSize
         | N::ClippedCoverageSplit
+        | N::LoopedSampleOutputs
         | N::DeviceUnorm8LinearFilter
         | N::HalfOutputFastMathBlend
         | N::DeviceSampling

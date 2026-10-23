@@ -459,7 +459,10 @@ pub enum CoverageLoop {
     #[default]
     NotNeeded,
     /// Compiled for a multisampled pipeline (`LoweringInputs::multisampled`), the function runs
-    /// once per pixel, without sample shading, and runs its body once per covered sample.
+    /// once per pixel, without sample shading, and runs its body once per covered sample. Its
+    /// outputs are the last pass's, written to each covered sample whose pass's sample mask keeps
+    /// it, where Metal writes each sample's from that sample's run
+    /// (`PrecisionNote::LoopedSampleOutputs`).
     Looped,
     /// The function loops over its covered samples when compiled for a multisampled pipeline,
     /// and was compiled without `multisampled`: link asks for it
@@ -483,10 +486,6 @@ pub enum CoverageLoop {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum CoverageLoopRefusal {
-    /// It writes an output (a color, depth, stencil, or sample mask): Metal writes each sample's
-    /// output from that sample's own run, which one pixel-rate invocation cannot.
-    /// `Unsupported{PixelCoverageAtSampleRate, NotRepresentable}`.
-    Outputs,
     /// It runs under `[[early_fragment_tests]]`: Metal then runs only the samples that pass the
     /// tests, each reading the coverage from before them, and a Vulkan invocation reads either
     /// coverage, never both. `Unsupported{PixelCoverageAtSampleRate, NotRepresentable}`.
@@ -515,9 +514,7 @@ impl CoverageLoopRefusal {
         use crate::error::{Capability, Feature, Unsupported};
         let f = Feature::PixelCoverageAtSampleRate;
         match self {
-            CoverageLoopRefusal::Outputs | CoverageLoopRefusal::EarlyFragmentTests => {
-                Unsupported::not_representable(f)
-            }
+            CoverageLoopRefusal::EarlyFragmentTests => Unsupported::not_representable(f),
             CoverageLoopRefusal::Discard
             | CoverageLoopRefusal::QuadOperations
             | CoverageLoopRefusal::Attachments => Unsupported::not_implemented(f),

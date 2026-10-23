@@ -11,11 +11,13 @@
 //! builds:
 //!
 //! ```text
-//! main:  rest = SampleMask[0]
+//! main:  rest = SampleMask[0]; kept = 0
 //!        loop { if rest == 0 { break }
 //!               sample = FindILsb(rest)          // the Private `loop_sample`
 //!               call body
+//!               kept |= SampleMaskOut[0] & (1 << sample)   // where the stage writes it
 //!               rest &= rest - 1 }
+//!        SampleMaskOut[0] = kept                  // where the stage writes it
 //!        return
 //! ```
 //!
@@ -31,11 +33,21 @@
 //! where the whole quad runs, into a `Private` array (`stage_io::read_at_every_sample`), and each
 //! pass reads its sample's element.
 //!
-//! One pixel-rate invocation cannot write each sample's outputs, so the loop is only for a
-//! function whose side effects are its memory writes. A function it does not fit is refused
-//! ([`CoverageLoopRefusal`]): by link in a pipeline of more than one sample, from the reason
-//! its interface records (`StageIo::coverage_loop`), or, compiled for a multisampled pipeline once
-//! its body showed the reason, by the compile layer.
+//! Metal writes each covered sample's outputs (color, depth, stencil) from that sample's own run,
+//! and keeps the sample only where the run's `[[sample_mask]]` output has the sample's bit (an M3
+//! Max under macOS 27.0.1, our probe `co`: the runs go lowest sample first). One pixel-rate
+//! invocation writes one value per output, so a looping function's outputs are the last pass's,
+//! written to the samples Metal's runs keep: where the stage writes `SampleMask` (the function's
+//! own output, or the pipeline's private masks), the loop ORs each pass's word ANDed with its
+//! sample's bit, and stores that union once the loop ends; elsewhere every covered sample is
+//! written, as on Metal. Equal to Metal's where every pass computes the same outputs, and
+//! recorded as `PrecisionNote::LoopedSampleOutputs`: Vulkan hands an invocation under sample
+//! shading only its own sample's bit of the coverage, so no form runs each sample's pass in its
+//! own invocation and reads the pixel's coverage.
+//!
+//! A function the loop does not fit is refused ([`CoverageLoopRefusal`]): by link in a pipeline of
+//! more than one sample, from the reason its interface records (`StageIo::coverage_loop`), or,
+//! compiled for a multisampled pipeline once its body showed the reason, by the compile layer.
 //!
 //! Metal's rasterizer splits a primitive it clips into pieces whose coverages it hands to
 //! separate runs, which no Vulkan rasterizer reproduces; the loop reads the pixel's coverage of the
@@ -81,7 +93,7 @@ pub struct CoveragePlan {
     /// entry's loop (`wrap`).
     pub looped: bool,
     /// Why the function cannot loop, as far as its interface shows before its body is selected:
-    /// its outputs, its early tests, its attachments, or the device's interpolation functions.
+    /// its early tests, its attachments, or the device's interpolation functions.
     pub refusal: Option<CoverageLoopRefusal>,
     /// The function writes memory, which a driver with
     /// `DriverWorkaround::MemoryWritingFragmentsRunPerSample` repeats per covered sample.
@@ -99,8 +111,8 @@ pub struct CoveragePlan {
 
 /// An upper estimate of the words the looping entry adds around the body function: its function
 /// type, the entry function, the loop's blocks and merges, the mask's load, the bit's extraction,
-/// the call, and the `rest` variable's loads and stores.
-pub(super) const LOOP_WORDS: u64 = 96;
+/// the call, the `rest` variable's loads and stores, and the union of the kept samples.
+pub(super) const LOOP_WORDS: u64 = 144;
 
 fn invariant(msg: &'static str) -> Error {
     Error::Internal(InternalError::new(InternalKind::Invariant, msg))
@@ -209,9 +221,7 @@ pub(super) fn plan(cx: &mut SelectCx<'_>) -> Result<(), Error> {
         && !((sample_id || sample_varying) && position);
     let attachments = super::rog::declared(e)
         || used(&|r| matches!(r, ParamRole::ColorInput { .. } | ParamRole::Imageblock(_)));
-    let refusal = if !e.ep.outputs.is_empty() {
-        Some(CoverageLoopRefusal::Outputs)
-    } else if matches!(
+    let refusal = if matches!(
         e.ep.stage,
         AirStage::Fragment {
             early_fragment_tests: true
@@ -226,6 +236,10 @@ pub(super) fn plan(cx: &mut SelectCx<'_>) -> Result<(), Error> {
         None
     };
     let looped = cx.inputs.multisampled && refusal.is_none() && !driver_runs;
+    // Each pass's outputs land on every sample the passes keep, the last pass's (the module docs).
+    if looped && !e.ep.outputs.is_empty() {
+        cx.precision.insert(PrecisionNote::LoopedSampleOutputs);
+    }
     let whole_quad = p
         .workarounds
         .contains(&DriverWorkaround::InterpolationNeedsTheWholeQuad);
@@ -348,18 +362,27 @@ pub(super) fn wrap(
     // Where the driver's interpolation needs the whole quad, the sample-qualified varyings at
     // every sample, before the quad's helpers leave the loop.
     crate::lower::stage_io::read_at_every_sample(&mut fb, plan, decl)?;
-    emit_loop(&mut fb, u32_, covered, sample, body)?;
+    let kept = match super::sample_mask_output(plan) {
+        Some(i) => Some(decl.stage_io.globals.get(i).copied().ok_or_else(|| {
+            invariant("a looping fragment function's sample mask output without its variable")
+        })?),
+        None => None,
+    };
+    emit_loop(&mut fb, u32_, covered, sample, body, kept)?;
     Ok(fb.finish()?)
 }
 
 /// `rest = covered; loop { if rest == 0 { break } sample = FindILsb(rest); call body;
-/// rest &= rest - 1 }; return`, in `fb`'s open block, `covered` the loaded `SampleMask[0]`.
+/// rest &= rest - 1 }; return`, in `fb`'s open block, `covered` the loaded `SampleMask[0]`; where
+/// the stage writes `SampleMask` (`out`, its variable), each pass's word ANDed with its sample's
+/// bit is ORed into the word stored there once the loop ends.
 fn emit_loop(
     fb: &mut FunctionBuilder<'_>,
     u32_: crate::spirv::ids::TypeId,
     covered: crate::spirv::ids::Value,
     sample: GlobalId,
     body: FuncId,
+    out: Option<GlobalId>,
 ) -> BResult<()> {
     let zero = fb.u32_const(0)?;
     let zero = fb.module().const_value(zero)?;
@@ -368,6 +391,18 @@ fn emit_loop(
     let rest = fb.local_var(u32_, None)?;
     let rest = fb.var_ptr(rest)?;
     fb.store(rest, covered, MemAccess::default())?;
+    // The output word and the union of the samples the passes keep.
+    let out = match out {
+        Some(g) => {
+            let base = fb.module().global_value(g)?;
+            let word = fb.access_chain(base, &[zero])?;
+            let kept = fb.local_var(u32_, None)?;
+            let kept = fb.var_ptr(kept)?;
+            fb.store(kept, zero, MemAccess::default())?;
+            Some((word, kept))
+        }
+        None => None,
+    };
     let sample = fb.module().global_value(sample)?;
     fb.loop_(
         &mut (),
@@ -389,10 +424,22 @@ fn emit_loop(
                 fb.store(sample, s, MemAccess::default())?;
                 fb.call(body, &[])?;
                 let below = fb.binary(BinOp::ISub, left, one)?;
+                if let Some((word, kept)) = out {
+                    let bit = fb.binary(BinOp::ShiftLeftLogical, one, s)?;
+                    let written = fb.load(word, MemAccess::default())?;
+                    let written = fb.binary(BinOp::BitwiseAnd, written, bit)?;
+                    let union = fb.load(kept, MemAccess::default())?;
+                    let union = fb.binary(BinOp::BitwiseOr, union, written)?;
+                    fb.store(kept, union, MemAccess::default())?;
+                }
                 let next = fb.binary(BinOp::BitwiseAnd, left, below)?;
                 fb.store(rest, next, MemAccess::default())
             },
         ),
     )?;
+    if let Some((word, kept)) = out {
+        let union = fb.load(kept, MemAccess::default())?;
+        fb.store(word, union, MemAccess::default())?;
+    }
     fb.ret(None)
 }
