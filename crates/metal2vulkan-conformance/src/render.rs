@@ -85,6 +85,74 @@ pub struct TargetSpec {
     /// rotation are Apple SPI on the descriptor, and Metal makes such a texture over an IOSurface
     /// alone. A side that cannot make one answers its own typed refusal.
     pub surface: Option<crate::surface::PlaneSpec>,
+    /// A **texture over a buffer the case made**, rather than a texture of its own memory
+    /// ([`OverBuffer`]).
+    ///
+    /// Such a target's texels are a buffer's bytes, so the case reads the buffer back and sees
+    /// both what the pass wrote and what it left between the rows. The buffer is the case's own
+    /// object, from [`Side::buffer`](crate::case::Side::buffer), so the case states its contents
+    /// and reads them with [`Side::read_buffer`](crate::case::Side::read_buffer).
+    pub over_buffer: Option<OverBuffer>,
+}
+
+/// Where a target's texels lie in a buffer the case made:
+/// `newTextureWithDescriptor:offset:bytesPerRow:`.
+///
+/// The row in bytes is **stated** rather than derived from the pixel format, for the reason the
+/// buffer-backed texture cases state theirs: `MTLTexture` answers no bytes-per-texel, and a format
+/// table of ours would be a second spelling of Metal's to keep in step. It is here because a
+/// pitch below the row is the one shape of this call that ends Metal's process rather than
+/// refusing ([`OverBuffer::unsafe_stride`]), and the number the guard compares against has to come
+/// from the case.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OverBuffer {
+    /// The buffer the target lies over. A handle never reaches a fingerprint, so this field is not
+    /// in [`OverBuffer::words`].
+    pub buffer: Handle,
+    /// `offset`: the target's first row's first byte in the buffer.
+    pub offset: u64,
+    /// `bytesPerRow`: how far apart the target's rows lie in the buffer.
+    pub bytes_per_row: u64,
+    /// One row of the target in bytes, which the case states.
+    pub row_bytes: u64,
+}
+
+impl OverBuffer {
+    /// The target over `buffer` at `offset`, its rows `bytes_per_row` apart and `row_bytes` wide.
+    pub const fn new(buffer: Handle, offset: u64, bytes_per_row: u64, row_bytes: u64) -> Self {
+        Self {
+            buffer,
+            offset,
+            bytes_per_row,
+            row_bytes,
+        }
+    }
+
+    /// Why handing this backing to Metal would end the process, where it would.
+    ///
+    /// A `bytesPerRow` below the texture's own row fails AGX's assertion
+    /// `bytes_per_row >= used_bytes_per_row`, which ends the process rather than answering nil, so
+    /// no side may make the call and no case may ask for it. It is decided from the backing's own
+    /// numbers, so a side reaches the refusal without a device.
+    pub fn unsafe_stride(&self) -> Option<String> {
+        (self.bytes_per_row < self.row_bytes).then(|| {
+            format!(
+                "bytesPerRow {} is below the target's own row of {} bytes, which fails AGX's \
+                 assertion `bytes_per_row >= used_bytes_per_row` and ends Metal's process",
+                self.bytes_per_row, self.row_bytes
+            )
+        })
+    }
+
+    /// The words a case's input fingerprint covers: the call's three numbers and the stated row.
+    /// The buffer's handle is not among them.
+    pub fn words(&self) -> Vec<u8> {
+        let mut bytes = b"newTextureWithDescriptor:offset:bytesPerRow:".to_vec();
+        bytes.extend(self.offset.to_le_bytes());
+        bytes.extend(self.bytes_per_row.to_le_bytes());
+        bytes.extend(self.row_bytes.to_le_bytes());
+        bytes
+    }
 }
 
 impl TargetSpec {
@@ -98,6 +166,7 @@ impl TargetSpec {
             shader_write: false,
             shared: false,
             surface: None,
+            over_buffer: None,
         }
     }
 
@@ -116,6 +185,7 @@ impl TargetSpec {
             shader_write: false,
             shared: false,
             surface: None,
+            over_buffer: None,
         }
     }
 
@@ -124,6 +194,16 @@ impl TargetSpec {
     #[must_use]
     pub const fn over_plane(mut self, plane: crate::surface::PlaneSpec) -> Self {
         self.surface = Some(plane);
+        self.shared = true;
+        self
+    }
+
+    /// The target as a texture over `backing`'s buffer. Such a texture holds the buffer's own
+    /// bytes, so it is of shared storage as the buffer is, and its contents are the case's to
+    /// state and to read back.
+    #[must_use]
+    pub const fn over_buffer(mut self, backing: OverBuffer) -> Self {
+        self.over_buffer = Some(backing);
         self.shared = true;
         self
     }
@@ -168,6 +248,14 @@ impl TargetSpec {
         if let Some(plane) = &self.surface {
             bytes.push(1);
             bytes.extend(plane.words());
+        }
+        // Written **only where the target has one**, for the reason the surface plane above is:
+        // a target of its own memory fingerprints to exactly the bytes it always has, so adding
+        // this field leaves every existing render case's recording valid. A `0` for `None` would
+        // not, and that mistake cost 62 of other families' cases a verdict once already.
+        if let Some(over) = &self.over_buffer {
+            bytes.push(1);
+            bytes.extend(over.words());
         }
         bytes
     }
@@ -1358,6 +1446,59 @@ impl RenderWork {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    /// A target of its own memory fingerprints to exactly the bytes it did before a backing could
+    /// be stated, and a target over a buffer appends its backing's words after them.
+    ///
+    /// This is the invariant the surface plane beside it learned the hard way: a `None` that wrote
+    /// a discriminant moved every render case's recording, and only a whole-set replay caught it.
+    /// Stated as the whole target's words rather than the field's, so the test fails if the field
+    /// is ever written anywhere but at the end, or when the target has no backing at all.
+    #[test]
+    fn a_target_over_no_buffer_fingerprints_as_it_always_did() {
+        let plain = TargetSpec::plain(PixelFormat::RGBA8Unorm, [4, 4]);
+        // The format, the two axes, the samples and the three flags: what a target always has.
+        assert_eq!(plain.words().len(), 4 + 2 * 4 + 4 + 3);
+        assert_eq!(
+            plain.words(),
+            TargetSpec::plain(PixelFormat::RGBA8Unorm, [4, 4]).words()
+        );
+        let over = OverBuffer::new(handle(), 256, 32, 16);
+        // A backing is of shared storage, so the storage flag moves with it; everything the
+        // backing itself adds comes after every byte a plain target has.
+        let mut expected = plain.shared().words();
+        expected.push(1);
+        expected.extend(over.words());
+        assert_eq!(plain.over_buffer(over).words(), expected);
+    }
+
+    /// A backing whose rows lie closer together than a row is wide is refused, and one at or above
+    /// its row is not.
+    ///
+    /// Such a call ends Metal's process instead of answering nil, so the refusal has to be decided
+    /// from the backing's own numbers and reached without a device. Its failure mode was exercised
+    /// while writing it: comparing with `<=` makes the second half fail, naming the pitch.
+    #[test]
+    fn a_backing_below_its_own_row_is_refused_and_nothing_at_or_above_it() {
+        let row = 16;
+        for pitch in 0..row {
+            let over = OverBuffer::new(handle(), 256, pitch, row);
+            assert!(
+                over.unsafe_stride().is_some(),
+                "a pitch of {pitch} under a row of {row} is not refused, so a case could hand \
+                 Metal the call that ends its process"
+            );
+        }
+        for pitch in [row, row + 1, row * 2, 4096] {
+            let over = OverBuffer::new(handle(), 256, pitch, row);
+            assert_eq!(
+                over.unsafe_stride(),
+                None,
+                "a pitch of {pitch} at or above a row of {row} is refused, which would refuse a \
+                 target Metal makes"
+            );
+        }
+    }
 
     /// A handle to name in a step. Which handle a step holds never reaches the fingerprint, so any
     /// one will do here.
