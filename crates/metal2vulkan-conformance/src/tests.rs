@@ -3835,6 +3835,32 @@ fn a_count_whose_ceiling_is_the_lone_run_is_gated_there() {
         &record,
         "WorkCounts {\n    pipeline_layouts_made: 9,\n}"
     ));
+    // What the command prints and what the record stores are the same judgement, held together
+    // here because they are two code paths over the same rule and nothing else compares them: a
+    // count `apart_from` prints as a disagreement is exactly one `fold_alone_into` writes to
+    // `composed`, for the ceiling counts and the ordinary ones alike.
+    for (text, bound) in [
+        ("WorkCounts {\n    pipeline_layouts_made: 2,\n}", 1),
+        ("WorkCounts {\n    pipeline_layouts_made: 1,\n}", 2),
+        ("WorkCounts {\n    command_buffers_begun: 2,\n}", 1),
+        ("WorkCounts {\n    command_buffers_begun: 1,\n}", 2),
+    ] {
+        let count = text
+            .trim_start_matches("WorkCounts {\n    ")
+            .split(':')
+            .next()
+            .expect("the shape names one count");
+        let record = held(count, bound);
+        let measured = alone(text);
+        let printed: Vec<&str> = measured
+            .apart_from(&record)
+            .into_iter()
+            .map(|(count, _, _)| count)
+            .collect();
+        let stored = measured.fold_alone_into(&record, "eight runs alone".to_owned());
+        let kept: Vec<&str> = stored.composed.keys().map(String::as_str).collect();
+        assert_eq!(printed, kept, "{text} against a bound of {bound}");
+    }
     // A count with no row is reported whichever way it differs, so the table is the whole of the
     // exception.
     let record = alone("WorkCounts {\n    device_memory_allocated: 268435456,\n}").fold_alone_into(
