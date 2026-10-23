@@ -320,6 +320,9 @@ pub fn all() -> Vec<Visibility> {
 const PASS_NOTICES: &[Degradation] = &[
     // A `Shared` buffer the device keeps in system memory, which the visibility buffer is.
     Degradation::SharedInSystemMemory,
+    // The device's own compiler rewrote the stage's fast-math arithmetic as it made the pipeline,
+    // which MoltenVK 1.4.2 on this M3 Max announces for this fixture's vertex stage.
+    Degradation::FastMathRewrites,
 ];
 
 /// The bytes a buffer of `words` 64-bit words starts as.
