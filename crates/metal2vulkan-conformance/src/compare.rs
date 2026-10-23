@@ -19,7 +19,7 @@
 //!
 //! One rule is checked beside the walk rather than in it: **every degrade notice our side announced
 //! must be one the case names**, reported as a
-//! [`DivergenceKind::UndeclaredNotice`](crate::diff::DivergenceKind::UndeclaredNotice). The notices
+//! [`DivergenceKind::UndeclaredNotice`]. The notices
 //! site holds the whole announced set as one value, and a declaration unchecks that site, so the
 //! walk alone let one declaration excuse every other notice. The subset check is what makes the
 //! suite's central sentence — a difference is a bug unless we announced it — able to fail where it
