@@ -29,10 +29,12 @@
 //! Nothing here can fault a GPU: blit copies between textures the program makes, of formats whose
 //! copy unit matches, no dispatch, no draw and no loop.
 
+use crate::allowance::Allowance;
 use crate::case::{made, Abort, Case, Failure, Input, MetalSource, Side};
 use crate::transcript::{ByteLayout, Element, Observed, Sites, Value};
 use crate::work::{Plane, Resource, Step, TextureSpec, Work};
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
+use metal2vulkan_runtime::Degradation;
 
 /// Every texture's width; each is one row.
 const W: u64 = 4;
@@ -295,6 +297,16 @@ impl Case for FormatCopies {
 
     fn metal_source(&self) -> MetalSource {
         MetalSource::Run
+    }
+
+    fn allowances(&self) -> Vec<Allowance> {
+        // A device that flushes denormal depth values announces it once, and a `Depth32Float`
+        // texture is where that shows (lavapipe does; this Mac does not). The bytes the copies
+        // moved still compare exactly: the only site loosened is the set of notices, which Metal
+        // holds empty, and the allowance fails the case if the notice did not fire.
+        vec![crate::replay::notice_allowance(
+            Degradation::DepthDenormals.code(),
+        )]
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
