@@ -32,6 +32,7 @@ pub mod compressed_blits;
 pub mod compressed_decode;
 pub mod compute_threadgroups;
 pub mod depth_texel_reads;
+pub mod discard_hoist;
 pub mod extended_range_blends;
 pub mod extended_range_planes;
 pub mod extended_range_targets;
@@ -103,6 +104,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in wide_points::all() {
+        cases.push(Box::new(case));
+    }
+    for case in discard_hoist::all() {
         cases.push(Box::new(case));
     }
     for case in extended_range_planes::all() {
