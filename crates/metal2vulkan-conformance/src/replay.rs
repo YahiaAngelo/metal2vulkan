@@ -176,7 +176,6 @@ fn verdict_over(
     stopped: bool,
 ) -> Verdict {
     let allowances = case.allowances();
-    let validation = answer.validated.stopped();
     let carried = match case.metal_source() {
         MetalSource::Carried { from, .. } => Some(from),
         MetalSource::Run => None,
@@ -198,7 +197,7 @@ fn verdict_over(
         }
         let offered = Offered::new(announced, &answer.validated);
         let found = compare_run(&outcome.transcript, ours, &allowances, offered, stopped);
-        best = Some(better(best, Verdict::of(&found, validation.clone())));
+        best = Some(better(best, Verdict::of(&found, &answer.validated)));
     }
     best.unwrap_or(Verdict::Unrecorded {
         why: "the recording's answer holds no outcome".to_owned(),

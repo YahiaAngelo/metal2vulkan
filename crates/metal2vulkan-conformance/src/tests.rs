@@ -551,8 +551,43 @@ fn a_typed_error_where_metal_answered_is_refused_not_divergent() {
     };
     assert_eq!(at.len(), 1, "{at:?}");
     assert!(at[0].starts_with("case/dispatch"), "{at:?}");
-    // Metal's validation let the case run, so nothing excuses the refusal.
-    assert_eq!(*metal_validation, None);
+    // The recording's validated leg let the case run, so nothing excuses the refusal — and the
+    // verdict says which of the three facts that is rather than leaving it to be guessed at.
+    assert_eq!(*metal_validation, Validated::Ran.describe());
+    let printed = replayed.verdict.to_string();
+    assert!(
+        printed.contains("plain Metal answered the call"),
+        "{printed}"
+    );
+    assert!(printed.contains("let the case run"), "{printed}");
+}
+
+/// A refusal whose recording never took a validated leg says so, rather than reading as a case
+/// Metal's validation let through. The two are different facts and the report must tell them
+/// apart: one is a bug of ours, the other is a missing measurement.
+#[test]
+fn a_refusal_with_no_validated_leg_says_the_fact_is_missing() {
+    let case = WordsCase::new("words", 2);
+    let mut recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
+    recording.answers[0].validated = Validated::NotRun;
+    let mut side = StubSide::new(Vec::new()).refusing(
+        "dispatch",
+        Failure::named("Error::Invalid", "the encoder refused the dispatch"),
+    );
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    let Verdict::Refused {
+        metal_validation, ..
+    } = &replayed.verdict
+    else {
+        panic!("not refused: {}", replayed.verdict);
+    };
+    assert_eq!(*metal_validation, Validated::NotRun.describe());
+    assert!(
+        metal_validation.contains("never run under it"),
+        "{metal_validation}"
+    );
+    // Never a pass, whatever the validated leg says.
+    assert!(!replayed.verdict.is_compliant());
 }
 
 #[test]
@@ -1022,7 +1057,7 @@ fn a_refusal_reads_by_what_metals_validation_did() {
     );
     assert!(found.refusals.is_empty(), "{found:?}");
     assert_eq!(found.announced.len(), 1, "{found:?}");
-    assert_eq!(Verdict::of(&found, stopped.stopped()).word(), "announced");
+    assert_eq!(Verdict::of(&found, &stopped).word(), "announced");
 
     // Without the validated leg the same refusal is a failing case, named as unjustified rather
     // than quietly passing or quietly diverging.
@@ -1033,7 +1068,7 @@ fn a_refusal_reads_by_what_metals_validation_did() {
         found.bad_allowances[0].why,
         Unjustified::MetalValidationNotRun
     );
-    assert_eq!(Verdict::of(&found, None).word(), "divergent");
+    assert_eq!(Verdict::of(&found, &Validated::NotRun).word(), "divergent");
 }
 
 /// The rate-map cases state the descriptor they feed, name the words Metal's validation used, and
@@ -1062,16 +1097,12 @@ fn the_rate_map_cases_name_what_justifies_them() {
         // Every allowance names something that exists.
         for allowance in case.allowances() {
             match &allowance.justified_by {
-                Justification::Degradation(code) => assert!(
-                    Degradation::ALL.iter().any(|kind| kind.code() == code),
-                    "{code}"
-                ),
                 Justification::MetalValidation { says } => {
                     assert_eq!(says, crate::cases::rate_maps::ZERO_WIDTH_SAYS);
                     // Loosened at the refused call alone, so every other answer still compares.
                     assert_eq!(allowance.path, "case/map");
                 }
-                other => panic!("{other:?}"),
+                other => panic!("an unexpected tolerance: {other:?}"),
             }
         }
     }

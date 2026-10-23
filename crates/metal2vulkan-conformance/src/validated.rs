@@ -32,7 +32,7 @@
 //!
 //! # How a complaint is attributed to a call
 //!
-//! The child announces each [`Side`](crate::case::Side) call it is about to make on its standard
+//! The child announces each [`Side`] call it is about to make on its standard
 //! error ([`MARKER`]), so Metal's own output and our markers interleave in one stream in the order
 //! they happened. Everything between two markers is the complaint of the call the first marker
 //! names. Nothing is matched against Apple's wording, so a new check in a release the suite has
@@ -42,7 +42,7 @@
 //! recording holds nothing host-specific: the prefix carries this run's process id.
 
 use crate::case::{
-    Answer, Bindings, Case, Fill, Handle, IndirectReadBack, MeshCommand, MeshFunctions, MeshStep,
+    Answer, Bindings, Fill, Handle, IndirectReadBack, MeshCommand, MeshFunctions, MeshStep,
     PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, ShaderSource, Side, StageInRegion,
     StageInput, Venue,
 };
@@ -100,7 +100,7 @@ impl std::fmt::Display for LegError {
 /// What Metal's API validation did with `case`, taken by running the case in a child of this
 /// command with the layer on.
 #[cfg(target_os = "macos")]
-pub fn take(case: &dyn Case) -> Result<Validated, LegError> {
+pub fn take(case: &dyn crate::case::Case) -> Result<Validated, LegError> {
     let program = std::env::current_exe()
         .map_err(|error| LegError::NotStarted(format!("this command's own path: {error}")))?;
     let output = std::process::Command::new(&program)

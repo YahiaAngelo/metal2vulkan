@@ -38,9 +38,7 @@
 
 use crate::allowance::{Allowance, Justification, Loosening};
 use crate::case::{made, Abort, Case, Input, MetalSource, RateMapLayer, RateMapRequest, Side};
-use crate::replay::notice_allowance;
 use crate::transcript::{ByteLayout, Element, Gaps, Node, Observed, Region, Sites};
-use metal2vulkan_runtime::Degradation;
 
 /// The case of a descriptor Metal counts as having no layers.
 pub const NO_LAYERS: &str = "rate-map-no-layers";
@@ -155,22 +153,22 @@ impl Case for RateMapCase {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // Every map that is not the identity announces that a pass over it draws by this crate's
-        // tile lines rather than Apple's fixed-point ones. Metal announces nothing, so the notice
-        // site differs and the difference names the notice that justifies it.
-        let mut allowances = vec![notice_allowance(Degradation::RasterizationRateMap.code())];
-        if let Some(refusal) = &self.refusal {
-            // The one allowance that rests on the recording's validated oracle: we refuse a call
-            // plain Metal answered, and Metal's own API validation refusing it is what justifies
-            // that. The call's own site is loosened and nothing else, so every other answer of
-            // the case still compares exactly.
-            allowances.push(Allowance::new(
-                format!("case/{}", site::MAP),
-                Loosening::Unchecked,
-                refusal.clone(),
-            ));
-        }
-        allowances
+        // Exact is the default and these cases keep it. Neither venue announced anything over
+        // these maps (verified on MoltenVK and on lavapipe), so neither case carries a notice
+        // allowance: a tolerance that never fires is one nobody is checking, and a device that
+        // does announce something here should fail the case until somebody names why.
+        let Some(refusal) = &self.refusal else {
+            return Vec::new();
+        };
+        // The one tolerance of the family, and the only one that rests on the recording's second
+        // oracle: we refuse a call plain Metal answered, and Metal's own API validation refusing
+        // it is what justifies that. The refused call's own site is loosened and nothing else, so
+        // every other answer of the case still compares exactly.
+        vec![Allowance::new(
+            format!("case/{}", site::MAP),
+            Loosening::Unchecked,
+            refusal.clone(),
+        )]
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {

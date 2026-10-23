@@ -110,11 +110,20 @@ pub enum Validated {
 }
 
 impl Validated {
-    /// The words the report prints, where the validation stopped the case.
-    pub fn stopped(&self) -> Option<String> {
+    /// The words the report prints, whichever of the three the recording holds.
+    ///
+    /// All three say something, including [`Validated::NotRun`]. An unexercised leg read as "plain
+    /// Metal ran it" once, which claims a fact nobody took: a report must tell "Metal's validation
+    /// let this through" from "nobody asked Metal's validation".
+    pub fn describe(&self) -> String {
         match self {
-            Validated::Stopped { call, message } => Some(format!("stopped at {call}: {message}")),
-            Validated::Ran | Validated::NotRun => None,
+            Validated::Stopped { call, message } => {
+                format!("it stopped at {call}: {message}")
+            }
+            Validated::Ran => "it let the case run".to_owned(),
+            Validated::NotRun => {
+                "the case was never run under it, so there is no such fact".to_owned()
+            }
         }
     }
 }

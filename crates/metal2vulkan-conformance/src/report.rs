@@ -118,6 +118,21 @@ impl Report {
             }
         }
         out.push_str(&self.matrix());
+        // Every justified difference is printed, not only the failures. A tolerance that is never
+        // read is a tolerance nobody is checking, and a refusal that Metal's own API validation
+        // justifies must not read as a bare "announced" cell: the owner's rule is that a refusal
+        // stays visible.
+        for row in &self.rows {
+            if let Verdict::Announced { fields } = &row.verdict {
+                out.push_str(&format!(
+                    "\n{} on {} differed, justified\n",
+                    row.case, row.venue
+                ));
+                for field in fields {
+                    out.push_str(&format!("  {field}\n"));
+                }
+            }
+        }
         for error in &self.errors {
             out.push_str(&format!("\nerror: {error}\n"));
         }

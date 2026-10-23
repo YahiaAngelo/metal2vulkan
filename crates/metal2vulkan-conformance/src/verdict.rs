@@ -7,6 +7,7 @@
 
 use crate::compare::Comparison;
 use crate::diff::Divergence;
+use crate::recording::Validated;
 use metal2vulkan::error::{Needs, Unsupported};
 use metal2vulkan_runtime::Error;
 
@@ -24,9 +25,12 @@ pub enum Verdict {
     Refused {
         /// The sites we refused, as their paths and our errors.
         at: Vec<String>,
-        /// What Metal's API validation did with the same case, where the recording holds it: a
-        /// refusal Metal's validation also stops is a different fact from one plain Metal ran.
-        metal_validation: Option<String>,
+        /// What the recording's second oracle says of the same case
+        /// ([`Validated::describe`]): a refusal Metal's own validation also refuses is a
+        /// different fact from one its validation let through, and both differ again from a case
+        /// whose validated leg was never taken. The refusal is a failure in all three; what
+        /// changes is what a reader should do about it.
+        metal_validation: String,
     },
     /// No Metal answer stands for this run: none was recorded for the venue's Metal level, or the
     /// inputs the run fed are not the ones the recording's answer was taken from. Counted, never
@@ -38,9 +42,9 @@ pub enum Verdict {
 }
 
 impl Verdict {
-    /// The verdict `found` says, with `metal_validation` what the recording holds of Metal's
-    /// validated run.
-    pub fn of(found: &Comparison, metal_validation: Option<String>) -> Self {
+    /// The verdict `found` says, with `validated` what the recording holds of Metal's validated
+    /// run.
+    pub fn of(found: &Comparison, validated: &Validated) -> Self {
         if !found.divergences.is_empty() || !found.bad_allowances.is_empty() {
             let mut diverged = found.divergences.clone();
             for bad in &found.bad_allowances {
@@ -60,7 +64,7 @@ impl Verdict {
                     .iter()
                     .map(|refusal| format!("{}: {}", refusal.path, refusal.ours))
                     .collect(),
-                metal_validation,
+                metal_validation: validated.describe(),
             };
         }
         if found.announced.is_empty() {
@@ -129,10 +133,8 @@ impl std::fmt::Display for Verdict {
                 for site in at {
                     write!(out, "\n  {site}")?;
                 }
-                match metal_validation {
-                    Some(stopped) => write!(out, "\n  Metal's validation: {stopped}"),
-                    None => write!(out, "\n  plain Metal ran it"),
-                }
+                write!(out, "\n  plain Metal answered the call")?;
+                write!(out, "\n  Metal's API validation: {metal_validation}")
             }
             Verdict::Unrecorded { why } => write!(out, "unrecorded: {why}"),
             Verdict::LacksFeature { needs } => write!(out, "lacks the device feature: {needs}"),
