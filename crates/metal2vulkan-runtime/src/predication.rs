@@ -132,6 +132,14 @@
 //!   records, or a dispatch whose variant records in a command buffer of its own) splits it: each
 //!   run again records it again where it lies, as its first run did. A dispatch inside a laying
 //!   whose pipelines are being made waits for them, so the laying is not split for it.
+//! - **Encoded again at a rebind** (`command_buffer/reencode.rs`), as Metal resolves what a
+//!   command names as it submits the command buffer: a compute encoder that was its unit alone,
+//!   laid no loop and left no work out logs its Ifs, Elses and Ends among its calls
+//!   (`replay.rs`), and is encoded again in its unit begun anew as it opened
+//!   ([`Predication::replaying`]: the next record's index and the run of compute encoders as
+//!   they were), over a counter, steps, gates and a check word of its own; the first encoding's
+//!   go unsubmitted with its recording. Any other compute encoder of a command buffer that used
+//!   predication keeps no log, and a loop's record ends the log.
 
 use super::buffer::Buffer;
 use super::command_buffer::rerun::{LoopCheck, Piece};
@@ -142,6 +150,7 @@ use super::encoder::EncoderCore;
 use super::error::{internal, Error};
 use super::indirect_command_buffer::IndirectCommandBuffer;
 use super::owned_kernel::{OwnedBinds, OwnedKernel, OwnedModule, OwnedSet};
+use super::replay::ComputeCall;
 use super::residency::Residency;
 use super::resource::ResourceKey;
 use super::tracker::{Access, Barrier, Use, UseRange};
@@ -187,6 +196,23 @@ pub(super) struct Predication {
     /// encoder at this place among the command buffer's ended encoders on, which the open encoder
     /// leaves out of the command buffer's work ([`take_left_out`](Self::take_left_out)).
     left_out: Option<usize>,
+    /// What each compute encoder found as it opened, in order ([`Opened`]).
+    opened: Vec<Opened>,
+    /// The places among the command buffer's ended encoders of the compute encoders whose unit
+    /// they were alone, which laid no loop and left nothing out: a rebind may encode one again
+    /// ([`replaying`](Self::replaying)).
+    alone: Vec<usize>,
+}
+
+/// What a compute encoder found as it opened: its place among the command buffer's ended
+/// encoders, the event waits and signals encoded before it, its dispatch type, the index of the
+/// command buffer's next record, and the run of compute encoders it joined.
+struct Opened {
+    place: usize,
+    events: (usize, usize),
+    dispatch_type: DispatchType,
+    records: u32,
+    indirect_run: Option<IndirectRun>,
 }
 
 /// The laying of a unit's outermost loop: its pieces in encoding order (`command_buffer/rerun.rs`),
@@ -409,6 +435,7 @@ impl Condition<'_> {
 /// event signal or wait between: at some Metal levels its first indirect dispatch in an encoder of
 /// another type than its first encoder's ends the process
 /// (`MetalLevel::ends_at_a_runs_first_indirect_of_another_type`).
+#[derive(Clone)]
 struct IndirectRun {
     /// The place among the command buffer's ended encoders its last encoder takes.
     place: usize,
@@ -448,6 +475,10 @@ struct Unit {
     /// The bodies of the loops its last encoder ended with open, which its next encoder carries
     /// on (`Captures`).
     carried: Vec<Vec<(EncoderState, Event)>>,
+    /// A loop was laid in it.
+    looped: bool,
+    /// An unbalanced record left out what its encoders recorded before it.
+    left: bool,
 }
 
 /// The range of a unit an unbalanced record drops (the module docs): from the anchor to the next
@@ -529,6 +560,8 @@ impl Unit {
             closing: false,
             check: None,
             carried: Vec::new(),
+            looped: false,
+            left: false,
         }
     }
 
@@ -586,6 +619,13 @@ impl Predication {
                 })
             }
         }
+        self.opened.push(Opened {
+            place,
+            events,
+            dispatch_type,
+            records: self.records,
+            indirect_run: self.indirect_run.clone(),
+        });
         if let Some(unit) = &mut self.unit {
             if !unit.closing
                 && unit.place + 1 == place
@@ -614,6 +654,9 @@ impl Predication {
         // A loop open where its unit ends is closed by no End: its laying is checked by none.
         self.laying = None;
         if let Some(unit) = self.unit.take() {
+            if unit.first == unit.place && !unit.looped && !unit.left {
+                self.alone.push(unit.first);
+            }
             if let (true, Some(check), Some(outermost)) =
                 (unit.live_open(), unit.check, unit.stack.first())
             {
@@ -640,6 +683,40 @@ impl Predication {
     /// A command-predication call returned `Ok`: the next call's index is one more.
     pub(super) fn counted(&mut self) {
         self.records += 1;
+    }
+
+    /// Whether the compute encoder at `place` among the command buffer's ended encoders was its
+    /// unit alone, laying no loop and leaving nothing out, as its commit found: a rebind may
+    /// encode it again (`command_buffer/reencode.rs`).
+    pub(super) fn alone(&self, place: usize) -> bool {
+        self.alone.contains(&place)
+    }
+
+    /// The predication the compute encoder at `place` encodes again with, where it was its unit
+    /// alone ([`alone`](Self::alone)): its unit begun anew as it opened, the next record's index
+    /// and the run of compute encoders as they were then. Its records and dispatches then step
+    /// and gate as the first encoding's did, over a counter, steps and gates of their own; the
+    /// first encoding's go with its recording, never submitted.
+    pub(super) fn replaying(&self, place: usize) -> Option<Predication> {
+        if !self.alone(place) {
+            return None;
+        }
+        let opened = self.opened.iter().find(|opened| opened.place == place)?;
+        Some(Predication {
+            unit: Some(Unit::new(place, opened.events, opened.dispatch_type)),
+            records: opened.records,
+            indirect_run: opened.indirect_run.clone(),
+            ..Predication::default()
+        })
+    }
+
+    /// Take `replayed`'s check words, an encoder's encoded again in place of its first
+    /// encoding's ([`replaying`](Self::replaying)), committed: the command buffer fails at its
+    /// completion where one is set. The first encoding's, which its `UnitEnd` steps no longer
+    /// write, read zero.
+    pub(super) fn take_checks(&mut self, replayed: Predication) {
+        let Predication { open_checks, .. } = replayed;
+        self.open_checks.extend(open_checks);
     }
 
     /// The command buffer commits: its last unit ends, and each run's table is written into its
@@ -760,6 +837,7 @@ impl Predication {
         })?;
         let unit = self.unit()?;
         unit.range.dropping = true;
+        unit.left |= unit.range.work;
         let left_out = unit.range.work.then_some(unit.first);
         self.left_out = left_out.or(self.left_out);
         Ok(Some(record))
@@ -984,6 +1062,7 @@ impl Predication {
         test: Option<&Test>,
     ) -> Result<(Option<Step>, Step), Error> {
         let (resume, dead) = self.resume(uploads, device)?;
+        self.unit()?.looped = true;
         self.loops = (self.loops.checked_add(1))
             .ok_or_else(|| internal("a command buffer's loops past 2^32"))?;
         let looping = Looping {
@@ -1438,9 +1517,6 @@ impl ComputeCommandEncoder {
         &mut self,
         record: impl FnOnce(&mut Predication, &mut Uploads, &Device) -> Result<T, Error>,
     ) -> Result<T, Error> {
-        // Its commands, and those of its command buffer's other encoders, run gated inside
-        // blocks that end at the commit: none of them is encoded again (`replay.rs`).
-        self.stop_logging();
         let worked = self.captures().worked;
         self.captures().worked = false;
         let core = self.core();
@@ -1449,11 +1525,12 @@ impl ComputeCommandEncoder {
             let mut state = core.command_buffer().state();
             let state = &mut *state;
             state.predicated = true;
-            if let Some(unit) = &mut state.predication.unit {
+            let (predication, uploads) = state.predication_and_uploads();
+            if let Some(unit) = &mut predication.unit {
                 unit.note_work(worked);
             }
-            let recorded = record(&mut state.predication, &mut state.uploads, &device)?;
-            let left_out = state.predication.take_left_out();
+            let recorded = record(predication, uploads, &device)?;
+            let left_out = state.predication_mut().take_left_out();
             if let Some(first) = left_out {
                 state.leave_out_ended(first);
             }
@@ -1475,7 +1552,11 @@ impl ComputeCommandEncoder {
     /// buffer's, unless a loop's copy replayed it.
     fn counted<T>(&mut self, result: Result<T, Error>) -> Result<T, Error> {
         if result.is_ok() && !self.captures().replaying {
-            self.core().command_buffer().state().predication.counted();
+            self.core()
+                .command_buffer()
+                .state()
+                .predication_mut()
+                .counted();
         }
         result
     }
@@ -1483,7 +1564,7 @@ impl ComputeCommandEncoder {
     /// The encoder updated a fence: its unit of predication ends with it (the module docs).
     pub(super) fn fence_updated(&mut self) {
         let mut state = self.core().command_buffer().state();
-        state.predication.fence_updated();
+        state.predication_mut().fence_updated();
     }
 
     /// As the encoder ends: its unit takes its dispatches since its last record, and the bodies
@@ -1499,12 +1580,12 @@ impl ComputeCommandEncoder {
             if !state.predicated {
                 // No record yet: only its dispatches, which a later unbalanced record of its unit
                 // would find ran ungated.
-                if let Some(unit) = &mut state.predication.unit {
+                if let Some(unit) = &mut state.predication_mut().unit {
                     unit.note_work(worked);
                 }
                 return Ok(());
             }
-            state.predication.ends_with_open_blocks()
+            state.predication_mut().ends_with_open_blocks()
         };
         let mut open = std::mem::take(&mut self.captures().open);
         if !open.is_empty() {
@@ -1766,8 +1847,14 @@ impl ComputeCommandEncoder {
         comparison: u64,
         reference_value: u32,
     ) -> Result<(), Error> {
-        let result = self.encode_start_if_uncounted(buffer, offset, comparison, reference_value);
-        self.counted(result)
+        self.logged(
+            |_| ComputeCall::StartIf(buffer.cloned(), offset, comparison, reference_value),
+            |this| {
+                let result =
+                    this.encode_start_if_uncounted(buffer, offset, comparison, reference_value);
+                this.counted(result)
+            },
+        )
     }
 
     /// [`encode_start_if`](Self::encode_start_if), not yet counted among the command buffer's records.
@@ -1809,8 +1896,13 @@ impl ComputeCommandEncoder {
     /// an Else on a loop, kills the outermost open block, as Metal's does; with no block open it is
     /// an unbalanced record, as Metal's is.
     pub fn encode_start_else(&mut self) -> Result<(), Error> {
-        let result = self.encode_start_else_uncounted();
-        self.counted(result)
+        self.logged(
+            |_| ComputeCall::StartElse,
+            |this| {
+                let result = this.encode_start_else_uncounted();
+                this.counted(result)
+            },
+        )
     }
 
     /// [`encode_start_else`](Self::encode_start_else), not yet counted among the command buffer's records.
@@ -1830,8 +1922,11 @@ impl ComputeCommandEncoder {
     /// for the End that closes that block; with no block open it is an unbalanced record,
     /// answering `NO` (the module docs).
     pub fn encode_end_if(&mut self) -> Result<bool, Error> {
+        let at = self.log(|_| ComputeCall::EndIf(false));
         let result = self.encode_end_if_uncounted();
-        self.counted(result)
+        let result = self.counted(result);
+        self.answered(at, &result, ComputeCall::EndIf);
+        result
     }
 
     /// [`encode_end_if`](Self::encode_end_if), not yet counted among the command buffer's records.
@@ -1867,6 +1962,7 @@ impl ComputeCommandEncoder {
         comparison: u64,
         reference_value: u32,
     ) -> Result<(), Error> {
+        self.stop_logging();
         let result = self.encode_start_while_uncounted(buffer, offset, comparison, reference_value);
         self.counted(result)
     }
@@ -1902,6 +1998,7 @@ impl ComputeCommandEncoder {
     /// run, and again while that End's condition holds after each run, as
     /// [`encode_start_while`](Self::encode_start_while)'s run, laid down as there.
     pub fn encode_start_do_while(&mut self) -> Result<(), Error> {
+        self.stop_logging();
         let result = self.encode_start_do_while_uncounted();
         self.counted(result)
     }
@@ -1916,6 +2013,7 @@ impl ComputeCommandEncoder {
     /// block it kills the outermost open block and answers `NO`; with no block open it is an
     /// unbalanced record, answering `NO` (the module docs).
     pub fn encode_end_while(&mut self) -> Result<bool, Error> {
+        self.stop_logging();
         let result = self.encode_end_while_uncounted();
         self.counted(result)
     }
@@ -1943,6 +2041,7 @@ impl ComputeCommandEncoder {
         comparison: u64,
         reference_value: u32,
     ) -> Result<bool, Error> {
+        self.stop_logging();
         let result =
             self.encode_end_do_while_uncounted(buffer, offset, comparison, reference_value);
         self.counted(result)

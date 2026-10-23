@@ -1678,7 +1678,7 @@ impl EncoderCore {
         let (next, laying) = {
             let mut state = command_buffer.state();
             let next = command_buffer.allocate_raw(&mut state)?;
-            (next, state.predication.laying())
+            (next, state.predication_mut().laying())
         };
         if !laying {
             self.begin(next, vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)?;
@@ -1690,7 +1690,7 @@ impl EncoderCore {
         self.begin(next, vk::CommandBufferUsageFlags::empty())?;
         // SAFETY: just begun, and only this encoder records it.
         unsafe { Barrier::everything().record(self.device().shared().vk(), next) };
-        command_buffer.state().predication.laid_into(next);
+        command_buffer.state().predication_mut().laid_into(next);
         Ok(Continuation(next, Laid::Inside))
     }
 
@@ -1821,7 +1821,7 @@ impl EncoderCore {
         // Inside a predicated loop's laying, the work goes among its pieces, before the command
         // buffer the encoder goes on in (`command_buffer/rerun.rs`).
         if next.1 == Laid::Inside {
-            (self.open.command_buffer.state().predication).laid_apart(&work);
+            (self.open.command_buffer.state().predication_mut()).laid_apart(&work);
         }
         let host = work.gpu_written();
         if host {

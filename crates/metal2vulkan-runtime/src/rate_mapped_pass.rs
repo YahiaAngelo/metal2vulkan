@@ -81,9 +81,9 @@
 //!   map; their passes that took it are encoded again from their logs, in the reset's call, before
 //!   that submission (`command_buffer/reencode.rs`), and a command buffer not yet committed has
 //!   them encoded again at its commit. A group submitted before the reset draws by the map as its
-//!   passes took it: Metal's GPU, already reading, may do either. An encoder that kept no log (a
-//!   command predication's command buffer, an encoder opened while a buffer of the device was
-//!   detached, one that left work for a host step), or whose encoding again is refused (the pass
+//!   passes took it: Metal's GPU, already reading, may do either. An encoder that kept no log (an
+//!   encoder opened while a buffer of the device was detached, one that left work for a host
+//!   step), or whose encoding again is refused (the pass
 //!   checked against the map as reset), draws by the map as it took it, announced
 //!   (`rate-map-reset-unencoded`).
 //! - **A mutable map's pass past the screen** (the M3 Max under macOS 27.0.1, a quad far past the

@@ -719,8 +719,11 @@ pub(super) struct State {
     storage_form: Option<Arc<Riding>>,
     /// Its units of command predication (`predication.rs`).
     pub(super) predication: Predication,
-    /// An encoder of it used command predication: its commit lets go of every log, as a command
-    /// encoded again after the commit would run outside its block.
+    /// The predication of an encoder a rebind encodes again now, which was its unit alone
+    /// (`Predication::replaying`, `reencode.rs`): its records and dispatches step and gate there.
+    pub(super) replaying_predication: Option<Predication>,
+    /// An encoder of it used command predication: its commit lets go of the logs of its compute
+    /// encoders that shared their unit, or laid a loop or left work out (`State::keep_replays`).
     pub(super) predicated: bool,
     /// The device's trail mark as it completed (`trails.rs`): its waiters return once no trail
     /// numbered below is open. 0 before, which waits for none.
@@ -1141,6 +1144,25 @@ impl State {
     /// The encoders, or parts of them, ended so far.
     pub(super) fn parts(&self) -> usize {
         self.recorded.len()
+    }
+
+    /// The predication the open encoder's records and dispatches use: that of an encoder a rebind
+    /// encodes again now ([`replaying_predication`](Self::replaying_predication)), else the
+    /// command buffer's.
+    pub(super) fn predication_mut(&mut self) -> &mut Predication {
+        match &mut self.replaying_predication {
+            Some(replaying) => replaying,
+            None => &mut self.predication,
+        }
+    }
+
+    /// [`predication_mut`](Self::predication_mut), with the upload arena.
+    pub(super) fn predication_and_uploads(&mut self) -> (&mut Predication, &mut Uploads) {
+        let predication = match &mut self.replaying_predication {
+            Some(replaying) => replaying,
+            None => &mut self.predication,
+        };
+        (predication, &mut self.uploads)
     }
 
     /// A compute encoder of `dispatch_type` opened: it joins the unit of command predication of
@@ -1767,6 +1789,7 @@ impl CommandBuffer {
                 checks: None,
                 storage_form: None,
                 predication: Predication::default(),
+                replaying_predication: None,
                 predicated: false,
                 trail_mark: 0,
             }),

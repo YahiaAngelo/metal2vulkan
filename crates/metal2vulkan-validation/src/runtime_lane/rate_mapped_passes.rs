@@ -723,31 +723,31 @@ fn a_pass_over_a_map_of_no_compiled_layers_runs_its_vertex_function_alone() {
 /// The kind [`a_pass_the_runtime_cannot_encode_again_draws_by_the_map_it_took`] takes.
 pub(super) const RESET_UNENCODED: [Degradation; 1] = [Degradation::RateMapResetUnencoded];
 
-/// A pass whose command buffer used command predication keeps no log (`replay.rs`), so a reset
-/// of its map before the commit cannot encode it again: it draws by the map as it took it, the
-/// identity's 64 by 64 pixels, where Metal's GPU draws by the map as reset, and the commit
+/// A pass whose encoding again is refused keeps its first recording: its draw's scissor, which
+/// cuts into the viewport, the runtime plans over the identity map the pass took, and refuses over
+/// a map that is not the identity (`RegionRefusal::Scissor`), so a reset of its map to half quality
+/// before the commit cannot encode it again: it draws by the map as it took it, the scissor's 16
+/// by 64 pixels of the identity, where Metal's GPU draws by the map as reset, and the commit
 /// announces [`RESET_UNENCODED`], once for two such command buffers.
 #[test]
 fn a_pass_the_runtime_cannot_encode_again_draws_by_the_map_it_took() {
     fresh(|fixture, messages| {
         let device = &fixture.device;
-        let word = buffer_with(device, &0u32.to_le_bytes()).unwrap();
-        let identity = (64 * 64, [0, 0, 63, 63], [[0.5, 0.5], [63.5, 63.5]]);
+        let identity = (16 * 64, [0, 0, 15, 63], [[0.5, 0.5], [15.5, 63.5]]);
         for _ in 0..2 {
             let map = reset_map(fixture, 1.0, true);
             let target = fixture.target(64);
             let queue = device.new_command_queue().unwrap();
             let command_buffer = queue.command_buffer().unwrap();
-            let mut compute = command_buffer.compute_command_encoder().unwrap();
-            compute.encode_start_if(Some(&word), 0, 0, 0).unwrap();
-            compute.encode_end_if().unwrap();
-            compute.end_encoding().unwrap();
             let mut encoder = command_buffer
                 .render_command_encoder(&pass(&map, &target))
                 .unwrap();
             encoder.set_render_pipeline_state(&fixture.state).unwrap();
             encoder
                 .set_fragment_buffer(Some(&fixture.screen), 0, 0)
+                .unwrap();
+            encoder
+                .set_scissor_rect(ScissorRect::new(0, 0, 16, 64))
                 .unwrap();
             encoder
                 .draw_primitives(PrimitiveType::Triangle, 0, 3, 1, 0)
