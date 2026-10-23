@@ -31,6 +31,23 @@
 //! per-format probe made each texture first: what they pin is Metal's compressed-texture pattern
 //! per format, and their prefilled destination is what makes the read honest.
 //!
+//! # What the rows are held to, and the one branch of the lane that is not exercised
+//!
+//! **Not one byte of this family is loosened.** Every row's bytes are Metal's own on both venues of
+//! this round — MoltenVK and lavapipe — so the only field that may differ is the set of degrade
+//! notices our side announced, and only four rows name one: lavapipe keeps a decoded twin of a
+//! `BC1_RGBA` image (`decoded-block-twin`) and cannot hold Metal's denormal depths
+//! (`depth-denormals`). Each is named on the row that announced it, not on the family.
+//!
+//! The lane also carries a branch for a device that **cannot** write Metal's pattern and so reads
+//! zero, announcing `fresh-pattern-zeroed`. That branch is right for the lane, which must run
+//! anywhere, but **neither venue of this round takes it**: MoltenVK and lavapipe both write Metal's
+//! pattern exactly, in all 58 formats and every patterned shape. So these rows hold our side to
+//! Metal's pattern and name no allowance for the zeroing — an allowance that fires on no venue is
+//! a claim no run has checked, which the suite counts and which this family deliberately does not
+//! add. A device that does zero will read as `Divergent` here, and the allowance belongs in the
+//! commit that has that device's run behind it.
+//!
 //! # Why one process is the right place for this, and more than the lane had
 //!
 //! The lane's header describes a probe across *three fresh processes* and one after 768 MiB of
@@ -148,27 +165,6 @@ fn runs_site(name: impl Into<String>, bytes: &[u8], texel: usize) -> Node {
 /// The command buffers' statuses, in commit order.
 fn statuses_site(done: &[String]) -> Node {
     Node::leaf("statuses", Observed::value(Value::Lines(done.to_vec())))
-}
-
-/// The runs a read of `length` bytes of zero holds, in `texel`-byte texels: what a row reads where
-/// the device announced it cannot write Metal's pattern.
-fn zeroed_runs(length: usize, texel: usize) -> Value {
-    texel_runs(&vec![0u8; length], texel)
-}
-
-/// The allowance a patterned row needs where the device writes zero for Metal's pattern and
-/// announces `fresh-pattern-zeroed`: at `path`, the answer may be the runs of all-zero bytes of
-/// `length`, and nothing else.
-///
-/// It is stated as the one value the lane accepts instead, not as `Unchecked`: the lane's
-/// expectation is "Metal's pattern, or zero where the device announced it", and an unchecked field
-/// would stop holding the device to either.
-fn zeroed_allowance(path: impl Into<String>, length: usize, texel: usize) -> Allowance {
-    Allowance::new(
-        path,
-        crate::allowance::Loosening::AnyOf(vec![zeroed_runs(length, texel)]),
-        crate::allowance::Justification::notice(Degradation::FreshPatternZeroed),
-    )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -473,21 +469,56 @@ const fn chain(size: [u64; 2], levels: u64, wide: u64) -> Shape {
     }
 }
 
-/// One texture row: its case name, its shape and its storage mode.
+/// One texture row: its case name, its shape, its storage mode, and the degrade notices a device
+/// that cannot hold this shape exactly announces for it.
+///
+/// Metal announces none, so the notices site is the only field of a row that may differ at all —
+/// every byte compares exactly on both venues of this round — and each kind listed is what
+/// justifies that one difference. A row that announced a kind it does not list fails until the kind
+/// is added, which is the model working.
 struct Row {
     case: &'static str,
     shape: Shape,
     storage: Storage,
+    notices: &'static [Degradation],
 }
 
-/// A row of `shape` in `storage`.
+/// A row of `shape` in `storage` that a device holds exactly, announcing nothing.
 const fn row(case: &'static str, shape: Shape, storage: Storage) -> Row {
     Row {
         case,
         shape,
         storage,
+        notices: &[],
     }
 }
+
+/// A row of `shape` in `storage` whose shape a device may not hold exactly, announcing `notices`.
+const fn degraded(
+    case: &'static str,
+    shape: Shape,
+    storage: Storage,
+    notices: &'static [Degradation],
+) -> Row {
+    Row {
+        case,
+        shape,
+        storage,
+        notices,
+    }
+}
+
+/// What a device without block-compressed images announces for a `BC1_RGBA` texture: it keeps a
+/// decoded twin of the image and writes it after each write into the texture.
+///
+/// Measured, not guessed: lavapipe announces exactly this for all three of the `BC1_RGBA` rows,
+/// and MoltenVK announces nothing for them, which is why the kind is named per row rather than for
+/// the family.
+const BLOCK_TWIN: &[Degradation] = &[Degradation::DecodedBlockTwin];
+
+/// What a device whose depth format cannot hold Metal's denormal depths announces for a
+/// `Depth32Float` target: lavapipe announces it for the depth row, MoltenVK announces nothing.
+const DEPTH_DENORMALS: &[Degradation] = &[Degradation::DepthDenormals];
 
 /// Every texture row of the family.
 ///
@@ -570,18 +601,34 @@ const TEXTURES: &[Row] = &[
         RGBA16FLOAT,
         Storage::Private,
     ),
-    row("fresh-texture-bc1-rgba-shared", BC1_RGBA, Storage::Shared),
-    row("fresh-texture-bc1-rgba-managed", BC1_RGBA, Storage::Managed),
-    row("fresh-texture-bc1-rgba-private", BC1_RGBA, Storage::Private),
+    degraded(
+        "fresh-texture-bc1-rgba-shared",
+        BC1_RGBA,
+        Storage::Shared,
+        BLOCK_TWIN,
+    ),
+    degraded(
+        "fresh-texture-bc1-rgba-managed",
+        BC1_RGBA,
+        Storage::Managed,
+        BLOCK_TWIN,
+    ),
+    degraded(
+        "fresh-texture-bc1-rgba-private",
+        BC1_RGBA,
+        Storage::Private,
+        BLOCK_TWIN,
+    ),
     row(
         "fresh-texture-plain-rgba8unorm-private",
         RGBA8_PLAIN,
         Storage::Private,
     ),
-    row(
+    degraded(
         "fresh-texture-depth32float-private",
         DEPTH32FLOAT,
         Storage::Private,
+        DEPTH_DENORMALS,
     ),
     row(
         "fresh-chain-32x32-private",
@@ -707,7 +754,11 @@ impl Case for FreshTexture {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        patterned_allowances(&self.row.shape, self.row.storage)
+        self.row
+            .notices
+            .iter()
+            .map(|kind| crate::replay::notice_allowance(kind.code()))
+            .collect()
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
@@ -719,22 +770,6 @@ impl Case for FreshTexture {
         sites.push(statuses_site(&done.statuses));
         Ok(())
     }
-}
-
-/// What a row loosens: the `fresh` site may read all-zero bytes instead of Metal's pattern where
-/// the device announced `fresh-pattern-zeroed`, and the notices site then differs from Metal's
-/// empty one.
-///
-/// A row Metal reads zero in loosens **nothing**: both sides read zero and there is nothing a
-/// notice could excuse.
-fn patterned_allowances(shape: &Shape, storage: Storage) -> Vec<Allowance> {
-    if storage != Storage::Private || shape.pattern.is_none() {
-        return Vec::new();
-    }
-    vec![
-        crate::replay::notice_allowance(Degradation::FreshPatternZeroed.code()),
-        zeroed_allowance("case/fresh", shape.total() as usize, shape.block.0 as usize),
-    ]
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -920,7 +955,9 @@ impl Pattern {
         }
     }
 
-    /// The bytes a read of the whole texture answers.
+    /// The bytes a read of the whole texture answers. The cross-check against the lane's table is
+    /// what reads it, so it is the tests' alone.
+    #[cfg(test)]
     fn total(&self) -> u64 {
         self.shape().total()
     }
@@ -967,17 +1004,6 @@ impl Case for FreshPattern {
         let mut words = self.row.shape().words();
         words.push(BEFORE);
         Ok(vec![Input::bytes("shape-and-bytes", &words)])
-    }
-
-    fn allowances(&self) -> Vec<Allowance> {
-        vec![
-            crate::replay::notice_allowance(Degradation::FreshPatternZeroed.code()),
-            zeroed_allowance(
-                "case/fresh",
-                self.row.total() as usize,
-                self.row.texel.len(),
-            ),
-        ]
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
@@ -1412,27 +1438,45 @@ mod tests {
         }
     }
 
-    /// A row loosens only what a device's announced zeroing can touch: the `fresh` site and the
-    /// notices, and only where Metal's answer is a `Private` texture's pattern. A row Metal reads
-    /// zero in loosens nothing, and the `written` site — the row's own bytes — is never loosened.
+    /// **A row loosens the notices site and nothing else.** Not one byte of this family is ever
+    /// loosened: both venues of this round read Metal's own bytes, and the only field that may
+    /// differ is the set of notices our side announced for a device that cannot hold a shape
+    /// exactly.
+    ///
+    /// Only the four rows a venue announced something for name anything at all, and each names the
+    /// kind that venue announced. A row whose notices were a guess would show here as a row
+    /// loosening a site nothing needed.
     #[test]
-    fn only_a_patterned_row_loosens_anything() {
+    fn a_row_loosens_the_notices_site_alone() {
+        let notices = format!("case/{}/*", crate::replay::NOTICES_SITE);
         for case in all() {
             for allowance in case.allowances() {
-                assert!(
-                    allowance.path == "case/fresh"
-                        || allowance.path == format!("case/{}/*", crate::replay::NOTICES_SITE),
-                    "{}: {}",
-                    case.name(),
-                    allowance.path
-                );
+                assert_eq!(allowance.path, notices, "{}", case.name());
             }
         }
+        let named: Vec<&str> = TEXTURES
+            .iter()
+            .filter(|row| !row.notices.is_empty())
+            .map(|row| row.case)
+            .collect();
+        assert_eq!(
+            named,
+            vec![
+                "fresh-texture-bc1-rgba-shared",
+                "fresh-texture-bc1-rgba-managed",
+                "fresh-texture-bc1-rgba-private",
+                "fresh-texture-depth32float-private",
+            ]
+        );
         for row in TEXTURES {
-            let loosened = !patterned_allowances(&row.shape, row.storage).is_empty();
-            let patterned = row.storage == Storage::Private && row.shape.pattern.is_some();
-            assert_eq!(loosened, patterned, "{}", row.case);
+            assert_eq!(
+                FreshTexture { row }.allowances().len(),
+                row.notices.len(),
+                "{}",
+                row.case
+            );
         }
+        // Everything else is held to Metal exactly, notices included.
         for (case, storage) in BUFFERS {
             assert!(
                 FreshBuffers { case, storage }.allowances().is_empty(),
@@ -1444,6 +1488,9 @@ mod tests {
                 FreshOverBuffer { case, storage }.allowances().is_empty(),
                 "{case}"
             );
+        }
+        for row in PATTERNS {
+            assert!(FreshPattern { row }.allowances().is_empty(), "{}", row.case);
         }
     }
 
