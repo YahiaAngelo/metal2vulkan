@@ -154,7 +154,9 @@ impl SlotWrite {
     ) -> SlotWritability {
         let mut gap = None;
         for s in slots {
-            // A role that determines no binding type covers no slot of one.
+            // An argument of another binding type covers no slot of this one. One whose role
+            // determines no binding type at all (`MemberRole`) is not ruled out: what Metal
+            // binds it to is unknown, so it may be this slot.
             if s.binding_type.is_some_and(|t| t != binding_type) {
                 continue;
             }
