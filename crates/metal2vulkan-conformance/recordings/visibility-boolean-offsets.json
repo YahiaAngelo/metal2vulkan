@@ -445,7 +445,6 @@
         "draws_settled": 2,
         "driver_diagnostics_withheld": 1,
         "encoder_command_buffers_begun": 4,
-        "encoder_primaries_begun_ahead": 1,
         "finales_folded": 2,
         "graphics_pipelines_looked_up": 1,
         "images_started_on_the_host": 2,

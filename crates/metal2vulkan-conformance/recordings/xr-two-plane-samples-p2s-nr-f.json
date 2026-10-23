@@ -489,7 +489,6 @@
         "dispatch_pipelines_pooled": 2,
         "encoder_command_buffers_begun": 6,
         "finales_apart": 2,
-        "finales_folded": 0,
         "pipeline_layouts_made": 3,
         "pooled_memory_blocks_made": 4,
         "shader_modules_made": 4,

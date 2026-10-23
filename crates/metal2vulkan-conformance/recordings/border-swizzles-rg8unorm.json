@@ -6153,7 +6153,6 @@
         "dispatch_pipelines_pooled": 1,
         "encoder_command_buffers_begun": 62,
         "finales_apart": 1,
-        "finales_folded": 59,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 4,
         "sampler_sets_made": 1,

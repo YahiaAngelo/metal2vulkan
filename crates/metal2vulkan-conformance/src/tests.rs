@@ -4050,3 +4050,53 @@ fn a_ceiling_is_recorded_as_the_evidence_for_its_bound() {
     assert!(folded.ceilings.is_empty());
     assert_eq!(folded.composed.get("inline_passes"), Some(&2));
 }
+
+/// Reading a committed recording and writing it back changes **no byte**, for every case in the set.
+///
+/// The corollary the ceiling defect taught: *the check that an invariant holds must survive the
+/// operation twice.* A record is written by one measurement and read by every later one, so any
+/// asymmetry between the two — a field the writer omits and the reader defaults differently, a map
+/// that serialises in an order its type does not fix, a number that round-trips through a narrower
+/// form — drifts a little on each pass and is invisible on any single one. The cost half alone added
+/// five fields that serialise only when non-empty, which is exactly the shape that hides such a
+/// drift.
+///
+/// This holds the whole committed set rather than one synthetic record, because the interesting
+/// combinations are the ones real measurements produced: a case with ceilings and no `composed`, one
+/// with `moving` and no contrast, one with every map empty.
+#[test]
+fn reading_a_recording_and_writing_it_back_changes_no_byte() {
+    let mut checked = 0;
+    let mut drifted = Vec::new();
+    for case in crate::cases::all() {
+        let path = crate::recording::recording_path(case.name());
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let held: crate::recording::Recording = match serde_json::from_str(&text) {
+            Ok(held) => held,
+            Err(why) => {
+                drifted.push(format!("{}: does not parse: {why}", case.name()));
+                continue;
+            }
+        };
+        let mut again = serde_json::to_string_pretty(&held).expect("it serialises");
+        again.push('\n');
+        if again != text {
+            drifted.push(format!(
+                "{}: {} bytes in, {} bytes out",
+                case.name(),
+                text.len(),
+                again.len()
+            ));
+        }
+        checked += 1;
+    }
+    assert!(
+        drifted.is_empty(),
+        "{} of {checked} recording(s) changed on a read-and-write round trip:\n  {}",
+        drifted.len(),
+        drifted.join("\n  ")
+    );
+    assert!(checked > 0, "no recording was read, so this proved nothing");
+}
