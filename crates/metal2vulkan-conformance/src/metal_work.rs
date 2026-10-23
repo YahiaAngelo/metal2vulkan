@@ -118,6 +118,9 @@ fn descriptor(spec: &TextureSpec) -> Answer<Retained<MTLTextureDescriptor>> {
     if spec.render_target {
         usage |= MTLTextureUsage::RenderTarget | MTLTextureUsage::PixelFormatView;
     }
+    if let Some(stated) = spec.usage {
+        usage = MTLTextureUsage(stated as usize);
+    }
     let (storage, resource_options) = options(spec.private);
     if spec.kind == TextureKind::TextureBuffer {
         // SAFETY: the constructor reads only the format, the width, the options and the usage it
@@ -157,6 +160,7 @@ fn descriptor(spec: &TextureSpec) -> Answer<Retained<MTLTextureDescriptor>> {
     }
     descriptor.setUsage(usage);
     descriptor.setStorageMode(storage);
+    descriptor.setAllowGPUOptimizedContents(spec.gpu_optimized);
     Ok(descriptor)
 }
 

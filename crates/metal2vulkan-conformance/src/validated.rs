@@ -296,6 +296,11 @@ impl<S: Side> Side for Announcing<S> {
         self.inner.replace_region(texture, size, row_pitch, bytes)
     }
 
+    fn texture(&mut self, request: &crate::texture::TextureRequest<'_>) -> Answer<Handle> {
+        self.at("texture");
+        self.inner.texture(request)
+    }
+
     fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
         self.at("sampler");
         self.inner.sampler(spec)

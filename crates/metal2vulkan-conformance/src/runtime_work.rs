@@ -109,6 +109,11 @@ fn descriptor(spec: &TextureSpec) -> Answer<TextureDescriptor> {
     if spec.render_target {
         usage |= TextureUsage::RENDER_TARGET | TextureUsage::PIXEL_FORMAT_VIEW;
     }
+    if let Some(stated) = spec.usage {
+        usage = TextureUsage::try_from(stated).map_err(|problem| {
+            Failure::named("NoSuchTextureUsage", format!("{stated}: {problem:?}"))
+        })?;
+    }
     if spec.kind == TextureKind::TextureBuffer {
         let options = if spec.private {
             ResourceOptions::private()
@@ -131,6 +136,7 @@ fn descriptor(spec: &TextureSpec) -> Answer<TextureDescriptor> {
     d.mipmap_level_count = spec.levels.max(1);
     d.sample_count = spec.samples.max(1);
     d.usage = usage;
+    d.allow_gpu_optimized_contents = spec.gpu_optimized;
     d.resource_options = if spec.private {
         ResourceOptions::private()
     } else {
