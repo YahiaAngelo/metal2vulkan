@@ -87,6 +87,7 @@ impl Gpu for Native {
     type Listener = Retained<MTLSharedEventListener>;
     type Pass = Retained<MTLRenderPassDescriptor>;
     type BlitEncoder = Object<dyn MTLBlitCommandEncoder>;
+    type Fence = Object<dyn objc2_metal::MTLFence>;
 
     fn label(&self) -> String {
         format!("native Metal on {}", self.device.name())
@@ -1032,6 +1033,18 @@ impl Gpu for Native {
         );
     }
 
+    fn use_heap(&self, encoder: &mut Self::ComputeEncoder, heap: &Self::Heap) {
+        encoder.useHeap(heap);
+    }
+
+    fn update_fence(&self, encoder: &mut Self::ComputeEncoder, fence: &Self::Fence) {
+        encoder.updateFence(fence);
+    }
+
+    fn wait_for_fence(&self, encoder: &mut Self::ComputeEncoder, fence: &Self::Fence) {
+        encoder.waitForFence(fence);
+    }
+
     fn use_buffers(&self, encoder: &mut Self::ComputeEncoder, buffers: &[&Self::Buffer]) {
         let resources: Vec<NonNull<ProtocolObject<dyn MTLResource>>> = buffers
             .iter()
@@ -1106,6 +1119,47 @@ impl Gpu for Native {
         };
     }
 
+    fn fill_buffer_in(
+        &self,
+        encoder: &mut Self::BlitEncoder,
+        buffer: &Self::Buffer,
+        offset: usize,
+        length: usize,
+    ) {
+        encoder.fillBuffer_range_value(
+            buffer,
+            objc2_foundation::NSRange {
+                location: offset,
+                length,
+            },
+            0x5a,
+        );
+    }
+
+    fn copy_to_texture(
+        &self,
+        encoder: &mut Self::BlitEncoder,
+        source: &Self::Buffer,
+        texture: &Self::Texture,
+        (width, height): (usize, usize),
+        bytes_per_row: usize,
+    ) {
+        // SAFETY: the region lies in the buffer and in the texture (the workload's).
+        unsafe {
+            encoder.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                source,
+                0,
+                bytes_per_row,
+                bytes_per_row * height,
+                MTLSize { width, height, depth: 1 },
+                texture,
+                0,
+                0,
+                MTLOrigin { x: 0, y: 0, z: 0 },
+            )
+        };
+    }
+
     fn end_blit(&self, encoder: Self::BlitEncoder) {
         encoder.endEncoding();
     }
@@ -1133,24 +1187,11 @@ impl Gpu for Native {
         (width, height): (usize, usize),
         bytes_per_row: usize,
     ) {
-        let blit = command_buffer
+        let mut blit = command_buffer
             .blitCommandEncoder()
             .expect("blitCommandEncoder");
         for texture in textures {
-            // SAFETY: the region lies in the buffer and in the texture (the workload's).
-            unsafe {
-                blit.copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
-                    source,
-                    0,
-                    bytes_per_row,
-                    bytes_per_row * height,
-                    MTLSize { width, height, depth: 1 },
-                    texture,
-                    0,
-                    0,
-                    MTLOrigin { x: 0, y: 0, z: 0 },
-                )
-            };
+            self.copy_to_texture(&mut blit, source, texture, (width, height), bytes_per_row);
         }
         blit.endEncoding();
     }
@@ -1169,12 +1210,28 @@ impl Gpu for Native {
         );
     }
 
+    fn wait_only(&self, command_buffer: &Self::CommandBuffer) {
+        command_buffer.waitUntilCompleted();
+    }
+
+    fn status(&self, command_buffer: &Self::CommandBuffer) -> u64 {
+        command_buffer.status().0 as u64
+    }
+
+    fn fence(&self) -> Self::Fence {
+        self.device.newFence().expect("newFence")
+    }
+
     fn shared_event(&self) -> Self::SharedEvent {
         self.device.newSharedEvent().expect("newSharedEvent")
     }
 
     fn event_value(&self, event: &Self::SharedEvent) -> u64 {
         event.signaledValue()
+    }
+
+    fn set_event_value(&self, event: &Self::SharedEvent, value: u64) {
+        event.setSignaledValue(value);
     }
 
     fn set_when_scheduled(

@@ -32,6 +32,7 @@ pub trait Gpu {
     type Listener;
     type Pass;
     type BlitEncoder;
+    type Fence;
 
     /// The side and the device's name.
     fn label(&self) -> String;
@@ -387,6 +388,12 @@ pub trait Gpu {
     fn use_buffers_drawn(&self, encoder: &mut Self::RenderEncoder, buffers: &[&Self::Buffer]);
     /// `useResource:usage:` of `buffer`, read and write: the executed commands bind it.
     fn use_buffer(&self, encoder: &mut Self::ComputeEncoder, buffer: &Self::Buffer);
+    /// `useHeap:` of `heap`, whose textures the encoder's kernels read.
+    fn use_heap(&self, encoder: &mut Self::ComputeEncoder, heap: &Self::Heap);
+    /// `updateFence:` of a compute encoder.
+    fn update_fence(&self, encoder: &mut Self::ComputeEncoder, fence: &Self::Fence);
+    /// `waitForFence:` of a compute encoder.
+    fn wait_for_fence(&self, encoder: &mut Self::ComputeEncoder, fence: &Self::Fence);
     /// `useResources:count:usage:` of `buffers`, `MTLResourceUsageRead`.
     fn use_buffers(&self, encoder: &mut Self::ComputeEncoder, buffers: &[&Self::Buffer]);
     /// `executeCommandsInBuffer:withRange:` of commands `0..count`.
@@ -415,6 +422,25 @@ pub trait Gpu {
         to: (&Self::Buffer, usize),
         size: usize,
     );
+    /// `fillBuffer:range:value:` of `length` bytes from `offset` inside `encoder`.
+    fn fill_buffer_in(
+        &self,
+        encoder: &mut Self::BlitEncoder,
+        buffer: &Self::Buffer,
+        offset: usize,
+        length: usize,
+    );
+    /// `copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:
+    /// destinationSlice:destinationLevel:destinationOrigin:` of a `size` region from the start of
+    /// `source`, its rows `bytes_per_row` apart, inside `encoder`.
+    fn copy_to_texture(
+        &self,
+        encoder: &mut Self::BlitEncoder,
+        source: &Self::Buffer,
+        texture: &Self::Texture,
+        size: (usize, usize),
+        bytes_per_row: usize,
+    );
     fn end_blit(&self, encoder: Self::BlitEncoder);
     /// A blit encoder of one `fillBuffer:range:value:` over the buffer's first `length` bytes.
     fn fill(&self, command_buffer: &Self::CommandBuffer, buffer: &Self::Buffer, length: usize);
@@ -433,12 +459,21 @@ pub trait Gpu {
     fn commit(&self, command_buffer: &Self::CommandBuffer);
     /// `waitUntilCompleted`, then a check that it completed without error.
     fn wait(&self, command_buffer: &Self::CommandBuffer);
+    /// `waitUntilCompleted` alone, no status read after it.
+    fn wait_only(&self, command_buffer: &Self::CommandBuffer);
+    /// `status`, as `MTLCommandBufferStatus` numbers it: 0 not enqueued, 1 enqueued, 2 committed,
+    /// 3 scheduled, 4 completed, 5 in error.
+    fn status(&self, command_buffer: &Self::CommandBuffer) -> u64;
+    /// `newFence`.
+    fn fence(&self) -> Self::Fence;
     /// `addCompletedHandler:`.
     fn on_completed(&self, command_buffer: &Self::CommandBuffer, handler: Box<dyn FnOnce() + Send>);
     /// `newSharedEvent`.
     fn shared_event(&self) -> Self::SharedEvent;
     /// `signaledValue`.
     fn event_value(&self, event: &Self::SharedEvent) -> u64;
+    /// `setSignaledValue:`.
+    fn set_event_value(&self, event: &Self::SharedEvent, value: u64);
     /// `addScheduledHandler:` of a handler that sets `event`'s value to `value`: how a program
     /// without `encodeSignalEventScheduled:value:` signals as the command buffer is scheduled.
     fn set_when_scheduled(
