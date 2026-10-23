@@ -191,7 +191,6 @@
         "object_churn.vk_buffer_bindings": 1,
         "object_churn.vk_buffers_made": 1,
         "pooled_memory_blocks_made": 3,
-        "primaries_begun_ahead": 1,
         "queue_submissions": 2,
         "scheduled_where_submitted": 2,
         "scheduler_passes": 1,
@@ -200,7 +199,7 @@
         "slot_returns": 2,
         "spare_command_pools_taken": 4,
         "submit_infos": 2,
-        "wakes_completion_waiters": 3,
+        "wakes_completion_waiters": 2,
         "wakes_spared": 13
       },
       "composed": {

@@ -584,6 +584,7 @@
         "draws_settled": 1,
         "driver_diagnostics_withheld": 1,
         "encoder_command_buffers_begun": 11,
+        "fences_made": 1,
         "finales_apart": 2,
         "finales_folded": 2,
         "graphics_pipelines_looked_up": 1,

@@ -1270,7 +1270,6 @@
         "command_buffers_begun_secondaries": 12,
         "command_buffers_begun_segments": 4,
         "command_buffers_deferred": 28,
-        "command_buffers_replayed": 6,
         "command_buffers_replayed_inline": 28,
         "command_buffers_submitted": 20,
         "commands_replayed.begin_command_buffer": 28,
@@ -1345,10 +1344,9 @@
         "render_passes_begun_instances": 6,
         "render_passes_made": 2,
         "scheduled_where_submitted": 7,
-        "scheduler_passes": 9,
-        "scheduler_sleeps": 8,
+        "scheduler_passes": 7,
+        "scheduler_sleeps": 7,
         "scheduler_wakes_commit": 7,
-        "scheduler_wakes_host": 1,
         "shader_modules_made": 3,
         "slot_returns": 7,
         "spare_command_pools_taken": 14,
@@ -1356,7 +1354,6 @@
         "submit_infos": 11,
         "variant_pipelines_made": 9,
         "wakes_completion_waiters": 7,
-        "wakes_handler_threads": 1,
         "wakes_spared": 42
       },
       "composed": {

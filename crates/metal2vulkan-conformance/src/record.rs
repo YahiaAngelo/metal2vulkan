@@ -155,16 +155,21 @@ pub fn never_returned(
 
 /// Write `answers` as `case`'s recording.
 ///
-/// The cost half of a recording already written is kept ([`Recording::costs`]): it is our side's
-/// measurement, taken on a venue rather than from Metal, so re-taking Metal's answer neither
-/// refreshes it nor invalidates it, and dropping it here would silently empty the cost gate every
-/// time a case was re-recorded.
+/// Everything a recording already written holds that Metal does not measure is **kept**
+/// ([`Recording::carrying_the_answers_of`]): the cost half, and any other half another leg
+/// measures on another machine. Re-taking Metal's answer neither refreshes nor invalidates them,
+/// and dropping one here would silently empty its gate every time a case was re-recorded.
+///
+/// The keeping is a default rather than a list, so a half added later is carried without anyone
+/// remembering to add it.
 pub fn write(case: &dyn Case, answers: Vec<Answer>) -> Result<std::path::PathBuf, String> {
     let shaders = case.shaders()?;
-    let costs = recording::read(case.name())
-        .map(|held| held.costs)
-        .unwrap_or_default();
-    recording::write(&Recording::new(case.name(), shaders, answers).with_costs(costs))
+    let fresh = Recording::new(case.name(), shaders, answers);
+    let recording = match recording::read(case.name()) {
+        Ok(held) => held.carrying_the_answers_of(fresh),
+        Err(_) => fresh,
+    };
+    recording::write(&recording)
 }
 
 /// Count `transcript` among `outcomes`, as a new outcome or as another run of one already held.

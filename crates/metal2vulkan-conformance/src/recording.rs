@@ -332,6 +332,26 @@ impl Recording {
 
     /// The same recording holding `costs`: what our side cost on each venue measured.
     #[must_use]
+    /// `self`, a recording already written, with everything a fresh run of Metal **measures**
+    /// taken from `fresh` and everything else kept.
+    ///
+    /// The carry is inverted on purpose: keeping is the default and dropping takes an explicit
+    /// line here. Listing the halves to keep instead is the shape that loses one. It has already
+    /// cost this crate a defect — the cost half's ceiling bounds were carried by a list of maps,
+    /// a later change added evidence that belonged in no map on that list, and a re-measure
+    /// dropped 389 bounds across 149 cases with nothing in any output saying so. A half measured
+    /// by another leg, on another machine, is the normal case and not the exception: Metal's
+    /// answers come from a Mac, the counters from a venue, and nothing re-taken here refreshes or
+    /// invalidates the rest.
+    pub fn carrying_the_answers_of(mut self, fresh: Recording) -> Recording {
+        self.format = fresh.format;
+        self.suite_version = fresh.suite_version;
+        self.case = fresh.case;
+        self.shaders = fresh.shaders;
+        self.answers = fresh.answers;
+        self
+    }
+
     pub fn with_costs(mut self, costs: Vec<CostRecord>) -> Self {
         self.costs = costs;
         self
