@@ -374,10 +374,11 @@ impl Case for MeshCommands {
 ///
 /// The whole attachment is still a site of the transcript, loosened to [`Loosening::Unchecked`]
 /// and justified by the accepted difference `docs/API.md` section 10 now carries for the order
-/// ([`ORDER_IS_ACCEPTED`]). Two reasons it is a site rather than nothing: the recording then holds
-/// **Metal's own texels** for every one of the 30 runs, so the next macOS is read against them
-/// instead of against a memory of them; and the loosening has to name a document entry, so the day
-/// we announce the order or withdraw the entry, this case fails and says which.
+/// (`ORDER_IS_ACCEPTED`, this module's own words for its bold lead-in). Two reasons it is a site
+/// rather than nothing: the recording then holds **Metal's own texels** for every one of the 30
+/// runs, so the next macOS is read against them instead of against a memory of them; and the
+/// loosening has to name a document entry, so the day we announce the order or withdraw the entry,
+/// this case fails and says which.
 pub const UNORDERED_DRAWS: &str = "mesh-commands-unordered-draws";
 
 /// The owned fixture the racy row runs: `mesh_barrier`'s writer and object reader, the same

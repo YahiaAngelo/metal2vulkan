@@ -10,7 +10,7 @@
 //! So Metal's answer here is **run**, not copied. Record mode runs each case on native Metal on the
 //! chip and build the recording is keyed to, and the case records the words Metal's own threads
 //! wrote. The lane's formulas stay exactly where they are, as the readable model, and this module's
-//! own tests check the recorded words against them ([`tests`]): that is the cross-check the port
+//! own tests check the recorded words against them: that is the cross-check the port
 //! owes the lane, and it is what turns a comment into evidence.
 //!
 //! What a case observes is typed: every call of the pass by the Metal selector it makes, the
