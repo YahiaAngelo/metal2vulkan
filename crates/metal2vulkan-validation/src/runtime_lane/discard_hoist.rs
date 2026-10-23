@@ -30,16 +30,18 @@
 //! on Apple M4 answers `hoisted_nested` as Metal does (`RECORDED`).
 
 use super::buffer_with;
+use super::degrade_notices::counts;
 use super::resolves::{lane, quiet, Lane};
 use crate::air_library::AirLibrary;
 use crate::c3::AnswerGap;
 use metal2vulkan::bind::SamplerDescriptor;
+use metal2vulkan::error::DriverDeviation;
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureUsage};
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
 use metal2vulkan::vk::DriverId;
 use metal2vulkan_devtools::llvm_assemble;
 use metal2vulkan_runtime::{
-    BlitOption, ClearColor, LoadAction, PipelineOptions, Region, RenderPassDescriptor,
+    BlitOption, ClearColor, Degradation, LoadAction, PipelineOptions, Region, RenderPassDescriptor,
     RenderPipelineState, ResourceOptions, StoreAction, Texture, TextureDescriptor,
 };
 use std::path::Path;
@@ -245,6 +247,14 @@ fn rows(texels: &[[i32; 4]]) -> String {
 /// Each shape answers as the module places its sum on the device: Metal's answer where its
 /// placement is known and the device's fragment subgroup holds two quads, the noted residue
 /// where it is not known, the survivors alone under the subgroup gap (`AnswerGap`).
+///
+/// The gap's answer is announced, not silent: the sums run over the device's fragment subgroups,
+/// so every one of these draws records `PrecisionNote::FragmentSimdgroupGrouping` and the runtime
+/// announces `Degradation::FragmentSimdgroupGrouping` on every device whose driver does not run
+/// the fragment on Metal — which every device with the gap is, since a device that does
+/// (`DriverDeviation::MetalFragmentSimdgroups`) runs Metal's 32-lane simdgroups. The test asserts
+/// the notice where the facts predict it and its absence where they do not, so the gap and the
+/// notice are tied by this run and not by two descriptions of one fact.
 #[test]
 fn a_sum_before_a_discard_answers_as_metal_places_it() {
     let (messages, _cache, lane) = lane();
@@ -275,5 +285,24 @@ fn a_sum_before_a_discard_answers_as_metal_places_it() {
             rows(&texels)
         );
     }
+    // The notice the draws' sums announce, and the gap it covers: a device whose driver runs the
+    // fragment on Metal has Metal's own simdgroups and announces none, and no such device has the
+    // gap, so the gap's answer always carries the notice.
+    let metal_simdgroups = lane
+        .device
+        .compile_device()
+        .profile()
+        .takes_driver_deviation(DriverDeviation::MetalFragmentSimdgroups);
+    let announced = counts(&messages.take_notices());
+    let grouping = announced.contains_key(&Degradation::FragmentSimdgroupGrouping);
+    assert_eq!(
+        grouping, !metal_simdgroups,
+        "{name} (subgroup {size}, gap {gap}, Metal's simdgroups {metal_simdgroups}) announced \
+         {announced:?}"
+    );
+    assert!(
+        !gap || grouping,
+        "{name} answers the subgroup gap with no grouping notice: {announced:?}"
+    );
     quiet(lane, &messages);
 }
