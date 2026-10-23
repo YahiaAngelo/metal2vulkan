@@ -131,6 +131,7 @@ fn descriptor(spec: &TextureSpec) -> Answer<TextureDescriptor> {
     d.mipmap_level_count = spec.levels.max(1);
     d.sample_count = spec.samples.max(1);
     d.usage = usage;
+    d.allow_gpu_optimized_contents = spec.gpu_optimized;
     d.resource_options = if spec.private {
         ResourceOptions::private()
     } else {

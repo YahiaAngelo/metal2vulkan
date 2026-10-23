@@ -157,6 +157,7 @@ fn descriptor(spec: &TextureSpec) -> Answer<Retained<MTLTextureDescriptor>> {
     }
     descriptor.setUsage(usage);
     descriptor.setStorageMode(storage);
+    descriptor.setAllowGPUOptimizedContents(spec.gpu_optimized);
     Ok(descriptor)
 }
 

@@ -59,6 +59,10 @@ pub struct TextureSpec {
     pub private: bool,
     /// Whether the texture is a render target as well as read and viewed.
     pub render_target: bool,
+    /// `allowGPUOptimizedContents`: whether the GPU may keep the texture in a layout of its own.
+    /// Metal's descriptor has it on, so a spec has it on, and a case that means a plain layout
+    /// says so ([`TextureSpec::plain`]).
+    pub gpu_optimized: bool,
 }
 
 impl TextureSpec {
@@ -74,7 +78,15 @@ impl TextureSpec {
             samples: 1,
             private: true,
             render_target: false,
+            gpu_optimized: true,
         }
+    }
+
+    /// The same texture without `allowGPUOptimizedContents`.
+    #[must_use]
+    pub const fn plain(mut self) -> Self {
+        self.gpu_optimized = false;
+        self
     }
 
     /// The same texture with `levels` mip levels.
