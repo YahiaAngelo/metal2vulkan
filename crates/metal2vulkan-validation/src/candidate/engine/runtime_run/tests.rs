@@ -677,9 +677,9 @@ fn a_multisampled_render_case_runs_through_the_runtime_as_the_executor_compiles_
 /// context, compared (the tests above).
 #[cfg(any(m2v_gpu, m2v_cpu_icd))]
 fn runs_as_the_executor_compiles_it(name: &str) {
+    use crate::candidate::engine::RefusedOn;
     use crate::candidate::tests::compile_worker;
     use crate::candidate::tests::engine_compute::BACKEND;
-    use crate::worker::device::OpenedDevice;
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("corpus");
     let device = crate::gpu::TEST_DEVICE;
     let store = CorpusStore::new(&root);
@@ -716,7 +716,7 @@ fn runs_as_the_executor_compiles_it(name: &str) {
             )),
         ) => {
             assert_eq!(on_context.result.err(), Some(error), "{name}");
-            let artifact = |refused_on: Option<OpenedDevice>| {
+            let artifact = |refused_on: Option<RefusedOn>| {
                 refused_on
                     .and_then(|opened| opened.artifact)
                     .unwrap_or_else(|| panic!("{name}: the refusal records no artifact"))
