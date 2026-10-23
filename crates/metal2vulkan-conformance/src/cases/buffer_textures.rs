@@ -428,6 +428,10 @@ fn bytes_work() -> Work {
                 bytes_per_row: pitch,
                 bytes_per_image: 0,
                 length,
+                // These rows read at the region's own pitch, so there is no padding between the
+                // rows to ask about and no distinctive fill to ask it with. Zero is the byte the
+                // destination held before this field existed.
+                before: 0,
             });
         }
         let ([x, y, width, height], pitch, length) = row.write;
@@ -437,6 +441,10 @@ fn bytes_work() -> Work {
             slice: 0,
             region: Rect::new(x, y, width, height),
             bytes: written(length, row.seed()),
+            // An uncompressed format's rows of bytes are its texel rows, which is the region's
+            // height: what this call always meant before a block-compressed family needed the
+            // difference named.
+            rows: u64::from(height),
             bytes_per_row: pitch,
             bytes_per_image: 0,
         });
