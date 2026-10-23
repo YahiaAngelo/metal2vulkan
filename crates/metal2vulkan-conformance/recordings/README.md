@@ -18,8 +18,9 @@ taken in a child process under `MTL_DEBUG_LAYER=1` and `MTL_DEBUG_LAYER_ERROR_MO
   holds this. It is recorded, never guessed at: "the validation let this through" and "nobody asked
   the validation" are different facts and the report keeps them apart.
 
-`validated` is never compared with our behaviour. It is what may justify our refusing a call plain
-Metal answered, and nothing else.
+`validated` is never compared with our behaviour, and it never makes a case compliant: Metal's API
+validation stopping a call is not Metal refusing it. It may document a refusal of ours, which keeps
+the better bug report in the record, and it is held to the words the case names.
 
 These are the conformance suite's own files in its own format. They are not the validation crate's
 observations and they enter no census.

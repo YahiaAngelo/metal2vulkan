@@ -2,10 +2,25 @@
 //!
 //! Plain Metal is the behavioural oracle, because that is how a consumer runs the runtime. What
 //! Metal's API validation does with the same case is a **second recorded fact**, never compared
-//! with our behaviour, and the only thing that may justify our refusing a call plain Metal
-//! answered ([`crate::allowance::Justification::MetalValidation`]).
+//! with our behaviour.
 //!
-//! # Why a child process
+//! # A validated stop is not Metal refusing the call
+//!
+//! The ruling, and the reason the rest of this module exists: Metal's API validation stopping a
+//! call is **not** Metal refusing it. Plain Metal is the oracle, and the owner's standing rule is
+//! that what Metal allows we must allow. So where plain Metal answers a call and we return a
+//! typed error, that is a gap of ours, whatever its validation layer thinks: the row is
+//! [`Verdict::Refused`](crate::verdict::Verdict::Refused), it counts in the suite's own number,
+//! and it is never compliant. The suite calling such a row a pass would be the suite laundering a
+//! refusal.
+//!
+//! What the validated fact is for is the record and the report. It may **document** a refusal
+//! ([`crate::allowance::Justification::MetalValidation`]) — a refusal Metal's own validation also
+//! refuses reads differently from one Metal is happy with, and the first is the better bug report
+//! — and it is still held to its evidence, which is what keeps this leg load-bearing rather than
+//! decorative. It buys an explanation, never a pass.
+//!
+//! # Why a child process, and why `nslog` rather than the default
 //!
 //! Metal reads `MTL_DEBUG_LAYER` as it initialises, so the layer cannot be turned on inside a
 //! process that has already made a device: the plain leg and the validated leg cannot share one.
@@ -14,21 +29,32 @@
 //! layers under `MTL_DEBUG_LAYER=1` alone printed
 //! `` failed assertion `RasterizationRateMap Layers Validation ...` `` and died with SIGABRT,
 //! while the same descriptor under [`ERROR_MODE`] printed the same words through `NSLog` and let
-//! the call run.
+//! the call run. The valid modes are `ignore`, `assert`, `nslog`, `oslog` and `exception`;
+//! `nslog` is the one that reports every check without ending anything.
 //!
 //! So the leg runs in a child process of this same command, under [`ERROR_MODE`] and
-//! [`WARNING_MODE`], and the parent reads what the child's Metal said. Two properties follow,
-//! both of which the round's safety rule asks for:
+//! [`WARNING_MODE`], and the parent reads what the child's Metal said.
+//!
+//! **This is settled; do not re-litigate it from the letter of the safety rule.** That rule reads
+//! that a shape whose Metal leg aborts is a recorded-only row that must never be re-run, and read
+//! literally it would forbid re-recording even the *plain* leg of these cases, where Metal answers
+//! cleanly and safely. Its purpose is that no case of ours may end Metal's process or fault the
+//! device on demand, and this arrangement serves that purpose while keeping both legs
+//! re-recordable:
 //!
 //! - **The suite's own process never has the validation layer on**, so no assertion of Apple's can
-//!   end a record run, whatever a future case asks Metal.
+//!   end a record run, whatever a future case asks Metal. A child that aborts cannot take the
+//!   recorder with it.
+//! - **The layer reports instead of asserting**, so in practice nothing aborts at all.
 //! - **Nothing of the validated leg reaches the GPU** for the cases that use it: a descriptor is
 //!   compiled and queried on the CPU, and no command buffer is committed. A validation complaint
 //!   is a CPU-side check, so the leg cannot fault or hang the device.
 //!
 //! If a child dies anyway, that is reported rather than guessed at: a leg that produced no
 //! complaint and no clean exit is [`LegError::Died`], and record mode refuses the case instead of
-//! writing a [`Validated`] value nobody measured.
+//! writing a [`Validated`] value nobody measured. There is deliberately no `Validated` variant for
+//! "taken and died": refusing the case is the honest answer, and a variant nothing constructs
+//! would be dead code.
 //!
 //! # How a complaint is attributed to a call
 //!

@@ -1025,9 +1025,11 @@ fn metals_validation_justifies_a_refusal_and_only_a_recorded_one() {
     ));
 }
 
-/// A case that refuses a call plain Metal answered is `Announced` where its allowance names
-/// Metal's validated refusal, and `Refused` where the recording holds no such fact. The recorded
-/// validated answer is what decides, so the verdict is the same on a host with no Metal.
+/// A refusal stays a refusal however well documented it is.
+///
+/// Metal's API validation stopping a call is not Metal refusing it: plain Metal answered, so the
+/// row is `Refused` and is not compliant, and the justification buys the words in the report and
+/// nothing else. Where the recording holds no such fact, the claim itself fails too.
 #[test]
 fn a_refusal_reads_by_what_metals_validation_did() {
     let says = "screenSize.width (0) must be >0 and <=32768.";
@@ -1055,12 +1057,24 @@ fn a_refusal_reads_by_what_metals_validation_did() {
         Offered::new(&[], &stopped),
         true,
     );
-    assert!(found.refusals.is_empty(), "{found:?}");
-    assert_eq!(found.announced.len(), 1, "{found:?}");
-    assert_eq!(Verdict::of(&found, &stopped).word(), "announced");
+    // The refusal is not laundered into an announced difference: it stays its own row.
+    assert_eq!(found.refusals.len(), 1, "{found:?}");
+    assert!(found.announced.is_empty(), "{found:?}");
+    assert!(found.bad_allowances.is_empty(), "{found:?}");
+    // What the justification bought: Metal's own words beside the row, and nothing else.
+    assert_eq!(
+        found.refusals[0].documented_by,
+        Some(Justification::metal_validation(says).describe())
+    );
+    let verdict = Verdict::of(&found, &stopped);
+    assert_eq!(verdict.word(), "refused");
+    assert!(!verdict.is_compliant(), "a refusal is never compliant");
+    let printed = verdict.to_string();
+    assert!(printed.contains("documented, not excused"), "{printed}");
+    assert!(printed.contains(says), "{printed}");
 
-    // Without the validated leg the same refusal is a failing case, named as unjustified rather
-    // than quietly passing or quietly diverging.
+    // Without the validated leg the claim fails too, so the case says it has no explanation
+    // rather than offering one nobody took.
     let found =
         crate::compare::compare_run(&metal, &ours, &allowances, Offered::notices(&[]), true);
     assert_eq!(found.bad_allowances.len(), 1, "{found:?}");
@@ -1068,7 +1082,37 @@ fn a_refusal_reads_by_what_metals_validation_did() {
         found.bad_allowances[0].why,
         Unjustified::MetalValidationNotRun
     );
-    assert_eq!(Verdict::of(&found, &Validated::NotRun).word(), "divergent");
+    assert_eq!(found.refusals.len(), 1, "{found:?}");
+    assert_eq!(found.refusals[0].documented_by, None);
+    // A claim that does not hold fails the case on its own, ahead of the refusal it was made for.
+    assert!(!Verdict::of(&found, &Validated::NotRun).is_compliant());
+}
+
+/// A refusal nothing documents is still exactly one refusal, and the words say plain Metal
+/// answered. This is the shape the ported lanes will mostly meet.
+#[test]
+fn an_undocumented_refusal_is_one_row_and_names_no_excuse() {
+    let metal = Transcript::new(vec![Node::leaf(
+        "map",
+        Observed::value(Value::ok(Value::Absent)),
+    )]);
+    let ours = Transcript::new(vec![Node::leaf(
+        "map",
+        Observed::value(Value::error("Error::Invalid", Value::Absent)),
+    )]);
+    let found =
+        crate::compare::compare_run(&metal, &ours, &[], Offered::new(&[], &Validated::Ran), true);
+    assert_eq!(found.refusals.len(), 1, "{found:?}");
+    assert_eq!(found.refusals[0].documented_by, None);
+    let verdict = Verdict::of(&found, &Validated::Ran);
+    assert_eq!(verdict.word(), "refused");
+    assert!(!verdict.is_compliant());
+    let printed = verdict.to_string();
+    assert!(
+        printed.contains("plain Metal answered the call"),
+        "{printed}"
+    );
+    assert!(!printed.contains("documented"), "{printed}");
 }
 
 /// The rate-map cases state the descriptor they feed, name the words Metal's validation used, and
@@ -1106,7 +1150,7 @@ fn the_rate_map_cases_name_what_justifies_them() {
             }
         }
     }
-    // Only the refusal case rests on the validated oracle.
+    // Only the refusal case names the validated oracle.
     let resting = |case: &crate::cases::rate_maps::RateMapCase| {
         case.allowances().iter().any(|allowance| {
             matches!(

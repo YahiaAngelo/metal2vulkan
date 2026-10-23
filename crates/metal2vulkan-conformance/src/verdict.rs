@@ -22,6 +22,13 @@ pub enum Verdict {
     /// A field differs with nothing to justify it: the bug class.
     Divergent { found: Vec<Divergence> },
     /// We returned a typed error where Metal answered the call.
+    ///
+    /// **Never compliant, and no allowance can change that.** Plain Metal is the behavioural
+    /// oracle, because that is how a consumer runs the runtime, and the owner's standing rule is
+    /// that what Metal allows we must allow; so a refusal of something plain Metal does is a gap
+    /// of ours. A case may name what documents the refusal — Metal's own API validation refusing
+    /// the same call is the one thing that can — and that is printed beside the row, but the row
+    /// still counts here. Metal's validation stopping a call is not Metal refusing it.
     Refused {
         /// The sites we refused, as their paths and our errors.
         at: Vec<String>,
@@ -62,7 +69,13 @@ impl Verdict {
                 at: found
                     .refusals
                     .iter()
-                    .map(|refusal| format!("{}: {}", refusal.path, refusal.ours))
+                    .map(|refusal| match &refusal.documented_by {
+                        Some(documented) => format!(
+                            "{}: {} (documented, not excused, by {documented})",
+                            refusal.path, refusal.ours
+                        ),
+                        None => format!("{}: {}", refusal.path, refusal.ours),
+                    })
                     .collect(),
                 metal_validation: validated.describe(),
             };

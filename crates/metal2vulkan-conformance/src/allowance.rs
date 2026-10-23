@@ -30,14 +30,22 @@ pub enum Justification {
     /// ([`accepted_slug`]). The entry must be in the document.
     AcceptedDifference(String),
     /// **Metal's own API validation refuses the call**, which is the recording's second Metal
-    /// fact ([`Validated::Stopped`]). This is the one justification that rests on the recording's
-    /// validated oracle rather than on anything of ours, and it is the only thing that may
-    /// justify our refusing a call plain Metal answered.
+    /// fact ([`Validated::Stopped`]). It is the one justification that rests on the validated
+    /// oracle rather than on anything of ours.
     ///
-    /// The case names the words Metal's validation used, and the recording's message must hold
-    /// them, so the justification cannot decay into "Metal probably objects to this": if Apple
-    /// changes the check, or the validated leg was never taken, the allowance fails and the case
-    /// fails with it.
+    /// **It documents a refusal; it never excuses one.** Metal's API validation stopping a call is
+    /// not Metal refusing it: plain Metal is the behavioural oracle, because that is how a
+    /// consumer runs the runtime, and the owner's standing rule is that what Metal allows we must
+    /// allow. So a site where plain Metal answered and we returned a typed error stays
+    /// [`Verdict::Refused`](crate::verdict::Verdict::Refused) and stays non-compliant, with these
+    /// words printed beside it. Letting it pass would be the suite laundering a refusal.
+    ///
+    /// What the justification is for, then, is the report and the record: a refusal Metal's own
+    /// validation also refuses reads differently from one Metal is perfectly happy with, and the
+    /// first is the better bug report. It is still held to its evidence, which is what keeps the
+    /// validated leg load-bearing rather than decorative: the case names the words Metal's
+    /// validation used, the recording's message must hold them, and if Apple's check moves or the
+    /// leg was never taken the claim fails and the case fails with it.
     MetalValidation {
         /// A fragment of the validation's own message, which the recording must contain.
         says: String,

@@ -17,12 +17,17 @@
 //!   and all 24,624 bytes of the parameter data word by word. The validated fact sits beside it
 //!   and changes nothing, which is the ruling: plain Metal is the oracle because that is how the
 //!   runtime is used.
-//! - **[`ZERO_SCREEN_WIDTH`] is the refusal case.** Plain Metal makes that map and the runtime
-//!   refuses it, `Invalid` with `RateMapProblem::ScreenSize`. That refusal is justified by
-//!   Metal's validated run and by nothing else, so the case names
-//!   [`Justification::MetalValidation`] with the words Metal's validation used. If the validated
-//!   leg is ever not taken, or Apple's check moves, the allowance stops holding and the case
-//!   fails — which is how the axis is kept load-bearing rather than decorative.
+//! - **[`ZERO_SCREEN_WIDTH`] is the refusal case, and it is meant to fail.** Plain Metal makes that
+//!   map and answers queries over it; the runtime refuses the call, `Invalid` with
+//!   `RateMapProblem::ScreenSize`. Metal's API validation refuses it too, and the case names
+//!   [`Justification::MetalValidation`] with the words it used — but that **documents** the
+//!   refusal, it does not excuse it. A validated stop is not Metal refusing the call, so the row
+//!   is [`Verdict::Refused`](crate::verdict::Verdict::Refused) and is **not compliant**: by the
+//!   owner's standing rule, what plain Metal allows we must allow, so this is a gap of ours and
+//!   the runtime's refusal is on the todo list as runtime work. The case's job is to hold that
+//!   gap visible with Metal's own words beside it, and the justification is still held to its
+//!   evidence, so if the validated leg is ever not taken or Apple's check moves, the claim fails
+//!   too.
 //!
 //! # Why this family is safe
 //!
@@ -160,10 +165,10 @@ impl Case for RateMapCase {
         let Some(refusal) = &self.refusal else {
             return Vec::new();
         };
-        // The one tolerance of the family, and the only one that rests on the recording's second
-        // oracle: we refuse a call plain Metal answered, and Metal's own API validation refusing
-        // it is what justifies that. The refused call's own site is loosened and nothing else, so
-        // every other answer of the case still compares exactly.
+        // What documents the family's one refusal, and the only claim in the suite that rests on
+        // the recording's second oracle. It does not excuse the refusal: the row stays `Refused`
+        // and stays non-compliant, because plain Metal answered the call. It names Metal's own
+        // words so the report says which kind of refusal it is, and it is held to them.
         vec![Allowance::new(
             format!("case/{}", site::MAP),
             Loosening::Unchecked,

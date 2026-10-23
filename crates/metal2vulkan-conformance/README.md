@@ -9,21 +9,18 @@ A case is written once, against one vocabulary, and run by either side: native M
 tree of named sites holding what a Metal program can observe. Metal's answer is **recorded** on a
 Mac, once per case, and **replayed** anywhere — the replay leg needs no Metal at all.
 
-<<<<<<< HEAD
 Comparison is exact by default. A loosened field names either a degrade notice's code or an entry of
 `docs/API.md`'s accepted differences, and the comparison fails where that entry is gone or the
 notice did not fire. A site may name several, because a notice is announced once per device per
 kind: the difference is justified where any of them holds.
 
+A site where plain Metal answered a call and we returned a typed error is a **refusal**, and no
+allowance can make it anything else: it counts in its own verdict and is never compliant.
+
 A replay holds the runtime to exact answers. `conformance replay --default-policy` replays under
 the runtime's own defaults instead — the fast form of every speed-for-accuracy choice, which is
 what a consumer runs — so the suite can say whether a difference is the policy's or the
 implementation's.
-=======
-Comparison is exact by default. A loosened field names either a degrade notice's code, an entry of
-`docs/API.md`'s accepted differences, or Metal's own API validation refusing the call, and the
-comparison fails where that entry is gone, the notice did not fire, or the validated run says
-otherwise.
 
 ## Two Metal oracles
 
@@ -33,11 +30,17 @@ Each recording holds **two** Metal facts, and never collapses them.
 transcript is what comparison uses, and matching it is what the suite asks for.
 
 **The same case under Metal's own API validation layer is a second recorded fact**
-(`Validated::{Ran, Stopped, NotRun}`). It is never compared with our behaviour. It exists because
-it is the one thing that may justify our refusing a call plain Metal answered
-(`Justification::MetalValidation`): the case names the words Metal's validation used, and the
-allowance holds only where the recording's message contains them. An unexercised leg justifies
-nothing, so a case resting on the axis cannot pass unless the validated leg really ran.
+(`Validated::{Ran, Stopped, NotRun}`). It is never compared with our behaviour.
+
+**A validated stop is not Metal refusing the call.** Where plain Metal answers and we return a
+typed error, that is a gap of ours whatever its validation layer thinks, so the row is `Refused`
+and is not compliant. The validated fact may **document** such a refusal
+(`Justification::MetalValidation`) — a refusal Metal's own validation also refuses reads
+differently from one Metal is happy with, and the first is the better bug report — and it is held
+to its evidence: the case names the words Metal's validation used, and the claim holds only where
+the recording's message contains them. An unexercised leg documents nothing. So the claim buys an
+explanation in the report, never a pass, and it cannot be made at all unless the validated leg
+really ran.
 
 `record` takes the validated leg in a **child process** of the command, under `MTL_DEBUG_LAYER=1`
 with `MTL_DEBUG_LAYER_ERROR_MODE=nslog`. Two reasons, both measured rather than assumed:
@@ -55,7 +58,6 @@ host-specific.
 
 A Metal-less host reads the validated fact out of the recording like everything else, so the axis
 is as portable as the rest of a case.
->>>>>>> ccd1efd (Say what the validated oracle holds, including when nobody asked it)
 
 ## This crate is not the validation suite
 
