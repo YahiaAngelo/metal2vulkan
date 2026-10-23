@@ -10,17 +10,12 @@
         "os_build": "26A434",
         "metal_level": "27.0.1"
       },
-      "provenance": {
-        "carried": {
-          "from": "runtime_lane::two_plane_heap_blits, from the probe tph: the heap digests on an Apple M4 under macOS 27.0.1 and an Apple M3 Max under macOS 26.7 alike, and the run shape recovered on an Apple M3 Max under MoltenVK",
-          "measured_on": "apple-m4"
-        }
-      },
-      "device": "apple-m3-max",
-      "runs": 6,
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
       "outcomes": [
         {
-          "runs": 6,
+          "runs": 3,
           "transcript": {
             "root": {
               "name": "case",
@@ -21465,7 +21460,12 @@
           }
         }
       ],
-      "validated": "not_run"
+      "validated": {
+        "stopped": {
+          "call": "work",
+          "message": "Copy From Texture Validation\n[sourceTexture pixelFormat](MTLPixelFormatRGB10A8_2P_XR10) must equal [destinationTexture pixelFormat](MTLPixelFormatRGB10A8_2P_XR10_sRGB)"
+        }
+      }
     }
   ]
 }

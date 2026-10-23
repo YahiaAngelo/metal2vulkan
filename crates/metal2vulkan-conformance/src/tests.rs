@@ -1053,7 +1053,7 @@ fn a_carried_answer_taken_on_another_chip_names_it() {
     for case in crate::cases::all() {
         let claimed = match case.metal_source() {
             MetalSource::Carried { measured_on, .. } => measured_on,
-            MetalSource::Run => continue,
+            MetalSource::Run | MetalSource::DidNotReturn { .. } => continue,
         };
         let recorded = crate::recording::read(case.name())
             .unwrap_or_else(|why| panic!("{}: {why}", case.name()))
@@ -1075,23 +1075,19 @@ fn a_carried_answer_taken_on_another_chip_names_it() {
             case.name()
         );
     }
-    // The two families, and no others. A third would mean a table nobody noticed came from another
-    // machine.
+    // One family, and no others. A second would mean a table nobody noticed came from another
+    // machine. `two_plane_heap_blits` used to be the other one and now records on Metal: nothing
+    // it does is Apple SPI, so its answer is this chip's.
     assert!(
         elsewhere
             .iter()
             .any(|name| name.starts_with("texture-fills-")),
         "texture_fills carries the M4's digests: {elsewhere:?}"
     );
-    assert!(
-        elsewhere.contains(&crate::cases::two_plane_heap_blits::HEAP_BLITS),
-        "two_plane_heap_blits carries the M4's digests: {elsewhere:?}"
-    );
     for name in &elsewhere {
         assert!(
-            name.starts_with("texture-fills-")
-                || *name == crate::cases::two_plane_heap_blits::HEAP_BLITS,
-            "{name} carries another chip's values and is not one of the two known families"
+            name.starts_with("texture-fills-"),
+            "{name} carries another chip's values and is not one of the known families"
         );
     }
     // The file says the chip only where it differs: an oracle-taken recording holds no such field.
@@ -1622,4 +1618,432 @@ fn the_ledger_fails_on_a_new_refusal_and_on_one_that_is_gone() {
         matches!(found.as_slice(), [Expectation::NotLedgerable { .. }]),
         "{found:?}"
     );
+}
+
+#[test]
+fn an_allowance_no_site_needed_is_counted_and_named_rather_than_silently_kept() {
+    // The hole this closes: the up-front check over a case's allowances has to exempt a degrade
+    // notice the run did not announce, because a notice is announced once per device per kind. So
+    // a case could name a tolerance that fires on no venue, naming a notice no venue announces,
+    // and every run would read green with nobody told. Two allowances of exactly this shape were
+    // written and deleted by hand in this round.
+    let mut case = WordsCase::new("words", 2);
+    case.allowances = vec![
+        // A tolerance nothing needs, for a notice nothing announces: speculation.
+        Allowance::new(
+            "case/output",
+            Loosening::Absolute(8.0),
+            Justification::notice(Degradation::DeviceArithmetic),
+        ),
+        // A tolerance nothing needs, for a notice the run did announce: not speculation, just
+        // unused on this row.
+        Allowance::new(
+            "case/output",
+            Loosening::Absolute(8.0),
+            Justification::notice(Degradation::ShadowedTexture),
+        ),
+    ];
+    let bytes = words(&[1, 2]);
+    // The notice the second allowance names is announced, so it is justified; the run is
+    // byte-identical, so neither allowance fires.
+    let announced = [Degradation::ShadowedTexture.code()];
+    let recording = recording_of(
+        &case,
+        case.transcript(bytes.clone(), "Completed", &announced),
+        3,
+    );
+    let mut side = StubSide::new(bytes).announcing(&[Degradation::ShadowedTexture]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+
+    // Report-only: the run is still exact, and still compliant.
+    assert_eq!(replayed.verdict, Verdict::Exact, "{}", replayed.verdict);
+    assert_eq!(replayed.allowances.named, 2);
+    assert_eq!(replayed.allowances.fired(), 0);
+    assert_eq!(
+        replayed.allowances.unfired.len(),
+        2,
+        "{:?}",
+        replayed.allowances.unfired
+    );
+
+    let mut report = Report::new();
+    report.add(replayed);
+    assert!(report.is_compliant());
+    assert_eq!(report.allowance_counts(), (2, 2));
+    assert_eq!(report.unfired_everywhere().len(), 2);
+    // Only the one nothing justifies is called out as a tolerance no run has checked.
+    let unchecked = report.unchecked_everywhere();
+    assert_eq!(unchecked.len(), 1, "{unchecked:?}");
+    assert_eq!(
+        unchecked[0].1.justified_by,
+        Justification::notice(Degradation::DeviceArithmetic).describe()
+    );
+    let rendered = report.render();
+    assert!(
+        rendered.contains("2 named, 0 fired, 2 never fired"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains(Degradation::DeviceArithmetic.code()),
+        "{rendered}"
+    );
+    assert!(rendered.contains("words                "), "{rendered}");
+}
+
+#[test]
+fn an_allowance_that_fires_is_not_counted_as_unfired() {
+    // The other half of the guard: a tolerance the run needs must not show up in the unfired
+    // count, or the count would say "nobody checked this" of the one allowance a run did check.
+    let mut case = WordsCase::new("words", 2);
+    case.allowances = vec![
+        Allowance::new(
+            "case/output",
+            Loosening::Absolute(8.0),
+            Justification::notice(Degradation::DeviceArithmetic),
+        ),
+        // The notice site differs too, because the device announced what the tolerance names and
+        // Metal announces nothing. That allowance fires as well, which is the point: both are
+        // claims the run used.
+        crate::replay::notice_allowance(Degradation::DeviceArithmetic.code()),
+    ];
+    let recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
+    // One word differs by 7, inside the allowance, and the notice it names is announced.
+    let mut side = StubSide::new(words(&[1, 9])).announcing(&[Degradation::DeviceArithmetic]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert!(
+        matches!(replayed.verdict, Verdict::Announced { .. }),
+        "{}",
+        replayed.verdict
+    );
+    assert_eq!(replayed.allowances.fired(), 2);
+    assert!(
+        replayed.allowances.unfired.is_empty(),
+        "{:?}",
+        replayed.allowances.unfired
+    );
+    let mut report = Report::new();
+    report.add(replayed);
+    assert!(report.unfired_everywhere().is_empty());
+    assert!(report.render().contains("2 named, 2 fired, 0 never fired"));
+}
+
+#[test]
+fn metal_on_this_chip_answers_the_two_plane_blits_exactly_as_the_probes_printed_them() {
+    // Two rows lost their Metal leg to a reason that named the wrong thing: `NO_PUBLIC_CALL` said
+    // the two-plane extended-range formats are Apple's private ones, so Metal had no public call
+    // for them. The fill is private; the format is not. Both rows now record on Metal, and this
+    // holds the committed recordings to the tables the probes printed — so the conversion is
+    // checked rather than asserted, and a Metal that starts answering differently shows up here
+    // instead of in a quiet re-record.
+    let held = |case: &dyn Case, carried: &Transcript| {
+        let recorded = crate::recording::read(case.name())
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        let answer = recorded
+            .answer(MetalLevel::NEWEST)
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        assert_eq!(
+            answer.provenance,
+            Provenance::MetalRun,
+            "{}: the case records on Metal now",
+            case.name()
+        );
+        let taken = answer
+            .deterministic()
+            .unwrap_or_else(|| panic!("{}: one outcome", case.name()));
+        // Field by field, through the suite's own comparison: a difference names the site.
+        let found = compare(carried, taken, &[], Offered::notices(&[]));
+        // The first few sites, not the whole comparison: a difference has to read on one screen.
+        assert!(
+            found.is_exact(),
+            "{}: Metal's recorded answer is not the probe's table:\n  {}",
+            case.name(),
+            found
+                .divergences
+                .iter()
+                .take(4)
+                .map(|divergence| divergence.to_string())
+                .collect::<Vec<String>>()
+                .join("\n  ")
+        );
+    };
+
+    let heap_blits = crate::cases::two_plane_heap_blits::heap_blits();
+    let (runs, carried) = heap_blits.carried_from_the_m4().unwrap();
+    assert_eq!(runs, 6, "the probe's runs behind the carried digests");
+    held(&heap_blits, &carried);
+
+    let announced = crate::cases::two_plane_copies::announced_row_blits();
+    let printed = announced.printed_by_the_probe().unwrap();
+    held(&announced, &printed);
+    // And the case that still carries, still carries: its reason is the fill, not the format.
+    let fills = crate::cases::two_plane_copies::row_blits();
+    assert!(
+        matches!(
+            fills.metal_source(),
+            MetalSource::Carried {
+                re_record: ReRecord::Forbidden { reason },
+                ..
+            } if reason.contains("fillTexture:") && !reason.contains("formats are Apple's private")
+        ),
+        "{:?}",
+        fills.metal_source()
+    );
+}
+
+/// A case whose Metal leg does not come back: the shape there was no verdict for.
+///
+/// `pass`'s call answers on our side, which is what the row pins; `answers` makes it answer
+/// instead, which is the break the verdict has to survive.
+struct DiedOnMetal {
+    /// Whether our side answers the call rather than refusing it.
+    answers: bool,
+}
+
+/// The call the probe died in, as the case names its site.
+const DIED_AT: &str = "the-call";
+
+/// What the probe saw, in its own words.
+const DIED_SAYS: &str = "Metal's process went away inside the call and never came back";
+
+impl DiedOnMetal {
+    /// The transcript the case states by hand: the inputs, and the call Metal never returned
+    /// from.
+    fn stated(&self) -> Transcript {
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(&self.inputs().unwrap()));
+        sites.value(DIED_AT, Value::Nothing(Negative::NeverReturned));
+        sites.notices(NOTICES_SITE, &[] as &[&str]);
+        sites.finish()
+    }
+}
+
+impl Case for DiedOnMetal {
+    fn name(&self) -> &'static str {
+        "died-on-metal"
+    }
+
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::did_not_return("the suite's own tests", DIED_AT, DIED_SAYS)
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        Ok(vec![Input::bytes("buffer:0", &[0u8; 4])])
+    }
+
+    fn carried_transcript(&self) -> Result<Option<(u32, Transcript)>, String> {
+        Ok(Some((1, self.stated())))
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        if self.answers {
+            // We came back from the call Metal did not: the divergence the row exists to catch.
+            let _ = made(sites, DIED_AT, side.zeroed_buffer(4))?;
+            return Ok(());
+        }
+        sites.push(Node::leaf(
+            DIED_AT,
+            Observed::value(Failure::named("Unsupported", "this call is not built").value),
+        ));
+        Ok(())
+    }
+}
+
+#[test]
+fn a_call_metal_did_not_return_from_is_its_own_verdict() {
+    // The hole this closes: a row that ends Metal's process has nothing to carry -- the lane holds
+    // no line for it -- so it was not recorded-only material, it had no verdict at all. `Exact`
+    // would claim a value matched where Metal produced none; `Divergent` would claim a behaviour
+    // of Metal's to differ from; `Refused` is for a call plain Metal answered, and counting it
+    // there would bury a real gap of ours among rows that are not one.
+    let case = DiedOnMetal { answers: false };
+    let (runs, stated) = case.carried_transcript().unwrap().unwrap();
+    let recording = Recording::new(
+        case.name(),
+        Vec::new(),
+        vec![crate::record::never_returned(
+            MetalLevel::NEWEST,
+            "the suite's own tests",
+            DIED_AT,
+            "the probe's device",
+            runs,
+            stated,
+        )],
+    );
+    let mut side = StubSide::new(Vec::new());
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    let Verdict::MetalNeverReturned { at, justified } = &replayed.verdict else {
+        panic!("{}", replayed.verdict);
+    };
+    assert_eq!(at.len(), 1, "{at:?}");
+    assert!(at[0].starts_with(&format!("case/{DIED_AT}: ")), "{at:?}");
+    assert!(justified.is_empty(), "{justified:?}");
+
+    // Counted like the others, and it does not loosen compliance: it is a distinct word in the
+    // report, not a quiet pass hidden inside "exact".
+    let mut report = Report::new();
+    report.add(replayed);
+    assert_eq!(report.counts().get("never-returned"), Some(&1));
+    assert_eq!(report.counts().get("exact"), None);
+    assert!(report.is_compliant());
+    let rendered = report.render();
+    assert!(rendered.contains("never-returned"), "{rendered}");
+    assert!(
+        rendered.contains("Metal did not return from the call, and we refused it"),
+        "{rendered}"
+    );
+
+    // No allowance can reach it: a case that loosens the site whole still gets this verdict and
+    // not `announced`, so the row cannot be dressed up as a justified difference.
+    let unchecked = vec![Allowance::new(
+        format!("case/{DIED_AT}"),
+        Loosening::Unchecked,
+        Justification::accepted(accepted_differences()[0].clone()),
+    )];
+    let found = compare(
+        &case.stated(),
+        &{
+            let mut side = StubSide::new(Vec::new());
+            replay_against(&case, &mut side, &recording).unwrap().ours
+        },
+        &unchecked,
+        Offered::notices(&[]),
+    );
+    assert_eq!(found.never_returned.len(), 1, "{found:?}");
+    assert!(found.announced.is_empty(), "{found:?}");
+}
+
+#[test]
+fn answering_where_metal_did_not_return_is_divergent() {
+    // The other half, and the reason the verdict is a mechanism and not a label: the one fact the
+    // row holds is that *we* refuse where Metal went away. Answering instead has to fail.
+    let case = DiedOnMetal { answers: true };
+    let (runs, stated) = DiedOnMetal { answers: false }
+        .carried_transcript()
+        .unwrap()
+        .unwrap();
+    let recording = Recording::new(
+        case.name(),
+        Vec::new(),
+        vec![crate::record::never_returned(
+            MetalLevel::NEWEST,
+            "the suite's own tests",
+            DIED_AT,
+            "the probe's device",
+            runs,
+            stated,
+        )],
+    );
+    let mut side = StubSide::new(Vec::new());
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    let Verdict::Divergent { found } = &replayed.verdict else {
+        panic!("{}", replayed.verdict);
+    };
+    assert!(
+        found.iter().any(|divergence| matches!(
+            divergence.kind,
+            DivergenceKind::AnsweredWhereMetalDidNotReturn { .. }
+        )),
+        "{found:?}"
+    );
+    assert!(!replayed.verdict.is_compliant());
+}
+
+#[test]
+fn record_mode_refuses_a_row_metal_does_not_return_from() {
+    // It may never be produced by running the shape: making the call is what ends Metal's
+    // process. `forbidden` carries the probe's own words, so `record` refuses before anything is
+    // encoded, on a host with no Metal as on this one.
+    let case = DiedOnMetal { answers: false };
+    assert_eq!(case.metal_source().forbidden(), Some(DIED_SAYS));
+    let mut side = StubSide::new(Vec::new());
+    let refused = record(&case, &mut side, 1, MetalLevel::NEWEST, Validated::NotRun);
+    assert_eq!(
+        refused,
+        Err(RecordError::Forbidden {
+            case: case.name().to_owned(),
+            reason: DIED_SAYS.to_owned(),
+        }),
+        "{refused:?}"
+    );
+    // And the answer that is written instead says so in the file: the provenance names the call,
+    // and Metal's API validation was never asked either.
+    let answer = crate::record::never_returned(
+        MetalLevel::NEWEST,
+        "the suite's own tests",
+        DIED_AT,
+        "the probe's device",
+        1,
+        case.stated(),
+    );
+    assert_eq!(answer.provenance.never_returned_from(), Some(DIED_AT));
+    assert_eq!(answer.provenance.measured_elsewhere(), None);
+    assert_eq!(answer.validated, Validated::NotRun);
+}
+
+#[test]
+fn the_report_says_how_many_answers_came_from_another_chip() {
+    // 53 recordings carried an Apple M4's values and `conformance cases` showed it only through a
+    // `Debug` print, so a run could read entirely green while a fifth of its answers came from a
+    // machine that is gone. The suite's own rule is that a recording of another oracle is stale;
+    // a carried table is the one place that rule is relaxed, so the relaxation has to be counted
+    // where a reader of the report sees it.
+    use crate::recording::APPLE_M4;
+    let carried = |case: &dyn Case, chip: &str| {
+        let bytes = words(&[1, 2]);
+        let transcript = WordsCase::new(case.name(), 2).transcript(bytes, "Completed", &[]);
+        Recording::new(
+            case.name(),
+            Vec::new(),
+            vec![RecordedAnswer {
+                key: crate::recording::OracleKey::current(MetalLevel::NEWEST),
+                provenance: Provenance::Carried {
+                    from: "a probe this tree holds".to_owned(),
+                    measured_on: chip.to_owned(),
+                },
+                device: "the probe's device".to_owned(),
+                runs: 1,
+                outcomes: vec![Outcome {
+                    runs: 1,
+                    transcript,
+                }],
+                validated: Validated::NotRun,
+            }],
+        )
+    };
+    let mut elsewhere = WordsCase::new("from-the-m4", 2);
+    elsewhere.source = MetalSource::carried("a probe this tree holds").measured_on(APPLE_M4);
+    let mut here = WordsCase::new("from-the-oracle", 2);
+    here.source = MetalSource::carried("a probe this tree holds");
+
+    let mut report = Report::new();
+    let mut side = StubSide::new(words(&[1, 2]));
+    let far = replay_against(&elsewhere, &mut side, &carried(&elsewhere, APPLE_M4)).unwrap();
+    assert_eq!(far.verdict, Verdict::Exact, "{}", far.verdict);
+    assert_eq!(far.measured_on.as_deref(), Some(APPLE_M4));
+    report.add(far);
+    let mut side = StubSide::new(words(&[1, 2]));
+    let near = replay_against(
+        &here,
+        &mut side,
+        &carried(&here, crate::recording::ORACLE_CHIP),
+    )
+    .unwrap();
+    // An answer taken on the oracle names no other chip: the count is of the relaxation, not of
+    // every carried row.
+    assert_eq!(near.measured_on, None);
+    report.add(near);
+
+    assert_eq!(
+        report.carried_from_another_chip(),
+        [(APPLE_M4, 1)].into_iter().collect()
+    );
+    let rendered = report.render();
+    assert!(rendered.contains("carried from another chip"), "{rendered}");
+    assert!(
+        rendered.contains(&format!("1 row(s) answered from {APPLE_M4}")),
+        "{rendered}"
+    );
+    // The rows are still compliant: a carried answer from another chip is weaker evidence, not a
+    // failure. Counting it is the whole mechanism.
+    assert!(report.is_compliant());
 }

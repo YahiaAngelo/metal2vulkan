@@ -124,6 +124,35 @@ pub fn carried(
     }
 }
 
+/// The answer a row has where **Metal did not return** from the call: one outcome, which the case
+/// states by hand from the probe that died, and a provenance naming the call.
+///
+/// Nothing here runs anything. This is the one answer in the suite that cannot be taken by running
+/// its own shape -- making the call is what ends Metal's process -- so [`record`] refuses such a
+/// row ([`crate::case::MetalSource::forbidden`]) and this is the only way one is built. The
+/// validated oracle is [`Validated::NotRun`] for the same reason: Metal's API validation layer was
+/// never asked either, and the file says so rather than implying it was content.
+pub fn never_returned(
+    level: MetalLevel,
+    from: &str,
+    call: &str,
+    device: &str,
+    runs: u32,
+    transcript: Transcript,
+) -> Answer {
+    Answer {
+        key: recording::OracleKey::current(level),
+        provenance: Provenance::NeverReturned {
+            from: from.to_owned(),
+            call: call.to_owned(),
+        },
+        device: device.to_owned(),
+        runs,
+        outcomes: vec![Outcome { runs, transcript }],
+        validated: Validated::NotRun,
+    }
+}
+
 /// Write `answers` as `case`'s recording.
 pub fn write(case: &dyn Case, answers: Vec<Answer>) -> Result<std::path::PathBuf, String> {
     let shaders = case.shaders()?;

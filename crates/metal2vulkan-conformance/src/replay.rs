@@ -6,7 +6,7 @@
 
 use crate::allowance::{Justification, Offered};
 use crate::case::{inputs_node, Case, MetalSource, Side, Venue, INPUTS_SITE};
-use crate::compare::compare_run;
+use crate::compare::{compare_run, Unfired};
 use crate::recording::{self, Answer, Lookup, Recording};
 use crate::transcript::{Node, Sites, Transcript};
 use crate::verdict::Verdict;
@@ -23,8 +23,34 @@ pub struct Replayed {
     pub case: String,
     pub venue: Venue,
     pub verdict: Verdict,
+    /// How many allowances the case named, and which of them nothing on this run needed
+    /// ([`crate::compare::Unfired`]). Empty where no comparison happened at all — a venue that
+    /// lacks the feature fires nothing, and saying its allowances went unused would be noise.
+    pub allowances: Allowances,
+    /// The chip a carried answer was measured on, where that is not the oracle's
+    /// ([`crate::recording::Provenance::measured_elsewhere`]). The report counts these: an answer
+    /// carried from a machine that is gone is weaker evidence than one taken here, and the suite's
+    /// own rule is that a recording of another oracle is stale, so the one place that rule is
+    /// relaxed has to be visible rather than implied.
+    pub measured_on: Option<String>,
     /// What our side observed, for a reader who wants the whole transcript after a failure.
     pub ours: Transcript,
+}
+
+/// What a case's allowances did on one row.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Allowances {
+    /// How many the case named.
+    pub named: usize,
+    /// The ones no site of this run needed.
+    pub unfired: Vec<Unfired>,
+}
+
+impl Allowances {
+    /// How many fired.
+    pub fn fired(&self) -> usize {
+        self.named.saturating_sub(self.unfired.len())
+    }
 }
 
 /// Why a case could not be replayed at all. These are never verdicts: a stale recording must fail
@@ -135,6 +161,8 @@ pub fn replay_against_known(
                 verdict: Verdict::Unrecorded {
                     why: format!("no Metal answer at Metal level {level}"),
                 },
+                allowances: Allowances::default(),
+                measured_on: None,
                 ours,
             })
         }
@@ -153,54 +181,75 @@ pub fn replay_against_known(
             case: name.to_owned(),
             venue,
             verdict: Verdict::LacksFeature { needs: lacks },
+            allowances: Allowances::default(),
+            measured_on: answer.provenance.measured_elsewhere().map(str::to_owned),
             ours,
         });
     }
 
-    let verdict = verdict_over(case, answer, &ours, &announced, abort.is_some());
+    let (verdict, allowances) = verdict_over(case, answer, &ours, &announced, abort.is_some());
     Ok(Replayed {
         case: name.to_owned(),
         venue,
         verdict,
+        allowances,
+        measured_on: answer.provenance.measured_elsewhere().map(str::to_owned),
         ours,
     })
 }
 
 /// The verdict of `ours` against `answer`'s outcomes: the most favourable of them, because Metal
-/// produced any of the set and matching one of them is matching Metal.
+/// produced any of the set and matching one of them is matching Metal. With it, what the case's
+/// allowances did against that outcome.
+///
+/// The allowances follow the verdict rather than being gathered over every outcome, because they
+/// are a fact about the comparison the verdict came from: a racy case whose run matched the
+/// outcome that needed no tolerance did not need the tolerance, however the other outcomes read.
 fn verdict_over(
     case: &dyn Case,
     answer: &Answer,
     ours: &Transcript,
     announced: &[String],
     stopped: bool,
-) -> Verdict {
+) -> (Verdict, Allowances) {
     let allowances = case.allowances();
     let carried = match case.metal_source() {
         MetalSource::Carried { from, .. } => Some(from),
-        MetalSource::Run => None,
+        MetalSource::Run | MetalSource::DidNotReturn { .. } => None,
     };
-    let mut best: Option<Verdict> = None;
+    let mut best: Option<(Verdict, Allowances)> = None;
     for outcome in &answer.outcomes {
         // The inputs come first: an answer taken from other bytes is no answer for this run.
         if let Some(why) = inputs_differ(&outcome.transcript, ours) {
             best = Some(better(
                 best,
-                Verdict::Unrecorded {
-                    why: match carried {
-                        Some(from) => format!("{why}; the answer is carried from {from}"),
-                        None => why,
+                (
+                    Verdict::Unrecorded {
+                        why: match carried {
+                            Some(from) => format!("{why}; the answer is carried from {from}"),
+                            None => why,
+                        },
                     },
-                },
+                    Allowances::default(),
+                ),
             ));
             continue;
         }
         let offered = Offered::new(announced, &answer.validated);
         let found = compare_run(&outcome.transcript, ours, &allowances, offered, stopped);
-        best = Some(better(best, Verdict::of(&found, &answer.validated)));
+        let used = Allowances {
+            named: found.named,
+            unfired: found.unfired.clone(),
+        };
+        best = Some(better(best, (Verdict::of(&found, &answer.validated), used)));
     }
-    best.unwrap_or(Verdict::Unrecorded {
-        why: "the recording's answer holds no outcome".to_owned(),
+    best.unwrap_or_else(|| {
+        (
+            Verdict::Unrecorded {
+                why: "the recording's answer holds no outcome".to_owned(),
+            },
+            Allowances::default(),
+        )
     })
 }
 
@@ -237,10 +286,13 @@ fn input_diff(recorded: &Node, fed: &Node) -> String {
     moved.join(", ")
 }
 
-/// The more favourable of two verdicts.
-fn better(held: Option<Verdict>, found: Verdict) -> Verdict {
+/// The more favourable of two verdicts, with the allowances of whichever is kept.
+fn better(
+    held: Option<(Verdict, Allowances)>,
+    found: (Verdict, Allowances),
+) -> (Verdict, Allowances) {
     match held {
-        Some(held) if rank(&held) <= rank(&found) => held,
+        Some(held) if rank(&held.0) <= rank(&found.0) => held,
         _ => found,
     }
 }
@@ -250,10 +302,11 @@ fn rank(verdict: &Verdict) -> u8 {
     match verdict {
         Verdict::Exact => 0,
         Verdict::Announced { .. } => 1,
-        Verdict::LacksFeature { .. } => 2,
-        Verdict::Refused { .. } => 3,
-        Verdict::Divergent { .. } => 4,
-        Verdict::Unrecorded { .. } => 5,
+        Verdict::MetalNeverReturned { .. } => 2,
+        Verdict::LacksFeature { .. } => 3,
+        Verdict::Refused { .. } => 4,
+        Verdict::Divergent { .. } => 5,
+        Verdict::Unrecorded { .. } => 6,
     }
 }
 

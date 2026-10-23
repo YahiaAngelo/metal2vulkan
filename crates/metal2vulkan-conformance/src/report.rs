@@ -3,6 +3,7 @@
 //! Errors are counted apart from verdicts. A stale recording is not a verdict, and printing it as
 //! one would let it read as coverage.
 
+use crate::compare::Unfired;
 use crate::known_refusals::{against, Expectation, KnownRefusal};
 use crate::replay::{ReplayError, Replayed};
 use crate::verdict::Verdict;
@@ -99,6 +100,147 @@ impl Report {
             .collect()
     }
 
+    /// How many allowances the selection named, and how many of them no row needed.
+    ///
+    /// A tolerance that never fires is the suite's blind spot made visible. The up-front check
+    /// over a case's allowances cannot catch it — a degrade notice is announced once per device
+    /// per kind, so an allowance naming a notice this run did not announce has to be allowed to
+    /// stand — which means a case could name a tolerance no venue ever justifies and no run would
+    /// say a word. The day one did fire, the row would read "announced, justified" with nobody
+    /// having checked whether the tolerance was right.
+    ///
+    /// It does not fail a run, because an allowance may legitimately be venue-specific. What the
+    /// report calls out is the stronger shape: [`Report::unfired_everywhere`].
+    pub fn allowance_counts(&self) -> (usize, usize) {
+        let named = self.rows.iter().map(|row| row.allowances.named).sum();
+        let unfired = self
+            .rows
+            .iter()
+            .map(|row| row.allowances.unfired.len())
+            .sum();
+        (named, unfired)
+    }
+
+    /// The allowances no row of the report needed, by case and path: those that fired on no venue
+    /// of this run at all, and what the case named to justify each.
+    ///
+    /// An allowance that fires on lavapipe and not on MoltenVK is doing its job; one that fires
+    /// nowhere is a claim this run cannot vouch for. The key is (case, path, justification),
+    /// because the same case may name several tolerances at one site — a notice is announced once
+    /// per device per kind, so which of them a run sees depends on what ran before it — and each
+    /// is its own claim.
+    pub fn unfired_everywhere(&self) -> Vec<(&str, &Unfired)> {
+        // A row says only which of its case's allowances went **unused**, so a claim fired on a
+        // row where that row compared at all and the claim is absent from its unfired list. A row
+        // that compared nothing — a venue that lacks the feature, a case with no answer — settles
+        // nothing either way, which is why `named` is read and not just the list's length.
+        let fired: BTreeSet<(&str, &str, &str)> = self
+            .rows
+            .iter()
+            .filter(|row| row.allowances.named > 0)
+            .flat_map(|row| {
+                let unused: BTreeSet<(&str, &str)> = row
+                    .allowances
+                    .unfired
+                    .iter()
+                    .map(|claim| (claim.path.as_str(), claim.justified_by.as_str()))
+                    .collect();
+                self.rows
+                    .iter()
+                    .filter(move |other| other.case == row.case)
+                    .flat_map(|other| &other.allowances.unfired)
+                    .filter(move |claim| {
+                        !unused.contains(&(claim.path.as_str(), claim.justified_by.as_str()))
+                    })
+                    .map(move |claim| {
+                        (
+                            row.case.as_str(),
+                            claim.path.as_str(),
+                            claim.justified_by.as_str(),
+                        )
+                    })
+            })
+            .collect();
+        let mut everywhere: Vec<(&str, &Unfired)> = Vec::new();
+        for row in &self.rows {
+            for claim in &row.allowances.unfired {
+                let key = (
+                    row.case.as_str(),
+                    claim.path.as_str(),
+                    claim.justified_by.as_str(),
+                );
+                let already = everywhere.iter().any(|(case, held)| {
+                    (*case, held.path.as_str(), held.justified_by.as_str()) == key
+                });
+                if !fired.contains(&key) && !already {
+                    everywhere.push((row.case.as_str(), claim));
+                }
+            }
+        }
+        everywhere
+    }
+
+    /// The allowances no row needed **and** no row could justify: the case names a tolerance, no
+    /// site of the run differed inside it, and the notice or entry it names did not hold either.
+    ///
+    /// This is the speculative shape at its plainest, and the one worth a stronger word than the
+    /// rest. Nothing in the run connects the tolerance to anything: it is a sentence about a
+    /// device that was not here. Two allowances of exactly this shape were written and deleted by
+    /// hand in this round, which is why the suite now counts them.
+    ///
+    /// It is still **reported, not fatal**. A degrade notice fires on the device that needs it, so
+    /// a tolerance for a notice no venue of this run announces may be right about another venue;
+    /// what the suite can say honestly is that no run has checked it. Making it fatal would
+    /// instead force a case to carry only the tolerances this Mac happens to need, which is a
+    /// worse rule: it would read as proof of a device nobody tested.
+    pub fn unchecked_everywhere(&self) -> Vec<(&str, &Unfired)> {
+        self.unfired_everywhere()
+            .into_iter()
+            .filter(|(case, claim)| {
+                // A row that did justify the claim settles it, whether or not it fired there: the
+                // notice was announced, so the tolerance is about something that happened.
+                self.rows.iter().all(|row| {
+                    row.case != *case
+                        || row.allowances.unfired.iter().all(|held| {
+                            held.path != claim.path
+                                || held.justified_by != claim.justified_by
+                                || held.why.is_some()
+                        })
+                })
+            })
+            .collect()
+    }
+
+    /// Each case's allowances, as (fired, named, never fired), for the cases that named any.
+    ///
+    /// Per case rather than only in total, because the total says a number and this says which
+    /// case's claim it is. A case appearing once per venue is summed over its venues.
+    pub fn allowances_by_case(&self) -> BTreeMap<&str, (usize, usize, usize)> {
+        let mut by_case: BTreeMap<&str, (usize, usize, usize)> = BTreeMap::new();
+        for row in &self.rows {
+            if row.allowances.named == 0 {
+                continue;
+            }
+            let held = by_case.entry(row.case.as_str()).or_default();
+            held.0 += row.allowances.fired();
+            held.1 += row.allowances.named;
+            held.2 += row.allowances.unfired.len();
+        }
+        by_case
+    }
+
+    /// How many of the report's rows were answered from a chip that is not the oracle's: a carried
+    /// measurement taken on a machine this round cannot re-record on.
+    pub fn carried_from_another_chip(&self) -> BTreeMap<&str, usize> {
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+        for row in &self.rows {
+            if let Some(chip) = &row.measured_on {
+                *counts.entry(chip.as_str()).or_default() += 1;
+            }
+        }
+        counts
+    }
+
     /// Every row that differed inside an allowance, or that the venue could not run.
     ///
     /// These are compliant, and they are still the report's most important lines: the claim under
@@ -111,7 +253,9 @@ impl Report {
             .filter(|row| {
                 matches!(
                     row.verdict,
-                    Verdict::Announced { .. } | Verdict::LacksFeature { .. }
+                    Verdict::Announced { .. }
+                        | Verdict::MetalNeverReturned { .. }
+                        | Verdict::LacksFeature { .. }
                 )
             })
             .collect()
@@ -134,6 +278,16 @@ impl Report {
         for (venue, codes) in &self.venue_notices {
             if !codes.is_empty() {
                 out.push_str(&format!("\n{venue} announced as it was made: {codes:?}\n"));
+            }
+        }
+        out.push_str(&self.allowances_section());
+        let carried = self.carried_from_another_chip();
+        if !carried.is_empty() {
+            out.push_str("\ncarried from another chip\n");
+            for (chip, count) in carried {
+                out.push_str(&format!(
+                    "  {count} row(s) answered from {chip}, which this round cannot re-record on\n"
+                ));
             }
         }
         out.push_str(&self.matrix());
@@ -170,6 +324,65 @@ impl Report {
         out
     }
 
+    /// What the selection's allowances did: the counts, what each justification went unused for,
+    /// and the per-case tally.
+    ///
+    /// The whole point of the section is that an allowance which never fires is otherwise
+    /// invisible, so it is written to be read: the totals first, then one line per justification
+    /// rather than one per site, because 575 sites naming eleven notices is eleven facts and not
+    /// 575.
+    pub fn allowances_section(&self) -> String {
+        let (named, unfired) = self.allowance_counts();
+        if named == 0 {
+            return String::new();
+        }
+        let mut out = format!(
+            "\nallowances: {named} named, {} fired, {unfired} never fired\n",
+            named - unfired
+        );
+        let everywhere = self.unfired_everywhere();
+        if everywhere.is_empty() {
+            out.push_str("  every allowance named fired on some venue of this run\n");
+            return out;
+        }
+        let unchecked = self.unchecked_everywhere();
+        out.push_str(&format!(
+            "  {} of them fired on no venue of this run, and of those {} name nothing this run \
+             justifies either, so no run of this suite has checked them:\n",
+            everywhere.len(),
+            unchecked.len()
+        ));
+        // One line per justification: eleven notices named by sixty cases is eleven claims.
+        let mut by_justification: BTreeMap<&str, (usize, &str, &str)> = BTreeMap::new();
+        for (case, claim) in &unchecked {
+            let held = by_justification
+                .entry(claim.justified_by.as_str())
+                .or_insert((0, case, claim.path.as_str()));
+            held.0 += 1;
+        }
+        for (justification, (count, case, path)) in &by_justification {
+            out.push_str(&format!(
+                "    {justification}: {count} site(s), first {case} at {path}\n"
+            ));
+        }
+        let justified = everywhere.len() - unchecked.len();
+        if justified > 0 {
+            out.push_str(&format!(
+                "  the other {justified} name something the run did justify — the device \
+                 announced the notice, for another case's work — so they are tolerances this run \
+                 did not need rather than claims nothing stands behind\n"
+            ));
+        }
+        out.push_str("  by case, fired of named:\n");
+        for (case, (fired, named, never)) in self.allowances_by_case() {
+            if never == 0 {
+                continue;
+            }
+            out.push_str(&format!("    {case:<44} {fired} of {named}\n"));
+        }
+        out
+    }
+
     /// The matrix of case against venue, one row per case and one column per venue.
     pub fn matrix(&self) -> String {
         let venues: BTreeSet<String> = self.rows.iter().map(|row| row.venue.label()).collect();
@@ -189,7 +402,7 @@ impl Report {
             .max(4);
         let widths: Vec<usize> = venues
             .iter()
-            .map(|venue| venue.len().max("lacks-feature".len()))
+            .map(|venue| venue.len().max("never-returned".len()))
             .collect();
         let mut out = String::from("\nmatrix\n");
         out.push_str(&format!("  {:<case_width$}", "case"));

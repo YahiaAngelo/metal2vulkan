@@ -678,6 +678,17 @@ impl Side for MetalSide {
         Ok(bytes.to_vec())
     }
 
+    /// A copy-and-fill program, through public Metal alone ([`crate::metal_work`]).
+    ///
+    /// The fills (`fillTexture:` and `fillTextureColor:`) are Apple SPI and the interpreter refuses
+    /// those two steps, so a case built on a fill still carries its Metal answer. Everything else a
+    /// program states -- heaps, placed textures, textures over a buffer, views, every blit,
+    /// `replaceRegion:` and `getBytes:` -- is public Metal whatever pixel format the case names,
+    /// including Apple's two-plane extended-range 550 and 551.
+    fn work(&mut self, work: &crate::work::Work) -> Answer<crate::work::Done> {
+        crate::metal_work::run(&self.device, &self.queue, work)
+    }
+
     fn announced(&mut self) -> Vec<String> {
         Vec::new()
     }
@@ -1207,7 +1218,7 @@ impl MetalSide {
 
 /// The word a command buffer's status records as, in the runtime's spelling so the two sides'
 /// transcripts hold one vocabulary.
-fn status_word(status: MTLCommandBufferStatus) -> &'static str {
+pub(crate) fn status_word(status: MTLCommandBufferStatus) -> &'static str {
     match status {
         MTLCommandBufferStatus::NotEnqueued => "NotEnqueued",
         MTLCommandBufferStatus::Enqueued => "Enqueued",

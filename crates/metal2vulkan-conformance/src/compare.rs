@@ -12,6 +12,10 @@
 //! A case may name what *documents* its refusal — Metal's own API validation refusing the same
 //! call is the one thing that can — and the justification is still checked, but it buys an
 //! explanation in the report and not a pass. See [`crate::validated`].
+//!
+//! The walk also counts the allowances it **did not** use ([`Unfired`]). A tolerance no site needed
+//! is not a failure — it may be venue-specific — but it is a claim no run has checked, and until it
+//! was counted a case could name one indefinitely without anybody noticing.
 
 use crate::allowance::{Allowance, Loosening, Offered, Unjustified};
 use crate::diff::{Divergence, DivergenceKind, Side};
@@ -51,6 +55,24 @@ pub struct Refusal {
     pub documented_by: Option<String>,
 }
 
+/// A site where Metal did not return from the call and we gave a typed error.
+///
+/// Its own outcome, because it is neither of the two it would otherwise be squeezed into. It is not
+/// exact: there is no value on Metal's side to match. It is not divergent: there is no behaviour of
+/// Metal's to differ from — the call ended Metal's process. And it is not a refusal, which is
+/// reserved for a call plain Metal **answered**.
+///
+/// **No allowance is consulted here**, in either direction. A case cannot loosen its way into this
+/// outcome, and it cannot loosen its way out of the divergence it becomes when we answer where
+/// Metal did not ([`crate::diff::DivergenceKind::AnsweredWhereMetalDidNotReturn`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NeverReturned {
+    /// The site, as node names from the root.
+    pub path: String,
+    /// Our typed error, as the report prints it.
+    pub ours: String,
+}
+
 /// An allowance that does not hold: the case names it, and why it cannot be used.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BadAllowance {
@@ -59,15 +81,60 @@ pub struct BadAllowance {
     pub why: Unjustified,
 }
 
+/// An allowance nothing on the run needed: the case names a tolerance and every site it covers
+/// matched exactly.
+///
+/// This is counted because an allowance that never fires is otherwise **invisible**. The up-front
+/// check over a case's allowances exempts a degrade notice that was not announced — it has to,
+/// since a notice is announced once per device per kind and the run's own notices are checked
+/// where the allowance fires — so a case may name a tolerance no venue ever justifies and no run
+/// says a word. The day some venue does fire it, the row reads "announced, justified" with nobody
+/// ever having looked at whether the tolerance was the right one. Two such speculative allowances
+/// were written and deleted by hand in this round; the suite now says so itself.
+///
+/// It is **reported, not failed**: an allowance may be legitimately venue-specific, firing on
+/// lavapipe where MoltenVK is exact. What the report says instead is how many fired nowhere at
+/// all ([`crate::report::Report::unfired_everywhere`]), which is the suspicious shape.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Unfired {
+    /// The allowance's path, as the case wrote it.
+    pub path: String,
+    /// What the case loosened there.
+    pub how: Loosening,
+    /// What the case named to justify it, in words.
+    pub justified_by: String,
+    /// Why that justification does not hold on this run, where it does not. An unfired allowance
+    /// whose justification is also missing is the speculative shape at its plainest: the case
+    /// names a notice the run never announced *and* no site needed the tolerance, so nothing
+    /// anywhere connects the two.
+    pub why: Option<String>,
+}
+
+impl std::fmt::Display for Unfired {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(out, "{} ({})", self.path, self.justified_by)?;
+        match &self.why {
+            Some(why) => write!(out, ", and {why}"),
+            None => Ok(()),
+        }
+    }
+}
+
 /// What comparing one run against its recording found.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Comparison {
     pub announced: Vec<Announced>,
     pub divergences: Vec<Divergence>,
     pub refusals: Vec<Refusal>,
+    /// Sites where Metal did not return from the call and we gave a typed error.
+    pub never_returned: Vec<NeverReturned>,
     /// Allowances whose justification is gone. Each of these fails the case on its own: a
     /// difference nobody is accounting for.
     pub bad_allowances: Vec<BadAllowance>,
+    /// Allowances nothing on this run needed ([`Unfired`]). Reported, never fatal.
+    pub unfired: Vec<Unfired>,
+    /// How many allowances the case named, so a report can say "none of 2" rather than only "2".
+    pub named: usize,
 }
 
 impl Comparison {
@@ -95,6 +162,7 @@ impl Comparison {
         self.announced.is_empty()
             && self.divergences.is_empty()
             && self.refusals.is_empty()
+            && self.never_returned.is_empty()
             && self.bad_allowances.is_empty()
     }
 }
@@ -143,13 +211,34 @@ pub fn compare_run(
             found.note_bad(&allowance.path, why);
         }
     }
+    let mut fired = vec![false; allowances.len()];
     let mut walk = Walk {
         allowances,
         offered,
         stopped,
+        fired: &mut fired,
         found: &mut found,
     };
     walk.node("", &metal.root, &ours.root);
+    // An allowance no site needed is the case naming a tolerance this run cannot vouch for. It is
+    // counted rather than failed, and the justification is re-read here without the exemption the
+    // up-front check gives a notice, because "the tolerance fired nowhere and the notice was never
+    // announced" is the one shape nothing else in the suite can say.
+    found.named = allowances.len();
+    for (allowance, fired) in allowances.iter().zip(&fired) {
+        if *fired {
+            continue;
+        }
+        found.unfired.push(Unfired {
+            path: allowance.path.clone(),
+            how: allowance.loosening.clone(),
+            justified_by: allowance.justified_by.describe(),
+            why: allowance
+                .justified_by
+                .unjustified(&offered)
+                .map(|why| why.to_string()),
+        });
+    }
     found
 }
 
@@ -171,6 +260,9 @@ struct Walk<'a> {
     offered: Offered<'a>,
     /// Whether the run stopped before the end: a site only Metal reached is then no divergence.
     stopped: bool,
+    /// One flag per allowance: whether the walk used it to justify a difference, or named it as
+    /// what documents a refusal. What stays false is an allowance this run never needed.
+    fired: &'a mut [bool],
     found: &'a mut Comparison,
 }
 
@@ -342,6 +434,26 @@ impl Walk<'_> {
         if metal == ours {
             return;
         }
+        // Metal not coming back from the call is settled first, and without consulting an
+        // allowance at all. There is no value here to be within a tolerance of, and the one fact
+        // the row holds -- that we refuse where Metal went away -- must not be loosenable.
+        if let Value::Nothing(crate::transcript::Negative::NeverReturned) = metal {
+            match ours {
+                Value::Variant { name, .. } if name == "Err" => {
+                    self.found.never_returned.push(NeverReturned {
+                        path: path.to_owned(),
+                        ours: crate::diff::print(ours),
+                    });
+                }
+                _ => self.found.divergences.push(Divergence::new(
+                    path,
+                    DivergenceKind::AnsweredWhereMetalDidNotReturn {
+                        ours: crate::diff::print(ours),
+                    },
+                )),
+            }
+            return;
+        }
         // A refusal is settled before any allowance is consulted, because no allowance may turn
         // one into a pass: Metal answered the call and we did not.
         if refused(metal, ours) {
@@ -480,13 +592,15 @@ impl Walk<'_> {
     fn refusal(&mut self, path: &str, ours: &Value) {
         let mut documented_by = None;
         let mut first_unjustified = None;
-        for allowance in self
+        for (at, allowance) in self
             .allowances
             .iter()
-            .filter(|allowance| allowance.covers(path))
+            .enumerate()
+            .filter(|(_, allowance)| allowance.covers(path))
         {
             match allowance.justified_by.unjustified(&self.offered) {
                 None => {
+                    self.fired[at] = true;
                     documented_by = Some(allowance.justified_by.describe());
                     break;
                 }
@@ -529,17 +643,18 @@ impl Walk<'_> {
         let mut covering = self
             .allowances
             .iter()
-            .filter(|allowance| allowance.covers(path) && allowance.within(metal, ours))
+            .enumerate()
+            .filter(|(_, allowance)| allowance.covers(path) && allowance.within(metal, ours))
             .peekable();
         if covering.peek().is_none() {
             return false;
         }
         let mut first_unjustified = None;
         let mut held = None;
-        for allowance in covering {
+        for (at, allowance) in covering {
             match allowance.justified_by.unjustified(&self.offered) {
                 None => {
-                    held = Some(allowance);
+                    held = Some((at, allowance));
                     break;
                 }
                 Some(why) => {
@@ -547,12 +662,13 @@ impl Walk<'_> {
                 }
             }
         }
-        let Some(allowance) = held else {
+        let Some((at, allowance)) = held else {
             let (allowance, why) = first_unjustified.expect("a covering allowance");
             let path = allowance.path.clone();
             self.found.note_bad(&path, why);
             return false;
         };
+        self.fired[at] = true;
         let difference = crate::allowance::difference(metal, ours);
         match self.found.announced.iter_mut().find(|held| {
             held.path == path && held.justified_by == allowance.justified_by.describe()

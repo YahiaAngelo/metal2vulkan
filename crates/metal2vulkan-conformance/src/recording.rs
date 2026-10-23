@@ -114,6 +114,18 @@ pub enum Provenance {
         #[serde(default = "oracle_chip", skip_serializing_if = "is_oracle_chip")]
         measured_on: String,
     },
+    /// **Metal did not return from the call.** The answer is the absence of one: a probe made this
+    /// call and Metal never came back, so there is no value, no behaviour and nothing to re-take.
+    ///
+    /// It is written by hand from the probe that died, never by running the shape
+    /// ([`crate::case::MetalSource::DidNotReturn`]), and the site it names holds
+    /// [`Negative::NeverReturned`](crate::transcript::Negative::NeverReturned) rather than a value.
+    NeverReturned {
+        /// Where the probe that died is written down.
+        from: String,
+        /// The call Metal did not return from.
+        call: String,
+    },
 }
 
 /// The chip a carried answer was measured on where its recording names none: the oracle's.
@@ -137,6 +149,16 @@ impl Provenance {
             Provenance::Carried { measured_on, .. } if measured_on != ORACLE_CHIP => {
                 Some(measured_on)
             }
+            Provenance::Carried { .. }
+            | Provenance::MetalRun
+            | Provenance::NeverReturned { .. } => None,
+        }
+    }
+
+    /// The call Metal did not return from, where that is what the answer says.
+    pub fn never_returned_from(&self) -> Option<&str> {
+        match self {
+            Provenance::NeverReturned { call, .. } => Some(call),
             Provenance::Carried { .. } | Provenance::MetalRun => None,
         }
     }
