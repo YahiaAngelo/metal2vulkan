@@ -10,7 +10,7 @@ The suite reaches Metal through `objc2-metal`, whose Rust name for a binding is 
 
 Its limits, measured rather than asserted:
 
-- **485 of 584 call sites** in the Metal leg resolve to an item of the SDK. 31 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
+- **488 of 587 call sites** in the Metal leg resolve to an item of the SDK. 31 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
 - **99 call sites' receivers did not type.** They cost the count 8 selectors, which the suite calls and which this attributes to no item:
   - `type`, bound by `MTLArgument`, `MTLArgumentDescriptor`, `MTLBinding`, `MTLPointerType`, `MTLTensorReferenceType`, `MTLTextureReferenceType`
   - `count`, bound by `MTL4CounterHeap`, `MTL4CounterHeapDescriptor`
@@ -271,8 +271,8 @@ An implemented container no case's Metal leg touches. These are the families of 
 | `Side` methods (the suite's whole device vocabulary) | 62 |
 | `Side` methods the Metal leg reaches an SDK item through | 48 |
 | SDK items a case's Metal leg reaches, median | 31 |
-| the same, least and most | 0 and 83 |
-| Metal call sites in the leg | 584 |
+| the same, least and most | 0 and 84 |
+| Metal call sites in the leg | 587 |
 | distinct selectors the leg sends | 230 |
 | of those, resolved to an item of the coverage map | 222 |
 | oracles the recordings name | `apple-m3-max` ×696 |
@@ -289,7 +289,7 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `buffer_depth_samples` | 3 | 3 | every field | 40 |
 | `buffer_textures` | 3 | 2 | every field | 41 |
 | `chroma_pairs` | 6 | 6 | every field | 41 |
-| `color_write_masks` | 3 | 3 | every field | 68 |
+| `color_write_masks` | 3 | 3 | every field | 69 |
 | `command_queues` | 1 | 1 | every field | 3 |
 | `compressed_blits` | 4 | 4 | every field | 32 |
 | `compressed_decode` | 10 | 10 | 1 tolerance(s): `Degradation` | 22 |
@@ -298,18 +298,18 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `compute_threadgroups` | 2 | 1 | every field | 8 |
 | `denormal_word_fetches` | 1 | 1 | every field | 22 |
 | `depth_texel_reads` | 1 | 1 | every field | 19 |
-| `discard_hoist` | 1 | 1 | 1 tolerance(s): `Degradation` | 79 |
+| `discard_hoist` | 1 | 1 | 1 tolerance(s): `Degradation` | 80 |
 | `etc_textures` | 10 | 10 | 2 tolerance(s): `Degradation` | 22 |
 | `event_orders` | 4 | 4 | every field | 17 |
-| `extended_range_blends` | 18 | 18 | every field | 74 |
+| `extended_range_blends` | 18 | 18 | every field | 75 |
 | `extended_range_planes` | 4 | 4 | every field | 4 |
-| `extended_range_targets` | 22 | 22 | every field | 74 |
+| `extended_range_targets` | 22 | 22 | every field | 75 |
 | `extended_range_two_planes` | 2 | 2 | every field | 11 |
 | `extended_swizzles` | 15 | 15 | every field | 30 |
-| `fetch_ordered` | 4 | 4 | every field | 68 |
+| `fetch_ordered` | 4 | 4 | every field | 69 |
 | `format_copies` | 16 | 16 | every field | 31 |
 | `fresh_contents` | 87 | 87 | every field | 33 |
-| `half_output_blends` | 6 | 6 | every field | 68 |
+| `half_output_blends` | 6 | 6 | every field | 69 |
 | `half_read_nans` | 6 | 6 | every field | 19 |
 | `half_storage_writes` | 9 | 9 | every field | 11 |
 | `half_texel_nans` | 8 | 8 | every field | 11 |
@@ -332,19 +332,19 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `pvrtc_rows` | 8 | 8 | every field | 31 |
 | `rate_maps` | 2 | 2 | every field | 13 |
 | `rgb10a2_srgb` | 8 | 8 | every field | 37 |
-| `rotated_planes` | 20 | 20 | 1 tolerance(s): `Degradation` | 69 |
-| `rotated_targets` | 14 | 14 | every field | 69 |
+| `rotated_planes` | 20 | 20 | 1 tolerance(s): `Degradation` | 70 |
+| `rotated_targets` | 14 | 14 | every field | 70 |
 | `sample_fills` | 17 | 0 | 1 tolerance(s): `Degradation` | 0 |
-| `sample_positions` | 19 | 16 | every field | 68 |
+| `sample_positions` | 19 | 16 | every field | 69 |
 | `scheduled_handlers` | 1 | 1 | every field | 11 |
-| `shader_stencil` | 2 | 2 | every field | 82 |
+| `shader_stencil` | 2 | 2 | every field | 83 |
 | `shared_events` | 1 | 1 | every field | 8 |
 | `shared_exponent_storage` | 5 | 5 | every field | 22 |
 | `simdgroup_lockstep` | 2 | 2 | every field | 7 |
-| `snorm_tile_store` | 7 | 7 | 1 tolerance(s): `Degradation` | 68 |
+| `snorm_tile_store` | 7 | 7 | 1 tolerance(s): `Degradation` | 69 |
 | `sparse_heaps` | 6 | 6 | every field | 21 |
 | `sparse_tiles` | 4 | 4 | every field | 4 |
-| `srgb_fetch` | 2 | 2 | every field | 80 |
+| `srgb_fetch` | 2 | 2 | every field | 81 |
 | `stage_in_regions` | 1 | 1 | every field | 21 |
 | `surface_fills` | 1 | 0 | every field | 0 |
 | `swizzled_storage` | 6 | 6 | every field | 22 |
@@ -357,8 +357,8 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `two_plane_copies` | 3 | 1 | every field | 34 |
 | `two_plane_heap_blits` | 1 | 1 | every field | 32 |
 | `two_plane_samples` | 16 | 16 | every field | 19 |
-| `visibility` | 10 | 10 | every field | 82 |
-| `wide_points` | 1 | 1 | every field | 69 |
+| `visibility` | 10 | 10 | every field | 83 |
+| `wide_points` | 1 | 1 | every field | 70 |
 | `ycbcr_minify` | 2 | 2 | every field | 22 |
 | `ycbcr_textures` | 2 | 2 | every field | 20 |
 
@@ -561,7 +561,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `length` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_texel_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rate_maps`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 486 |
 | `contents` | yes | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `etc_textures`, `event_orders`, `extended_range_blends`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rate_maps`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 512 |
 | `didModifyRange:` | no | — | — |
-| `newTextureWithDescriptor:offset:bytesPerRow:` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `denormal_word_fetches`, `etc_textures`, `extended_swizzles`, `format_copies`, `fresh_contents`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `shared_exponent_storage`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `ycbcr_minify`, `ycbcr_textures` | 266 |
+| `newTextureWithDescriptor:offset:bytesPerRow:` | yes | `astc_textures`, `border_swizzles`, `buffer_depth_samples`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `denormal_word_fetches`, `discard_hoist`, `etc_textures`, `extended_range_blends`, `extended_range_targets`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `fresh_contents`, `half_output_blends`, `level_sizes`, `norm_storage_writes`, `pvrtc_cpu_order`, `pvrtc_rows`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `snorm_tile_store`, `srgb_fetch`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 392 |
 | `gpuAddress` | no | — | — |
 
 ### `MTLBufferBinding`
