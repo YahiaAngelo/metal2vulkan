@@ -2344,10 +2344,15 @@ mod tests {
     /// One pair is permitted, named here and nowhere else, and only as this pair: a third step
     /// joining them fails, as does either of them leaving. It is the pair documented at
     /// [`RenderStep::call`] -- `UseBuffer` is an indirect command's own residency call and emits
-    /// the name `UseResource` emits. It is sound only while no case holds both. Neither can be
-    /// renamed away: `UseBuffer`'s own selector is `useResource:usage:stages:`, whose site name is
-    /// the one `UseResourceInStages` already emits, and a rename either way moves the committed
-    /// recording of every case that holds the step.
+    /// the name `UseResource` emits. It is sound only while no case holds both.
+    ///
+    /// Renaming is not a way out of it, because the vocabulary holds **two variants for one Metal
+    /// selector**: `UseBuffer` sends `useResource:usage:stages:`, which is what
+    /// `UseResourceInStages` sends, so the name this module's convention gives `UseBuffer` is the
+    /// one `UseResourceInStages` already holds. A rename moves which pair shares a site; it does
+    /// not leave none sharing one. What a rename does **not** do is move a recording: giving
+    /// `UseBuffer` a name of its own leaves all 785 committed recordings reading and every case's
+    /// input fingerprint where it was, with this guard the only thing in the suite that objects.
     #[test]
     fn every_step_names_a_call_no_other_step_names() {
         let permitted = [
