@@ -10,11 +10,11 @@
 //! That fact is load-bearing for the translator. `DriverDeviation::SimdgroupLockstep` is the
 //! measured driver answer that lets a kernel keep these accesses with no barrier where the device
 //! runs a simdgroup in lockstep itself, and take emulated simdgroups everywhere else. The lane
-//! checks which of the two a profile took and compares the words against an expectation it
-//! computes in Rust — a simulation of lockstep ([`tests::in_lockstep`], kept here as the readable
-//! model) whose only tie to Metal is a comment saying it was measured on an Apple M3 Max and an
-//! Apple M4. Record mode now runs the kernels on the oracle, so the recording holds Metal's own
-//! words and the simulation is checked against them.
+//! checks which of the two a profile took and compares the words against an expectation it computes
+//! in Rust — a simulation of lockstep (this crate's own `tests::in_lockstep`, kept here as the
+//! readable model) whose only tie to Metal is a comment saying it was measured on an Apple M3 Max
+//! and an Apple M4. Record mode now runs the kernels on the oracle, so the recording holds Metal's
+//! own words and the simulation is checked against them.
 //!
 //! Each case records all 512 bytes of its output buffer under a layout of two rows of 64 words:
 //! for `until` the second row is each thread's iteration count, and for `divergent_loop` the kernel
