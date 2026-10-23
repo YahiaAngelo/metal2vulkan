@@ -186,7 +186,10 @@ impl BlitCommandEncoder {
 
     /// Carry the slots past the records' of `source`'s commands `from` into `destination`'s from
     /// command `to`, as the copy carries the records: every slot of a stage both hold, and the
-    /// destination's slots past the source's cleared, which the source holds unset.
+    /// destination's slots past the source's cleared, which the source holds unset; and the
+    /// threadgroup lengths and words past the records', lengths 36 and 37 cleared where the
+    /// destination's commands hold pipeline words, as Metal's copy clears them
+    /// (`Overflow::copy_clears`).
     fn copy_overflow(
         &mut self,
         source: &IndirectCommandBuffer,
@@ -214,7 +217,7 @@ impl BlitCommandEncoder {
                 })?;
                 self.core().retain(held.storage().clone());
                 self.core().retain(into.storage().clone());
-                return Ok(());
+                return self.clear_runs(into, to..to + count);
             }
             Some(held) => held,
         };
@@ -260,6 +263,45 @@ impl BlitCommandEncoder {
         Ok(())
     }
 
+    /// Clear the runs of commands `range` of `overflow` a copy into them clears after it carried
+    /// the source's blocks (`Overflow::copy_clears`), by one copy from zeroed bytes of the upload
+    /// arena: a fill a run costs the device a command each.
+    fn clear_runs(&mut self, overflow: &Overflow, range: Range<u32>) -> Result<(), Error> {
+        let runs = overflow.copy_clears(range.clone());
+        let Some(&(_, size)) = runs.first() else {
+            return Ok(());
+        };
+        let device = self.core().device().clone();
+        let zeros = vec![0u8; size as usize];
+        let upload = self
+            .core()
+            .command_buffer()
+            .state()
+            .uploads
+            .upload(&device, &zeros, size)?;
+        let storage = overflow.storage();
+        let regions: Vec<vk::BufferCopy> = runs
+            .iter()
+            .map(|&(at, size)| vk::BufferCopy {
+                src_offset: upload.offset(),
+                dst_offset: storage.at(at).1,
+                size,
+            })
+            .collect();
+        let (from, (raw, _)) = (upload.raw(), storage.at(0));
+        self.command(
+            &[writes(storage, overflow.bytes(range))],
+            |device, command_buffer| {
+                // SAFETY: the encoder's command buffer is recording; the overflow is live and
+                // retained until it completes, and the arena's region until the command buffer
+                // completes; each region lies inside both, and none overlaps another.
+                unsafe { device.cmd_copy_buffer(command_buffer, from, raw, &regions) };
+            },
+        )?;
+        self.core().retain(storage.clone());
+        Ok(())
+    }
+
     /// Clear `bytes` of `overflow`, the slots of commands a reset or a copy clears.
     fn clear_overflow(&mut self, overflow: &Overflow, bytes: Range<u64>) -> Result<(), Error> {
         if bytes.is_empty() {
@@ -270,7 +312,8 @@ impl BlitCommandEncoder {
         let size = bytes.end - bytes.start;
         self.command(&[writes(storage, bytes)], |device, command_buffer| {
             // SAFETY: the encoder's command buffer is recording; the overflow is live and
-            // retained until it completes; the range lies inside it, a multiple of 16 bytes.
+            // retained until it completes; the range lies inside it, its offset and size multiples
+            // of 4 bytes.
             unsafe { device.cmd_fill_buffer(command_buffer, raw, at, size, 0) };
         })?;
         self.core().retain(storage.clone());

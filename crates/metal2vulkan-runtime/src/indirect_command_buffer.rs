@@ -576,6 +576,7 @@ impl Device {
                     storage,
                     past: layout.past,
                     lengths: layout.lengths,
+                    pipeline_words: layout.pipeline_words,
                     commands: size,
                 })
             }
@@ -968,11 +969,14 @@ struct IcbShared {
     /// The buffer slots past the record's, where the descriptor counts more, and a compute
     /// buffer's threadgroup lengths 31 to 37 ([`Overflow`]).
     overflow: Option<Overflow>,
-    /// The threadgroup lengths set past the last command's 38 ([`LENGTH_STRIDE`]), by their
-    /// place past them, none 0. Metal keeps them in its storage's slack for its getter alone (an
-    /// M3 Max, 3 commands: the last command's lengths at 100, 300 and 1000 read back as set,
-    /// changing no other command's state); no command's copy or reset reaches them. Past about
-    /// 4000 places its setter ends the process (`SIGSEGV`, `SIGBUS`); the runtime keeps them all.
+    /// The threadgroup lengths set past the last command's 38 ([`LENGTH_STRIDE`]) and past the
+    /// commands' words there ([`Overflow::tail_at`]), by their place past the last command's 38,
+    /// none 0. Metal keeps them in its storage's slack for its getter alone (an M3 Max, 3
+    /// commands: the last command's lengths at 100, 300 and 1000 read back as set, changing no
+    /// other command's state); no command's reset reaches them, and a GPU copy reaches the
+    /// first two alone, writing there a value of its own, which the runtime does not (it keeps
+    /// them). Past about 4000 places Metal's setter ends the process (`SIGSEGV`, `SIGBUS`); the
+    /// runtime keeps them all.
     tail: Mutex<BTreeMap<u64, u32>>,
     /// The command buffers that may write its records on the GPU ([`GpuWrite`]): how many have
     /// not yet completed, and the stamp of the last one's completion.
@@ -988,32 +992,40 @@ struct IcbShared {
 
 /// The buffer slots of each command past the 32 of a stage its record holds, below the
 /// descriptor's count of the stage, and a compute command's threadgroup lengths 31 to 37, past
-/// the 31 its record holds, in a host-visible buffer of their own outside the Metal address
-/// space. A command's block holds its buffer slots, 16 bytes a slot, the address word and the
-/// stride word as a record's slot holds them (both 0 where none is set), its stages in
-/// [`OVERFLOW_STAGES`]' order, then, in a buffer of compute commands, its lengths 31 to 37
-/// ([`LENGTHS_BYTES`]); each command's block follows the one before. Metal keeps such a slot or
+/// the 31 its record holds, and its words past the last command's lengths, in a host-visible
+/// buffer of their own outside the Metal address space. A command's block holds its buffer
+/// slots, 16 bytes a slot, the address word and the stride word as a record's slot holds them
+/// (both 0 where none is set), its stages in [`OVERFLOW_STAGES`]' order, then, in a buffer of
+/// compute commands, its lengths 31 to 37 ([`LENGTHS_BYTES`]), its pipeline words where the
+/// buffer does not inherit its pipeline state ([`PIPELINE_WORDS`]) and its dispatch words
+/// ([`DISPATCH_WORDS`]); each command's block follows the one before. Metal keeps such a slot or
 /// length for its getters alone (no function binds past index 30), its storage growing with the
 /// buffer count; its getters answer every slot below the count and every length, its GPU copy
-/// carries them, and its resets clear them.
+/// carries them (but lengths 36 and 37 where the commands hold pipeline words, which it clears),
+/// its GPU reset clears them, and its CPU resets clear them but the dispatch words.
 pub(super) struct Overflow {
     /// Made zeroed.
     storage: Buffer,
     /// The slots past the record's of each of [`OVERFLOW_STAGES`].
     past: [u32; 5],
-    /// Whether each command's block holds its threadgroup lengths 31 to 37: the buffer holds
-    /// compute commands.
+    /// Whether each command's block holds its threadgroup lengths 31 to 37 and its dispatch
+    /// words: the buffer holds compute commands.
     lengths: bool,
+    /// Whether each command's block holds its pipeline words: the buffer holds compute commands
+    /// and does not inherit its pipeline state.
+    pipeline_words: bool,
     /// The commands whose blocks it holds: the buffer's size.
     commands: u32,
 }
 
 /// What [`Overflow`] holds of each command, of a descriptor: the slots past the record's of
-/// each stage, and whether it holds the threadgroup lengths 31 to 37.
+/// each stage, whether it holds the threadgroup lengths 31 to 37 and the dispatch words, and
+/// whether it holds the pipeline words.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct OverflowLayout {
     past: [u32; 5],
     lengths: bool,
+    pipeline_words: bool,
 }
 
 /// How many threadgroup lengths Metal keeps a compute command, at `command * 38 + index` of one
@@ -1026,6 +1038,24 @@ const LENGTH_STRIDE: u32 = 38;
 /// The bytes of a command's threadgroup lengths 31 to 37 in its [`Overflow`] block: 4 a length,
 /// padded to 8 bytes.
 const LENGTHS_BYTES: u64 = 32;
+
+/// The bytes of a command's threadgroup lengths 31 to 35 in its [`Overflow`] block, which
+/// Metal's GPU copy carries whatever the descriptor; lengths 36 and 37 follow.
+const LENGTHS_BEFORE_36: u64 = 20;
+
+/// The words Metal keeps a compute command past the last command's threadgroup lengths, at
+/// `2 * command` of them, where the buffer does not inherit its pipeline state (an M3 Max, macOS
+/// 27.0.1, buffers of 1 to 8 commands): its pipeline setter writes them, and so do its getter and
+/// setter of a length there. Metal's CPU and GPU resets of the command clear them and its GPU copy
+/// carries them.
+const PIPELINE_WORDS: u64 = 2;
+
+/// The words Metal keeps a compute command past the last command's threadgroup lengths and the
+/// [`PIPELINE_WORDS`], at `8 * command` of them (the probes of [`PIPELINE_WORDS`]'s): its dispatch
+/// writes the threadgroup counts and size in the first six and its imageblock setter the width
+/// and height in the last two, and so do its getter and setter of a length there. Metal's GPU
+/// reset of the command clears them and its GPU copy carries them; its CPU resets leave them.
+const DISPATCH_WORDS: u64 = 8;
 
 /// The stages whose slots [`Overflow`] holds, in its order.
 const OVERFLOW_STAGES: [BufferStage; 5] = [
@@ -1054,7 +1084,12 @@ impl OverflowLayout {
         // Any compute command may hold a length past its record: Metal's setter keeps one at
         // any index, whatever the count.
         let lengths = descriptor.command_types.intersects(COMPUTE_TYPES);
-        (lengths || past.iter().any(|&slots| slots > 0)).then_some(OverflowLayout { past, lengths })
+        let pipeline_words = lengths && !descriptor.inherit_pipeline_state;
+        (lengths || past.iter().any(|&slots| slots > 0)).then_some(OverflowLayout {
+            past,
+            lengths,
+            pipeline_words,
+        })
     }
 
     /// The bytes of one command's buffer slots.
@@ -1062,9 +1097,30 @@ impl OverflowLayout {
         self.past.iter().map(|&slots| u64::from(slots)).sum::<u64>() * SLOT_BYTES
     }
 
-    /// The bytes of one command's block: its buffer slots, then its lengths 31 to 37.
+    /// The bytes of one command's pipeline words: none where the buffer holds no compute
+    /// commands or inherits its pipeline state.
+    fn pipeline_bytes(&self) -> u64 {
+        if self.pipeline_words {
+            PIPELINE_WORDS * 4
+        } else {
+            0
+        }
+    }
+
+    /// The bytes of one command's lengths 31 to 37, pipeline words and dispatch words: none where
+    /// the buffer holds no compute commands.
+    fn lengths_bytes(&self) -> u64 {
+        if self.lengths {
+            LENGTHS_BYTES + self.pipeline_bytes() + DISPATCH_WORDS * 4
+        } else {
+            0
+        }
+    }
+
+    /// The bytes of one command's block: its buffer slots, then its lengths 31 to 37, pipeline
+    /// words and dispatch words.
     fn command_bytes(&self) -> u64 {
-        self.slot_bytes() + if self.lengths { LENGTHS_BYTES } else { 0 }
+        self.slot_bytes() + self.lengths_bytes()
     }
 
     /// The bytes an overflow of `commands` commands holds.
@@ -1079,6 +1135,7 @@ impl Overflow {
         OverflowLayout {
             past: self.past,
             lengths: self.lengths,
+            pipeline_words: self.pipeline_words,
         }
     }
 
@@ -1095,6 +1152,56 @@ impl Overflow {
         (self.lengths && index < self.commands && slot < LENGTH_STRIDE).then(|| {
             self.bytes(index..index).start + self.layout().slot_bytes() + u64::from(past) * 4
         })
+    }
+
+    /// The offset of the word `past` places past the last command's threadgroup lengths, where
+    /// Metal keeps a command's words there: each command's [`PIPELINE_WORDS`] first, where the
+    /// commands hold them, then each command's [`DISPATCH_WORDS`]. `None` past them, or where
+    /// the blocks hold no lengths.
+    fn tail_at(&self, past: u64) -> Option<u64> {
+        if !self.lengths {
+            return None;
+        }
+        let commands = u64::from(self.commands);
+        let pipeline = if self.pipeline_words {
+            PIPELINE_WORDS
+        } else {
+            0
+        };
+        let (command, at) = match past.checked_sub(pipeline * commands) {
+            None => (past / pipeline, LENGTHS_BYTES + past % pipeline * 4),
+            Some(past) if past < DISPATCH_WORDS * commands => (
+                past / DISPATCH_WORDS,
+                LENGTHS_BYTES + pipeline * 4 + past % DISPATCH_WORDS * 4,
+            ),
+            Some(_) => return None,
+        };
+        let command = command as u32;
+        Some(self.bytes(command..command).start + self.layout().slot_bytes() + at)
+    }
+
+    /// The bytes of command `index`'s block a CPU reset clears, as Metal's: all but its dispatch
+    /// words.
+    fn cpu_reset_bytes(&self, index: u32) -> Range<u64> {
+        let block = self.bytes(index..index + 1);
+        let kept = if self.lengths { DISPATCH_WORDS * 4 } else { 0 };
+        block.start..block.end - kept
+    }
+
+    /// The runs of commands `range`'s blocks a GPU copy into them clears after it carried the
+    /// source's blocks, as `(offset, bytes)`: lengths 36 and 37 where the commands hold
+    /// pipeline words, as Metal's copy clears them; none otherwise.
+    pub(super) fn copy_clears(&self, range: Range<u32>) -> Vec<(u64, u64)> {
+        if !self.pipeline_words {
+            return Vec::new();
+        }
+        let lengths = self.layout().slot_bytes() + LENGTHS_BEFORE_36;
+        range
+            .map(|index| {
+                let at = self.bytes(index..index).start + lengths;
+                (at, LENGTHS_BYTES - LENGTHS_BEFORE_36)
+            })
+            .collect()
     }
 
     /// The offset of slot `slot` (at or past the record's) of `stage` of command `index`, `None`
@@ -1127,12 +1234,37 @@ impl Overflow {
             source += u64::from(held) * SLOT_BYTES;
             destination += u64::from(taken) * SLOT_BYTES;
         }
-        // The threadgroup lengths 31 to 37, as Metal's copy carries a command's 38.
-        match (self.lengths, into.lengths) {
-            (true, true) => runs.copies.push((source, destination, LENGTHS_BYTES)),
-            (false, true) => runs.clears.push((destination, LENGTHS_BYTES)),
+        // The threadgroup lengths 31 to 37, pipeline words and dispatch words, as Metal's copy
+        // carries a command's: lengths 36 and 37 cleared where the destination's commands hold
+        // pipeline words.
+        if !into.lengths {
+            return runs;
+        }
+        if !self.lengths {
+            runs.clears
+                .push((destination, into.layout().lengths_bytes()));
+            return runs;
+        }
+        runs.copies.push((source, destination, LENGTHS_BEFORE_36));
+        let (after, rest) = (LENGTHS_BEFORE_36, LENGTHS_BYTES - LENGTHS_BEFORE_36);
+        match into.pipeline_words {
+            true => runs.clears.push((destination + after, rest)),
+            false => runs
+                .copies
+                .push((source + after, destination + after, rest)),
+        }
+        let (source, destination) = (source + LENGTHS_BYTES, destination + LENGTHS_BYTES);
+        let pipeline = PIPELINE_WORDS * 4;
+        match (self.pipeline_words, into.pipeline_words) {
+            (true, true) => runs.copies.push((source, destination, pipeline)),
+            (false, true) => runs.clears.push((destination, pipeline)),
             _ => {}
         }
+        let (source, destination) = (
+            source + self.layout().pipeline_bytes(),
+            destination + into.layout().pipeline_bytes(),
+        );
+        runs.copies.push((source, destination, DISPATCH_WORDS * 4));
         runs
     }
 
@@ -1143,7 +1275,7 @@ impl Overflow {
 
     /// Whether `other` lays its commands' blocks out as this one does.
     pub(super) fn same_layout(&self, other: &Overflow) -> bool {
-        self.past == other.past && self.lengths == other.lengths
+        self.layout() == other.layout()
     }
 }
 
@@ -1176,8 +1308,9 @@ impl Drop for GpuWrite {
 }
 
 /// Where a threadgroup length is kept (`IndirectCommandBuffer::length_place`): command and
-/// index of a record, an offset of the [`Overflow`], or a place past the last command's lengths
-/// (`IcbShared::tail`).
+/// index of a record, an offset of the [`Overflow`] (a length 31 to 37 or a command's word past
+/// the last command's lengths), or a place past the last command's lengths and the commands'
+/// words there (`IcbShared::tail`).
 enum LengthPlace {
     Record(u32, u32),
     Overflow(u64),
@@ -1606,14 +1739,21 @@ impl IndirectCommandBuffer {
     /// Where Metal keeps threadgroup length `slot` of command `index` of a compute buffer: at
     /// `index * 38 + slot` of one array of the buffer's ([`LENGTH_STRIDE`]), the length of
     /// command `(index * 38 + slot) / 38` at the remainder: in its record below 31, in its
-    /// [`Overflow`] block at 31 to 37, and past the last command's in [`IcbShared::tail`].
+    /// [`Overflow`] block at 31 to 37; past the last command's, the commands' words there
+    /// ([`Overflow::tail_at`]), and past those in [`IcbShared::tail`].
     fn length_place(&self, index: u32, slot: u32) -> Result<LengthPlace, Error> {
         let stride = u64::from(LENGTH_STRIDE);
         let flat = u64::from(index) * stride + u64::from(slot);
         let (command, slot) = (flat / stride, (flat % stride) as u32);
         let size = u64::from(self.0.size);
         if command >= size {
-            return Ok(LengthPlace::Tail(flat - size * stride));
+            let past = flat - size * stride;
+            let word = self
+                .0
+                .overflow
+                .as_ref()
+                .and_then(|overflow| overflow.tail_at(past));
+            return Ok(word.map_or(LengthPlace::Tail(past), LengthPlace::Overflow));
         }
         let command = command as u32;
         if slot < THREADGROUP_BUFFER_ARGUMENT_COUNT {
@@ -1783,24 +1923,26 @@ impl IndirectCommandBuffer {
         })
     }
 
-    /// Clear the slots past the record's of commands `range`, as a reset does. The caller holds
-    /// `pipelines`.
+    /// Clear the slots past the record's of commands `range`, as a CPU reset does: all but
+    /// their dispatch words ([`Overflow::cpu_reset_bytes`]). The caller holds `pipelines`.
     fn clear_overflow(&self, range: Range<u32>) -> Result<(), Error> {
         let Some(overflow) = self.0.overflow.as_ref() else {
             return Ok(());
         };
-        let bytes = overflow.bytes(range);
         let contents = overflow
             .storage
             .contents()
             .ok_or_else(|| internal("an indirect command buffer's overflow is not mapped"))?;
-        // SAFETY: as `write_overflow`'s; `bytes` lies inside the overflow.
-        unsafe {
-            std::ptr::write_bytes(
-                contents.as_ptr().add(bytes.start as usize),
-                0,
-                (bytes.end - bytes.start) as usize,
-            );
+        for index in range {
+            let bytes = overflow.cpu_reset_bytes(index);
+            // SAFETY: as `write_overflow`'s; `bytes` lies inside the overflow.
+            unsafe {
+                std::ptr::write_bytes(
+                    contents.as_ptr().add(bytes.start as usize),
+                    0,
+                    (bytes.end - bytes.start) as usize,
+                );
+            }
         }
         self.wrote();
         Ok(())
@@ -3405,8 +3547,17 @@ impl IndirectComputeCommand {
     /// an index of 38 or more sets a later command's length (`index - 38` of the next command's,
     /// and so on), and one past the last command's is kept beside the buffer for the getter. No
     /// function binds one past index 30: Metal keeps lengths 31 to 37 for its private getter
-    /// alone, as the runtime does. Differs: far past the last command's lengths (about 4000
-    /// places on an M3 Max), Metal's setter ends the process; the runtime keeps the length.
+    /// alone, as the runtime does. Past the last command's lengths Metal keeps each command's
+    /// words: 2 a command where the buffer does not inherit its pipeline state, then 8 a command;
+    /// a length set there is reset and copied with that command, as on Metal: a CPU reset clears
+    /// the 2, a GPU reset both, and a GPU copy carries both (and clears lengths 36 and 37 where
+    /// the commands hold the 2). Differs: Metal's pipeline setter writes the 2 words and clears
+    /// lengths 36 and 37, and its dispatch and imageblock setters write the 8 (the threadgroup
+    /// counts and size, the imageblock's width and height), so its getter answers those there;
+    /// the runtime keeps the lengths set there alone, and its pipeline setter leaves lengths 36
+    /// and 37. A GPU copy writes a value of its own two places past the commands' words, which
+    /// the runtime does not. Far past the last command's lengths (about 4000 places on an M3
+    /// Max), Metal's setter ends the process; the runtime keeps the length.
     pub fn set_threadgroup_memory_length(&self, length: u32, index: u32) -> Result<(), Error> {
         self.icb.set_length(self.index, index, length)
     }
@@ -3497,10 +3648,13 @@ impl IndirectComputeCommand {
     /// [`set_threadgroup_memory_length`](Self::set_threadgroup_memory_length) sets it (below 31,
     /// the command's
     /// [`threadgroup_memory_lengths`](EncodedComputeCommand::threadgroup_memory_lengths)`[index]`;
-    /// at 38 or more, a later command's), read alone: 0 where none was set, at any index, the
-    /// descriptor's `max_kernel_threadgroup_memory_bind_count` or not; always some. Differs: far
-    /// past the last command's lengths (an M3 Max: 100000 places past command 0's of 3), Metal's
-    /// getter ends the process; the runtime's answers.
+    /// at 38 or more, a later command's; past the last command's, the commands' words there),
+    /// read alone: 0 where none was set, at any index, the descriptor's
+    /// `max_kernel_threadgroup_memory_bind_count` or not; always some. Differs: past the last
+    /// command's lengths Metal's getter answers what its pipeline, dispatch and imageblock
+    /// setters wrote there, the runtime's only lengths set there (the setter's docs); far past
+    /// them (an M3 Max: 100000 places past command 0's of 3), Metal's getter ends the process,
+    /// and the runtime's answers.
     pub fn threadgroup_memory_length(&self, index: u64) -> Result<Option<u32>, Error> {
         self.icb.length(self.index, index as u32).map(Some)
     }

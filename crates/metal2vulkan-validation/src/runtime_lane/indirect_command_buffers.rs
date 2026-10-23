@@ -32,6 +32,7 @@ use metal2vulkan_runtime::{
     PurgeableState, Region, RenderPassDescriptor, RenderPipelineState, ResourceId, ResourceOptions,
     RuntimeGap, Size, StorageMode, StoreAction, TextureDescriptor,
 };
+use std::ops::Range;
 
 fn invalid(call: &'static str, problem: Problem) -> Error {
     Error::Invalid(Invalid::new(call, problem))
@@ -1285,7 +1286,9 @@ fn kept_lengths(icb: &IndirectCommandBuffer, range: u64) -> [Vec<(u64, u32)>; 3]
 /// past the count is kept as well, and one past the last command's 38 reads back as set (at
 /// 1000 of the last command), changing no command's record; the getter takes the index's low 32
 /// bits. A command's reset, on the CPU or by a blit, clears its 38 and leaves the next command's;
-/// a blit's copy of a command carries its 38. None announces anything.
+/// a blit's copy of a command carries its lengths 0 to 35 (lengths 36 and 37 and the words past
+/// the last command's: [`words_past_lengths_reset_and_copy_as_metal_s`]). None announces
+/// anything.
 #[test]
 fn threadgroup_lengths_are_kept_where_metal_keeps_them() {
     notices::on_device(|device, messages| {
@@ -1417,6 +1420,220 @@ fn threadgroup_lengths_are_kept_where_metal_keeps_them() {
             kept_lengths(&icb, 72),
             [vec![], vec![], vec![(38, 1038), (45, 1045)]],
             "past the last command's"
+        );
+        assert_eq!(
+            counts(&messages.take_notices()),
+            Default::default(),
+            "nothing announced"
+        );
+    });
+}
+
+/// The places past the last command's threadgroup lengths [`words_past_lengths_reset_and_copy_as_metal_s`]
+/// sets and reads.
+const PAST: u64 = 60;
+
+/// Every threadgroup length command 0 of `icb` reads, from 0 to its commands' 38 and [`PAST`]
+/// places past them.
+fn flat_lengths(icb: &IndirectCommandBuffer) -> Vec<u32> {
+    let first = icb.indirect_compute_command_at(0).unwrap();
+    (0..icb.size() * 38 + PAST)
+        .map(|at| first.threadgroup_memory_length(at).unwrap().unwrap())
+        .collect()
+}
+
+/// Set, as the probes set them, `base + 100 k + s` at each `s` of 0 to 37 of every command `k`
+/// of `icb`, and through its last command `base + 100000 + p` at each place `p` of 0 to
+/// [`PAST`] past the last command's lengths; the lengths as read back, as set.
+fn fill_lengths(icb: &IndirectCommandBuffer, base: u32) -> Vec<u32> {
+    let size = icb.size();
+    for index in 0..size {
+        let command = icb.indirect_compute_command_at(index).unwrap();
+        for at in 0..38 {
+            let length = base + 100 * index as u32 + at;
+            command.set_threadgroup_memory_length(length, at).unwrap();
+        }
+    }
+    let last = icb.indirect_compute_command_at(size - 1).unwrap();
+    for past in 0..PAST as u32 {
+        last.set_threadgroup_memory_length(base + 100000 + past, 38 + past)
+            .unwrap();
+    }
+    let lengths = flat_lengths(icb);
+    let commands = (size * 38) as usize;
+    let set = |at: usize| match at.checked_sub(commands) {
+        Some(past) => base + 100000 + past as u32,
+        None => base + 100 * (at / 38) as u32 + (at % 38) as u32,
+    };
+    assert!(
+        (0..lengths.len()).all(|at| lengths[at] == set(at)),
+        "read back as set"
+    );
+    lengths
+}
+
+/// `lengths` but at the places `unknown`, which Metal's GPU copy writes with a value of its own.
+fn known(mut lengths: Vec<u32>, unknown: Range<usize>) -> Vec<u32> {
+    lengths[unknown].fill(0);
+    lengths
+}
+
+/// A length set past the last command's threadgroup lengths is reset and copied as Metal resets
+/// and copies the command whose words lie there (an M3 Max, macOS 27.0.1, buffers of 1 to 8
+/// commands, each case in its own process): where the buffer does not inherit its pipeline state,
+/// 2 words a command from the last command's lengths, then 8 a command; where it does, the 8 alone.
+/// A command's CPU reset clears its 38 and its 2 words, leaving its 8; a blit's reset clears
+/// all; a blit's copy carries its lengths 0 to 35, its 2 words and its 8, and clears its lengths
+/// 36 and 37 where the buffer does not inherit its pipeline state (carrying them where it does).
+/// Two places past the commands' words, which Metal's copy writes with a value of its own, are
+/// not compared. None announces anything.
+#[test]
+fn words_past_lengths_reset_and_copy_as_metal_s() {
+    notices::on_device(|device, messages| {
+        messages.take_notices();
+        let queue = device.new_command_queue().unwrap();
+        let blit = |work: &dyn Fn(&mut BlitCommandEncoder)| {
+            let command_buffer = queue.command_buffer().unwrap();
+            let mut blit = command_buffer.blit_command_encoder().unwrap();
+            work(&mut blit);
+            blit.end_encoding().unwrap();
+            command_buffer.commit().unwrap();
+            command_buffer.wait_until_completed_for(WAIT).unwrap();
+            assert_eq!(command_buffer.error(), None);
+        };
+        let mut descriptor = compute_descriptor();
+        descriptor.max_kernel_threadgroup_memory_bind_count = 8;
+        let mut inheriting = descriptor;
+        inheriting.inherit_pipeline_state = true;
+        let mut wider = descriptor;
+        wider.max_kernel_buffer_bind_count = 40;
+        // Three commands, their lengths to 114, 2 words each from 114, 8 each from 120.
+        let made = || icb(device, &descriptor, 3);
+
+        let buffer = made();
+        let mut expected = fill_lengths(&buffer, 100000);
+        buffer
+            .indirect_compute_command_at(1)
+            .unwrap()
+            .reset()
+            .unwrap();
+        expected[38..76].fill(0);
+        expected[116..118].fill(0);
+        assert_eq!(flat_lengths(&buffer), expected, "a command's reset");
+
+        let buffer = made();
+        let mut expected = fill_lengths(&buffer, 100000);
+        buffer.reset_with_range(0..2).unwrap();
+        expected[0..76].fill(0);
+        expected[114..118].fill(0);
+        assert_eq!(flat_lengths(&buffer), expected, "a CPU reset of a range");
+
+        let buffer = made();
+        let mut expected = fill_lengths(&buffer, 100000);
+        blit(&|blit| blit.reset_commands_in_buffer(&buffer, 1..2).unwrap());
+        expected[38..76].fill(0);
+        expected[116..118].fill(0);
+        expected[128..136].fill(0);
+        assert_eq!(
+            flat_lengths(&buffer),
+            expected,
+            "a blit's reset of command 1"
+        );
+
+        let buffer = made();
+        let mut expected = fill_lengths(&buffer, 100000);
+        blit(&|blit| blit.reset_commands_in_buffer(&buffer, 0..3).unwrap());
+        expected[0..144].fill(0);
+        assert_eq!(flat_lengths(&buffer), expected, "a blit's reset of all");
+
+        // A copy of command 2 into command 0 of another buffer, of one descriptor and of a
+        // descriptor of more buffers (the runtime's answer: Metal garbles a copy between
+        // descriptors).
+        for (source_descriptor, name) in [(descriptor, "one descriptor"), (wider, "two")] {
+            let source = icb(device, &source_descriptor, 3);
+            let from = fill_lengths(&source, 100000);
+            let into = made();
+            let mut expected = fill_lengths(&into, 300000);
+            blit(&|blit| {
+                blit.copy_indirect_command_buffer(&source, 2..3, &into, 0)
+                    .unwrap()
+            });
+            expected[0..36].copy_from_slice(&from[76..112]);
+            expected[36..38].fill(0);
+            expected[114..116].copy_from_slice(&from[118..120]);
+            expected[120..128].copy_from_slice(&from[136..144]);
+            assert_eq!(
+                known(flat_lengths(&into), 144..146),
+                known(expected, 144..146),
+                "a blit's copy of command 2 into command 0, {name}"
+            );
+        }
+
+        // A copy of all three into command 2 of five: lengths to 190, 2 words each from 190, 8
+        // each from 200.
+        let source = made();
+        let from = fill_lengths(&source, 100000);
+        let into = icb(device, &descriptor, 5);
+        let mut expected = fill_lengths(&into, 300000);
+        blit(&|blit| {
+            blit.copy_indirect_command_buffer(&source, 0..3, &into, 2)
+                .unwrap()
+        });
+        for command in 0..3 {
+            let (at, to) = (command * 38, (2 + command) * 38);
+            expected[to..to + 36].copy_from_slice(&from[at..at + 36]);
+            expected[to + 36..to + 38].fill(0);
+        }
+        expected[194..200].copy_from_slice(&from[114..120]);
+        expected[216..240].copy_from_slice(&from[120..144]);
+        assert_eq!(
+            known(flat_lengths(&into), 240..242),
+            known(expected, 240..242),
+            "a blit's copy of all into command 2 of 5"
+        );
+
+        // Inheriting the pipeline state, four commands: their lengths to 152, 8 words each from
+        // 152.
+        let made = || icb(device, &inheriting, 4);
+        let buffer = made();
+        let mut expected = fill_lengths(&buffer, 100000);
+        buffer
+            .indirect_compute_command_at(1)
+            .unwrap()
+            .reset()
+            .unwrap();
+        expected[38..76].fill(0);
+        assert_eq!(
+            flat_lengths(&buffer),
+            expected,
+            "inheriting: a command's reset"
+        );
+
+        let buffer = made();
+        let mut expected = fill_lengths(&buffer, 100000);
+        blit(&|blit| blit.reset_commands_in_buffer(&buffer, 1..2).unwrap());
+        expected[38..76].fill(0);
+        expected[160..168].fill(0);
+        assert_eq!(
+            flat_lengths(&buffer),
+            expected,
+            "inheriting: a blit's reset"
+        );
+
+        let source = made();
+        let from = fill_lengths(&source, 100000);
+        let into = made();
+        let mut expected = fill_lengths(&into, 300000);
+        blit(&|blit| {
+            blit.copy_indirect_command_buffer(&source, 1..2, &into, 2)
+                .unwrap()
+        });
+        expected[76..114].copy_from_slice(&from[38..76]);
+        expected[168..176].copy_from_slice(&from[160..168]);
+        assert_eq!(
+            known(flat_lengths(&into), 184..186),
+            known(expected, 184..186),
+            "inheriting: a blit's copy of command 1 into command 2"
         );
         assert_eq!(
             counts(&messages.take_notices()),
