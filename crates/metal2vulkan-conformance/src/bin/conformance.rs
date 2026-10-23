@@ -597,9 +597,11 @@ fn times(
         calls,
         shaders,
     } = asked;
-    // Read before the measurement rather than after it, so the figure describes the host the
-    // measurement ran on and not the host it left behind.
-    let load = metal2vulkan_conformance::clocks::host_load();
+    // Read on both sides of the measurement, so the pair brackets the host the measurement
+    // actually ran on. One reading before it can only describe the host it started on, and a run
+    // that starts on an empty queue and finishes against five other builds is the case that
+    // matters: both halves have to be quiet for the figures to be of one machine.
+    let load_before = metal2vulkan_conformance::clocks::host_load();
     let metal = match legs {
         Legs::Both | Legs::Metal => metal_times(cases, runs)?,
         Legs::Ours => None,
@@ -608,6 +610,7 @@ fn times(
         Legs::Both | Legs::Ours => Some(run::times_on_under(venues, policy, cases, runs, shaders)?),
         Legs::Metal => None,
     };
+    let load_after = metal2vulkan_conformance::clocks::host_load();
     // The host's load belongs in the words a record carries, because our leg is CPU-bound where
     // Metal's largest calls are GPU-blocked: a figure taken on a busy host is not the figure a
     // quiet one gives, and a reader of the recording cannot otherwise tell which they have.
@@ -619,13 +622,14 @@ fn times(
             run::Shaders::Warm => "carried over between the cases of a round",
             run::Shaders::Cold => "fresh for every case",
         },
-        match load {
-            Some(load) => format!(
-                "the host's one-minute load average was {load:.2} when the measurement started, \
-                 and the per-call margin is judged only at {:.1} or under",
+        match (load_before, load_after) {
+            (Some(before), Some(after)) => format!(
+                "the host's one-minute load average was {before:.2} when the measurement started \
+                 and {after:.2} when it finished, and the per-call margin is judged only when both \
+                 are {:.1} or under",
                 metal2vulkan_conformance::slow_calls::QUIET_ENOUGH
             ),
-            None => "this host answers no load average".to_owned(),
+            _ => "this host answers no load average".to_owned(),
         }
     );
     match (&metal, &ours) {
@@ -656,7 +660,8 @@ fn times(
     // It also needs a measurement whose readings localise: a warm one rather than a cold one, and
     // one taken on a quiet host rather than a busy one -- see `slow_calls::judges`.
     let mut green = true;
-    if let Err(why) = metal2vulkan_conformance::slow_calls::judges(shaders, load) {
+    if let Err(why) = metal2vulkan_conformance::slow_calls::judges(shaders, load_before, load_after)
+    {
         println!("\n{why}");
     } else if let (Some(metal), Some(ours)) = (&metal, &ours) {
         let ledger = metal2vulkan_conformance::slow_calls::ledger()?;
