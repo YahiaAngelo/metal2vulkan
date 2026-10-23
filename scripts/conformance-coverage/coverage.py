@@ -731,9 +731,10 @@ def write(data) -> str:
     w("## Exercised, but not ours")
     w("")
     w(
-        "An item the suite's Metal leg calls whose coverage-map status is not implemented. The "
-        "suite is measuring Metal's behaviour for something our side cannot answer the same way, "
-        "so each is a case that can only be exact by accident."
+        "An item the suite's Metal leg calls whose coverage-map status is not implemented. Read "
+        "each one before concluding anything: a call the leg makes to **set its own Metal up** is "
+        "not a behaviour under test, and our side need not have it. A call the case's answer "
+        "depends on is the other thing, and would be a case that can only be exact by accident."
     )
     w("")
     w("| item | status | note | families |")
