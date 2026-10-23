@@ -4919,12 +4919,32 @@ fn the_diff_tool_reads_the_gate_and_not_the_noise() {
         vec![("render_passes_made".to_owned(), Drifted::GateLost)]
     );
     assert!(!moved.iter().any(|one| one.what.is_load_bearing()));
+    let moved = drift(&held, &ungated);
+    assert_eq!(
+        crate::cost::reach(&moved),
+        crate::cost::Reach {
+            given_up: 1,
+            taken_on: 0
+        },
+        "a count the measurement stops gating is counted as reach given up, never taken on"
+    );
     let moved = drift(&ungated, &held);
     assert_eq!(
         what(&moved),
         vec![("render_passes_made".to_owned(), Drifted::GateGained)]
     );
     assert!(!moved.iter().any(|one| one.what.is_load_bearing()));
+    // The two directions are reported apart because only one of them is dangerous, so the tally
+    // must not be able to swap them: the same pair of records compared each way has to put its
+    // one count in the opposite field.
+    assert_eq!(
+        crate::cost::reach(&moved),
+        crate::cost::Reach {
+            given_up: 0,
+            taken_on: 1
+        },
+        "a count the measurement starts gating is counted as reach taken on, never given up"
+    );
 
     // And a record compared with itself drifts in nothing, so the tool cannot cry wolf on a
     // measurement that read exactly what the record holds.

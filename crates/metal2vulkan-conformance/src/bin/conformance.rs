@@ -379,6 +379,15 @@ fn cost(
     if check {
         let mut drifted = 0;
         let mut fatal = 0;
+        // The two reach directions are counted apart, by `cost::reach`, because they are not
+        // equally safe and because a tally written here could swap them with nothing to catch it.
+        let mut reach = metal2vulkan_conformance::cost::Reach::default();
+        // A case landed since the last whole-set measurement has no bound, so this comparison has
+        // nothing to compare and passes it over. That is right -- inventing a bound from the run
+        // that is checking it would gate on itself -- but passing it over in silence makes the
+        // gate's coverage shrink invisibly with every landing. The count is printed so the bill
+        // is read rather than discovered.
+        let mut uncovered = Vec::new();
         for one in &measured {
             if one.stopped.is_some() {
                 continue;
@@ -387,6 +396,7 @@ fn cost(
                 .map(|recording| recording.costs)
                 .unwrap_or_default();
             let Some(held) = held.iter().find(|held| held.venue == venue) else {
+                uncovered.push(one.case.clone());
                 continue;
             };
             let fresh = one.record(&venue, words.clone());
@@ -400,6 +410,9 @@ fn cost(
                 continue;
             }
             println!("\n{}", one.case);
+            let here = metal2vulkan_conformance::cost::reach(&moved);
+            reach.given_up += here.given_up;
+            reach.taken_on += here.taken_on;
             for one in &moved {
                 println!("  {one}");
                 drifted += 1;
@@ -412,6 +425,24 @@ fn cost(
             "\n{drifted} load-bearing or reach difference(s) between the records and this \
              measurement, {fatal} of them a number the gate reads"
         );
+        println!(
+            "reach: {} count(s) the gate gives up, {} it takes on. A count given up stops \
+             gating; a count taken on is a bound this measurement is the only evidence for, so \
+             {} is the number to watch.",
+            reach.given_up, reach.taken_on, reach.taken_on
+        );
+        if !uncovered.is_empty() {
+            println!(
+                "{} of the {} case(s) measured hold no bound on {venue}, so this comparison \
+                 passed them over; each is a case the gate does not cover until a whole-set \
+                 measurement writes one:",
+                uncovered.len(),
+                measured.len()
+            );
+            for case in &uncovered {
+                println!("  {case}");
+            }
+        }
         if fatal == 0 {
             println!(
                 "no gated bound and no ceiling moved: re-measuring would change nothing the gate \
