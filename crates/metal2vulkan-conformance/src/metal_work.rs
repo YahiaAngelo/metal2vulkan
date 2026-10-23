@@ -15,7 +15,7 @@
 //! The pattern fill was the second stated reason a copy-and-fill case had to carry its answer, and
 //! it does not hold either. `fillTexture:level:slice:region:bytes:length:` has no public header, so
 //! `objc2-metal` binds nothing for it, but the selector is there: the committed probe
-//! `probes/surface_buffer_fills.m` calls it, and so does [`Run::fill_texture`], by selector, after
+//! `probes/surface_buffer_fills.m` calls it, and so does this interpreter, by selector, after
 //! **`respondsToSelector:`** — a release that drops it answers [`Failure::unavailable`] and the
 //! case reads as unrecorded rather than the process dying on an unrecognised selector. So a case
 //! built on [`Step::FillTexture`] can be recorded on Metal, which is what the heap-run cases of
