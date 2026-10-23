@@ -15,6 +15,13 @@
 //! [`rate_maps`] is the family where Metal's own API validation layer and plain Metal disagree,
 //! and it is what exercises the recording's second oracle ([`crate::validated`]).
 //!
+//! Two families are ports of lanes that held **no Metal value at all** — a rule, or a list in a
+//! module's prose — and whose values this round measured on the oracle for the first time:
+//! [`texture_accesses`], where Metal's render-pipeline reflection states each texture slot's
+//! access, and [`textures`], where every uncompressed colour format's texture answers what a fresh
+//! level 0 reads, what a host round trip gives back, and whether the bytes between the rows stayed
+//! as they were.
+//!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
 pub mod command_queues;
