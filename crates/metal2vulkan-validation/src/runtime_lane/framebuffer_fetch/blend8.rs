@@ -274,8 +274,8 @@ fn filled(lane: &Lane, pf: PixelFormat, bytes: &[u8], bpp: u64) -> Texture {
 }
 
 /// A pipeline of `fixture`'s `entry` blending color 0 of `pf` by `blended` (with color 1 of mask
-/// none), or `None` where a device fetching through the pixel interlock lacks the format's
-/// storage there (printed).
+/// none), or `None` where the device lacks a capability the pipeline needs: the format's storage
+/// through the pixel interlock, or its rendering or blend through input attachments (printed).
 fn pipeline(
     lane: &Lane,
     (library, fixture): (&Library, &Fixture),
@@ -303,8 +303,10 @@ fn pipeline(
         .new_render_pipeline_state(&descriptor, &PipelineOptions::default())
     {
         Ok(state) => Some(state),
-        // A format whose storage the device lacks is refused by that capability.
-        Err(Error::Unsupported(u)) if !through_inputs(lane) && u.needs != Needs::NotImplemented => {
+        // A format whose storage, or blend, the device lacks is refused by that capability
+        // (lavapipe renders and blends no `R8Unorm_sRGB` and `RG8Unorm_sRGB`, through input
+        // attachments).
+        Err(Error::Unsupported(u)) if u.needs != Needs::NotImplemented => {
             println!("FETCH-BLEND8 {entry} {pf:?} | {device} | refused: {u}");
             None
         }
