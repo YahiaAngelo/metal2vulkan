@@ -47,9 +47,11 @@
 //! with `VkPipelineSampleLocationsStateCreateInfoEXT`, the pass's positions on a grid of one
 //! pixel (`pipeline/graphics.rs`), each coordinate already rounded as Metal rounds it, so it
 //! lies in the range and on the sub-pixel grid every device with the extension takes exactly
-//! (Vulkan guarantees `[0, 0.9375]` and four sub-pixel bits). The pass takes custom positions at
-//! the counts the device's `sampleLocationSampleCounts` lists, on a device with
-//! `variableSampleLocations` (every committed profile), where no pass needs them at its begin;
+//! (Vulkan guarantees `[0, 0.9375]` and four sub-pixel bits). The grid is programmed at the
+//! pass's sample count, never at the number of positions the caller gave, so the one count the
+//! device is asked for is the pass's: the pass takes custom positions where
+//! `sampleLocationSampleCounts` holds `samples`, on a device with `variableSampleLocations`
+//! (every committed profile), where no pass needs them at its begin;
 //! [`are_programmable_sample_positions_supported`](super::DeviceProperties::are_programmable_sample_positions_supported)
 //! answers whether that is every count above 1 the device renders. The store action option keeps
 //! nothing more: Vulkan stores each sample by its index, wherever the pass rasterized it.
@@ -102,12 +104,19 @@
 //! both ways, which the stand-in's copies need; a stencil-only attachment on a device without a
 //! combined format that takes them; and on a device without `variableSampleLocations`, which takes
 //! positions only at a pass's begin.
+//!
+//! **The device's own lack** is its own answer, never the caller's error: a device whose
+//! `sampleLocationSampleCounts` does not hold the pass's sample count refuses the pass
+//! `Unsupported(SamplePositions)` naming that property
+//! ([`Needs::AnyOf`](metal2vulkan::error::Needs::AnyOf)), which says this GPU cannot do it rather
+//! than that the consumer passed bad arguments.
 
 use super::error::{invalid, Error, Problem, RuntimeGap};
 use super::render_pass::{Attachment, RenderPassProblem};
 use super::render_values::{SamplePosition, StoreAction, StoreActionOptions};
 use super::Device;
 use metal2vulkan::device::{DeviceProfile, VkProperty};
+use metal2vulkan::error::{Capability, Feature, Unsupported};
 use metal2vulkan::vk::{Format, ImageCreateFlags, SampleCountFlags};
 
 fn problem(call: &'static str, p: RenderPassProblem) -> Error {
@@ -117,21 +126,83 @@ fn problem(call: &'static str, p: RenderPassProblem) -> Error {
 /// A sample position in sixteenths of a pixel, `x` then `y`, each at most 15.
 pub(super) type Sixteenths = [u8; 2];
 
+/// What a pass's custom sample positions take of the device, read off it once
+/// ([`PositionRules::of`]) so that [`positioned`] decides every rule below from the pass's own
+/// shape and these answers, with no device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PositionRules {
+    /// The device takes custom sample locations at the pass's sample count
+    /// (`sampleLocationSampleCounts` holds `samples`), which is the only count the grid is ever
+    /// programmed at ([`positioned`]).
+    pub(super) located_at_samples: bool,
+    /// `variableSampleLocations`: the locations may differ between the pipelines of one pass, so
+    /// no pass needs them at its begin.
+    pub(super) variable: bool,
+}
+
+impl PositionRules {
+    /// What `device` answers for a pass of `samples` samples.
+    pub(super) fn of(device: &Device, samples: u32) -> PositionRules {
+        let properties = &device.compile_device().profile().enabled().properties;
+        PositionRules {
+            located_at_samples: properties
+                .contains(&VkProperty::SampleLocationSampleCount(samples)),
+            variable: properties.contains(&VkProperty::VariableSampleLocations),
+        }
+    }
+}
+
+/// Why a pass's custom sample positions are not programmed: what Metal refuses of the caller's
+/// own numbers, what the device lacks, and what the runtime has not built. The three are kept
+/// apart here because they are three different answers to a consumer: it passed bad arguments,
+/// this GPU cannot do it, or we have not built it ([`refusal_error`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PositionRefusal {
+    /// The caller's: a coordinate outside `[0, 1)`, at this index.
+    Outside { index: u32 },
+    /// The caller's: a count Metal takes no custom positions at.
+    Count { count: u64 },
+    /// The caller's: more positions than the pass's samples.
+    MoreThanSamples { positions: u64, samples: u32 },
+    /// The device's: it takes no custom sample locations at the pass's sample count, which is the
+    /// count the grid is programmed at. Nothing the caller passed is wrong.
+    DeviceLacksCount { samples: u32 },
+    /// The runtime's: positions a pass would need at its begin, which it does not program (a
+    /// device without `variableSampleLocations`, or a depth/stencil attachment whose image was
+    /// not made for them).
+    NotBuilt,
+}
+
+/// The error `refusal` reports out of `call`: the caller's as Metal's own stop (`Invalid`), the
+/// device's as the Vulkan property it lacks (`Unsupported`, [`Needs::AnyOf`]), and the runtime's
+/// as its typed gap. A device gap is never an `Invalid`: that would tell a consumer it passed bad
+/// arguments where the truth is that this GPU cannot do it.
+fn refusal_error(call: &'static str, refusal: PositionRefusal) -> Error {
+    match refusal {
+        PositionRefusal::Outside { index } => {
+            problem(call, RenderPassProblem::SamplePosition { index })
+        }
+        PositionRefusal::Count { count } => {
+            problem(call, RenderPassProblem::SamplePositionCount { count })
+        }
+        PositionRefusal::MoreThanSamples { positions, samples } => problem(
+            call,
+            RenderPassProblem::SamplePositionsSamples { positions, samples },
+        ),
+        PositionRefusal::DeviceLacksCount { samples } => Error::Unsupported(Unsupported::needs(
+            Feature::SamplePositions,
+            Capability::Property(VkProperty::SampleLocationSampleCount(samples)),
+        )),
+        PositionRefusal::NotBuilt => Error::NotImplemented(RuntimeGap::SamplePositionsAtBegin),
+    }
+}
+
 /// Whether `device` takes `positions` in a pass of `samples` samples as [`grid`] takes them,
-/// whatever the pass's depth/stencil attachment: positions inside the pixel, at a count the
-/// device takes custom positions at, no more than the pass's samples, which it takes them at
-/// too, on a device with `variableSampleLocations`.
+/// whatever the pass's depth/stencil attachment: [`positioned`] under the device's rules with no
+/// attachment, so the two can never disagree about a pass.
 pub(super) fn taken(device: &Device, positions: &[SamplePosition], samples: u32) -> bool {
-    let inside = |v: f32| (0.0..1.0).contains(&v);
-    let properties = &device.compile_device().profile().enabled().properties;
-    let count = positions.len() as u32;
-    !positions.is_empty()
-        && positions.iter().all(|p| inside(p.x) && inside(p.y))
-        && count <= samples
-        && count > 1
-        && properties.contains(&VkProperty::SampleLocationSampleCount(count))
-        && properties.contains(&VkProperty::SampleLocationSampleCount(samples))
-        && properties.contains(&VkProperty::VariableSampleLocations)
+    let rules = PositionRules::of(device, samples);
+    !positions.is_empty() && positioned(rules, positions, samples, None).is_ok()
 }
 
 /// The pass's sample positions on `device`, in sixteenths of a pixel (empty for the device's
@@ -145,44 +216,57 @@ pub(super) fn grid(
     samples: u32,
     depth_stencil: Option<ImageCreateFlags>,
 ) -> Result<Vec<Sixteenths>, Error> {
+    let rules = PositionRules::of(device, samples);
+    positioned(rules, positions, samples, depth_stencil)
+        .map_err(|refusal| refusal_error(call, refusal))
+}
+
+/// [`grid`]'s grid under `rules`, decided from the pass's own numbers alone.
+pub(super) fn positioned(
+    rules: PositionRules,
+    positions: &[SamplePosition],
+    samples: u32,
+    depth_stencil: Option<ImageCreateFlags>,
+) -> Result<Vec<Sixteenths>, PositionRefusal> {
     if positions.is_empty() {
         return Ok(Vec::new());
     }
     let inside = |v: f32| (0.0..1.0).contains(&v);
     if let Some(index) = positions.iter().position(|p| !inside(p.x) || !inside(p.y)) {
         let index = index as u32;
-        return Err(problem(call, RenderPassProblem::SamplePosition { index }));
+        return Err(PositionRefusal::Outside { index });
     }
     let count = positions.len() as u64;
-    let properties = &device.compile_device().profile().enabled().properties;
-    let taken = u32::try_from(count).is_ok_and(|count| {
-        count > 1 && properties.contains(&VkProperty::SampleLocationSampleCount(count))
-    });
-    if !taken {
-        return Err(problem(
-            call,
-            RenderPassProblem::SamplePositionCount { count },
-        ));
+    // Metal holds the count to a sample count it takes custom positions at, above 1: a power of
+    // two, and at most the pass's samples (below). Measured on an M4 (the module docs): plain
+    // Metal stops at 1 and at 3, and takes 2 and 4 in a pass of 4. This is the caller's own
+    // number and nothing else; the device's `sampleLocationSampleCounts` is asked at the pass's
+    // sample count instead, never at this one, because the grid is only ever programmed at
+    // `samples` (`pipeline/graphics.rs`'s `sample_locations_per_pixel`) with the samples past
+    // these positions at the pixel's corner. Holding the count to the device's property refused
+    // 2 positions in a 4-sample pass on a device advertising only `{4}` (lavapipe), a pass it
+    // runs, and said the caller had erred.
+    if count <= 1 || !count.is_power_of_two() {
+        return Err(PositionRefusal::Count { count });
     }
     // Fewer positions than the pass's samples put the samples past them at the pixel's corner,
     // as plain Metal does (the module docs); more stay refused.
     if count > u64::from(samples) {
         let positions = count;
-        return Err(problem(
-            call,
-            RenderPassProblem::SamplePositionsSamples { positions, samples },
-        ));
+        return Err(PositionRefusal::MoreThanSamples { positions, samples });
+    }
+    // The device's own lack, which no argument of the caller's can fix.
+    if !rules.located_at_samples {
+        return Err(PositionRefusal::DeviceLacksCount { samples });
     }
     // A depth/stencil attachment rasterizes at custom locations only where its image was made
-    // for them (`compatible_depth`).
+    // for them (`compatible_depth`); a device without `variableSampleLocations` takes them only
+    // at a pass's begin. Neither is built.
     let incompatible = depth_stencil.is_some_and(|flags| {
         !flags.contains(ImageCreateFlags::SAMPLE_LOCATIONS_COMPATIBLE_DEPTH_EXT)
     });
-    if incompatible
-        || !properties.contains(&VkProperty::VariableSampleLocations)
-        || !properties.contains(&VkProperty::SampleLocationSampleCount(samples))
-    {
-        return Err(Error::NotImplemented(RuntimeGap::SamplePositionsAtBegin));
+    if incompatible || !rules.variable {
+        return Err(PositionRefusal::NotBuilt);
     }
     let corner = [0, 0];
     Ok(positions
@@ -262,6 +346,122 @@ pub(super) fn programmable(profile: &DeviceProfile, counts: SampleCountFlags) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A device that takes custom sample locations at the pass's sample count and has
+    /// `variableSampleLocations`.
+    fn takes() -> PositionRules {
+        PositionRules {
+            located_at_samples: true,
+            variable: true,
+        }
+    }
+
+    /// `n` positions, each inside the pixel and at its own coordinate.
+    fn positions(n: usize) -> Vec<SamplePosition> {
+        (0..n)
+            .map(|i| SamplePosition {
+                x: 0.25 + 0.125 * i as f32,
+                y: 0.5,
+            })
+            .collect()
+    }
+
+    /// Fewer positions than the pass's samples are programmed as Metal rasterizes them, on a
+    /// device that takes custom locations at the pass's sample count and whatever counts it takes
+    /// them at besides: the grid is only ever programmed at the pass's count
+    /// (`pipeline/graphics.rs`), so a device advertising `{4}` alone runs 2 positions in a
+    /// 4-sample pass, the samples past them at the pixel's corner. Holding the count to the
+    /// device's property instead refused this pass on lavapipe, and called it the caller's error.
+    #[test]
+    fn fewer_positions_than_samples_are_taken_at_the_passs_count() {
+        let two = positions(2);
+        assert_eq!(
+            positioned(takes(), &two, 4, None),
+            Ok(vec![[4, 8], [6, 8], [0, 0], [0, 0]])
+        );
+        assert_eq!(positioned(takes(), &two, 2, None), Ok(vec![[4, 8], [6, 8]]));
+        // Every count Metal takes, at the pass's own.
+        assert_eq!(
+            positioned(takes(), &positions(4), 4, None).map(|g| g.len()),
+            Ok(4)
+        );
+    }
+
+    /// What Metal stops of the caller's own numbers, measured (the module docs): a coordinate
+    /// outside the pixel, a count of 1 or 3, and more positions than the pass's samples. Each is
+    /// the caller's error and stays one.
+    #[test]
+    fn metals_own_stops_are_the_callers_error() {
+        let outside = vec![
+            SamplePosition { x: 0.5, y: 0.5 },
+            SamplePosition { x: 1.0, y: 0.5 },
+        ];
+        assert_eq!(
+            positioned(takes(), &outside, 4, None),
+            Err(PositionRefusal::Outside { index: 1 })
+        );
+        for count in [1, 3] {
+            assert_eq!(
+                positioned(takes(), &positions(count), 4, None),
+                Err(PositionRefusal::Count {
+                    count: count as u64
+                }),
+                "{count} positions"
+            );
+        }
+        assert_eq!(
+            positioned(takes(), &positions(4), 2, None),
+            Err(PositionRefusal::MoreThanSamples {
+                positions: 4,
+                samples: 2
+            })
+        );
+    }
+
+    /// A device that takes no custom sample locations at the pass's sample count answers with its
+    /// own lack, naming the Vulkan property, and never with an `Invalid`: an `Invalid` tells a
+    /// consumer it passed bad arguments where the truth is that this GPU cannot do it. A device
+    /// without `variableSampleLocations`, and an attachment whose image was not made for the
+    /// positions, are the runtime's gap instead.
+    #[test]
+    fn a_device_that_lacks_the_count_answers_with_its_own_lack() {
+        let lacks = PositionRules {
+            located_at_samples: false,
+            variable: true,
+        };
+        assert_eq!(
+            positioned(lacks, &positions(2), 4, None),
+            Err(PositionRefusal::DeviceLacksCount { samples: 4 })
+        );
+        let needs = Unsupported::needs(
+            Feature::SamplePositions,
+            Capability::Property(VkProperty::SampleLocationSampleCount(4)),
+        );
+        assert_eq!(
+            refusal_error("t", PositionRefusal::DeviceLacksCount { samples: 4 }),
+            Error::Unsupported(needs)
+        );
+        assert!(!matches!(
+            refusal_error("t", PositionRefusal::DeviceLacksCount { samples: 4 }),
+            Error::Invalid(_)
+        ));
+        let at_begin = PositionRules {
+            located_at_samples: true,
+            variable: false,
+        };
+        assert_eq!(
+            positioned(at_begin, &positions(2), 4, None),
+            Err(PositionRefusal::NotBuilt)
+        );
+        assert_eq!(
+            positioned(takes(), &positions(2), 4, Some(ImageCreateFlags::empty())),
+            Err(PositionRefusal::NotBuilt)
+        );
+        assert_eq!(
+            refusal_error("t", PositionRefusal::NotBuilt),
+            Error::NotImplemented(RuntimeGap::SamplePositionsAtBegin)
+        );
+    }
 
     /// Metal's rounding, measured (the module docs): the nearest sixteenth, a tie up, at most
     /// 15/16.
