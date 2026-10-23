@@ -41,6 +41,7 @@ pub mod extended_range_blends;
 pub mod extended_range_planes;
 pub mod extended_range_targets;
 pub mod extended_range_two_planes;
+pub mod fetch_ordered;
 pub mod format_copies;
 pub mod fresh_contents;
 pub mod half_write_nans;
@@ -241,6 +242,11 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.extend(fresh_contents::all());
     cases.extend(sample_positions::all());
+    cases.extend(
+        fetch_ordered::all()
+            .into_iter()
+            .map(|case| Box::new(case) as Box<dyn Case>),
+    );
     cases.extend(
         shader_stencil::all()
             .into_iter()
