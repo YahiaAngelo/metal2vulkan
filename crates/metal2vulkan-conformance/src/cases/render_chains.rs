@@ -1,0 +1,785 @@
+//! What a pass sees when it **samples a texture an earlier pass of the same command buffer drew**.
+//!
+//! Every other render family in the suite asks about one pass: it clears, it draws, and the host
+//! reads the target back. A program does not look like that. It renders into a texture, and then a
+//! later pass reads that texture through a sampler without the host ever seeing the bytes in
+//! between. Three things stand between the two passes, and **no case in the suite asks Metal about
+//! any of them**:
+//!
+//! - the target's move from "a pass is writing it" to "a fragment function is sampling it", which
+//!   on our side is an image-layout transition and on Metal's side is nothing a program states;
+//! - the ordering between the two passes, which Metal tracks for a resource a command buffer uses
+//!   twice and which our side must turn into a barrier;
+//! - what the sampler sees of an image the same command buffer has just rendered.
+//!
+//! So each case here draws a known pattern into a **private** target, samples that target in a
+//! second pass of the **same command buffer**, and reads both targets back at the end. Reading the
+//! first target as well as the second is what makes a difference diagnosable: if the sampled
+//! target is wrong the case says whether the first pass drew the wrong thing or the second pass
+//! sampled the right thing wrongly.
+//!
+//! # The pattern, and why it is bands
+//!
+//! The first pass clears the target to a distinctive code and then draws **four vertical bands**,
+//! one draw each, each band a colour of its own out of one buffer at four offsets. Vertical
+//! because the mapping from a clip-space `x` to a pixel column is unambiguous, so the bands' places
+//! are a fact about the geometry rather than about which way Metal hands its `y` axis; four
+//! different colours because a sample that reaches the wrong texel then reads a different value
+//! rather than passing by coincidence; and a clear nothing covers nowhere, so a draw that did not
+//! happen at all shows as the clear code rather than as a colour.
+//!
+//! Every colour channel is a whole code over 255, so `RGBA8Unorm` stores exactly what the fragment
+//! function returned and the texels are exact on this venue.
+//!
+//! # Three rows, three different questions of the sampler
+//!
+//! - **`render-then-sample-exact`** samples at the texel centres: `tob_sample` divides the pixel's
+//!   own position by the sampled texture's extent, so with the two targets of one extent every
+//!   sample lands on a texel centre and the second target must come back **equal to the first**.
+//!   The filter cannot change that answer, which is the point: it is the barrier and the layout,
+//!   and nothing else, that this row can fail on.
+//! - **`render-then-sample-magnified-nearest`** samples an 8 by 8 target over a 16 by 16 one
+//!   through `tgp_layer`, whose texture coordinates run across the drawn rectangle rather than
+//!   being derived from the sampled texture, so each source texel covers four pixels. Nearest
+//!   filtering makes that an exact doubling.
+//! - **`render-then-sample-magnified-linear`** is the same geometry with a linear filter, so the
+//!   hardware's filter really runs between the texels of an image the same command buffer drew.
+//!   Its answer is Metal's and is not computed here; what this module's tests hold is that the
+//!   filter ran at all (the row differs from the nearest row) and that every channel lies between
+//!   the source texels it is a blend of.
+//!
+//! Nothing here can fault a GPU: two passes, four and one draws, targets of at most 16 by 16, and
+//! no loop in any function either pass runs.
+
+use crate::allowance::Allowance;
+use crate::case::{
+    call, made, Abort, Case, Failure, Handle, Input, MetalSource, SamplerSpec, Side,
+};
+use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
+use crate::recording::ShaderRef;
+use crate::render::{
+    ColorState, PassColor, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, TargetSpec,
+};
+use crate::transcript::{
+    Aspect, ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value,
+};
+use metal2vulkan::metal::{PixelFormat, PrimitiveType, SamplerMinMagFilter};
+use metal2vulkan_runtime::Degradation;
+
+/// The format both targets of every row carry. Its codes survive a store unchanged, so every texel
+/// of every row is exact.
+const FORMAT: PixelFormat = PixelFormat::RGBA8Unorm;
+
+/// Bytes one texel of [`FORMAT`] takes.
+const TEXEL: u32 = 4;
+
+/// The bands the first pass draws, which is also how many colours the buffer holds.
+const BANDS: u32 = 4;
+
+/// The clear the first pass loads its target with: a code no band's colour holds, so a band that
+/// was never drawn reads as this rather than as another band's colour.
+const SOURCE_CLEAR: u8 = 7;
+
+/// The clear the second pass loads its target with, told apart from the first pass's so a sampled
+/// target that kept its clear cannot be read as the source's.
+const TARGET_CLEAR: u8 = 3;
+
+/// The four colours the first pass draws, a whole code a channel so `RGBA8Unorm` stores exactly
+/// what the fragment function returned, and every channel of every band different from every
+/// other.
+const COLORS: [[u8; 4]; BANDS as usize] = [
+    [16, 32, 48, 200],
+    [64, 80, 96, 210],
+    [112, 128, 144, 220],
+    [160, 176, 192, 230],
+];
+
+/// The owned fixture whose `tob_rect` draws a rectangle from a buffer's two corners, whose
+/// `tob_solid` returns a colour from a buffer, and whose `tob_sample` samples texture 0 at the
+/// pixel's own position over the sampled texture's extent.
+const TOB: &str = "tob_renders";
+
+/// The owned fixture whose `tgp_rect` draws a rectangle with its texture coordinates **across the
+/// rectangle**, and whose `tgp_layer` writes the sample of texture 0 into colour 0.
+const TGP: &str = "tgp_composite";
+
+/// The vertex and fragment functions that fill the source target: the rectangle and the solid
+/// colour, both of [`TOB`].
+const FILL: Functions = Functions {
+    fixture: TOB,
+    vertex: "tob_rect",
+    fragment: "tob_solid",
+};
+
+/// A pipeline's two functions and the fixture they come from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Functions {
+    fixture: &'static str,
+    vertex: &'static str,
+    fragment: &'static str,
+}
+
+/// What one row asks: the two extents, the functions the sampling pass runs, and its filter.
+#[derive(Clone, Copy)]
+struct Subject {
+    name: &'static str,
+    /// The side, in texels, of the target the first pass draws into and the second pass samples.
+    source_side: u32,
+    /// The side, in texels, of the target the second pass draws into.
+    target_side: u32,
+    /// The functions the sampling pass's pipeline is made of.
+    sample: Functions,
+    /// Both of the sampler's filters.
+    filter: SamplerMinMagFilter,
+}
+
+/// The three rows, in the order the report lists them.
+const SUBJECTS: &[Subject] = &[
+    Subject {
+        name: "render-then-sample-exact",
+        source_side: 16,
+        target_side: 16,
+        sample: Functions {
+            fixture: TOB,
+            vertex: "tob_rect",
+            fragment: "tob_sample",
+        },
+        filter: SamplerMinMagFilter::Nearest,
+    },
+    Subject {
+        name: "render-then-sample-magnified-nearest",
+        source_side: 8,
+        target_side: 16,
+        sample: Functions {
+            fixture: TGP,
+            vertex: "tgp_rect",
+            fragment: "tgp_layer",
+        },
+        filter: SamplerMinMagFilter::Nearest,
+    },
+    Subject {
+        name: "render-then-sample-magnified-linear",
+        source_side: 8,
+        target_side: 16,
+        sample: Functions {
+            fixture: TGP,
+            vertex: "tgp_rect",
+            fragment: "tgp_layer",
+        },
+        filter: SamplerMinMagFilter::Linear,
+    },
+];
+
+/// One row of the family.
+pub struct RenderChain {
+    subject: Subject,
+}
+
+/// Every row of the family, in the order the report lists them.
+pub fn all() -> Vec<RenderChain> {
+    SUBJECTS
+        .iter()
+        .map(|subject| RenderChain { subject: *subject })
+        .collect()
+}
+
+/// Every row as the case set holds it, so the one line this module adds to
+/// [`crate::cases::all`] stays one line.
+pub fn boxed() -> Vec<Box<dyn Case>> {
+    all()
+        .into_iter()
+        .map(|case| Box::new(case) as Box<dyn Case>)
+        .collect()
+}
+
+/// Band `at` of `BANDS`, as `tob_rect` and `tgp_rect` take a rectangle: the two clip-space corners
+/// `(x, y)` and `(z, w)`, over the whole height.
+///
+/// A band's columns are the pixels whose centre lies inside it, which for a side that `BANDS`
+/// divides is exactly `side / BANDS` of them and never a column of two bands: the band edge falls
+/// between two pixel centres rather than on one.
+fn band(at: u32) -> [f32; 4] {
+    let edge = |step: u32| 2.0 * step as f32 / BANDS as f32 - 1.0;
+    [edge(at), -1.0, edge(at + 1), 1.0]
+}
+
+/// The whole target, as a rectangle.
+const WHOLE: [f32; 4] = [-1.0, -1.0, 1.0, 1.0];
+
+/// A rectangle's bytes, as the vertex function's `constant float4 &` binding takes them.
+fn rect_bytes(rect: [f32; 4]) -> Vec<u8> {
+    rect.iter().flat_map(|edge| edge.to_le_bytes()).collect()
+}
+
+/// The buffer the solid fragment function reads its colour out of: the four colours as `float4`s,
+/// each channel a whole code over 255.
+fn colors_buffer() -> Vec<u8> {
+    COLORS
+        .iter()
+        .flat_map(|color| {
+            color
+                .iter()
+                .flat_map(|code| (f32::from(*code) / 255.0).to_le_bytes())
+                .collect::<Vec<u8>>()
+        })
+        .collect()
+}
+
+/// The one colour attachment both pipelines of a row carry.
+const COLOR_STATE: [Option<ColorState>; 1] = [Some(ColorState::new(FORMAT))];
+
+/// The draw both rectangle functions take: two triangles of six vertices, one instance.
+const RECT_DRAW: RenderStep = RenderStep::Draw {
+    primitive: PrimitiveType::Triangle,
+    first: 0,
+    count: 6,
+    instances: 1,
+};
+
+/// The layout a target of `side` texels a side is read under: one row of the layout a row of
+/// texels and one element a channel, so a diff names the pixel and the channel.
+fn layout(side: u32) -> ByteLayout {
+    let row_pitch = TEXEL * side;
+    ByteLayout {
+        region: Region::Texture {
+            level: 0,
+            slice: 0,
+            aspect: Aspect::Color,
+            sample: 0,
+            origin: [0, 0, 0],
+            size: [side, side, 1],
+        },
+        element: Element::U8,
+        row_offset: 0,
+        row_elements: row_pitch,
+        row_pitch,
+        rows: side,
+        image_pitch: row_pitch * side,
+        images: 1,
+        gaps: Gaps::Compared,
+    }
+}
+
+impl Subject {
+    /// Bytes the source target's whole level 0 takes, which is also where the sampled target's
+    /// bytes start in the read-back buffer.
+    fn source_bytes(&self) -> u32 {
+        TEXEL * self.source_side * self.source_side
+    }
+
+    /// Bytes the sampled target's whole level 0 takes.
+    fn target_bytes(&self) -> u32 {
+        TEXEL * self.target_side * self.target_side
+    }
+
+    /// The fixtures the row loads, in the order it loads them: one where both pipelines come from
+    /// the same fixture, two where they do not.
+    fn fixtures(&self) -> Vec<&'static str> {
+        let mut named = vec![FILL.fixture];
+        if self.sample.fixture != FILL.fixture {
+            named.push(self.sample.fixture);
+        }
+        named
+    }
+
+    /// The sampler state the second pass binds: the row's filter on both axes, clamped to the
+    /// edge, which is Metal's own default address mode.
+    fn sampler(&self) -> SamplerSpec {
+        SamplerSpec::filtered(self.filter)
+    }
+
+    /// The pipeline of `functions` over the one colour attachment.
+    fn pipeline(functions: Functions) -> RenderPipelineSpec<'static> {
+        RenderPipelineSpec::new(functions.vertex, functions.fragment, &COLOR_STATE)
+    }
+}
+
+impl Case for RenderChain {
+    fn name(&self) -> &'static str {
+        self.subject.name
+    }
+
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::Run
+    }
+
+    fn allowances(&self) -> Vec<Allowance> {
+        // No texel is loosened: whole codes over 255 in `RGBA8Unorm` are an exact answer on every
+        // device, and a difference in one is what this family exists to report. The notices site
+        // is declared for the one notice a fragment function that stores a converted colour may
+        // announce, chosen from the case's own shape -- its format and its fragment stage -- and
+        // not from any device. It loosens no value.
+        vec![crate::replay::notice_allowance(
+            Degradation::ShaderColorConversion.code(),
+        )]
+    }
+
+    fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
+        let mut shaders = Vec::new();
+        for name in self.subject.fixtures() {
+            let fixture = Fixture::new(name);
+            let entry = match name {
+                _ if name == FILL.fixture && name == self.subject.sample.fixture => format!(
+                    "{}+{}+{}",
+                    FILL.vertex, FILL.fragment, self.subject.sample.fragment
+                ),
+                _ if name == FILL.fixture => format!("{}+{}", FILL.vertex, FILL.fragment),
+                _ => format!(
+                    "{}+{}",
+                    self.subject.sample.vertex, self.subject.sample.fragment
+                ),
+            };
+            for extension in [RUNTIME_TEXT, METAL_TEXT] {
+                shaders.push(ShaderRef {
+                    fixture: format!("{name}{extension}"),
+                    entry: entry.clone(),
+                    source_sha256: crate::sha256_hex(fixture.text(extension)?.as_bytes()),
+                });
+            }
+        }
+        Ok(shaders)
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        let subject = &self.subject;
+        let mut inputs = Vec::new();
+        for name in subject.fixtures() {
+            let fixture = Fixture::new(name);
+            inputs.push(Input {
+                name: format!("air:{name}"),
+                digest: Digest::sha256(fixture.text(RUNTIME_TEXT)?.as_bytes()),
+            });
+            inputs.push(Input {
+                name: format!("air-typed:{name}"),
+                digest: Digest::sha256(fixture.text(METAL_TEXT)?.as_bytes()),
+            });
+        }
+        inputs.push(Input::bytes(
+            "fill-pipeline",
+            &Subject::pipeline(FILL).words(),
+        ));
+        inputs.push(Input::bytes(
+            "sample-pipeline",
+            &Subject::pipeline(subject.sample).words(),
+        ));
+        inputs.push(Input::bytes(
+            "source-target",
+            &TargetSpec::read(FORMAT, [subject.source_side; 2]).words(),
+        ));
+        inputs.push(Input::bytes(
+            "target",
+            &TargetSpec::read(FORMAT, [subject.target_side; 2]).words(),
+        ));
+        inputs.push(Input::bytes("sampler", &subject.sampler().words()));
+        inputs.push(Input::bytes("buffer:colors", &colors_buffer()));
+        let mut rects: Vec<u8> = (0..BANDS).flat_map(|at| rect_bytes(band(at))).collect();
+        rects.extend(rect_bytes(WHOLE));
+        inputs.push(Input::bytes("rects", &rects));
+        inputs.push(Input::bytes("clears", &[SOURCE_CLEAR, TARGET_CLEAR, 0, 0]));
+        Ok(inputs)
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        let subject = &self.subject;
+        let mut libraries: Vec<(&'static str, Handle)> = Vec::new();
+        for name in subject.fixtures() {
+            let loaded = Fixture::new(name).loaded().map_err(|why| Abort {
+                at: format!("library:{name}"),
+                failure: Failure::named("FixtureNotRead", why),
+            })?;
+            let library = made(
+                sites,
+                &format!("library:{name}"),
+                side.library(&loaded.source()),
+            )?;
+            libraries.push((name, library));
+        }
+        let library_of = |named: &'static str| -> Handle {
+            libraries
+                .iter()
+                .find(|(name, _)| *name == named)
+                .map(|(_, library)| *library)
+                .expect("the row loads every fixture its pipelines name")
+        };
+        let fill_state = made(
+            sites,
+            "fill-pipeline",
+            side.render_pipeline(library_of(FILL.fixture), &Subject::pipeline(FILL)),
+        )?;
+        let sample_state = made(
+            sites,
+            "sample-pipeline",
+            side.render_pipeline(
+                library_of(subject.sample.fixture),
+                &Subject::pipeline(subject.sample),
+            ),
+        )?;
+        let source = made(
+            sites,
+            "source-target",
+            side.target(&TargetSpec::read(FORMAT, [subject.source_side; 2])),
+        )?;
+        let target = made(
+            sites,
+            "target",
+            side.target(&TargetSpec::read(FORMAT, [subject.target_side; 2])),
+        )?;
+        let sampler = made(sites, "sampler", side.sampler(&subject.sampler()))?;
+        let colors = made(sites, "buffer:colors", side.buffer(&colors_buffer()))?;
+        let read_back = made(
+            sites,
+            "buffer:read-back",
+            side.zeroed_buffer((subject.source_bytes() + subject.target_bytes()) as usize),
+        )?;
+
+        // The first pass fills the source target, band by band: one pipeline, then a rectangle and
+        // a colour offset a draw.
+        let mut fill = vec![RenderStep::Pipeline(fill_state)];
+        for at in 0..BANDS {
+            fill.push(RenderStep::VertexBytes {
+                bytes: rect_bytes(band(at)),
+                index: 0,
+            });
+            fill.push(RenderStep::FragmentBuffer {
+                buffer: colors,
+                offset: u64::from(at) * 16,
+                index: 0,
+            });
+            fill.push(RECT_DRAW);
+        }
+        // The second pass samples the target the first one drew, in the same command buffer and
+        // with nothing of the host in between: the whole target, one draw.
+        let sample = vec![
+            RenderStep::Pipeline(sample_state),
+            RenderStep::FragmentTexture {
+                texture: source,
+                index: 0,
+            },
+            RenderStep::FragmentSampler { sampler, index: 0 },
+            RenderStep::VertexBytes {
+                bytes: rect_bytes(WHOLE),
+                index: 0,
+            },
+            RECT_DRAW,
+        ];
+        let work = vec![
+            RenderWork::Pass(
+                RenderPass::clearing(vec![PassColor::cleared(source, cleared(SOURCE_CLEAR))])
+                    .drawing(fill),
+            ),
+            RenderWork::Pass(
+                RenderPass::clearing(vec![PassColor::cleared(target, cleared(TARGET_CLEAR))])
+                    .drawing(sample),
+            ),
+            RenderWork::ReadTexture {
+                texture: source,
+                into: read_back,
+                offset: 0,
+                row_pitch: TEXEL * subject.source_side,
+                size: [subject.source_side; 2],
+            },
+            RenderWork::ReadTexture {
+                texture: target,
+                into: read_back,
+                offset: u64::from(subject.source_bytes()),
+                row_pitch: TEXEL * subject.target_side,
+                size: [subject.target_side; 2],
+            },
+        ];
+        let outcome = call(sites, "render", side.render(&work), |outcome| {
+            outcome.status.clone()
+        })?;
+        // What each piece of the command buffer answered. Metal's encoder calls answer nothing, so
+        // a piece of ours that refused compares against Metal answering and reads as a refusal
+        // rather than as a divergence in the texels.
+        let names = ["fill-pass", "sample-pass", "read-source", "read-target"];
+        let mut pieces = Node::branch("pieces", Vec::new());
+        for (at, what) in names.iter().enumerate() {
+            pieces = pieces.with(Node::leaf(
+                *what,
+                Observed::value(match outcome.refused.get(at).and_then(Option::as_ref) {
+                    Some(failure) => failure.value.clone(),
+                    None => Value::ok(Value::Absent),
+                }),
+            ));
+        }
+        sites.push(pieces);
+        if let Some((at, failure)) = names
+            .iter()
+            .enumerate()
+            .find_map(|(at, what)| outcome.refused.get(at)?.as_ref().map(|f| (*what, f)))
+        {
+            return Err(Abort {
+                at: format!("pieces/{at}"),
+                failure: failure.clone(),
+            });
+        }
+        let bytes = call(
+            sites,
+            "read-back",
+            side.read_buffer(
+                read_back,
+                0,
+                (subject.source_bytes() + subject.target_bytes()) as usize,
+            ),
+            |_| Value::Absent,
+        )?;
+        let split = subject.source_bytes() as usize;
+        sites.push(Node::branch("drawn", Vec::new()).with(Node::leaf(
+            "texels",
+            Observed::bytes(bytes[..split].to_vec(), layout(subject.source_side)),
+        )));
+        sites.push(Node::branch("sampled", Vec::new()).with(Node::leaf(
+            "texels",
+            Observed::bytes(bytes[split..].to_vec(), layout(subject.target_side)),
+        )));
+        Ok(())
+    }
+}
+
+/// The clear colour whose every channel is the code `code` over 255, as Metal's clear takes it.
+fn cleared(code: u8) -> [f64; 4] {
+    [f64::from(code) / 255.0; 4]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcript::Transcript;
+    use std::collections::BTreeSet;
+
+    /// The one outcome of `name`'s recorded Metal answer, or `None` where nothing has recorded it.
+    ///
+    /// A row of this family is settled -- two passes, a fixed geometry, no race -- so its runs fold
+    /// into one outcome and a recording with more than one is itself a finding.
+    fn only_outcome(name: &str) -> Option<Transcript> {
+        let recording = crate::recording::read(name).ok()?;
+        let answer = recording.answers.first()?;
+        assert_eq!(answer.outcomes.len(), 1, "{name}: more than one outcome");
+        Some(answer.outcomes[0].transcript.clone())
+    }
+
+    /// The bytes the site at `path` of `transcript` holds.
+    fn bytes(transcript: &Transcript, path: &str) -> Vec<u8> {
+        let mut node = &transcript.root;
+        for name in path.split('/') {
+            node = node
+                .child(name)
+                .unwrap_or_else(|| panic!("no site {path} (stopped at {name})"));
+        }
+        let Value::Bytes(bytes) = &node.observed.value else {
+            panic!("{path} holds no bytes");
+        };
+        bytes.clone()
+    }
+
+    /// Texel `(x, y)` of a `side`-wide target's bytes.
+    fn texel(bytes: &[u8], side: u32, x: u32, y: u32) -> [u8; 4] {
+        let at = ((y * side + x) * TEXEL) as usize;
+        [bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]
+    }
+
+    /// The bookkeeping of the family holds with no device: distinct names, a geometry whose bands
+    /// tile each source extent, and layouts that cover exactly the bytes each read answers.
+    #[test]
+    fn the_rows_name_distinct_questions_over_a_geometry_that_tiles() {
+        let named: BTreeSet<&str> = SUBJECTS.iter().map(|subject| subject.name).collect();
+        assert_eq!(named.len(), SUBJECTS.len());
+        // Every band's colour differs from every other's in every channel, so a sample that
+        // reached the wrong band cannot read as the right one.
+        for (at, color) in COLORS.iter().enumerate() {
+            for other in &COLORS[at + 1..] {
+                for (channel, (ours, theirs)) in color.iter().zip(other).enumerate() {
+                    assert_ne!(ours, theirs, "band {at}, channel {channel}");
+                }
+                assert_ne!(color, &[SOURCE_CLEAR; 4]);
+                assert_ne!(color, &[TARGET_CLEAR; 4]);
+            }
+        }
+        assert_ne!(SOURCE_CLEAR, TARGET_CLEAR);
+        for subject in SUBJECTS {
+            assert_eq!(
+                subject.source_side % BANDS,
+                0,
+                "{}: the bands do not tile the source",
+                subject.name
+            );
+            assert_eq!(
+                layout(subject.source_side).extent(),
+                subject.source_bytes() as usize,
+                "{}",
+                subject.name
+            );
+            assert_eq!(
+                layout(subject.target_side).extent(),
+                subject.target_bytes() as usize,
+                "{}",
+                subject.name
+            );
+            // Each row's two pipelines are two different pipelines, so a recording cannot be read
+            // for the other one.
+            assert_ne!(
+                Subject::pipeline(FILL).words(),
+                Subject::pipeline(subject.sample).words(),
+                "{}",
+                subject.name
+            );
+        }
+        // The two clip-space bands at the ends reach the ends of the target.
+        assert_eq!(band(0)[0], -1.0);
+        assert_eq!(band(BANDS - 1)[2], 1.0);
+    }
+
+    /// Metal's recorded first target holds the four bands where the geometry puts them, in every
+    /// row, and the clear nowhere.
+    ///
+    /// This is the cross-check the first pass owes: band `x * BANDS / side` of column `x`, which
+    /// follows from the rectangles the case states and from nothing Metal was asked. A row that
+    /// drew a band in the wrong column, or dropped one, fails here rather than being carried into
+    /// the sampled target as "Metal's answer".
+    #[test]
+    fn metal_drew_each_band_in_its_own_columns() {
+        let mut checked = 0usize;
+        for subject in SUBJECTS {
+            let Some(recorded) = only_outcome(subject.name) else {
+                println!("{}: no recording in the tree yet", subject.name);
+                continue;
+            };
+            let drawn = bytes(&recorded, "drawn/texels");
+            assert_eq!(drawn.len(), subject.source_bytes() as usize);
+            for y in 0..subject.source_side {
+                for x in 0..subject.source_side {
+                    let expected = COLORS[(x * BANDS / subject.source_side) as usize];
+                    assert_eq!(
+                        texel(&drawn, subject.source_side, x, y),
+                        expected,
+                        "{}: ({x}, {y})",
+                        subject.name
+                    );
+                }
+            }
+            checked += 1;
+        }
+        println!("metal_drew_each_band_in_its_own_columns: {checked} rows checked");
+    }
+
+    /// The exact row's sampled target is its drawn target, texel for texel.
+    ///
+    /// `tob_sample` divides the pixel's own position by the sampled texture's extent, so with the
+    /// two targets of one extent every sample lands on a texel centre and the answer cannot depend
+    /// on the filter. What is left for the row to fail on is the barrier between the two passes and
+    /// the layout the sampled image is in -- which is what the family is for.
+    #[test]
+    fn the_exact_rows_sample_reproduces_what_the_first_pass_drew() {
+        let subject = SUBJECTS[0];
+        assert_eq!(subject.source_side, subject.target_side);
+        let Some(recorded) = only_outcome(subject.name) else {
+            println!("{}: no recording in the tree yet", subject.name);
+            return;
+        };
+        assert_eq!(
+            bytes(&recorded, "sampled/texels"),
+            bytes(&recorded, "drawn/texels"),
+            "{}",
+            subject.name
+        );
+    }
+
+    /// The magnified nearest row's sampled target is its drawn target doubled on both axes.
+    ///
+    /// `tgp_rect` runs the texture coordinates across the drawn rectangle, so the sample for pixel
+    /// `x` of a 16-wide target lands at `(x + 0.5) / 2` texels into an 8-wide source, whose nearest
+    /// texel is `x / 2`. That is arithmetic the case states and Metal was not asked, so a
+    /// disagreement is a finding about the geometry rather than a number to adopt.
+    #[test]
+    fn the_magnified_nearest_row_doubles_each_source_texel() {
+        let subject = SUBJECTS[1];
+        assert_eq!(subject.filter, SamplerMinMagFilter::Nearest);
+        assert_eq!(subject.target_side, 2 * subject.source_side);
+        let Some(recorded) = only_outcome(subject.name) else {
+            println!("{}: no recording in the tree yet", subject.name);
+            return;
+        };
+        let (drawn, sampled) = (
+            bytes(&recorded, "drawn/texels"),
+            bytes(&recorded, "sampled/texels"),
+        );
+        for y in 0..subject.target_side {
+            for x in 0..subject.target_side {
+                assert_eq!(
+                    texel(&sampled, subject.target_side, x, y),
+                    texel(&drawn, subject.source_side, x / 2, y / 2),
+                    "{}: ({x}, {y})",
+                    subject.name
+                );
+            }
+        }
+    }
+
+    /// The linear row's filter really ran over the image the first pass drew, and every channel it
+    /// answered lies between the source texels it is a blend of.
+    ///
+    /// Metal's filter is Metal's answer and is not recomputed here: a bound read off a formula
+    /// would be this suite deciding what the hardware does. What the row can hold without
+    /// deciding that is two things -- that the answer is **not** the nearest row's, so the filter
+    /// was not quietly dropped, and that each channel is inside the range of the four source texels
+    /// that surround the sample, which no blend of them can leave.
+    #[test]
+    fn the_magnified_linear_row_blends_between_the_source_texels() {
+        let (nearest, linear) = (SUBJECTS[1], SUBJECTS[2]);
+        assert_eq!(linear.filter, SamplerMinMagFilter::Linear);
+        assert_eq!(linear.source_side, nearest.source_side);
+        assert_eq!(linear.target_side, nearest.target_side);
+        let (Some(near), Some(lin)) = (only_outcome(nearest.name), only_outcome(linear.name))
+        else {
+            println!("{}: no recording in the tree yet", linear.name);
+            return;
+        };
+        let drawn = bytes(&lin, "drawn/texels");
+        let sampled = bytes(&lin, "sampled/texels");
+        assert_eq!(
+            drawn,
+            bytes(&near, "drawn/texels"),
+            "the two rows draw the same source"
+        );
+        let mut moved = 0usize;
+        for y in 0..linear.target_side {
+            for x in 0..linear.target_side {
+                let here = texel(&sampled, linear.target_side, x, y);
+                if here != texel(&bytes(&near, "sampled/texels"), linear.target_side, x, y) {
+                    moved += 1;
+                }
+                // The four source texels the sample at ((x + 0.5) / 2, (y + 0.5) / 2) texels can
+                // be a blend of, with the edge clamp folding a neighbour outside the source back
+                // onto the edge.
+                let clamp = |at: i32| at.clamp(0, linear.source_side as i32 - 1) as u32;
+                let (u, v) = (x as i32 / 2, y as i32 / 2);
+                let (du, dv) = (
+                    if x % 2 == 0 { -1 } else { 1 },
+                    if y % 2 == 0 { -1 } else { 1 },
+                );
+                let neighbours = [
+                    texel(&drawn, linear.source_side, clamp(u), clamp(v)),
+                    texel(&drawn, linear.source_side, clamp(u + du), clamp(v)),
+                    texel(&drawn, linear.source_side, clamp(u), clamp(v + dv)),
+                    texel(&drawn, linear.source_side, clamp(u + du), clamp(v + dv)),
+                ];
+                for channel in 0..4 {
+                    let low = neighbours.iter().map(|n| n[channel]).min().unwrap();
+                    let high = neighbours.iter().map(|n| n[channel]).max().unwrap();
+                    assert!(
+                        (low..=high).contains(&here[channel]),
+                        "{}: ({x}, {y}) channel {channel} answered {} outside {low}..={high}",
+                        linear.name,
+                        here[channel]
+                    );
+                }
+            }
+        }
+        assert!(
+            moved > 0,
+            "{}: the linear row answered exactly what the nearest row did, so no filter ran",
+            linear.name
+        );
+    }
+}

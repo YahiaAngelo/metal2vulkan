@@ -91,6 +91,7 @@ pub mod pixel_samplers;
 pub mod pvrtc_cpu_order;
 pub mod pvrtc_rows;
 pub mod rate_maps;
+pub mod render_chains;
 pub mod rgb10a2_srgb;
 pub mod rotated_planes;
 pub mod rotated_targets;
@@ -329,6 +330,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.extend(rotated_targets::all());
     cases.extend(rotated_planes::all());
+    cases.extend(render_chains::boxed());
     cases
 }
 
