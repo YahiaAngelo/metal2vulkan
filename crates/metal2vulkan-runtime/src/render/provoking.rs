@@ -5,11 +5,22 @@
 //!
 //! - Mode 0 takes a primitive's flat inputs, and the slice and viewport its vertex function
 //!   selects, from its first vertex; mode 1 from its last. Every other value, its top bit set or
-//!   not, draws a third way, which differs between pipeline states (for one, a triangle list from
-//!   its last vertex and an odd strip triangle `(i + 2, i + 1, i)` from `i`; for one whose vertex
-//!   function selects a slice, a triangle from its middle vertex) and draws every line's flat
-//!   inputs and `[[primitive_id]]` 0: the runtime draws them as mode 1, announcing it at the call
-//!   (`Degradation::ProvokingVertexUnmatched`). No value is a validation error.
+//!   not, draws as 2 does, a third way: a triangle list's, a fan's and Metal's private triangle
+//!   types' primitives as mode 1 draws them, flat inputs, `[[primitive_id]]` and weights, but for
+//!   a pipeline whose vertex function selects a slice or viewport, whose triangles take their
+//!   middle vertex; a triangle strip's odd triangle `(i + 2, i + 1, i)` from `i`; every line's
+//!   flat inputs and `[[primitive_id]]` 0; points whose vertex function writes their size another
+//!   way than mode 1's; and patches as mode 0. No value is a validation error.
+//!
+//! The runtime draws the third way as mode 1, and patches as mode 0, announcing at each draw
+//! whose shape Metal's third way draws otherwise than mode 1, as far as its pipeline state reads
+//! the difference ([`RenderLowering::third_way`]): a strip of triangles whose pipeline reads flat
+//! inputs, weights, or a slice or viewport; lines whose pipeline reads flat inputs, the primitive
+//! ID, or a slice or viewport; sized points whose pipeline reads flat inputs or the primitive ID;
+//! triangles of a pipeline that selects a slice or viewport; and mesh draws, unmeasured, whose
+//! pipeline reads flat inputs, weights, or a slice or viewport
+//! (`Degradation::ProvokingVertexUnmatched`). A list's, a fan's and a private type's triangles of
+//! any other pipeline, and patches, draw as Metal's, silent.
 //! - At mode 1 the vertex is a line list's `2j + 1`, a line strip's `j + 1`, a triangle list's
 //!   `3j + 2`, a triangle strip's `j + 2`, and Metal's private types' list primitives' last
 //!   (`DrawPrimitiveType`). The barycentric order is mode 0's but for a triangle strip's odd
@@ -64,8 +75,8 @@
 //!   fragment function reads flat inputs and barycentrics, and patches and mesh draws, whose
 //!   primitives no list holds (their flat inputs from the first vertex).
 //!
-//! An execution's commands take the first vertex: its snapshot of the encoder's state does
-//! (`render/executions.rs`).
+//! An execution's commands take the first vertex, at every mode: its snapshot of the encoder's
+//! state does (`render/executions.rs`).
 
 use super::{Assembly, RenderLowering};
 use crate::degradation::Degradation;
@@ -180,15 +191,24 @@ fn native(device: &Device) -> bool {
             .contains(&VkProperty::ProvokingVertexModePerPipeline)
 }
 
-/// Whether a draw of `pipeline` under `state` runs a `VkPipeline` of the last provoking vertex
-/// ([`Provoking::Native`]).
+/// Whether a draw of `pipeline` as `assembly` under `state` runs a `VkPipeline` of the last
+/// provoking vertex ([`Provoking::Native`]): patches at a mode past 1 take the first.
 pub(super) fn natively_last(
     device: &Device,
     state: &EncoderState,
-    pipeline: &DrawingState,
+    (pipeline, assembly): (&DrawingState, Assembly),
 ) -> bool {
     let (flat, weights) = reads(pipeline);
-    state.provoking_last() && (flat || weights) && native(device)
+    state.provoking_last()
+        && !third_way_first(state, assembly)
+        && (flat || weights)
+        && native(device)
+}
+
+/// Whether a draw as `assembly` under `state` takes the first vertex at a mode past 1, as Metal's
+/// third way draws it: patches.
+fn third_way_first(state: &EncoderState, assembly: Assembly) -> bool {
+    state.provoking_third() && matches!(assembly, Assembly::Patches)
 }
 
 /// Whether `draw` of `assembly` makes no primitive: a direct or indexed draw of too few vertices
@@ -218,6 +238,17 @@ enum Class {
 }
 
 impl Class {
+    /// What a draw of the class draws, in words.
+    fn name(&self) -> &'static str {
+        match self {
+            Class::Points => "points",
+            Class::Lines => "lines",
+            Class::Triangles { strip: true } => "a triangle strip",
+            Class::Triangles { strip: false } => "triangles",
+            Class::Unlisted => "patches or meshes",
+        }
+    }
+
     fn of(assembly: Assembly) -> Class {
         use metal2vulkan::bind::RewriteProgram as R;
         match assembly {
@@ -235,29 +266,68 @@ impl Class {
 
 impl RenderLowering {
     /// The lowering of `setProvokingVertexMode:`'s `mode`: the encoder's draws from here take
-    /// the first vertex or the last, the third way drawn as the last and announced (the module
-    /// docs).
+    /// the first vertex or the last, the third way drawn as the last but for patches, each draw
+    /// it draws otherwise than Metal announced there (the module docs).
     pub(crate) fn set_provoking_vertex(&mut self, mode: u64) {
         let mode = Mode::of(mode);
-        if mode == Mode::Third {
-            self.core
-                .device()
-                .degrade(Degradation::ProvokingVertexUnmatched, || {
-                    (
-                        "setProvokingVertexMode: of a mode past 1".to_owned(),
-                        "Metal draws such a mode a third way, which differs between pipeline \
-                         states, and every line's flat inputs and [[primitive_id]] as 0; the \
-                         runtime draws it as mode 1"
-                            .to_owned(),
-                    )
-                });
-        }
-        let last = mode != Mode::First;
+        let (last, third) = (mode != Mode::First, mode == Mode::Third);
         // Only a change takes the state to a new version (`versioned.rs`), so the draws' memo
         // holds across a call that repeats the mode.
         if self.state.provoking_last() != last {
             self.state.set_provoking_last(last);
         }
+        if self.state.provoking_third() != third {
+            self.state.set_provoking_third(third);
+        }
+    }
+
+    /// Announce `call`'s draw of `pipeline` as `assembly` at a mode past 1 where Metal's third
+    /// way draws it otherwise than mode 1, as the runtime does, as far as the pipeline state
+    /// reads the difference (the module docs). Patches, which take the first vertex as Metal's,
+    /// and a list's, a fan's and a private type's triangles of a pipeline that selects no slice
+    /// or viewport, which mode 1 draws as Metal, announce nothing.
+    fn third_way(&self, call: &'static str, pipeline: &DrawingState, assembly: Assembly) {
+        let graphics = &pipeline.base().graphics;
+        let flat = graphics.flat_fragment_inputs;
+        let selects = pipeline.vertex_chooses_slice() || graphics.writes_viewport_index;
+        let (weights, ids) = (
+            graphics.reads_barycentric_coord,
+            graphics.reads_primitive_id,
+        );
+        let differs = match Class::of(assembly) {
+            Class::Points => (graphics.writes_point_size && (flat || ids)).then_some(
+                "a point whose vertex function writes its size is drawn otherwise than at mode 1",
+            ),
+            Class::Lines => (flat || ids || selects)
+                .then_some("every line's flat inputs and [[primitive_id]] read 0"),
+            Class::Triangles { strip: true } => (flat || weights || selects).then_some(
+                "a strip's odd triangle takes its first vertex, its weights in the order (i + 2, \
+                 i + 1, i)",
+            ),
+            Class::Triangles { strip: false } => selects.then_some(
+                "a triangle of a pipeline that selects its slice or viewport \
+                                   takes its middle vertex",
+            ),
+            Class::Unlisted if matches!(assembly, Assembly::Meshes) => {
+                (flat || weights || selects).then_some("a mesh draw is unmeasured there")
+            }
+            Class::Unlisted => None,
+        };
+        let Some(how) = differs else {
+            return;
+        };
+        self.core
+            .device()
+            .degrade(Degradation::ProvokingVertexUnmatched, || {
+                (
+                    format!(
+                        "{call}: a draw of {} under setProvokingVertexMode: of a mode past 1, \
+                         whose pipeline state reads what Metal draws a third way there",
+                        Class::of(assembly).name()
+                    ),
+                    format!("Metal draws such a mode a third way: {how}; the runtime draws it as mode 1"),
+                )
+            });
     }
 
     /// How `call`'s `draw` of `pipeline` as `assembly` takes the encoder's provoking vertex (the
@@ -270,8 +340,17 @@ impl RenderLowering {
         assembly: Assembly,
         draw: &DrawCall,
     ) -> Provoking {
+        if !self.state.provoking_last() || makes_none(assembly, draw) {
+            return Provoking::AsIs;
+        }
+        if self.state.provoking_third() {
+            if third_way_first(&self.state, assembly) {
+                return Provoking::AsIs;
+            }
+            self.third_way(call, pipeline, assembly);
+        }
         let (flat, weights) = reads(pipeline);
-        if !self.state.provoking_last() || !(flat || weights) || makes_none(assembly, draw) {
+        if !(flat || weights) {
             return Provoking::AsIs;
         }
         let device = self.core.device();

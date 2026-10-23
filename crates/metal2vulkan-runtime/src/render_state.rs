@@ -200,6 +200,9 @@ pub(super) struct EncoderState {
     /// Apple's `setProvokingVertexMode:` at 1: a primitive's flat inputs read its last vertex
     /// (`render/provoking.rs`). Metal's default, and every new encoder's, is the first.
     provoking_last: bool,
+    /// The mode is past 1, which Metal draws a third way, the runtime as mode 1 but for patches
+    /// (`render/provoking.rs`).
+    provoking_third: bool,
 }
 
 impl EncoderState {
@@ -236,6 +239,7 @@ impl EncoderState {
             fill_mode: TriangleFillMode::Fill,
             clip_mode: DepthClipMode::Clip,
             provoking_last: false,
+            provoking_third: false,
         }
     }
 
@@ -323,6 +327,16 @@ impl EncoderState {
     /// Whether a primitive's flat inputs read its last vertex (`setProvokingVertexMode:` 1).
     pub(super) fn provoking_last(&self) -> bool {
         self.provoking_last
+    }
+
+    /// `setProvokingVertexMode:`: a mode past 1 where `third` (`render/provoking.rs`).
+    pub(super) fn set_provoking_third(&mut self, third: bool) {
+        self.provoking_third = third;
+    }
+
+    /// Whether the mode is past 1, which Metal draws a third way.
+    pub(super) fn provoking_third(&self) -> bool {
+        self.provoking_third
     }
 
     pub(super) fn set_winding(&mut self, winding: Winding) {

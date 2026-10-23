@@ -24,8 +24,9 @@
 //!   to 8, 15, 16, 255 and the largest values): the count is the value's set bits in mode 1 and the
 //!   value in every other mode, exact from 1 to 8 (`amplification_mode_count`).
 //!
-//! A provoking vertex mode past 1, which Metal draws a third way that differs between pipeline
-//! states, is accepted and drawn as mode 1, announced at the call (`provoking-vertex-unmatched`).
+//! A provoking vertex mode past 1, which Metal draws a third way, is accepted and drawn as mode 1
+//! (patches as mode 0), announced at each draw whose shape and pipeline state Metal draws
+//! otherwise there (`provoking-vertex-unmatched`).
 //!
 //! Every other call is refused, and records nothing:
 //! - a line width other than 1 (Apple's wide-line rule is unmeasured, where Vulkan has
@@ -376,9 +377,12 @@ impl RenderCommandEncoder {
     /// led by its last vertex, which a GPU pass writes (the CPU for a direct draw without
     /// indices); what that list draws otherwise than Metal is announced
     /// (`provoking-vertex-lines`, `provoking-vertex-unmatched`). Metal draws every other mode,
-    /// its top bit set or not, a third way, which differs between pipeline states (every line's
-    /// flat inputs and `[[primitive_id]]` 0), and the runtime as mode 1, announced at the call
-    /// (`provoking-vertex-unmatched`). No mode is refused.
+    /// its top bit set or not, as 2, a third way: a triangle list's, a fan's and the private
+    /// triangle types' primitives as mode 1 (but a triangle of a pipeline that selects its slice
+    /// or viewport from its middle vertex), a strip's odd triangle from its first vertex, every
+    /// line's flat inputs and `[[primitive_id]]` 0, and patches as mode 0. The runtime draws it as
+    /// mode 1, and patches as mode 0, announcing each draw whose pipeline state reads what Metal
+    /// draws otherwise there (`provoking-vertex-unmatched`). No mode is refused.
     pub fn set_provoking_vertex_mode(&mut self, mode: u64) -> Result<(), Error> {
         match self.lowers_at_call() {
             true => self.at_call(|lowering| lowering.set_provoking_vertex_mode(mode)),

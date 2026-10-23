@@ -659,6 +659,7 @@ impl RenderLowering {
         // encoder's provoking vertex mode (Metal probes on the M3 Max, macOS 27.0.1).
         let mut state = (*self.state).clone();
         state.set_provoking_last(false);
+        state.set_provoking_third(false);
         let snapshot = Snapshot {
             layout: self.layout.clone(),
             state,
