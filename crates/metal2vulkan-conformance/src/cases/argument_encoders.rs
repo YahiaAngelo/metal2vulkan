@@ -20,7 +20,7 @@
 //! - **The layout the encoder states**: `encodedLength`, `alignment`, the `label` it keeps, and
 //!   whether `device` is the case's own.
 //! - **Where every argument landed**: the case fills the argument buffer with
-//!   [`BLANK`](crate::argument_encoders::BLANK) first and then compares, word by eight-byte word,
+//!   [`crate::argument_encoders::BLANK`] first and then compares, word by eight-byte word,
 //!   which words the encoder wrote. That is the offset, the stride and the alignment of every
 //!   argument, with none of the host's numbers in it — and the padding between them, which must
 //!   stay as it was. Pre-filling is what makes it a real check: over a buffer created zeroed, an
@@ -33,7 +33,7 @@
 //!
 //! # The two shapes of layout, and why both
 //!
-//! [`FUNCTION_LAYOUT`] cases take the encoder from the fixture's own kernel
+//! The function-layout cases take the encoder from the fixture's own kernel
 //! (`newArgumentEncoderWithBufferIndex:`), so the layout is the one the AIR declares and the
 //! dispatch proves the encoder and the translated function agree. The descriptor cases describe a
 //! layout themselves (`newArgumentEncoderWithArguments:`), which is the only way to reach
