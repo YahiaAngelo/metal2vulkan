@@ -805,6 +805,30 @@ pub trait Side {
         threads: [u32; 3],
     ) -> Answer<Handle>;
 
+    /// **One** command buffer with **one** compute encoder holding every command of `pass` in
+    /// order, then `endEncoding`, `commit` and a bounded wait
+    /// ([`ComputePass`](crate::compute_pass::ComputePass)).
+    ///
+    /// [`dispatch`](Side::dispatch) and [`dispatch_threads`](Side::dispatch_threads) are a fixed
+    /// pass — pipeline, bindings at 0 up, one dispatch, commit — and four of
+    /// `MTLComputeCommandEncoder`'s items are reachable that way. A case that states its commands
+    /// reaches the rest: the inline bytes, the plural setters, the LOD-clamped sampler bindings,
+    /// the dynamic threadgroup allocation, the residency declarations, the barriers, the
+    /// threadgroup-grid dispatch and the indirect one.
+    ///
+    /// Every command is encoded whatever an earlier one answered, as
+    /// [`mesh_pass`](Side::mesh_pass) and [`tile_pass`](Side::tile_pass) do, and the answer names
+    /// which one refused. **The side makes nothing resident of its own**: a case that reaches a
+    /// resource other than through a bound slot says so with a residency command, which is both
+    /// what Metal requires and how those items are exercised.
+    fn compute_pass(
+        &mut self,
+        pass: &crate::compute_pass::ComputePass<'_>,
+    ) -> Answer<crate::compute_pass::ComputePassOutcome> {
+        let _ = pass;
+        Err(Failure::unavailable("compute_pass"))
+    }
+
     /// The read-back of an indirect render command the CPU encoded, as the side's getters answer
     /// it: `getCommandType` and the draw. Metal exposes these privately only, so the Metal side
     /// answers [`Failure::unavailable`] and such a case's Metal answer is carried.

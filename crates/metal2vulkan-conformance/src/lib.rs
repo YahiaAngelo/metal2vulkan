@@ -49,6 +49,7 @@ pub mod case;
 pub mod cases;
 pub mod clocks;
 pub mod compare;
+pub mod compute_pass;
 pub mod cost;
 pub mod coverage;
 pub mod device;

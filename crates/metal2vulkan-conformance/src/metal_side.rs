@@ -19,6 +19,9 @@ use crate::case::{
     ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
     TilePipelineSpec, TileStep, Venue,
 };
+use crate::compute_pass::{
+    ComputePass, ComputePassOutcome, ComputeStep, Dispatching, PassResource,
+};
 use crate::function_bindings::{
     ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
     TextureFacts, ThreadgroupFacts, TypeFacts,
@@ -47,12 +50,13 @@ use objc2_metal::{
     MTLCommandBuffer, MTLCommandBufferHandler, MTLCommandBufferStatus, MTLCommandEncoder,
     MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder, MTLComputePipelineDescriptor,
     MTLComputePipelineReflection, MTLComputePipelineState, MTLCreateSystemDefaultDevice,
-    MTLDataType, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction,
-    MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer,
-    MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand,
-    MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
-    MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
-    MTLPointerType, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
+    MTLDataType, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLDispatchType,
+    MTLEvent, MTLFunction, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType,
+    MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType,
+    MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor,
+    MTLMultisampleDepthResolveFilter, MTLMultisampleStencilResolveFilter, MTLOrigin,
+    MTLPipelineOption, MTLPixelFormat, MTLPointerType, MTLPrimitiveType,
+    MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
     MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
     MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplePosition,
@@ -2494,6 +2498,53 @@ impl Side for MetalSide {
         })
     }
 
+    fn compute_pass(&mut self, pass: &ComputePass<'_>) -> Answer<ComputePassOutcome> {
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+        // The type is written out rather than inferred from the `match`, so that the coverage
+        // derivation can resolve the receiver of the getter below: a call whose receiver does not
+        // type is attributed to no item at all, which is how `dispatchType` came to read
+        // unexercised while this very line read it.
+        let encoder: Retained<ProtocolObject<dyn MTLComputeCommandEncoder>> =
+            match pass.dispatching {
+                Dispatching::Serial => command_buffer.computeCommandEncoder(),
+                Dispatching::Concurrent => command_buffer
+                    .computeCommandEncoderWithDispatchType(MTLDispatchType::Concurrent),
+            }
+            .ok_or_else(|| Failure::named("ComputeCommandEncoder", pass.dispatching.call()))?;
+        // Read into its own binding, rather than as the scrutinee of the `match`: the coverage
+        // derivation reads a call's receiver as the expression before the dot, and `match encoder`
+        // is not a receiver it can type — which is how this very line left `dispatchType` reading
+        // unexercised.
+        let answered = encoder.dispatchType();
+        let dispatch_type = Value::unit_variant(match answered {
+            MTLDispatchType::Concurrent => "Concurrent",
+            _ => "Serial",
+        });
+        // Metal's encoder methods answer nothing, so no step of this side can refuse. A refusal of
+        // ours then compares against Metal's answer at that step and reads as a refusal.
+        let refused = vec![None; pass.steps.len()];
+        for step in pass.steps {
+            self.encode_compute_step(&encoder, step)?;
+        }
+        encoder.endEncoding();
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        let error = command_buffer
+            .error()
+            .map(|error| Value::unit_variant(format!("code {}", error.code())));
+        let status = Value::unit_variant(status_word(command_buffer.status()));
+        keep(&mut self.command_buffers, command_buffer);
+        Ok(ComputePassOutcome {
+            refused,
+            dispatch_type,
+            status,
+            error,
+        })
+    }
+
     fn target(&mut self, spec: &TargetSpec) -> Answer<Handle> {
         if let Some(plane) = &spec.surface {
             return self.surface_target(spec, plane);
@@ -4488,6 +4539,245 @@ impl MetalSide {
         }
         encoder.dispatchThreads_threadsPerThreadgroup(size(dispatch.grid), size(dispatch.threads));
         encoder.endEncoding();
+        Ok(())
+    }
+
+    /// Encode one command of a compute pass into `encoder`.
+    ///
+    /// Each arm is one Metal call, with the handles resolved through the side's own pools, so a
+    /// case's command list reads as the calls it makes.
+    fn encode_compute_step(
+        &self,
+        encoder: &ProtocolObject<dyn MTLComputeCommandEncoder>,
+        step: &ComputeStep,
+    ) -> Answer<()> {
+        // A resource of either kind as `id<MTLResource>`: what the residency declarations and the
+        // resource barrier take.
+        let resource = |named: &PassResource| -> Answer<Retained<ProtocolObject<dyn MTLResource>>> {
+            match named {
+                PassResource::Buffer(handle) => {
+                    let held = self.held(*handle)?;
+                    Ok(Retained::from(ProtocolObject::<dyn MTLResource>::from_ref(
+                        held,
+                    )))
+                }
+                PassResource::Texture(handle) => {
+                    let held = self.held_texture(*handle)?;
+                    Ok(Retained::from(ProtocolObject::<dyn MTLResource>::from_ref(
+                        held,
+                    )))
+                }
+            }
+        };
+        match step {
+            ComputeStep::Pipeline(pipeline) => {
+                let state = self
+                    .pipelines
+                    .get(pipeline.0 as usize)
+                    .ok_or_else(|| {
+                        Failure::named("NoSuchHandle", format!("pipeline {}", pipeline.0))
+                    })?
+                    .clone();
+                encoder.setComputePipelineState(&state);
+            }
+            ComputeStep::Buffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: the buffer is at least as long as the kernel's binding from that
+                // offset, which the case states as one of its inputs, and the encoder outlives
+                // the call.
+                unsafe {
+                    encoder.setBuffer_offset_atIndex(Some(held), *offset as usize, *index as usize)
+                };
+            }
+            ComputeStep::BufferOffset { offset, index } => {
+                // SAFETY: a buffer is bound at that index already — the case states the binding
+                // before this command — and the offset leaves the kernel's binding inside it.
+                unsafe { encoder.setBufferOffset_atIndex(*offset as usize, *index as usize) };
+            }
+            ComputeStep::Buffers { buffers, first } => {
+                let held: Vec<Option<Retained<ProtocolObject<dyn MTLBuffer>>>> = buffers
+                    .iter()
+                    .map(|(handle, _)| self.held(*handle).map(|held| Some(Retained::from(held))))
+                    .collect::<Answer<Vec<_>>>()?;
+                let pointers = pointer_array(&held);
+                let offsets: Vec<usize> = buffers.iter().map(|(_, at)| *at as usize).collect();
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: both arrays hold the range's length of elements, each buffer outlives
+                // the call, and each binding lies inside its buffer from its offset.
+                unsafe {
+                    encoder.setBuffers_offsets_withRange(
+                        array_head(&pointers)?,
+                        array_head(&offsets)?,
+                        range,
+                    );
+                }
+            }
+            ComputeStep::Bytes { bytes, index } => {
+                // `bytes.as_ptr()`, never `NonNull::from(bytes)`: the latter is the address of the
+                // `Vec` itself — its pointer, capacity and length — and Metal would copy those
+                // words into the kernel's binding. Written as the three inline bindings beside it
+                // are (`setTileBytes:`, `setObjectBytes:`, `setVertexBytes:`); taking the other
+                // one first made this case's own Metal leg read a kernel's coordinates out of a
+                // `Vec` header, which read exactly like a product bug.
+                let pointer =
+                    std::ptr::NonNull::new(bytes.as_ptr().cast::<std::ffi::c_void>().cast_mut())
+                        .ok_or_else(|| Failure::named("NoBytes", "an empty inline binding"))?;
+                // SAFETY: `bytes` lives for the call, which copies them, and is at least as long
+                // as the kernel's binding at that slot.
+                unsafe { encoder.setBytes_length_atIndex(pointer, bytes.len(), *index as usize) };
+            }
+            ComputeStep::Texture { texture, index } => {
+                let held = self.held_texture(*texture)?;
+                // SAFETY: the texture is of the kind and access the kernel declares at that slot,
+                // and the encoder outlives the call.
+                unsafe { encoder.setTexture_atIndex(Some(held), *index as usize) };
+            }
+            ComputeStep::Textures { textures, first } => {
+                let held: Vec<Option<Retained<ProtocolObject<dyn MTLTexture>>>> = textures
+                    .iter()
+                    .map(|handle| {
+                        self.held_texture(*handle)
+                            .map(|held| Some(Retained::from(held)))
+                    })
+                    .collect::<Answer<Vec<_>>>()?;
+                let pointers = pointer_array(&held);
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: the array holds the range's length of pointers and each texture
+                // outlives the call.
+                unsafe { encoder.setTextures_withRange(array_head(&pointers)?, range) };
+            }
+            ComputeStep::Sampler { sampler, index } => {
+                let held = self.held_sampler(*sampler)?;
+                // SAFETY: the kernel declares a sampler at that slot, and the encoder outlives
+                // the call.
+                unsafe { encoder.setSamplerState_atIndex(Some(held), *index as usize) };
+            }
+            ComputeStep::Samplers { samplers, first } => {
+                let held: Vec<Option<Retained<ProtocolObject<dyn MTLSamplerState>>>> = samplers
+                    .iter()
+                    .map(|handle| {
+                        self.held_sampler(*handle)
+                            .map(|held| Some(Retained::from(held)))
+                    })
+                    .collect::<Answer<Vec<_>>>()?;
+                let pointers = pointer_array(&held);
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: as for `setTextures:withRange:`.
+                unsafe { encoder.setSamplerStates_withRange(array_head(&pointers)?, range) };
+            }
+            ComputeStep::ClampedSampler {
+                sampler,
+                lod_min,
+                lod_max,
+                index,
+            } => {
+                let held = self.held_sampler(*sampler)?;
+                // SAFETY: as for `setSamplerState:atIndex:`; the clamps are two floats Metal
+                // reads by value.
+                unsafe {
+                    encoder.setSamplerState_lodMinClamp_lodMaxClamp_atIndex(
+                        Some(held),
+                        *lod_min,
+                        *lod_max,
+                        *index as usize,
+                    );
+                }
+            }
+            ComputeStep::ClampedSamplers { samplers, first } => {
+                let held: Vec<Option<Retained<ProtocolObject<dyn MTLSamplerState>>>> = samplers
+                    .iter()
+                    .map(|(handle, _, _)| {
+                        self.held_sampler(*handle)
+                            .map(|held| Some(Retained::from(held)))
+                    })
+                    .collect::<Answer<Vec<_>>>()?;
+                let pointers = pointer_array(&held);
+                let mins: Vec<f32> = samplers.iter().map(|(_, min, _)| *min).collect();
+                let maxes: Vec<f32> = samplers.iter().map(|(_, _, max)| *max).collect();
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: the three arrays hold the range's length of elements and each state
+                // outlives the call.
+                unsafe {
+                    encoder.setSamplerStates_lodMinClamps_lodMaxClamps_withRange(
+                        array_head(&pointers)?,
+                        array_head(&mins)?,
+                        array_head(&maxes)?,
+                        range,
+                    );
+                }
+            }
+            ComputeStep::ThreadgroupMemory { length, index } => {
+                // SAFETY: the length is at least the bytes the kernel's `[[threadgroup(n)]]`
+                // allocation reads, which the case states as one of its inputs, and the index is
+                // one the kernel declares.
+                unsafe {
+                    encoder.setThreadgroupMemoryLength_atIndex(*length as usize, *index as usize);
+                }
+            }
+            ComputeStep::UseResource {
+                resource: one,
+                usage,
+            } => {
+                let held = resource(one)?;
+                encoder.useResource_usage(&held, MTLResourceUsage(*usage as usize));
+            }
+            ComputeStep::UseResources { resources, usage } => {
+                let held: Vec<Retained<ProtocolObject<dyn MTLResource>>> =
+                    resources.iter().map(resource).collect::<Answer<Vec<_>>>()?;
+                let pointers: Vec<std::ptr::NonNull<ProtocolObject<dyn MTLResource>>> = held
+                    .iter()
+                    .map(|one| std::ptr::NonNull::from(&**one))
+                    .collect();
+                // SAFETY: the array holds `count` pointers and each resource outlives the call.
+                unsafe {
+                    encoder.useResources_count_usage(
+                        array_head(&pointers)?,
+                        pointers.len(),
+                        MTLResourceUsage(*usage as usize),
+                    );
+                }
+            }
+            ComputeStep::BarrierScope { scope } => {
+                encoder.memoryBarrierWithScope(MTLBarrierScope(*scope as usize));
+            }
+            ComputeStep::BarrierResources { resources } => {
+                let held: Vec<Retained<ProtocolObject<dyn MTLResource>>> =
+                    resources.iter().map(resource).collect::<Answer<Vec<_>>>()?;
+                let pointers: Vec<std::ptr::NonNull<ProtocolObject<dyn MTLResource>>> = held
+                    .iter()
+                    .map(|one| std::ptr::NonNull::from(&**one))
+                    .collect();
+                // SAFETY: as for `useResources:count:usage:`.
+                unsafe {
+                    encoder
+                        .memoryBarrierWithResources_count(array_head(&pointers)?, pointers.len());
+                }
+            }
+            ComputeStep::DispatchThreadgroups { groups, threads } => {
+                encoder.dispatchThreadgroups_threadsPerThreadgroup(size(*groups), size(*threads));
+            }
+            ComputeStep::DispatchThreadgroupsIndirect {
+                buffer,
+                offset,
+                threads,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: the buffer holds the grid's three 32-bit words at that offset, which
+                // the case states as one of its inputs, and the encoder outlives the call.
+                unsafe {
+                    encoder
+                        .dispatchThreadgroupsWithIndirectBuffer_indirectBufferOffset_threadsPerThreadgroup(
+                            held,
+                            *offset as usize,
+                            size(*threads),
+                        );
+                }
+            }
+        }
         Ok(())
     }
 

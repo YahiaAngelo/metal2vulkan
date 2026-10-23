@@ -406,6 +406,14 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.tile_pass(targets, tile, steps)
     }
 
+    fn compute_pass(
+        &mut self,
+        pass: &crate::compute_pass::ComputePass<'_>,
+    ) -> Answer<crate::compute_pass::ComputePassOutcome> {
+        let _span = self.watch("compute_pass");
+        self.inner.compute_pass(pass)
+    }
+
     fn heap_texture_size_and_align(
         &mut self,
         query: &crate::texture_query::HeapTextureQuery,

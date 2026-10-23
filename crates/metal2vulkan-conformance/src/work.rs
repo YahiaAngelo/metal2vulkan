@@ -282,6 +282,12 @@ pub enum Resource {
         offset: u64,
         bytes_per_row: u64,
     },
+    /// `newFence`: a fence two of a command buffer's encoders order their work by
+    /// ([`Step::UpdateFence`], [`Step::WaitForFence`]).
+    ///
+    /// It holds no memory, reaches no GPU on its own and is never read, so a program that makes
+    /// one allocates nothing a device can fault on.
+    Fence,
     /// A view of `texture` in `format`, over `level_count` levels from `level` and `slice_count`
     /// slices from `slice`, as a 2D multisample texture where `flatten`.
     ///
@@ -359,6 +365,92 @@ pub enum Step {
         to_slice: u64,
         to_level: u64,
         to_origin: [u64; 3],
+    },
+    /// `copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:
+    /// destinationSlice:destinationLevel:destinationOrigin:` — the selector that takes **no**
+    /// `MTLBlitOption`.
+    ///
+    /// Its own step rather than a [`Plane`] of [`Step::CopyBufferToTexture`], because Metal binds
+    /// two selectors here and a case states which of them it means. Passing
+    /// `MTLBlitOptionNone` to the optioned form is the same request written the other way, and
+    /// whether the two agree is exactly what a case over this can ask.
+    CopyBufferToTextureWithoutOptions {
+        buffer: usize,
+        offset: u64,
+        bytes_per_row: u64,
+        bytes_per_image: u64,
+        size: [u64; 3],
+        texture: usize,
+        slice: u64,
+        level: u64,
+        origin: [u64; 3],
+    },
+    /// `copyFromTexture:sourceSlice:sourceLevel:sourceOrigin:sourceSize:toBuffer:
+    /// destinationOffset:destinationBytesPerRow:destinationBytesPerImage:` — the selector that
+    /// takes **no** `MTLBlitOption`, the read-back twin of
+    /// [`Step::CopyBufferToTextureWithoutOptions`].
+    CopyTextureToBufferWithoutOptions {
+        texture: usize,
+        slice: u64,
+        level: u64,
+        origin: [u64; 3],
+        size: [u64; 3],
+        buffer: usize,
+        offset: u64,
+        bytes_per_row: u64,
+        bytes_per_image: u64,
+    },
+    /// `copyFromTexture:toTexture:`: every level and slice the two textures share, with no region
+    /// of either stated. Which levels Metal pairs, and which slices, is the whole subject.
+    CopyWholeTexture { from: usize, to: usize },
+    /// `copyFromTexture:sourceSlice:sourceLevel:toTexture:destinationSlice:destinationLevel:
+    /// sliceCount:levelCount:`: whole levels and whole slices, by count rather than by region.
+    ///
+    /// A count of zero copies nothing wherever its slices and levels lie, which is a step a case
+    /// may state on purpose.
+    CopyTextureSlices {
+        from: usize,
+        from_slice: u64,
+        from_level: u64,
+        to: usize,
+        to_slice: u64,
+        to_level: u64,
+        slice_count: u64,
+        level_count: u64,
+    },
+    /// `generateMipmapsForTexture:`: the levels under level 0, each filtered from the one above.
+    ///
+    /// The one step of this vocabulary whose answer is a **filter's** rather than a move's, so a
+    /// case over it is kept apart from the cases that move bytes: an implementation whose filter
+    /// rounds otherwise diverges here and nowhere else.
+    GenerateMipmaps { texture: usize },
+    /// `optimizeContentsForGPUAccess:`, or `optimizeContentsForGPUAccess:slice:level:` where `at`
+    /// names a slice and a level.
+    ///
+    /// One step for the two selectors, because they are one request of a case — let the
+    /// implementation lay these texels out for the GPU — differing only in how much of the texture
+    /// it names.
+    OptimizeForGpuAccess {
+        texture: usize,
+        at: Option<(u64, u64)>,
+    },
+    /// `optimizeContentsForCPUAccess:`, or `optimizeContentsForCPUAccess:slice:level:` where `at`
+    /// names a slice and a level.
+    OptimizeForCpuAccess {
+        texture: usize,
+        at: Option<(u64, u64)>,
+    },
+    /// `synchronizeResource:`: the host sees what the GPU wrote into a `Managed` resource once the
+    /// command buffer completes.
+    ///
+    /// It takes a buffer or a texture, as Metal's own `id<MTLResource>` does.
+    SynchronizeResource { resource: usize },
+    /// `synchronizeTexture:slice:level:`: as [`Step::SynchronizeResource`], for one slice of one
+    /// level of a `Managed` texture.
+    SynchronizeTexture {
+        texture: usize,
+        slice: u64,
+        level: u64,
     },
     CopyBufferToBuffer {
         from: usize,
@@ -464,6 +556,21 @@ pub enum Step {
     /// reads its own declaration again, so a case remakes the thing underneath first and then what
     /// stands on it, in that order.
     Make { resource: usize },
+    /// `endEncoding` of the blit encoder, **without** committing: the steps after it open a
+    /// second encoder on the same command buffer.
+    ///
+    /// A fence orders one encoder's work against another's, so a case over
+    /// [`Step::UpdateFence`] cannot be written at all while a program has one encoder a command
+    /// buffer. [`Step::Commit`] is not that step: it closes the command buffer too, and two
+    /// command buffers is a different program — the queue orders them anyway, so a fence between
+    /// them would prove nothing.
+    EndEncoder,
+    /// `updateFence:` of the blit encoder: the fence is updated once this encoder's commands are
+    /// done.
+    UpdateFence { fence: usize },
+    /// `waitForFence:` of the blit encoder: this encoder's commands wait for the fence's last
+    /// update before them in the queue's commit order.
+    WaitForFence { fence: usize },
     /// Close the blit encoder, commit the command buffer and wait for it: its status is recorded
     /// and every read-back the steps before it asked for is answered.
     Commit,

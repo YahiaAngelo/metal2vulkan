@@ -14,6 +14,9 @@ use crate::case::{
     RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion, StageInput,
     TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
+use crate::compute_pass::{
+    ComputePass, ComputePassOutcome, ComputeStep, Dispatching, PassResource,
+};
 use crate::function_bindings::{
     ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
     TextureFacts, ThreadgroupFacts, TypeFacts, DEPTH,
@@ -33,8 +36,8 @@ use metal2vulkan::bind::{
 };
 use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{
-    BarrierScope, BindingAccess, IndexType, IndirectCommandType, PixelFormat, PrimitiveType,
-    RenderStages, ResourceUsage, TextureType, TextureUsage,
+    BarrierScope, BindingAccess, DispatchType, IndexType, IndirectCommandType, PixelFormat,
+    PrimitiveType, RenderStages, ResourceUsage, TextureType, TextureUsage,
 };
 use metal2vulkan::pipeline::{
     ColorAttachmentDescriptor, MeshPipelineDescriptor, RenderPipelineDescriptor,
@@ -52,6 +55,27 @@ use metal2vulkan_runtime::{
     SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor, Viewport,
 };
 use std::time::Duration;
+
+/// The `MTLResourceUsage` the raw bits a case states name, refused where they name a bit Metal has
+/// no name for.
+///
+/// A case writes the bits because the vocabulary names neither API's type, so the conversion is
+/// where an unknown bit has to be answered for; it reads as a typed refusal of ours, at the
+/// residency command's own site.
+fn resource_usage(bits: u64) -> Answer<ResourceUsage> {
+    u32::try_from(bits)
+        .ok()
+        .and_then(|bits| ResourceUsage::try_from(bits).ok())
+        .ok_or_else(|| Failure::named("NoSuchResourceUsage", format!("{bits:#x}")))
+}
+
+/// The `MTLBarrierScope` the raw bits a case states name, refused as [`resource_usage`] is.
+fn barrier_scope(bits: u64) -> Answer<BarrierScope> {
+    u32::try_from(bits)
+        .ok()
+        .and_then(|bits| BarrierScope::try_from(bits).ok())
+        .ok_or_else(|| Failure::named("NoSuchBarrierScope", format!("{bits:#x}")))
+}
 
 /// The longest the side waits for a command buffer. A wait that runs out is recorded, not retried.
 const WAIT: Duration = Duration::from_secs(60);
@@ -2295,6 +2319,224 @@ impl Side for RuntimeSide<'_> {
         }
         Ok(PassOutcome {
             refused,
+            status: status_value(command_buffer.status()),
+            error: command_buffer
+                .error()
+                .map(|error| Value::unit_variant(format!("{error:?}"))),
+        })
+    }
+
+    fn compute_pass(&mut self, pass: &ComputePass<'_>) -> Answer<ComputePassOutcome> {
+        // The pools are cloned once, so every command can reach the case's objects while the
+        // command buffer is borrowed.
+        let buffers: Vec<Buffer> = self.buffers.clone();
+        let textures: Vec<Texture> = self.textures.clone();
+        let samplers: Vec<SamplerState> = self.samplers.clone();
+        let states: Vec<ComputePipelineState> = self.pipelines.clone();
+        let buffer = |handle: Handle| -> Answer<&Buffer> {
+            buffers
+                .get(handle.0 as usize)
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
+        };
+        let texture = |handle: Handle| -> Answer<&Texture> {
+            textures
+                .get(handle.0 as usize)
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+        };
+        let sampler = |handle: Handle| -> Answer<Option<&SamplerState>> {
+            samplers
+                .get(handle.0 as usize)
+                .map(Some)
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("sampler {}", handle.0)))
+        };
+        let resource = |named: &PassResource| -> Answer<ResourceRef<'_>> {
+            Ok(match named {
+                PassResource::Buffer(handle) => ResourceRef::Buffer(buffer(*handle)?),
+                PassResource::Texture(handle) => ResourceRef::Texture(texture(*handle)?),
+            })
+        };
+        let command_buffer = self
+            .queue()?
+            .command_buffer()
+            .map_err(Failure::from_error)?;
+        let mut encoder = command_buffer
+            .compute_command_encoder_with_dispatch_type(match pass.dispatching {
+                Dispatching::Serial => DispatchType::Serial,
+                Dispatching::Concurrent => DispatchType::Concurrent,
+            })
+            .map_err(Failure::from_error)?;
+        let dispatch_type = Value::unit_variant(match encoder.dispatch_type() {
+            DispatchType::Concurrent => "Concurrent",
+            _ => "Serial",
+        });
+        let mut refused = Vec::with_capacity(pass.steps.len());
+        for step in pass.steps {
+            let answered = match step {
+                ComputeStep::Pipeline(state) => states
+                    .get(state.0 as usize)
+                    .ok_or_else(|| {
+                        Failure::named("NoSuchHandle", format!("compute pipeline {}", state.0))
+                    })
+                    .and_then(|state| {
+                        encoder
+                            .set_compute_pipeline_state(state)
+                            .map_err(Failure::from_error)
+                    }),
+                ComputeStep::Buffer {
+                    buffer: handle,
+                    offset,
+                    index,
+                } => buffer(*handle).and_then(|held| {
+                    encoder
+                        .set_buffer(Some(held), *offset, *index)
+                        .map_err(Failure::from_error)
+                }),
+                ComputeStep::BufferOffset { offset, index } => encoder
+                    .set_buffer_offset(*offset, *index)
+                    .map_err(Failure::from_error),
+                ComputeStep::Buffers {
+                    buffers: named,
+                    first,
+                } => named
+                    .iter()
+                    .map(|(handle, _)| buffer(*handle).map(Some))
+                    .collect::<Answer<Vec<Option<&Buffer>>>>()
+                    .and_then(|held| {
+                        let offsets: Vec<u64> = named.iter().map(|(_, at)| *at).collect();
+                        encoder
+                            .set_buffers(&held, &offsets, *first)
+                            .map_err(Failure::from_error)
+                    }),
+                ComputeStep::Bytes { bytes, index } => encoder
+                    .set_bytes(bytes, *index)
+                    .map_err(Failure::from_error),
+                ComputeStep::Texture {
+                    texture: handle,
+                    index,
+                } => texture(*handle).and_then(|held| {
+                    encoder
+                        .set_texture(Some(held), *index)
+                        .map_err(Failure::from_error)
+                }),
+                ComputeStep::Textures {
+                    textures: named,
+                    first,
+                } => named
+                    .iter()
+                    .map(|handle| texture(*handle).map(Some))
+                    .collect::<Answer<Vec<Option<&Texture>>>>()
+                    .and_then(|held| {
+                        encoder
+                            .set_textures(&held, *first)
+                            .map_err(Failure::from_error)
+                    }),
+                ComputeStep::Sampler {
+                    sampler: handle,
+                    index,
+                } => sampler(*handle).and_then(|held| {
+                    encoder
+                        .set_sampler_state(held, *index)
+                        .map_err(Failure::from_error)
+                }),
+                ComputeStep::Samplers {
+                    samplers: named,
+                    first,
+                } => named
+                    .iter()
+                    .map(|handle| sampler(*handle))
+                    .collect::<Answer<Vec<Option<&SamplerState>>>>()
+                    .and_then(|held| {
+                        encoder
+                            .set_sampler_states(&held, *first)
+                            .map_err(Failure::from_error)
+                    }),
+                ComputeStep::ClampedSampler {
+                    sampler: handle,
+                    lod_min,
+                    lod_max,
+                    index,
+                } => sampler(*handle).and_then(|held| {
+                    encoder
+                        .set_sampler_state_with_lod_clamps(held, *lod_min, *lod_max, *index)
+                        .map_err(Failure::from_error)
+                }),
+                ComputeStep::ClampedSamplers {
+                    samplers: named,
+                    first,
+                } => named
+                    .iter()
+                    .map(|(handle, _, _)| sampler(*handle))
+                    .collect::<Answer<Vec<Option<&SamplerState>>>>()
+                    .and_then(|held| {
+                        let mins: Vec<f32> = named.iter().map(|(_, min, _)| *min).collect();
+                        let maxes: Vec<f32> = named.iter().map(|(_, _, max)| *max).collect();
+                        encoder
+                            .set_sampler_states_with_lod_clamps(&held, &mins, &maxes, *first)
+                            .map_err(Failure::from_error)
+                    }),
+                ComputeStep::ThreadgroupMemory { length, index } => encoder
+                    .set_threadgroup_memory_length(*length, *index)
+                    .map_err(Failure::from_error),
+                ComputeStep::UseResource {
+                    resource: named,
+                    usage,
+                } => resource(named).and_then(|held| {
+                    encoder
+                        .use_resource(held, resource_usage(*usage)?)
+                        .map_err(Failure::from_error)
+                }),
+                ComputeStep::UseResources {
+                    resources: named,
+                    usage,
+                } => named
+                    .iter()
+                    .map(resource)
+                    .collect::<Answer<Vec<ResourceRef<'_>>>>()
+                    .and_then(|held| {
+                        encoder
+                            .use_resources(&held, resource_usage(*usage)?)
+                            .map_err(Failure::from_error)
+                    }),
+                ComputeStep::BarrierScope { scope } => barrier_scope(*scope).map(|scope| {
+                    encoder.memory_barrier_with_scope(scope);
+                }),
+                ComputeStep::BarrierResources { resources: named } => named
+                    .iter()
+                    .map(resource)
+                    .collect::<Answer<Vec<ResourceRef<'_>>>>()
+                    .and_then(|held| {
+                        encoder
+                            .memory_barrier_with_resources(&held)
+                            .map_err(Failure::from_error)
+                    }),
+                ComputeStep::DispatchThreadgroups { groups, threads } => encoder
+                    .dispatch_threadgroups(size(*groups), size(*threads))
+                    .map_err(Failure::from_error),
+                ComputeStep::DispatchThreadgroupsIndirect {
+                    buffer: handle,
+                    offset,
+                    threads,
+                } => buffer(*handle).and_then(|held| {
+                    encoder
+                        .dispatch_threadgroups_indirect(held, *offset, size(*threads))
+                        .map_err(Failure::from_error)
+                }),
+            };
+            refused.push(answered.err());
+        }
+        encoder.end_encoding().map_err(Failure::from_error)?;
+        command_buffer.commit().map_err(Failure::from_error)?;
+        if command_buffer.wait_until_completed_for(WAIT).is_err() {
+            return Ok(ComputePassOutcome {
+                refused,
+                dispatch_type,
+                status: Value::Nothing(Negative::NeverReturned),
+                error: None,
+            });
+        }
+        Ok(ComputePassOutcome {
+            refused,
+            dispatch_type,
             status: status_value(command_buffer.status()),
             error: command_buffer
                 .error()
