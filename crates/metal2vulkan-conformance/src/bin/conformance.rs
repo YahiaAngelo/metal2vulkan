@@ -76,10 +76,7 @@ fn command() -> Result<bool, String> {
     // replays, then reached 3 — and running that case alone for eight rounds moved it 2..3. A rare
     // second arm is the one thing a thin measurement turns into a false regression.
     let mut runs = 8;
-    let mut write = false;
-    let mut show = false;
-    let mut alone = false;
-    let mut check = false;
+    let mut how = How::default();
     let mut legs = Legs::Both;
     let mut call = None;
     let mut words = words.peekable();
@@ -89,10 +86,10 @@ fn command() -> Result<bool, String> {
             "--gpu" => venues = Venues::Gpu,
             "--default-policy" => policy = Policy::Default,
             "--exact-policy" => policy = Policy::Exact,
-            "--write" => write = true,
-            "--show" => show = true,
-            "--alone" => alone = true,
-            "--check" => check = true,
+            "--write" => how.write = true,
+            "--show" => how.show = true,
+            "--alone" => how.alone = true,
+            "--check" => how.check = true,
             "--call" => {
                 call = Some(words.next().ok_or("--call wants a Side call's name")?);
             }
@@ -124,7 +121,7 @@ fn command() -> Result<bool, String> {
             Ok(true)
         }
         "record" => record(&cases),
-        "cost" => cost(venues, policy, &cases, runs, write, show, alone, check),
+        "cost" => cost(venues, policy, &cases, runs, how),
         "times" => times(
             &cases,
             Asked {
@@ -132,8 +129,8 @@ fn command() -> Result<bool, String> {
                 policy,
                 runs,
                 legs,
-                write,
-                show,
+                write: how.write,
+                show: how.show,
                 call: call.as_deref(),
             },
         ),
@@ -219,16 +216,41 @@ fn command() -> Result<bool, String> {
 /// device nothing else has touched. That is where a pooled count is at its largest, so it is the
 /// bound a later landing cannot invalidate — and the contrast between the two shapes is what says
 /// whether a count is the case's own work or the selection's.
+/// How one `cost` invocation runs: which shape it measures and what it does with the result.
+///
+/// `times` takes the same `write` and `show` through its own [`Asked`], because the two commands
+/// mean the same thing by them: keep the measurement in the recordings, and print every figure
+/// rather than the ones that decide the run.
+///
+/// The four switches travel together because they are one decision made at the command line, and
+/// because four separate `bool` parameters are four chances for a call site to transpose two of
+/// them with nothing to say so. They arrived from different branches and the merged signature was
+/// the one clippy refused.
+#[derive(Clone, Copy, Default)]
+struct How {
+    /// Keep the measurement in the cases' own recordings.
+    write: bool,
+    /// Print every count, not only the ones that decide the run.
+    show: bool,
+    /// Measure each case on a device nothing else has touched, rather than in the whole selection.
+    alone: bool,
+    /// Compare the committed records against the measurement instead of measuring.
+    check: bool,
+}
+
 fn cost(
     venues: Venues,
     policy: Policy,
     cases: &[Box<dyn metal2vulkan_conformance::case::Case>],
     runs: u32,
-    write: bool,
-    show: bool,
-    alone: bool,
-    check: bool,
+    how: How,
 ) -> Result<bool, String> {
+    let How {
+        write,
+        show,
+        alone,
+        check,
+    } = how;
     // **Do not run both shapes in one process.** It reads as the obvious simplification -- one
     // `cost --write` taking the whole set and then each case alone, instead of two commands a
     // reader has to know to run in order -- and it silently measures the wrong thing. The second
