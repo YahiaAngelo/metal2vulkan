@@ -17,12 +17,11 @@ kind: the difference is justified where any of them holds.
 A site where plain Metal answered a call and we returned a typed error is a **refusal**, and no
 allowance can make it anything else: it counts in its own verdict and is never compliant.
 
-<<<<<<< HEAD
 A replay holds the runtime to exact answers. `conformance replay --default-policy` replays under
 the runtime's own defaults instead — the fast form of every speed-for-accuracy choice, which is
 what a consumer runs — so the suite can say whether a difference is the policy's or the
 implementation's.
-=======
+
 ## The known-refusals ledger
 
 `known-refusals.tsv` holds the refusals we have written down as open gaps. Each row is an **open
@@ -43,7 +42,6 @@ It is an expectation, not an allowlist, and `replay` holds it in **both** direct
 That second direction is the point: closing a gap forces the ledger edit, so a row cannot outlive
 the bug it stands for and the file cannot rot into a silencer. A row is held only against the cases
 a run selected, so replaying one case does not read every other row as fixed.
->>>>>>> dad2932 (Expect the refusals we have written down, in both directions)
 
 ## Two Metal oracles
 
@@ -113,9 +111,9 @@ edits one.
 | `validated` | The second oracle: the same case under Metal's API validation layer, in a child process |
 | `record`, `replay` | Taking Metal's answer, and comparing a run against it |
 | `report` | Verdict counts and the matrix of case against venue |
-<<<<<<< HEAD
 | `work`, `runtime_work` | The copy-and-fill vocabulary a case states as data, and the runtime side that runs it |
 | `measured` | The committed Metal measurements a ported case reads, under the public fixtures |
+| `known_refusals` | The ledger of open gaps, held in both directions; it sets the exit status, never a verdict |
 | `cases` | The case set itself, one module per family |
 
 ## The case set
@@ -138,6 +136,3 @@ edits one.
 A carried answer is our own measurement of this chip, stated in the shape the case emits, and its
 case forbids re-recording with the reason why. Record mode refuses such a case rather than
 pretending it can ask Metal again.
-=======
-| `known_refusals` | The ledger of open gaps, held in both directions; it sets the exit status, never a verdict |
->>>>>>> dad2932 (Expect the refusals we have written down, in both directions)
