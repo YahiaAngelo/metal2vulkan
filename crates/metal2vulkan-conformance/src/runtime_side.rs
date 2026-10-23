@@ -350,6 +350,48 @@ fn size(axes: [u32; 3]) -> Size {
     Size::new(axes[0].into(), axes[1].into(), axes[2].into())
 }
 
+/// Every field of a case's [`RenderPipelineSpec`] **except its two stages**, as the runtime side
+/// states them on the pipeline descriptor.
+///
+/// It exists to be testable without a device. A whole `RenderPipelineDescriptor` cannot be built
+/// without one -- its `new` takes a `StageSource`, and neither a `Function` nor a
+/// `CompiledFunction` can be made without a device -- so the stage-independent fields are mapped
+/// into this value first and copied onto the descriptor after. That is not a mock: it is the value
+/// the real path builds and uses.
+///
+/// The guard over it is `tests::the_runtime_side_forwards_every_field_of_a_pipeline_spec`, and the
+/// reason it is wanted is that this side has now twice silently failed to state a field the Metal
+/// side states: `write_mask`, and then `depth_format` and `stencil_format`.
+pub(crate) struct PipelineFields {
+    pub color_attachments: [Option<ColorAttachmentDescriptor>; 8],
+    pub depth_format: Option<metal2vulkan::metal::PixelFormat>,
+    pub stencil_format: Option<metal2vulkan::metal::PixelFormat>,
+    pub raster_sample_count: u32,
+    pub rasterization_enabled: bool,
+    pub vertex_descriptor: Option<VertexDescriptor>,
+}
+
+/// [`PipelineFields`] of `spec`: `Err` where the spec names a colour attachment past the eight a
+/// Metal pipeline holds.
+pub(crate) fn pipeline_fields(spec: &RenderPipelineSpec<'_>) -> Answer<PipelineFields> {
+    let mut color_attachments: [Option<ColorAttachmentDescriptor>; 8] = Default::default();
+    for (at, color) in spec.colors.iter().enumerate() {
+        let Some(color) = color else { continue };
+        let attachment = color_attachments
+            .get_mut(at)
+            .ok_or_else(|| Failure::named("NoSuchAttachment", format!("color {at}")))?;
+        *attachment = Some(color_descriptor(color));
+    }
+    Ok(PipelineFields {
+        color_attachments,
+        depth_format: spec.depth_format,
+        stencil_format: spec.stencil_format,
+        raster_sample_count: spec.samples,
+        rasterization_enabled: spec.rasterization,
+        vertex_descriptor: spec.vertex_layout.as_ref().map(vertex_descriptor),
+    })
+}
+
 /// The runtime's vertex descriptor for `layout`: the same attribute indices, buffer indices and
 /// step functions the case states, so both sides fetch the same way.
 fn vertex_descriptor(layout: &crate::render::VertexLayout<'_>) -> VertexDescriptor {
@@ -1616,19 +1658,13 @@ impl Side for RuntimeSide<'_> {
         };
         let mut descriptor = RenderPipelineDescriptor::new(stage(&spec.vertex)?);
         descriptor.fragment = spec.fragment.as_ref().map(&stage).transpose()?;
-        descriptor.raster_sample_count = spec.samples;
-        descriptor.rasterization_enabled = spec.rasterization;
-        if let Some(layout) = &spec.vertex_layout {
-            descriptor.vertex_descriptor = Some(vertex_descriptor(layout));
-        }
-        for (at, color) in spec.colors.iter().enumerate() {
-            let Some(color) = color else { continue };
-            let attachment = descriptor
-                .color_attachments
-                .get_mut(at)
-                .ok_or_else(|| Failure::named("NoSuchAttachment", format!("color {at}")))?;
-            *attachment = Some(color_descriptor(color));
-        }
+        let apart = pipeline_fields(spec)?;
+        descriptor.color_attachments = apart.color_attachments;
+        descriptor.depth_format = apart.depth_format;
+        descriptor.stencil_format = apart.stencil_format;
+        descriptor.raster_sample_count = apart.raster_sample_count;
+        descriptor.rasterization_enabled = apart.rasterization_enabled;
+        descriptor.vertex_descriptor = apart.vertex_descriptor;
         let state = self
             .device
             .new_render_pipeline_state(&descriptor, &PipelineOptions::default())

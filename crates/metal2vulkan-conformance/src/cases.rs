@@ -41,6 +41,7 @@ pub mod extended_range_blends;
 pub mod extended_range_planes;
 pub mod extended_range_targets;
 pub mod extended_range_two_planes;
+pub mod fetch_ordered;
 pub mod format_copies;
 pub mod fresh_contents;
 pub mod half_write_nans;
@@ -64,6 +65,7 @@ pub mod rgb10a2_srgb;
 pub mod sample_fills;
 pub mod sample_positions;
 pub mod scheduled_handlers;
+pub mod shader_stencil;
 pub mod shared_events;
 pub mod simdgroup_lockstep;
 pub mod snorm_tile_store;
@@ -240,6 +242,16 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.extend(fresh_contents::all());
     cases.extend(sample_positions::all());
+    cases.extend(
+        fetch_ordered::all()
+            .into_iter()
+            .map(|case| Box::new(case) as Box<dyn Case>),
+    );
+    cases.extend(
+        shader_stencil::all()
+            .into_iter()
+            .map(|case| Box::new(case) as Box<dyn Case>),
+    );
     cases
 }
 
