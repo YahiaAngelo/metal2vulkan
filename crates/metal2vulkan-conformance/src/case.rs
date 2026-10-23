@@ -516,9 +516,12 @@ pub trait Side {
 
     /// Run a copy-and-fill program ([`crate::work`]) and answer what it read.
     ///
-    /// Metal fills a texture through private API and its two-plane extended-range formats are
-    /// private too, so the Metal side has no public call for this and answers
-    /// [`Failure::unavailable`]; a case built on it carries its Metal answer.
+    /// The Metal side runs a program through public `objc2-metal` calls and refuses the two fills
+    /// alone, because `fillTexture:` and `fillTextureColor:` are Apple SPI. The pixel format a
+    /// case names is never the reason: it is a raw value, and Metal handles Apple's two-plane
+    /// extended-range formats publicly. So a program that fills carries its Metal answer; a
+    /// program of copies records on Metal. A side that runs no program at all answers
+    /// [`Failure::unavailable`], which is this default.
     fn work(&mut self, work: &crate::work::Work) -> Answer<crate::work::Done> {
         let _ = work;
         Err(Failure::unavailable("work"))

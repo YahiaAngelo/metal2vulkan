@@ -6,10 +6,13 @@
 //! it and answers what it read ([`Done`]). The case body stays a description of the probe, which
 //! is what makes a port readable beside the lane it came from.
 //!
-//! A side with no public call for this answers [`crate::case::Failure::unavailable`], as the
-//! Metal side does: Metal fills a texture through private API, and a two-plane extended-range
-//! format is private too, so there is no public call for a Metal side to make. Those cases carry
-//! their Metal answer ([`crate::case::MetalSource::Carried`]).
+//! A side with no public call for a step answers [`crate::case::Failure::unavailable`] for that
+//! step. On the Metal side that is the **fill** and the fill alone: `fillTexture:` and
+//! `fillTextureColor:` are Apple SPI ([`crate::metal_work`]). The *formats* a case names are not
+//! private — a pixel format is a raw value in `MTLTextureDescriptor`, and Metal makes, writes,
+//! blits and reads back Apple's two-plane extended-range 550 and 551 through public calls like any
+//! other. So a program that fills carries its Metal answer
+//! ([`crate::case::MetalSource::Carried`]); a program of copies records on Metal.
 //!
 //! Nothing here names a device, a vendor or an environment variable. A resource the venue cannot
 //! make comes back as the runtime's typed refusal, and the suite reads the venue's honest gap out
@@ -39,7 +42,9 @@ impl Rect {
 }
 
 /// How a texture is shaped. The format is its raw `MTLPixelFormat`, because a case states the
-/// probe's number and some of the probes' formats are Apple's private ones.
+/// probe's number and some of those numbers have no name in a public header. A number with no
+/// public name is still a number Metal takes: `MTLTextureDescriptor`'s pixel format is a raw
+/// value, so both sides make, write, blit and read such a texture through public calls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TextureSpec {
     /// The raw `MTLPixelFormat`.
