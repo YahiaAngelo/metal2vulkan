@@ -1452,8 +1452,9 @@ pub enum PrecisionNote {
     DeviceUnorm8LinearFilter,
     /// A fragment function of a module compiled with fast math (`air.compile.fast_math_enable`)
     /// returns a `half` color output to an attachment the pipeline has that stores some channel
-    /// (its write mask not none; `StageIo::half_fast_colors`, which the pipeline's stage reads),
-    /// where [`PrecisionNote::HalfOutputPrecision`]'s conditions hold; or computes the blend of a 16-bit
+    /// (its write mask names one of its format's channels; `StageIo::half_fast_colors`, which the
+    /// pipeline's stage reads, or the interlocked storage form's write), where
+    /// [`PrecisionNote::HalfOutputPrecision`]'s conditions hold; or computes the blend of a 16-bit
     /// float attachment it fetches where Metal's compiler may regroup it (below). Metal's compiler
     /// folds the attachment's blend and conversion into the function and, under fast math, fuses
     /// and regroups them per pipeline: it reads the output's `float` or its `half`, rounds each
@@ -1792,11 +1793,13 @@ pub enum PrecisionNote {
     /// that fuses a product within that product's rounding, and one of a format of fewer bits than
     /// a `float` within the format's own rounding of the result where Metal's arithmetic is at
     /// least as fine. A factor of the second source reads the function's second output, clamped as
-    /// the source. An 8-bit sRGB attachment (`RGBA8Unorm_sRGB`, `BGRA8Unorm_sRGB`) under a blend of
-    /// the second source, in a module compiled with fast math, records it too: there the shader
-    /// computes Metal's 8-bit unorm blend's rounded forms over the decoded texel, in the output's
-    /// type, and stores the result by Metal's sRGB encode (`extended_range::Blend::srgb8`), which
-    /// is Metal's without fast math; under fast math Metal regroups the blend, unmeasured.
+    /// the source. An 8-bit sRGB attachment (`R8Unorm_sRGB`, `RG8Unorm_sRGB`, `RGBA8Unorm_sRGB`,
+    /// `BGRA8Unorm_sRGB`) under a blend of the second source, a one- or two-channel one under a
+    /// lerp, each in a module compiled with fast math, and one written by an output of fewer than
+    /// four lanes, record it too: there the shader computes Metal's 8-bit unorm blend's rounded
+    /// forms over the decoded texel, in the output's type (a missing lane zero), and stores the
+    /// result by Metal's sRGB encode (`extended_range::Blend::srgb8`), which is Metal's without
+    /// fast math at four lanes; under fast math Metal regroups the blend, unmeasured.
     /// Validation derives no tolerance from it.
     UnmeasuredFetchBlend,
 }

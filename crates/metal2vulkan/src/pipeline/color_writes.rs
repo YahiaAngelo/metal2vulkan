@@ -1059,11 +1059,18 @@ pub(crate) fn blends_output(c: &ColorAttachmentState) -> bool {
 }
 
 /// Whether the pipeline's attachment `c` stores some channel of the fragment function's output,
-/// blended or not: its write mask is not empty. Where it stores none, a `half` output of a module
-/// with fast math leaves nothing Metal's compiler could fold otherwise
+/// blended or not: its write mask names one of its format's color components (a mask of blue
+/// alone stores nothing into a one-channel format). Where it stores none, a `half` output of a
+/// module with fast math leaves nothing Metal's compiler could fold otherwise
 /// (`StageIo::half_fast_colors`).
 pub(crate) fn stores_output(c: &ColorAttachmentState) -> bool {
-    !c.write_mask.is_empty()
+    let components = c
+        .format
+        .block()
+        .map_or(crate::vk::ColorComponentFlags::known_bits(), |b| {
+            b.color_components
+        });
+    c.write_mask.intersects(components)
 }
 
 /// Whether a 16-bit float attachment `c` at `color` blends the output of the fragment stage of

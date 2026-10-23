@@ -2561,11 +2561,12 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   end), an output's missing lane zero, and the result stored through the device's conversion.
   Metal's blend arithmetic for these formats is not measured, so the bound is not known. A factor
   of the second source reads the function's second output, clamped as the source. An 8-bit sRGB
-  attachment (`RGBA8Unorm_sRGB`, `BGRA8Unorm_sRGB`) under a blend of the second source, in a
-  module compiled with fast math, announces it too: the shader computes Metal's 8-bit unorm
-  blend's rounded forms over the decoded texel, in the output's type, and stores the result by
-  Metal's sRGB encode, Metal's without fast math; under fast math Metal regroups the blend,
-  unmeasured.
+  attachment (`R8Unorm_sRGB`, `RG8Unorm_sRGB`, `RGBA8Unorm_sRGB`, `BGRA8Unorm_sRGB`) under a blend
+  of the second source, a one- or two-channel one under a lerp, each in a module compiled with
+  fast math, and one written by an output of fewer than four lanes, announce it too: the shader
+  computes Metal's 8-bit unorm blend's rounded forms over the decoded texel, in the output's type
+  (a missing lane zero), and stores the result by Metal's sRGB encode, Metal's without fast math
+  at four lanes; under fast math Metal regroups the blend, unmeasured.
 - `metal2vulkan-degrade-fp8-value` (precision). `PrecisionNote::Fp8Value`: An 8-bit float converts
   to an integer from the format's documented value with Metal's saturating float-to-integer rule,
   where Metal's device here answers otherwise: Metal on Apple M3 compiles these reads but extends
@@ -2835,8 +2836,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
 - `metal2vulkan-degrade-half-output-fast-math-blend` (precision).
   `PrecisionNote::HalfOutputFastMathBlend`: A fragment function of a module compiled with fast math
   (`air.compile.fast_math_enable`) returns a `half` color output to an attachment the pipeline has
-  that stores some channel (its write mask not none; `StageIo::half_fast_colors`, which the
-  pipeline's stage reads), where `PrecisionNote::HalfOutputPrecision`'s conditions hold; or
+  that stores some channel (its write mask names one of its format's channels;
+  `StageIo::half_fast_colors`, which the pipeline's stage reads, or the interlocked storage form's
+  write), where `PrecisionNote::HalfOutputPrecision`'s conditions hold; or
   computes the blend of a 16-bit float attachment it fetches in the interlocked storage form (no
   Vulkan blend applies to a storage write) where Metal's compiler may fold the output's own
   arithmetic into that blend or regroup a sum of it: within 2 `half` units in the last place of

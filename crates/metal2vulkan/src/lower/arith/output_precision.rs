@@ -270,10 +270,14 @@ pub(crate) fn half_output_note(cx: &SelectCx<'_>) -> PrecisionNote {
 /// the function writes in the storage form, which the pipeline's color attachments do not show;
 /// in a module naming no math mode [`half_output_note`] itself. Nothing where the function
 /// computes Metal's 16-bit float blend there itself (`DevicePolicy::half_blend`, or a fetched
-/// attachment's blend), which stores Metal's value.
+/// attachment's blend), which stores Metal's value, nor where it writes the attachment in the
+/// storage form under a write mask that names none of the format's channels, which stores nothing.
 pub(crate) fn note_half_output(cx: &mut SelectCx<'_>, color: u32) {
     // Metal's 16-bit float blend, computed by the function: the attachment stores Metal's value.
-    if crate::lower::fragment::blends_half_in_storage(cx, color) {
+    // A storage write of no channel stores nothing.
+    if crate::lower::fragment::blends_half_in_storage(cx, color)
+        || crate::lower::fragment::stores_nothing_in_storage(cx, color)
+    {
         return;
     }
     let math = cx.entry.compile.fast_math;
