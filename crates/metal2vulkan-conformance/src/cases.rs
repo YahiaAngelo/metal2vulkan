@@ -18,6 +18,7 @@
 
 pub mod depth_texel_reads;
 pub mod extended_range_planes;
+pub mod extended_range_two_planes;
 pub mod indirect_private_types;
 pub mod math_routines;
 pub mod mesh_barriers;
@@ -50,6 +51,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in depth_texel_reads::all() {
+        cases.push(Box::new(case));
+    }
+    for case in extended_range_two_planes::all() {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(texture_buffer_fills::streams()));
