@@ -304,7 +304,10 @@ impl Case for PvrtcCpuOrder {
             ),
             // The whole program as the interpreter will run it: every descriptor, every region,
             // every pitch and every byte written.
-            Input::bytes("program", format!("{:?}", self.plan().work).as_bytes()),
+            Input::bytes(
+                "program",
+                &crate::cases::compressed_moves::fingerprint(&self.plan().work),
+            ),
         ])
     }
 

@@ -431,7 +431,7 @@ impl Case for CompressedViews {
         for (shape, plan) in self.plans() {
             inputs.push(Input::bytes(
                 format!("program:{}", shape.name),
-                format!("{:?}", plan.work).as_bytes(),
+                &crate::cases::compressed_moves::fingerprint(&plan.work),
             ));
         }
         Ok(inputs)

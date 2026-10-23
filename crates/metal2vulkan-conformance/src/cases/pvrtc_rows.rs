@@ -575,7 +575,10 @@ impl Case for PvrtcRows {
             // `Unrecorded` rather than compared against a recording of other bytes. The cost is
             // that a later addition to the copy vocabulary makes these recordings stale, which
             // fails loudly and is one re-record — the same price an OS update already carries.
-            Input::bytes("program", format!("{:?}", self.plan().work).as_bytes()),
+            Input::bytes(
+                "program",
+                &crate::cases::compressed_moves::fingerprint(&self.plan().work),
+            ),
         ])
     }
 

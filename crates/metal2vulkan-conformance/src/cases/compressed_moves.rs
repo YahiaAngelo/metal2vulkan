@@ -897,7 +897,7 @@ impl Case for CompressedMoves {
         for (shape, plan) in self.plans() {
             inputs.push(Input::bytes(
                 format!("program:{}", shape.name),
-                format!("{:?}", plan.work).as_bytes(),
+                &fingerprint(&plan.work),
             ));
         }
         Ok(inputs)
@@ -933,6 +933,241 @@ impl Case for CompressedMoves {
         }
         Ok(())
     }
+}
+
+/// A program's fingerprint, keyed by each step's **Metal selector** and its own parameters rather
+/// than by its position in the vocabulary.
+///
+/// The compressed families fingerprint their whole program, because a pitch or a region moving is
+/// exactly the kind of change that must make a recording `Unrecorded` rather than compare against
+/// Metal's answer over other bytes. Writing that as `format!("{work:?}")` would have worked and been
+/// a trap: every later addition to [`crate::work`] — a field no case here sets — would move the
+/// fingerprint and turn every one of these recordings stale at once, in a stream that is no longer
+/// running. So each step contributes the name of the call it makes and the numbers and bytes it
+/// hands that call, and a resource contributes its kind and its own shape. A new variant or a new
+/// field then changes nothing for a case that does not use it.
+pub fn fingerprint(work: &Work) -> Vec<u8> {
+    let mut out = Vec::new();
+    let word = |out: &mut Vec<u8>, value: u64| out.extend(value.to_le_bytes());
+    for resource in &work.resources {
+        match resource {
+            Resource::Buffer { bytes } => {
+                out.extend(b"newBufferWithBytes");
+                word(&mut out, bytes.len() as u64);
+                out.extend(bytes);
+            }
+            Resource::PrivateBuffer { length } => {
+                out.extend(b"newBufferWithLength");
+                word(&mut out, *length);
+            }
+            Resource::Texture { spec } => {
+                out.extend(b"newTextureWithDescriptor");
+                out.extend(texture_words(spec));
+            }
+            Resource::View {
+                texture,
+                format,
+                level,
+                level_count,
+                slice,
+                slice_count,
+                flatten,
+            } => {
+                out.extend(b"newTextureViewWithPixelFormat");
+                for value in [
+                    *texture as u64,
+                    u64::from(*format),
+                    *level,
+                    *level_count,
+                    *slice,
+                    *slice_count,
+                    u64::from(*flatten),
+                ] {
+                    word(&mut out, value);
+                }
+            }
+            // No case in these families makes one, so its shape is whatever it is: a variant none
+            // of them uses cannot move their fingerprints.
+            other => out.extend(format!("{other:?}").as_bytes()),
+        }
+    }
+    for step in &work.steps {
+        match step {
+            WorkStep::ReplaceRegion {
+                texture,
+                level,
+                slice,
+                region,
+                bytes,
+                rows,
+                bytes_per_row,
+                bytes_per_image,
+            } => {
+                out.extend(b"replaceRegion");
+                for value in [
+                    *texture as u64,
+                    *level,
+                    *slice,
+                    *rows,
+                    *bytes_per_row,
+                    *bytes_per_image,
+                ] {
+                    word(&mut out, value);
+                }
+                out.extend(rect_words(region));
+                word(&mut out, bytes.len() as u64);
+                out.extend(bytes);
+            }
+            WorkStep::GetBytes {
+                texture,
+                level,
+                slice,
+                region,
+                bytes_per_row,
+                bytes_per_image,
+                length,
+                before,
+            } => {
+                out.extend(b"getBytes");
+                for value in [
+                    *texture as u64,
+                    *level,
+                    *slice,
+                    *bytes_per_row,
+                    *bytes_per_image,
+                    *length as u64,
+                    u64::from(*before),
+                ] {
+                    word(&mut out, value);
+                }
+                out.extend(rect_words(region));
+            }
+            WorkStep::CopyBufferToTexture {
+                buffer,
+                offset,
+                bytes_per_row,
+                bytes_per_image,
+                size,
+                texture,
+                slice,
+                level,
+                origin,
+                plane,
+            } => {
+                out.extend(b"copyFromBufferToTexture");
+                for value in [
+                    *buffer as u64,
+                    *offset,
+                    *bytes_per_row,
+                    *bytes_per_image,
+                    *texture as u64,
+                    *slice,
+                    *level,
+                ] {
+                    word(&mut out, value);
+                }
+                out.extend(rect_words(&Rect::new_3d(*origin, *size)));
+                out.extend(format!("{plane:?}").as_bytes());
+            }
+            WorkStep::CopyTextureToBuffer {
+                texture,
+                slice,
+                level,
+                origin,
+                size,
+                buffer,
+                offset,
+                bytes_per_row,
+                bytes_per_image,
+                plane,
+            } => {
+                out.extend(b"copyFromTextureToBuffer");
+                for value in [
+                    *texture as u64,
+                    *slice,
+                    *level,
+                    *buffer as u64,
+                    *offset,
+                    *bytes_per_row,
+                    *bytes_per_image,
+                ] {
+                    word(&mut out, value);
+                }
+                out.extend(rect_words(&Rect::new_3d(*origin, *size)));
+                out.extend(format!("{plane:?}").as_bytes());
+            }
+            WorkStep::CopyTextureToTexture {
+                from,
+                from_slice,
+                from_level,
+                from_origin,
+                size,
+                to,
+                to_slice,
+                to_level,
+                to_origin,
+            } => {
+                out.extend(b"copyFromTextureToTexture");
+                for value in [
+                    *from as u64,
+                    *from_slice,
+                    *from_level,
+                    *to as u64,
+                    *to_slice,
+                    *to_level,
+                ] {
+                    word(&mut out, value);
+                }
+                out.extend(rect_words(&Rect::new_3d(*from_origin, *size)));
+                out.extend(rect_words(&Rect::new_3d(*to_origin, *size)));
+            }
+            WorkStep::ReadBuffer {
+                buffer,
+                offset,
+                length,
+            } => {
+                out.extend(b"contents");
+                for value in [*buffer as u64, *offset, *length as u64] {
+                    word(&mut out, value);
+                }
+            }
+            WorkStep::Commit => out.extend(b"commit"),
+            // As above: a step none of these families encodes cannot move their fingerprints.
+            other => out.extend(format!("{other:?}").as_bytes()),
+        }
+    }
+    out
+}
+
+/// A texture's own shape, as the fields the compressed families set.
+fn texture_words(spec: &TextureSpec) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend(format!("{:?}", spec.kind).as_bytes());
+    for value in [
+        u64::from(spec.format),
+        spec.width,
+        spec.height,
+        spec.depth,
+        spec.levels,
+        spec.slices,
+        spec.samples,
+        u64::from(spec.private),
+        u64::from(spec.gpu_optimized),
+        u64::from(spec.usage.unwrap_or(0)),
+        u64::from(spec.usage.is_some()),
+    ] {
+        out.extend(value.to_le_bytes());
+    }
+    out
+}
+
+/// A region's origin and size, in texels.
+fn rect_words(rect: &Rect) -> Vec<u8> {
+    let mut out = Vec::new();
+    for axis in rect.origin.iter().chain(&rect.size) {
+        out.extend(axis.to_le_bytes());
+    }
+    out
 }
 
 #[cfg(test)]
