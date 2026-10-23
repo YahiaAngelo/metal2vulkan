@@ -85,6 +85,7 @@ pub mod half_texel_nans;
 pub mod half_write_nans;
 pub mod handler_waits;
 pub mod heap_metal_sizes;
+pub mod host_page_writes;
 pub mod indirect_private_types;
 pub mod int_attributes;
 pub mod level_sizes;
@@ -316,6 +317,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(buffer_texture_blits::all());
     cases.extend(buffer_textures::all());
     cases.extend(buffer_target_clears::all());
+    cases.extend(host_page_writes::all());
     cases.extend(buffer_depth_samples::all());
     cases.extend(simdgroup_lockstep::all());
     for case in sparse_tiles::all() {

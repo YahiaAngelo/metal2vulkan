@@ -1005,10 +1005,15 @@ degradations! {
         /// `MTLResourceOptions` bit 24
         /// ([`ResourceOptions::PRIVATE_BIT`](crate::ResourceOptions::PRIVATE_BIT)), or off macOS a
         /// no-copy buffer or heap over the caller's bytes, which Metal makes and keeps the GPU's
-        /// writes from the memory of (the M3 Max under macOS 27.0.1: a kernel's stores and a
-        /// blit's fill reach neither the CPU nor a later command buffer, which read the memory's
-        /// bytes; a later command of the same command buffer may read them, as the GPU's caches
-        /// hold them; a blit into a texture over or in that memory faults the command buffer), is
+        /// writes from the memory of (the M3 Max under macOS 27.0.1, `read_only_view.rs`: what a
+        /// shader or the blit engine writes reaches neither the CPU nor a later command buffer,
+        /// which read the memory's bytes -- a blit's fill, a kernel's stores, a vertex- or
+        /// fragment-stage store, and a store through an address loaded out of an argument buffer,
+        /// each completing with no error; a later command of the same command buffer may read them,
+        /// as the GPU's caches hold them, which is not stable; while what a render pass's own
+        /// machinery writes **faults** the command buffer -- a colour attachment over that memory,
+        /// a resolve into it, a depth or stencil attachment in a heap of the bit, and a blit into a
+        /// texture over or in it), is
         /// made as without it, and reports its options without it, as Metal's does. On macOS a
         /// no-copy buffer or heap with the bit drops the GPU's writes as Metal's does, its pages
         /// imported through a read-only view of them (`read_only_view.rs`), announcing nothing.

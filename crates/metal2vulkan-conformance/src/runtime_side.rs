@@ -52,7 +52,7 @@ use metal2vulkan::pipeline::{
 use metal2vulkan_runtime::{
     ArgumentEncoder, BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus,
     CommandQueue, ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, Heap,
-    HeapDescriptor, HeapType, IndirectCommand, IndirectCommandBuffer,
+    HeapDescriptor, HeapType, HostMemory, IndirectCommand, IndirectCommandBuffer,
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
     LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region,
     RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState,
@@ -141,6 +141,14 @@ pub struct RuntimeSide<'a> {
     planes: Vec<(Handle, Buffer)>,
     /// The degrade-notice codes the device has delivered so far, which `announced` takes away.
     notices: Box<dyn FnMut() -> Vec<String> + 'a>,
+    /// The host pages this side mapped for a no-copy buffer ([`Side::host_buffer`]), one per such
+    /// buffer, in the order they were made.
+    ///
+    /// **Declared after every resource pool on purpose**, because fields drop in declaration
+    /// order: a no-copy buffer's pages have to stay mapped for as long as the buffer, and
+    /// `buffers` above is dropped before this is. Not a pool a handle names — the buffer itself
+    /// lives in `buffers`, and what this adds is the mapping under it.
+    host_pages: Vec<crate::host_pages::HostPages>,
 }
 
 impl<'a> RuntimeSide<'a> {
@@ -165,6 +173,7 @@ impl<'a> RuntimeSide<'a> {
             argument_encoders: Vec::new(),
             planes: Vec::new(),
             notices: Box::new(notices),
+            host_pages: Vec::new(),
         }
     }
 
@@ -865,6 +874,34 @@ impl Side for RuntimeSide<'_> {
             .device
             .new_buffer(length.max(1) as u64, ResourceOptions::shared())
             .map_err(|error| Failure::of(&error))?;
+        Ok(keep(&mut self.buffers, buffer))
+    }
+
+    fn host_buffer(&mut self, spec: &crate::host_pages::HostBufferSpec) -> Answer<Handle> {
+        if let Some(why) = spec.unmappable() {
+            return Err(Failure::named("UnmappableHostBuffer", why));
+        }
+        let length = usize::try_from(spec.bytes)
+            .map_err(|_| Failure::named("UnmappableHostBuffer", "more bytes than a usize"))?;
+        let pages = crate::host_pages::HostPages::of(length, spec.pattern)
+            .ok_or_else(|| Failure::named("MmapFailed", format!("{length} bytes")))?;
+        let raw = if spec.read_only {
+            ResourceOptions::shared().raw() | ResourceOptions::PRIVATE_BIT
+        } else {
+            ResourceOptions::shared().raw()
+        };
+        let options = ResourceOptions::from_raw(raw).map_err(|error| Failure::of(&error))?;
+        // SAFETY: the pages are this side's own mapping of `length` writable bytes, and they stay
+        // mapped for as long as the buffer: `host_pages` is declared after `buffers`, so the
+        // buffer is released first, and nothing remaps or frees them meanwhile. No deallocator, so
+        // the runtime frees nothing of ours.
+        let buffer = unsafe {
+            let memory = HostMemory::new(pages.pointer());
+            self.device
+                .new_buffer_with_bytes_no_copy(memory, spec.bytes, options, None)
+        }
+        .map_err(|error| Failure::of(&error))?;
+        self.host_pages.push(pages);
         Ok(keep(&mut self.buffers, buffer))
     }
 
@@ -2836,6 +2873,27 @@ impl Side for RuntimeSide<'_> {
                         u64::from(*row_pitch),
                         u64::from(*row_pitch) * u64::from(extent[1]),
                         BlitOption::None,
+                    )
+                    .map_err(Failure::from_error)?;
+                    blit.end_encoding().map_err(Failure::from_error)
+                }),
+                RenderWork::CopyBuffer {
+                    from,
+                    from_offset,
+                    into,
+                    into_offset,
+                    length,
+                } => buffer(*from).and_then(|from| {
+                    let into = buffer(*into)?;
+                    let mut blit = command_buffer
+                        .blit_command_encoder()
+                        .map_err(Failure::from_error)?;
+                    blit.copy_from_buffer_to_buffer(
+                        from,
+                        *from_offset,
+                        into,
+                        *into_offset,
+                        *length,
                     )
                     .map_err(Failure::from_error)?;
                     blit.end_encoding().map_err(Failure::from_error)

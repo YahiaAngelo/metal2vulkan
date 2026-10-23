@@ -145,6 +145,11 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.zeroed_buffer(length)
     }
 
+    fn host_buffer(&mut self, spec: &crate::host_pages::HostBufferSpec) -> Answer<Handle> {
+        let _span = self.watch("host_buffer");
+        self.inner.host_buffer(spec)
+    }
+
     fn texture_2d(
         &mut self,
         format: PixelFormat,

@@ -59,6 +59,7 @@ pub mod fixture;
 pub mod function_bindings;
 pub mod function_facts;
 pub mod handler_waits;
+pub mod host_pages;
 pub mod known_gaps;
 pub mod measured;
 pub mod pipeline_facts;

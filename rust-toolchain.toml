@@ -1,0 +1,10 @@
+# The toolchain every build of this tree uses. It travels with the tree, so a worktree, a snapshot
+# or a fresh clone cannot silently take whatever `stable` happens to be on the machine — which is
+# how three lints that exist only in a later Rust were once reported as a broken `development`.
+#
+# The channel is the MSRV the published crates promise in `rust-version`, so an ordinary build is
+# what checks that promise rather than a separate job nobody runs. Raising it is a deliberate,
+# fleet-wide step: it is a consumer-facing contract, not a local convenience.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]
