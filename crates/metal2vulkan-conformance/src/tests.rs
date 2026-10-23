@@ -2297,6 +2297,80 @@ fn no_recorded_message_holds_an_address() {
     assert!(messages > 0, "no recording holds a validation complaint");
 }
 
+/// **No site of a committed recording shares its name with a sibling.**
+///
+/// A path is how the comparison finds the answer to hold a site's answer against, so two children
+/// of one node under one name is a pair the walk cannot settle. It does not fail loudly: it pairs
+/// a site with whichever namesake it reaches, reports a difference of shape between two things
+/// that were never the same observation, and never compares what the case was asking about. That
+/// is what it did -- a case of this round named the call that made its buffer and the buffer's
+/// bytes after the pass both `buffer`, and its first whole-case replay reported six cases
+/// divergent at `case/buffer`, with Metal's bytes against our `Ok` of the make, having compared no
+/// byte of either.
+///
+/// So the invariant is held here rather than left to each case's author, over every answer of
+/// every recording: a name is unique among its siblings. It was measured before it was written,
+/// across all 706 recordings, and those six sites were the only duplicates in the suite.
+#[test]
+fn no_recorded_site_shares_its_name_with_a_sibling() {
+    fn duplicates(path: &str, node: &crate::transcript::Node, found: &mut Vec<String>) {
+        let here = match path.is_empty() {
+            true => node.name.to_string(),
+            false => format!("{path}/{}", node.name),
+        };
+        let mut seen = std::collections::BTreeSet::new();
+        for child in &node.children {
+            let name = child.name.to_string();
+            if !seen.insert(name.clone()) {
+                found.push(format!("{here}: two children named {name}"));
+            }
+        }
+        for child in &node.children {
+            duplicates(&here, child, found);
+        }
+    }
+    // The walk finds one where there is one, so a green run means the recordings are clean rather
+    // than that the check cannot fire.
+    let twins = Node::branch(
+        "case",
+        vec![
+            Node::leaf("buffer", Observed::absent()),
+            Node::leaf("buffer", Observed::absent()),
+        ],
+    );
+    let mut control = Vec::new();
+    duplicates("", &twins, &mut control);
+    assert_eq!(
+        control.len(),
+        1,
+        "the walk does not see a duplicate: {control:?}"
+    );
+    let mut found = Vec::new();
+    let mut sites = 0;
+    for case in crate::cases::all() {
+        let recording = crate::recording::read(case.name())
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        for answer in &recording.answers {
+            for outcome in &answer.outcomes {
+                sites += 1;
+                let mut here = Vec::new();
+                duplicates("", &outcome.transcript.root, &mut here);
+                for one in here {
+                    found.push(format!("{}: {one}", case.name()));
+                }
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "{} site(s) share a name with a sibling, so the comparison pairs them by luck:\n{}",
+        found.len(),
+        found.join("\n")
+    );
+    // And the walk really read the recordings there are.
+    assert!(sites > 0, "no recording holds a transcript");
+}
+
 /// The committed ledger parses, every row names a gap, and each row's case is a real case.
 ///
 /// A row whose case has been renamed away would otherwise read as "no longer held" forever, or

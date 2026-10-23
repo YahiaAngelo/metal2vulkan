@@ -1,0 +1,190 @@
+{
+  "format": 1,
+  "case": "buffer-target-clears-pitch-32-dont-care",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "buffer-bytes",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "2e1608e368fe714707f6a80a6af4b5de262fd2f12e4817f083039225a50e0aa7"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ac999821c2baf91bcb72dc5f9b00a28187b8025e233ca693d29f6a55f33616a6"
+                        }
+                      }
+                    },
+                    {
+                      "name": "pass",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "d060d88ad650c3a38301f8df2bd4f6d91cdd0d6a1de226ed58f5df83f5839279"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer-after-the-pass",
+                  "observed": {
+                    "value": {
+                      "bytes": "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"
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 2048
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 32,
+                        "row_pitch": 32,
+                        "rows": 64,
+                        "image_pitch": 2048,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": {
+        "stopped": {
+          "call": "render",
+          "message": "End Encoding Validation\nendEncoding without encoding GPU work."
+        }
+      }
+    }
+  ]
+}
