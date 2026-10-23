@@ -471,6 +471,7 @@ edits one.
 | `buffer_blits` | Where a blit encoder's buffer fills and copies landed, overlapping ones included | run on Metal |
 | `simdgroup_lockstep` | The threadgroup words two loops only a simdgroup's lockstep orders came to | run on Metal |
 | `color_write_masks` | Which channels of a texel a draw changes under a write mask of none, some and all of them | run on Metal |
+| `blend_sweeps` | Every settable `MTLBlendFactor` in each of the four slots, every `MTLBlendOperation` against six factor pairs and against each other, all sixteen write masks with the blend on and off, blending enabled against disabled, the blend colour at and outside its range, and the `Source1` factors through a second fragment output | run on Metal |
 | `fresh_contents` | What a new buffer or texture reads before anything writes it, and after memory that was written was released | run on Metal |
 | `argument_encoders` | What an argument encoder says of a layout, which word of an argument buffer each argument landed in, and what the kernel then sampled through it | run on Metal |
 | `function_bindings` | What a kernel's reflection says each argument is: the binding, its subprotocol's fields, and an argument buffer's struct type member by member | run on Metal |

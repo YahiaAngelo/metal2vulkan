@@ -1,0 +1,533 @@
+{
+  "format": 1,
+  "case": "blend-sweep-blend-color-order",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "rt6_samples.ll",
+      "entry": "rt6_fill_vertex",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    },
+    {
+      "fixture": "rt6_samples.air.ll",
+      "entry": "rt6_fill_vertex",
+      "source_sha256": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+    },
+    {
+      "fixture": "rt6_samples.ll",
+      "entry": "rt6_fill_rgba32float",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    },
+    {
+      "fixture": "rt6_samples.air.ll",
+      "entry": "rt6_fill_rgba32float",
+      "source_sha256": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "program:air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "program:air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "63d2e3f4a17d021a2ca10a50eea35ce51e27af2b9e95df0093825e2cc58d199a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:source",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "47eabc26e865cc2f2493452c7eb7a91c3b564cbe6e4e503e946302de520797b2"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:shape",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "db49223a2cf9616171322e5325816a7a579582ebdce91c2f89df8df7aa8aac01"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:destination",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f95df6e441bedfbd180de3104b14123620da981cb80468f53a714564ccf7a15d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:once",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "af11633da077b870339d16b2cd858565e9761bc2c750bc4f9f952a089c1ddd3b"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:twice",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "8704b219f0e15bae1cdbe4850578c951afd3c7d20286c08790fece529876807f"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:reversed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "000fe254ae3dd16f0de8966a39543ee8a9612120e418e1a55bc6751a2349bbb5"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/source",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/once",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/once",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/once",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/once",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/twice",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/twice",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/twice",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/twice",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/reversed",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/reversed",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/reversed",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/reversed",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-back/once",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/twice",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/reversed",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blended",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "once",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "twice",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPgAA0jwAAGE9AIC8PQBADD4AANI8AABhPQCAvD0AQAw+AADSPAAAYT0AgLw9AEAMPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "reversed",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvwAAIL0AABC+AACcvgAACL8AACC9AAAQvgAAnL4AAAi/AAAgvQAAEL4AAJy+AAAIvw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": {
+        "stopped": {
+          "call": "render",
+          "message": "Set Blend Color Validation\nprevious setBlendColorRed was unused.\nSet Blend Color Validation\nprevious setBlendColorRed was unused."
+        }
+      }
+    }
+  ]
+}

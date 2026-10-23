@@ -32,12 +32,16 @@
 //! computed for the source — which is the property the lane's own extra draw was there for.
 //!
 //! **The five blends of the lane's twenty-two that are not here** are the ones whose factors read
-//! the blend color (`BlendColor`, `OneMinusBlendColor`, `BlendAlpha`, `OneMinusBlendAlpha`):
-//! `setBlendColorRed:green:blue:alpha:` has no step in the render vocabulary, so there is nowhere
-//! for a case to say it. They are the blends behind the lane's finding that Metal reads the blend
-//! color's `half` **before** its one minus (`h(1 - h(c))`), and porting them wants one new
-//! [`crate::render::RenderStep`]. The module docs of `runtime_lane::half_output_blends` keep that
-//! finding until then.
+//! the blend color (`BlendColor`, `OneMinusBlendColor`, `BlendAlpha`, `OneMinusBlendAlpha`). The
+//! reason used to be that `setBlendColorRed:green:blue:alpha:` had no step in the render
+//! vocabulary; **that is no longer true** -- [`crate::render::RenderStep::BlendColor`] is one, and
+//! [`super::blend_sweeps`] and [`super::rotated_targets`] both set it -- so nothing is in the way
+//! and these five are simply **not ported**. They are the blends behind the lane's finding that
+//! Metal reads the blend color's `half` **before** its one minus (`h(1 - h(c))`), which this
+//! family's `half` outputs would compare and which [`super::blend_sweeps`] does not reach: that
+//! sweep blends `float` outputs into a 32-bit float target, where there is no `half` rounding to
+//! find. The module docs of `runtime_lane::half_output_blends` keep the finding until somebody
+//! ports the five rows.
 //!
 //! **Where our side differs from Metal, measured over every word.** On this round's MoltenVK
 //! (Apple M3 Max, API 1.2) `half-output-blends-r32f` is `announced` -- every code of all seventeen
@@ -571,8 +575,9 @@ mod tests {
         assert_eq!(named.len(), sweeps.len());
         let states: BTreeSet<Vec<u8>> = sweeps.iter().map(|sweep| sweep.blend.words()).collect();
         assert_eq!(states.len(), sweeps.len());
-        // No blend here reads the blend color, which is what makes the set portable without a
-        // `setBlendColorRed:green:blue:alpha:` step.
+        // No blend here reads the blend color. That is now a property of the table rather than of
+        // the vocabulary -- `RenderStep::BlendColor` exists -- and it is what the module docs name
+        // as the five rows nobody has ported.
         for sweep in &sweeps {
             for factor in [
                 sweep.blend.source_rgb,

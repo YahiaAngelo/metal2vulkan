@@ -44,6 +44,7 @@
 
 pub mod argument_encoders;
 pub mod astc_textures;
+pub mod blend_sweeps;
 pub mod blit_encoder_commands;
 pub mod border_swizzles;
 pub mod buffer_blits;
@@ -343,6 +344,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in color_write_masks::all() {
+        cases.push(Box::new(case));
+    }
+    for case in blend_sweeps::all() {
         cases.push(Box::new(case));
     }
     for case in visibility::all() {

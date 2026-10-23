@@ -1,0 +1,1764 @@
+{
+  "format": 1,
+  "case": "blend-sweep-source-alpha",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "rt6_samples.ll",
+      "entry": "rt6_fill_vertex",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    },
+    {
+      "fixture": "rt6_samples.air.ll",
+      "entry": "rt6_fill_vertex",
+      "source_sha256": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+    },
+    {
+      "fixture": "rt6_samples.ll",
+      "entry": "rt6_fill_rgba32float",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    },
+    {
+      "fixture": "rt6_samples.air.ll",
+      "entry": "rt6_fill_rgba32float",
+      "source_sha256": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "program:air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "program:air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "63d2e3f4a17d021a2ca10a50eea35ce51e27af2b9e95df0093825e2cc58d199a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:source",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "47eabc26e865cc2f2493452c7eb7a91c3b564cbe6e4e503e946302de520797b2"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:shape",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "db49223a2cf9616171322e5325816a7a579582ebdce91c2f89df8df7aa8aac01"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:destination",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f95df6e441bedfbd180de3104b14123620da981cb80468f53a714564ccf7a15d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:zero",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b1590db2573a093f058a7bdbff0b6f3ffc1638f6ec1d682822ef7838d9ce5c1a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:one",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "2b97e5ba170f3e03dbad29b58f97352be40b178ddfa3dc6673ece5ab6b69796c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:source-color",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "bbbeb7040705be60f7cb5db915da79b4cb77bb0ecda2de1d87f18248b410f7c2"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:one-minus-source-color",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "09b8c3cdd462d392b7fd14f6b4c6617626238781b594e65c8ad7bc5e57283ba7"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:source-alpha",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "80877762cbb001a9127144f3c267d00aba95db9d5bee659481df9fbaf8b9048d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:one-minus-source-alpha",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a9938515770361e1f52c954d8844829ee7ac41601c255490e3bbd96e034898dc"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:destination-color",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "75c3f0cdb657fd664059fb74c2e3ecc828c65492777f5d13b42087c96b29f633"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:one-minus-destination-color",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "8accddcfe75fc439cb8d7f903a44f9ca0b186d43b8f5f9c9663f412e4caf764c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:destination-alpha",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "d00e726dd7b617ef70d12f6730d3634d69ba917f4b45aba9af124bd75365c9ce"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:one-minus-destination-alpha",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "8a7211a2fe1d8afad126438e1ffe510f247d1051ad52e990266984a33402c1da"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:source-alpha-saturated",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3486965f1d350a0817546e27590b5e2bec6abea054b918e8ab50d50d6671ac87"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:blend-color",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3bd613f19342eac559d494b4ca71a21205afd0dbe4c8ec63d9bb51eee3bb5cbd"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:one-minus-blend-color",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "952ef55391206cbdb5c94c1dd7c0e895f8f6969f1d73671c6a20608c23902dcc"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:blend-alpha",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6da5957b4b0aa53b31b5f9faaf5de9b9a138b16f50d36136eac10e761f412e5d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:one-minus-blend-alpha",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b39fec7fa51e2473ac84432a4e58bacd84c4f128a0136ab507f9811d371c0154"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/source",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/one",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/one",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/one",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/one",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/source-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/source-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/source-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/source-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/one-minus-source-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/one-minus-source-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/one-minus-source-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/one-minus-source-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/source-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/source-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/source-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/source-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/one-minus-source-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/one-minus-source-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/one-minus-source-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/one-minus-source-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/destination-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/destination-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/destination-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/destination-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/one-minus-destination-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/one-minus-destination-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/one-minus-destination-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/one-minus-destination-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/destination-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/destination-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/destination-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/destination-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/one-minus-destination-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/one-minus-destination-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/one-minus-destination-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/one-minus-destination-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/source-alpha-saturated",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/source-alpha-saturated",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/source-alpha-saturated",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/source-alpha-saturated",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/blend-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/blend-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/blend-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/blend-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/one-minus-blend-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/one-minus-blend-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/one-minus-blend-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/one-minus-blend-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/blend-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/blend-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/blend-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/blend-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/one-minus-blend-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/one-minus-blend-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/one-minus-blend-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/one-minus-blend-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-back/zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/one",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/source-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/one-minus-source-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/source-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/one-minus-source-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/destination-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/one-minus-destination-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/destination-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/one-minus-destination-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/source-alpha-saturated",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/blend-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/one-minus-blend-color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/blend-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/one-minus-blend-alpha",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blended",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "zero",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAAAAAAKA9AAAQPgAAUD4AAAAAAACgPQAAED4AAFA+AAAAAA=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "one",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "source-color",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQ=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "one-minus-source-color",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "source-alpha",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQAAoD0AABA+AABQPgCAkD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AICQPQ=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "one-minus-source-alpha",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPgAAoD0AABA+AABQPgDARz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AMBHPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "destination-color",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAiDsAAKA9AAAQPgAAUD4AAAg8AACgPQAAED4AAFA+AABMPAAAoD0AABA+AABQPgAAiDwAAKA9AAAQPgAAUD4AAKo8AACgPQAAED4AAFA+AADMPAAAoD0AABA+AABQPgAA7jwAAKA9AAAQPgAAUD4AAAg9AACgPQAAED4AAFA+AAAZPQAAoD0AABA+AABQPgAAKj0AAKA9AAAQPgAAUD4AADs9AACgPQAAED4AAFA+AABMPQAAoD0AABA+AABQPgAAXT0AAKA9AAAQPgAAUD4AAG49AACgPQAAED4AAFA+AAB/PQAAoD0AABA+AABQPgAAiD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AACZPQAAoD0AABA+AABQPgCAoT0AAKA9AAAQPgAAUD4AAKo9AACgPQAAED4AAFA+AICyPQAAoD0AABA+AABQPgAAuz0AAKA9AAAQPgAAUD4AgMM9AACgPQAAED4AAFA+AADMPQAAoD0AABA+AABQPgCA1D0AAKA9AAAQPgAAUD4AAN09AACgPQAAED4AAFA+AIDlPQAAoD0AABA+AABQPgAA7j0AAKA9AAAQPgAAUD4AgPY9AACgPQAAED4AAFA+AAD/PQAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AAAg+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgCAED4AAKA9AAAQPgAAUD4AwBQ+AACgPQAAED4AAFA+AAAZPgAAoD0AABA+AABQPgBAHT4AAKA9AAAQPgAAUD4AgCE+AACgPQAAED4AAFA+AMAlPgAAoD0AABA+AABQPgAAKj4AAKA9AAAQPgAAUD4AQC4+AACgPQAAED4AAFA+AIAyPgAAoD0AABA+AABQPgDANj4AAKA9AAAQPgAAUD4AADs+AACgPQAAED4AAFA+AEA/PgAAoD0AABA+AABQPgCAQz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AABMPgAAoD0AABA+AABQPgBAUD4AAKA9AAAQPgAAUD4AgFQ+AACgPQAAED4AAFA+AMBYPgAAoD0AABA+AABQPgAAXT4AAKA9AAAQPgAAUD4AQGE+AACgPQAAED4AAFA+AIBlPgAAoD0AABA+AABQPgDAaT4AAKA9AAAQPgAAUD4AAG4+AACgPQAAED4AAFA+AEByPgAAoD0AABA+AABQPgCAdj4AAKA9AAAQPgAAUD4AwHo+AACgPQAAED4AAFA+AAB/PgAAoD0AABA+AABQPgCggT4AAKA9AAAQPgAAUD4AwIM+AACgPQAAED4AAFA+AOCFPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "one-minus-destination-color",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgDghT4AAKA9AAAQPgAAUD4AwIM+AACgPQAAED4AAFA+AKCBPgAAoD0AABA+AABQPgAAfz4AAKA9AAAQPgAAUD4AwHo+AACgPQAAED4AAFA+AIB2PgAAoD0AABA+AABQPgBAcj4AAKA9AAAQPgAAUD4AAG4+AACgPQAAED4AAFA+AMBpPgAAoD0AABA+AABQPgCAZT4AAKA9AAAQPgAAUD4AQGE+AACgPQAAED4AAFA+AABdPgAAoD0AABA+AABQPgDAWD4AAKA9AAAQPgAAUD4AgFQ+AACgPQAAED4AAFA+AEBQPgAAoD0AABA+AABQPgAATD4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AIBDPgAAoD0AABA+AABQPgBAPz4AAKA9AAAQPgAAUD4AADs+AACgPQAAED4AAFA+AMA2PgAAoD0AABA+AABQPgCAMj4AAKA9AAAQPgAAUD4AQC4+AACgPQAAED4AAFA+AAAqPgAAoD0AABA+AABQPgDAJT4AAKA9AAAQPgAAUD4AgCE+AACgPQAAED4AAFA+AEAdPgAAoD0AABA+AABQPgAAGT4AAKA9AAAQPgAAUD4AwBQ+AACgPQAAED4AAFA+AIAQPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AAAg+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgAA/z0AAKA9AAAQPgAAUD4AgPY9AACgPQAAED4AAFA+AADuPQAAoD0AABA+AABQPgCA5T0AAKA9AAAQPgAAUD4AAN09AACgPQAAED4AAFA+AIDUPQAAoD0AABA+AABQPgAAzD0AAKA9AAAQPgAAUD4AgMM9AACgPQAAED4AAFA+AAC7PQAAoD0AABA+AABQPgCAsj0AAKA9AAAQPgAAUD4AAKo9AACgPQAAED4AAFA+AIChPQAAoD0AABA+AABQPgAAmT0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AACIPQAAoD0AABA+AABQPgAAfz0AAKA9AAAQPgAAUD4AAG49AACgPQAAED4AAFA+AABdPQAAoD0AABA+AABQPgAATD0AAKA9AAAQPgAAUD4AADs9AACgPQAAED4AAFA+AAAqPQAAoD0AABA+AABQPgAAGT0AAKA9AAAQPgAAUD4AAAg9AACgPQAAED4AAFA+AADuPAAAoD0AABA+AABQPgAAzDwAAKA9AAAQPgAAUD4AAKo8AACgPQAAED4AAFA+AACIPAAAoD0AABA+AABQPgAATDwAAKA9AAAQPgAAUD4AAAg8AACgPQAAED4AAFA+AACIOw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "destination-alpha",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AAAAAAAAoD0AABA+AABQPgAAiDsAAKA9AAAQPgAAUD4AAAg8AACgPQAAED4AAFA+AABMPAAAoD0AABA+AABQPgAAiDwAAKA9AAAQPgAAUD4AAKo8AACgPQAAED4AAFA+AADMPAAAoD0AABA+AABQPgAA7jwAAKA9AAAQPgAAUD4AAAg9AACgPQAAED4AAFA+AAAZPQAAoD0AABA+AABQPgAAKj0AAKA9AAAQPgAAUD4AADs9AACgPQAAED4AAFA+AABMPQAAoD0AABA+AABQPgAAXT0AAKA9AAAQPgAAUD4AAG49AACgPQAAED4AAFA+AAB/PQAAoD0AABA+AABQPgAAiD0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AACZPQAAoD0AABA+AABQPgCAoT0AAKA9AAAQPgAAUD4AAKo9AACgPQAAED4AAFA+AICyPQAAoD0AABA+AABQPgAAuz0AAKA9AAAQPgAAUD4AgMM9AACgPQAAED4AAFA+AADMPQAAoD0AABA+AABQPgCA1D0AAKA9AAAQPgAAUD4AAN09AACgPQAAED4AAFA+AIDlPQAAoD0AABA+AABQPgAA7j0AAKA9AAAQPgAAUD4AgPY9AACgPQAAED4AAFA+AAD/PQAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AAAg+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgCAED4AAKA9AAAQPgAAUD4AwBQ+AACgPQAAED4AAFA+AAAZPgAAoD0AABA+AABQPgBAHT4AAKA9AAAQPgAAUD4AgCE+AACgPQAAED4AAFA+AMAlPgAAoD0AABA+AABQPgAAKj4AAKA9AAAQPgAAUD4AQC4+AACgPQAAED4AAFA+AIAyPgAAoD0AABA+AABQPgDANj4AAKA9AAAQPgAAUD4AADs+AACgPQAAED4AAFA+AEA/PgAAoD0AABA+AABQPgCAQz4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AABMPgAAoD0AABA+AABQPgBAUD4AAKA9AAAQPgAAUD4AgFQ+AACgPQAAED4AAFA+AMBYPgAAoD0AABA+AABQPgAAXT4AAKA9AAAQPgAAUD4AQGE+AACgPQAAED4AAFA+AIBlPgAAoD0AABA+AABQPgDAaT4AAKA9AAAQPgAAUD4AAG4+AACgPQAAED4AAFA+AEByPgAAoD0AABA+AABQPgCAdj4AAKA9AAAQPgAAUD4AwHo+AACgPQAAED4AAFA+AAB/PgAAoD0AABA+AABQPgCggT4AAKA9AAAQPgAAUD4AwIM+AACgPQAAED4AAFA+AOCFPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "one-minus-destination-alpha",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgDghT4AAKA9AAAQPgAAUD4AwIM+AACgPQAAED4AAFA+AKCBPgAAoD0AABA+AABQPgAAfz4AAKA9AAAQPgAAUD4AwHo+AACgPQAAED4AAFA+AIB2PgAAoD0AABA+AABQPgBAcj4AAKA9AAAQPgAAUD4AAG4+AACgPQAAED4AAFA+AMBpPgAAoD0AABA+AABQPgCAZT4AAKA9AAAQPgAAUD4AQGE+AACgPQAAED4AAFA+AABdPgAAoD0AABA+AABQPgDAWD4AAKA9AAAQPgAAUD4AgFQ+AACgPQAAED4AAFA+AEBQPgAAoD0AABA+AABQPgAATD4AAKA9AAAQPgAAUD4AwEc+AACgPQAAED4AAFA+AIBDPgAAoD0AABA+AABQPgBAPz4AAKA9AAAQPgAAUD4AADs+AACgPQAAED4AAFA+AMA2PgAAoD0AABA+AABQPgCAMj4AAKA9AAAQPgAAUD4AQC4+AACgPQAAED4AAFA+AAAqPgAAoD0AABA+AABQPgDAJT4AAKA9AAAQPgAAUD4AgCE+AACgPQAAED4AAFA+AEAdPgAAoD0AABA+AABQPgAAGT4AAKA9AAAQPgAAUD4AwBQ+AACgPQAAED4AAFA+AIAQPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AAAg+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgAA/z0AAKA9AAAQPgAAUD4AgPY9AACgPQAAED4AAFA+AADuPQAAoD0AABA+AABQPgCA5T0AAKA9AAAQPgAAUD4AAN09AACgPQAAED4AAFA+AIDUPQAAoD0AABA+AABQPgAAzD0AAKA9AAAQPgAAUD4AgMM9AACgPQAAED4AAFA+AAC7PQAAoD0AABA+AABQPgCAsj0AAKA9AAAQPgAAUD4AAKo9AACgPQAAED4AAFA+AIChPQAAoD0AABA+AABQPgAAmT0AAKA9AAAQPgAAUD4AgJA9AACgPQAAED4AAFA+AACIPQAAoD0AABA+AABQPgAAfz0AAKA9AAAQPgAAUD4AAG49AACgPQAAED4AAFA+AABdPQAAoD0AABA+AABQPgAATD0AAKA9AAAQPgAAUD4AADs9AACgPQAAED4AAFA+AAAqPQAAoD0AABA+AABQPgAAGT0AAKA9AAAQPgAAUD4AAAg9AACgPQAAED4AAFA+AADuPAAAoD0AABA+AABQPgAAzDwAAKA9AAAQPgAAUD4AAKo8AACgPQAAED4AAFA+AACIPAAAoD0AABA+AABQPgAATDwAAKA9AAAQPgAAUD4AAAg8AACgPQAAED4AAFA+AACIOw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "source-alpha-saturated",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "blend-color",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "one-minus-blend-color",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "blend-alpha",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPgAAoD0AABA+AABQPgBADD4AAKA9AAAQPgAAUD4AQAw+AACgPQAAED4AAFA+AEAMPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "one-minus-blend-alpha",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPgAAoD0AABA+AABQPgDAAz4AAKA9AAAQPgAAUD4AwAM+AACgPQAAED4AAFA+AMADPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

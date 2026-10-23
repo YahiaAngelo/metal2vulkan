@@ -1,0 +1,528 @@
+{
+  "format": 1,
+  "case": "blend-sweep-enabled",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "rt6_samples.ll",
+      "entry": "rt6_fill_vertex",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    },
+    {
+      "fixture": "rt6_samples.air.ll",
+      "entry": "rt6_fill_vertex",
+      "source_sha256": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+    },
+    {
+      "fixture": "rt6_samples.ll",
+      "entry": "rt6_fill_rgba32float",
+      "source_sha256": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+    },
+    {
+      "fixture": "rt6_samples.air.ll",
+      "entry": "rt6_fill_rgba32float",
+      "source_sha256": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "program:air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "857adcbb6951b3d5348087377c099c2b2b4733fe56cc754501b605496cb30fb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "program:air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "50449c6cad01f47ad3407cbf3bbbdfa4405c43f2cae14639e56d71b307a41d2c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "63d2e3f4a17d021a2ca10a50eea35ce51e27af2b9e95df0093825e2cc58d199a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:source",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "47eabc26e865cc2f2493452c7eb7a91c3b564cbe6e4e503e946302de520797b2"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:shape",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "db49223a2cf9616171322e5325816a7a579582ebdce91c2f89df8df7aa8aac01"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:destination",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f95df6e441bedfbd180de3104b14123620da981cb80468f53a714564ccf7a15d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:off",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "102232daa9a33b3592282cde6adf9a96ba50116822b1e629fe5159019fff38f9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:on-one-zero",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a95862386f6c24adec857bb51672b4e46930bdced9f832ab39c5260ee989872e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "variant:on-one-one",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "68da3541f169afaa79b95359ef59ed824d6c44e5567abd3c91bf8dd571201923"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/source",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/shape",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/off",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/off",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/off",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/off",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/on-one-zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/on-one-zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/on-one-zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/on-one-zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/on-one-one",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target/on-one-one",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace-region/on-one-one",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/texels/on-one-one",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "program",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-back/off",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/on-one-zero",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back/on-one-one",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blended",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "off",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "on-one-zero",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPgAAoD0AABA+AABQPgAAiD4AAKA9AAAQPgAAUD4AAIg+AACgPQAAED4AAFA+AACIPg=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "on-one-one",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADAPQAAMD4AAIA+AACIPgAAmD4AACA/AABUPwAAkD4AAAA/AACKPwAA0D4AAJg+AAA0PwAACD8AAHw/AACgPgAAaD8AAHw/AAAQPwAAqD4AAOA9AADgPgAAkj8AALA+AACgPgAAZD8AADg/AAC4PgAABD8AALA+AACYPgAAwD4AADg/AABMPwAAYD8AAMg+AABsPwAAgD4AAOg+AADQPgAAAD4AADQ/AACEPwAA2D4AAKg+AAAgPgAAHD8AAOA+AAAIPwAAHD8AAJg/AADoPgAAPD8AAIg/AABEPwAA8D4AAHA/AAAEPwAAsD4AAPg+AAAQPgAAeD8AAGw/AAAAPwAAsD4AANg+AAAAPwAABD8AAAw/AABgPwAAij8AAAg/AABAPwAAqD4AACg/AAAMPwAAdD8AAEg/AABwPgAAED8AACA+AABwPgAAUD8AABQ/AAC4PgAAMD8AAMg+AAAYPwAAED8AABA+AAB4PwAAHD8AAEQ/AAAYPwAADD8AACA/AAB4PwAAhj8AAJA/AAAkPwAAMD4AAAA/AAA0PwAAKD8AAMA+AAB0PwAAkD4AACw/AAAUPwAA0D4AAFw/AAAwPwAASD8AAFw/AADgPgAAND8AAHw/AACgPgAAgj8AADg/AABAPgAARD8AABg/AAA8PwAAyD4AAGA+AACWPwAAQD8AABg/AAAsPwAAQD8AAEQ/AABMPwAAkD8AAKg+AABIPwAAgD8AABQ/AABoPwAATD8AAFA+AACEPwAA+D4AAFA/AADQPgAA+D4AAIg/AABUPwAAHD8AAHA/AAAkPwAAWD8AAFA/AADIPgAAYD4AAFw/AACCPwAAWD8AAEw/AABgPwAAYD4AAJg+AADAPgAAZD8AANg+AABAPwAAdD8AAGg/AAAgPwAAUD4AAAg/AABsPwAAVD8AACg/AACOPwAAcD8AAIQ/AACOPwAAMD8AAHQ/AABwPgAAED8AAIg+AAB4PwAA4D4AAII/AABYPwAAfD8AACQ/AADwPgAA2D4AAIA/AABYPwAAbD8AAIA/AACCPwAAhj8AAMA+AAAUPwAAhD8AAIA+AABUPwAAlD8AAIY/AADoPgAAkD4AADw/AACIPwAAKD8AADw/AACgPgAAij8AAFw/AABAPgAAZD8AAIw/AACIPwAAJD8AAPA+AACOPwAAiD4AAIw/AACGPwAAkD8AAPA+AAAMPwAAID8AAJI/AAAsPwAAgD8AAFA+AACUPwAAYD8AAOg+AABIPwAAlj8AAKA9AABoPwAAuD4AAJg/AACQPgAAuD4AAHA/AACaPwAA+D4AAFA/AAAEPwAAnD8AADA/AACIPgAAjD8AAJ4/AABkPwAAOD8AACw/AACgPw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  8,
+                                  8,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 64,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}
