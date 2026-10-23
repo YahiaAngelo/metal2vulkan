@@ -317,9 +317,9 @@ pub enum ExtendedRange {
         srgb: bool,
     },
     /// `R10Unorm_X6` (576), a 10-bit unsigned normalized red code in the top 10 bits of a
-    /// little-endian 16-bit word, held as `R16_UINT`. Metal makes it over an IOSurface's plane or
-    /// a buffer (a texture of a descriptor alone stores nothing: refused,
-    /// [`padded_only_over_memory`]). Measured on an Apple M4 under macOS 27.0.1 and an Apple M3
+    /// little-endian 16-bit word, held as `R16_UINT`. Metal makes a texture of it in memory of
+    /// its own as readily as over an IOSurface's plane or a buffer ([`padded_words`], which has
+    /// the creators measured). Measured on an Apple M4 under macOS 27.0.1 and an Apple M3
     /// Max under macOS 26.7: a read is `c / 1023` correctly rounded (its `half` to nearest even),
     /// the low 6 bits unread; a kernel write stores the code of the exact product of the value,
     /// clamped to `[0, 1]` (a NaN 0), with 1023, rounded to nearest, the low 6 bits zero; a render
@@ -1195,14 +1195,32 @@ pub fn extended_range_blend(pf: PixelFormat, profile: &DeviceProfile) -> Result<
     crate::lower::fragment::extended_range_blend(pf, profile)
 }
 
-/// Whether Metal holds a texture of `pf` exactly only over memory it is given, an IOSurface's
-/// plane or a buffer: the padded 10-bit formats `R10Unorm_X6` and `RG10Unorm_X12`. A texture of
-/// such a format made from a descriptor alone (a device's or a heap's) stores nothing on an Apple
-/// M4 under macOS 27.0.1 and an Apple M3 Max under macOS 26.7 (a `replaceRegion`, a clear and a
-/// draw leave nothing a read or `getBytes` returns, and a blit from a buffer leaves `getBytes`
-/// reading 0 where a read returns 1), so the runtime refuses it `NotImplemented(Format)`; over a
-/// plane or a buffer every access is exact.
-pub fn padded_only_over_memory(pf: PixelFormat) -> bool {
+/// Whether `pf` holds each of its 10-bit codes in the top 10 bits of its own little-endian
+/// 16-bit word, the low 6 unread: the padded formats `R10Unorm_X6` and `RG10Unorm_X12` and their
+/// `_sRGB` twins. `RGB10A2Unorm_sRGB` packs its codes in one 32-bit word instead, so it is not
+/// one of these ([`ExtendedRange::padded`] names both sets).
+///
+/// Metal makes a texture of such a format wherever it makes one of any format, in memory of its
+/// own as much as over an IOSurface's plane or a buffer. Measured on an Apple M3 Max under macOS
+/// 27.0.1 (26A434) for all four, 2D 8x8 unless said: `newTextureWithDescriptor:` answers a
+/// texture in `Shared`, `Private` and `Memoryless` storage, under `ShaderRead`,
+/// `ShaderRead | ShaderWrite` and `ShaderRead | RenderTarget` usage, with four levels, as an
+/// array of three slices, and as a texture buffer of 64 texels; an automatic, a placement and a
+/// sparse heap each place one, and `heapTextureSizeAndAlignWithDescriptor:` answers the tight
+/// linear size at an alignment of 128. A shader read answers the code's value and a shader write
+/// stores the code, a blit from a buffer lands exactly, and a render pass clears and draws into
+/// one. Only `newSharedTextureWithDescriptor:` answers nil, and only a multisample descriptor is
+/// stopped by Metal's validation.
+///
+/// Metal's own host copies of such a texture are exact only while it keeps the texture linear —
+/// `allocatedSize` equal to the tight `width * bytes * height`, which held for every height up
+/// to 8 at widths to 1024, for heights to 12 at a width of 16, and at any extent whose usage
+/// includes `ShaderWrite`. Where Metal picks its compressed layout instead (an extra 128 bytes
+/// or more in `allocatedSize`: 16x16 and 64x64 under `ShaderRead` alone) both host copies are
+/// silent no-ops: `getBytes:` leaves its destination untouched and `replaceRegion:` leaves the
+/// texture zero as a shader reads it, while a blit either way still moves the texels. The
+/// runtime's copies are exact at every extent (docs/API.md, accepted differences).
+pub fn padded_words(pf: PixelFormat) -> bool {
     matches!(
         pf,
         PixelFormat::R10UnormX6

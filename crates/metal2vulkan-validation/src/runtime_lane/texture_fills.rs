@@ -30,7 +30,7 @@ use super::degrade_notices::{twins_depth, UNPACKED_FILL};
 use super::extended_range_two_planes::{get, put};
 use super::texture_blits::depth_images;
 use super::{buffer_with, read_buffer};
-use metal2vulkan::metal::format::{is_depth_stencil, padded_only_over_memory, ExtendedRange};
+use metal2vulkan::metal::format::{is_depth_stencil, padded_words, ExtendedRange};
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
     BlitOption, ClearColor, CommandBufferStatus, CommandQueue, Degradation, Device, Error,
@@ -293,7 +293,7 @@ fn unpacked(raw: u32, case: &Case) -> bool {
     bw * bh > 1
         || is_depth_stencil(pf)
         || matches!(ExtendedRange::of(pf), Some(ExtendedRange::Planes { .. }))
-        || padded_only_over_memory(pf)
+        || padded_words(pf)
 }
 
 /// Case `name` of format `raw` (of a heap of `heap` bytes where a two-plane format's, else

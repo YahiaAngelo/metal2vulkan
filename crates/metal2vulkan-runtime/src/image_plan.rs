@@ -52,7 +52,7 @@
 //!   copy writes, where a depth image may store a value outside `[0, 1]` clamped or a denormal as
 //!   zero (ANV and RADV do); its depth twin ([`plan_depth_twin`]), a `D32_SFLOAT` image of the same
 //!   shape, holds the same texels for the comparisons the device makes (the shader makes the
-//!   others; [`plan_texture_images`]). Where the device lacks either format's sampling or copies
+//!   others; [`plan_images`]). Where the device lacks either format's sampling or copies
 //!   the texture keeps its depth image; a texture over a buffer, a shared texture and a texture
 //!   over the caller's image ([`plan_image`]) have no twin.
 //!
@@ -513,37 +513,6 @@ pub(super) fn plan_image(
     facts: &ImageFacts<'_>,
 ) -> Result<ImagePlan, ImageRefusal> {
     plan_held(layout, usage, memoryless, facts, false).map_err(|r| r.naming(layout.pixel_format))
-}
-
-/// The images of a texture `new_texture` makes, of `layout` with Metal `usage` on a device with
-/// `facts` (`memoryless` for `MTLStorageModeMemoryless`): [`plan_images`]' plan, the format
-/// refused where Metal stores nothing in memory a texture makes for itself
-/// ([`check_own_memory`]): a device's, a heap's or a sparse heap's texture, and a heap's size
-/// query.
-pub(super) fn plan_texture_images(
-    layout: &TextureLayout,
-    usage: TextureUsage,
-    memoryless: bool,
-    facts: &ImageFacts<'_>,
-) -> Result<(ImagePlan, Option<ImagePlan>), ImageRefusal> {
-    check_own_memory(layout.pixel_format).map_err(ImageRefusal::Unsupported)?;
-    plan_images(layout, usage, memoryless, facts)
-}
-
-/// The check every creator of a texture whose texels live in memory the runtime makes for it
-/// asks of its format `pf`: a device's, a heap's or a sparse heap's texture and a heap's size
-/// query ([`plan_texture_images`]), a shareable texture (`texture/shared.rs`), and a texture
-/// buffer over a buffer of its own, a device's, a shareable one's or a heap's, and a heap's
-/// size query for one (`buffer_texture::texture_buffer_texel`). A format Metal holds exactly only over memory it
-/// is given (`metal::format::padded_only_over_memory`: `R10Unorm_X6`, `RG10Unorm_X12` and their
-/// `_sRGB` twins) is
-/// refused `NotImplemented(Format)` naming it, since Metal's texture of a descriptor alone
-/// stores nothing. A texture over an IOSurface's plane or a caller's buffer does not ask it.
-pub(super) fn check_own_memory(pf: PixelFormat) -> Result<(), Unsupported> {
-    match metal2vulkan::metal::format::padded_only_over_memory(pf) {
-        true => Err(Unsupported::not_implemented(Feature::Format).naming_format(pf)),
-        false => Ok(()),
-    }
 }
 
 /// The images of a texture of `layout` with Metal `usage` on a device with `facts`, whatever

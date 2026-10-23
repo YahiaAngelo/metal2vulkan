@@ -7,8 +7,7 @@ use super::super::copy_plan::ImageRegion;
 use super::super::driver_defects;
 use super::super::image_plan::{
     block_family, check_image_limits, compatible, cube_compatible, holds_srgb_twin, plan_image,
-    plan_images, plan_texture_images, sample_count, srgb_twin, DepthImageFacts, ImageFacts,
-    ImagePlan, ImageRefusal,
+    plan_images, sample_count, srgb_twin, DepthImageFacts, ImageFacts, ImagePlan, ImageRefusal,
 };
 use super::super::memory::MemoryClass;
 use super::super::pvrtc::{holds_blocks, image_buffer_region, image_region, CARRIERS};
@@ -23,7 +22,7 @@ use ash::vk;
 use metal2vulkan::device::{
     Device, DeviceDescription, DevicePolicy, FormatUsage, VkExtension, VkFeature, VkProperty,
 };
-use metal2vulkan::error::{Capability, Feature, Needs, RuntimeDriverDefect, Unsupported};
+use metal2vulkan::error::{Capability, Feature, Needs, RuntimeDriverDefect};
 use metal2vulkan::metal::format::{
     alpha_in_red, alpha_in_red_format, direct_format, is_depth_stencil, srgb_raw_twin,
     storage_image_choice, storage_view_formats, vk_format, FormatEmulation, WordAttachment,
@@ -997,7 +996,7 @@ fn depth_twins_hold_the_texels_in_colour_where_a_depth_image_may_not() {
             (TextureType::Cube, 1),
         ] {
             let l = layout(ty, P::Depth32Float, 1, array);
-            let (plan, twin) = plan_texture_images(&l, read, false, &facts).expect(&name);
+            let (plan, twin) = plan_images(&l, read, false, &facts).expect(&name);
             let Some(twin) = twin else {
                 assert!(exact, "{name}: {ty:?}");
                 assert_eq!(plan, plan_image(&l, read, false, &facts).unwrap(), "{name}");
@@ -1070,7 +1069,7 @@ fn depth_twins_hold_the_texels_in_colour_where_a_depth_image_may_not() {
                 false,
             ),
         ] {
-            if let Ok((_, twin)) = plan_texture_images(&l, usage, memoryless, &facts) {
+            if let Ok((_, twin)) = plan_images(&l, usage, memoryless, &facts) {
                 assert_eq!(twin, None, "{name}: {what}");
             }
         }
@@ -1553,7 +1552,7 @@ fn extended_range_textures_hold_their_bytes_raw() {
                 TextureUsage::RENDER_TARGET,
                 TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ,
             ] {
-                let memoryless = plan_texture_images(&l, target, true, &facts);
+                let memoryless = plan_images(&l, target, true, &facts);
                 match renders {
                     true => {
                         let (plan, twin) = memoryless.expect(&what);
@@ -1578,7 +1577,7 @@ fn extended_range_textures_hold_their_bytes_raw() {
             .optimal(Format::R8G8B8A8_UNORM)
             .contains(FormatFeatureFlags2::COLOR_ATTACHMENT)
         {
-            let (plan, twin) = plan_texture_images(&l, TextureUsage::RENDER_TARGET, true, &facts)
+            let (plan, twin) = plan_images(&l, TextureUsage::RENDER_TARGET, true, &facts)
                 .unwrap_or_else(|e| panic!("{name}: a memoryless ARGB8Unorm texture: {e:?}"));
             assert!(twin.is_none(), "{name}");
             assert_eq!(plan.format, Format::R8G8B8A8_UNORM, "{name}");
@@ -1960,12 +1959,12 @@ fn a_block_writes_only_texture_s_image_is_a_shader_write_one_s() {
     assert!(stored > 100, "{stored}");
 }
 
-/// A texture of `R10Unorm_X6` or `RG10Unorm_X12` (or of their `_sRGB` twins) of a descriptor alone
-/// is refused `NotImplemented(Format)` naming it (Metal's stores nothing), and one over memory it
-/// is given holds its words raw in `R16_UINT` or `R16G16_UINT` for every usage, on every committed
-/// device.
+/// A texture of `R10Unorm_X6` or `RG10Unorm_X12` (or of their `_sRGB` twins) holds its words raw
+/// in `R16_UINT` or `R16G16_UINT` for every usage, on every committed device, in memory of its own
+/// as much as over memory it is given: one plan for both, as Metal makes it from either
+/// (`metal::format::padded_words`).
 #[test]
-fn padded_formats_are_held_only_over_given_memory() {
+fn padded_formats_are_held_raw_from_every_creator() {
     use PixelFormat as P;
     let usage =
         TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE | TextureUsage::RENDER_TARGET;
@@ -1978,12 +1977,6 @@ fn padded_formats_are_held_only_over_given_memory() {
             (P::RG10UnormX12SRGB, Format::R16G16_UINT),
         ] {
             let l = layout(TextureType::Type2D, pf, 1, 1);
-            let refused = Unsupported::not_implemented(Feature::Format).naming_format(pf);
-            assert_eq!(
-                plan_texture_images(&l, usage, false, &facts),
-                Err(ImageRefusal::Unsupported(refused)),
-                "{name} {pf:?}"
-            );
             let plan = plan_image(&l, usage, false, &facts).expect(&name);
             assert_eq!((plan.pixel_format, plan.format), (pf, raw), "{name}");
             // Every usage on the Apple venues and lavapipe; a device without the raw format's
@@ -2033,8 +2026,7 @@ fn decoded_twins_are_planned_in_their_texels_format() {
             };
             assert_eq!(zero, start, "{pf:?}");
             let l = layout(TextureType::Type2DArray, pf, 1, 3);
-            let Ok((plan, _)) = plan_texture_images(&l, TextureUsage::SHADER_READ, false, &facts)
-            else {
+            let Ok((plan, _)) = plan_images(&l, TextureUsage::SHADER_READ, false, &facts) else {
                 continue;
             };
             planned += 1;

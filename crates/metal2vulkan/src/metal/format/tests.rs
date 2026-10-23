@@ -1106,7 +1106,7 @@ fn formats_metal_names_are_named_and_refused_typed() {
         (650, "MTLPixelFormatRGB10A8Uint_2P"),
     ];
     // All but `R10Unorm_X6`, `RG10Unorm_X12` and their `_sRGB` twins, held raw
-    // (`padded_only_over_memory`).
+    // in their words' integer formats (`padded_words`).
     // And the eleven RGBX formats, held in their RGBA twins (`x_channel`).
     // And the three bfloat formats and `RGB10A2Unorm_sRGB`, held raw (`ExtendedRange`).
     let bfloat = |pf| ExtendedRange::of(pf).is_some_and(ExtendedRange::bfloat);
@@ -1122,7 +1122,7 @@ fn formats_metal_names_are_named_and_refused_typed() {
         let pf = PixelFormat::try_from(raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
         assert_eq!(pf.name(), name);
         assert_eq!(PixelFormat::from_name(name), Some(pf));
-        if padded_only_over_memory(pf) || x_channel(pf) || bfloat(pf) || rgb10a2_srgb(pf) {
+        if padded_words(pf) || x_channel(pf) || bfloat(pf) || rgb10a2_srgb(pf) {
             continue;
         }
         assert!(matches!(pf, formats_named_not_held!()), "{name}");
@@ -1146,8 +1146,9 @@ fn formats_metal_names_are_named_and_refused_typed() {
 }
 
 /// `R10Unorm_X6` and `RG10Unorm_X12` are held raw in their words' integer formats for sampling,
-/// storage and rendering (the shader decodes, filters and encodes them, `ExtendedRange::R10X6` and `Rg10X12`), only they
-/// are held only over memory a texture is given, and a clear stores Metal's words: the color
+/// storage and rendering (the shader decodes, filters and encodes them, `ExtendedRange::R10X6` and `Rg10X12`),
+/// they and their `_sRGB` twins are exactly the formats whose codes sit in the top bits of their
+/// own 16-bit words (`padded_words`), and a clear stores Metal's words: the color
 /// through `float` and `half`, each to nearest even, the code of the exact product with 1023
 /// rounded to nearest in the top 10 bits.
 #[test]
@@ -1157,7 +1158,7 @@ fn padded_formats_are_held_raw() {
     let held: Vec<PixelFormat> = PixelFormat::ALL
         .iter()
         .copied()
-        .filter(|&pf| padded_only_over_memory(pf))
+        .filter(|&pf| padded_words(pf))
         .collect();
     assert_eq!(
         held,

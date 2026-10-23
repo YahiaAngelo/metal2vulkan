@@ -1226,7 +1226,7 @@ degradations! {
         /// pass's load pass (`render/unused_bits_load.rs`) does not take it (`render.rs`): a
         /// multisampled attachment, a texture held as a shadow of another image or of a heap's
         /// bytes, a sparse one, or one whose image the device does not copy both ways (a padded
-        /// format has none of these). Metal's pass, once it draws, writes each 32 x 32 tile a
+        /// format takes no multisample texture). Metal's pass, once it draws, writes each 32 x 32 tile a
         /// draw reaches back with the bits its codes leave unused made canonical, the texels no
         /// fragment writes and the channels a write mask leaves out too (on an Apple M4 and an
         /// Apple M3 Max), where such an attachment keeps the bytes its draws do not write.

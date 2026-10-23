@@ -79,8 +79,8 @@ use super::heap::{Heap, HeapProblem, HeapType};
 use super::heap_sets;
 use super::host_bytes::HostBytes;
 use super::image_plan::{
-    check_image_limits, plan_image, plan_images, plan_texture_images, DepthImageFacts, ImageFacts,
-    ImagePlan, ImageRefusal,
+    check_image_limits, plan_image, plan_images, DepthImageFacts, ImageFacts, ImagePlan,
+    ImageRefusal,
 };
 use super::key_hash::KeyMap;
 use super::linear_plan::{
@@ -1677,9 +1677,8 @@ impl Device {
             .shared()
             .textures
             .facts(self.compile_device().profile());
-        let (mut plan, twin) =
-            plan_texture_images(&layout, descriptor.image_usage(), false, &facts)
-                .map_err(|refusal| image_error(call, refusal))?;
+        let (mut plan, twin) = plan_images(&layout, descriptor.image_usage(), false, &facts)
+            .map_err(|refusal| image_error(call, refusal))?;
         if twin.is_some() {
             // A depth twin would need its own memory bound alike.
             return Err(Error::NotImplemented(RuntimeGap::SparseHeaps));
@@ -2095,12 +2094,12 @@ impl Device {
             .textures
             .facts(self.compile_device().profile());
         let mut usage = descriptor.own_image_usage();
-        let (mut plan, mut twin) = plan_texture_images(&layout, usage, memoryless, &facts)
+        let (mut plan, mut twin) = plan_images(&layout, usage, memoryless, &facts)
             .map_err(|refusal| image_error(call, refusal))?;
         // An image whose copies would rewrite texels Metal keeps is made uncompressed.
         if let Some(exact) = self.copy_exact_usage(descriptor, &layout, plan.format, usage) {
             usage = exact;
-            (plan, twin) = plan_texture_images(&layout, usage, memoryless, &facts)
+            (plan, twin) = plan_images(&layout, usage, memoryless, &facts)
                 .map_err(|refusal| image_error(call, refusal))?;
         }
         let plan = match memoryless {

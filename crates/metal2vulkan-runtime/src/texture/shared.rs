@@ -20,7 +20,7 @@
 use super::super::address::RangeToken;
 use super::super::buffer_texture::TexelsHome;
 use super::super::error::{invalid, nil, Error, Problem};
-use super::super::image_plan::{check_own_memory, plan_image};
+use super::super::image_plan::plan_image;
 use super::super::resource_ids::IdPlacement;
 use super::super::texture_descriptor::TextureDescriptor;
 use super::super::values::StorageMode;
@@ -107,8 +107,6 @@ impl Device {
             .shared()
             .textures
             .facts(self.compile_device().profile());
-        // Its image is memory the runtime makes for it, as a device texture's is.
-        check_own_memory(layout.pixel_format).map_err(Error::Unsupported)?;
         let plan = plan_image(&layout, descriptor.image_usage(), false, &facts)
             .map_err(|refusal| image_error(CALL, refusal))?;
         let mut image = self.new_texture_image(plan, &layout, descriptor, hazard)?;

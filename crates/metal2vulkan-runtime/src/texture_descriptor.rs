@@ -64,7 +64,9 @@ use super::image_plan::block_family;
 use super::metal_level::MetalLevel;
 use super::resource_ids::IdPlacement;
 use super::values::{ResourceOptions, StorageMode};
-use metal2vulkan::metal::format::{is_depth_stencil, ycbcr, ycbcr_format, ExtendedRange};
+use metal2vulkan::metal::format::{
+    is_depth_stencil, padded_words, ycbcr, ycbcr_format, ExtendedRange,
+};
 pub use metal2vulkan::metal::TextureSwizzleChannels;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan::vk::SampleCountFlags;
@@ -526,6 +528,12 @@ impl TextureDescriptor {
         if no_texture_alone(pf) && !(over_surface && ycbcr(pf)) {
             return Err(Refused::Nil(TextureProblem::NoTextureOfFormat));
         }
+        // `newSharedTextureWithDescriptor:` alone answers nil for a padded 10-bit format, where
+        // the device's, a heap's and the size query all answer a texture of one (an Apple M3 Max
+        // under macOS 27.0.1, all four formats, 2D 8x8 `Private` under `ShaderRead`).
+        if creator == Creator::Shared && padded_words(pf) {
+            return Err(Refused::Nil(TextureProblem::NoTextureOfFormat));
+        }
         // Plain Metal makes no `Unspecialized` texture and answers nil, whatever the storage
         // and usage.
         if pf == PixelFormat::Unspecialized {
@@ -803,15 +811,14 @@ fn type_for_format(pf: PixelFormat, ty: TextureType) -> Result<(), Refused> {
         multisample
     } else if matches!(pf, P::GBGR422 | P::BGRG422) {
         ty != T::Type2D
-    // The padded 10-bit formats take no multisample texture: Metal's validation asserts on one
-    // of 4 samples (`R10Unorm_X6`, `RG10Unorm_X12` and their `_sRGB` twins; the consumer's
-    // census of every format, an Apple M3 Max under macOS 26.7), and their flags list neither
-    // MSAA nor resolve.
+    // The padded 10-bit formats take no multisample texture: Metal's validation asserts
+    // "MTLTextureDescriptor pixelFormat (MTLPixelFormatR10Unorm_X6) does not support multisample
+    // textures" on one of 1 and of 4 samples alike, re-read on an Apple M3 Max under macOS
+    // 27.0.1 (`R10Unorm_X6` and `RG10Unorm_X12`, a `Private` 8x8 render target), and their flags
+    // list neither MSAA nor resolve.
     // Metal's texture descriptor validation asserts on one of 4 samples (`R16Bfloat`,
     // `RG16Bfloat`, `RGBA16Bfloat`; an Apple M4 under macOS 27.0.1).
-    } else if metal2vulkan::metal::format::padded_only_over_memory(pf)
-        || ExtendedRange::of(pf).is_some_and(ExtendedRange::bfloat)
-    {
+    } else if padded_words(pf) || ExtendedRange::of(pf).is_some_and(ExtendedRange::bfloat) {
         multisample
     } else if block_extent(pf).is_some() {
         let flat = matches!(
