@@ -416,8 +416,9 @@ degradations! {
         IndirectIndexBoundsPass = "indirect-index-bounds-pass", Performance,
             "two dispatches before the pass write two draws' arguments and the indices past the \
              buffer into the command buffer's index pool (a sixty-fourth of the device's largest \
-             device-local heap), between barriers, and the draw is two indirect draws; a draw \
-             the pool cannot hold fails the command buffer";
+             device-local heap), between barriers, two for a run of such draws over one arguments \
+             and one index buffer, and the draw is two indirect draws; a draw the pool cannot \
+             hold fails the command buffer";
         /// A mesh render pipeline's draws on a device without `VK_EXT_mesh_shader`
         /// (`render/mesh.rs`).
         EmulatedMeshDraws = "emulated-mesh-draws", Performance,

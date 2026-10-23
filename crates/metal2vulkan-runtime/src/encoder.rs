@@ -37,6 +37,7 @@ use super::error::{internal, invalid, vulkan, CommandBufferError, Error, Problem
 use super::execution::Execution;
 use super::fresh_unwritten::FreshRead;
 use super::heap::Heap;
+use super::index_bounds::{BoundsRunRequest, BoundsSlot};
 use super::index_rewrite::{
     self, CommandedList, GatherHeld, GatherRequest, GatherRuns, GatheredList,
     IndirectGatherRequest, RewriteRunRequest,
@@ -723,6 +724,7 @@ impl EncoderCore {
             return Ok(None);
         };
         self.joined(held, uses);
+        self.device().shared().counts.gathered_draw();
         Ok(Some(list))
     }
 
@@ -752,6 +754,7 @@ impl EncoderCore {
             return Ok(None);
         };
         self.joined(held, uses);
+        self.device().shared().counts.gathered_draw();
         Ok(Some(list))
     }
 
@@ -779,12 +782,43 @@ impl EncoderCore {
             return Ok(None);
         };
         self.joined(held, uses);
+        self.device().shared().counts.gathered_draw();
         Ok(Some(list))
     }
 
-    /// A draw joined a gather run or a rewrite run: hold what a new run's command buffer holds, track the draw's
+    /// `request`'s indexed indirect draw joins an open run of the index bounds pass, which
+    /// records before the encoder's next command (`index_bounds.rs`): its slot, or `None` where
+    /// no run takes it. Its reads `uses` are tracked here, the run's barriers before and after it
+    /// ordering them. Refused as the run's objects, the command buffer's index pool and its
+    /// status words are refused.
+    pub(super) fn bounds_run(
+        &mut self,
+        request: BoundsRunRequest<'_>,
+        uses: &[Use<ResourceKey>],
+    ) -> Result<Option<BoundsSlot>, Error> {
+        if self.gathers.full() {
+            self.flush_gathers();
+        }
+        let device = self.device().clone();
+        let queue = self.open.command_buffer.command_queue().id();
+        let joined = {
+            let mut state = self.open.command_buffer.state();
+            let pool = state.index_pool(&device, queue)?;
+            let status = state.status_words(&device)?;
+            self.gathers
+                .join_bounds(&device, (&mut state.uploads, &status, &pool), request)?
+        };
+        let Some((slot, held)) = joined else {
+            return Ok(None);
+        };
+        self.joined(held, uses);
+        self.device().shared().counts.bounded_run_draw();
+        Ok(Some(slot))
+    }
+
+    /// A draw joined a run: hold what a new run's command buffer holds, and track the draw's
     /// reads `uses` (the run's barrier from everything before orders them: the one tracking
-    /// returns goes unrecorded), and count the draw.
+    /// returns goes unrecorded).
     fn joined(&mut self, held: Option<GatherHeld>, uses: &[Use<ResourceKey>]) {
         if let Some(held) = held {
             if let Some(output) = held.output {
@@ -799,7 +833,6 @@ impl EncoderCore {
             uses,
             &BTreeSet::new(),
         );
-        self.device().shared().counts.gathered_draw();
     }
 
     /// Record the open gather runs, where any is open, into the encoder's `VkCommandBuffer`.

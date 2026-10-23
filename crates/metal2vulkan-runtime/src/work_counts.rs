@@ -188,6 +188,7 @@ pub(crate) struct Counters {
     provoking_last_pipeline_draws: AtomicU64,
     provoking_listed_draws: AtomicU64,
     gathered_draws: AtomicU64,
+    bounded_run_draws: AtomicU64,
     bound_notices_made: AtomicU64,
     argument_tables_retained: AtomicU64,
     argument_objects_retained: AtomicU64,
@@ -1394,6 +1395,12 @@ impl Counters {
     /// the run's lists by one dispatch (`index_rewrite.rs`).
     pub(crate) fn gathered_draw(&self) {
         self.gathered_draws.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// An indexed indirect draw whose index fetch the index bounds pass bounds joined a run of
+    /// it, which plans and fills the run's draws by one dispatch each (`index_bounds.rs`).
+    pub(crate) fn bounded_run_draw(&self) {
+        self.bounded_run_draws.fetch_add(1, Ordering::Relaxed);
     }
 
     /// A bind of a variant made the notices it announces at every occurrence
@@ -3204,6 +3211,11 @@ pub struct WorkCounts {
     /// plan dispatch) or the index rewrite pass's (one dispatch for a run of direct indexed draws
     /// over one index buffer), where a draw's own rewrite pass takes three dispatches.
     pub gathered_draws: u64,
+    /// Indexed indirect draws whose index fetch the index bounds pass bounds (no
+    /// `robustBufferAccess2`, or a driver not measured to read index 0 past the bound range) that
+    /// joined a run of it: one plan dispatch and one fill dispatch for the run's draws, where a
+    /// draw's own pass takes two dispatches between three barriers.
+    pub bounded_run_draws: u64,
     /// Notices of a variant's that a bind announces at every occurrence
     /// (`DeviceOptions::announce_each`), made for a bind: once per variant until the
     /// specializations or the formats its notices name change; each bind announces them.
@@ -4166,6 +4178,7 @@ impl Device {
                 .load(Ordering::Relaxed),
             provoking_listed_draws: counters.provoking_listed_draws.load(Ordering::Relaxed),
             gathered_draws: counters.gathered_draws.load(Ordering::Relaxed),
+            bounded_run_draws: counters.bounded_run_draws.load(Ordering::Relaxed),
             bound_notices_made: counters.bound_notices_made.load(Ordering::Relaxed),
             argument_tables_retained: counters.argument_tables_retained.load(Ordering::Relaxed),
             argument_objects_retained: counters.argument_objects_retained.load(Ordering::Relaxed),

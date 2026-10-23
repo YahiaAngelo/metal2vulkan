@@ -35,6 +35,15 @@
 //!   the write there (probes, M3 and M4). A write since the last barrier, which Metal does not
 //!   order before the draw's fetch, is refused, `NotImplemented(IndirectDrawArguments)` as before;
 //!   so is any earlier write where an execution's command draws.
+//! - **Runs** (`bind::IndexBoundsRun`): a draw that reads its arguments and indices in place,
+//!   where nothing of the encoder wrote them behind a memory barrier and no execution replays it,
+//!   joins an open run of draws over its arguments and index buffers in place of its own pass,
+//!   which records before the encoder's next command with the encoder's other runs
+//!   (`index_rewrite.rs`'s `record_runs`): one plan dispatch of one invocation for the run's
+//!   draws, then one fill dispatch for all of them, where each draw's own pass takes two
+//!   dispatches between three barriers. Each draw's two draws, its reservation and the status are
+//!   the ones its own pass leaves (the module's tests), and its two draws read their commands from
+//!   its slot of the run's words.
 //! - **Announced** once per device as `indirect-index-bounds-pass` (decision (d)); a draw from
 //!   an index offset at or past the buffer's length, whose positions draw index 0 where Metal
 //!   reads the memory past the buffer (the probe-ix), also as `zeroed-index-fetch`.
@@ -44,15 +53,17 @@ use super::draw_source::{DrawSource, IndexBind, SizedIndexBind};
 use super::encoder::EncoderCore;
 use super::error::{internal, Error, RuntimeGap};
 use super::gpu_pools::IndexPool;
+use super::index_rewrite::GatherHeld;
 use super::owned_kernel::{OwnedKernel, OwnedModule, OwnedSets};
 use super::resource::ResourceKey;
 use super::tracker::{Access, Barrier, Use, UseRange};
-use super::upload::Upload;
+use super::upload::{Upload, Uploads};
+use super::Device;
 use crate::device::functions::Vk;
 use ash::vk;
 use metal2vulkan::bind::{
-    ExecutionStatus, IndexBoundsFillModule, IndexBoundsPass, IndexBoundsPlanModule, IndexBufferRef,
-    IndirectRef,
+    BoundsRunDraw, ExecutionStatus, IndexBoundsFillModule, IndexBoundsPass, IndexBoundsPlanModule,
+    IndexBoundsRun, IndexBufferRef, IndirectRef,
 };
 
 /// One draw's pass, planned: what records before the render pass instance, and the two draws in
@@ -146,8 +157,7 @@ impl BoundsPass {
             OwnedSets::write(&device, &plan, &[plan_set.to_vec()])?,
             OwnedSets::write(&device, &fill, &[fill_set.to_vec()])?,
         ];
-        let (buffer, offset) = index.metal();
-        let past_length = (offset >= buffer.length()).then(|| (offset, buffer.length()));
+        let past_length = past_length(index);
         Ok(BoundsPass {
             words,
             pool,
@@ -187,93 +197,131 @@ impl BoundsPass {
         };
         core.retain(plan_sets);
         core.retain(fill_sets);
-        let device = core.device();
-        device.degrade(Degradation::IndirectIndexBoundsPass, || {
-            (
-                "an indexed indirect draw whose index fetch nothing bounds".to_owned(),
-                "the device does not enable robustBufferAccess2, or its driver is not measured to \
-                 read index 0 past the bound range, or the draw's index offset lies at or past the \
-                 buffer's length, so the draw's indices are bounded on the GPU before the pass"
-                    .to_owned(),
-            )
-        });
-        if let Some((offset, length)) = past_length {
-            device.degrade(Degradation::ZeroedIndexFetch, || {
-                (
-                    format!(
-                        "an indexed indirect draw from offset {offset} of an index buffer of \
-                         {length} bytes"
-                    ),
-                    "its offset lies at or past the buffer's length, so each position draws \
-                     index 0 plus the base vertex"
-                        .to_owned(),
-                )
-            });
-        }
+        announce(core.device(), past_length);
         steps
     }
 
-    /// The two draws of the pass, in order: each its index binding, the `VkBuffer` of its
-    /// arguments, and its command. `draw` is the binder's indexed indirect draw of `index`, and
-    /// `sized` the device's index range binding.
+    /// The two draws of the pass ([`two_draws`]).
     pub(super) fn draws(
         &self,
         index: &DrawSource<'_>,
         draw: metal2vulkan::vk::DrawCommand,
         sized: Option<SizedIndexBind>,
-    ) -> Result<
-        [(
-            Option<IndexBind>,
-            Option<vk::Buffer>,
-            metal2vulkan::vk::DrawCommand,
-        ); 2],
-        Error,
-    > {
-        let metal2vulkan::vk::DrawCommand::DrawIndexedIndirect {
-            index_type,
-            index_buffer_offset,
-            ..
-        } = draw
-        else {
-            return Err(internal(
-                "an index bounds pass of a draw that is not indexed indirect",
-            ));
-        };
-        let words = self.words.raw();
+    ) -> Result<[BoundDraw; 2], Error> {
         let at = |offset: u64| self.words.offset() + offset;
-        // The first draws only where every position lies inside the buffer's whole indices;
-        // with none inside, its offset may lie past the `VkBuffer`, so it binds offset 0 and
-        // draws nothing.
-        let first_offset = if index.bound(index.at) == 0 {
-            0
-        } else {
-            index_buffer_offset
-        };
-        let first = metal2vulkan::vk::DrawCommand::DrawIndexedIndirect {
-            index_type,
-            index_buffer_offset: first_offset,
-            offset: at(IndexBoundsPass::FIRST_DRAW_OFFSET),
-            draw_count: 1,
-            stride: 20,
-        };
-        let pool_indices = IndexBoundsPass::POOL_HEADER_BYTES;
-        let second = metal2vulkan::vk::DrawCommand::DrawIndexedIndirect {
-            index_type,
-            index_buffer_offset: pool_indices,
-            offset: at(IndexBoundsPass::SECOND_DRAW_OFFSET),
-            draw_count: 1,
-            stride: 20,
-        };
-        let pool = IndexBind {
-            buffer: self.pool.block,
-            offset: pool_indices,
-            index_type: index_type.into(),
-            sized: sized.map(|bind| (bind, self.pool.index_bytes())),
-        };
-        Ok([
-            (IndexBind::of(index, first, sized), Some(words), first),
-            (Some(pool), Some(words), second),
-        ])
+        two_draws(
+            (index, draw, sized),
+            (
+                self.words.raw(),
+                at(IndexBoundsPass::FIRST_DRAW_OFFSET),
+                at(IndexBoundsPass::SECOND_DRAW_OFFSET),
+            ),
+            &self.pool,
+        )
+    }
+}
+
+/// One Vulkan draw of a bounded draw: its index binding, the `VkBuffer` of its arguments, and its
+/// command.
+pub(super) type BoundDraw = (
+    Option<IndexBind>,
+    Option<vk::Buffer>,
+    metal2vulkan::vk::DrawCommand,
+);
+
+/// The two draws of a pass or a run's slot, in order, their commands in `words` at `first` and
+/// `second`: the first over the Metal index buffer as `index` binds it, the second over `pool`.
+/// `draw` is the binder's indexed indirect draw of `index`, and `sized` the device's index range
+/// binding.
+fn two_draws(
+    (index, draw, sized): (
+        &DrawSource<'_>,
+        metal2vulkan::vk::DrawCommand,
+        Option<SizedIndexBind>,
+    ),
+    (words, first, second): (vk::Buffer, u64, u64),
+    pool: &IndexPool,
+) -> Result<[BoundDraw; 2], Error> {
+    let metal2vulkan::vk::DrawCommand::DrawIndexedIndirect {
+        index_type,
+        index_buffer_offset,
+        ..
+    } = draw
+    else {
+        return Err(internal(
+            "an index bounds pass of a draw that is not indexed indirect",
+        ));
+    };
+    // The first draws only where every position lies inside the buffer's whole indices; with
+    // none inside, its offset may lie past the `VkBuffer`, so it binds offset 0 and draws
+    // nothing.
+    let first_offset = if index.bound(index.at) == 0 {
+        0
+    } else {
+        index_buffer_offset
+    };
+    let first_draw = metal2vulkan::vk::DrawCommand::DrawIndexedIndirect {
+        index_type,
+        index_buffer_offset: first_offset,
+        offset: first,
+        draw_count: 1,
+        stride: 20,
+    };
+    let pool_indices = IndexBoundsPass::POOL_HEADER_BYTES;
+    let second_draw = metal2vulkan::vk::DrawCommand::DrawIndexedIndirect {
+        index_type,
+        index_buffer_offset: pool_indices,
+        offset: second,
+        draw_count: 1,
+        stride: 20,
+    };
+    let pooled = IndexBind {
+        buffer: pool.block,
+        offset: pool_indices,
+        index_type: index_type.into(),
+        sized: sized.map(|bind| (bind, pool.index_bytes())),
+    };
+    Ok([
+        (
+            IndexBind::of(index, first_draw, sized),
+            Some(words),
+            first_draw,
+        ),
+        (Some(pooled), Some(words), second_draw),
+    ])
+}
+
+/// The index offset and the buffer's length of a draw from `index`, where the offset lies at or
+/// past the length: every position draws index 0 there, where Metal reads memory.
+fn past_length(index: &DrawSource<'_>) -> Option<(u64, u64)> {
+    let (buffer, offset) = index.metal();
+    (offset >= buffer.length()).then(|| (offset, buffer.length()))
+}
+
+/// Announce the pass once per device, and where the draw's index offset lies at or past the
+/// buffer's length (`past_length`), the zeroed fetch.
+fn announce(device: &Device, past_length: Option<(u64, u64)>) {
+    device.degrade(Degradation::IndirectIndexBoundsPass, || {
+        (
+            "an indexed indirect draw whose index fetch nothing bounds".to_owned(),
+            "the device does not enable robustBufferAccess2, or its driver is not measured to read \
+             index 0 past the bound range, or the draw's index offset lies at or past the buffer's \
+             length, so the draw's indices are bounded on the GPU before the pass"
+                .to_owned(),
+        )
+    });
+    if let Some((offset, length)) = past_length {
+        device.degrade(Degradation::ZeroedIndexFetch, || {
+            (
+                format!(
+                    "an indexed indirect draw from offset {offset} of an index buffer of {length} \
+                     bytes"
+                ),
+                "its offset lies at or past the buffer's length, so each position draws index 0 \
+                 plus the base vertex"
+                    .to_owned(),
+            )
+        });
     }
 }
 
@@ -378,42 +426,284 @@ impl BoundsSteps {
     ///
     /// `command_buffer` is recording outside a render pass, and only one encoder records it.
     unsafe fn dispatches(&self, raw: &Vk, command_buffer: vk::CommandBuffer) {
-        let bind = |kernel: &OwnedKernel, sets: &[vk::DescriptorSet]| {
-            // SAFETY: as the caller states; the kernel is the device's, and its sets are live
-            // until the command buffer completes (retained by `into_steps`).
-            unsafe {
-                raw.cmd_bind_pipeline(
-                    command_buffer,
-                    vk::PipelineBindPoint::COMPUTE,
-                    kernel.pipeline,
-                );
-                raw.cmd_bind_descriptor_sets(
-                    command_buffer,
-                    vk::PipelineBindPoint::COMPUTE,
-                    kernel.layout,
-                    0,
-                    sets,
-                    &[],
-                );
-            }
-        };
         let (words, offset) = self.words;
-        bind(&self.plan, &self.sets[0]);
-        // SAFETY: as above; the uploads and the Metal buffers the sets name are live until the
-        // command buffer completes, and the fill's dispatch arguments lie in the words, which the
-        // plan writes before the barrier between the two.
+        // SAFETY: as the caller states; the kernels are the device's, and their sets are live
+        // until the command buffer completes (retained by `into_steps`), as are the uploads and
+        // the Metal buffers the sets name; the fill's dispatch arguments lie in the words, which
+        // the plan writes before the barrier between the two.
         unsafe {
+            bind_kernel(raw, command_buffer, &self.plan, &self.sets[0]);
             raw.cmd_dispatch(command_buffer, 1, 1, 1);
             Barrier::everything().record(raw, command_buffer);
-        }
-        bind(&self.fill, &self.sets[1]);
-        // SAFETY: as above.
-        unsafe {
+            bind_kernel(raw, command_buffer, &self.fill, &self.sets[1]);
             raw.cmd_dispatch_indirect(
                 command_buffer,
                 words,
                 offset + IndexBoundsPass::FILL_DISPATCH_OFFSET,
             );
         }
+    }
+}
+
+/// An indexed indirect draw's index bounds, which records before the pass: its own pass, or its
+/// slot of a run (the module docs).
+pub(super) enum Bounded {
+    Pass(Box<BoundsPass>),
+    Run(BoundsSlot),
+}
+
+impl Bounded {
+    /// The reads of the Metal arguments and indices that record with the draw: its own pass's; a
+    /// run's draw's were tracked when it joined.
+    pub(super) fn uses(&self) -> &[Use<ResourceKey>] {
+        match self {
+            Bounded::Pass(pass) => pass.uses(),
+            Bounded::Run(_) => &[],
+        }
+    }
+
+    /// The two draws ([`two_draws`]).
+    pub(super) fn draws(
+        &self,
+        index: &DrawSource<'_>,
+        draw: metal2vulkan::vk::DrawCommand,
+        sized: Option<SizedIndexBind>,
+    ) -> Result<[BoundDraw; 2], Error> {
+        match self {
+            Bounded::Pass(pass) => pass.draws(index, draw, sized),
+            Bounded::Run(slot) => {
+                let (words, at) = slot.words;
+                two_draws(
+                    (index, draw, sized),
+                    (
+                        words,
+                        at + IndexBoundsRun::first_draw_offset(slot.slot),
+                        at + IndexBoundsRun::second_draw_offset(slot.slot),
+                    ),
+                    &slot.pool,
+                )
+            }
+        }
+    }
+}
+
+/// The most draws of a run: its words fit half an ordinary chunk of the upload arena
+/// (`upload.rs`).
+const RUN_DRAWS: u32 = 288;
+
+/// An indexed indirect draw whose index fetch a run of the index bounds pass bounds: its Metal
+/// index and arguments sources, both read in place, and its index size.
+pub(super) struct BoundsRunRequest<'a> {
+    pub(super) index: &'a DrawSource<'a>,
+    pub(super) indirect: &'a DrawSource<'a>,
+    pub(super) index_size: u64,
+}
+
+/// What a run's draws share: the arguments' `VkBuffer` and the bytes it binds of it, then the
+/// indices'.
+type RunKey = ((vk::Buffer, u64, u64), (vk::Buffer, u64, u64));
+
+/// One run of the index bounds pass: its draws, what they share, its words' region, its kernels
+/// and their sets (the plan's, then the fill's).
+pub(super) struct BoundsRun {
+    run: IndexBoundsRun,
+    key: RunKey,
+    words: Upload,
+    plan: OwnedKernel,
+    fill: OwnedKernel,
+    sets: [Vec<vk::DescriptorSet>; 2],
+}
+
+/// A draw's slot of a run: the run's words' `VkBuffer` and offset, the slot, the command
+/// buffer's index pool, and the draw's index offset and buffer length where the offset lies at
+/// or past the length.
+pub(super) struct BoundsSlot {
+    words: (vk::Buffer, u64),
+    slot: u32,
+    pool: IndexPool,
+    past_length: Option<(u64, u64)>,
+}
+
+impl BoundsSlot {
+    /// Announce the bounds as the draw's own pass announces them. Call it once the draw records.
+    pub(super) fn announce(&self, device: &Device) {
+        announce(device, self.past_length);
+    }
+}
+
+/// `request`'s draw joins an open run of `runs` over its arguments and index buffers that takes
+/// it, or a new one into `pool`, with its words' region in `uploads` and `status` the command
+/// buffer's status words: its slot, and what a new run's command buffer holds. `None` where no
+/// run takes the draw (its own pass would not be made, or its bytes are past what a run's
+/// bindings take), which its own pass then bounds. Refused as uploads, kernels and descriptor
+/// sets are refused.
+pub(super) fn join(
+    runs: &mut Vec<BoundsRun>,
+    device: &Device,
+    (uploads, status, pool): (&mut Uploads, &Upload, &IndexPool),
+    request: BoundsRunRequest<'_>,
+) -> Result<Option<(BoundsSlot, Option<GatherHeld>)>, Error> {
+    let BoundsRunRequest {
+        index,
+        indirect,
+        index_size,
+    } = request;
+    // The run binds each Metal buffer's bytes, from its start, through its length (an index
+    // buffer's rounded up to 4, `IndexBufferRef::fetch_end`).
+    let bytes = |source: &DrawSource<'_>| (source.raw, source.at - source.metal().1, source.length);
+    let key = (bytes(indirect), bytes(index));
+    let draw = BoundsRunDraw {
+        arguments_offset: indirect.at,
+        index_size,
+        index_offset: index.at,
+        index_end: index.at + index.bound(index.at),
+    };
+    let slot_of = |run: &BoundsRun, slot| BoundsSlot {
+        words: (run.words.raw(), run.words.offset()),
+        slot,
+        pool: pool.clone(),
+        past_length: past_length(index),
+    };
+    let joined = runs
+        .iter_mut()
+        .filter(|run| run.key == key && run.run.len() < RUN_DRAWS as usize)
+        .find_map(|run| {
+            let slot = run.run.push(draw)?;
+            Some(slot_of(run, slot))
+        });
+    if let Some(slot) = joined {
+        return Ok(Some((slot, None)));
+    }
+    let limits = &device.properties().description.limits;
+    let Ok(pool_bytes) = u32::try_from(pool.index_bytes()) else {
+        return Ok(None);
+    };
+    let ((_, arguments_start, arguments_end), (_, index_start, index_end)) = key;
+    let Some(mut run) = IndexBoundsRun::new(
+        (arguments_start, arguments_end),
+        Some((index_start, index_end)),
+        (
+            limits.min_storage_buffer_offset_alignment,
+            limits.max_storage_buffer_range,
+            limits.max_compute_work_group_count[0],
+        ),
+        pool_bytes,
+    ) else {
+        return Ok(None);
+    };
+    let Some(slot) = run.push(draw) else {
+        return Ok(None);
+    };
+    let words = uploads.upload(device, &[], IndexBoundsRun::words_bytes(RUN_DRAWS))?;
+    let plan = device.owned_kernel(OwnedModule::IndexBoundsPlanRun)?;
+    let fill = device.owned_kernel(OwnedModule::IndexBoundsFillRun)?;
+    let region = |upload: &Upload, len: u64| (upload.raw(), upload.offset(), len);
+    let words_range = region(&words, words.len());
+    let arguments = run.arguments_range();
+    let mut plan_set = [(vk::Buffer::null(), 0, 0); 4];
+    plan_set[IndexBoundsPlanModule::WORDS_BINDING as usize] = words_range;
+    plan_set[IndexBoundsPlanModule::ARGUMENTS_BINDING as usize] =
+        (indirect.raw, arguments.offset, arguments.range);
+    plan_set[IndexBoundsPlanModule::POOL_BINDING as usize] =
+        region(&pool.counter, IndexBoundsPass::POOL_HEADER_BYTES);
+    plan_set[IndexBoundsPlanModule::STATUS_BINDING as usize] =
+        region(status, ExecutionStatus::BYTES as u64);
+    let mut fill_set = [(vk::Buffer::null(), 0, 0); 3];
+    fill_set[IndexBoundsFillModule::WORDS_BINDING as usize] = words_range;
+    // No index inside the buffer: nothing reads the binding, which takes the words.
+    fill_set[IndexBoundsFillModule::INDICES_BINDING as usize] = match run.indices_range() {
+        Some(range) => (index.raw, range.offset, range.range),
+        None => words_range,
+    };
+    fill_set[IndexBoundsFillModule::POOL_BINDING as usize] = (pool.block, 0, pool.bytes);
+    let plan_sets = OwnedSets::write(device, &plan, &[plan_set.to_vec()])?;
+    let fill_sets = OwnedSets::write(device, &fill, &[fill_set.to_vec()])?;
+    let run = BoundsRun {
+        run,
+        key,
+        words,
+        plan,
+        fill,
+        sets: [plan_sets.sets.clone(), fill_sets.sets.clone()],
+    };
+    let slot = slot_of(&run, slot);
+    runs.push(run);
+    Ok(Some((
+        slot,
+        Some(GatherHeld {
+            output: None,
+            sets: vec![plan_sets, fill_sets],
+        }),
+    )))
+}
+
+impl BoundsRun {
+    /// Write the run's words into its region: before its plan records.
+    pub(super) fn write(&self) {
+        self.words.write(&self.run.words());
+    }
+
+    /// Record the run's plan, one invocation, into `command_buffer`.
+    ///
+    /// # Safety
+    ///
+    /// `command_buffer` is recording outside a render pass, and only one encoder records it; the
+    /// run's kernels are the device's, its sets are held until the command buffer completes, and
+    /// its words were written ([`write`](Self::write)).
+    pub(super) unsafe fn record_plan(&self, raw: &Vk, command_buffer: vk::CommandBuffer) {
+        // SAFETY: as the caller states.
+        unsafe {
+            bind_kernel(raw, command_buffer, &self.plan, &self.sets[0]);
+            raw.cmd_dispatch(command_buffer, 1, 1, 1);
+        }
+    }
+
+    /// Record the run's fill into `command_buffer`, dispatched indirectly from what its plan
+    /// wrote into its words.
+    ///
+    /// # Safety
+    ///
+    /// As [`record_plan`](Self::record_plan)'s, after the plan and a barrier from its writes to
+    /// the dispatch's reads.
+    pub(super) unsafe fn record_fill(&self, raw: &Vk, command_buffer: vk::CommandBuffer) {
+        // SAFETY: as the caller states.
+        unsafe {
+            bind_kernel(raw, command_buffer, &self.fill, &self.sets[1]);
+            raw.cmd_dispatch_indirect(
+                command_buffer,
+                self.words.raw(),
+                self.words.offset() + IndexBoundsRun::DISPATCH_OFFSET,
+            );
+        }
+    }
+}
+
+/// Bind `kernel` and its `sets` for the compute dispatches that follow in `command_buffer`.
+///
+/// # Safety
+///
+/// `command_buffer` is recording, and only one encoder records it; the kernel is the device's,
+/// and its sets are live until the command buffer completes.
+unsafe fn bind_kernel(
+    raw: &Vk,
+    command_buffer: vk::CommandBuffer,
+    kernel: &OwnedKernel,
+    sets: &[vk::DescriptorSet],
+) {
+    // SAFETY: as the caller states.
+    unsafe {
+        raw.cmd_bind_pipeline(
+            command_buffer,
+            vk::PipelineBindPoint::COMPUTE,
+            kernel.pipeline,
+        );
+        raw.cmd_bind_descriptor_sets(
+            command_buffer,
+            vk::PipelineBindPoint::COMPUTE,
+            kernel.layout,
+            0,
+            sets,
+            &[],
+        );
     }
 }

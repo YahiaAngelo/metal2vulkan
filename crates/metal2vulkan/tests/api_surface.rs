@@ -767,10 +767,14 @@ surface! {
         struct DepthStencilResolveModules N;
         enum ResolveWrite N;
         fn index_bounds_fill_module;
+        fn index_bounds_fill_run_module;
         fn index_bounds_plan_module;
+        fn index_bounds_plan_run_module;
+        struct BoundsRunDraw E;
         struct IndexBoundsFillModule N;
         struct IndexBoundsPass N;
         struct IndexBoundsPlanModule N;
+        struct IndexBoundsRun O;
         fn index_gather_module;
         fn index_gather_plan_module;
         fn index_rewrite_module;

@@ -303,6 +303,38 @@ fn store_word(f: &mut FunctionBuilder<'_>, buffer: Value, index: Value, v: Value
     f.store(p, v, MemAccess::default())
 }
 
+/// A draw's bounds words: the words buffer, and where a run's slot starts in it (`None` for a
+/// pass's own words, from word 0).
+#[derive(Clone, Copy)]
+struct Words {
+    buffer: Value,
+    slot: Option<Value>,
+}
+
+impl Words {
+    /// The index into the buffer of the draw's word `index`.
+    fn at(self, f: &mut FunctionBuilder<'_>, index: u32) -> BResult<Value> {
+        let i = k(f, index)?;
+        match self.slot {
+            None => Ok(i),
+            Some(first) => f.binary(BinOp::IAdd, first, i),
+        }
+    }
+
+    /// The draw's word `index`.
+    fn load(self, f: &mut FunctionBuilder<'_>, index: u32) -> BResult<Value> {
+        let i = self.at(f, index)?;
+        let p = word_ptr(f, self.buffer, i)?;
+        f.load(p, MemAccess::default())
+    }
+
+    /// Store `v` as the draw's word `index`.
+    fn store(self, f: &mut FunctionBuilder<'_>, index: u32, v: Value) -> BResult<()> {
+        let i = self.at(f, index)?;
+        store_word(f, self.buffer, i, v)
+    }
+}
+
 /// The range of a buffer that a pass binds as a storage buffer of words to read the bytes from
 /// `offset` to `end` (in the `VkBuffer`'s offsets), and `offset`'s byte in it: from `offset`
 /// aligned down to `alignment` (`minStorageBufferOffsetAlignment`, and to 4) through `end`
@@ -347,6 +379,12 @@ fn contained_word(f: &mut FunctionBuilder<'_>, buffer: Value, index: Value) -> B
 /// serializes, which the CPU interpreter runs. Its bindings are the symbols [`WORDS`], [`SOURCE`]
 /// (the arguments), [`POOL`], and [`STATUS`].
 pub fn plan_typed_module() -> BResult<TypedModule> {
+    plan_module_of(false)
+}
+
+/// The plan of a run of draws (`run`) or of one draw, as a typed module: one invocation, which
+/// plans a run's draws one after another, each from its slot (`run::IndexBoundsRun`).
+pub(crate) fn plan_module_of(run: bool) -> BResult<TypedModule> {
     let mut b = ModuleBuilder::new();
     let u32_ = b.ty(Type::Int {
         width: 32,
@@ -362,22 +400,50 @@ pub fn plan_typed_module() -> BResult<TypedModule> {
     let arguments = f.module().global_value(arguments)?;
     let pool = f.module().global_value(pool)?;
     let status = f.module().global_value(status)?;
-    let zero = k(&mut f, 0)?;
-    let one = k(&mut f, 1)?;
-    let two = k(&mut f, 2)?;
-    let three = k(&mut f, 3)?;
-    let four = k(&mut f, 4)?;
+    let sources = (arguments, pool, status);
+    match run {
+        false => plan_draw(
+            &mut f,
+            Words {
+                buffer: words,
+                slot: None,
+            },
+            sources,
+        )?,
+        true => run::plan_run(&mut f, u32_, words, sources)?,
+    }
+    f.ret(None)?;
+    let id = f.finish()?;
+    b.entry(
+        ExecModel::GLCompute,
+        id,
+        vec![ExecMode::LocalSize { x: 1, y: 1, z: 1 }],
+    )?;
+    b.finalize()
+}
 
-    let first = load_word(&mut f, words, Parameter::ArgumentsWord as u32)?;
-    let inside = load_word(&mut f, words, Parameter::Inside as u32)?;
-    let wide = load_word(&mut f, words, Parameter::Wide as u32)?;
-    let pool_bytes = load_word(&mut f, words, Parameter::PoolBytes as u32)?;
+/// The plan of the draw whose bounds words are `words`, over the arguments, pool and status.
+fn plan_draw(
+    f: &mut FunctionBuilder<'_>,
+    words: Words,
+    (arguments, pool, status): (Value, Value, Value),
+) -> BResult<()> {
+    let zero = k(f, 0)?;
+    let one = k(f, 1)?;
+    let two = k(f, 2)?;
+    let three = k(f, 3)?;
+    let four = k(f, 4)?;
+
+    let first = words.load(f, Parameter::ArgumentsWord as u32)?;
+    let inside = words.load(f, Parameter::Inside as u32)?;
+    let wide = words.load(f, Parameter::Wide as u32)?;
+    let pool_bytes = words.load(f, Parameter::PoolBytes as u32)?;
     // Metal's arguments: indexCount, instanceCount, indexStart, baseVertex, baseInstance.
     let mut argument = Vec::with_capacity(5);
     for i in 0..5 {
-        let i = k(&mut f, i)?;
+        let i = k(f, i)?;
         let index = f.binary(BinOp::IAdd, first, i)?;
-        argument.push(contained_word(&mut f, arguments, index)?);
+        argument.push(contained_word(f, arguments, index)?);
     }
     let (count, instances, start, base, base_instance) = (
         argument[0],
@@ -400,7 +466,7 @@ pub fn plan_typed_module() -> BResult<TypedModule> {
     let is_wide = f.binary(BinOp::INotEqual, wide, zero)?;
     let size = f.select(is_wide, four, two)?;
     let counter_index = zero;
-    let counter_ptr = word_ptr(&mut f, pool, counter_index)?;
+    let counter_ptr = word_ptr(f, pool, counter_index)?;
     let reserved = f.load(counter_ptr, MemAccess::default())?;
     let room = f.binary(BinOp::ISub, pool_bytes, reserved)?;
     let room_indices = f.binary(BinOp::UDiv, room, size)?;
@@ -432,18 +498,17 @@ pub fn plan_typed_module() -> BResult<TypedModule> {
             .into_iter()
             .enumerate()
         {
-            let index = k(&mut f, at + i as u32)?;
-            store_word(&mut f, words, index, v)?;
+            words.store(f, at + i as u32, v)?;
         }
     }
     // The fill: a workgroup per LOCAL_SIZE words of the reservation.
     let fill_words = f.select(place, word_count, zero)?;
-    let local = k(&mut f, IndexBoundsFillModule::LOCAL_SIZE - 1)?;
+    let local = k(f, IndexBoundsFillModule::LOCAL_SIZE - 1)?;
     let rounded = f.binary(BinOp::IAdd, fill_words, local)?;
-    let local_size = k(&mut f, IndexBoundsFillModule::LOCAL_SIZE)?;
+    let local_size = k(f, IndexBoundsFillModule::LOCAL_SIZE)?;
     let groups = f.binary(BinOp::UDiv, rounded, local_size)?;
     let reserved_word = f.binary(BinOp::ShiftRightLogical, reserved, two)?;
-    let header_words = k(&mut f, (IndexBoundsPass::POOL_HEADER_BYTES / 4) as u32)?;
+    let header_words = k(f, (IndexBoundsPass::POOL_HEADER_BYTES / 4) as u32)?;
     let pool_word = f.binary(BinOp::IAdd, header_words, reserved_word)?;
     for (at, v) in [
         (Output::FillDispatch as u32, groups),
@@ -453,32 +518,30 @@ pub fn plan_typed_module() -> BResult<TypedModule> {
         (Output::FillStart as u32, start),
         (Output::FillCount as u32, second_count),
     ] {
-        let index = k(&mut f, at)?;
-        store_word(&mut f, words, index, v)?;
+        words.store(f, at, v)?;
     }
     // A draw of indices the pool cannot hold draws nothing and says so.
-    let word = k(&mut f, StatusWord::Status.index())?;
-    let bit = k(&mut f, StatusBits::INDEX_POOL_OVERFLOW.0)?;
+    let word = k(f, StatusWord::Status.index())?;
+    let bit = k(f, StatusBits::INDEX_POOL_OVERFLOW.0)?;
     let then: ArmFn<'_, ()> = Box::new(move |fb, _| {
         let p = word_ptr(fb, status, word)?;
         fb.atomic(AtomicOp::Or, p, Scope::Device, Semantics::RELAXED, bit)?;
         Ok(ArmEnd::FallThrough(Vec::new()))
     });
     f.if_(&mut (), overflow, then, None)?;
-    f.ret(None)?;
-    let id = f.finish()?;
-    b.entry(
-        ExecModel::GLCompute,
-        id,
-        vec![ExecMode::LocalSize { x: 1, y: 1, z: 1 }],
-    )?;
-    b.finalize()
+    Ok(())
 }
 
 /// The fill as a typed module, before serialization: the module [`index_bounds_fill_module`]
 /// serializes, which the CPU interpreter runs. Its bindings are the symbols [`WORDS`], [`SOURCE`]
 /// (the indices), and [`POOL`].
 pub fn fill_typed_module() -> BResult<TypedModule> {
+    fill_module_of(false)
+}
+
+/// The fill of a run of draws (`run`) or of one draw, as a typed module: a run's workgroup fills
+/// its part of the draw whose fill groups hold it (`run::IndexBoundsRun`).
+pub(crate) fn fill_module_of(run: bool) -> BResult<TypedModule> {
     let mut b = ModuleBuilder::new();
     let u32_ = b.ty(Type::Int {
         width: 32,
@@ -494,19 +557,54 @@ pub fn fill_typed_module() -> BResult<TypedModule> {
     let words = f.module().global_value(words)?;
     let indices = f.module().global_value(indices)?;
     let pool = f.module().global_value(pool)?;
-    let zero = k(&mut f, 0)?;
-    let one = k(&mut f, 1)?;
-    let sixteen = k(&mut f, 16)?;
     let invocation = f.module().global_value(invocation)?;
     let invocation = f.load(invocation, MemAccess::default())?;
     let w = f.composite_extract(invocation, &[0])?;
+    let row = f.composite_extract(invocation, &[1])?;
+    match run {
+        false => fill_draw(
+            &mut f,
+            Words {
+                buffer: words,
+                slot: None,
+            },
+            (indices, pool),
+            w,
+        )?,
+        true => run::fill_run(&mut f, u32_, words, (indices, pool), (w, row))?,
+    }
+    f.ret(None)?;
+    let id = f.finish()?;
+    b.entry(
+        ExecModel::GLCompute,
+        id,
+        vec![ExecMode::LocalSize {
+            x: IndexBoundsFillModule::LOCAL_SIZE,
+            y: 1,
+            z: 1,
+        }],
+    )?;
+    b.finalize()
+}
 
-    let first_byte = load_word(&mut f, words, Parameter::IndicesByte as u32)?;
-    let inside = load_word(&mut f, words, Parameter::Inside as u32)?;
-    let wide = load_word(&mut f, words, Parameter::Wide as u32)?;
-    let pool_word = load_word(&mut f, words, Output::FillPoolWord as u32)?;
-    let start = load_word(&mut f, words, Output::FillStart as u32)?;
-    let count = load_word(&mut f, words, Output::FillCount as u32)?;
+/// The fill of word `w` of the reservation of the draw whose bounds words are `words`, from the
+/// indices into the pool.
+fn fill_draw(
+    f: &mut FunctionBuilder<'_>,
+    words: Words,
+    (indices, pool): (Value, Value),
+    w: Value,
+) -> BResult<()> {
+    let zero = k(f, 0)?;
+    let one = k(f, 1)?;
+    let sixteen = k(f, 16)?;
+
+    let first_byte = words.load(f, Parameter::IndicesByte as u32)?;
+    let inside = words.load(f, Parameter::Inside as u32)?;
+    let wide = words.load(f, Parameter::Wide as u32)?;
+    let pool_word = words.load(f, Output::FillPoolWord as u32)?;
+    let start = words.load(f, Output::FillStart as u32)?;
+    let count = words.load(f, Output::FillCount as u32)?;
     let is_wide = f.binary(BinOp::INotEqual, wide, zero)?;
     // Words of the reservation: one per 32-bit index, one per two 16-bit ones.
     let plus_one = f.binary(BinOp::IAdd, count, one)?;
@@ -567,18 +665,7 @@ pub fn fill_typed_module() -> BResult<TypedModule> {
         Ok(ArmEnd::FallThrough(Vec::new()))
     });
     f.if_(&mut (), listed, fill, None)?;
-    f.ret(None)?;
-    let id = f.finish()?;
-    b.entry(
-        ExecModel::GLCompute,
-        id,
-        vec![ExecMode::LocalSize {
-            x: IndexBoundsFillModule::LOCAL_SIZE,
-            y: 1,
-            z: 1,
-        }],
-    )?;
-    b.finalize()
+    Ok(())
 }
 
 /// The fixed binding numbers of the plan's symbols.
@@ -655,6 +742,11 @@ pub fn index_bounds_fill_module(device: &Device) -> Result<IndexBoundsFillModule
         requirements,
     })
 }
+
+mod run;
+pub use run::{
+    index_bounds_fill_run_module, index_bounds_plan_run_module, BoundsRunDraw, IndexBoundsRun,
+};
 
 #[cfg(test)]
 mod tests;

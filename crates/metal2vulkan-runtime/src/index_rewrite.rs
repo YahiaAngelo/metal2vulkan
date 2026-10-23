@@ -86,7 +86,7 @@ use super::draw_source::{DrawSource, IndexBind, SizedIndexBind};
 use super::encoder::EncoderCore;
 use super::error::{internal, Error, RuntimeGap};
 use super::gpu_pools::IndexPool;
-use super::index_bounds;
+use super::index_bounds::{self, BoundsRun, BoundsRunRequest, BoundsSlot};
 use super::owned_kernel::{OwnedKernel, OwnedModule, OwnedSets};
 use super::resource::ResourceKey;
 use super::tracker::{Access, Barrier, Use, UseRange};
@@ -792,19 +792,22 @@ pub(super) struct RewriteRunRequest<'a> {
     pub(super) wide: bool,
 }
 
-/// The runs of an encoder's gathered draws (the module docs, `index_rewrite.rs`'s gather): each
-/// one dispatch (an indirect run's after its plan), recorded before the encoder's next command,
-/// between a barrier from everything before and one to everything after for all of them.
+/// The runs of an encoder's gathered draws (the module docs, `index_rewrite.rs`'s gather) and of
+/// its bounded ones (`index_bounds.rs`): each one dispatch (an indirect run's and a bounds run's
+/// after its plan), recorded before the encoder's next command, between a barrier from
+/// everything before and one to everything after for all of them.
 #[derive(Default)]
 pub(super) struct GatherRuns {
     runs: Vec<GatherRun>,
     rewrites: Vec<RewriteRun>,
+    bounds: Vec<BoundsRun>,
 }
 
 /// The open runs an encoder records now ([`record_runs`]).
 pub(super) struct TakenRuns {
     gathers: Vec<GatherRun>,
     rewrites: Vec<RewriteRun>,
+    bounds: Vec<BoundsRun>,
 }
 
 /// What a rewrite run's draws share: the index `VkBuffer` and the bytes it binds of it, the
@@ -881,12 +884,12 @@ pub(super) struct GatherHeld {
 impl GatherRuns {
     /// Whether no run is open.
     pub(super) fn is_empty(&self) -> bool {
-        self.runs.is_empty() && self.rewrites.is_empty()
+        self.runs.is_empty() && self.rewrites.is_empty() && self.bounds.is_empty()
     }
 
     /// Whether the runs are as many as an encoder keeps open: they record before another opens.
     pub(super) fn full(&self) -> bool {
-        self.runs.len() + self.rewrites.len() >= OPEN_RUNS
+        self.runs.len() + self.rewrites.len() + self.bounds.len() >= OPEN_RUNS
     }
 
     /// The open runs, which record now ([`record_runs`]).
@@ -894,6 +897,7 @@ impl GatherRuns {
         TakenRuns {
             gathers: std::mem::take(&mut self.runs),
             rewrites: std::mem::take(&mut self.rewrites),
+            bounds: std::mem::take(&mut self.bounds),
         }
     }
 
@@ -1235,6 +1239,20 @@ impl GatherRuns {
     }
 }
 
+impl GatherRuns {
+    /// `request`'s indexed indirect draw joins an open run of the index bounds pass over its
+    /// arguments and index buffers that takes it, or a new one (`index_bounds::join`): its slot,
+    /// and what a new run's command buffer holds; `None` where no run takes it.
+    pub(super) fn join_bounds(
+        &mut self,
+        device: &Device,
+        regions: (&mut Uploads, &Upload, &IndexPool),
+        request: BoundsRunRequest<'_>,
+    ) -> Result<Option<(BoundsSlot, Option<GatherHeld>)>, Error> {
+        index_bounds::join(&mut self.bounds, device, regions, request)
+    }
+}
+
 impl RewriteRun {
     /// Where the run's draw of slot `slot` finds its list (the run's output, from its start, the
     /// command's first index its region's) and its command.
@@ -1400,9 +1418,9 @@ impl CommandedList {
 
 /// Record `runs` into `command_buffer`: each run's table or words written into its region, then
 /// between a barrier from everything before and one to everything after, each rewrite run's
-/// dispatch, each indirect run's plan (one after another: each reads and writes the index pool's
-/// counter), and after the plans' writes each gather run's dispatch (an indirect run's from its
-/// plan's).
+/// dispatch, each bounds run's and indirect run's plan (one after another: each reads and writes
+/// the index pool's counter), and after the plans' writes each bounds run's fill and each gather
+/// run's dispatch (an indirect run's and a bounds run's from its plan's).
 ///
 /// # Safety
 ///
@@ -1417,6 +1435,9 @@ pub(super) unsafe fn record_runs(raw: &Vk, command_buffer: vk::CommandBuffer, ta
     }
     for run in &taken.rewrites {
         run.words.write(&run.run.words());
+    }
+    for run in &taken.bounds {
+        run.write();
     }
     let bind = |kernel: &OwnedKernel, sets: &[vk::DescriptorSet]| {
         // SAFETY: as the caller states.
@@ -1444,15 +1465,25 @@ pub(super) unsafe fn record_runs(raw: &Vk, command_buffer: vk::CommandBuffer, ta
             raw.cmd_dispatch(command_buffer, run.run.workgroups(), 1, 1);
         }
         let plans = runs.iter().filter_map(|run| run.plan.as_ref());
-        for (at, plan) in plans.enumerate() {
+        let bounds = taken.bounds.len();
+        for (at, run) in taken.bounds.iter().enumerate() {
             if at > 0 {
+                Barrier::between_dispatches().record(raw, command_buffer);
+            }
+            run.record_plan(raw, command_buffer);
+        }
+        for (at, plan) in plans.enumerate() {
+            if bounds + at > 0 {
                 Barrier::between_dispatches().record(raw, command_buffer);
             }
             bind(&plan.kernel, &plan.sets);
             raw.cmd_dispatch(command_buffer, 1, 1, 1);
         }
-        if runs.iter().any(|run| run.plan.is_some()) {
+        if bounds > 0 || runs.iter().any(|run| run.plan.is_some()) {
             Barrier::between_dispatches().record(raw, command_buffer);
+        }
+        for run in &taken.bounds {
+            run.record_fill(raw, command_buffer);
         }
         for run in runs {
             bind(&run.kernel, &run.sets);

@@ -1228,6 +1228,7 @@ impl Gpu for Runtime {
             ),
             ("provoking_listed_draws", c.provoking_listed_draws),
             ("gathered_draws", c.gathered_draws),
+            ("bounded_run_draws", c.bounded_run_draws),
         ]
         .into_iter()
         .map(|(name, count)| (name, count as f64))

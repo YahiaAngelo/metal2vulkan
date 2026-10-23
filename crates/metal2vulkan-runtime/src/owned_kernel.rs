@@ -55,6 +55,12 @@ pub(super) enum OwnedModule {
     IndexBoundsPlan,
     /// `bind::index_bounds_fill_module`: the plan's reservation in the index pool, filled.
     IndexBoundsFill,
+    /// `bind::index_bounds_plan_run_module`: a run of indexed indirect draws' index bounds plans,
+    /// by one invocation (`index_bounds.rs`).
+    IndexBoundsPlanRun,
+    /// `bind::index_bounds_fill_run_module`: a run's reservations in the index pool, filled by
+    /// one dispatch.
+    IndexBoundsFillRun,
     /// `bind::index_gather_module`: the lists of a run of draws, by one dispatch
     /// (`index_rewrite.rs`).
     IndexGather,
@@ -253,6 +259,18 @@ impl OwnedModule {
             OwnedModule::IndexBoundsFill => {
                 let module = metal2vulkan::bind::index_bounds_fill_module(device.compile_device())
                     .map_err(Error::Compile)?;
+                Ok((module.spirv.to_vec(), 3, 0))
+            }
+            OwnedModule::IndexBoundsPlanRun => {
+                let module =
+                    metal2vulkan::bind::index_bounds_plan_run_module(device.compile_device())
+                        .map_err(Error::Compile)?;
+                Ok((module.spirv.to_vec(), 4, 0))
+            }
+            OwnedModule::IndexBoundsFillRun => {
+                let module =
+                    metal2vulkan::bind::index_bounds_fill_run_module(device.compile_device())
+                        .map_err(Error::Compile)?;
                 Ok((module.spirv.to_vec(), 3, 0))
             }
             OwnedModule::IndexGather => {
@@ -530,6 +548,8 @@ pub(super) struct OwnedKernels {
     visibility_combine: Option<OwnedKernel>,
     index_bounds_plan: Option<OwnedKernel>,
     index_bounds_fill: Option<OwnedKernel>,
+    index_bounds_plan_run: Option<OwnedKernel>,
+    index_bounds_fill_run: Option<OwnedKernel>,
     index_gather: Option<OwnedKernel>,
     index_gather_plan: Option<OwnedKernel>,
     replay_preprocess: Option<OwnedKernel>,
@@ -580,6 +600,8 @@ impl OwnedKernels {
             self.visibility_combine,
             self.index_bounds_plan,
             self.index_bounds_fill,
+            self.index_bounds_plan_run,
+            self.index_bounds_fill_run,
             self.index_gather,
             self.index_gather_plan,
             self.replay_preprocess,
@@ -716,6 +738,8 @@ impl OwnedKernels {
             OwnedModule::VisibilityCombine => &mut self.visibility_combine,
             OwnedModule::IndexBoundsPlan => &mut self.index_bounds_plan,
             OwnedModule::IndexBoundsFill => &mut self.index_bounds_fill,
+            OwnedModule::IndexBoundsPlanRun => &mut self.index_bounds_plan_run,
+            OwnedModule::IndexBoundsFillRun => &mut self.index_bounds_fill_run,
             OwnedModule::IndexGather => &mut self.index_gather,
             OwnedModule::IndexGatherPlan => &mut self.index_gather_plan,
             OwnedModule::ReplayPreprocess => &mut self.replay_preprocess,

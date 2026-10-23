@@ -340,6 +340,109 @@ fn index_positions_past_the_buffer_draw_index_zero_plus_the_base_vertex() {
     }
 }
 
+/// One encoder's indexed indirect draws from one index buffer and one arguments buffer, on a
+/// device opened without robustness, so that every venue bounds them: each draw's index offset,
+/// positions, and `seen` after Metal's draw. Inside the buffer; two positions past it; from the
+/// second index, then past it; of no position; from offsets at and past the length (index 0 plus
+/// the base vertex at each position); and all four again.
+const RUN: [(u64, u32, [u32; 8]); 7] = [
+    (0, 2, [0, 0, 0, 0, 0, 1, 1, 0]),
+    (0, POSITIONS, METAL),
+    (4, 3, [0, 0, 0, 0, 1, 0, 1, 0]),
+    (0, 0, [0; 8]),
+    (8, POSITIONS, ZEROS),
+    (16, 1, ZEROS),
+    (0, POSITIONS, METAL),
+];
+
+/// The draws of [`RUN`] in one encoder each draw Metal's vertices into a `seen` of its own, and
+/// each joins the one run of the index bounds pass their buffers share
+/// (`WorkCounts::bounded_run_draws`): one plan and one fill bound them all, each draw's two
+/// draws and reservation its own pass's.
+#[test]
+fn a_run_of_bounded_indirect_draws_draws_each_draws_metal_vertices() {
+    let bytes: Vec<u8> = INDICES.iter().flat_map(|i| i.to_le_bytes()).collect();
+    let cache = ScratchCache::new().unwrap();
+    let messages = Messages::default();
+    {
+        let device = validated_device_with(TEST_DEVICE, &messages, cache.path(), |options| {
+            Opened::WithoutRobustness.adjust(options)
+        })
+        .unwrap();
+        let name = device.name().to_owned();
+        let shared = shared_kinds(&device);
+        let lane = Lane::new(device);
+        let indices = buffer_with(&lane.device, &bytes).unwrap();
+        let arguments: Vec<u8> = RUN
+            .iter()
+            .flat_map(|&(_, positions, _)| [positions, 1, 0, BASE_VERTEX as u32, 0])
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        let arguments = buffer_with(&lane.device, &arguments).unwrap();
+        let seen: Vec<Buffer> = RUN
+            .iter()
+            .map(|_| buffer_with(&lane.device, &[0; 32]).unwrap())
+            .collect();
+        let before = lane.device.work_counts().bounded_run_draws;
+        let mut pass = RenderPassDescriptor::new();
+        pass.render_target_width = 1;
+        pass.render_target_height = 1;
+        pass.default_raster_sample_count = 1;
+        let command_buffer = lane.queue.command_buffer().unwrap();
+        let mut encoder = command_buffer.render_command_encoder(&pass).unwrap();
+        encoder.set_render_pipeline_state(&lane.pipeline).unwrap();
+        for (at, ((offset, _, _), seen)) in RUN.iter().zip(&seen).enumerate() {
+            encoder.set_vertex_buffer(Some(seen), 0, 0).unwrap();
+            encoder
+                .draw_indexed_primitives_indirect(
+                    PrimitiveType::Point,
+                    IndexType::UInt32,
+                    &indices,
+                    *offset,
+                    &arguments,
+                    at as u64 * 20,
+                )
+                .unwrap();
+        }
+        encoder.end_encoding().unwrap();
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(command_buffer.error(), None, "on {name}");
+        assert_eq!(
+            lane.device.work_counts().bounded_run_draws - before,
+            RUN.len() as u64,
+            "on {name}: the draws joined a run"
+        );
+        for (at, ((offset, positions, metal), seen)) in RUN.iter().zip(&seen).enumerate() {
+            let bytes = read_buffer(seen, 0, 32).unwrap();
+            let words: Vec<u32> = bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| u32::from_le_bytes(*chunk))
+                .collect();
+            assert_eq!(
+                words, metal,
+                "on {name}: draw {at}, {positions} positions from offset {offset}"
+            );
+        }
+        assert_made_once(
+            &messages,
+            &[
+                Degradation::IndirectIndexBoundsPass,
+                Degradation::ZeroedIndexFetch,
+            ],
+            &shared,
+        );
+        println!(
+            "CBF-MARK {name}: {} indexed indirect draws joined one run of the index bounds pass \
+             and drew Metal's vertices",
+            RUN.len()
+        );
+    }
+    assert_eq!(messages.take(), Vec::new(), "the validation layer reported");
+}
+
 /// The positions of [`an_indirect_draw_past_the_old_index_pool_draws_metals_vertices`]'s draw:
 /// 300,000 32-bit positions, 1.2 MB of indices in the command buffer's index pool, past the 1 MiB
 /// every device's pool once held.

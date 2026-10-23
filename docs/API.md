@@ -1269,8 +1269,9 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   `DriverFact::RobustIndexFetchReadsZero`, or the index offset lies at or past the buffer's length)
   is bounded on the GPU before the pass. Cost: two dispatches before the pass write two draws'
   arguments and the indices past the buffer into the command buffer's index pool (a sixty-fourth of
-  the device's largest device-local heap), between barriers, and the draw is two indirect draws; a
-  draw the pool cannot hold fails the command buffer.
+  the device's largest device-local heap), between barriers, two for a run of such draws over one
+  arguments and one index buffer, and the draw is two indirect draws; a draw the pool cannot hold
+  fails the command buffer.
 - `metal2vulkan-degrade-emulated-mesh-draws` (performance). `EmulatedMeshDraws`: A mesh render
   pipeline's draws on a device without `VK_EXT_mesh_shader`. Cost: the object and mesh functions run
   as compute dispatches before the pass, between barriers, writing records a synthesized vertex

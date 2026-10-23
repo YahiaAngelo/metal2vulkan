@@ -40,7 +40,10 @@
 //! An indexed indirect draw whose index fetch
 //! nothing bounds (`DrawCommands::index_bounds_pass`) can bound it on the GPU instead of reading
 //! its arguments: an [`IndexBoundsPass`] of [`index_bounds_plan_module`] and
-//! [`index_bounds_fill_module`] before the render pass instance, and two indirect draws. An
+//! [`index_bounds_fill_module`] before the render pass instance, and two indirect draws (a run of
+//! such draws over one arguments buffer and one index buffer, one [`IndexBoundsRun`] plan of
+//! [`index_bounds_plan_run_module`] and one fill of [`index_bounds_fill_run_module`] for all of
+//! them instead). An
 //! indexed draw whose primitives Vulkan's input assembly does not form as Metal does (a strip
 //! restarting at another index than all-ones) can draw them as a list instead: an
 //! [`IndexRewritePass`] of three [`index_rewrite_module`] dispatches ([`RewritePhase`]) before the
@@ -233,8 +236,9 @@ pub use heap::{
     HANDLE_TABLE_CAPACITY, NEUTRAL_HEAP_ELEMENT,
 };
 pub use index_bounds::{
-    index_bounds_fill_module, index_bounds_plan_module, IndexBoundsFillModule, IndexBoundsPass,
-    IndexBoundsPlanModule,
+    index_bounds_fill_module, index_bounds_fill_run_module, index_bounds_plan_module,
+    index_bounds_plan_run_module, BoundsRunDraw, IndexBoundsFillModule, IndexBoundsPass,
+    IndexBoundsPlanModule, IndexBoundsRun,
 };
 pub use index_rewrite::{
     index_gather_module, index_gather_plan_module, index_rewrite_module, index_rewrite_run_module,
