@@ -6,7 +6,7 @@
 //! conformance replay [--cpu] [--default-policy] [case ...]
 //! conformance cost [--cpu] [--default-policy] [--runs N] [--write] [--show] [--alone] [--check] [case ...]
 //! conformance times [--cpu] [--default-policy] [--runs N] [--leg metal|ours] [--write] [--show]
-//!                    [--call NAME] [case ...]
+//!                    [--call NAME]... [--cold-shaders] [case ...]
 //! conformance cases
 //! ```
 //!
@@ -78,7 +78,8 @@ fn command() -> Result<bool, String> {
     let mut runs = 8;
     let mut how = How::default();
     let mut legs = Legs::Both;
-    let mut call = None;
+    let mut calls = Vec::new();
+    let mut shaders = run::Shaders::Warm;
     let mut words = words.peekable();
     while let Some(word) = words.next() {
         match word.as_str() {
@@ -90,8 +91,9 @@ fn command() -> Result<bool, String> {
             "--show" => how.show = true,
             "--alone" => how.alone = true,
             "--check" => how.check = true,
+            "--cold-shaders" => shaders = run::Shaders::Cold,
             "--call" => {
-                call = Some(words.next().ok_or("--call wants a Side call's name")?);
+                calls.push(words.next().ok_or("--call wants a Side call's name")?);
             }
             "--leg" => {
                 let value = words.next().ok_or("--leg wants metal or ours")?;
@@ -131,7 +133,8 @@ fn command() -> Result<bool, String> {
                 legs,
                 write: how.write,
                 show: how.show,
-                call: call.as_deref(),
+                calls: &calls,
+                shaders,
             },
         ),
         "timing-coverage" => timing_coverage(venues, policy, &cases),
@@ -544,8 +547,13 @@ struct Asked<'a> {
     legs: Legs,
     write: bool,
     show: bool,
-    /// The one call `--call` names, whose cost is then printed case by case.
-    call: Option<&'a str>,
+    /// The calls `--call` names, each printed case by case. It repeats, because the contrast a
+    /// reader wants is usually two calls at once and a whole-set run is minutes.
+    calls: &'a [String],
+    /// Whether our leg's shader cache carries over between cases ([`run::Shaders`]). Warm is what
+    /// a consumer sees; cold is the only setting under which the compile rows compare like with
+    /// like.
+    shaders: run::Shaders,
 }
 
 /// Measure what the selection costs in **time** on each leg and print the table.
@@ -565,19 +573,39 @@ fn times(
         legs,
         write,
         show,
-        call,
+        calls,
+        shaders,
     } = asked;
+    // Read before the measurement rather than after it, so the figure describes the host the
+    // measurement ran on and not the host it left behind.
+    let load = metal2vulkan_conformance::clocks::host_load();
     let metal = match legs {
         Legs::Both | Legs::Metal => metal_times(cases, runs)?,
         Legs::Ours => None,
     };
     let ours = match legs {
-        Legs::Both | Legs::Ours => Some(run::times_on_under(venues, policy, cases, runs)?),
+        Legs::Both | Legs::Ours => Some(run::times_on_under(venues, policy, cases, runs, shaders)?),
         Legs::Metal => None,
     };
+    // The host's load belongs in the words a record carries, because our leg is CPU-bound where
+    // Metal's largest calls are GPU-blocked: a figure taken on a busy host is not the figure a
+    // quiet one gives, and a reader of the recording cannot otherwise tell which they have.
     let words = format!(
         "{runs} round(s) of the whole selection, in the case set's own order, each round on a \
-         fresh device; a figure is the median of the rounds' own medians"
+         fresh device, our shader cache {}; a figure is the median of the rounds' own medians; \
+         {}",
+        match shaders {
+            run::Shaders::Warm => "carried over between the cases of a round",
+            run::Shaders::Cold => "fresh for every case",
+        },
+        match load {
+            Some(load) => format!(
+                "the host's one-minute load average was {load:.2} when the measurement started, \
+                 and the per-call margin is judged only at {:.1} or under",
+                metal2vulkan_conformance::slow_calls::QUIET_ENOUGH
+            ),
+            None => "this host answers no load average".to_owned(),
+        }
     );
     match (&metal, &ours) {
         (metal, Some(ours)) => print!(
@@ -594,27 +622,63 @@ fn times(
     }
     // The triage for a row of the per-call table: a total over a case set says that a call is
     // expensive, never where.
-    if let (Some(call), Some(metal), Some(ours)) = (call, &metal, &ours) {
-        print!(
-            "{}",
-            metal2vulkan_conformance::times::render_one_call(metal, ours, call)
+    if let (Some(metal), Some(ours)) = (&metal, &ours) {
+        for call in calls {
+            print!(
+                "{}",
+                metal2vulkan_conformance::times::render_one_call(metal, ours, call)
+            );
+        }
+    }
+    // The per-call gate, which is why this command has a meaningful exit status at all. It is held
+    // against the paired rows, so it needs both legs; a one-leg run reports and judges nothing.
+    // It also needs a measurement whose readings localise: a warm one rather than a cold one, and
+    // one taken on a quiet host rather than a busy one -- see `slow_calls::judges`.
+    let mut green = true;
+    if let Err(why) = metal2vulkan_conformance::slow_calls::judges(shaders, load) {
+        println!("\n{why}");
+    } else if let (Some(metal), Some(ours)) = (&metal, &ours) {
+        let ledger = metal2vulkan_conformance::slow_calls::ledger()?;
+        let held = metal2vulkan_conformance::slow_calls::held(
+            &metal2vulkan_conformance::times::paired(metal, ours),
+            &ledger,
         );
+        println!();
+        for one in &held {
+            println!("{one}");
+        }
+        let failing: Vec<_> = held.iter().filter(|one| one.fails()).collect();
+        if failing.is_empty() {
+            println!(
+                "every call over the {}x margin is one known-slow-calls.tsv lists, each a bug \
+                 with a todo behind it",
+                metal2vulkan_conformance::times::MARGIN
+            );
+        } else {
+            green = false;
+            println!(
+                "\n{} per-call cost result(s) the ledger does not expect",
+                failing.len()
+            );
+        }
     }
     if !write {
         println!("nothing written; pass --write to keep these figures in the recordings");
-        return Ok(true);
+        return Ok(green);
     }
-    let mut all = true;
+    let mut written_all = true;
+    let mut wrote = 0;
     for (case, written) in run::record_times(metal.as_ref(), ours.as_ref(), &words) {
         match written {
-            Ok(path) => println!("{case}: {}", path.display()),
+            Ok(_) => wrote += 1,
             Err(why) => {
-                all = false;
+                written_all = false;
                 println!("{case}: not recorded: {why}");
             }
         }
     }
-    Ok(all)
+    println!("{wrote} case(s) carry their timing");
+    Ok(green && written_all)
 }
 
 /// The Metal leg's figures, where this host has Metal.
@@ -644,7 +708,9 @@ fn timing_coverage(
     // One round is enough: the census asks which calls a case makes, not what they cost. A call a
     // case makes only sometimes is the one thing a single round can miss, so the census says how
     // many rounds it took.
-    let measured = run::times_on_under(venues, policy, cases, 1)?;
+    // Warm, because the census asks which calls a case makes and a cold run would cost a device
+    // per case to answer the same question.
+    let measured = run::times_on_under(venues, policy, cases, 1, run::Shaders::Warm)?;
     let census = metal2vulkan_conformance::coverage::Census::of(&measured)?;
     print!("{}", census.render());
     Ok(true)

@@ -68,6 +68,7 @@ pub mod runtime_side;
 pub mod runtime_work;
 pub mod scheduled_handlers;
 pub mod shared_events;
+pub mod slow_calls;
 pub mod sparse_query;
 pub mod surface;
 pub mod texture;
@@ -97,7 +98,8 @@ pub use cost::{CostBound, CostRecord, CostVerdict, Counts, Region};
 pub use recording::{Recording, SUITE_VERSION};
 pub use replay::{replay, replay_against, Replayed};
 pub use report::Report;
-pub use times::{CallTimes, CaseTimes, Leg, TimeRecord, TimeVerdict};
+pub use slow_calls::KnownSlowCall;
+pub use times::{CallTimes, CaseTimes, Leg, Paired, TimeRecord, TimeVerdict};
 pub use transcript::{Node, Observed, Sites, Transcript, Value};
 pub use verdict::Verdict;
 

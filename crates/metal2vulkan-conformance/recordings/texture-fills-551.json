@@ -188,5 +188,69 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "texture-fills-551",
+        "calls": 0,
+        "in_calls": 0,
+        "on_cpu": 0,
+        "blocked": 0,
+        "elsewhere": 0,
+        "spend": 0,
+        "spend_least": 0,
+        "spend_most": 0,
+        "stopped": "the case forbids running its Metal leg here: Metal fills a texture through private API alone, so no public call exists to record it from",
+        "per_call": []
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "texture-fills-551",
+        "calls": 25,
+        "in_calls": 36569832,
+        "on_cpu": 10445126,
+        "blocked": 26124706,
+        "elsewhere": 15839875,
+        "spend": 52409707,
+        "spend_least": 35711125,
+        "spend_most": 234877544,
+        "degraded": [
+          "metal2vulkan-degrade-heap-two-plane-layout",
+          "metal2vulkan-degrade-shadowed-texture",
+          "metal2vulkan-degrade-unpacked-fill-color"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 25,
+            "most_calls": 25,
+            "wall": 1367208,
+            "on_cpu": 393250,
+            "blocked": 936125,
+            "wall_least": 994708,
+            "wall_most": 3662500,
+            "wall_total": 36569832,
+            "on_cpu_total": 10445126,
+            "blocked_total": 26124706
+          }
+        ]
+      }
+    }
   ]
 }

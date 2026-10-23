@@ -187,5 +187,68 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "texture-fills-241",
+        "calls": 0,
+        "in_calls": 0,
+        "on_cpu": 0,
+        "blocked": 0,
+        "elsewhere": 0,
+        "spend": 0,
+        "spend_least": 0,
+        "spend_most": 0,
+        "stopped": "the case forbids running its Metal leg here: Metal fills a texture through private API alone, so no public call exists to record it from",
+        "per_call": []
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "texture-fills-241",
+        "calls": 22,
+        "in_calls": 37564582,
+        "on_cpu": 12728459,
+        "blocked": 24813663,
+        "elsewhere": 15069916,
+        "spend": 54218957,
+        "spend_least": 30790542,
+        "spend_most": 122439875,
+        "degraded": [
+          "metal2vulkan-degrade-carried-decoded-twin",
+          "metal2vulkan-degrade-unpacked-fill-color"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 22,
+            "most_calls": 22,
+            "wall": 1690750,
+            "on_cpu": 427834,
+            "blocked": 1050374,
+            "wall_least": 965167,
+            "wall_most": 2485083,
+            "wall_total": 37564582,
+            "on_cpu_total": 12728459,
+            "blocked_total": 24813663
+          }
+        ]
+      }
+    }
   ]
 }

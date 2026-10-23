@@ -2091,5 +2091,262 @@
         "shader_modules_made": 2
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "half-output-blends-r32f",
+        "calls": 89,
+        "in_calls": 59296213,
+        "on_cpu": 4143415,
+        "blocked": 54962625,
+        "elsewhere": 10907250,
+        "spend": 69119629,
+        "spend_least": 65812295,
+        "spend_most": 259678919,
+        "per_call": [
+          {
+            "call": "buffer",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 8292,
+            "on_cpu": 8458,
+            "blocked": 0,
+            "wall_least": 7875,
+            "wall_most": 15875,
+            "wall_total": 44459,
+            "on_cpu_total": 44958,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 45122042,
+            "on_cpu": 1039375,
+            "blocked": 43979834,
+            "wall_least": 39941708,
+            "wall_most": 226877042,
+            "wall_total": 45122042,
+            "on_cpu_total": 1039375,
+            "blocked_total": 43979834
+          },
+          {
+            "call": "read_buffer",
+            "least_calls": 17,
+            "most_calls": 17,
+            "wall": 2625,
+            "on_cpu": 2791,
+            "blocked": 0,
+            "wall_least": 2542,
+            "wall_most": 6167,
+            "wall_total": 51002,
+            "on_cpu_total": 53790,
+            "blocked_total": 0
+          },
+          {
+            "call": "render",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 13249417,
+            "on_cpu": 1307000,
+            "blocked": 11965542,
+            "wall_least": 11741833,
+            "wall_most": 16886083,
+            "wall_total": 13249417,
+            "on_cpu_total": 1307000,
+            "blocked_total": 11965542
+          },
+          {
+            "call": "render_pipeline",
+            "least_calls": 17,
+            "most_calls": 17,
+            "wall": 60667,
+            "on_cpu": 60875,
+            "blocked": 0,
+            "wall_least": 58583,
+            "wall_most": 105750,
+            "wall_total": 1218043,
+            "on_cpu_total": 1221916,
+            "blocked_total": 0
+          },
+          {
+            "call": "replace_region",
+            "least_calls": 17,
+            "most_calls": 17,
+            "wall": 5500,
+            "on_cpu": 5666,
+            "blocked": 0,
+            "wall_least": 5250,
+            "wall_most": 8792,
+            "wall_total": 103084,
+            "on_cpu_total": 105835,
+            "blocked_total": 0
+          },
+          {
+            "call": "target",
+            "least_calls": 17,
+            "most_calls": 17,
+            "wall": 12625,
+            "on_cpu": 12791,
+            "blocked": 0,
+            "wall_least": 12333,
+            "wall_most": 35125,
+            "wall_total": 240960,
+            "on_cpu_total": 243708,
+            "blocked_total": 0
+          },
+          {
+            "call": "zeroed_buffer",
+            "least_calls": 17,
+            "most_calls": 17,
+            "wall": 4666,
+            "on_cpu": 4792,
+            "blocked": 0,
+            "wall_least": 4334,
+            "wall_most": 7791,
+            "wall_total": 82581,
+            "on_cpu_total": 85126,
+            "blocked_total": 0
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "half-output-blends-r32f",
+        "calls": 89,
+        "in_calls": 347817374,
+        "on_cpu": 240137662,
+        "blocked": 47985503,
+        "elsewhere": 12076292,
+        "spend": 361782916,
+        "spend_least": 192512705,
+        "spend_most": 1075160542,
+        "degraded": [
+          "metal2vulkan-degrade-half-output-fast-math-blend"
+        ],
+        "per_call": [
+          {
+            "call": "buffer",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 9250,
+            "on_cpu": 9458,
+            "blocked": 0,
+            "wall_least": 8791,
+            "wall_most": 10250,
+            "wall_total": 62958,
+            "on_cpu_total": 63457,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 3856375,
+            "on_cpu": 3858916,
+            "blocked": 0,
+            "wall_least": 3671250,
+            "wall_most": 10167542,
+            "wall_total": 3856375,
+            "on_cpu_total": 3858916,
+            "blocked_total": 0
+          },
+          {
+            "call": "read_buffer",
+            "least_calls": 17,
+            "most_calls": 17,
+            "wall": 208,
+            "on_cpu": 375,
+            "blocked": 0,
+            "wall_least": 125,
+            "wall_most": 459,
+            "wall_total": 8127,
+            "on_cpu_total": 10415,
+            "blocked_total": 0
+          },
+          {
+            "call": "render",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 8229458,
+            "on_cpu": 4210208,
+            "blocked": 3969417,
+            "wall_least": 6455333,
+            "wall_most": 28063000,
+            "wall_total": 8229458,
+            "on_cpu_total": 4210208,
+            "blocked_total": 3969417
+          },
+          {
+            "call": "render_pipeline",
+            "least_calls": 17,
+            "most_calls": 17,
+            "wall": 18477791,
+            "on_cpu": 12267958,
+            "blocked": 1085292,
+            "wall_least": 9771167,
+            "wall_most": 59778875,
+            "wall_total": 329709376,
+            "on_cpu_total": 225381999,
+            "blocked_total": 43903004
+          },
+          {
+            "call": "replace_region",
+            "least_calls": 17,
+            "most_calls": 17,
+            "wall": 17417,
+            "on_cpu": 17625,
+            "blocked": 0,
+            "wall_least": 9791,
+            "wall_most": 23041,
+            "wall_total": 315958,
+            "on_cpu_total": 321086,
+            "blocked_total": 0
+          },
+          {
+            "call": "target",
+            "least_calls": 17,
+            "most_calls": 17,
+            "wall": 247959,
+            "on_cpu": 248291,
+            "blocked": 0,
+            "wall_least": 119208,
+            "wall_most": 325166,
+            "wall_total": 4543585,
+            "on_cpu_total": 4466331,
+            "blocked_total": 0
+          },
+          {
+            "call": "zeroed_buffer",
+            "least_calls": 17,
+            "most_calls": 17,
+            "wall": 31792,
+            "on_cpu": 32000,
+            "blocked": 0,
+            "wall_least": 15666,
+            "wall_most": 42292,
+            "wall_total": 621626,
+            "on_cpu_total": 626455,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
   ]
 }

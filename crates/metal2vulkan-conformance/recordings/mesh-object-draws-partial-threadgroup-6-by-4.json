@@ -314,5 +314,195 @@
       ],
       "validated": "not_run"
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "mesh-object-draws-partial-threadgroup-6-by-4",
+        "calls": 8,
+        "in_calls": 59022502,
+        "on_cpu": 2065709,
+        "blocked": 56958209,
+        "elsewhere": 5953833,
+        "spend": 64749502,
+        "spend_least": 52479916,
+        "spend_most": 70812624,
+        "per_call": [
+          {
+            "call": "buffer",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 13959,
+            "on_cpu": 14125,
+            "blocked": 0,
+            "wall_least": 12750,
+            "wall_most": 22125,
+            "wall_total": 13959,
+            "on_cpu_total": 14125,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 50126667,
+            "on_cpu": 1152042,
+            "blocked": 48565626,
+            "wall_least": 40138125,
+            "wall_most": 54829458,
+            "wall_total": 50126667,
+            "on_cpu_total": 1152042,
+            "blocked_total": 48565626
+          },
+          {
+            "call": "mesh_pass",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 6907916,
+            "on_cpu": 366125,
+            "blocked": 6585000,
+            "wall_least": 6242625,
+            "wall_most": 9260291,
+            "wall_total": 6907916,
+            "on_cpu_total": 366125,
+            "blocked_total": 6585000
+          },
+          {
+            "call": "mesh_pipeline",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 289875,
+            "on_cpu": 290375,
+            "blocked": 0,
+            "wall_least": 279583,
+            "wall_most": 487167,
+            "wall_total": 289875,
+            "on_cpu_total": 290375,
+            "blocked_total": 0
+          },
+          {
+            "call": "read_texture",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 5417,
+            "on_cpu": 5541,
+            "blocked": 0,
+            "wall_least": 5166,
+            "wall_most": 11917,
+            "wall_total": 22875,
+            "on_cpu_total": 23208,
+            "blocked_total": 0
+          },
+          {
+            "call": "render_target",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 15209,
+            "on_cpu": 15375,
+            "blocked": 0,
+            "wall_least": 13250,
+            "wall_most": 28542,
+            "wall_total": 73125,
+            "on_cpu_total": 73542,
+            "blocked_total": 0
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "mesh-object-draws-partial-threadgroup-6-by-4",
+        "calls": 6,
+        "in_calls": 22584375,
+        "on_cpu": 21304167,
+        "blocked": 1471417,
+        "elsewhere": 558708,
+        "spend": 23288210,
+        "spend_least": 20299376,
+        "spend_most": 62841042,
+        "stopped": "a call did not answer, at object-threads-6-by-4/buffer/calls/2-drawMeshThreads",
+        "per_call": [
+          {
+            "call": "buffer",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 27792,
+            "on_cpu": 28083,
+            "blocked": 0,
+            "wall_least": 26500,
+            "wall_most": 61333,
+            "wall_total": 27792,
+            "on_cpu_total": 28083,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 1640834,
+            "on_cpu": 1642875,
+            "blocked": 0,
+            "wall_least": 1525292,
+            "wall_most": 2963084,
+            "wall_total": 1640834,
+            "on_cpu_total": 1642875,
+            "blocked_total": 0
+          },
+          {
+            "call": "mesh_pass",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 1806417,
+            "on_cpu": 598584,
+            "blocked": 1187292,
+            "wall_least": 1694500,
+            "wall_most": 23562083,
+            "wall_total": 1806417,
+            "on_cpu_total": 598584,
+            "blocked_total": 1187292
+          },
+          {
+            "call": "mesh_pipeline",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 18827250,
+            "on_cpu": 18792958,
+            "blocked": 0,
+            "wall_least": 16233125,
+            "wall_most": 35486542,
+            "wall_total": 18827250,
+            "on_cpu_total": 18792958,
+            "blocked_total": 0
+          },
+          {
+            "call": "render_target",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 58000,
+            "on_cpu": 58334,
+            "blocked": 0,
+            "wall_least": 52375,
+            "wall_most": 67125,
+            "wall_total": 251625,
+            "on_cpu_total": 252459,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
   ]
 }

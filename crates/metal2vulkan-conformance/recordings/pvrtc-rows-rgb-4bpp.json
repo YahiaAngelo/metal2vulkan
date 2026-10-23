@@ -829,5 +829,80 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "pvrtc-rows-rgb-4bpp",
+        "calls": 1,
+        "in_calls": 11314125,
+        "on_cpu": 2651042,
+        "blocked": 8526459,
+        "elsewhere": 5140791,
+        "spend": 16689958,
+        "spend_least": 12806375,
+        "spend_most": 27865917,
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 11314125,
+            "on_cpu": 2651042,
+            "blocked": 8526459,
+            "wall_least": 8168458,
+            "wall_most": 21641333,
+            "wall_total": 11314125,
+            "on_cpu_total": 2651042,
+            "blocked_total": 8526459
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "pvrtc-rows-rgb-4bpp",
+        "calls": 1,
+        "in_calls": 15832917,
+        "on_cpu": 6041375,
+        "blocked": 9149042,
+        "elsewhere": 4729792,
+        "spend": 21301042,
+        "spend_least": 17306833,
+        "spend_most": 83355000,
+        "degraded": [
+          "metal2vulkan-degrade-carried-decoded-twin"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 15832917,
+            "on_cpu": 6041375,
+            "blocked": 9149042,
+            "wall_least": 13578958,
+            "wall_most": 69094125,
+            "wall_total": 15832917,
+            "on_cpu_total": 6041375,
+            "blocked_total": 9149042
+          }
+        ]
+      }
+    }
   ]
 }

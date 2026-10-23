@@ -264,5 +264,103 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "heap-sizes-two-plane-cubes",
+        "calls": 8,
+        "in_calls": 198083,
+        "on_cpu": 199543,
+        "blocked": 0,
+        "elsewhere": 2292,
+        "spend": 199916,
+        "spend_least": 195833,
+        "spend_most": 221835,
+        "per_call": [
+          {
+            "call": "heap_texture_size_and_align",
+            "least_calls": 4,
+            "most_calls": 4,
+            "wall": 19916,
+            "on_cpu": 20083,
+            "blocked": 0,
+            "wall_least": 19458,
+            "wall_most": 20459,
+            "wall_total": 88624,
+            "on_cpu_total": 89333,
+            "blocked_total": 0
+          },
+          {
+            "call": "makes_texture",
+            "least_calls": 4,
+            "most_calls": 4,
+            "wall": 23459,
+            "on_cpu": 23666,
+            "blocked": 0,
+            "wall_least": 23042,
+            "wall_most": 25125,
+            "wall_total": 109500,
+            "on_cpu_total": 110210,
+            "blocked_total": 0
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "heap-sizes-two-plane-cubes",
+        "calls": 8,
+        "in_calls": 23831,
+        "on_cpu": 25000,
+        "blocked": 0,
+        "elsewhere": 1166,
+        "spend": 24331,
+        "spend_least": 19123,
+        "spend_most": 363208,
+        "per_call": [
+          {
+            "call": "heap_texture_size_and_align",
+            "least_calls": 4,
+            "most_calls": 4,
+            "wall": 833,
+            "on_cpu": 917,
+            "blocked": 0,
+            "wall_least": 666,
+            "wall_most": 1625,
+            "wall_total": 4541,
+            "on_cpu_total": 5042,
+            "blocked_total": 0
+          },
+          {
+            "call": "makes_texture",
+            "least_calls": 4,
+            "most_calls": 4,
+            "wall": 2834,
+            "on_cpu": 2958,
+            "blocked": 0,
+            "wall_least": 2583,
+            "wall_most": 7084,
+            "wall_total": 19290,
+            "on_cpu_total": 19958,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
   ]
 }

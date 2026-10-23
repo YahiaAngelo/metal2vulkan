@@ -143,5 +143,64 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "handler-waits-scheduled-until-scheduled",
+        "calls": 0,
+        "in_calls": 0,
+        "on_cpu": 0,
+        "blocked": 0,
+        "elsewhere": 0,
+        "spend": 0,
+        "spend_least": 0,
+        "spend_most": 0,
+        "stopped": "Metal does not return from addScheduledHandler/waitUntilScheduled: a scheduled handler's wait for its own command buffer's scheduling never returns: the transition it waits for is the one it is itself inside",
+        "per_call": []
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "handler-waits-scheduled-until-scheduled",
+        "calls": 1,
+        "in_calls": 1059208,
+        "on_cpu": 188208,
+        "blocked": 849667,
+        "elsewhere": 522875,
+        "spend": 1550124,
+        "spend_least": 1025250,
+        "spend_most": 25389625,
+        "per_call": [
+          {
+            "call": "handler_wait",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 1059208,
+            "on_cpu": 188208,
+            "blocked": 849667,
+            "wall_least": 739917,
+            "wall_most": 24866750,
+            "wall_total": 1059208,
+            "on_cpu_total": 188208,
+            "blocked_total": 849667
+          }
+        ]
+      }
+    }
   ]
 }

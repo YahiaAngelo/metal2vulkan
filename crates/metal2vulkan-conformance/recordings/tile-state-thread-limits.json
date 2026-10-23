@@ -301,5 +301,129 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "tile-state-thread-limits",
+        "calls": 7,
+        "in_calls": 42408290,
+        "on_cpu": 1425124,
+        "blocked": 40683832,
+        "elsewhere": 3750,
+        "spend": 42454249,
+        "spend_least": 38022873,
+        "spend_most": 65215416,
+        "per_call": [
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 41861375,
+            "on_cpu": 1154459,
+            "blocked": 40675083,
+            "wall_least": 37733916,
+            "wall_most": 64474500,
+            "wall_total": 41861375,
+            "on_cpu_total": 1154459,
+            "blocked_total": 40675083
+          },
+          {
+            "call": "tile_facts",
+            "least_calls": 3,
+            "most_calls": 3,
+            "wall": 5041,
+            "on_cpu": 5167,
+            "blocked": 0,
+            "wall_least": 4958,
+            "wall_most": 10958,
+            "wall_total": 18542,
+            "on_cpu_total": 19000,
+            "blocked_total": 0
+          },
+          {
+            "call": "tile_pipeline",
+            "least_calls": 3,
+            "most_calls": 3,
+            "wall": 57792,
+            "on_cpu": 58208,
+            "blocked": 0,
+            "wall_least": 55584,
+            "wall_most": 258083,
+            "wall_total": 267084,
+            "on_cpu_total": 268041,
+            "blocked_total": 0
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "tile-state-thread-limits",
+        "calls": 7,
+        "in_calls": 9654251,
+        "on_cpu": 9557084,
+        "blocked": 48792,
+        "elsewhere": 11625,
+        "spend": 9656167,
+        "spend_least": 8945498,
+        "spend_most": 178577791,
+        "per_call": [
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 928417,
+            "on_cpu": 919459,
+            "blocked": 0,
+            "wall_least": 876666,
+            "wall_most": 2358708,
+            "wall_total": 928417,
+            "on_cpu_total": 919459,
+            "blocked_total": 0
+          },
+          {
+            "call": "tile_facts",
+            "least_calls": 3,
+            "most_calls": 3,
+            "wall": 2625,
+            "on_cpu": 2791,
+            "blocked": 0,
+            "wall_least": 1791,
+            "wall_most": 7584,
+            "wall_total": 10708,
+            "on_cpu_total": 11208,
+            "blocked_total": 0
+          },
+          {
+            "call": "tile_pipeline",
+            "least_calls": 3,
+            "most_calls": 3,
+            "wall": 739333,
+            "on_cpu": 738875,
+            "blocked": 6792,
+            "wall_least": 722917,
+            "wall_most": 45149625,
+            "wall_total": 8724417,
+            "on_cpu_total": 8652585,
+            "blocked_total": 48792
+          }
+        ]
+      }
+    }
   ]
 }

@@ -359,5 +359,67 @@
         "pooled_memory_blocks_made": 3
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "two-plane-pad-fills",
+        "calls": 0,
+        "in_calls": 0,
+        "on_cpu": 0,
+        "blocked": 0,
+        "elsewhere": 0,
+        "spend": 0,
+        "spend_least": 0,
+        "spend_most": 0,
+        "stopped": "the case forbids running its Metal leg here: the fill goes through fillTexture:/fillTextureColor:, which are Apple SPI, so no public call exists to record it from; the two-plane extended-range formats themselves are public, and the cases here that run no fill do record on Metal",
+        "per_call": []
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "two-plane-pad-fills",
+        "calls": 9,
+        "in_calls": 24449792,
+        "on_cpu": 6171916,
+        "blocked": 18277876,
+        "elsewhere": 11919834,
+        "spend": 36369626,
+        "spend_least": 26574043,
+        "spend_most": 57849956,
+        "degraded": [
+          "metal2vulkan-degrade-two-plane-buffer-blit"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 9,
+            "most_calls": 9,
+            "wall": 2123375,
+            "on_cpu": 610250,
+            "blocked": 1465125,
+            "wall_least": 1564042,
+            "wall_most": 3466000,
+            "wall_total": 24449792,
+            "on_cpu_total": 6171916,
+            "blocked_total": 18277876
+          }
+        ]
+      }
+    }
   ]
 }

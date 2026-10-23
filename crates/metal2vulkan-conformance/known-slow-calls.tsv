@@ -1,0 +1,35 @@
+# Known slow calls: our per-call cost against Metal's, where it is over an order of magnitude.
+#
+# READ THIS BEFORE ADDING A ROW. A row here is not an accepted difference and it is not permission
+# for anything. It is a call that costs an order of magnitude more than Metal's over the cases both
+# legs did exactly, written down so the one call that holds an open bug visible does not make every
+# run red and teach everyone to stop reading the report. Nothing here is resolved by being listed.
+#
+# The gate is held in BOTH directions (src/slow_calls.rs): a call over the margin that is not
+# listed fails the run, and a listed call that has come back inside the band fails it too, saying
+# the row looks fixed and must go. So a row cannot outlive the bug it stands for.
+#
+# Before adding a row, LOCALISE IT: `conformance times --runs 8 --call <name>` prints the call case
+# by case. A per-call total says that a call is expensive and never where, and the first row below
+# was 105x over the whole set and 1.2x over the three cases that obviously make it.
+#
+# A ratio here is a measurement and it moves: over two whole-set runs of one binary on this M3 Max,
+# Metal's own per-call totals moved a median 1.28x and as much as 2.43x. That is why the margin is
+# an order of magnitude and why a listed row is only read as fixed below the band (margin / 2.5).
+#
+# Fields, tab-separated:
+#   call                the Side call
+# A COLD MEASUREMENT IS REPORTED AND NEVER JUDGED, so no row here is measured with
+# `--cold-shaders`. That switch gives every case a fresh device as well as a fresh shader cache,
+# and only on our leg, so a cold reading over the margin does not say whether the cost is our
+# compile or first use on a new device: measured on this M3 Max, `target` is 0.9x warm and 14.3x
+# cold and compiles nothing at all. Nine calls were over the margin cold against four warm, and
+# seven of the nine were one mechanism. src/slow_calls.rs refuses to judge a cold run.
+#
+#   measured            the ratio its measurement read, with an x
+#   where the cost is   the family it is in, and what the figure splits into
+#   waiting on          what Metal does, what we do instead, and where the fix belongs
+replace_region	105.5x	all of it in the 16 xr-two-plane-samples cases: one replaceRegion each, Metal 4 us against our 1210 us, 92% of ours blocked; the other 86 cases that make the call are 1.3x together	Metal's replaceRegion on a two-plane extended-range texture answers in 4 us; ours waits about 1.1 ms, so we stage the upload and wait on it where Metal writes through. The fix is in the runtime's texture upload path for two-plane extended-range formats, not in the suite
+render_pipeline	33.3x	85 calls over the comparable set, Metal 5459 us against our 181742 us, of which 168004 us is our own CPU	Pipeline creation is CPU work we do and Metal does differently; AGENTS.md gives pipeline-creation time its own ceiling rather than the device API's, so this row records the size of the gap and is NOT yet attributed. It is unaudited: the alone-versus-in-set contrast has not been run on it
+render_pipeline_with_reflection	14.7x	one call, Metal 291 us against our 4274 us, 3946 us of it our own CPU	The same pipeline-creation path as render_pipeline plus reflection; listed separately because one call is too thin a measurement to fold into that row
+tile_pipeline	11.9x	three calls, Metal 192 us against our 2292 us, all of it our own CPU	The same pipeline-creation path for tile pipelines. Closest of the four to the band, so a quiet run may read it either side; the band exists for exactly this row

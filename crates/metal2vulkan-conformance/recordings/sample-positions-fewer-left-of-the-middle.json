@@ -410,5 +410,132 @@
         "variant_pipelines_made": 2
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "sample-positions-fewer-left-of-the-middle",
+        "calls": 0,
+        "in_calls": 0,
+        "on_cpu": 0,
+        "blocked": 0,
+        "elsewhere": 0,
+        "spend": 0,
+        "spend_least": 0,
+        "spend_most": 0,
+        "stopped": "the case forbids running its Metal leg here: fewer custom sample positions than the pass's samples is a count Metal's API validation stops, and one position past the pass's samples is measured to end Metal's process: a record run must not walk this family",
+        "per_call": []
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "sample-positions-fewer-left-of-the-middle",
+        "calls": 8,
+        "in_calls": 5430917,
+        "on_cpu": 3549122,
+        "blocked": 1945126,
+        "elsewhere": 1108584,
+        "spend": 6546583,
+        "spend_least": 5933458,
+        "spend_most": 9226001,
+        "degraded": [
+          "metal2vulkan-degrade-dont-care-store"
+        ],
+        "per_call": [
+          {
+            "call": "buffer",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 8916,
+            "on_cpu": 9166,
+            "blocked": 0,
+            "wall_least": 8250,
+            "wall_most": 10208,
+            "wall_total": 35375,
+            "on_cpu_total": 35792,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 945583,
+            "on_cpu": 947291,
+            "blocked": 0,
+            "wall_least": 909291,
+            "wall_most": 979292,
+            "wall_total": 945583,
+            "on_cpu_total": 947291,
+            "blocked_total": 0
+          },
+          {
+            "call": "read_buffer",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 2083,
+            "on_cpu": 2250,
+            "blocked": 0,
+            "wall_least": 1333,
+            "wall_most": 2667,
+            "wall_total": 2083,
+            "on_cpu_total": 2250,
+            "blocked_total": 0
+          },
+          {
+            "call": "render",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 3733167,
+            "on_cpu": 1843959,
+            "blocked": 1945126,
+            "wall_least": 3384791,
+            "wall_most": 6055833,
+            "wall_total": 3733167,
+            "on_cpu_total": 1843959,
+            "blocked_total": 1945126
+          },
+          {
+            "call": "render_pipeline",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 504459,
+            "on_cpu": 504958,
+            "blocked": 0,
+            "wall_least": 443750,
+            "wall_most": 521125,
+            "wall_total": 504459,
+            "on_cpu_total": 504958,
+            "blocked_total": 0
+          },
+          {
+            "call": "target",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 69875,
+            "on_cpu": 70333,
+            "blocked": 0,
+            "wall_least": 66250,
+            "wall_most": 83542,
+            "wall_total": 210334,
+            "on_cpu_total": 211042,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
   ]
 }

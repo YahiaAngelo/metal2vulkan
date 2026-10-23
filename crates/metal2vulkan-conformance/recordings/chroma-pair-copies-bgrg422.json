@@ -1272,5 +1272,82 @@
         "pooled_memory_blocks_made": 4
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "chroma-pair-copies-bgrg422",
+        "calls": 1,
+        "in_calls": 10622750,
+        "on_cpu": 1872625,
+        "blocked": 8750125,
+        "elsewhere": 5686834,
+        "spend": 16309584,
+        "spend_least": 14741708,
+        "spend_most": 47525542,
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 10622750,
+            "on_cpu": 1872625,
+            "blocked": 8750125,
+            "wall_least": 9442583,
+            "wall_most": 39962625,
+            "wall_total": 10622750,
+            "on_cpu_total": 1872625,
+            "blocked_total": 8750125
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "chroma-pair-copies-bgrg422",
+        "calls": 1,
+        "in_calls": 26273375,
+        "on_cpu": 7870917,
+        "blocked": 17132708,
+        "elsewhere": 13250375,
+        "spend": 42310916,
+        "spend_least": 20082125,
+        "spend_most": 68471042,
+        "degraded": [
+          "metal2vulkan-degrade-carried-decoded-twin",
+          "metal2vulkan-degrade-cpu-block-decode",
+          "metal2vulkan-degrade-staged-texture-copy"
+        ],
+        "per_call": [
+          {
+            "call": "work",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 26273375,
+            "on_cpu": 7870917,
+            "blocked": 17132708,
+            "wall_least": 14044542,
+            "wall_most": 55220667,
+            "wall_total": 26273375,
+            "on_cpu_total": 7870917,
+            "blocked_total": 17132708
+          }
+        ]
+      }
+    }
   ]
 }

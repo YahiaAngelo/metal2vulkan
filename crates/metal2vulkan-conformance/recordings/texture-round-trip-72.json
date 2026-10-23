@@ -225,5 +225,129 @@
         "pooled_memory_blocks_made": 4
       }
     }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 305,
+      "times": {
+        "case": "texture-round-trip-72",
+        "calls": 4,
+        "in_calls": 45250,
+        "on_cpu": 45918,
+        "blocked": 0,
+        "elsewhere": 2375,
+        "spend": 46583,
+        "spend_least": 31875,
+        "spend_most": 452375,
+        "per_call": [
+          {
+            "call": "read_texture_over",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 4958,
+            "on_cpu": 5083,
+            "blocked": 0,
+            "wall_least": 4709,
+            "wall_most": 16208,
+            "wall_total": 13458,
+            "on_cpu_total": 13751,
+            "blocked_total": 0
+          },
+          {
+            "call": "replace_region",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 6083,
+            "on_cpu": 6208,
+            "blocked": 0,
+            "wall_least": 5375,
+            "wall_most": 21042,
+            "wall_total": 6083,
+            "on_cpu_total": 6208,
+            "blocked_total": 0
+          },
+          {
+            "call": "texture_2d_in_role",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 25709,
+            "on_cpu": 25917,
+            "blocked": 0,
+            "wall_least": 15583,
+            "wall_most": 68125,
+            "wall_total": 25709,
+            "on_cpu_total": 25917,
+            "blocked_total": 0
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 17.56 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 292,
+      "times": {
+        "case": "texture-round-trip-72",
+        "calls": 4,
+        "in_calls": 59667,
+        "on_cpu": 60499,
+        "blocked": 0,
+        "elsewhere": 459,
+        "spend": 59875,
+        "spend_least": 58000,
+        "spend_most": 187334,
+        "per_call": [
+          {
+            "call": "read_texture_over",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 2375,
+            "on_cpu": 2625,
+            "blocked": 0,
+            "wall_least": 2333,
+            "wall_most": 6750,
+            "wall_total": 5708,
+            "on_cpu_total": 6042,
+            "blocked_total": 0
+          },
+          {
+            "call": "replace_region",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 2875,
+            "on_cpu": 3000,
+            "blocked": 0,
+            "wall_least": 2792,
+            "wall_most": 8042,
+            "wall_total": 2875,
+            "on_cpu_total": 3000,
+            "blocked_total": 0
+          },
+          {
+            "call": "texture_2d_in_role",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 51167,
+            "on_cpu": 51416,
+            "blocked": 0,
+            "wall_least": 49292,
+            "wall_most": 160125,
+            "wall_total": 51167,
+            "on_cpu_total": 51416,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
   ]
 }
