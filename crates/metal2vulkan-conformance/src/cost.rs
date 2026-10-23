@@ -985,18 +985,21 @@ impl CaseCost {
     ///
     /// A count whose runs disagreed carries its range and is reported rather than gated.
     pub fn record(&self, venue: &str, measured: String) -> CostRecord {
-        let mut bounds = BTreeMap::new();
-        let mut moving = BTreeMap::new();
-        for (count, most) in self.counts.iter() {
-            bounds.insert(count.to_owned(), most);
-            let least = self.least.get(count);
-            // A count the rule already names as racy is not written here: the rule ungates it
-            // whatever a measurement saw, so an entry would be redundant. What that leaves is the
-            // useful list — a count written here moved for a reason the rule does not explain.
-            if least < most && racy(count).is_none() {
-                moving.insert(count.to_owned(), least);
-            }
-        }
+        let bounds = self
+            .counts
+            .iter()
+            .map(|(count, most)| (count.to_owned(), most))
+            .collect();
+        // The stored list **is** the printed one ([`CaseCost::moved`]), not a second computation of
+        // the same rule. Two paths over one rule drift silently and only one of them is ever
+        // checked: breaking the ceiling exception in `apart_from` alone, where the printed and
+        // stored forms of *that* rule were separate, left every test in this crate passing. A
+        // command's output and a record's value are worth collapsing wherever they can be.
+        let moving = self
+            .moved()
+            .into_iter()
+            .map(|(count, least, _)| (count.to_owned(), least))
+            .collect();
         CostRecord {
             venue: venue.to_owned(),
             runs: self.runs,
@@ -1022,32 +1025,22 @@ impl CaseCost {
     pub fn fold_alone_into(&self, held: &CostRecord, measured: String) -> CostRecord {
         let mut folded = held.clone();
         folded.contrasted = Some(measured);
-        let names: std::collections::BTreeSet<&str> = self
-            .counts
-            .iter()
-            .map(|(count, _)| count)
-            .chain(held.bounds.keys().map(String::as_str))
-            .collect();
-        for count in names {
-            // The rule already ungates these whatever either shape read, so an entry would be
-            // redundant and the bound is the gate's own shape's.
+        // The counts the selection decides are the ones the command prints ([`apart_from`]), the
+        // same list and not a second computation of it. The rule it applies — which counts the two
+        // shapes disagree on, less the ones the race rule already reports and the ones whose
+        // ceiling the lone run is — lives there alone.
+        for (count, _, apart) in self.apart_from(held) {
+            folded.composed.insert(count.to_owned(), apart);
+        }
+        // The bound stays the largest either shape saw, so the record's own number is honest about
+        // what was observed. For a gated count the two shapes agree, so only the bounds of counts
+        // that are reported anyway widen. A count the race rule names keeps the gate's own shape's
+        // bound, because the lone run says nothing about a reading that is a thread's arrival.
+        for (count, _) in self.counts.iter() {
             if racy(count).is_some() {
                 continue;
             }
             let apart = self.counts.get(count);
-            let inside = held.bounds.get(count).copied().unwrap_or(0);
-            // A count whose larger reading is the no-sharing extreme keeps its gate there
-            // ([`monotone`]), because no composition can exceed what the case does with nothing
-            // before it. The direction is checked rather than assumed: a lone run reading *lower*
-            // is the one thing that would make such a bound wrong, so it is reported like any
-            // other count the selection decides.
-            let its_ceiling = monotone(count).is_some() && apart > inside;
-            if apart != inside && !its_ceiling {
-                folded.composed.insert(count.to_owned(), apart);
-            }
-            // The bound stays the largest either shape saw, so the record's own number is honest
-            // about what was observed. For a gated count the two agree, so only the bounds of
-            // counts that are reported anyway widen.
             let bound = folded.bounds.entry(count.to_owned()).or_insert(apart);
             *bound = (*bound).max(apart);
         }
