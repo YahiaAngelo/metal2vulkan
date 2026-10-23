@@ -1623,3 +1623,110 @@ fn the_ledger_fails_on_a_new_refusal_and_on_one_that_is_gone() {
         "{found:?}"
     );
 }
+
+#[test]
+fn an_allowance_no_site_needed_is_counted_and_named_rather_than_silently_kept() {
+    // The hole this closes: the up-front check over a case's allowances has to exempt a degrade
+    // notice the run did not announce, because a notice is announced once per device per kind. So
+    // a case could name a tolerance that fires on no venue, naming a notice no venue announces,
+    // and every run would read green with nobody told. Two allowances of exactly this shape were
+    // written and deleted by hand in this round.
+    let mut case = WordsCase::new("words", 2);
+    case.allowances = vec![
+        // A tolerance nothing needs, for a notice nothing announces: speculation.
+        Allowance::new(
+            "case/output",
+            Loosening::Absolute(8.0),
+            Justification::notice(Degradation::DeviceArithmetic),
+        ),
+        // A tolerance nothing needs, for a notice the run did announce: not speculation, just
+        // unused on this row.
+        Allowance::new(
+            "case/output",
+            Loosening::Absolute(8.0),
+            Justification::notice(Degradation::ShadowedTexture),
+        ),
+    ];
+    let bytes = words(&[1, 2]);
+    // The notice the second allowance names is announced, so it is justified; the run is
+    // byte-identical, so neither allowance fires.
+    let announced = [Degradation::ShadowedTexture.code()];
+    let recording = recording_of(
+        &case,
+        case.transcript(bytes.clone(), "Completed", &announced),
+        3,
+    );
+    let mut side = StubSide::new(bytes).announcing(&[Degradation::ShadowedTexture]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+
+    // Report-only: the run is still exact, and still compliant.
+    assert_eq!(replayed.verdict, Verdict::Exact, "{}", replayed.verdict);
+    assert_eq!(replayed.allowances.named, 2);
+    assert_eq!(replayed.allowances.fired(), 0);
+    assert_eq!(
+        replayed.allowances.unfired.len(),
+        2,
+        "{:?}",
+        replayed.allowances.unfired
+    );
+
+    let mut report = Report::new();
+    report.add(replayed);
+    assert!(report.is_compliant());
+    assert_eq!(report.allowance_counts(), (2, 2));
+    assert_eq!(report.unfired_everywhere().len(), 2);
+    // Only the one nothing justifies is called out as a tolerance no run has checked.
+    let unchecked = report.unchecked_everywhere();
+    assert_eq!(unchecked.len(), 1, "{unchecked:?}");
+    assert_eq!(
+        unchecked[0].1.justified_by,
+        Justification::notice(Degradation::DeviceArithmetic).describe()
+    );
+    let rendered = report.render();
+    assert!(
+        rendered.contains("2 named, 0 fired, 2 never fired"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains(Degradation::DeviceArithmetic.code()),
+        "{rendered}"
+    );
+    assert!(rendered.contains("words                "), "{rendered}");
+}
+
+#[test]
+fn an_allowance_that_fires_is_not_counted_as_unfired() {
+    // The other half of the guard: a tolerance the run needs must not show up in the unfired
+    // count, or the count would say "nobody checked this" of the one allowance a run did check.
+    let mut case = WordsCase::new("words", 2);
+    case.allowances = vec![
+        Allowance::new(
+            "case/output",
+            Loosening::Absolute(8.0),
+            Justification::notice(Degradation::DeviceArithmetic),
+        ),
+        // The notice site differs too, because the device announced what the tolerance names and
+        // Metal announces nothing. That allowance fires as well, which is the point: both are
+        // claims the run used.
+        crate::replay::notice_allowance(Degradation::DeviceArithmetic.code()),
+    ];
+    let recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
+    // One word differs by 7, inside the allowance, and the notice it names is announced.
+    let mut side = StubSide::new(words(&[1, 9])).announcing(&[Degradation::DeviceArithmetic]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert!(
+        matches!(replayed.verdict, Verdict::Announced { .. }),
+        "{}",
+        replayed.verdict
+    );
+    assert_eq!(replayed.allowances.fired(), 2);
+    assert!(
+        replayed.allowances.unfired.is_empty(),
+        "{:?}",
+        replayed.allowances.unfired
+    );
+    let mut report = Report::new();
+    report.add(replayed);
+    assert!(report.unfired_everywhere().is_empty());
+    assert!(report.render().contains("2 named, 2 fired, 0 never fired"));
+}
