@@ -66,14 +66,8 @@ use metal2vulkan_runtime::{
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
     LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region,
     RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState,
-    SamplerStateOptions,
-    ScissorRect,
-    Size,
-    SparseTextureRegionAlignmentMode,
-    StoreAction,
-    Texture,
-    TextureDescriptor,
-    Viewport,
+    SamplerStateOptions, ScissorRect, Size, SparseTextureRegionAlignmentMode, StoreAction, Texture,
+    TextureDescriptor, Viewport,
 };
 use std::time::Duration;
 
