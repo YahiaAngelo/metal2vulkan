@@ -238,20 +238,24 @@ const OBJECT_ROWS: &[Row] = &[
 
 /// The probe's object cases whose `drawMeshThreads` leaves a partial object threadgroup (the
 /// lane's `OBJECT_CASES`' two `Threads` rows). Metal draws them, running the threads left; the
-/// runtime refuses them, which is this case's whole subject.
-const OBJECT_THREAD_ROWS: &[Row] = &[
-    object(
+/// runtime refuses them, which is these cases' whole subject.
+///
+/// Each is a case of its own, holding one row. A refused call stops a run, and the run's later
+/// rows are then neither compared nor reported, so two refusing rows in one case would report one
+/// refusal and lose the other.
+const OBJECT_THREAD_ROWS: [&[Row]; 2] = [
+    &[object(
         "object-threads-6-by-4",
         [2, 1, 0, 0],
         Binding::Buffer,
         Draw::Threads([6, 1, 1], [4, 1, 1], [2, 1, 1]),
-    ),
-    object(
+    )],
+    &[object(
         "object-threads-5x3-by-4x2",
         [1, 1, 0, 0],
         Binding::Buffer,
         Draw::Threads([5, 3, 1], [4, 2, 1], [2, 1, 1]),
-    ),
+    )],
 ];
 
 /// Object draws whose object threadgroups each set a mesh grid Metal launches nothing for (the
@@ -325,10 +329,16 @@ pub fn all() -> Vec<MeshDraws> {
             rows: OBJECT_ROWS,
         },
         MeshDraws {
-            name: "mesh-object-draws-partial-threadgroup",
+            name: "mesh-object-draws-partial-threadgroup-6-by-4",
             object: Some("mesh_draws_object"),
             mesh: "mesh_draws_mesh",
-            rows: OBJECT_THREAD_ROWS,
+            rows: OBJECT_THREAD_ROWS[0],
+        },
+        MeshDraws {
+            name: "mesh-object-draws-partial-threadgroup-5x3-by-4x2",
+            object: Some("mesh_draws_object"),
+            mesh: "mesh_draws_mesh",
+            rows: OBJECT_THREAD_ROWS[1],
         },
         MeshDraws {
             name: "mesh-object-draws-past-limits",
@@ -367,8 +377,19 @@ impl MeshDraws {
         }
     }
 
-    /// Run one row: a fresh pass of its own targets, and the sites it observed.
-    fn row(&self, side: &mut dyn Side, pipeline: Handle, row: &Row) -> Result<Node, Abort> {
+    /// Run one row: a fresh pass of its own targets, emitting the sites it observed.
+    ///
+    /// A step the side refused stops the run at that call, after the call's site is emitted. That
+    /// is what makes a refusal its own verdict: were the run to carry on and read the attachments
+    /// back, the bytes a refused draw did not write would be divergences of their own and the
+    /// refusal would be buried under them.
+    fn row(
+        &self,
+        side: &mut dyn Side,
+        pipeline: Handle,
+        row: &Row,
+        sites: &mut Sites,
+    ) -> Result<(), Abort> {
         let at = self.row_site(row);
         let mut node = Node::branch(at.clone(), Vec::new());
         let stop = |at: &str, failure: Failure| Abort {
@@ -441,6 +462,23 @@ impl MeshDraws {
             ));
         }
         node = node.with(calls);
+        if let Some((at, failure)) =
+            steps
+                .iter()
+                .zip(&outcome.refused)
+                .enumerate()
+                .find_map(|(index, (step, refused))| {
+                    refused.as_ref().map(|failure| {
+                        (
+                            format!("{at}/calls/{index}-{}", step.call()),
+                            failure.clone(),
+                        )
+                    })
+                })
+        {
+            sites.push(node);
+            return Err(Abort { at, failure });
+        }
         node = node.with(Node::leaf(
             "status",
             Observed::value(Value::ok(outcome.status.clone())),
@@ -477,7 +515,8 @@ impl MeshDraws {
             "drawn",
             Observed::value(Value::Uint(drawn(&read))),
         ));
-        Ok(node)
+        sites.push(node);
+        Ok(())
     }
 }
 
@@ -589,7 +628,7 @@ impl Case for MeshDraws {
             },
             Input::bytes("functions", &functions),
             Input::bytes(
-                "attachments",
+                "render-targets",
                 format!("{ATTACHMENTS}x RGBA32Uint {SIDE}x{SIDE} cleared to zero").as_bytes(),
             ),
             Input::bytes("rows", &rows),
@@ -612,8 +651,7 @@ impl Case for MeshDraws {
             side.mesh_pipeline(library, &self.functions()),
         )?;
         for row in self.rows {
-            let node = self.row(side, pipeline, row)?;
-            sites.push(node);
+            self.row(side, pipeline, row, sites)?;
         }
         Ok(())
     }
