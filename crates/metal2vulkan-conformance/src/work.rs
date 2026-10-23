@@ -60,7 +60,12 @@ pub struct TextureSpec {
     pub kind: TextureKind,
     pub width: u64,
     pub height: u64,
+    /// `depth`: a 3D texture's images. 1 for every other kind, as Metal's descriptor has it.
+    pub depth: u64,
     pub levels: u64,
+    /// `arrayLength`, which is 1 for a cube: Metal counts a cube's six faces as its slices and not
+    /// as its array length, so a case over a cube reads six slices out of a spec whose
+    /// `slices` is 1 ([`TextureSpec::faces`]).
     pub slices: u64,
     pub samples: u64,
     /// Where the texture's own memory lives ([`Storage`]).
@@ -89,6 +94,7 @@ impl TextureSpec {
             kind: TextureKind::Type2D,
             width,
             height,
+            depth: 1,
             levels: 1,
             slices: 1,
             samples: 1,
@@ -126,6 +132,36 @@ impl TextureSpec {
         self.kind = TextureKind::Type2DArray;
         self.slices = slices;
         self
+    }
+
+    /// The same texture as a cube of `side` texels a face.
+    ///
+    /// Its `slices` stays 1, because that is `arrayLength` and a cube's array length is 1; its six
+    /// faces are the slices a copy names ([`TextureSpec::faces`]).
+    #[must_use]
+    pub const fn cube(mut self, side: u64) -> Self {
+        self.kind = TextureKind::Cube;
+        self.width = side;
+        self.height = side;
+        self.slices = 1;
+        self
+    }
+
+    /// The same texture as a 3D one of `depth` images.
+    #[must_use]
+    pub const fn volume(mut self, depth: u64) -> Self {
+        self.kind = TextureKind::Type3D;
+        self.depth = depth;
+        self.slices = 1;
+        self
+    }
+
+    /// The slices a copy may name: a cube's six faces, otherwise the array length.
+    pub const fn faces(&self) -> u64 {
+        match self.kind {
+            TextureKind::Cube => 6,
+            _ => self.slices,
+        }
     }
 
     /// The same texture in shared storage.
@@ -171,19 +207,33 @@ impl TextureSpec {
 pub enum TextureKind {
     Type2D,
     Type2DArray,
+    /// A cube of six faces, each `width` by `height`. Its faces are the slices a copy names, and
+    /// its `arrayLength` is 1.
+    Cube,
+    /// A 3D texture of `depth` images, whose levels halve the depth as well as the width and the
+    /// height.
+    Type3D,
     Type2DMultisample,
     Type2DMultisampleArray,
     /// A texture over a buffer's bytes; its width is its texels and its height is 1.
     TextureBuffer,
 }
 
-/// Which plane of a combined format a copy moves, as Metal's `MTLBlitOption` names it.
+/// The `MTLBlitOption` a copy takes: which plane of a combined format it moves, or PVRTC's
+/// row-linear block order.
+///
+/// It is one enum rather than a bit set because Metal's own options are mutually exclusive in
+/// practice — a depth plane and a PVRTC row order cannot both apply to one format — and a case
+/// states the one it means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Plane {
-    /// Every byte of the texture's own format.
+    /// Every byte of the texture's own format, with no option.
     Whole,
     Depth,
     Stencil,
+    /// `MTLBlitOptionRowLinearPVRTC`: a PVRTC texture's blocks lie row by row, `bytes_per_row`
+    /// apart, instead of in the block order Metal otherwise uses.
+    RowLinearPvrtc,
 }
 
 /// A resource a case makes. Each is named by its index in [`Work::resources`], so a step refers to
@@ -232,11 +282,20 @@ pub enum Resource {
         offset: u64,
         bytes_per_row: u64,
     },
-    /// A view of `texture`'s `slice` in `format`, as a 2D multisample texture where `flatten`.
+    /// A view of `texture` in `format`, over `level_count` levels from `level` and `slice_count`
+    /// slices from `slice`, as a 2D multisample texture where `flatten`.
+    ///
+    /// The ranges are stated rather than assumed because the two families that view a texture mean
+    /// opposite things by one: a per-sample read-back wants one slice of one level, while a
+    /// compressed texture read through its sibling format wants every level and every slice, so
+    /// that the view's own copies reach the whole chain.
     View {
         texture: usize,
         format: u32,
+        level: u64,
+        level_count: u64,
         slice: u64,
+        slice_count: u64,
         flatten: bool,
     },
 }
