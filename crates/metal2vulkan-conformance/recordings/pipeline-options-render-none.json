@@ -1,0 +1,177 @@
+{
+  "format": 1,
+  "case": "pipeline-options-render-none",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "reflection/texture_accesses.ll",
+      "entry": "texture_accesses_vertex",
+      "source_sha256": "081bf6dfe075bb2171d010f4720eb3bd1fce1d77b5cf5b7cf6cb07afaec9bfc8"
+    },
+    {
+      "fixture": "reflection/texture_accesses.air.ll",
+      "entry": "texture_accesses_vertex",
+      "source_sha256": "954c6d7119e9d0bc9526de28fbbea84424cb9619dc05a1e9ee7b8659f60e0dd3"
+    },
+    {
+      "fixture": "reflection/texture_accesses.ll",
+      "entry": "texture_accesses_fragment",
+      "source_sha256": "081bf6dfe075bb2171d010f4720eb3bd1fce1d77b5cf5b7cf6cb07afaec9bfc8"
+    },
+    {
+      "fixture": "reflection/texture_accesses.air.ll",
+      "entry": "texture_accesses_fragment",
+      "source_sha256": "954c6d7119e9d0bc9526de28fbbea84424cb9619dc05a1e9ee7b8659f60e0dd3"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "081bf6dfe075bb2171d010f4720eb3bd1fce1d77b5cf5b7cf6cb07afaec9bfc8"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "954c6d7119e9d0bc9526de28fbbea84424cb9619dc05a1e9ee7b8659f60e0dd3"
+                        }
+                      }
+                    },
+                    {
+                      "name": "options",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "551ebb2cc5e9d83f795aa1d3311b960f5691348c11cfca6a69c53362f1633ad1"
+                        }
+                      }
+                    },
+                    {
+                      "name": "attachment",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ba8c9eac092a503e4fb70771c34a00c5bb651043de24db4d3525ebbb3ee7ff08"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "outcome",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "reflected",
+                      "observed": {
+                        "value": {
+                          "bool": false
+                        }
+                      }
+                    },
+                    {
+                      "name": "vertex_bindings",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "None",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "fragment_bindings",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "None",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

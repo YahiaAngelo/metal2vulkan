@@ -382,6 +382,40 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.compute_pipeline_bindings(library, entry)
     }
 
+    fn compute_pipeline_under_options(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        options: u64,
+    ) -> Answer<crate::pipeline_options::OptionOutcome> {
+        let _span = self.watch("compute_pipeline_under_options");
+        self.inner
+            .compute_pipeline_under_options(library, entry, options)
+    }
+
+    fn render_pipeline_under_options(
+        &mut self,
+        library: Handle,
+        vertex: &str,
+        fragment: &str,
+        attachment: PixelFormat,
+        options: u64,
+    ) -> Answer<crate::pipeline_options::OptionOutcome> {
+        let _span = self.watch("render_pipeline_under_options");
+        self.inner
+            .render_pipeline_under_options(library, vertex, fragment, attachment, options)
+    }
+
+    fn render_pipeline_functions_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &crate::pipeline_functions::FunctionsDescriptorSpec<'_>,
+    ) -> Answer<crate::pipeline_functions::FunctionsDescriptorFacts> {
+        let _span = self.watch("render_pipeline_functions_descriptor_facts");
+        self.inner
+            .render_pipeline_functions_descriptor_facts(library, spec)
+    }
+
     fn constant_data_offset(&mut self, encoder: Handle, index: u32) -> Answer<u64> {
         let _span = self.watch("constant_data_offset");
         self.inner.constant_data_offset(encoder, index)

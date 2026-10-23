@@ -1,0 +1,195 @@
+{
+  "format": 1,
+  "case": "pipeline-functions-tile-only",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "visible_table_functions.ll",
+      "entry": "visible_table_functions",
+      "source_sha256": "f8484e8c7fa3e0eeb3b812a22ffd727068cd811109a23e29363e0eff535470f0"
+    },
+    {
+      "fixture": "visible_table_functions.air.ll",
+      "entry": "visible_table_functions",
+      "source_sha256": "3f009dfc20260ffbd454841e8c4c5a1a3c6d4eb0bb317f9eecd5be1e25eb1483"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f8484e8c7fa3e0eeb3b812a22ffd727068cd811109a23e29363e0eff535470f0"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3f009dfc20260ffbd454841e8c4c5a1a3c6d4eb0bb317f9eecd5be1e25eb1483"
+                        }
+                      }
+                    },
+                    {
+                      "name": "writes",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "907214b793c3e0617e80a33cd5991d583cc5cbd378d59cf479e414113bb2ec60"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "facts",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "vertex_additional_binary_functions",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "count",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "fragment_additional_binary_functions",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "count",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "tile_additional_binary_functions",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "count",
+                          "observed": {
+                            "value": {
+                              "uint": 2
+                            }
+                          }
+                        },
+                        {
+                          "name": "name/0",
+                          "observed": {
+                            "value": {
+                              "lines": [
+                                "table_mul"
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "name": "name/1",
+                          "observed": {
+                            "value": {
+                              "lines": [
+                                "table_add"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

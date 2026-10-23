@@ -771,6 +771,64 @@ pub trait Side {
         Err(Failure::unavailable("compute_pipeline_bindings"))
     }
 
+    /// `newComputePipelineStateWithFunction:options:reflection:error:` under the raw
+    /// `MTLPipelineOption` value `options`, answering whether a reflection came back and what it
+    /// held ([`OptionOutcome`](crate::pipeline_options::OptionOutcome)).
+    ///
+    /// The option is a **raw** value because the sweep's subject is the whole of Metal's option
+    /// word, the bits it does not define included, and a typed set that spelled only the three
+    /// defined bits could not state the rest.
+    ///
+    /// One call for the creation and the reflection together, for the reason
+    /// [`Side::compute_pipeline_bindings`] states: which getter to ask of a binding is decided by
+    /// what an earlier getter answered, and whether to ask at all is decided by this creation.
+    fn compute_pipeline_under_options(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        options: u64,
+    ) -> Answer<crate::pipeline_options::OptionOutcome> {
+        let _ = (library, entry, options);
+        Err(Failure::unavailable("compute_pipeline_under_options"))
+    }
+
+    /// `newRenderPipelineStateWithDescriptor:options:reflection:error:` of the pipeline `vertex`,
+    /// `fragment` and `attachment` describe, under the raw `MTLPipelineOption` value `options`.
+    ///
+    /// The vertex and fragment binding lists alone, for the reason
+    /// [`crate::cases::pipeline_options`] states: a drawing pipeline's other three stage lists are
+    /// empty on both sides by construction, so a site for one would compare an empty list against
+    /// an empty list.
+    fn render_pipeline_under_options(
+        &mut self,
+        library: Handle,
+        vertex: &str,
+        fragment: &str,
+        attachment: PixelFormat,
+        options: u64,
+    ) -> Answer<crate::pipeline_options::OptionOutcome> {
+        let _ = (library, vertex, fragment, attachment, options);
+        Err(Failure::unavailable("render_pipeline_under_options"))
+    }
+
+    /// What an `MTLRenderPipelineFunctionsDescriptor` answers after `spec`'s writes
+    /// ([`FunctionsDescriptorFacts`](crate::pipeline_functions::FunctionsDescriptorFacts)).
+    ///
+    /// The writes and the reads in one call, because the descriptor is mutable and what a case
+    /// means is "the descriptor these writes made answers this": a side that kept the object
+    /// between calls would be answering about a different descriptor than the one the case
+    /// states.
+    fn render_pipeline_functions_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &crate::pipeline_functions::FunctionsDescriptorSpec<'_>,
+    ) -> Answer<crate::pipeline_functions::FunctionsDescriptorFacts> {
+        let _ = (library, spec);
+        Err(Failure::unavailable(
+            "render_pipeline_functions_descriptor_facts",
+        ))
+    }
+
     /// `newComputePipelineStateWithDescriptor:options:reflection:error:` of the descriptor
     /// `spec` describes whole ([`ComputeStateSpec`](crate::pipeline_facts::ComputeStateSpec)).
     ///

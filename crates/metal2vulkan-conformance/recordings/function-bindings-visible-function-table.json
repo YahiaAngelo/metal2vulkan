@@ -1,0 +1,416 @@
+{
+  "format": 1,
+  "case": "function-bindings-visible-function-table",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "visible_table_caller.ll",
+      "entry": "visible_table_dispatch",
+      "source_sha256": "948168a8fe7df7d16ad89c9b5dd6bd6013b8aa10632f71ff318cd05d57f29590"
+    },
+    {
+      "fixture": "visible_table_caller.air.ll",
+      "entry": "visible_table_dispatch",
+      "source_sha256": "5c8d6370ee20afca5837d955c212b056568725d1164a7ee544e629764396509a"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "948168a8fe7df7d16ad89c9b5dd6bd6013b8aa10632f71ff318cd05d57f29590"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "5c8d6370ee20afca5837d955c212b056568725d1164a7ee544e629764396509a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "entry",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3d318cad02ae26f4178b706d9dde04ff00ede4571367628e301abb0f796839ba"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "bindings",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "count",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "MTLBindingTypeBuffer/0/out",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "name",
+                          "observed": {
+                            "value": {
+                              "lines": [
+                                "out"
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "name": "type",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLBindingTypeBuffer"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 0
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "access",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLBindingAccessReadWrite"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 1
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "index",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        },
+                        {
+                          "name": "used",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "argument",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "buffer",
+                          "observed": {
+                            "value": "absent"
+                          },
+                          "children": [
+                            {
+                              "name": "alignment",
+                              "observed": {
+                                "value": {
+                                  "uint": 4
+                                }
+                              }
+                            },
+                            {
+                              "name": "data_size",
+                              "observed": {
+                                "value": {
+                                  "uint": 4
+                                }
+                              }
+                            },
+                            {
+                              "name": "data_type",
+                              "observed": {
+                                "value": {
+                                  "fields": {
+                                    "name": {
+                                      "lines": [
+                                        "MTLDataTypeUInt"
+                                      ]
+                                    },
+                                    "raw": {
+                                      "uint": 33
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "name": "struct_type",
+                              "observed": {
+                                "value": {
+                                  "variant": {
+                                    "name": "None",
+                                    "payload": "absent"
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "name": "pointer_type",
+                              "observed": {
+                                "value": "absent"
+                              },
+                              "children": [
+                                {
+                                  "name": "element_type",
+                                  "observed": {
+                                    "value": {
+                                      "fields": {
+                                        "name": {
+                                          "lines": [
+                                            "MTLDataTypeUInt"
+                                          ]
+                                        },
+                                        "raw": {
+                                          "uint": 33
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "access",
+                                  "observed": {
+                                    "value": {
+                                      "fields": {
+                                        "name": {
+                                          "lines": [
+                                            "MTLBindingAccessReadWrite"
+                                          ]
+                                        },
+                                        "raw": {
+                                          "uint": 1
+                                        }
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "alignment",
+                                  "observed": {
+                                    "value": {
+                                      "uint": 4
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "data_size",
+                                  "observed": {
+                                    "value": {
+                                      "uint": 4
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "element_is_argument_buffer",
+                                  "observed": {
+                                    "value": {
+                                      "bool": false
+                                    }
+                                  }
+                                },
+                                {
+                                  "name": "element",
+                                  "observed": {
+                                    "value": {
+                                      "variant": {
+                                        "name": "Plain",
+                                        "payload": "absent"
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "name": "MTLBindingTypeVisibleFunctionTable/1/ops",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "name",
+                          "observed": {
+                            "value": {
+                              "lines": [
+                                "ops"
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "name": "type",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLBindingTypeVisibleFunctionTable"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 24
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "access",
+                          "observed": {
+                            "value": {
+                              "fields": {
+                                "name": {
+                                  "lines": [
+                                    "MTLBindingAccessReadOnly"
+                                  ]
+                                },
+                                "raw": {
+                                  "uint": 0
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "name": "index",
+                          "observed": {
+                            "value": {
+                              "uint": 1
+                            }
+                          }
+                        },
+                        {
+                          "name": "used",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        },
+                        {
+                          "name": "argument",
+                          "observed": {
+                            "value": {
+                              "bool": true
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

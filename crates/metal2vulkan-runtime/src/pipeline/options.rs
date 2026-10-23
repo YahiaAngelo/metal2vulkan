@@ -4,11 +4,15 @@
 //! - **Every bit is kept.** Metal accepts any raw value, undefined bits included (measured on an
 //!   M3 Max and an M4, validated or not: 8, 16, `1 << 10`, `1 << 31`, `1 << 40`), so the runtime
 //!   keeps the raw value and acts only on the bits Metal defines.
-//! - **Reflection.** `BINDING_INFO` and `BUFFER_TYPE_INFO` ask the `_with_reflection` creation
-//!   forms for the pipeline's reflection. Either, or both, gets the same full reflection, struct
-//!   and pointer types included, as Metal answers on an M3 Max and an M4: `BUFFER_TYPE_INFO` adds
-//!   nothing over `BINDING_INFO`. Neither gets none (Metal's nil). The other creation forms return
-//!   no reflection, as Metal's `reflection:nil`.
+//! - **Reflection.** Any option word but `NONE` asks the `_with_reflection` creation forms for the
+//!   pipeline's reflection, and every one of them gets the same full reflection, struct and
+//!   pointer types included: `BUFFER_TYPE_INFO` adds nothing over `BINDING_INFO`, and neither does
+//!   `FAIL_ON_BINARY_ARCHIVE_MISS` on its own or an undefined bit on its own. Metal tests the word
+//!   against zero and nothing finer (measured on an M3 Max under macOS 27.0.1, on a compute and a
+//!   render creation, at `FAIL_ON_BINARY_ARCHIVE_MISS`, 8, `1 << 31` and `1 << 40`, each of which
+//!   reflects, and at `NONE`, which does not; the conformance suite's `pipeline_options` family
+//!   holds it). `NONE` gets none, as do the creation forms with no reflection out-parameter, which
+//!   is Metal's `reflection:nil`.
 //! - **Binary archives.** `binary_archives` is the descriptor's `binaryArchives` (the compile
 //!   layer's descriptors are plain data, so the list rides here): where the creation looks
 //!   before compiling, and, under `FAIL_ON_BINARY_ARCHIVE_MISS`, where it must find its
@@ -56,29 +60,25 @@ impl PipelineOption {
         self.0 & other.0 == other.0
     }
 
-    /// Whether the options ask for reflection: **any** of the three bits Apple's header names.
+    /// Whether the options ask for reflection: **any** word but `NONE`, which is the whole of the
+    /// test Metal makes.
     ///
-    /// Not `BINDING_INFO | BUFFER_TYPE_INFO` alone, which is what Apple's documentation for the
-    /// third bit would suggest. Measured on an M3 Max under macOS 27.0.1 over all eight
-    /// combinations of the three bits (the conformance suite's `pipeline_options` family):
+    /// Not `BINDING_INFO | BUFFER_TYPE_INFO`, which is what Apple's documentation for the third
+    /// bit would suggest, and not the three named bits either. Measured on an M3 Max under macOS
+    /// 27.0.1 by the conformance suite's `pipeline_option_reflection` and `pipeline_options`
+    /// families, over all eight combinations of the named bits and over four words of undefined
+    /// bits (`1 << 3`, `1 << 31`, `1 << 40` and `BINDING_INFO | 1 << 3`), on the compute and the
+    /// render creation alike:
     /// `newComputePipelineStateWithFunction:options:reflection:error:` fills its `reflection`
-    /// out-parameter for every non-zero value and leaves it nil only for
-    /// `MTLPipelineOptionNone` — `MTLPipelineOptionFailOnBinaryArchiveMiss` **alone** included.
-    /// A creation that answered nil there would refuse a consumer the reflection Metal hands it.
-    ///
-    /// An undefined bit on its own is not measured and does not reflect: `from_raw` keeps every
-    /// bit Metal accepts, and what Metal does with a value its header gives no meaning to is not
-    /// something this answers for.
+    /// out-parameter for **every** non-zero value and leaves it nil only for
+    /// `MTLPipelineOptionNone` -- `MTLPipelineOptionFailOnBinaryArchiveMiss` alone included, and
+    /// a bit the header gives no meaning to included. Metal tests the word against zero and
+    /// nothing finer. A creation that answered nil here would refuse a consumer the reflection
+    /// Metal hands it.
     pub(crate) const fn reflects(self) -> bool {
-        self.0 & NAMED_BITS != 0
+        self.0 != PipelineOption::NONE.0
     }
 }
-
-/// The three bits `MTLPipelineOption` names in Apple's header, which is the set
-/// [`PipelineOption::reflects`] reads.
-const NAMED_BITS: u64 = PipelineOption::BINDING_INFO.0
-    | PipelineOption::BUFFER_TYPE_INFO.0
-    | PipelineOption::FAIL_ON_BINARY_ARCHIVE_MISS.0;
 
 impl std::ops::BitOr for PipelineOption {
     type Output = PipelineOption;

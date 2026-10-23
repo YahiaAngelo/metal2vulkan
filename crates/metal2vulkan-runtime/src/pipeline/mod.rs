@@ -529,7 +529,7 @@ impl Device {
 
     /// `newComputePipelineStateWithDescriptor:options:reflection:error:` with reflection:
     /// [`Device::new_compute_pipeline_state`], and the pipeline's reflection when `options` asks
-    /// for it (`BINDING_INFO`, `BUFFER_TYPE_INFO`, or both, which Metal answers alike), `None`
+    /// for it (any word but `NONE`, which Metal answers alike), `None`
     /// when it does not, as Metal leaves `reflection` nil. The reflection is
     /// [`ComputePipelineDescriptor::reflection`]'s, under the creation's budget; what it refuses
     /// refuses the call (`Unsupported`, `Compile`).

@@ -12,8 +12,8 @@ The suite reaches Metal through `objc2-metal`, whose Rust name for a binding is 
 
 Its limits, measured rather than asserted:
 
-- **1306 of 1460 call sites** in the Metal leg resolve to an item of the SDK. 47 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
-- **125 call sites resolve to no item**: an instance send whose receiver this could not type, or a message to a Metal class whose name `objc2-metal` declares on no Metal type. They cost the count 3 selectors, which the suite calls and which this attributes to no item:
+- **1325 of 1482 call sites** in the Metal leg resolve to an item of the SDK. 47 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
+- **126 call sites resolve to no item**: an instance send whose receiver this could not type, or a message to a Metal class whose name `objc2-metal` declares on no Metal type. They cost the count 3 selectors, which the suite calls and which this attributes to no item:
   - `alloc`, which `objc2-metal` declares on no Metal type, so it is an item of no Metal container
   - `class`, which `objc2-metal` declares on no Metal type, so it is an item of no Metal container
   - `count`, bound by `MTL4CounterHeap`, `MTL4CounterHeapDescriptor`
@@ -27,15 +27,15 @@ Its limits, measured rather than asserted:
 | | |
 |---|---|
 | implemented Metal items | 958 |
-| of those, exercised by the suite's Metal leg | 637 |
-| of those, not exercised | 321 |
-| share exercised | 66% |
-| of those exercised, no case reaching it loosens anything | 502 |
+| of those, exercised by the suite's Metal leg | 640 |
+| of those, not exercised | 318 |
+| share exercised | 67% |
+| of those exercised, no case reaching it loosens anything | 505 |
 | of those exercised, a case reaching it loosens some site | 135 |
-| case modules | 113 |
-| committed recordings | 884 |
-| distinct SDK items the Metal leg calls | 646 |
-| ledger rows (a case whose gap is recorded) | 43 |
+| case modules | 115 |
+| committed recordings | 915 |
+| distinct SDK items the Metal leg calls | 649 |
+| ledger rows (a case whose gap is recorded) | 44 |
 
 A tolerance names a **site of a transcript**, not an item, so the last two rows are read as written: a case that loosens one site of its own transcript may compare every other field of it exactly, and this derivation cannot tell which of a case's fields came from which Metal call. Where the distinction matters, read the case.
 
@@ -66,10 +66,10 @@ What this axis cannot see, measured rather than asserted:
 |---|---|
 | Metal enums and option sets with a generated value list | 43 |
 | their values | 703 |
-| values compared | 348 |
+| values compared | 351 |
 | share compared | 50% |
 | values only the suite's shared sources name | 4 |
-| values no source names and no recording holds | 351 |
+| values no source names and no recording holds | 348 |
 | types every value of which is compared | 15 |
 | types no value of which is compared | 5 |
 
@@ -82,10 +82,10 @@ Deepest gap first, which is the order the work list reads in. *answered* and *in
 | Metal type | values | compared | answered | in effect | shared only | missing |
 |---|---|---|---|---|---|---|
 | `MTLPixelFormat` | 301 | 179 | 112 | 110 | 0 | 122 |
-| `MTLDataType` | 97 | 15 | 10 | 9 | 0 | 82 |
+| `MTLDataType` | 97 | 16 | 11 | 9 | 0 | 81 |
 | `MTLAttributeFormat` | 54 | 1 | 0 | 1 | 0 | 53 |
 | `MTLVertexFormat` | 54 | 18 | 2 | 16 | 0 | 36 |
-| `MTLBindingType` | 12 | 4 | 4 | 0 | 0 | 8 |
+| `MTLBindingType` | 12 | 6 | 6 | 0 | 0 | 6 |
 | `MTLCompareFunction` | 8 | 4 | 0 | 4 | 0 | 4 |
 | `MTLFunctionType` | 7 | 3 | 3 | 0 | 0 | 4 |
 | `MTLStepFunction` | 9 | 5 | 0 | 5 | 0 | 4 |
@@ -130,10 +130,10 @@ Deepest gap first, which is the order the work list reads in. *answered* and *in
 The work list. A name here is a value of Metal's that no committed recording holds and no case module states **by name**: it is not a claim that Metal accepts the value on every device, and not a claim that no case reaches it, because a case that sweeps a type by ordinal states none of its values here. Each row is a question for the case, not a verdict on it.
 
 - **`MTLPixelFormat`**, 122 of 301: `MTLPixelFormatR16Sint`, `MTLPixelFormatRG8Unorm_sRGB`, `MTLPixelFormatRG8Uint`, `MTLPixelFormatRG8Sint`, `MTLPixelFormatRGB8Unorm`, `MTLPixelFormatRGB8Snorm`, `MTLPixelFormatRGB8Uint`, `MTLPixelFormatRGB8Sint`, `MTLPixelFormatRG16Uint`, `MTLPixelFormatRG16Sint`, `MTLPixelFormatRGBA8Sint`, `MTLPixelFormatRGB10A2Uint`, `MTLPixelFormatRGB16Unorm`, `MTLPixelFormatRGB16Snorm`, `MTLPixelFormatRGB16Uint`, `MTLPixelFormatRGB16Sint`, `MTLPixelFormatRGB16Float`, `MTLPixelFormatRG32Uint`, `MTLPixelFormatRG32Sint`, `MTLPixelFormatRGBA16Sint`, `MTLPixelFormatRGB32Uint`, `MTLPixelFormatRGB32Sint`, `MTLPixelFormatRGB32Float`, `MTLPixelFormatBC1_RGBA_sRGB`, `MTLPixelFormatBC2_RGBA`, `MTLPixelFormatBC2_RGBA_sRGB`, `MTLPixelFormatBC3_RGBA`, `MTLPixelFormatBC3_RGBA_sRGB`, `MTLPixelFormatBC4_RUnorm`, `MTLPixelFormatBC4_RSnorm`, `MTLPixelFormatBC5_RGUnorm`, `MTLPixelFormatBC5_RGSnorm`, `MTLPixelFormatBC6H_RGBFloat`, `MTLPixelFormatBC6H_RGBUfloat`, `MTLPixelFormatBC7_RGBAUnorm_sRGB`, `MTLPixelFormatPVRTC_RGB_2BPP`, `MTLPixelFormatPVRTC_RGB_2BPP_sRGB`, `MTLPixelFormatPVRTC_RGB_4BPP`, `MTLPixelFormatPVRTC_RGB_4BPP_sRGB`, `MTLPixelFormatPVRTC_RGBA_2BPP`, `MTLPixelFormatPVRTC_RGBA_2BPP_sRGB`, `MTLPixelFormatASTC_4x4_HDR`, `MTLPixelFormatASTC_5x4_HDR`, `MTLPixelFormatASTC_5x5_HDR`, `MTLPixelFormatASTC_6x5_HDR`, `MTLPixelFormatASTC_6x6_HDR`, `MTLPixelFormatASTC_8x5_HDR`, `MTLPixelFormatASTC_8x6_HDR`, `MTLPixelFormatASTC_8x8_HDR`, `MTLPixelFormatASTC_10x5_HDR`, `MTLPixelFormatASTC_10x6_HDR`, `MTLPixelFormatASTC_10x8_HDR`, `MTLPixelFormatASTC_10x10_HDR`, `MTLPixelFormatASTC_12x10_HDR`, `MTLPixelFormatASTC_12x12_HDR`, `MTLPixelFormatX24_Stencil8`, `MTLPixelFormatASTC_4x2_sRGB`, `MTLPixelFormatASTC_8x4_sRGB`, `MTLPixelFormatASTC_4x2_LDR`, `MTLPixelFormatASTC_8x4_LDR`, `MTLPixelFormatASTC_4x2_HDR`, `MTLPixelFormatASTC_8x4_HDR`, `MTLPixelFormatBGRA4Unorm`, `MTLPixelFormatARGB8Unorm_sRGB`, `MTLPixelFormatRGB16Bfloat`, `MTLPixelFormatRGBX8Unorm`, `MTLPixelFormatRGBX8Unorm_sRGB`, `MTLPixelFormatRGBX8Snorm`, `MTLPixelFormatRGBX8Uint`, `MTLPixelFormatRGBX8Sint`, `MTLPixelFormatRGBX16Uint`, `MTLPixelFormatRGBX16Sint`, `MTLPixelFormatRGBX16Float`, `MTLPixelFormatRGBX32Uint`, `MTLPixelFormatRGBX32Sint`, `MTLPixelFormatRGBX32Float`, `MTLPixelFormatYCBCR8_422_1P`, `MTLPixelFormatYCBCR10_444_1P`, `MTLPixelFormatYCBCR8_422_1P_sRGB`, `MTLPixelFormatYCBCR10_444_1P_sRGB`, `MTLPixelFormatYCBCRA8_444_1P`, `MTLPixelFormatYCBCR8_422_1P_REV`, `MTLPixelFormatYCBCR10_444_1P_PQ`, `MTLPixelFormatRGB10A2Unorm_PQ`, `MTLPixelFormatR10Unorm_PACKED`, `MTLPixelFormatRG10Unorm_PACKED`, `MTLPixelFormatYCBCR10_444_1P_XR`, `MTLPixelFormatR12Unorm_X4`, `MTLPixelFormatR12Unorm_X4_PQ`, `MTLPixelFormatRG12Unorm_X8`, `MTLPixelFormatR10Unorm_X6_PQ`, `MTLPixelFormatYCBCR10_444_1P_HLG`, `MTLPixelFormatR10Unorm_X6_HLG`, `MTLPixelFormatR12Unorm_X4_HLG`, `MTLPixelFormatRGB10A2Unorm_HLG`, `MTLPixelFormatRGB10A8_2P`, `MTLPixelFormatRGB10A8_2P_sRGB`, `MTLPixelFormatRGB10A8_2P_PQ`, `MTLPixelFormatRGB10A8_2P_HLG`, `MTLPixelFormatBGR10A2Unorm_sRGB`, `MTLPixelFormatBGR10A2Unorm_PQ`, `MTLPixelFormatBGRA10Uint_PACKED`, `MTLPixelFormatBGRA10_XR_PACKED`, `MTLPixelFormatBGRA10_XR_PACKED_sRGB`, `MTLPixelFormatBGRA10Unorm_PACKED`, `MTLPixelFormatBGRA10Unorm_PACKED_sRGB`, `MTLPixelFormatBGRA10Unorm_PACKED_HLG`, `MTLPixelFormatBGRA10Unorm_PACKED_PQ`, `MTLPixelFormatBGRA10Uint`, `MTLPixelFormatBGRA10Unorm`, `MTLPixelFormatBGRA10Unorm_sRGB`, `MTLPixelFormatBGRA10Unorm_HLG`, `MTLPixelFormatBGRA10Unorm_PQ`, `MTLPixelFormatR10Uint_X6`, `MTLPixelFormatR10Uint_PACKED`, `MTLPixelFormatRG10Uint_X12`, `MTLPixelFormatRG10Uint_PACKED`, `MTLPixelFormatR12Uint_X4`, `MTLPixelFormatR12Uint_PACKED`, `MTLPixelFormatRG12Uint_X8`, `MTLPixelFormatRG12Uint_PACKED`, `MTLPixelFormatRGB10A8Uint_2P`
-- **`MTLDataType`**, 82 of 97: `MTLDataTypeNone`, `MTLDataTypeArray`, `MTLDataTypeFloat3`, `MTLDataTypeFloat2x2`, `MTLDataTypeFloat2x3`, `MTLDataTypeFloat2x4`, `MTLDataTypeFloat3x2`, `MTLDataTypeFloat3x3`, `MTLDataTypeFloat3x4`, `MTLDataTypeFloat4x2`, `MTLDataTypeFloat4x3`, `MTLDataTypeFloat4x4`, `MTLDataTypeHalf`, `MTLDataTypeHalf3`, `MTLDataTypeHalf4`, `MTLDataTypeHalf2x2`, `MTLDataTypeHalf2x3`, `MTLDataTypeHalf2x4`, `MTLDataTypeHalf3x2`, `MTLDataTypeHalf3x3`, `MTLDataTypeHalf3x4`, `MTLDataTypeHalf4x2`, `MTLDataTypeHalf4x3`, `MTLDataTypeHalf4x4`, `MTLDataTypeInt`, `MTLDataTypeInt2`, `MTLDataTypeInt3`, `MTLDataTypeInt4`, `MTLDataTypeUInt2`, `MTLDataTypeUInt3`, `MTLDataTypeUInt4`, `MTLDataTypeShort`, `MTLDataTypeShort2`, `MTLDataTypeShort3`, `MTLDataTypeShort4`, `MTLDataTypeUShort`, `MTLDataTypeUShort2`, `MTLDataTypeUShort3`, `MTLDataTypeUShort4`, `MTLDataTypeChar`, `MTLDataTypeChar2`, `MTLDataTypeChar3`, `MTLDataTypeChar4`, `MTLDataTypeUChar`, `MTLDataTypeUChar2`, `MTLDataTypeUChar3`, `MTLDataTypeBool2`, `MTLDataTypeBool3`, `MTLDataTypeBool4`, `MTLDataTypeR8Unorm`, `MTLDataTypeR8Snorm`, `MTLDataTypeR16Unorm`, `MTLDataTypeR16Snorm`, `MTLDataTypeRG8Unorm`, `MTLDataTypeRG8Snorm`, `MTLDataTypeRG16Unorm`, `MTLDataTypeRG16Snorm`, `MTLDataTypeRGBA8Unorm`, `MTLDataTypeRGBA8Unorm_sRGB`, `MTLDataTypeRGBA8Snorm`, `MTLDataTypeRGBA16Unorm`, `MTLDataTypeRGBA16Snorm`, `MTLDataTypeRGB10A2Unorm`, `MTLDataTypeRG11B10Float`, `MTLDataTypeRGB9E5Float`, `MTLDataTypeLong`, `MTLDataTypeLong2`, `MTLDataTypeLong3`, `MTLDataTypeLong4`, `MTLDataTypeULong`, `MTLDataTypeULong2`, `MTLDataTypeULong3`, `MTLDataTypeULong4`, `MTLDataTypeIntersectionFunctionTable`, `MTLDataTypePrimitiveAccelerationStructure`, `MTLDataTypeInstanceAccelerationStructure`, `MTLDataTypeBFloat`, `MTLDataTypeBFloat2`, `MTLDataTypeBFloat3`, `MTLDataTypeBFloat4`, `MTLDataTypeDepthStencilState`, `MTLDataTypeTensor`
+- **`MTLDataType`**, 81 of 97: `MTLDataTypeNone`, `MTLDataTypeArray`, `MTLDataTypeFloat3`, `MTLDataTypeFloat2x2`, `MTLDataTypeFloat2x3`, `MTLDataTypeFloat2x4`, `MTLDataTypeFloat3x2`, `MTLDataTypeFloat3x3`, `MTLDataTypeFloat3x4`, `MTLDataTypeFloat4x2`, `MTLDataTypeFloat4x3`, `MTLDataTypeFloat4x4`, `MTLDataTypeHalf`, `MTLDataTypeHalf3`, `MTLDataTypeHalf4`, `MTLDataTypeHalf2x2`, `MTLDataTypeHalf2x3`, `MTLDataTypeHalf2x4`, `MTLDataTypeHalf3x2`, `MTLDataTypeHalf3x3`, `MTLDataTypeHalf3x4`, `MTLDataTypeHalf4x2`, `MTLDataTypeHalf4x3`, `MTLDataTypeHalf4x4`, `MTLDataTypeInt`, `MTLDataTypeInt2`, `MTLDataTypeInt3`, `MTLDataTypeInt4`, `MTLDataTypeUInt2`, `MTLDataTypeUInt3`, `MTLDataTypeShort`, `MTLDataTypeShort2`, `MTLDataTypeShort3`, `MTLDataTypeShort4`, `MTLDataTypeUShort`, `MTLDataTypeUShort2`, `MTLDataTypeUShort3`, `MTLDataTypeUShort4`, `MTLDataTypeChar`, `MTLDataTypeChar2`, `MTLDataTypeChar3`, `MTLDataTypeChar4`, `MTLDataTypeUChar`, `MTLDataTypeUChar2`, `MTLDataTypeUChar3`, `MTLDataTypeBool2`, `MTLDataTypeBool3`, `MTLDataTypeBool4`, `MTLDataTypeR8Unorm`, `MTLDataTypeR8Snorm`, `MTLDataTypeR16Unorm`, `MTLDataTypeR16Snorm`, `MTLDataTypeRG8Unorm`, `MTLDataTypeRG8Snorm`, `MTLDataTypeRG16Unorm`, `MTLDataTypeRG16Snorm`, `MTLDataTypeRGBA8Unorm`, `MTLDataTypeRGBA8Unorm_sRGB`, `MTLDataTypeRGBA8Snorm`, `MTLDataTypeRGBA16Unorm`, `MTLDataTypeRGBA16Snorm`, `MTLDataTypeRGB10A2Unorm`, `MTLDataTypeRG11B10Float`, `MTLDataTypeRGB9E5Float`, `MTLDataTypeLong`, `MTLDataTypeLong2`, `MTLDataTypeLong3`, `MTLDataTypeLong4`, `MTLDataTypeULong`, `MTLDataTypeULong2`, `MTLDataTypeULong3`, `MTLDataTypeULong4`, `MTLDataTypeIntersectionFunctionTable`, `MTLDataTypePrimitiveAccelerationStructure`, `MTLDataTypeInstanceAccelerationStructure`, `MTLDataTypeBFloat`, `MTLDataTypeBFloat2`, `MTLDataTypeBFloat3`, `MTLDataTypeBFloat4`, `MTLDataTypeDepthStencilState`, `MTLDataTypeTensor`
 - **`MTLAttributeFormat`**, 53 of 54: `MTLAttributeFormatInvalid`, `MTLAttributeFormatUChar2`, `MTLAttributeFormatUChar3`, `MTLAttributeFormatUChar4`, `MTLAttributeFormatChar2`, `MTLAttributeFormatChar3`, `MTLAttributeFormatChar4`, `MTLAttributeFormatUChar2Normalized`, `MTLAttributeFormatUChar3Normalized`, `MTLAttributeFormatUChar4Normalized`, `MTLAttributeFormatChar2Normalized`, `MTLAttributeFormatChar3Normalized`, `MTLAttributeFormatChar4Normalized`, `MTLAttributeFormatUShort2`, `MTLAttributeFormatUShort3`, `MTLAttributeFormatUShort4`, `MTLAttributeFormatShort2`, `MTLAttributeFormatShort3`, `MTLAttributeFormatShort4`, `MTLAttributeFormatUShort2Normalized`, `MTLAttributeFormatUShort3Normalized`, `MTLAttributeFormatUShort4Normalized`, `MTLAttributeFormatShort2Normalized`, `MTLAttributeFormatShort3Normalized`, `MTLAttributeFormatShort4Normalized`, `MTLAttributeFormatHalf2`, `MTLAttributeFormatHalf3`, `MTLAttributeFormatHalf4`, `MTLAttributeFormatFloat`, `MTLAttributeFormatFloat2`, `MTLAttributeFormatFloat3`, `MTLAttributeFormatFloat4`, `MTLAttributeFormatInt`, `MTLAttributeFormatInt2`, `MTLAttributeFormatInt3`, `MTLAttributeFormatInt4`, `MTLAttributeFormatUInt2`, `MTLAttributeFormatUInt3`, `MTLAttributeFormatUInt4`, `MTLAttributeFormatInt1010102Normalized`, `MTLAttributeFormatUInt1010102Normalized`, `MTLAttributeFormatUChar4Normalized_BGRA`, `MTLAttributeFormatUChar`, `MTLAttributeFormatChar`, `MTLAttributeFormatUCharNormalized`, `MTLAttributeFormatCharNormalized`, `MTLAttributeFormatUShort`, `MTLAttributeFormatShort`, `MTLAttributeFormatUShortNormalized`, `MTLAttributeFormatShortNormalized`, `MTLAttributeFormatHalf`, `MTLAttributeFormatFloatRG11B10`, `MTLAttributeFormatFloatRGB9E5`
 - **`MTLVertexFormat`**, 36 of 54: `MTLVertexFormatUChar2Normalized`, `MTLVertexFormatUChar3Normalized`, `MTLVertexFormatUChar4Normalized`, `MTLVertexFormatChar2Normalized`, `MTLVertexFormatChar3Normalized`, `MTLVertexFormatChar4Normalized`, `MTLVertexFormatUShort2Normalized`, `MTLVertexFormatUShort3Normalized`, `MTLVertexFormatUShort4Normalized`, `MTLVertexFormatShort2Normalized`, `MTLVertexFormatShort3Normalized`, `MTLVertexFormatShort4Normalized`, `MTLVertexFormatHalf2`, `MTLVertexFormatHalf3`, `MTLVertexFormatHalf4`, `MTLVertexFormatFloat`, `MTLVertexFormatFloat3`, `MTLVertexFormatFloat4`, `MTLVertexFormatInt`, `MTLVertexFormatInt2`, `MTLVertexFormatInt3`, `MTLVertexFormatInt4`, `MTLVertexFormatUInt`, `MTLVertexFormatUInt2`, `MTLVertexFormatUInt3`, `MTLVertexFormatUInt4`, `MTLVertexFormatInt1010102Normalized`, `MTLVertexFormatUInt1010102Normalized`, `MTLVertexFormatUChar4Normalized_BGRA`, `MTLVertexFormatUCharNormalized`, `MTLVertexFormatCharNormalized`, `MTLVertexFormatUShortNormalized`, `MTLVertexFormatShortNormalized`, `MTLVertexFormatHalf`, `MTLVertexFormatFloatRG11B10`, `MTLVertexFormatFloatRGB9E5`
-- **`MTLBindingType`**, 8 of 12: `MTLBindingTypeImageblockData`, `MTLBindingTypeImageblock`, `MTLBindingTypeVisibleFunctionTable`, `MTLBindingTypePrimitiveAccelerationStructure`, `MTLBindingTypeInstanceAccelerationStructure`, `MTLBindingTypeIntersectionFunctionTable`, `MTLBindingTypeObjectPayload`, `MTLBindingTypeTensor`
+- **`MTLBindingType`**, 6 of 12: `MTLBindingTypeImageblockData`, `MTLBindingTypePrimitiveAccelerationStructure`, `MTLBindingTypeInstanceAccelerationStructure`, `MTLBindingTypeIntersectionFunctionTable`, `MTLBindingTypeObjectPayload`, `MTLBindingTypeTensor`
 - **`MTLCompareFunction`**, 4 of 8: `MTLCompareFunctionLessEqual`, `MTLCompareFunctionGreater`, `MTLCompareFunctionNotEqual`, `MTLCompareFunctionGreaterEqual`
 - **`MTLFunctionType`**, 4 of 7: `MTLFunctionTypeVisible`, `MTLFunctionTypeIntersection`, `MTLFunctionTypeMesh`, `MTLFunctionTypeObject`
 - **`MTLStepFunction`**, 4 of 9: `MTLStepFunctionPerVertex`, `MTLStepFunctionPerInstance`, `MTLStepFunctionPerPatch`, `MTLStepFunctionPerPatchControlPoint`
@@ -211,8 +211,7 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLRasterizationRateMapDescriptor` | 10 | 5 | 5 | `rate_map_sweeps`, `rate_maps` |
 | `MTLBlitCommandEncoder` | 22 | 18 | 4 | `blend_sweeps`, `blit_encoder_commands`, `buffer_blits`, `buffer_depth_samples`… |
 | `MTLLibrary` | 11 | 7 | 4 | `argument_encoders`, `astc_textures`, `blend_sweeps`, `blit_encoder_commands`… |
-| `MTLRenderPipelineFunctionsDescriptor` | 4 | 0 | 4 |  |
-| `MTLRenderPipelineReflection` | 9 | 5 | 4 | `texture_accesses` |
+| `MTLRenderPipelineReflection` | 9 | 5 | 4 | `pipeline_options`, `texture_accesses` |
 | `MTLVisibleFunctionTable` | 4 | 0 | 4 |  |
 | `MTLBuffer` | 6 | 3 | 3 | `argument_encoders`, `astc_textures`, `blend_sweeps`, `blit_encoder_commands`… |
 | `MTLDepthStencilState` | 3 | 0 | 3 |  |
@@ -226,7 +225,7 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLAttributeDescriptorArray` | 3 | 1 | 2 | `indirect_commands`, `stage_in_regions` |
 | `MTLBinaryArchiveDescriptor` | 2 | 0 | 2 |  |
 | `MTLBufferLayoutDescriptorArray` | 3 | 1 | 2 | `indirect_commands`, `stage_in_regions` |
-| `MTLComputePipelineReflection` | 3 | 1 | 2 | `function_bindings`, `pipeline_option_reflection` |
+| `MTLComputePipelineReflection` | 3 | 1 | 2 | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` |
 | `MTLFunction` | 12 | 10 | 2 | `argument_encoders`, `function_facts`, `library_facts`, `tile_pipeline_descriptors` |
 | `MTLFunctionConstantValues` | 5 | 3 | 2 | `function_facts`, `library_facts` |
 | `MTLIndirectCommandBuffer` | 6 | 4 | 2 | `indirect_commands`, `mesh_commands` |
@@ -246,11 +245,11 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLVertexDescriptor` | 5 | 3 | 2 | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`… |
 | `MTLAllocation` | 1 | 0 | 1 |  |
 | `MTLArgumentDescriptor` | 8 | 7 | 1 | `argument_encoders` |
-| `MTLArrayType` | 9 | 8 | 1 | `function_bindings`, `pipeline_option_reflection` |
+| `MTLArrayType` | 9 | 8 | 1 | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` |
 | `MTLAttribute` | 7 | 6 | 1 | `function_facts`, `library_facts` |
 | `MTLAttributeDescriptor` | 4 | 3 | 1 | `indirect_commands`, `stage_in_regions` |
-| `MTLBinding` | 7 | 6 | 1 | `function_bindings`, `pipeline_option_reflection`, `texture_accesses` |
-| `MTLBufferBinding` | 6 | 5 | 1 | `function_bindings`, `pipeline_option_reflection` |
+| `MTLBinding` | 7 | 6 | 1 | `function_bindings`, `pipeline_option_reflection`, `pipeline_options`, `texture_accesses` |
+| `MTLBufferBinding` | 6 | 5 | 1 | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` |
 | `MTLBufferLayoutDescriptor` | 4 | 3 | 1 | `indirect_commands`, `stage_in_regions` |
 | `MTLCommandBuffer` | 21 | 20 | 1 | `argument_encoders`, `astc_textures`, `blend_sweeps`, `blit_encoder_commands`… |
 | `MTLCommandEncoder` | 2 | 1 | 1 | `argument_encoders`, `astc_textures`, `blend_sweeps`, `blit_encoder_commands`… |
@@ -265,7 +264,7 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLIndirectCommandBufferDescriptor` | 19 | 18 | 1 | `indirect_commands`, `mesh_commands` |
 | `MTLMeshRenderPipelineDescriptor` | 18 | 17 | 1 | `mesh_barriers`, `mesh_commands`, `mesh_draws`, `mesh_pipeline_descriptors`… |
 | `MTLPipelineBufferDescriptor` | 2 | 1 | 1 | `compute_pipeline_descriptors`, `pipeline_descriptors`, `tile_pipeline_descriptors` |
-| `MTLPointerType` | 8 | 7 | 1 | `function_bindings`, `pipeline_option_reflection` |
+| `MTLPointerType` | 8 | 7 | 1 | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` |
 | `MTLRasterizationRateMap` | 11 | 10 | 1 | `rate_map_sweeps`, `rate_maps` |
 | `MTLRenderPassAttachmentDescriptor` | 12 | 11 | 1 | `blend_sweeps`, `buffer_depth_samples`, `buffer_target_clears`, `color_write_masks`… |
 | `MTLRenderPassColorAttachmentDescriptor` | 2 | 1 | 1 | `blend_sweeps`, `buffer_target_clears`, `color_write_masks`, `compute_render_chains`… |
@@ -275,18 +274,19 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLRenderPassStencilAttachmentDescriptor` | 3 | 2 | 1 | `blend_sweeps`, `buffer_depth_samples`, `buffer_target_clears`, `color_write_masks`… |
 | `MTLRenderPipelineColorAttachmentDescriptor` | 10 | 9 | 1 | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`… |
 | `MTLRenderPipelineDescriptor` | 35 | 34 | 1 | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`… |
+| `MTLRenderPipelineFunctionsDescriptor` | 4 | 3 | 1 | `pipeline_functions` |
 | `MTLResource` | 12 | 11 | 1 | `buffer_textures`, `heap_facts`, `resource_facts` |
 | `MTLResourceStateCommandEncoder` | 7 | 6 | 1 | `sparse_mappings` |
 | `MTLSharedEventHandle` | 2 | 1 | 1 | `shared_events` |
 | `MTLSharedTextureHandle` | 2 | 1 | 1 | `texture_views` |
 | `MTLStencilDescriptor` | 7 | 6 | 1 | `render_depth_stencil_state`, `shader_stencil`, `srgb_fetch`, `visibility` |
-| `MTLStructMember` | 9 | 8 | 1 | `function_bindings`, `pipeline_option_reflection` |
-| `MTLStructType` | 3 | 2 | 1 | `function_bindings`, `pipeline_option_reflection` |
+| `MTLStructMember` | 9 | 8 | 1 | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` |
+| `MTLStructType` | 3 | 2 | 1 | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` |
 | `MTLTexture` | 29 | 28 | 1 | `argument_encoders`, `astc_textures`, `blend_sweeps`, `blit_encoder_commands`… |
-| `MTLTextureBinding` | 5 | 4 | 1 | `function_bindings`, `pipeline_option_reflection` |
-| `MTLTextureReferenceType` | 5 | 4 | 1 | `function_bindings`, `pipeline_option_reflection` |
+| `MTLTextureBinding` | 5 | 4 | 1 | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` |
+| `MTLTextureReferenceType` | 5 | 4 | 1 | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` |
 | `MTLTextureViewDescriptor` | 6 | 5 | 1 | `texture_views` |
-| `MTLThreadgroupBinding` | 3 | 2 | 1 | `function_bindings`, `pipeline_option_reflection` |
+| `MTLThreadgroupBinding` | 3 | 2 | 1 | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` |
 | `MTLTileRenderPipelineColorAttachmentDescriptor` | 2 | 1 | 1 | `pipeline_handlers`, `tile_pipeline_descriptors`, `tile_threadgroups` |
 | `MTLTileRenderPipelineDescriptor` | 15 | 14 | 1 | `pipeline_handlers`, `tile_pipeline_descriptors`, `tile_threadgroups` |
 | `MTLVertexAttribute` | 7 | 6 | 1 | `function_facts`, `library_facts` |
@@ -301,9 +301,9 @@ A container is one Objective-C type; the SDK header it sits in is the family of 
 |---|---|---|---|
 | `MTLRenderCommandEncoder.h` | 119 | 64 | 55 |
 | `MTLArgument.h` | 77 | 46 | 31 |
-| `MTLRenderPipeline.h` | 114 | 90 | 24 |
 | `MTLDevice.h` | 73 | 51 | 22 |
 | `MTLRasterizationRate.h` | 37 | 16 | 21 |
+| `MTLRenderPipeline.h` | 114 | 93 | 21 |
 | `MTLComputeCommandEncoder.h` | 36 | 23 | 13 |
 | `MTLIndirectCommandEncoder.h` | 35 | 22 | 13 |
 | `MTLComputePipeline.h` | 34 | 22 | 12 |
@@ -358,25 +358,24 @@ An implemented container no case's Metal leg touches. These are the families of 
 | `MTLObjectPayloadBinding` | 3 | `MTLArgument.h` |
 | `MTLRasterizationRateLayerDescriptor` | 10 | `MTLRasterizationRate.h` |
 | `MTLRasterizationRateSampleArray` | 3 | `MTLRasterizationRate.h` |
-| `MTLRenderPipelineFunctionsDescriptor` | 4 | `MTLRenderPipeline.h` |
 | `MTLSharedEventListener` | 2 | `MTLEvent.h` |
 | `MTLType` | 2 | `MTLArgument.h` |
 | `MTLVisibleFunctionTable` | 4 | `MTLVisibleFunctionTable.h` |
 | `MTLVisibleFunctionTableDescriptor` | 3 | `MTLVisibleFunctionTable.h` |
 
-18 containers, 87 implemented items.
+17 containers, 83 implemented items.
 
 ## The suite's shape
 
 | | |
 |---|---|
-| case modules | 113 |
-| committed recordings | 884 |
+| case modules | 115 |
+| committed recordings | 915 |
 | recorded runs behind a case, median | 3 |
 | recorded runs, least and most | 1 and 30 |
 | cases whose recording holds more than one outcome | 0 |
-| cases running a committed shader fixture | 490 |
-| cases whose Metal answer is `metal_run` | 800 |
+| cases running a committed shader fixture | 521 |
+| cases whose Metal answer is `metal_run` | 831 |
 | cases whose Metal answer is `carried` | 80 |
 | cases whose Metal answer is `never_returned` | 4 |
 | modules that loosen a measured value | 11 |
@@ -385,14 +384,14 @@ An implemented container no case's Metal leg touches. These are the families of 
 | loosenings used | `Unchecked`, `Absolute`, `Ulps` |
 | justifications named | `Degradation`, `AcceptedDifference` |
 | modules forbidding a re-record | 8 |
-| `Side` methods (the suite's whole device vocabulary) | 114 |
-| `Side` methods the Metal leg reaches an SDK item through | 109 |
-| SDK items a case's Metal leg reaches, median | 43 |
+| `Side` methods (the suite's whole device vocabulary) | 117 |
+| `Side` methods the Metal leg reaches an SDK item through | 112 |
+| SDK items a case's Metal leg reaches, median | 44 |
 | the same, least and most | 0 and 142 |
-| Metal call sites in the leg | 1460 |
-| distinct selectors the leg sends | 577 |
-| of those, resolved to an item of the coverage map | 573 |
-| oracles the recordings name | `apple-m3-max` ×884 |
+| Metal call sites in the leg | 1482 |
+| distinct selectors the leg sends | 583 |
+| of those, resolved to an item of the coverage map | 579 |
+| oracles the recordings name | `apple-m3-max` ×915 |
 
 ## By family
 
@@ -438,7 +437,7 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `format_copies` | 16 | 16 | every field | 41 |
 | `frame_chains` | 1 | 1 | every field | 91 |
 | `fresh_contents` | 87 | 87 | every field | 43 |
-| `function_bindings` | 3 | 3 | every field | 49 |
+| `function_bindings` | 5 | 5 | every field | 49 |
 | `function_facts` | 12 | 12 | every field | 31 |
 | `half_output_blends` | 6 | 6 | every field | 77 |
 | `half_read_nans` | 6 | 6 | every field | 29 |
@@ -465,8 +464,10 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `pass_bytes` | 4 | 4 | 1 tolerance(s): `Degradation` | 16 |
 | `pipeline_descriptors` | 3 | 3 | every field | 62 |
 | `pipeline_facts` | 6 | 6 | every field | 53 |
+| `pipeline_functions` | 8 | 8 | every field | 4 |
 | `pipeline_handlers` | 24 | 24 | every field | 74 |
 | `pipeline_option_reflection` | 3 | 3 | every field | 49 |
+| `pipeline_options` | 21 | 21 | every field | 57 |
 | `pixel_downscales` | 7 | 7 | every field | 31 |
 | `pixel_samplers` | 16 | 16 | every field | 31 |
 | `pvrtc_cpu_order` | 6 | 6 | every field | 41 |
@@ -609,14 +610,14 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLArrayType` | no | — | — |
-| `elementType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `arrayLength` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `stride` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `argumentIndexStride` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `elementStructType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `elementArrayType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `elementTextureReferenceType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `elementPointerType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
+| `elementType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `arrayLength` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `stride` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `argumentIndexStride` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `elementStructType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `elementArrayType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `elementTextureReferenceType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `elementPointerType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
 
 ### `MTLAttribute`
 
@@ -671,12 +672,12 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLBinding` | no | — | — |
-| `name` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `type` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `access` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `index` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `used` | yes | `function_bindings`, `pipeline_option_reflection`, `texture_accesses` | 7 |
-| `argument` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
+| `name` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `type` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `access` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `index` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `used` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options`, `texture_accesses` | 30 |
+| `argument` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
 
 ### `MTLBlitCommandEncoder`
 
@@ -721,11 +722,11 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLBufferBinding` | no | — | — |
-| `bufferAlignment` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `bufferDataSize` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `bufferDataType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `bufferStructType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `bufferPointerType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
+| `bufferAlignment` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `bufferDataSize` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `bufferDataType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `bufferStructType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `bufferPointerType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
 
 ### `MTLBufferLayoutDescriptor`
 
@@ -853,7 +854,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLComputePipelineReflection` | no | — | — |
-| `bindings` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
+| `bindings` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
 | `arguments` | no | — | — |
 
 ### `MTLComputePipelineState`
@@ -923,11 +924,11 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `newSamplerStateWithDescriptor:` | yes | `argument_encoders`, `border_swizzles`, `chroma_pairs`, `compute_encoder_commands`, `compute_render_chains`, `depth_texel_reads`, `discard_hoist`, `draw_state_changes`, `extended_swizzles`, `frame_chains`, `half_read_nans`, `nearest_positions`, `pixel_downscales`, `pixel_samplers`, `render_chains`, `render_state`, `rgb10a2_srgb`, `two_plane_samples`, `ycbcr_minify` | 111 |
 | `newLibraryWithData:error:` | no | — | — |
 | `newRenderPipelineStateWithDescriptor:error:` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_facts`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 182 |
-| `newRenderPipelineStateWithDescriptor:options:reflection:error:` | yes | `pipeline_handlers`, `texture_accesses` | 25 |
+| `newRenderPipelineStateWithDescriptor:options:reflection:error:` | yes | `pipeline_handlers`, `pipeline_options`, `texture_accesses` | 46 |
 | `newRenderPipelineStateWithDescriptor:completionHandler:` | yes | `pipeline_handlers` | 24 |
 | `newRenderPipelineStateWithDescriptor:options:completionHandler:` | yes | `pipeline_handlers` | 24 |
 | `newComputePipelineStateWithFunction:error:` | yes | `argument_encoders`, `astc_textures`, `blit_encoder_commands`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_texture_blits`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_encoder_commands`, `compute_render_chains`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `format_copies`, `frame_chains`, `fresh_contents`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `host_page_writes`, `level_sizes`, `math_routines`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pipeline_handlers`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `rgb10a2_srgb`, `shared_exponent_storage`, `simdgroup_lockstep`, `swizzled_storage`, `texel_swizzles`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `ycbcr_minify`, `ycbcr_textures` | 462 |
-| `newComputePipelineStateWithFunction:options:reflection:error:` | yes | `function_bindings`, `pipeline_handlers`, `pipeline_option_reflection` | 30 |
+| `newComputePipelineStateWithFunction:options:reflection:error:` | yes | `function_bindings`, `pipeline_handlers`, `pipeline_option_reflection`, `pipeline_options` | 53 |
 | `newComputePipelineStateWithFunction:completionHandler:` | yes | `pipeline_handlers` | 24 |
 | `newComputePipelineStateWithFunction:options:completionHandler:` | yes | `pipeline_handlers` | 24 |
 | `newComputePipelineStateWithDescriptor:options:reflection:error:` | yes | `indirect_commands`, `pipeline_facts`, `pipeline_handlers`, `stage_in_regions` | 37 |
@@ -1172,7 +1173,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 |---|---|---|---|
 | `MTLLibrary` | no | — | — |
 | `device` | yes | `library_facts` | 5 |
-| `newFunctionWithName:` | yes | `argument_encoders`, `astc_textures`, `blend_sweeps`, `blit_encoder_commands`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_texture_blits`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_encoder_commands`, `compute_pipeline_descriptors`, `compute_render_chains`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `draw_state_changes`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `frame_chains`, `fresh_contents`, `function_bindings`, `function_facts`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `host_page_writes`, `indirect_commands`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `mesh_pipeline_descriptors`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `pipeline_option_reflection`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_accesses`, `texture_fills`, `tile_pipeline_descriptors`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 638 |
+| `newFunctionWithName:` | yes | `argument_encoders`, `astc_textures`, `blend_sweeps`, `blit_encoder_commands`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_texture_blits`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_encoder_commands`, `compute_pipeline_descriptors`, `compute_render_chains`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `draw_state_changes`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `frame_chains`, `fresh_contents`, `function_bindings`, `function_facts`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `host_page_writes`, `indirect_commands`, `int_attributes`, `level_sizes`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `mesh_pipeline_descriptors`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_functions`, `pipeline_handlers`, `pipeline_option_reflection`, `pipeline_options`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_accesses`, `texture_fills`, `tile_pipeline_descriptors`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` | 669 |
 | `newFunctionWithName:constantValues:error:` | yes | `function_facts` | 12 |
 | `newFunctionWithName:constantValues:completionHandler:` | no | — | — |
 | `reflectionForFunctionWithName:` | no | — | — |
@@ -1244,13 +1245,13 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLPointerType` | no | — | — |
-| `elementType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `access` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `alignment` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `dataSize` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `elementIsArgumentBuffer` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `elementStructType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `elementArrayType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
+| `elementType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `access` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `alignment` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `dataSize` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `elementIsArgumentBuffer` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `elementStructType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `elementArrayType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
 
 ### `MTLRasterizationRateLayerArray`
 
@@ -1513,7 +1514,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLRenderPipelineColorAttachmentDescriptor` | no | — | — |
-| `pixelFormat` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `mesh_pipeline_descriptors`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `texture_accesses`, `visibility`, `wide_points` | 223 |
+| `pixelFormat` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `mesh_pipeline_descriptors`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `pipeline_options`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `texture_accesses`, `visibility`, `wide_points` | 244 |
 | `blendingEnabled` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `mesh_pipeline_descriptors`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 204 |
 | `sourceRGBBlendFactor` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `mesh_pipeline_descriptors`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 204 |
 | `destinationRGBBlendFactor` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `mesh_pipeline_descriptors`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 204 |
@@ -1528,7 +1529,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLRenderPipelineColorAttachmentDescriptorArray` | no | — | — |
-| `objectAtIndexedSubscript:` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `mesh_pipeline_descriptors`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `texture_accesses`, `visibility`, `wide_points` | 223 |
+| `objectAtIndexedSubscript:` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `mesh_pipeline_descriptors`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `pipeline_options`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `texture_accesses`, `visibility`, `wide_points` | 244 |
 | `setObject:atIndexedSubscript:` | no | — | — |
 
 ### `MTLRenderPipelineDescriptor`
@@ -1537,8 +1538,8 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 |---|---|---|---|
 | `MTLRenderPipelineDescriptor` | no | — | — |
 | `label` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 201 |
-| `vertexFunction` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `texture_accesses`, `visibility`, `wide_points` | 210 |
-| `fragmentFunction` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `texture_accesses`, `visibility`, `wide_points` | 210 |
+| `vertexFunction` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `pipeline_options`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `texture_accesses`, `visibility`, `wide_points` | 231 |
+| `fragmentFunction` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `pipeline_options`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `texture_accesses`, `visibility`, `wide_points` | 231 |
 | `vertexDescriptor` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 201 |
 | `sampleCount` | yes | `pipeline_descriptors` | 3 |
 | `rasterSampleCount` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 201 |
@@ -1546,7 +1547,7 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `alphaToOneEnabled` | yes | `pipeline_descriptors` | 3 |
 | `rasterizationEnabled` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 201 |
 | `maxVertexAmplificationCount` | yes | `pipeline_descriptors` | 3 |
-| `colorAttachments` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `texture_accesses`, `visibility`, `wide_points` | 210 |
+| `colorAttachments` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `pipeline_options`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `texture_accesses`, `visibility`, `wide_points` | 231 |
 | `depthAttachmentPixelFormat` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 201 |
 | `stencilAttachmentPixelFormat` | yes | `blend_sweeps`, `color_write_masks`, `compute_render_chains`, `discard_hoist`, `draw_state_changes`, `extended_range_blends`, `extended_range_targets`, `fetch_ordered`, `frame_chains`, `half_output_blends`, `host_page_writes`, `indirect_commands`, `int_attributes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `snorm_tile_store`, `srgb_fetch`, `visibility`, `wide_points` | 201 |
 | `inputPrimitiveTopology` | yes | `pipeline_descriptors` | 3 |
@@ -1576,17 +1577,17 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLRenderPipelineFunctionsDescriptor` | no | — | — |
-| `vertexAdditionalBinaryFunctions` | no | — | — |
-| `fragmentAdditionalBinaryFunctions` | no | — | — |
-| `tileAdditionalBinaryFunctions` | no | — | — |
+| `vertexAdditionalBinaryFunctions` | yes | `pipeline_functions` | 8 |
+| `fragmentAdditionalBinaryFunctions` | yes | `pipeline_functions` | 8 |
+| `tileAdditionalBinaryFunctions` | yes | `pipeline_functions` | 8 |
 
 ### `MTLRenderPipelineReflection`
 
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLRenderPipelineReflection` | no | — | — |
-| `vertexBindings` | yes | `texture_accesses` | 1 |
-| `fragmentBindings` | yes | `texture_accesses` | 1 |
+| `vertexBindings` | yes | `pipeline_options`, `texture_accesses` | 22 |
+| `fragmentBindings` | yes | `pipeline_options`, `texture_accesses` | 22 |
 | `tileBindings` | yes | `texture_accesses` | 1 |
 | `objectBindings` | yes | `texture_accesses` | 1 |
 | `meshBindings` | yes | `texture_accesses` | 1 |
@@ -1732,22 +1733,22 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLStructMember` | no | — | — |
-| `name` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `offset` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `dataType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `structType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `arrayType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `textureReferenceType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `pointerType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `argumentIndex` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
+| `name` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `offset` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `dataType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `structType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `arrayType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `textureReferenceType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `pointerType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `argumentIndex` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
 
 ### `MTLStructType`
 
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLStructType` | no | — | — |
-| `members` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `memberByName:` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
+| `members` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `memberByName:` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
 
 ### `MTLTexture`
 
@@ -1788,10 +1789,10 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLTextureBinding` | no | — | — |
-| `textureType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `textureDataType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `depthTexture` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `arrayLength` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
+| `textureType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `textureDataType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `depthTexture` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `arrayLength` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
 
 ### `MTLTextureDescriptor`
 
@@ -1822,10 +1823,10 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLTextureReferenceType` | no | — | — |
-| `textureDataType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `textureType` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `access` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `isDepthTexture` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
+| `textureDataType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `textureType` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `access` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `isDepthTexture` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
 
 ### `MTLTextureViewDescriptor`
 
@@ -1843,8 +1844,8 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | item | exercised | families | cases Metal ran |
 |---|---|---|---|
 | `MTLThreadgroupBinding` | no | — | — |
-| `threadgroupMemoryAlignment` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
-| `threadgroupMemoryDataSize` | yes | `function_bindings`, `pipeline_option_reflection` | 6 |
+| `threadgroupMemoryAlignment` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
+| `threadgroupMemoryDataSize` | yes | `function_bindings`, `pipeline_option_reflection`, `pipeline_options` | 29 |
 
 ### `MTLTileRenderPipelineColorAttachmentDescriptor`
 
@@ -1969,7 +1970,7 @@ An item the suite's Metal leg calls whose coverage-map status is not implemented
 |---|---|---|---|
 | `MTL4LibraryDescriptor` `source` | missing | Metal 4's command model (`MTL4CommandQueue`, `MTL4CommandBuffer`, argument tables, the compiler, `RuntimeGap::Metal4Api`) | `blit_encoder_commands`, `buffer_blits`, `buffer_depth_samples`, `buffer_texture_blits`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` |
 | `MTL4LibraryFunctionDescriptor` `library` | missing | Metal 4's command model (`MTL4CommandQueue`, `MTL4CommandBuffer`, argument tables, the compiler, `RuntimeGap::Metal4Api`) | `blit_encoder_commands`, `buffer_blits`, `buffer_depth_samples`, `buffer_texture_blits`, `buffer_textures`, `chroma_pairs`, `compressed_blits`, `compressed_moves`, `compressed_views`, `format_copies`, `fresh_contents`, `pvrtc_cpu_order`, `pvrtc_rows`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` |
-| `MTLDevice` `newLibraryWithURL:error:` | missing | a metallib read from a file URL | `argument_encoders`, `astc_textures`, `blend_sweeps`, `blit_encoder_commands`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_texture_blits`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_encoder_commands`, `compute_pipeline_descriptors`, `compute_render_chains`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `draw_state_changes`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `frame_chains`, `fresh_contents`, `function_bindings`, `function_facts`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `host_page_writes`, `indirect_commands`, `int_attributes`, `level_sizes`, `library_facts`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `mesh_pipeline_descriptors`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_handlers`, `pipeline_option_reflection`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_accesses`, `texture_fills`, `tile_pipeline_descriptors`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` |
+| `MTLDevice` `newLibraryWithURL:error:` | missing | a metallib read from a file URL | `argument_encoders`, `astc_textures`, `blend_sweeps`, `blit_encoder_commands`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`, `buffer_texture_blits`, `buffer_textures`, `chroma_pairs`, `color_write_masks`, `compressed_blits`, `compressed_decode`, `compressed_moves`, `compressed_views`, `compute_encoder_commands`, `compute_pipeline_descriptors`, `compute_render_chains`, `compute_threadgroups`, `denormal_word_fetches`, `depth_texel_reads`, `discard_hoist`, `draw_state_changes`, `etc_textures`, `extended_range_blends`, `extended_range_planes`, `extended_range_targets`, `extended_range_two_planes`, `extended_swizzles`, `fetch_ordered`, `format_copies`, `frame_chains`, `fresh_contents`, `function_bindings`, `function_facts`, `half_output_blends`, `half_read_nans`, `half_storage_writes`, `half_texel_nans`, `half_write_nans`, `host_page_writes`, `indirect_commands`, `int_attributes`, `level_sizes`, `library_facts`, `math_routines`, `mesh_barriers`, `mesh_commands`, `mesh_draws`, `mesh_pipeline_descriptors`, `nearest_positions`, `norm_storage_writes`, `pass_bytes`, `pipeline_descriptors`, `pipeline_facts`, `pipeline_functions`, `pipeline_handlers`, `pipeline_option_reflection`, `pipeline_options`, `pixel_downscales`, `pixel_samplers`, `pvrtc_cpu_order`, `pvrtc_rows`, `render_chains`, `render_depth_stencil_state`, `render_draw_forms`, `render_residency`, `render_state`, `rgb10a2_srgb`, `rotated_planes`, `rotated_targets`, `sample_positions`, `shader_stencil`, `shared_exponent_storage`, `simdgroup_lockstep`, `snorm_tile_store`, `srgb_fetch`, `stage_in_regions`, `swizzled_storage`, `texel_swizzles`, `texture_accesses`, `texture_fills`, `tile_pipeline_descriptors`, `tile_threadgroups`, `two_plane_copies`, `two_plane_heap_blits`, `two_plane_samples`, `visibility`, `wide_points`, `ycbcr_minify`, `ycbcr_textures` |
 
 ## Called, attributed to no family
 
@@ -2000,6 +2001,7 @@ The Metal leg sends these selectors to a receiver this typed, and `scripts/metal
 | `MTLRenderPassDepthAttachmentDescriptor` | `new` |
 | `MTLRenderPassStencilAttachmentDescriptor` | `new` |
 | `MTLRenderPipelineDescriptor` | `new` |
+| `MTLRenderPipelineFunctionsDescriptor` | `new` |
 | `MTLSamplerDescriptor` | `new` |
 | `MTLStencilDescriptor` | `new` |
 | `MTLTextureDescriptor` | `new` |
@@ -2055,4 +2057,5 @@ A case whose difference from Metal is recorded rather than compared away. The le
 | `resource-own-getters` | `Texture::resource_options` does not carry the hazard tracking mode it resolved. Metal never reports `MTLHazardTrackingModeDefault` from a resource: it resolves… |
 | `resource-own-getters` | `Texture::resource_options` does not carry the hazard tracking mode it resolved. Metal never reports `MTLHazardTrackingModeDefault` from a resource: it resolves… |
 | `sparse-mapping-a-level-past-the-textures` | The runtime refuses a direct mapping update of a mip level past the texture's own levels, where plain Metal takes the call and maps nothing. Measured on this M3… |
+| `function-bindings-visible-function-table` | Metal compiles a kernel that takes a `visible_function_table` argument and links no visible function, and reflects it: the binding is listed as `MTLBindingTypeV… |
 

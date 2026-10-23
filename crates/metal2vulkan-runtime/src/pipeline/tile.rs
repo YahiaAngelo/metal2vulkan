@@ -67,7 +67,7 @@ impl Device {
 
     /// `newRenderPipelineStateWithTileDescriptor:options:reflection:error:` with reflection:
     /// [`Device::new_tile_render_pipeline_state`], and the pipeline's reflection when `options`
-    /// asks for it (`BINDING_INFO`, `BUFFER_TYPE_INFO`, or both, which Metal answers alike),
+    /// asks for it (any word but `NONE`, which Metal answers alike),
     /// `None` when it does not, as Metal leaves `reflection` nil. The reflection is
     /// [`TileRenderPipelineDescriptor::reflection`]'s (its tile bindings), under the creation's
     /// budget; what it refuses refuses the call (`Unsupported`, `Compile`).

@@ -6,7 +6,6 @@
 //!
 //! No wait here can hang: a command buffer is waited for with a bound, and a wait that runs out
 //! answers `NeverReturned` as a recorded fact rather than blocking the suite.
-
 use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
     Answer, ArgumentSlot, Bindings, CommandDraw, CoordinateProbe, Failure, Fill, FragmentFill,
@@ -45,11 +44,13 @@ use crate::pass_descriptors::{
     ASSIGNED_COLOR, DEPTH_AT, MUTATED_AFTER, READ_COLORS as PASS_COLORS, STENCIL_AT, SWEPT_COLOR,
 };
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
+use crate::pipeline_functions::{FunctionsDescriptorFacts, FunctionsDescriptorSpec, Write};
 use crate::pipeline_handlers::{
     BothPaths, Delivered, Form as PipelineForm, Handled, StateFacts,
     IMAGEBLOCK as HANDLER_IMAGEBLOCK,
 };
 use crate::pipeline_option_reflection::UnderOptions;
+use crate::pipeline_options::{OptionOutcome, FRAGMENT_STAGE, KERNEL_STAGE, VERTEX_STAGE};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
     ColorState, LodClamp, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction,
@@ -96,13 +97,12 @@ use metal2vulkan_runtime::{
     LoadAction, MultisampleDepthResolveFilter, MultisampleStencilResolveFilter, Origin,
     PipelineOption, PipelineOptions, PurgeableState, RasterizationRateMap, Region,
     RenderPassColorAttachmentDescriptor, RenderPassDepthAttachmentDescriptor, RenderPassDescriptor,
-    RenderPassStencilAttachmentDescriptor, RenderPipelineState, ResourceOptions, ResourceRef,
-    ResourceStateCommandEncoder, SamplePosition, SamplerState, SamplerStateOptions, ScissorRect,
-    Size, SparseTextureRegionAlignmentMode, StoreAction, StoreActionOptions, Texture,
-    TextureDescriptor, Viewport,
+    RenderPassStencilAttachmentDescriptor, RenderPipelineFunctionsDescriptor, RenderPipelineState,
+    ResourceOptions, ResourceRef, ResourceStateCommandEncoder, SamplePosition, SamplerState,
+    SamplerStateOptions, ScissorRect, Size, SparseTextureRegionAlignmentMode, StoreAction,
+    StoreActionOptions, Texture, TextureDescriptor, Viewport,
 };
 use std::time::Duration;
-
 /// The `MTLResourceUsage` the raw bits a case states name, refused where they name a bit Metal has
 /// no name for.
 ///
@@ -2311,6 +2311,152 @@ impl Side for RuntimeSide<'_> {
         Ok(UnderOptions {
             refused: false,
             bindings: found,
+        })
+    }
+
+    fn compute_pipeline_under_options(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        options: u64,
+    ) -> Answer<OptionOutcome> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .new_function_with_name(entry)
+            .map_err(|error| Failure::of(&error))?;
+        // The case's raw option word, whole: the runtime keeps every bit and acts on the ones
+        // Metal defines, which is the claim the sweep holds to Metal.
+        let options = PipelineOptions::new(PipelineOption::from_raw(options));
+        let (_state, reflection) = self
+            .device
+            .new_compute_pipeline_state_with_function_and_reflection(&function, &options)
+            .map_err(|error| Failure::of(&error))?;
+        Ok(match reflection {
+            Some(reflection) => OptionOutcome {
+                reflected: true,
+                stages: vec![(
+                    KERNEL_STAGE,
+                    Some(reflection.bindings().iter().map(our_binding).collect()),
+                )],
+            },
+            None => OptionOutcome::without_reflection(&[KERNEL_STAGE]),
+        })
+    }
+
+    fn render_pipeline_under_options(
+        &mut self,
+        library: Handle,
+        vertex: &str,
+        fragment: &str,
+        attachment: PixelFormat,
+        options: u64,
+    ) -> Answer<OptionOutcome> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let stage = |name: &str| -> Answer<StageSource> {
+            Ok(StageSource::Function(
+                library
+                    .new_function_with_name(name)
+                    .map_err(Failure::from_error)?
+                    .function_descriptor(),
+            ))
+        };
+        let mut descriptor = RenderPipelineDescriptor::new(stage(vertex)?);
+        descriptor.fragment = Some(stage(fragment)?);
+        descriptor.color_attachments[0] = Some(ColorAttachmentDescriptor::new(attachment));
+        let options = PipelineOptions::new(PipelineOption::from_raw(options));
+        let (_state, reflection) = self
+            .device
+            .new_render_pipeline_state_with_reflection(&descriptor, &options)
+            .map_err(Failure::from_error)?;
+        Ok(match reflection {
+            Some(reflection) => OptionOutcome {
+                reflected: true,
+                stages: vec![
+                    (
+                        VERTEX_STAGE,
+                        Some(
+                            reflection
+                                .vertex_bindings()
+                                .iter()
+                                .map(our_binding)
+                                .collect(),
+                        ),
+                    ),
+                    (
+                        FRAGMENT_STAGE,
+                        Some(
+                            reflection
+                                .fragment_bindings()
+                                .iter()
+                                .map(our_binding)
+                                .collect(),
+                        ),
+                    ),
+                ],
+            },
+            None => OptionOutcome::without_reflection(&[VERTEX_STAGE, FRAGMENT_STAGE]),
+        })
+    }
+
+    fn render_pipeline_functions_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &FunctionsDescriptorSpec<'_>,
+    ) -> Answer<FunctionsDescriptorFacts> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let mut made = Vec::new();
+        for name in spec.names() {
+            let function = library
+                .new_function_with_name(name)
+                .map_err(|error| Failure::of(&error))?;
+            made.push((name, function));
+        }
+        let held = |name: &str| -> Answer<metal2vulkan_runtime::Function> {
+            made.iter()
+                .find(|(held, _)| *held == name)
+                .map(|(_, function)| function.clone())
+                .ok_or_else(|| Failure::named("NoSuchFunction", name.to_owned()))
+        };
+        // The runtime has no descriptor object: a program hands it this value, so the case's
+        // writes are writes to its three fields, the last of each winning as a property's would.
+        let mut descriptor = RenderPipelineFunctionsDescriptor::new();
+        for (stage, writes) in [spec.vertex, spec.fragment, spec.tile]
+            .into_iter()
+            .enumerate()
+        {
+            for write in writes {
+                let mut functions = Vec::new();
+                if let Write::Functions(names) = write {
+                    for name in *names {
+                        functions.push(held(name)?);
+                    }
+                }
+                match stage {
+                    0 => descriptor.vertex_additional_binary_functions = functions,
+                    1 => descriptor.fragment_additional_binary_functions = functions,
+                    _ => descriptor.tile_additional_binary_functions = functions,
+                }
+            }
+        }
+        let names = |functions: &[metal2vulkan_runtime::Function]| -> Vec<String> {
+            functions
+                .iter()
+                .map(|function| function.name().to_owned())
+                .collect()
+        };
+        Ok(FunctionsDescriptorFacts {
+            vertex: names(&descriptor.vertex_additional_binary_functions),
+            fragment: names(&descriptor.fragment_additional_binary_functions),
+            tile: names(&descriptor.tile_additional_binary_functions),
         })
     }
 

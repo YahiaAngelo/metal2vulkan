@@ -11,7 +11,6 @@
 //!
 //! Metal announces no degrade notice, so this side announces none: a notice in a transcript is
 //! ours, and a case that holds one must name what justifies it.
-
 use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
     Answer, ArgumentSlot, Bindings, CommandDraw, CoordinateProbe, Failure, FragmentFill,
@@ -50,11 +49,13 @@ use crate::pass_descriptors::{
     ASSIGNED_COLOR, DEPTH_AT, MUTATED_AFTER, READ_COLORS as PASS_COLORS, STENCIL_AT, SWEPT_COLOR,
 };
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
+use crate::pipeline_functions::{FunctionsDescriptorFacts, FunctionsDescriptorSpec, Write};
 use crate::pipeline_handlers::{
     BothPaths, Delivered, Form as PipelineForm, Handled, StateFacts,
     IMAGEBLOCK as HANDLER_IMAGEBLOCK, WAIT as HANDLER_WAIT,
 };
 use crate::pipeline_option_reflection::UnderOptions;
+use crate::pipeline_options::{OptionOutcome, FRAGMENT_STAGE, KERNEL_STAGE, VERTEX_STAGE};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
     Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, StepResource,
@@ -87,9 +88,10 @@ use metal2vulkan::metal::{
 use metal2vulkan_runtime::{PurgeableState, SparsePageSize};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
+use objc2::AnyThread;
 use objc2::{AnyThread, ClassType};
 use objc2_foundation::{
-    NSArray, NSDictionary, NSError, NSObjectProtocol, NSRange, NSString, NSURL,
+    NSArray, NSDictionary, NSError, NSObjectProtocol, NSRange, NSString, NSUInteger, NSURL,
 };
 use objc2_metal::{
     MTLArgumentDescriptor, MTLArgumentEncoder, MTLArrayType, MTLAttribute, MTLAttributeFormat,
@@ -115,18 +117,18 @@ use objc2_metal::{
     MTLRenderPassColorAttachmentDescriptorArray, MTLRenderPassDepthAttachmentDescriptor,
     MTLRenderPassDescriptor, MTLRenderPassStencilAttachmentDescriptor,
     MTLRenderPipelineColorAttachmentDescriptor, MTLRenderPipelineColorAttachmentDescriptorArray,
-    MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
-    MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceStateCommandEncoder,
-    MTLResourceUsage, MTLSamplePosition, MTLSamplerAddressMode, MTLSamplerBorderColor,
-    MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLScissorRect, MTLSharedEvent,
-    MTLSharedEventHandle, MTLSize, MTLSparsePageSize, MTLSparseTextureMappingMode,
-    MTLSparseTextureRegionAlignmentMode, MTLStageInputOutputDescriptor, MTLStencilDescriptor,
-    MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLStoreActionOptions,
-    MTLStructMember, MTLStructType, MTLTessellationControlPointIndexType,
-    MTLTessellationFactorFormat, MTLTessellationFactorStepFunction, MTLTessellationPartitionMode,
-    MTLTexture, MTLTextureBinding, MTLTextureDescriptor, MTLTextureReferenceType,
-    MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage,
-    MTLTextureViewDescriptor, MTLThreadgroupBinding,
+    MTLRenderPipelineDescriptor, MTLRenderPipelineFunctionsDescriptor, MTLRenderPipelineReflection,
+    MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions,
+    MTLResourceStateCommandEncoder, MTLResourceUsage, MTLSamplePosition, MTLSamplerAddressMode,
+    MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
+    MTLScissorRect, MTLSharedEvent, MTLSharedEventHandle, MTLSize, MTLSparsePageSize,
+    MTLSparseTextureMappingMode, MTLSparseTextureRegionAlignmentMode,
+    MTLStageInputOutputDescriptor, MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction,
+    MTLStorageMode, MTLStoreAction, MTLStoreActionOptions, MTLStructMember, MTLStructType,
+    MTLTessellationControlPointIndexType, MTLTessellationFactorFormat,
+    MTLTessellationFactorStepFunction, MTLTessellationPartitionMode, MTLTexture, MTLTextureBinding,
+    MTLTextureDescriptor, MTLTextureReferenceType, MTLTextureSwizzle, MTLTextureSwizzleChannels,
+    MTLTextureType, MTLTextureUsage, MTLTextureViewDescriptor, MTLThreadgroupBinding,
     MTLTileRenderPipelineColorAttachmentDescriptor,
     MTLTileRenderPipelineColorAttachmentDescriptorArray, MTLTileRenderPipelineDescriptor,
     MTLTriangleFillMode, MTLVertexAttribute, MTLVertexAttributeDescriptor,
@@ -135,7 +137,6 @@ use objc2_metal::{
     MTLVertexStepFunction, MTLViewport, MTLVisibilityResultMode, MTLVisibleFunctionTable,
     MTLWinding,
 };
-
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
 /// on.
 const METAL_LEVEL: &str = crate::recording::ORACLE_OS_VERSION;
@@ -519,6 +520,18 @@ fn our_texture_type(raw: usize) -> Answer<metal2vulkan::metal::TextureType> {
 ///
 /// Which subprotocol to read is decided by the binding's own `type`, which is how Metal states it:
 /// `MTLBindingTypeBuffer` is the fact that the binding conforms to `MTLBufferBinding`.
+/// The `name` of each function of one of an `MTLRenderPipelineFunctionsDescriptor`'s three
+/// properties, in order; a nil property has none, which is the fold
+/// [`crate::pipeline_functions`] states.
+fn function_names(list: Option<&NSArray<ProtocolObject<dyn MTLFunction>>>) -> Vec<String> {
+    let Some(list) = list else {
+        return Vec::new();
+    };
+    list.iter()
+        .map(|function| function.name().to_string())
+        .collect()
+}
+
 fn metal_binding(binding: &ProtocolObject<dyn MTLBinding>) -> Answer<BindingFacts> {
     let kind = binding.r#type();
     let mut facts = BindingFacts {
@@ -3017,6 +3030,191 @@ impl Side for MetalSide {
         Ok(UnderOptions {
             refused: false,
             bindings: found,
+        })
+    }
+
+    fn compute_pipeline_under_options(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        options: u64,
+    ) -> Answer<OptionOutcome> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .newFunctionWithName(&NSString::from_str(entry))
+            .ok_or_else(|| Failure::named("NoSuchFunction", entry.to_owned()))?;
+        let mut reflection = None;
+        // SAFETY: the function is of this library, and `reflection` is this call's own
+        // out-parameter. The option is the case's own raw value, which Metal accepts whole: it
+        // reads the bits it defines and keeps the rest.
+        let state = unsafe {
+            self.device
+                .newComputePipelineStateWithFunction_options_reflection_error(
+                    &function,
+                    MTLPipelineOption(options as NSUInteger),
+                    Some(&mut reflection),
+                )
+        }
+        .map_err(|error| {
+            Failure::named(
+                "NewComputePipelineState",
+                error.localizedDescription().to_string(),
+            )
+        })?;
+        let outcome = match reflection {
+            // Declared, not inferred: the coverage derivation types a receiver from what bound
+            // it, and an `Option` the creation filled in through an out-parameter names no type.
+            Some(reflection) => {
+                let reflection: Retained<MTLComputePipelineReflection> = reflection;
+                let bindings = reflection.bindings();
+                let mut found = Vec::new();
+                for binding in &bindings {
+                    found.push(metal_binding(&binding)?);
+                }
+                OptionOutcome {
+                    reflected: true,
+                    stages: vec![(KERNEL_STAGE, Some(found))],
+                }
+            }
+            None => OptionOutcome::without_reflection(&[KERNEL_STAGE]),
+        };
+        // The state is kept so it outlives the reflection its creation answered.
+        keep(&mut self.pipelines, state);
+        Ok(outcome)
+    }
+
+    fn render_pipeline_under_options(
+        &mut self,
+        library: Handle,
+        vertex: &str,
+        fragment: &str,
+        attachment: PixelFormat,
+        options: u64,
+    ) -> Answer<OptionOutcome> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = |name: &str| -> Answer<Retained<ProtocolObject<dyn MTLFunction>>> {
+            library
+                .newFunctionWithName(&NSString::from_str(name))
+                .ok_or_else(|| Failure::named("NewFunctionWithName", name.to_owned()))
+        };
+        let descriptor = MTLRenderPipelineDescriptor::new();
+        let (vertex, fragment) = (function(vertex)?, function(fragment)?);
+        descriptor.setVertexFunction(Some(&vertex));
+        descriptor.setFragmentFunction(Some(&fragment));
+        let attachments = descriptor.colorAttachments();
+        // SAFETY: attachment 0 is inside the fixed-size array every descriptor holds.
+        let first = unsafe { attachments.objectAtIndexedSubscript(0) };
+        first.setPixelFormat(MTLPixelFormat(attachment.as_raw() as usize));
+        let mut reflection = None;
+        let state = self
+            .device
+            .newRenderPipelineStateWithDescriptor_options_reflection_error(
+                &descriptor,
+                MTLPipelineOption(options as NSUInteger),
+                Some(&mut reflection),
+            )
+            .map_err(|error| {
+                Failure::named(
+                    "NewRenderPipelineState",
+                    error.localizedDescription().to_string(),
+                )
+            })?;
+        let outcome = match reflection {
+            Some(reflection) => {
+                let reflection: Retained<MTLRenderPipelineReflection> = reflection;
+                let mut stages = Vec::new();
+                for (stage, bindings) in [
+                    (VERTEX_STAGE, reflection.vertexBindings()),
+                    (FRAGMENT_STAGE, reflection.fragmentBindings()),
+                ] {
+                    let mut found = Vec::new();
+                    for binding in &bindings {
+                        found.push(metal_binding(&binding)?);
+                    }
+                    stages.push((stage, Some(found)));
+                }
+                OptionOutcome {
+                    reflected: true,
+                    stages,
+                }
+            }
+            None => OptionOutcome::without_reflection(&[VERTEX_STAGE, FRAGMENT_STAGE]),
+        };
+        // The state is kept so it outlives the reflection its creation answered.
+        keep(
+            &mut self.render_pipelines,
+            RenderPipeline {
+                state,
+                reflection: None,
+            },
+        );
+        Ok(outcome)
+    }
+
+    fn render_pipeline_functions_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &FunctionsDescriptorSpec<'_>,
+    ) -> Answer<FunctionsDescriptorFacts> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let mut made: Vec<(&str, Retained<ProtocolObject<dyn MTLFunction>>)> = Vec::new();
+        for name in spec.names() {
+            let function = library
+                .newFunctionWithName(&NSString::from_str(name))
+                .ok_or_else(|| Failure::named("NewFunctionWithName", name.to_owned()))?;
+            made.push((name, function));
+        }
+        let held = |name: &str| -> Answer<Retained<ProtocolObject<dyn MTLFunction>>> {
+            made.iter()
+                .find(|(held, _)| *held == name)
+                .map(|(_, function)| function.clone())
+                .ok_or_else(|| Failure::named("NoSuchFunction", name.to_owned()))
+        };
+        let descriptor = MTLRenderPipelineFunctionsDescriptor::new();
+        // Each property's writes in the order the case states them, so "set and then set again"
+        // and "set and then put back to nil" are what the descriptor actually saw.
+        for writes in [spec.vertex, spec.fragment, spec.tile].iter().enumerate() {
+            let (stage, writes) = writes;
+            for write in *writes {
+                let functions = match write {
+                    Write::Functions(names) => {
+                        let mut objects = Vec::new();
+                        for name in *names {
+                            objects.push(held(name)?);
+                        }
+                        Some(NSArray::from_retained_slice(&objects))
+                    }
+                    Write::Nil => None,
+                };
+                let list = functions.as_deref();
+                // SAFETY: the array holds this library's own functions, which is what the
+                // property takes; Metal copies it.
+                unsafe {
+                    match stage {
+                        0 => descriptor.setVertexAdditionalBinaryFunctions(list),
+                        1 => descriptor.setFragmentAdditionalBinaryFunctions(list),
+                        _ => descriptor.setTileAdditionalBinaryFunctions(list),
+                    }
+                }
+            }
+        }
+        // Each getter bound to a local, so the coverage derivation types the receiver.
+        let vertex = descriptor.vertexAdditionalBinaryFunctions();
+        let fragment = descriptor.fragmentAdditionalBinaryFunctions();
+        let tile = descriptor.tileAdditionalBinaryFunctions();
+        Ok(FunctionsDescriptorFacts {
+            vertex: function_names(vertex.as_deref()),
+            fragment: function_names(fragment.as_deref()),
+            tile: function_names(tile.as_deref()),
         })
     }
 

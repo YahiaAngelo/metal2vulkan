@@ -107,8 +107,10 @@ pub mod norm_storage_writes;
 pub mod pass_bytes;
 pub mod pipeline_descriptors;
 pub mod pipeline_facts;
+pub mod pipeline_functions;
 pub mod pipeline_handlers;
 pub mod pipeline_option_reflection;
+pub mod pipeline_options;
 pub mod pixel_downscales;
 pub mod pixel_samplers;
 pub mod pvrtc_cpu_order;
@@ -192,6 +194,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in pipeline_facts::all() {
+        cases.push(Box::new(case));
+    }
+    for case in pipeline_options::all() {
+        cases.push(Box::new(case));
+    }
+    for case in pipeline_functions::all() {
         cases.push(Box::new(case));
     }
     for case in pipeline_descriptors::all() {

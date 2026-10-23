@@ -12,8 +12,17 @@
 //! argument; this compares what Metal says each argument is. Checking one without the other is
 //! checking an answer without its question.
 //!
-//! Three kernels, chosen so that between them the three subprotocols a binding can conform to are
-//! all reached:
+//! # The binding kinds, measured
+//!
+//! `MTLBindingType` holds twelve values and the suite's eight hundred recordings held **four** of
+//! them anywhere: `Buffer`, `ThreadgroupMemory`, `Texture` and `Sampler`. Of the other eight, four
+//! are ray tracing's and one is Metal 4's tensor, all out of this project's scope; `ObjectPayload`
+//! needs a mesh pipeline's reflection, which no case reads, and is a named gap. The two that are
+//! reachable from a compute pipeline are here: a **visible-function table**, whose kernel takes one
+//! as an argument, and an **imageblock**, whose kernel declares one explicitly.
+//!
+//! Five kernels, chosen so that between them the three subprotocols a binding can conform to are
+//! all reached, and so that two binding types nothing had compared are:
 //!
 //! - **the argument-buffer kernel** (`px_samplers`' `px_sample_argument`): two plain device
 //!   pointers, which answer a `bufferPointerType`, and one argument buffer, which answers a
@@ -76,6 +85,25 @@ pub fn all() -> Vec<FunctionBindingsCase> {
             name: "function-bindings-threadgroup-memory",
             fixture: "a27_ob1_threadgroup",
             entry: "ob1_threadgroup",
+        },
+        // The visible-function-table kernel: `visible_function_table<WordOp> ops [[buffer(1)]]`
+        // beside a plain `device uint *` at 0, which is the only shape in this tree whose
+        // reflection can hold `MTLBindingTypeVisibleFunctionTable`. The kernel links no visible
+        // function: it calls through the table's entries rather than naming one, so the pipeline
+        // compiles from the library alone and the binding is the table's own argument.
+        FunctionBindingsCase {
+            name: "function-bindings-visible-function-table",
+            fixture: "visible_table_caller",
+            entry: "visible_table_dispatch",
+        },
+        // The explicit-imageblock kernel: `imageblock<Cell, imageblock_layout_explicit> img`
+        // beside a `device uint4 *` at 0, which is the only shape in this tree that can reach
+        // `MTLBindingTypeImageblock` or `MTLBindingTypeImageblockData`. Whether Metal lists a
+        // compute kernel's imageblock as a binding at all is the measurement.
+        FunctionBindingsCase {
+            name: "function-bindings-imageblock",
+            fixture: "a4_imageblock_extent",
+            entry: "a4_imageblock_extent",
         },
     ]
 }

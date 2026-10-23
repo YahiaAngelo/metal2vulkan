@@ -29,6 +29,35 @@ fn undefined_bits_are_kept() {
     assert_eq!(PipelineOptions::new(both).options, both);
 }
 
+/// Metal tests the option word against zero and nothing finer: every word but `NONE` asks a
+/// `_with_reflection` creation for its reflection, an undefined bit alone and
+/// `FAIL_ON_BINARY_ARCHIVE_MISS` alone included (measured on an M3 Max under macOS 27.0.1 by the
+/// conformance suite's `pipeline_options` family, on a compute and a render creation).
+#[test]
+fn every_option_word_but_none_asks_for_a_reflection() {
+    assert!(!PipelineOptions::default().options.reflects());
+    assert!(!PipelineOption::NONE.reflects());
+    for raw in [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        1 << 31,
+        1 << 40,
+        1 | (1 << 3),
+        u64::MAX,
+    ] {
+        assert!(
+            PipelineOption::from_raw(raw).reflects(),
+            "the word {raw} asks for a reflection"
+        );
+    }
+}
+
 #[test]
 fn a_deadline_only_shortens_the_standard_budget() {
     let standard = Duration::from_secs(20);
