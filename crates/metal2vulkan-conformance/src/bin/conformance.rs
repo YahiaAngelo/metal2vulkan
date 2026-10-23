@@ -5,7 +5,8 @@
 //! conformance record [case ...]
 //! conformance replay [--cpu] [--default-policy] [case ...]
 //! conformance cost [--cpu] [--default-policy] [--runs N] [--write] [--show] [--alone] [case ...]
-//! conformance times [--cpu] [--default-policy] [--runs N] [--leg metal|ours] [--write] [--show] [case ...]
+//! conformance times [--cpu] [--default-policy] [--runs N] [--leg metal|ours] [--write] [--show]
+//!                    [--call NAME] [case ...]
 //! conformance cases
 //! ```
 //!
@@ -78,6 +79,7 @@ fn command() -> Result<bool, String> {
     let mut show = false;
     let mut alone = false;
     let mut legs = Legs::Both;
+    let mut call = None;
     let mut words = words.peekable();
     while let Some(word) = words.next() {
         match word.as_str() {
@@ -88,6 +90,9 @@ fn command() -> Result<bool, String> {
             "--write" => write = true,
             "--show" => show = true,
             "--alone" => alone = true,
+            "--call" => {
+                call = Some(words.next().ok_or("--call wants a Side call's name")?);
+            }
             "--leg" => {
                 let value = words.next().ok_or("--leg wants metal or ours")?;
                 legs = match value.as_str() {
@@ -117,7 +122,18 @@ fn command() -> Result<bool, String> {
         }
         "record" => record(&cases),
         "cost" => cost(venues, policy, &cases, runs, write, show, alone),
-        "times" => times(venues, policy, &cases, runs, legs, write, show),
+        "times" => times(
+            &cases,
+            Asked {
+                venues,
+                policy,
+                runs,
+                legs,
+                write,
+                show,
+                call: call.as_deref(),
+            },
+        ),
         "timing-coverage" => timing_coverage(venues, policy, &cases),
         metal2vulkan_conformance::validated::LEG_VERB => validated_leg(&cases),
         "replay" => {
@@ -383,6 +399,19 @@ enum Legs {
     Ours,
 }
 
+/// What a `times` run was asked for: the flags, gathered so the run takes one argument rather
+/// than eight.
+struct Asked<'a> {
+    venues: Venues,
+    policy: Policy,
+    runs: u32,
+    legs: Legs,
+    write: bool,
+    show: bool,
+    /// The one call `--call` names, whose cost is then printed case by case.
+    call: Option<&'a str>,
+}
+
 /// Measure what the selection costs in **time** on each leg and print the table.
 ///
 /// The two legs run as two phases of one process rather than case by case, because the off-thread
@@ -390,14 +419,18 @@ enum Legs {
 /// other's readings. `--leg` runs one leg in a process of its own, which is the only way to read
 /// that attribution with nothing of the other leg in it.
 fn times(
-    venues: Venues,
-    policy: Policy,
     cases: &[Box<dyn metal2vulkan_conformance::case::Case>],
-    runs: u32,
-    legs: Legs,
-    write: bool,
-    show: bool,
+    asked: Asked<'_>,
 ) -> Result<bool, String> {
+    let Asked {
+        venues,
+        policy,
+        runs,
+        legs,
+        write,
+        show,
+        call,
+    } = asked;
     let metal = match legs {
         Legs::Both | Legs::Metal => metal_times(cases, runs)?,
         Legs::Ours => None,
@@ -422,6 +455,14 @@ fn times(
             metal2vulkan_conformance::times::render(None, metal, show)
         ),
         (None, None) => return Err("--leg selected neither leg".to_owned()),
+    }
+    // The triage for a row of the per-call table: a total over a case set says that a call is
+    // expensive, never where.
+    if let (Some(call), Some(metal), Some(ours)) = (call, &metal, &ours) {
+        print!(
+            "{}",
+            metal2vulkan_conformance::times::render_one_call(metal, ours, call)
+        );
     }
     if !write {
         println!("nothing written; pass --write to keep these figures in the recordings");

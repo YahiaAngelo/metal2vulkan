@@ -260,8 +260,17 @@ conformance times --runs 8                  # both legs, print the tables
 conformance times --runs 8 --show           # and every per-case row, not only the interesting ones
 conformance times --leg metal --runs 8      # one leg in a process of its own
 conformance times --runs 8 --write          # keep the figures in the cases' recordings
+conformance times --runs 8 --call replace_region   # where one call's cost sits, case by case
 conformance timing-coverage                 # which calls are timed, and which are not
 ```
+
+`--call` is the triage, and it earns its place: the first whole-set run put `replace_region` at
+105x over 108 calls, and the three cases that obviously make it came out at 1.2x over 3 when run
+alone. The figure was real and almost none of it was there. `--call replace_region` put all of it
+in one family — 16 `xr-two-plane-samples` cases, one such call each, Metal 72 us against our
+19,132 us (**265x**, 92% of ours spent blocked) — while the other 86 cases that make the call sit
+at 1.3x together. A per-call total says *that* a call is expensive and never *where*, and a reading
+over one selection is not evidence about another.
 
 Both legs are measured **at one boundary**, `watch::Watching`'s span: around the Metal or Vulkan
 call and the side's own handle bookkeeping, outside the transcript, the fixtures and the input

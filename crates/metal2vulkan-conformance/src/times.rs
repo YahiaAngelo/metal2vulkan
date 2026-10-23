@@ -768,6 +768,76 @@ fn ms(nanos: u64) -> String {
     format!("{:.3}", nanos as f64 / 1_000_000.0)
 }
 
+/// Where one call's cost sits, case by case, worst first: the triage for a row of the per-call
+/// table.
+///
+/// **Why this exists.** The first whole-set run put `replace_region` at 105x over 108 calls, and
+/// running the three cases that obviously make it gave 1.2x over 3 — so the figure was real and
+/// almost none of it was there. A per-call total over a case set says *that* a call is expensive
+/// and never *where*, and the counters half's hardest lesson is that a reading over one selection
+/// is not evidence about another. Without this a reader has only the bisection by hand that the
+/// plan's UX bar exists to abolish.
+///
+/// Only the cases both legs did exactly are listed, for the same reason the paired table lists
+/// only those.
+pub fn render_one_call(metal: &Measurement, ours: &Measurement, call: &str) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "\nWHERE `{call}` COSTS, case by case over the cases both legs did exactly, worst ratio \
+         of totals first (us)\n"
+    ));
+    out.push_str(&format!(
+        "{:<44} {:>7} {:>11} {:>11} {:>8}   {:>11} {:>11}\n",
+        "case", "calls", "metal tot", "ours tot", "ratio", "ours cpu", "ours blkd"
+    ));
+    let mut rows: Vec<(&str, u64, &CallTimes, Option<&CallTimes>)> = Vec::new();
+    for one in &ours.cases {
+        let Some(theirs) = metal.case(&one.case) else {
+            continue;
+        };
+        if matches!(judge(theirs, one), TimeVerdict::Unmeasured { .. }) {
+            continue;
+        }
+        let Some(mine) = one.per_call.iter().find(|held| held.call == call) else {
+            continue;
+        };
+        rows.push((
+            &one.case,
+            mine.most_calls,
+            mine,
+            theirs.per_call.iter().find(|held| held.call == call),
+        ));
+    }
+    rows.sort_by_key(|(_, _, mine, theirs)| {
+        let metal = theirs.map(|theirs| theirs.wall_total).unwrap_or(0).max(1);
+        std::cmp::Reverse(mine.wall_total.saturating_mul(1_000) / metal)
+    });
+    for (case, calls, mine, theirs) in &rows {
+        let (their_total, ratio) = match theirs {
+            Some(theirs) if theirs.wall_total > 0 => (
+                us(theirs.wall_total),
+                format!("{:.1}x", mine.wall_total as f64 / theirs.wall_total as f64),
+            ),
+            Some(theirs) => (us(theirs.wall_total), "-".to_owned()),
+            None => ("-".to_owned(), "-".to_owned()),
+        };
+        out.push_str(&format!(
+            "{:<44} {:>7} {:>11} {:>11} {:>8}   {:>11} {:>11}\n",
+            case,
+            calls,
+            their_total,
+            us(mine.wall_total),
+            ratio,
+            us(mine.on_cpu_total),
+            us(mine.blocked_total)
+        ));
+    }
+    if rows.is_empty() {
+        out.push_str("  no case both legs did exactly makes that call\n");
+    }
+    out
+}
+
 /// The table a `times` run prints: native Metal beside our stack, per call and per case.
 ///
 /// `metal` is absent off macOS, where there is no Metal leg to compare with; the table then
