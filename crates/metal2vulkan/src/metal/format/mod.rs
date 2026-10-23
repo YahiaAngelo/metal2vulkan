@@ -2005,23 +2005,28 @@ pub fn ycbcr_writes_stored(pf: PixelFormat) -> bool {
 }
 
 /// Whether a render pass stores its color attachment of a two-plane YCbCr texture of `pf`
-/// ([`ycbcr`]) into the texture's planes as Metal stores it: the converted formats of unpacked
-/// 8- and 10-bit codes, `YCBCR8_420_2P`, `YCBCR8_422_2P`, `YCBCR8_444_2P`, `YCBCR10_420_2P`,
-/// `YCBCR10_422_2P` and `YCBCR10_444_2P`. Metal re-encodes every texel of the attachment, drawn
-/// or not, into both planes at the pass's store, by the codes `bind::ycbcr_store` states (an Apple
-/// M4 under macOS 27.0.1: every byte of the 8-bit formats' clears and full-screen draws over
-/// `420v`, `420f`, `422v` and `444v` surfaces, no matrix and BT.709; the consumer's run of the same
-/// probe on an Apple M3 Max under macOS 26.7: the M4's bytes in every case; the same M4: every byte
-/// of the 10-bit formats' draws and clears over `x420`, `xf20`, `x422`, `xf22`, `x444` and `xf44`).
+/// ([`ycbcr`]) into the texture's planes as Metal stores it: the formats of unpacked 8- and
+/// 10-bit codes read converted, `YCBCR8_420_2P`, `YCBCR8_422_2P`, `YCBCR8_444_2P`,
+/// `YCBCR10_420_2P`, `YCBCR10_422_2P` and `YCBCR10_444_2P`, or read as codes, `RGB8_420_2P` to
+/// `RGB10_444_2P`. Metal re-encodes every texel of the attachment, drawn or not, into both planes
+/// at the pass's store, by the codes `bind::ycbcr_store` states (an Apple M4 under macOS 27.0.1:
+/// every byte of the 8-bit formats' clears and full-screen draws over `420v`, `420f`, `422v` and
+/// `444v` surfaces, no matrix and BT.709; the consumer's run of the same probe on an Apple M3 Max
+/// under macOS 26.7: the M4's bytes in every case; the same M4: every byte of the 10-bit formats'
+/// draws and clears over `x420`, `xf20`, `x422`, `xf22`, `x444` and `xf44`; an Apple M3 Max under
+/// macOS 27.0.1: every byte of the code formats' draws).
 /// Such an attachment renders into `R32G32B32A32_SFLOAT` ([`FormatEmulation::YCbCrRendered`]),
 /// through any write mask and, where the device blends that format, any blend (within a code of
 /// Metal's, the runtime announces it; refused elsewhere, `Unsupported(Format)` naming the need).
-/// Not the `_sRGB`, code or packed formats, whose stores no rule matches yet (a packed one's pass
-/// is refused, [`ycbcr_pass_refused`]).
+/// Not the `_sRGB` or packed formats, whose stores no rule matches yet (a packed one's pass is
+/// refused, [`ycbcr_pass_refused`]).
 pub fn ycbcr_renders(pf: PixelFormat) -> bool {
     // Every such layout is held ([`ycbcr`]), whose representation asks this.
-    ycbcr_format(pf)
-        .is_some_and(|f| !f.packed && matches!(f.bits, 8 | 10) && f.reads == YCbCrReads::Converted)
+    ycbcr_format(pf).is_some_and(|f| {
+        !f.packed
+            && matches!(f.bits, 8 | 10)
+            && matches!(f.reads, YCbCrReads::Converted | YCbCrReads::Codes)
+    })
 }
 
 /// Whether `pf` is a packed 10-bit two-plane YCbCr format this crate holds ([`ycbcr`]), whose

@@ -712,11 +712,13 @@ fn binding_of(sym: &Symbol) -> Option<u32> {
     }
 }
 
-/// The object arguments pass of `device` ([`object_arguments_typed_module`] of its
-/// `maxComputeWorkGroupCount`), which an emulated indirect draw with an object function dispatches
-/// (one workgroup of one invocation) before its object dispatch, under the scan's bindings
-/// (`MeshDispatch::object_arguments`): built with the typed builder, verified, serialized, and
-/// numbered with the fixed bindings of [`MeshScanModule`].
+/// The object arguments pass of `device`, which an emulated indirect draw with an object function
+/// dispatches (one workgroup of one invocation) before its object dispatch, under the scan's
+/// bindings (`MeshDispatch::object_arguments`): it reads Metal's arguments, reserves the object
+/// threadgroups' slots in the records pool, and writes the object dispatch, or runs nothing and
+/// sets the status bit that says why (`MESH_GRID_DISCARDED`, `MESH_GRID_PAST_LIMITS` past the
+/// device's `maxComputeWorkGroupCount`, `MESH_RECORDS_OVERFLOW`). Built with the typed builder,
+/// verified, serialized, and numbered with the fixed bindings of [`MeshScanModule`].
 pub fn mesh_object_arguments_module(device: &Device) -> Result<MeshScanModule, Error> {
     let compute = device
         .profile()

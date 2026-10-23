@@ -9,9 +9,10 @@
 //!   (chroma blocks of drawn and cleared texels among them), and a full-screen draw over a
 //!   `DontCare` load, of values out of `[0, 1]`, NaNs, infinities and values beside the grid's ties
 //!   among them; every other byte is kept, and nothing is announced. So does one into
-//!   `YCBCR10_420_2P`, `YCBCR10_422_2P` or `YCBCR10_444_2P` (format gap 1 step 2), each code in the
-//!   high 10 bits of its 16-bit word, over the surfaces and conversions measured: `x420`, `xf20`,
-//!   `x422`, `xf22`, `x444` and `xf44`, without a matrix and under BT.709.
+//!   `YCBCR10_420_2P`, `YCBCR10_422_2P` or `YCBCR10_444_2P`, each code in the high 10 bits of its
+//!   16-bit word, over the surfaces and conversions measured: `x420`, `xf20`, `x422`, `xf22`,
+//!   `x444` and `xf44`, without a matrix and under BT.709; and one into a code format,
+//!   `RGB8_420_2P` to `RGB10_444_2P`, each texel's green, blue and red as codes.
 //! - A pass that loads such a texture loads each texel as the texture reads it and stores every
 //!   texel of each 32x32 tile its draws reach, re-encoded, keeping the planes' bytes of the other
 //!   tiles (`loaded_passes_store_the_tiles_they_reach_as_metal`); a `DontCare` store, or a store
@@ -27,7 +28,9 @@
 use super::degrade_notices::{counts, on_device};
 use super::{buffer_with, read_buffer};
 use crate::air_library::AirLibrary;
-use metal2vulkan::bind::{ycbcr_read, ycbcr_store, YCbCrCodes, YCbCrMatrix, YCbCrRange};
+use metal2vulkan::bind::{
+    ycbcr_read, ycbcr_store, YCbCrCodes, YCbCrMatrix, YCbCrOutput, YCbCrRange,
+};
 use metal2vulkan::error::{Error as CompileError, Feature};
 use metal2vulkan::metal::format::ycbcr_format;
 use metal2vulkan::metal::{BlendFactor, ColorWriteMask, PixelFormat, PrimitiveType, TextureUsage};
@@ -345,7 +348,8 @@ fn first_difference(after: &[u8], want: &[u8]) -> Option<(usize, u8, u8)> {
 /// Metal stores them: for each format, over both ranges and each matrix, a clear, a draw over part
 /// of a cleared texture, and a full-screen draw over a `DontCare` load; every other byte kept, and
 /// nothing announced past the pipeline states' own notes. So does one into a 10-bit converted one,
-/// over each of its surfaces measured, without a matrix and under BT.709.
+/// over each of its surfaces measured, without a matrix and under BT.709, and one into each code
+/// format.
 #[test]
 fn a_pass_stores_metal_s_codes_into_both_planes() {
     use PixelFormat as P;
@@ -374,6 +378,12 @@ fn a_pass_stores_metal_s_codes_into_both_planes() {
             (P::YCBCR104222P, "xf22", None, (Full, Bt601)),
             (P::YCBCR104442P, "x444", None, (Video, Bt601)),
             (P::YCBCR104442P, "xf44", b709, (Full, Bt709)),
+            (P::RGB84202P, "420v", None, (Video, Bt601)),
+            (P::RGB84222P, "422f", b709, (Full, Bt709)),
+            (P::RGB84442P, "444v", None, (Video, Bt601)),
+            (P::RGB104202P, "x420", None, (Video, Bt601)),
+            (P::RGB104222P, "xf22", b709, (Full, Bt709)),
+            (P::RGB104442P, "x444", None, (Video, Bt601)),
         ] {
             let codes = codes_of(pf);
             let state = pipeline(device, &library, pf, |_| {}).unwrap();
@@ -514,8 +524,9 @@ fn ycbcr_passes_outside_the_matched_store_are_refused_typed() {
     });
 }
 
-/// The texels a texture of `codes` over the surface `bytes` reads, as `[r, g, b]` floats of the
-/// converted values (`metal2vulkan::bind::ycbcr_read`, `v / 2048`): each texel's luma code and its
+/// The texels a texture of `codes` over the surface `bytes` reads, as `[r, g, b]` floats
+/// (`metal2vulkan::bind::ycbcr_read`: a converted value's step `v / 2048`, a code `v / (2^b - 1)`):
+/// each texel's luma code and its
 /// chroma pairs filtered as Metal reads them (the nearer pair weighted 3 and the farther 1 along
 /// each halved axis, the conversion module's filter).
 fn loaded_texels(
@@ -564,7 +575,11 @@ fn loaded_texels(
             }
             let [cb, cr] = sums.map(|s| ((s + 8) >> 4) as u16);
             let luma = code(y * ROW + unit * x) as u16;
-            ycbcr_read(codes, conversion, [luma, cb, cr]).map(|v| f32::from(v) / 2048.0)
+            let scale = match codes.output {
+                YCbCrOutput::Codes => ((1u32 << codes.bits) - 1) as f32,
+                _ => 2048.0,
+            };
+            ycbcr_read(codes, conversion, [luma, cb, cr]).map(|v| f32::from(v) / scale)
         })
         .collect()
 }
@@ -614,6 +629,8 @@ fn loaded_passes_store_the_tiles_they_reach_as_metal() {
             (P::YCBCR104202P, "x420", b709, (Video, Bt709)),
             (P::YCBCR104222P, "xf22", None, (Full, Bt601)),
             (P::YCBCR104442P, "xf44", b709, (Full, Bt709)),
+            (P::RGB84202P, "420f", None, (Full, Bt601)),
+            (P::RGB104442P, "x444", b709, (Video, Bt709)),
         ] {
             let codes = codes_of(pf);
             let state = pipeline(device, &library, pf, |_| {}).unwrap();
@@ -718,6 +735,8 @@ fn masked_blended_and_unstored_passes_are_metal_s() {
         for (pf, ostype, matrix, conversion) in [
             (P::YCBCR84202P, "420f", b709, (Full, Bt709)),
             (P::YCBCR104442P, "x444", None, (Video, Bt601)),
+            (P::RGB84222P, "422v", None, (Video, Bt601)),
+            (P::RGB104202P, "xf20", b709, (Full, Bt709)),
         ] {
             let codes = codes_of(pf);
             for case in 0..6 {

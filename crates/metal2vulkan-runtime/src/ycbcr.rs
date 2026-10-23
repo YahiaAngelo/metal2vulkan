@@ -113,8 +113,9 @@
 //!   use, as after any write of the planes. Exact, so announced nowhere.
 //! - **Passes** (on an Apple M4 under macOS 27.0.1, and on an Apple M3 Max under macOS 26.7 and
 //!   27.0.1, byte for byte alike). Metal's tile holds a color attachment of `YCBCR8_420_2P`,
-//!   `YCBCR8_422_2P`, `YCBCR8_444_2P` or their 10-bit formats (500 to 507) over plane 0 as halves
-//!   of red, green and blue, and its store converts the tile back into both planes: every texel's
+//!   `YCBCR8_422_2P`, `YCBCR8_444_2P` or their 10-bit formats (500 to 507), or of the code formats
+//!   `RGB8_420_2P` to `RGB10_444_2P` (540 to 545), over plane 0 as halves of red, green and blue,
+//!   and its store converts the tile back into both planes: every texel's
 //!   luma code, drawn or not, and each chroma pair's codes of the block of texels it covers, the
 //!   codes `metal2vulkan::bind::ycbcr_store` states (`metal::format::ycbcr_renders`). The pass
 //!   renders into the texture's render shadow (`texture/ycbcr_image.rs`), an
