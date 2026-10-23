@@ -1403,8 +1403,9 @@ degradations! {
         /// resolved buffer) that was rebound (`rebind_bytes_no_copy`) after the command was
         /// encoded and before the command buffer was first submitted
         /// (`CommandBufferError::EncodedUseRebound`, `command_buffer/first_submission.rs`), in an
-        /// encoder the rebind could not encode again (a command predication's command buffer; a
-        /// render pass a host step records, or whose end captured its draws' tile reach; work
+        /// encoder the rebind could not encode again (a command predication's compute encoder
+        /// that shares its unit of predication with other encoders, holds a loop or leaves work
+        /// out; a render pass a host step records, or whose end captured its draws' tile reach; work
         /// recorded on the GPU alone that no longer runs there; a call that answers otherwise than
         /// at its encoding; `replay.rs`). Its reason names where the first such submission found
         /// the use (the encoder, and its own commands or work it left for later) and why no rebind
@@ -1484,8 +1485,8 @@ degradations! {
         /// A render pass over a rasterization-rate map that was reset
         /// (`RasterizationRateMap::reset_using_descriptor`) after the pass took it and before
         /// its command buffer was submitted, in an encoder the runtime could not encode again
-        /// (it kept no log: a command predication's command buffer, a render encoder opened
-        /// while a buffer of the device was detached, or one that left work for a host step;
+        /// (it kept no log: a render encoder opened while a buffer of the device was detached,
+        /// or one that left work for a host step;
         /// `rate_mapped_pass.rs`). The pass draws by the map as it took it, where Metal's GPU
         /// reads the map as it runs the pass (the M3 Max under macOS 27.0.1). Announced at the
         /// commit, or at the reset where the command buffer was committed.

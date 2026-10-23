@@ -17,9 +17,9 @@ use crate::gpu::TEST_DEVICE;
 use metal2vulkan::metal::{PixelFormat, TextureUsage};
 use metal2vulkan_runtime::{
     host_time, BlitCommandEncoder, BlitOption, Buffer, CommandBuffer, CommandBufferStatus,
-    CommandQueue, CpuCacheMode, Device, Error, EventRef, HazardTrackingMode, Invalid, Origin,
-    Problem, ResourceOptions, RuntimeGap, SharedEvent, SharedEventListener, Size, StorageMode,
-    Texture, TextureDescriptor,
+    CommandQueue, CommitFailure, CpuCacheMode, Device, Error, EventRef, HazardTrackingMode,
+    Invalid, Origin, Problem, ResourceOptions, RuntimeGap, SharedEvent, SharedEventListener, Size,
+    StorageMode, Texture, TextureDescriptor,
 };
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -929,6 +929,19 @@ fn a_scheduled_signal_sets_its_value_as_the_command_buffer_is_scheduled() {
         // Once it completed, refused: Metal's process ends there.
         assert_eq!(
             command_buffer.encode_signal_event_scheduled(&later, 9),
+            Err(invalid(
+                "encode_signal_event_scheduled",
+                Problem::ScheduledSignalAfterCompletion
+            ))
+        );
+        assert_eq!(later.signaled_value(), 3);
+        // As once it failed (status `Error`): Metal's process ends there too.
+        let failed = first.command_buffer().unwrap();
+        failed.commit_failed(CommitFailure::new(8)).unwrap();
+        failed.wait_until_completed_for(WAIT).unwrap();
+        assert_eq!(failed.status(), CommandBufferStatus::Error);
+        assert_eq!(
+            failed.encode_signal_event_scheduled(&later, 9),
             Err(invalid(
                 "encode_signal_event_scheduled",
                 Problem::ScheduledSignalAfterCompletion
