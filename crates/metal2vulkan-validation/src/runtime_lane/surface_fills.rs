@@ -255,8 +255,14 @@ fn covers(text: &str, bytes: &[u8], case: &str) {
         .split('[')
         .skip(1)
         .map(|run| {
-            run.split_once(':')
-                .map_or(0, |(_, listed)| listed.split_whitespace().count())
+            run.split_once(':').map_or(0, |(_, listed)| {
+                (listed.split_whitespace())
+                    .filter(|word| {
+                        let word = word.strip_suffix(']').unwrap_or(word);
+                        word.len() == 2 && word.bytes().all(|b| b.is_ascii_hexdigit())
+                    })
+                    .count()
+            })
         })
         .sum();
     let changed = bytes.iter().filter(|&&b| b != 0xee).count();
