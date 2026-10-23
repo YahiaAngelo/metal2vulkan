@@ -109,6 +109,7 @@ const FILL: Functions = Functions {
     fixture: TOB,
     vertex: "tob_rect",
     fragment: "tob_solid",
+    half_output: false,
 };
 
 /// A pipeline's two functions and the fixture they come from.
@@ -117,6 +118,14 @@ struct Functions {
     fixture: &'static str,
     vertex: &'static str,
     fragment: &'static str,
+    /// Whether the fragment function returns a `half` colour output rather than a `float` one.
+    ///
+    /// This is the shape that decides one of the row's notice declarations and nothing else: our
+    /// side records `half-output-fast-math-blend` where a `half` colour output reaches an
+    /// attachment that stores a channel out of a module naming no math mode
+    /// (`metal2vulkan::pipeline::color_writes::pipeline_writes`), which is a fact about the
+    /// function and the attachment and not about any device.
+    half_output: bool,
 }
 
 /// What one row asks: the two extents, the functions the sampling pass runs, and its filter.
@@ -143,6 +152,7 @@ const SUBJECTS: &[Subject] = &[
             fixture: TOB,
             vertex: "tob_rect",
             fragment: "tob_sample",
+            half_output: false,
         },
         filter: SamplerMinMagFilter::Nearest,
     },
@@ -154,6 +164,7 @@ const SUBJECTS: &[Subject] = &[
             fixture: TGP,
             vertex: "tgp_rect",
             fragment: "tgp_layer",
+            half_output: true,
         },
         filter: SamplerMinMagFilter::Nearest,
     },
@@ -165,6 +176,7 @@ const SUBJECTS: &[Subject] = &[
             fixture: TGP,
             vertex: "tgp_rect",
             fragment: "tgp_layer",
+            half_output: true,
         },
         filter: SamplerMinMagFilter::Linear,
     },
@@ -305,13 +317,31 @@ impl Case for RenderChain {
 
     fn allowances(&self) -> Vec<Allowance> {
         // No texel is loosened: whole codes over 255 in `RGBA8Unorm` are an exact answer on every
-        // device, and a difference in one is what this family exists to report. The notices site
-        // is declared for the one notice a fragment function that stores a converted colour may
-        // announce, chosen from the case's own shape -- its format and its fragment stage -- and
-        // not from any device. It loosens no value.
-        vec![crate::replay::notice_allowance(
+        // device, and a difference in one is what this family exists to report. Both entries are
+        // **notice declarations** on the notices site, which loosen no value; Metal announces
+        // nothing, so a notice of ours has to be declared or the comparison cannot be made at all.
+        //
+        // Each is chosen from the case's own shape and not from any device:
+        //
+        // - `shader-color-conversion`, because every row's fragment stage stores a normalized
+        //   channel, which our side rounds in the shader on a device whose own conversion is not
+        //   Metal's. It fired on no venue measured here and is declared so the rows stay readable
+        //   on one where it does.
+        // - `half-output-fast-math-blend`, for the two rows whose fragment stage returns a `half`
+        //   colour output ([`Functions::half_output`]). Our side records it where such an output
+        //   reaches an attachment that stores a channel out of a module naming no math mode, which
+        //   `tgp_composite` does. It **fires on MoltenVK on this M3 Max**, and the rows' texels
+        //   still compare exactly, which is the evidence that declaring it loosens nothing: the
+        //   whole difference it covers is the announcement.
+        let mut named = vec![crate::replay::notice_allowance(
             Degradation::ShaderColorConversion.code(),
-        )]
+        )];
+        if self.subject.sample.half_output {
+            named.push(crate::replay::notice_allowance(
+                Degradation::HalfOutputFastMathBlend.code(),
+            ));
+        }
+        named
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
@@ -628,6 +658,43 @@ mod tests {
         // The two clip-space bands at the ends reach the ends of the target.
         assert_eq!(band(0)[0], -1.0);
         assert_eq!(band(BANDS - 1)[2], 1.0);
+    }
+
+    /// Every allowance of every row is a notice declaration on the notices site, and the
+    /// `half`-output one is declared by exactly the rows whose fragment stage returns a `half`.
+    ///
+    /// Both halves matter. The first is the family's whole tolerance story: a row that ever
+    /// loosened a texel would fail here, and the texels are the field the family exists to
+    /// compare. The second stops the declaration spreading to a row whose shape does not imply it,
+    /// which would be an allowance standing behind nothing.
+    #[test]
+    fn every_allowance_is_a_notice_declaration_chosen_from_the_rows_shape() {
+        use crate::allowance::Justification;
+        for case in all() {
+            let codes: Vec<String> = case
+                .allowances()
+                .iter()
+                .map(|allowance| {
+                    assert_eq!(
+                        allowance.path,
+                        format!("case/{}/*", crate::replay::NOTICES_SITE),
+                        "{}: an allowance outside the notices site",
+                        case.name()
+                    );
+                    match &allowance.justified_by {
+                        Justification::Degradation(code) => code.clone(),
+                        other => panic!("{}: an unexpected tolerance: {other:?}", case.name()),
+                    }
+                })
+                .collect();
+            assert!(codes.contains(&Degradation::ShaderColorConversion.code().to_owned()));
+            assert_eq!(
+                codes.contains(&Degradation::HalfOutputFastMathBlend.code().to_owned()),
+                case.subject.sample.half_output,
+                "{}: the half-output notice is declared by the wrong row",
+                case.name()
+            );
+        }
     }
 
     /// Metal's recorded first target holds the four bands where the geometry puts them, in every
