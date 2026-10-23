@@ -44,7 +44,6 @@ use crate::cases::compressed_moves::{out_tight, Expected, Model, Rng, Shape, SHA
 use crate::transcript::{Node, Observed, Sites, Value};
 use crate::work::{Plane, Rect, Resource, Step, Work};
 use metal2vulkan::metal::TextureUsage;
-use metal2vulkan_runtime::Degradation;
 
 /// One BC format: the case's name, its raw `MTLPixelFormat`, its block's bytes, and the sibling
 /// format its view takes.
@@ -407,14 +406,9 @@ impl Case for CompressedViews {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // Our `replaceRegion:` into a compressed texture goes through a staging buffer and a
-        // buffer-to-image copy, which the runtime announces once per device; Metal's own writes the
-        // texels where they stand and announces nothing. The only site loosened is the set of
-        // notices — every block and every padding byte still compares exactly — and the allowance
-        // fails the case if the notice did not fire.
-        vec![crate::replay::notice_allowance(
-            Degradation::StagedTextureCopy.code(),
-        )]
+        // The same carrier and decode notices the first lane's cases name, for the same reason
+        // and from the same measurement: one mechanism, not two.
+        crate::cases::compressed_moves::carrier_allowances(self.format().format)
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
