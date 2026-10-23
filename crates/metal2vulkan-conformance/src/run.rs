@@ -3,8 +3,8 @@
 //! One function per leg, so the command, a test and a device lane all drive the same code.
 
 use crate::case::Case;
-use crate::device::{self, Notices, ScratchCache, Venues};
-use crate::replay::replay;
+use crate::device::{self, Notices, Policy, ScratchCache, Venues};
+use crate::replay::replay_known;
 use crate::report::Report;
 use crate::runtime_side::RuntimeSide;
 
@@ -25,21 +25,43 @@ pub fn selected(names: &[String]) -> Result<Vec<Box<dyn Case>>, String> {
         .collect()
 }
 
-/// Replay `cases` on the venue `venues` names, as a report.
+/// Replay `cases` on the venue `venues` names, with exact answers, as a report.
 pub fn replay_on(venues: Venues, cases: &[Box<dyn Case>]) -> Result<Report, String> {
+    replay_on_under(venues, Policy::Exact, cases)
+}
+
+/// [`replay_on`] under `policy`: either form of every speed-for-accuracy choice.
+pub fn replay_on_under(
+    venues: Venues,
+    policy: Policy,
+    cases: &[Box<dyn Case>],
+) -> Result<Report, String> {
     let notices = Notices::default();
     let cache = ScratchCache::new().map_err(|error| error.to_string())?;
-    let device = device::open(venues, &notices, &cache)?;
+    let device = device::open_under(venues, policy, &notices, &cache)?;
     // The notices a device announces as it is made are the venue's, not any case's: they say what
     // this host's driver and release cost, once, before a case runs. They go in the report's venue
     // line, and the sink is cleared so a case's own notices site holds only what its work
     // announced.
     let mut report = Report::new();
     report.venue_announced(device.name(), notices.take());
+    // A notice is announced once per device per kind, so the codes a case provokes are the ones
+    // nothing earlier in the run provoked. The set carries forward: a case's own notices site
+    // holds its own work's notices alone, and the device's notices justify a loosened field in
+    // any case of the run.
+    let mut announced_on_device: Vec<String> = Vec::new();
     for case in cases {
         let taker = notices.clone();
         let mut side = RuntimeSide::new(&device, move || taker.take());
-        report.add_result(replay(case.as_ref(), &mut side));
+        let replayed = replay_known(case.as_ref(), &mut side, &announced_on_device);
+        if let Ok(replayed) = &replayed {
+            for code in replayed.ours.announced_notices().into_keys() {
+                if !announced_on_device.contains(&code) {
+                    announced_on_device.push(code);
+                }
+            }
+        }
+        report.add_result(replayed);
     }
     Ok(report)
 }

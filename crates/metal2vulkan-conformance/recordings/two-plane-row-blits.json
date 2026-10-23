@@ -1,0 +1,1844 @@
+{
+  "format": 1,
+  "case": "two-plane-row-blits",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": {
+        "carried": {
+          "from": "runtime_lane::two_plane_copies, from the probes bp.m and pad.m (an Apple M3 Max, macOS 27.0.1)"
+        }
+      },
+      "device": "apple-m3-max",
+      "runs": 1,
+      "outcomes": [
+        {
+          "runs": 1,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "blit-geometry",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b6ffb041d360a6725c50d6cfc314c939b41fe04a9ccce3a3fc25d45dedc5f9da"
+                        }
+                      }
+                    },
+                    {
+                      "name": "words-before",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "24389d2af1f2c2bf3c9fe1c5b91caca5d1ed7d7e535346efdbca5562d56a9ddd"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/0/5x3x1-out",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 268435459
+                        },
+                        {
+                          "uint": 268435460
+                        },
+                        {
+                          "uint": 268435460
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 268435461
+                        },
+                        {
+                          "uint": 268435461
+                        },
+                        {
+                          "uint": 268435462
+                        },
+                        {
+                          "uint": 268435463
+                        },
+                        {
+                          "uint": 268435464
+                        },
+                        {
+                          "uint": 268435465
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/1/5x3x1-out",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 268435462
+                        },
+                        {
+                          "uint": 268435463
+                        },
+                        {
+                          "uint": 268435464
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/2/7x4x1-out",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435462
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 268435463
+                        },
+                        {
+                          "uint": 268435464
+                        },
+                        {
+                          "uint": 268435465
+                        },
+                        {
+                          "uint": 268435466
+                        },
+                        {
+                          "uint": 268435467
+                        },
+                        {
+                          "uint": 268435468
+                        },
+                        {
+                          "uint": 268435469
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 268435470
+                        },
+                        {
+                          "uint": 268435471
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/3/3x4x1-out",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/4",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/4/3x4x1-out",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/5",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/5/1x5x1-out",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/6",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/6/5x3x2-out",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268500992
+                        },
+                        {
+                          "uint": 268500993
+                        },
+                        {
+                          "uint": 268500994
+                        },
+                        {
+                          "uint": 268500995
+                        },
+                        {
+                          "uint": 268500996
+                        },
+                        {
+                          "uint": 268500996
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 268500997
+                        },
+                        {
+                          "uint": 268500997
+                        },
+                        {
+                          "uint": 268500998
+                        },
+                        {
+                          "uint": 268500999
+                        },
+                        {
+                          "uint": 268501000
+                        },
+                        {
+                          "uint": 268501001
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/7",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/7/7x4x1-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 268435459
+                        },
+                        {
+                          "uint": 268435460
+                        },
+                        {
+                          "uint": 268435461
+                        },
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790018
+                        },
+                        {
+                          "uint": 2952790019
+                        },
+                        {
+                          "uint": 2952790272
+                        },
+                        {
+                          "uint": 2952790273
+                        },
+                        {
+                          "uint": 2952790274
+                        },
+                        {
+                          "uint": 2952790275
+                        },
+                        {
+                          "uint": 2952790528
+                        },
+                        {
+                          "uint": 2952790530
+                        },
+                        {
+                          "uint": 2952790531
+                        },
+                        {
+                          "uint": 268435472
+                        },
+                        {
+                          "uint": 268435473
+                        },
+                        {
+                          "uint": 268435474
+                        },
+                        {
+                          "uint": 268435475
+                        },
+                        {
+                          "uint": 268435476
+                        },
+                        {
+                          "uint": 268435477
+                        },
+                        {
+                          "uint": 268435478
+                        },
+                        {
+                          "uint": 268435479
+                        },
+                        {
+                          "uint": 268435480
+                        },
+                        {
+                          "uint": 268435481
+                        },
+                        {
+                          "uint": 268435482
+                        },
+                        {
+                          "uint": 268435483
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/8",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/8/3x4x1-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790017
+                        },
+                        {
+                          "uint": 2952790018
+                        },
+                        {
+                          "uint": 2952790272
+                        },
+                        {
+                          "uint": 2952790273
+                        },
+                        {
+                          "uint": 2952790274
+                        },
+                        {
+                          "uint": 2952790528
+                        },
+                        {
+                          "uint": 2952790529
+                        },
+                        {
+                          "uint": 2952790530
+                        },
+                        {
+                          "uint": 2952790784
+                        },
+                        {
+                          "uint": 2952790785
+                        },
+                        {
+                          "uint": 2952790786
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/9",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/9/3x4x1-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 268435459
+                        },
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790017
+                        },
+                        {
+                          "uint": 268435462
+                        },
+                        {
+                          "uint": 2952790272
+                        },
+                        {
+                          "uint": 2952790273
+                        },
+                        {
+                          "uint": 268435465
+                        },
+                        {
+                          "uint": 268435466
+                        },
+                        {
+                          "uint": 268435467
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/10",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/10/5x3x1-out",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 268435459
+                        },
+                        {
+                          "uint": 268435460
+                        },
+                        {
+                          "uint": 268435460
+                        },
+                        {
+                          "uint": 2762187425
+                        },
+                        {
+                          "uint": 2762187425
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 268435461
+                        },
+                        {
+                          "uint": 268435461
+                        },
+                        {
+                          "uint": 268435462
+                        },
+                        {
+                          "uint": 268435463
+                        },
+                        {
+                          "uint": 268435464
+                        },
+                        {
+                          "uint": 268435465
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/11",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/11/7x4x1-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 268435459
+                        },
+                        {
+                          "uint": 268435460
+                        },
+                        {
+                          "uint": 268435461
+                        },
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790018
+                        },
+                        {
+                          "uint": 2952790019
+                        },
+                        {
+                          "uint": 2952790272
+                        },
+                        {
+                          "uint": 2952790273
+                        },
+                        {
+                          "uint": 2952790274
+                        },
+                        {
+                          "uint": 2952790275
+                        },
+                        {
+                          "uint": 2952790528
+                        },
+                        {
+                          "uint": 2952790530
+                        },
+                        {
+                          "uint": 2952790531
+                        },
+                        {
+                          "uint": 268435472
+                        },
+                        {
+                          "uint": 268435473
+                        },
+                        {
+                          "uint": 268435474
+                        },
+                        {
+                          "uint": 268435475
+                        },
+                        {
+                          "uint": 268435476
+                        },
+                        {
+                          "uint": 268435477
+                        },
+                        {
+                          "uint": 268435478
+                        },
+                        {
+                          "uint": 268435479
+                        },
+                        {
+                          "uint": 268435480
+                        },
+                        {
+                          "uint": 268435481
+                        },
+                        {
+                          "uint": 268435482
+                        },
+                        {
+                          "uint": 268435483
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/12",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/12/3x4x1-out",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 0
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/13",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/13/5x3x1-out",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 268435459
+                        },
+                        {
+                          "uint": 268435460
+                        },
+                        {
+                          "uint": 268435460
+                        },
+                        {
+                          "uint": 2762187425
+                        },
+                        {
+                          "uint": 2762187425
+                        },
+                        {
+                          "uint": 0
+                        },
+                        {
+                          "uint": 268435461
+                        },
+                        {
+                          "uint": 268435461
+                        },
+                        {
+                          "uint": 268435462
+                        },
+                        {
+                          "uint": 268435463
+                        },
+                        {
+                          "uint": 268435464
+                        },
+                        {
+                          "uint": 268435465
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/14",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/14/5x6x1-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 268435459
+                        },
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790020
+                        },
+                        {
+                          "uint": 2952790273
+                        },
+                        {
+                          "uint": 2952790274
+                        },
+                        {
+                          "uint": 2952790275
+                        },
+                        {
+                          "uint": 2952790276
+                        },
+                        {
+                          "uint": 2952790532
+                        },
+                        {
+                          "uint": 2952790785
+                        },
+                        {
+                          "uint": 2952790786
+                        },
+                        {
+                          "uint": 2952790787
+                        },
+                        {
+                          "uint": 2952790788
+                        },
+                        {
+                          "uint": 268435471
+                        },
+                        {
+                          "uint": 268435472
+                        },
+                        {
+                          "uint": 268435473
+                        },
+                        {
+                          "uint": 268435474
+                        },
+                        {
+                          "uint": 268435475
+                        },
+                        {
+                          "uint": 268435476
+                        },
+                        {
+                          "uint": 268435477
+                        },
+                        {
+                          "uint": 268435478
+                        },
+                        {
+                          "uint": 268435479
+                        },
+                        {
+                          "uint": 268435480
+                        },
+                        {
+                          "uint": 268435481
+                        },
+                        {
+                          "uint": 268435482
+                        },
+                        {
+                          "uint": 268435483
+                        },
+                        {
+                          "uint": 268435484
+                        },
+                        {
+                          "uint": 268435485
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/15",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/15/5x6x1-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 268435459
+                        },
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790020
+                        },
+                        {
+                          "uint": 2952790273
+                        },
+                        {
+                          "uint": 2952790274
+                        },
+                        {
+                          "uint": 2952790275
+                        },
+                        {
+                          "uint": 2952790276
+                        },
+                        {
+                          "uint": 2952790532
+                        },
+                        {
+                          "uint": 2952790785
+                        },
+                        {
+                          "uint": 2952790786
+                        },
+                        {
+                          "uint": 2952790787
+                        },
+                        {
+                          "uint": 2952790788
+                        },
+                        {
+                          "uint": 268435471
+                        },
+                        {
+                          "uint": 268435472
+                        },
+                        {
+                          "uint": 268435473
+                        },
+                        {
+                          "uint": 268435474
+                        },
+                        {
+                          "uint": 268435475
+                        },
+                        {
+                          "uint": 268435476
+                        },
+                        {
+                          "uint": 268435477
+                        },
+                        {
+                          "uint": 268435478
+                        },
+                        {
+                          "uint": 268435479
+                        },
+                        {
+                          "uint": 268435480
+                        },
+                        {
+                          "uint": 268435481
+                        },
+                        {
+                          "uint": 268435482
+                        },
+                        {
+                          "uint": 268435483
+                        },
+                        {
+                          "uint": 268435484
+                        },
+                        {
+                          "uint": 268435485
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/16/7x4x3-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268566528
+                        },
+                        {
+                          "uint": 268566529
+                        },
+                        {
+                          "uint": 268566530
+                        },
+                        {
+                          "uint": 268566531
+                        },
+                        {
+                          "uint": 268566532
+                        },
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790017
+                        },
+                        {
+                          "uint": 2952790019
+                        },
+                        {
+                          "uint": 2952790020
+                        },
+                        {
+                          "uint": 2952790273
+                        },
+                        {
+                          "uint": 2952790274
+                        },
+                        {
+                          "uint": 2952790275
+                        },
+                        {
+                          "uint": 2952790276
+                        },
+                        {
+                          "uint": 2952790529
+                        },
+                        {
+                          "uint": 2952790531
+                        },
+                        {
+                          "uint": 2952790532
+                        },
+                        {
+                          "uint": 268566544
+                        },
+                        {
+                          "uint": 268566545
+                        },
+                        {
+                          "uint": 268566546
+                        },
+                        {
+                          "uint": 268566547
+                        },
+                        {
+                          "uint": 268566548
+                        },
+                        {
+                          "uint": 268566549
+                        },
+                        {
+                          "uint": 268566550
+                        },
+                        {
+                          "uint": 268566551
+                        },
+                        {
+                          "uint": 268566552
+                        },
+                        {
+                          "uint": 268566553
+                        },
+                        {
+                          "uint": 268566554
+                        },
+                        {
+                          "uint": 268566555
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/17",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/17/7x3x1-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790017
+                        },
+                        {
+                          "uint": 2952790018
+                        },
+                        {
+                          "uint": 2952790019
+                        },
+                        {
+                          "uint": 2952790020
+                        },
+                        {
+                          "uint": 2952790021
+                        },
+                        {
+                          "uint": 2952790022
+                        },
+                        {
+                          "uint": 2952790528
+                        },
+                        {
+                          "uint": 2952790529
+                        },
+                        {
+                          "uint": 2952790530
+                        },
+                        {
+                          "uint": 2952790531
+                        },
+                        {
+                          "uint": 2952790532
+                        },
+                        {
+                          "uint": 2952790533
+                        },
+                        {
+                          "uint": 2952790534
+                        },
+                        {
+                          "uint": 268435470
+                        },
+                        {
+                          "uint": 268435471
+                        },
+                        {
+                          "uint": 268435472
+                        },
+                        {
+                          "uint": 268435473
+                        },
+                        {
+                          "uint": 268435474
+                        },
+                        {
+                          "uint": 268435475
+                        },
+                        {
+                          "uint": 268435476
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/18",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/18/5x8x1-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 268435456
+                        },
+                        {
+                          "uint": 268435457
+                        },
+                        {
+                          "uint": 268435458
+                        },
+                        {
+                          "uint": 268435459
+                        },
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790020
+                        },
+                        {
+                          "uint": 2952790273
+                        },
+                        {
+                          "uint": 2952790274
+                        },
+                        {
+                          "uint": 2952790275
+                        },
+                        {
+                          "uint": 2952790276
+                        },
+                        {
+                          "uint": 2952790532
+                        },
+                        {
+                          "uint": 2952790785
+                        },
+                        {
+                          "uint": 2952790786
+                        },
+                        {
+                          "uint": 2952790787
+                        },
+                        {
+                          "uint": 2952791040
+                        },
+                        {
+                          "uint": 2952791044
+                        },
+                        {
+                          "uint": 2952791297
+                        },
+                        {
+                          "uint": 2952791298
+                        },
+                        {
+                          "uint": 2952791299
+                        },
+                        {
+                          "uint": 2952791300
+                        },
+                        {
+                          "uint": 268435476
+                        },
+                        {
+                          "uint": 268435477
+                        },
+                        {
+                          "uint": 268435478
+                        },
+                        {
+                          "uint": 268435479
+                        },
+                        {
+                          "uint": 268435480
+                        },
+                        {
+                          "uint": 268435481
+                        },
+                        {
+                          "uint": 268435482
+                        },
+                        {
+                          "uint": 268435483
+                        },
+                        {
+                          "uint": 268435484
+                        },
+                        {
+                          "uint": 268435485
+                        },
+                        {
+                          "uint": 268435486
+                        },
+                        {
+                          "uint": 268435487
+                        },
+                        {
+                          "uint": 268435488
+                        },
+                        {
+                          "uint": 268435489
+                        },
+                        {
+                          "uint": 268435490
+                        },
+                        {
+                          "uint": 268435491
+                        },
+                        {
+                          "uint": 268435492
+                        },
+                        {
+                          "uint": 268435493
+                        },
+                        {
+                          "uint": 268435494
+                        },
+                        {
+                          "uint": 268435495
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/19",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/19/5x6x1-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790017
+                        },
+                        {
+                          "uint": 2952790018
+                        },
+                        {
+                          "uint": 2952790019
+                        },
+                        {
+                          "uint": 2952790020
+                        },
+                        {
+                          "uint": 2952790528
+                        },
+                        {
+                          "uint": 2952790529
+                        },
+                        {
+                          "uint": 2952790530
+                        },
+                        {
+                          "uint": 2952790531
+                        },
+                        {
+                          "uint": 2952790532
+                        },
+                        {
+                          "uint": 2952791040
+                        },
+                        {
+                          "uint": 2952791041
+                        },
+                        {
+                          "uint": 2952791042
+                        },
+                        {
+                          "uint": 2952791043
+                        },
+                        {
+                          "uint": 2952791044
+                        },
+                        {
+                          "uint": 2952791300
+                        },
+                        {
+                          "uint": 268435472
+                        },
+                        {
+                          "uint": 268435473
+                        },
+                        {
+                          "uint": 268435474
+                        },
+                        {
+                          "uint": 268435475
+                        },
+                        {
+                          "uint": 268435476
+                        },
+                        {
+                          "uint": 268435477
+                        },
+                        {
+                          "uint": 268435478
+                        },
+                        {
+                          "uint": 268435479
+                        },
+                        {
+                          "uint": 268435480
+                        },
+                        {
+                          "uint": 268435481
+                        },
+                        {
+                          "uint": 268435482
+                        },
+                        {
+                          "uint": 268435483
+                        },
+                        {
+                          "uint": 268435484
+                        },
+                        {
+                          "uint": 268435485
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/20",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/20/6x5x1-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790017
+                        },
+                        {
+                          "uint": 2952790018
+                        },
+                        {
+                          "uint": 2952790019
+                        },
+                        {
+                          "uint": 2952790020
+                        },
+                        {
+                          "uint": 2952790021
+                        },
+                        {
+                          "uint": 2952790528
+                        },
+                        {
+                          "uint": 2952790529
+                        },
+                        {
+                          "uint": 2952790530
+                        },
+                        {
+                          "uint": 2952790531
+                        },
+                        {
+                          "uint": 2952790532
+                        },
+                        {
+                          "uint": 2952790533
+                        },
+                        {
+                          "uint": 2952791040
+                        },
+                        {
+                          "uint": 2952791041
+                        },
+                        {
+                          "uint": 2952791042
+                        },
+                        {
+                          "uint": 2952791043
+                        },
+                        {
+                          "uint": 2952791044
+                        },
+                        {
+                          "uint": 2952791045
+                        },
+                        {
+                          "uint": 268435474
+                        },
+                        {
+                          "uint": 268435475
+                        },
+                        {
+                          "uint": 268435476
+                        },
+                        {
+                          "uint": 268435477
+                        },
+                        {
+                          "uint": 268435478
+                        },
+                        {
+                          "uint": 268435479
+                        },
+                        {
+                          "uint": 268435480
+                        },
+                        {
+                          "uint": 268435481
+                        },
+                        {
+                          "uint": 268435482
+                        },
+                        {
+                          "uint": 268435483
+                        },
+                        {
+                          "uint": 268435484
+                        },
+                        {
+                          "uint": 268435485
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "work/21",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "blit/21/9x4x1-in",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "uint": 2952790016
+                        },
+                        {
+                          "uint": 2952790017
+                        },
+                        {
+                          "uint": 2952790018
+                        },
+                        {
+                          "uint": 2952790019
+                        },
+                        {
+                          "uint": 2952790020
+                        },
+                        {
+                          "uint": 2952790021
+                        },
+                        {
+                          "uint": 2952790022
+                        },
+                        {
+                          "uint": 2952790023
+                        },
+                        {
+                          "uint": 2952790024
+                        },
+                        {
+                          "uint": 2952790276
+                        },
+                        {
+                          "uint": 2952790277
+                        },
+                        {
+                          "uint": 2952790278
+                        },
+                        {
+                          "uint": 2952790279
+                        },
+                        {
+                          "uint": 2952790528
+                        },
+                        {
+                          "uint": 2952790529
+                        },
+                        {
+                          "uint": 2952790530
+                        },
+                        {
+                          "uint": 2952790531
+                        },
+                        {
+                          "uint": 2952790532
+                        },
+                        {
+                          "uint": 2952790536
+                        },
+                        {
+                          "uint": 2952790785
+                        },
+                        {
+                          "uint": 2952790786
+                        },
+                        {
+                          "uint": 2952790787
+                        },
+                        {
+                          "uint": 2952790788
+                        },
+                        {
+                          "uint": 2952790789
+                        },
+                        {
+                          "uint": 2952790790
+                        },
+                        {
+                          "uint": 2952790791
+                        },
+                        {
+                          "uint": 2952790792
+                        },
+                        {
+                          "uint": 268435483
+                        },
+                        {
+                          "uint": 268435484
+                        },
+                        {
+                          "uint": 268435485
+                        },
+                        {
+                          "uint": 268435486
+                        },
+                        {
+                          "uint": 268435487
+                        },
+                        {
+                          "uint": 268435488
+                        },
+                        {
+                          "uint": 268435489
+                        },
+                        {
+                          "uint": 268435490
+                        },
+                        {
+                          "uint": 268435491
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "not_run"
+    }
+  ]
+}

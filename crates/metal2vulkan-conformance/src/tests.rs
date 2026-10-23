@@ -185,6 +185,9 @@ struct WordsCase {
     allowances: Vec<Allowance>,
     /// The input fingerprint the case states, so a test can make the inputs move.
     input: Vec<u8>,
+    /// Whether the output site holds its digest alone, as a case ported from a probe that kept
+    /// one does.
+    digest_only: bool,
 }
 
 impl WordsCase {
@@ -195,6 +198,7 @@ impl WordsCase {
             source: MetalSource::Run,
             allowances: Vec::new(),
             input: vec![0u8; 4],
+            digest_only: false,
         }
     }
 
@@ -215,6 +219,16 @@ impl WordsCase {
         }
     }
 
+    /// What the output site observed: its bytes, or its digest alone where the case is
+    /// digest-only.
+    fn observed(&self, output: Vec<u8>) -> Observed {
+        if self.digest_only {
+            return Observed::absent()
+                .digested(crate::transcript::Digest::sha256_prefix16(&output));
+        }
+        Observed::bytes(output, self.layout())
+    }
+
     /// The transcript the case emits when its run answered `output` and its status was `status`.
     fn transcript(&self, output: Vec<u8>, status: &str, notices: &[&str]) -> Transcript {
         let mut sites = Sites::new();
@@ -225,7 +239,7 @@ impl WordsCase {
         sites.value("dispatch", Value::ok(Value::Absent));
         sites.value("status", Value::ok(Value::unit_variant(status)));
         sites.value("read-back", Value::ok(Value::Absent));
-        sites.push(Node::leaf("output", Observed::bytes(output, self.layout())));
+        sites.push(Node::leaf("output", self.observed(output)));
         sites.notices(NOTICES_SITE, notices);
         sites.finish()
     }
@@ -278,7 +292,7 @@ impl Case for WordsCase {
             side.read_buffer(buffer, 0, self.words as usize * 4),
             |_| Value::Absent,
         )?;
-        sites.push(Node::leaf("output", Observed::bytes(bytes, self.layout())));
+        sites.push(Node::leaf("output", self.observed(bytes)));
         Ok(())
     }
 }
@@ -389,6 +403,71 @@ fn an_allowance_whose_notice_did_not_fire_fails_the_case() {
     };
     let printed = format!("{found:?}");
     assert!(printed.contains("announced no"), "{printed}");
+}
+
+/// A notice is announced once per device per kind, so which of a case's notices its own run sees
+/// depends on what ran before it. A case that names several therefore has to be justified by any
+/// one of them that fired, not by whichever it listed first: the first ported batch failed two
+/// cases this way, over digests that matched Metal exactly.
+#[test]
+fn any_one_of_a_sites_allowances_firing_justifies_the_difference() {
+    let fired = Degradation::ALL[1];
+    let quiet = Degradation::ALL[0];
+    let bytes = words(&[1, 2]);
+    let plain = WordsCase::new("words", 2);
+    let recording = recording_of(&plain, plain.transcript(bytes.clone(), "Completed", &[]), 3);
+    // The quiet kind is listed first, and only the other one was announced.
+    let case = WordsCase {
+        allowances: vec![
+            crate::replay::notice_allowance(quiet.code()),
+            crate::replay::notice_allowance(fired.code()),
+        ],
+        ..WordsCase::new("words", 2)
+    };
+    let mut side = StubSide::new(bytes).announcing(&[fired]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert!(
+        matches!(replayed.verdict, Verdict::Announced { .. }),
+        "{}",
+        replayed.verdict
+    );
+}
+
+/// A row whose Metal answer is a digest, on a device that announced it cannot match it, has to be
+/// loosenable: the comparison checks the digest before anything else, so without consulting the
+/// case's allowance there a digest-only site could never be loosened at all.
+#[test]
+fn a_digest_only_site_compares_under_its_allowance() {
+    let kind = Degradation::ALL[0];
+    let case = WordsCase {
+        allowances: vec![
+            Allowance::new(
+                "case/output",
+                Loosening::Unchecked,
+                Justification::notice(kind),
+            ),
+            crate::replay::notice_allowance(kind.code()),
+        ],
+        digest_only: true,
+        ..WordsCase::new("words", 2)
+    };
+    let recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
+    // Unnamed notice: the digest moving is a divergence.
+    let mut side = StubSide::new(words(&[1, 7]));
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert!(
+        matches!(replayed.verdict, Verdict::Divergent { .. }),
+        "{}",
+        replayed.verdict
+    );
+    // With the notice announced, the digest goes unchecked, named and counted.
+    let mut side = StubSide::new(words(&[1, 7])).announcing(&[kind]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert!(
+        matches!(replayed.verdict, Verdict::Announced { .. }),
+        "{}",
+        replayed.verdict
+    );
 }
 
 #[test]

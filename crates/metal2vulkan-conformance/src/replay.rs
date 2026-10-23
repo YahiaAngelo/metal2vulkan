@@ -61,12 +61,22 @@ impl std::fmt::Display for ReplayError {
 
 /// Run `case` on `side` and compare it with its recording.
 pub fn replay(case: &dyn Case, side: &mut dyn Side) -> Result<Replayed, ReplayError> {
+    replay_known(case, side, &[])
+}
+
+/// [`replay`] where `device_notices` are the codes this device has already announced earlier in
+/// the run.
+pub fn replay_known(
+    case: &dyn Case,
+    side: &mut dyn Side,
+    device_notices: &[String],
+) -> Result<Replayed, ReplayError> {
     let name = case.name();
     let recording = recording::read(name).map_err(|why| ReplayError::NoRecording {
         case: name.to_owned(),
         why,
     })?;
-    replay_against(case, side, &recording)
+    replay_against_known(case, side, &recording, device_notices)
 }
 
 /// [`replay`] against a recording already in hand.
@@ -74,6 +84,24 @@ pub fn replay_against(
     case: &dyn Case,
     side: &mut dyn Side,
     recording: &Recording,
+) -> Result<Replayed, ReplayError> {
+    replay_against_known(case, side, recording, &[])
+}
+
+/// [`replay_against`] where `device_notices` are the codes this device has already announced
+/// earlier in the run.
+///
+/// A degrade notice is announced **once per device per kind**, so a case that runs after the one
+/// that first provoked a notice sees none of it. Its own notices site still holds only what its
+/// own work announced — that is what makes the site readable — but the device's notice is a fact
+/// about the device for the whole run, so it justifies a loosened field in any case of that run.
+/// Without this a case could only name a notice it happened to provoke first, which the order of
+/// the case set decides.
+pub fn replay_against_known(
+    case: &dyn Case,
+    side: &mut dyn Side,
+    recording: &Recording,
+    device_notices: &[String],
 ) -> Result<Replayed, ReplayError> {
     let name = case.name();
     let venue = side.venue();
@@ -96,6 +124,7 @@ pub fn replay_against(
     sites.notices(NOTICES_SITE, &announced);
     let ours = sites.finish();
     announced.extend(ours.announced_notices().into_keys());
+    announced.extend(device_notices.iter().cloned());
 
     let answer = match recording.answer(level) {
         Ok(answer) => answer,

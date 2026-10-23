@@ -477,6 +477,11 @@ impl Side for RuntimeSide<'_> {
             recorded_primitive_type: recorded,
         })
     }
+
+    fn work(&mut self, work: &crate::work::Work) -> Answer<crate::work::Done> {
+        let queue = self.queue()?.clone();
+        crate::runtime_work::run(self.device, &queue, work)
+    }
 }
 
 impl Failure {

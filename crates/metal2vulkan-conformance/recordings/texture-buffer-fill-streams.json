@@ -1,0 +1,1073 @@
+{
+  "format": 1,
+  "case": "texture-buffer-fill-streams",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": {
+        "carried": {
+          "from": "runtime_lane::texture_buffer_fills, from the probes tb.m and tblf.m (an Apple M3 Max, macOS 27.0.1)"
+        }
+      },
+      "device": "apple-m3-max",
+      "runs": 1,
+      "outcomes": [
+        {
+          "runs": 1,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "buffer-first-bytes",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "d71bdb461ee51a7eaa2204acf6826288db6dacdeffe7f165722cb1d4befe7ae0"
+                        }
+                      }
+                    },
+                    {
+                      "name": "fills",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "d2ccf4c950cc6596c01d3355d216cf0050a7ecf59d242fd39aa3932cb540ff44"
+                        }
+                      }
+                    },
+                    {
+                      "name": "metal-runs",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "74e7623a2f205ae68228c27eef22d0817b3f1c10baa4ed15c3dd0e95c65d6847"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/r8-8-whole",
+                  "observed": {
+                    "value": {
+                      "bytes": "oaKjpKWmp6ihoqOkweYQNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/r8-8-whole",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/r8-8-odd",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53qGio6SlweYQNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/r8-8-odd",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-8-whole",
+                  "observed": {
+                    "value": {
+                      "bytes": "oaKjpKWmp6ihoqOkpaanqKGio6SlpqeooaKjpKWmp6ihoqOkpaanqKGio6SlpqeoEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-8-whole",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-8-x4",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecweYQNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaKhoqOkpaanqKGio6SlpqeooaKjpKWmp6ihoqOkpaanqIClyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-8-x4",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-c115",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecweYQNQA0ALgAPQA6ADQAuAA9ADoANAC4AD0AOuELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-c115",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/r8-past-width",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecoaGhNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/r8-past-width",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-ending-past",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecweYQNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvKGio6ShoqOkoaKjpKGio6ShoqOk1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-ending-past",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/r8-no-rows",
+                  "observed": {
+                    "value": {
+                      "bytes": "AKGhb5S53ggtUnecweYQNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/r8-no-rows",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-no-images",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecweYQNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9yhoqOkoaKjpDNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-no-images",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-3-whole",
+                  "observed": {
+                    "value": {
+                      "bytes": "oaKjoaKjoaKjoaKjoaKjAKGio6Gio6Gio6Gio6GiowChoqOhoqOhoqOhoqOhoqMAEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-3-whole",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-9-after-8",
+                  "observed": {
+                    "value": {
+                      "bytes": "sbKztLW2t7i5AAAAAAAAALGys7S1tre4uQAAAAAAAACxsrO0tba3uLkAAAAAAAAAEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-9-after-8",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-12-x1",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53gihoqOkoaKjpKmqq6wAAAAAAAAAAAAAAACpqqusAAAAAAAAAAAAAAAAEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-12-x1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba32-17",
+                  "observed": {
+                    "value": {
+                      "bytes": "oaKjpKWmp6ipqqusra6vsLEAAAAAAAAAAAAAAAAAAAChoqOkpaanqKmqq6ytrq+wsQAAAAAAAAAAAAAAAAAAAKGio6SlpqeoqaqrrK2ur7CxAAAAAAAAAAAAAAAAAAAAoaKjpKWmp6ipqqusra6vsLEAAAAAAAAAAAAAAAAAAAChoqOkpaanqKmqq6ytrq+wsQAAAAAAAAAAAAAAAAAAAKGio6SlpqeoqaqrrK2ur7CxAAAAAAAAAAAAAAAAAAAATHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba32-17",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba32-24-x1",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecweYQNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaKhoqOkpaanqKmqq6ytrq+wsbKztLW2t7gAAAAAAAAAAKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uAAAAAAAAAAAoaKjpKWmp6ipqqusra6vsLGys7S1tre4AAAAAAAAAAChoqOkpaanqKmqq6ytrq+wsbKztLW2t7gAAAAAAAAAAKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uAAAAAAAAAAAX4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba32-24-x1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-33-past",
+                  "observed": {
+                    "value": {
+                      "bytes": "oaKjpKWmp6ipqqusra6vsKGio6SlpqeoqaqrrK2ur7DBAAAAAAAAAAAAAAAAAAAAwQAAAAAAAAAAAAAAAAAAAKGio6SlpqeoqaqrrK2ur7ChoqOkpaanqKmqq6ytrq+wwQAAAAAAAAAAAAAAAAAAAMEAAAAAAAAAAAAAAAAAAAChoqOkpaanqKmqq6ytrq+woaKjpKWmp6ipqqusra6vsJO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-33-past",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/r8-65-long",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKoaGhoaGhoaGhoaGhoaGio6SlpqeoqaqrrK2ur7ChoqOkpaanqKmqq6ytrq+woaKjpKWmp6ipqqusra6vsKGio6SlpqeoqaqrrK2ur7DhAAAAAAAAAAAAAAAAAAAA4QAAAAAAAAAAAAAAAAAAAOEAAAAAAAAAAAAAAAAAAADhAAAAAAAAAAAAAAAAAAAAoaKjpKWmp6ipqqusra6vsKGio6SlpqeoqaqrrK2ur7ChoqOkpaanqKmqq6ytrq+woaKjpKWmp6ipqqusra6vsOEAAAAAAAAAAAAAAAAAAADhAAAAAAAAAAAAAAAAAAAA4QAAAAAAAAAAAAAAAAAAAOEAAAAAAAAAAAAAAAAAAAChoqOkpaanqKmqq6ytrq+woaGhoaGhoaGhoaGhoaGhp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/r8-65-long",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-100",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53gihoqOkoaKjpKGio6SlpqeoqaqrrK2ur7ChoqOkpaanqKmqq6ytrq+wwcLDxMXGx8jJysvMzc7P0MHCw8TFxsfIycrLzM3Oz9Dh4uPk5ebn6Onq6+zt7u/w4eLj5OXm5+jp6uvs7e7v8AECAwQAAAAAAAAAAAAAAAABAgMEAAAAAAAAAAAAAAAAoaKjpKWmp6ipqqusra6vsKGio6SlpqeoqaqrrK2ur7DBwsPExcbHyMnKy8zNzs/QwcLDxMXGx8jJysvMzc7P0OHi4+Tl5ufo6err7O3u7/Dh4uPk5ebn6Onq6+zt7u/wAQIDBAAAAAAAAAAAAAAAAAECAwQAAAAAAAAAAAAAAAChoqOkpaanqKmqq6ytrq+woaKjpKWmp6ipqqusra6vsMHCw8TFxsfIycrLzM3Oz9DBwsPExcbHyMnKy8zNzs/Q4eLj5OXm5+jp6uvs7e7v8OHi4+Tl5ufo6err7O3u7/ABAgMEAAAAAAAAAAAAAAAAAQIDBAAAAAAAAAAAAAAAAKGio6ShoqOkJEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-100",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-256",
+                  "observed": {
+                    "value": {
+                      "bytes": "oaKjpKWmp6ipqqusra6vsLGys7S1tre4ubq7vL2+v8DBwsPExcbHyMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4+Tl5ufo6err7O3u7/Dx8vP09fb3+Pn6+/z9/v8AAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4/QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1+f4CBgoOEhYaHiImKi4yNjo+QkZKTlJWWl5iZmpucnZ6foKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr/AwcLDxMXGx8jJysvMzc7P0NHS09TV1tfY2drb3N3e3+Dh4uPk5ebn6Onq6+zt7u/w8fLz9PX29/j5+vv8/f7/AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMPIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rg8-5-x6",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecoaGhoaWhoqOkpaGio6SlAAAAAACloaKjpKWhoqOkpQAAAAAApaGio6SloaKjpKUAAAAAAKWhoqOkpaGio6SlAAAAAAClpaWloaGhoaWlpaWNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rg8-5-x6",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba16-24",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecweYQNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz6Gio6SlpqeooaKjpKWmp6ipqqusra6vsLGys7S1tre4AAAAAAAAAAChoqOkpaanqKmqq6ytrq+wsbKztLW2t7gAAAAAAAAAAKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uAAAAAAAAAAAoaKjpKWmp6ipqqusra6vsLGys7S1tre4AAAAAAAAAAChoqOkpaanqKmqq6ytrq+wsbKztLW2t7gAAAAAAAAAAKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uAAAAAAAAAAAoaKjpKWmp6ipqqusra6vsLGys7S1tre4AAAAAAAAAAChoqOkpaanqFh9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba16-24",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba32-past-end",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecweYQNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zoaKjpKWmp6ipqqusra6vsKGio6SlpqeoqaqrrK2ur7ChoqOkpaanqKmqq6ytrq+woaKjpKWmp6ipqqusra6vsKGio6SlpqeoqaqrrK2ur7ChoqOkpaanqKmqq6ytrq+woaKjpKWmp6ipqqusra6vsKGio6SlpqeoqaqrrK2ur7A="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba32-past-end",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/r8-past-buffer",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecweYQNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/r8-past-buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-width-0",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecweYQNVp/pMnuGD1ih6zR9iBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-width-0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-level-slice-z",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5S53ggtUnecoaGjo6Gho6OhoaOjoaGjoyBFao+02QMoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-level-slice-z",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/rgba8-c115-then-12",
+                  "observed": {
+                    "value": {
+                      "bytes": "oaKjpKWmp6ipqqusAAAAAKGio6SlpqeoqaqrrAAAAAChoqOkpaanqKmqq6wAAAAAEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/rgba8-c115-then-12",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fills/r8-3-odd",
+                  "observed": {
+                    "value": {
+                      "bytes": "ACVKb5ShoaOjoaGjo6Gho6Gio6Gio6Gio6Gio6GiowCjoaEoTXKXvOELMFV6n8TpEzhdgqfM8RtAZYqv1PkjSG2St9wGK1B1mr/kDjNYfaLH7BY7YIWqz/QeQ2iNstcBJktwlbrfCS5TeJ3C5xE2W4Clyu8ZPmOIrdL3IUZrkLXaBClOc5i94gwxVnugxeoUOV6DqM3yHEFmi7DV+iRJbpO43QcsUXabwOUPNFl+o8jtFzxhhqvQ9R9EaY6z2AInTHGWu+AKL1R5nsPoEjdcgabL8Bo/ZImu0/giR2yRttsFKk90mb7jDTJXfKHG6xU6X4SpzvMdQmeMsdYAJUpvlLneCC1Sd5zB5hA1Wn+kye4YPWKHrNH2IEVqj7TZAyhNcpe84QswVXqfxOkTOF2Cp8zxG0Bliq/U+SNIbZK33AYrUHWav+QOM1h9osfsFjtgharP9B5DaI2y1wEmS3CVut8JLlN4ncLnETZbgKXK7xk+Y4it0vchRmuQtdoEKU5zmL3iDDFWe6DF6hQ5XoOozfIcQWaLsNX6JEluk7jdByxRdpvA5Q80WX6jyO0XPGGGq9D1H0RpjrPYAidMcZa74AovVHmew+gSN1yBpsvwGj9kia7T+CJHbJG22wUqT3SZvuMNMld8ocbrFTpfhKnO8x1CZ4yx1gAlSm+Uud4ILVI="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 512
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 256,
+                        "row_pitch": 256,
+                        "rows": 2,
+                        "image_pitch": 512,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status/r8-3-odd",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Completed",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "not_run"
+    }
+  ]
+}

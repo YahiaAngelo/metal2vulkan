@@ -169,13 +169,22 @@ impl Walk<'_> {
     fn observed(&mut self, path: &str, metal: &Observed, ours: &Observed) {
         if let (Some(recorded), Some(taken)) = (&metal.digest, &ours.digest) {
             if recorded != taken {
-                self.found.divergences.push(Divergence::new(
-                    path,
-                    DivergenceKind::Digest {
-                        metal: recorded.hex.clone(),
-                        ours: taken.hex.clone(),
-                    },
-                ));
+                // A site a case loosened compares under its allowance here too. Without this a
+                // digest-only site could never be loosened, and a row whose Metal answer is a
+                // digest the device announced it cannot match -- a fill of depths outside
+                // [0, 1] on a device whose depth copies go by a draw -- would have no honest
+                // shape in the suite at all.
+                let hex =
+                    |digest: &crate::transcript::Digest| Value::Lines(vec![digest.hex.clone()]);
+                if !self.allowed(path, &hex(recorded), &hex(taken)) {
+                    self.found.divergences.push(Divergence::new(
+                        path,
+                        DivergenceKind::Digest {
+                            metal: recorded.hex.clone(),
+                            ours: taken.hex.clone(),
+                        },
+                    ));
+                }
                 return;
             }
         }
@@ -429,23 +438,43 @@ impl Walk<'_> {
         ));
     }
 
-    /// Whether an allowance of the case covers `path` and holds for this difference. An allowance
-    /// whose notice the run did not announce does not hold, and the case fails by it.
+    /// Whether an allowance of the case covers `path` and holds for this difference.
+    ///
+    /// A site may carry several allowances, and must: a notice is announced once per device per
+    /// kind, so which of a case's notices its own run sees depends on what ran before it. The
+    /// difference is justified where **any** of the covering allowances holds; the case fails only
+    /// where none does, and then by the first of them, so the report names a justification the
+    /// case actually claimed.
     fn allowed(&mut self, path: &str, metal: &Value, ours: &Value) -> bool {
-        let Some(allowance) = self
+        let mut covering = self
             .allowances
             .iter()
-            .find(|allowance| allowance.covers(path) && allowance.within(metal, ours))
-        else {
+            .filter(|allowance| allowance.covers(path) && allowance.within(metal, ours))
+            .peekable();
+        if covering.peek().is_none() {
             return false;
-        };
-        if let Some(why) = allowance.justified_by.unjustified(self.announced) {
+        }
+        let mut first_unjustified = None;
+        let mut held = None;
+        for allowance in covering {
+            match allowance.justified_by.unjustified(self.announced) {
+                None => {
+                    held = Some(allowance);
+                    break;
+                }
+                Some(why) => {
+                    first_unjustified = first_unjustified.or(Some((allowance, why)));
+                }
+            }
+        }
+        let Some(allowance) = held else {
+            let (allowance, why) = first_unjustified.expect("a covering allowance");
             self.found.bad_allowances.push(BadAllowance {
                 path: allowance.path.clone(),
                 why,
             });
             return false;
-        }
+        };
         let difference = crate::allowance::difference(metal, ours);
         match self.found.announced.iter_mut().find(|held| {
             held.path == path && held.justified_by == allowance.justified_by.describe()

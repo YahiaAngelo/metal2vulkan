@@ -3,18 +3,21 @@
 //!
 //! ```text
 //! conformance record [case ...]
-//! conformance replay [--cpu] [case ...]
+//! conformance replay [--cpu] [--default-policy] [case ...]
 //! conformance cases
 //! ```
 //!
 //! With no case named, the whole case set is selected. `--cpu` replays on a CPU Vulkan
-//! implementation (lavapipe), which is how the no-Metal leg is proven.
+//! implementation (lavapipe), which is how the no-Metal leg is proven. A replay holds the runtime
+//! to exact answers by default; `--default-policy` replays under the runtime's own defaults, the
+//! fast form of every speed-for-accuracy choice, which is what a consumer runs. Comparing a case
+//! under both is how the suite says whether a difference is the policy's or the implementation's.
 //!
 //! The command's exit status is 0 only where the selection is compliant: no divergence, no refusal,
 //! no unrecorded case and no stale recording. A venue that lacks a feature a case needs does not
 //! spoil it.
 
-use metal2vulkan_conformance::device::Venues;
+use metal2vulkan_conformance::device::{Policy, Venues};
 use metal2vulkan_conformance::run;
 
 fn main() -> std::process::ExitCode {
@@ -33,11 +36,14 @@ fn command() -> Result<bool, String> {
     let mut words = std::env::args().skip(1);
     let verb = words.next().unwrap_or_else(|| "replay".to_owned());
     let mut venues = Venues::Gpu;
+    let mut policy = Policy::Exact;
     let mut names = Vec::new();
     for word in words {
         match word.as_str() {
             "--cpu" => venues = Venues::Cpu,
             "--gpu" => venues = Venues::Gpu,
+            "--default-policy" => policy = Policy::Default,
+            "--exact-policy" => policy = Policy::Exact,
             flag if flag.starts_with('-') => return Err(format!("unknown flag {flag}")),
             name => names.push(name.to_owned()),
         }
@@ -52,7 +58,7 @@ fn command() -> Result<bool, String> {
         }
         "record" => record(&cases),
         "replay" => {
-            let report = run::replay_on(venues, &cases)?;
+            let report = run::replay_on_under(venues, policy, &cases)?;
             print!("{}", report.render());
             Ok(report.is_compliant())
         }
