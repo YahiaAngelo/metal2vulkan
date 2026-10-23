@@ -1,0 +1,289 @@
+{
+  "format": 1,
+  "case": "two-plane-pad-fills",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": {
+        "carried": {
+          "from": "runtime_lane::two_plane_copies, from the probes bp.m and pad.m (an Apple M3 Max, macOS 27.0.1)"
+        }
+      },
+      "device": "apple-m3-max",
+      "runs": 2,
+      "outcomes": [
+        {
+          "runs": 2,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "cases",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "80d0ce81f73d1d2eef6e4cedd85a856f9c02833a2eadd49ca5f621078502bfb0"
+                        }
+                      }
+                    },
+                    {
+                      "name": "fill-patterns",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4af618dbdbf9e1a0ddc79445c1f332f0f7475cb2adcad436bfeee23feccbdcd3"
+                        }
+                      }
+                    },
+                    {
+                      "name": "before",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "873ed984989ad511520322d272dae2795e18dfdd8dde063d30aba9004ff37771"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill/0/550-7x3x1",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "a22dfa6fdd93570d"
+                    }
+                  }
+                },
+                {
+                  "name": "work/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill/1/550-7x3x1",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "5b9fcd63521fb5dc"
+                    }
+                  }
+                },
+                {
+                  "name": "work/2",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill/2/551-33x5x1",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "ce168b61643ecebb"
+                    }
+                  }
+                },
+                {
+                  "name": "work/3",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill/3/550-6x2x1",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "dcc033fcbab11d58"
+                    }
+                  }
+                },
+                {
+                  "name": "work/4",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill/4/550-7x3x1",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "37ba266b851a2342"
+                    }
+                  }
+                },
+                {
+                  "name": "work/5",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill/5/550-13x4x1",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "94b181522346b0df"
+                    }
+                  }
+                },
+                {
+                  "name": "work/6",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill/6/550-5x3x2",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "fea04cfb6251b2ab"
+                    }
+                  }
+                },
+                {
+                  "name": "work/7",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill/7/550-3x4x1",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "683193cef365dc59"
+                    }
+                  }
+                },
+                {
+                  "name": "work/8",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill/8/551-9x3x1",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "b6719f0cdbc1e202"
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "not_run"
+    }
+  ]
+}

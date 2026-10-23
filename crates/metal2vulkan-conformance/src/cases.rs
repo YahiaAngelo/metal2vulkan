@@ -10,6 +10,7 @@ pub mod math_routines;
 pub mod pass_bytes;
 pub mod stage_in_regions;
 pub mod texture_buffer_fills;
+pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
 
 use crate::case::Case;
@@ -32,6 +33,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.push(Box::new(texture_buffer_fills::groups()));
     cases.push(Box::new(texture_buffer_fills::long_fills()));
     cases.push(Box::new(two_plane_heap_blits::heap_blits()));
+    cases.push(Box::new(two_plane_copies::row_blits()));
+    cases.push(Box::new(two_plane_copies::announced_row_blits()));
+    cases.push(Box::new(two_plane_copies::pad_fills()));
     cases
 }
 

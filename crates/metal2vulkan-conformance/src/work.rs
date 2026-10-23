@@ -146,6 +146,9 @@ pub enum Resource {
     },
     /// A texture of its own memory.
     Texture { spec: TextureSpec },
+    /// A placement heap exactly as large as one texture of `spec` needs, as Metal sizes it: what
+    /// a probe that placed one texture in a heap of Metal's size made.
+    HeapForTexture { spec: TextureSpec, private: bool },
     /// A texture placed in `heap` at `offset`.
     HeapTexture {
         heap: usize,

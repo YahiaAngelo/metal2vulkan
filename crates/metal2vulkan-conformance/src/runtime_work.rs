@@ -179,6 +179,21 @@ fn make(device: &Device, made: &[Made], resource: &Resource) -> Answer<Made> {
                 .map_err(|error| Failure::of(&error))?;
             Ok(Made::Heap(heap))
         }
+        Resource::HeapForTexture { spec, private } => {
+            let options = if *private {
+                ResourceOptions::private()
+            } else {
+                ResourceOptions::shared()
+            };
+            let size = device
+                .heap_texture_size_and_align(&descriptor(spec)?)
+                .map_err(|error| Failure::of(&error))?
+                .size;
+            let heap = device
+                .new_heap(&HeapDescriptor::new(HeapType::Placement, size, options))
+                .map_err(|error| Failure::of(&error))?;
+            Ok(Made::Heap(heap))
+        }
         Resource::HeapBuffer {
             heap,
             length,
