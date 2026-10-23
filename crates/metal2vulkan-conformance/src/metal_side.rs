@@ -33,6 +33,7 @@ use crate::function_facts::{
 use crate::indirect_commands::{
     CommandsMade, ComputeCommandStep, EncodedCommand, IcbDescriptor, RenderCommandStep,
 };
+use crate::library_facts::{FunctionDescriptorSpec, LibraryFacts};
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
@@ -50,6 +51,7 @@ use crate::sparse_query::{
 };
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
+use metal2vulkan::library::LibraryType;
 use metal2vulkan::metal::state::{DepthStencilDescriptor, StencilDescriptor};
 use metal2vulkan::metal::{
     BindingAccess, BindingType, FunctionOptions, FunctionType, PatchType, PixelFormat, RenderStages,
@@ -68,23 +70,24 @@ use objc2_metal::{
     MTLComputePipelineDescriptor, MTLComputePipelineReflection, MTLComputePipelineState,
     MTLCreateSystemDefaultDevice, MTLCullMode, MTLDataType, MTLDepthClipMode,
     MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLDispatchType, MTLEvent,
-    MTLFunction, MTLFunctionConstant, MTLFunctionConstantValues, MTLHeap, MTLHeapDescriptor,
-    MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
-    MTLIndirectCommandType, MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary,
-    MTLLinkedFunctions, MTLLoadAction, MTLMeshRenderPipelineDescriptor,
-    MTLMultisampleDepthResolveFilter, MTLMultisampleStencilResolveFilter, MTLMutability, MTLOrigin,
-    MTLPipelineBufferDescriptor, MTLPipelineBufferDescriptorArray, MTLPipelineOption,
-    MTLPixelFormat, MTLPointerType, MTLPrimitiveTopologyClass, MTLPrimitiveType,
-    MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
-    MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLRenderPipelineColorAttachmentDescriptor, MTLRenderPipelineColorAttachmentDescriptorArray,
-    MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
-    MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplePosition,
-    MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
-    MTLSamplerState, MTLScissorRect, MTLSharedEvent, MTLSharedEventHandle, MTLSize,
-    MTLSparsePageSize, MTLSparseTextureRegionAlignmentMode, MTLStageInputOutputDescriptor,
-    MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction,
-    MTLStoreActionOptions, MTLStructMember, MTLStructType, MTLTessellationControlPointIndexType,
+    MTLFunction, MTLFunctionConstant, MTLFunctionConstantValues, MTLFunctionDescriptor,
+    MTLFunctionOptions, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType,
+    MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType,
+    MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary, MTLLinkedFunctions,
+    MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
+    MTLMultisampleStencilResolveFilter, MTLMutability, MTLOrigin, MTLPipelineBufferDescriptor,
+    MTLPipelineBufferDescriptorArray, MTLPipelineOption, MTLPixelFormat, MTLPointerType,
+    MTLPrimitiveTopologyClass, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor,
+    MTLRasterizationRateMap, MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder,
+    MTLRenderPassDescriptor, MTLRenderPipelineColorAttachmentDescriptor,
+    MTLRenderPipelineColorAttachmentDescriptorArray, MTLRenderPipelineDescriptor,
+    MTLRenderPipelineReflection, MTLRenderPipelineState, MTLRenderStages, MTLResource,
+    MTLResourceOptions, MTLResourceUsage, MTLSamplePosition, MTLSamplerAddressMode,
+    MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
+    MTLScissorRect, MTLSharedEvent, MTLSharedEventHandle, MTLSize, MTLSparsePageSize,
+    MTLSparseTextureRegionAlignmentMode, MTLStageInputOutputDescriptor, MTLStencilDescriptor,
+    MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLStoreActionOptions,
+    MTLStructMember, MTLStructType, MTLTessellationControlPointIndexType,
     MTLTessellationFactorFormat, MTLTessellationFactorStepFunction, MTLTessellationPartitionMode,
     MTLTexture, MTLTextureBinding, MTLTextureDescriptor, MTLTextureReferenceType,
     MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage,
@@ -394,6 +397,72 @@ fn constant_values(values: &[ConstantValue]) -> Retained<MTLFunctionConstantValu
         }
     }
     built
+}
+
+/// Every `MTLFunction` getter the vocabulary reads, off a function however it was made.
+///
+/// Shared by `newFunctionWithName:`, `newFunctionWithName:constantValues:error:` and
+/// `newFunctionWithDescriptor:error:`, so the three ways of making a function are read through one
+/// walk and a case comparing them against each other compares the same getters.
+fn our_function_facts(
+    function: &ProtocolObject<dyn MTLFunction>,
+    registry: u64,
+) -> Answer<FunctionFacts> {
+    // Each list bound to a local of its declared type, as the bindings walk does: the coverage
+    // derivation types a receiver from what bound it, so a call made inside a `for` header or on
+    // an `Option`'s contents names no type at all.
+    let vertex: Option<Retained<NSArray<MTLVertexAttribute>>> = function.vertexAttributes();
+    let stage_in: Option<Retained<NSArray<MTLAttribute>>> = function.stageInputAttributes();
+    let dictionary: Retained<NSDictionary<NSString, MTLFunctionConstant>> =
+        function.functionConstantsDictionary();
+    let mut found = Vec::new();
+    for key in dictionary.allKeys() {
+        let constant: Retained<MTLFunctionConstant> = dictionary
+            .objectForKey(&key)
+            .ok_or_else(|| Failure::named("NoSuchConstant", key.to_string()))?;
+        found.push(ConstantFacts {
+            name: constant.name().to_string(),
+            data_type: our_data_type(constant.r#type().0)?,
+            index: constant.index() as u32,
+            required: constant.required(),
+        });
+    }
+    // A dictionary has no order, so the facts are sorted here and the comparison is of two sorted
+    // lists: `allKeys` is free to answer in any order and a case still compares the same constant
+    // against the same constant.
+    found.sort_by(|left, right| left.name.cmp(&right.name));
+    let count = function.patchControlPointCount();
+    Ok(FunctionFacts {
+        name: function.name().to_string(),
+        function_type: our_function_type(function.functionType().0)?,
+        patch_type: our_patch_type(function.patchType().0)?,
+        // Metal answers -1 where there is no count, which the vocabulary spells `None`.
+        patch_control_point_count: u32::try_from(count).ok(),
+        vertex_attributes: our_vertex_attributes(vertex.as_deref())?,
+        stage_input_attributes: our_stage_input_attributes(stage_in.as_deref())?,
+        constants: found,
+        options: FunctionOptions::try_from(function.options().0 as u32)
+            .map_err(|error| Failure::named("UnknownFunctionOptions", error.to_string()))?,
+        // The registry ID is each host's own number, so only the **comparison** is portable: the
+        // two sides agree that the function came from the case's device, never on the number that
+        // says so.
+        device_is_the_cases: function.device().registryID() == registry,
+    })
+}
+
+/// The translator's `MTLLibraryType` for a raw Metal ordinal.
+///
+/// The ordinals are `MTLLibraryType`'s own (0 and 1), not the metallib header's `file_type` byte
+/// (0 and 2) that our side reads the type out of.
+fn our_library_type(raw: isize) -> Answer<LibraryType> {
+    match raw {
+        0 => Ok(LibraryType::Executable),
+        1 => Ok(LibraryType::Dynamic),
+        other => Err(Failure::named(
+            "UnknownLibraryType",
+            format!("MTLLibraryType({other})"),
+        )),
+    }
 }
 
 /// The translator's `MTLBindingAccess` for a raw Metal ordinal.
@@ -2391,46 +2460,54 @@ impl Side for MetalSide {
                     })?
             }
         };
-        // Each list bound to a local of its declared type, as the bindings walk does: the
-        // coverage derivation types a receiver from what bound it, so a call made inside a `for`
-        // header or on an `Option`'s contents names no type at all.
-        let vertex: Option<Retained<NSArray<MTLVertexAttribute>>> = function.vertexAttributes();
-        let stage_in: Option<Retained<NSArray<MTLAttribute>>> = function.stageInputAttributes();
-        let dictionary: Retained<NSDictionary<NSString, MTLFunctionConstant>> =
-            function.functionConstantsDictionary();
-        let mut found = Vec::new();
-        for key in dictionary.allKeys() {
-            let constant: Retained<MTLFunctionConstant> = dictionary
-                .objectForKey(&key)
-                .ok_or_else(|| Failure::named("NoSuchConstant", key.to_string()))?;
-            found.push(ConstantFacts {
-                name: constant.name().to_string(),
-                data_type: our_data_type(constant.r#type().0)?,
-                index: constant.index() as u32,
-                required: constant.required(),
-            });
-        }
-        // A dictionary has no order, so the facts are sorted here and the comparison is of two
-        // sorted lists: `allKeys` is free to answer in any order and a case still compares the
-        // same constant against the same constant.
-        found.sort_by(|left, right| left.name.cmp(&right.name));
-        let count = function.patchControlPointCount();
-        Ok(FunctionFacts {
-            name: function.name().to_string(),
-            function_type: our_function_type(function.functionType().0)?,
-            patch_type: our_patch_type(function.patchType().0)?,
-            // Metal answers -1 where there is no count, which the vocabulary spells `None`.
-            patch_control_point_count: u32::try_from(count).ok(),
-            vertex_attributes: our_vertex_attributes(vertex.as_deref())?,
-            stage_input_attributes: our_stage_input_attributes(stage_in.as_deref())?,
-            constants: found,
-            options: FunctionOptions::try_from(function.options().0 as u32)
-                .map_err(|error| Failure::named("UnknownFunctionOptions", error.to_string()))?,
-            // The registry ID is each host's own number, so only the **comparison** is portable:
-            // the two sides agree that the function came from the case's device, never on the
-            // number that says so.
-            device_is_the_cases: function.device().registryID() == registry,
+        our_function_facts(&function, registry)
+    }
+
+    fn library_facts(&mut self, library: Handle) -> Answer<LibraryFacts> {
+        let registry = self.device.registryID();
+        let library: &Retained<ProtocolObject<dyn MTLLibrary>> = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        // Bound to a local of its declared type, as the facts walks do: the coverage derivation
+        // types a receiver from what bound it, so a call made inside a `for` header names no type.
+        let names: Retained<NSArray<NSString>> = library.functionNames();
+        let install: Option<Retained<NSString>> = library.installName();
+        Ok(LibraryFacts {
+            function_names: names.iter().map(|name| name.to_string()).collect(),
+            library_type: our_library_type(library.r#type().0)?,
+            install_name: install.map(|name| name.to_string()),
+            // The registry ID is each host's own number, so only the **comparison** is portable,
+            // as it is for a function's own device.
+            device_is_the_cases: library.device().registryID() == registry,
         })
+    }
+
+    fn function_facts_from_descriptor(
+        &mut self,
+        library: Handle,
+        descriptor: &FunctionDescriptorSpec,
+    ) -> Answer<FunctionFacts> {
+        let registry = self.device.registryID();
+        let library: &Retained<ProtocolObject<dyn MTLLibrary>> = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let made: Retained<MTLFunctionDescriptor> = MTLFunctionDescriptor::functionDescriptor();
+        made.setName(Some(&NSString::from_str(&descriptor.name)));
+        if !descriptor.constants.is_empty() {
+            made.setConstantValues(Some(&constant_values(&descriptor.constants)));
+        }
+        made.setOptions(MTLFunctionOptions(descriptor.options.as_raw() as usize));
+        let function: Retained<ProtocolObject<dyn MTLFunction>> = library
+            .newFunctionWithDescriptor_error(&made)
+            .map_err(|error| {
+                Failure::named(
+                    "NewFunctionWithDescriptor",
+                    error.localizedDescription().to_string(),
+                )
+            })?;
+        our_function_facts(&function, registry)
     }
 
     fn constant_data_offset(&mut self, encoder: Handle, index: u32) -> Answer<u64> {

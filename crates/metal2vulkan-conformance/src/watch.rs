@@ -323,6 +323,21 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.function_facts(library, entry, constants)
     }
 
+    fn library_facts(&mut self, library: Handle) -> Answer<crate::library_facts::LibraryFacts> {
+        let _span = self.watch("library_facts");
+        self.inner.library_facts(library)
+    }
+
+    fn function_facts_from_descriptor(
+        &mut self,
+        library: Handle,
+        descriptor: &crate::library_facts::FunctionDescriptorSpec,
+    ) -> Answer<crate::function_facts::FunctionFacts> {
+        let _span = self.watch("function_facts_from_descriptor");
+        self.inner
+            .function_facts_from_descriptor(library, descriptor)
+    }
+
     fn compute_pipeline_bindings(
         &mut self,
         library: Handle,

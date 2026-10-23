@@ -64,6 +64,7 @@ pub mod host_detach;
 pub mod host_pages;
 pub mod indirect_commands;
 pub mod known_gaps;
+pub mod library_facts;
 pub mod measured;
 pub mod pipeline_facts;
 pub mod queue_slots;

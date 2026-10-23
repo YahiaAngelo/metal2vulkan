@@ -92,6 +92,7 @@ pub mod indirect_commands;
 pub mod indirect_private_types;
 pub mod int_attributes;
 pub mod level_sizes;
+pub mod library_facts;
 pub mod math_routines;
 pub mod mesh_barriers;
 pub mod mesh_commands;
@@ -171,6 +172,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in function_facts::all() {
+        cases.push(Box::new(case));
+    }
+    for case in library_facts::all() {
         cases.push(Box::new(case));
     }
     for case in pipeline_facts::all() {

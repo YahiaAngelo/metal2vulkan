@@ -865,6 +865,37 @@ pub trait Side {
         Err(Failure::unavailable("function_facts"))
     }
 
+    /// What the library answers about **itself**
+    /// ([`crate::library_facts::LibraryFacts`]): `functionNames`, `type`, `installName`, and
+    /// whether `device` is the case's own.
+    ///
+    /// One call for the four getters, because a library's own facts are read together and none of
+    /// them takes an argument: the call is "ask this library about itself". No function is made
+    /// and nothing is compiled, so the answer is the container's reading alone.
+    fn library_facts(&mut self, library: Handle) -> Answer<crate::library_facts::LibraryFacts> {
+        let _ = library;
+        Err(Failure::unavailable("library_facts"))
+    }
+
+    /// `newFunctionWithDescriptor:error:` of the descriptor `descriptor` states, and what the
+    /// function then answers about itself ([`crate::function_facts::FunctionFacts`]).
+    ///
+    /// The same answer [`Side::function_facts`] reads, from the other way of making a function, so
+    /// the two are directly comparable: a descriptor naming a function with no constant values and
+    /// no options must give the facts `newFunctionWithName:` gives, and a descriptor's `options`
+    /// must come back out of the function it made.
+    ///
+    /// The descriptor is made, set and spent inside the call. Nothing compares its identity and
+    /// no case holds one past the function it makes, so neither side needs a handle space for it.
+    fn function_facts_from_descriptor(
+        &mut self,
+        library: Handle,
+        descriptor: &crate::library_facts::FunctionDescriptorSpec,
+    ) -> Answer<crate::function_facts::FunctionFacts> {
+        let _ = (library, descriptor);
+        Err(Failure::unavailable("function_facts_from_descriptor"))
+    }
+
     /// Where `constantDataAtIndex:` of `index` points, as a byte offset inside the encoder's
     /// arguments.
     ///

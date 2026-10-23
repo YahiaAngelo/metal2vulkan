@@ -28,6 +28,7 @@ use crate::function_facts::{
 use crate::indirect_commands::{
     CommandsMade, ComputeCommandStep, EncodedCommand, IcbDescriptor, RenderCommandStep,
 };
+use crate::library_facts::{FunctionDescriptorSpec, LibraryFacts};
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
@@ -1007,6 +1008,54 @@ fn our_constants(values: &[ConstantValue]) -> metal2vulkan::library::FunctionCon
     built
 }
 
+/// Every `MTLFunction` getter the vocabulary reads, off a function however it was made.
+///
+/// Shared by `newFunctionWithName:`, `newFunctionWithName:constantValues:` and
+/// `newFunctionWithDescriptor:`, so the three ways of making a function are read through one walk
+/// and a case comparing them against each other compares the same getters.
+fn our_function_facts(
+    function: &metal2vulkan_runtime::Function,
+    registry: u64,
+) -> Answer<FunctionFacts> {
+    let dictionary = function
+        .function_constants_dictionary()
+        .map_err(|error| Failure::of(&error))?;
+    Ok(FunctionFacts {
+        name: function.name().to_owned(),
+        function_type: function
+            .function_type()
+            .map_err(|error| Failure::of(&error))?,
+        patch_type: function.patch_type().map_err(|error| Failure::of(&error))?,
+        patch_control_point_count: function
+            .patch_control_point_count()
+            .map_err(|error| Failure::of(&error))?,
+        vertex_attributes: function
+            .vertex_attributes()
+            .map_err(|error| Failure::of(&error))?
+            .map(|held| held.iter().map(our_attribute).collect()),
+        stage_input_attributes: function
+            .stage_input_attributes()
+            .map_err(|error| Failure::of(&error))?
+            .map(|held| held.iter().map(our_attribute).collect()),
+        // A `BTreeMap`, so the names are already in the order the Metal side sorts its own into:
+        // the comparison is of two sorted lists of a dictionary's entries.
+        constants: dictionary
+            .iter()
+            .map(|(name, constant)| ConstantFacts {
+                name: name.clone(),
+                data_type: constant.data_type(),
+                index: constant.index(),
+                required: constant.is_required(),
+            })
+            .collect(),
+        options: function.options(),
+        // The registry ID is each host's own number, so only the **comparison** is portable: the
+        // two sides agree that the function came from the case's device, never on the number that
+        // says so.
+        device_is_the_cases: function.device().registry_id() == registry,
+    })
+}
+
 /// One reflected binding of ours, in the vocabulary both sides answer in.
 ///
 /// The kind-specific fields come from the subprotocol the binding conforms to, which the runtime
@@ -1962,43 +2011,44 @@ impl Side for RuntimeSide<'_> {
             }
         }
         .map_err(|error| Failure::of(&error))?;
-        let dictionary = function
-            .function_constants_dictionary()
-            .map_err(|error| Failure::of(&error))?;
-        Ok(FunctionFacts {
-            name: function.name().to_owned(),
-            function_type: function
-                .function_type()
-                .map_err(|error| Failure::of(&error))?,
-            patch_type: function.patch_type().map_err(|error| Failure::of(&error))?,
-            patch_control_point_count: function
-                .patch_control_point_count()
-                .map_err(|error| Failure::of(&error))?,
-            vertex_attributes: function
-                .vertex_attributes()
-                .map_err(|error| Failure::of(&error))?
-                .map(|held| held.iter().map(our_attribute).collect()),
-            stage_input_attributes: function
-                .stage_input_attributes()
-                .map_err(|error| Failure::of(&error))?
-                .map(|held| held.iter().map(our_attribute).collect()),
-            // A `BTreeMap`, so the names are already in the order the Metal side sorts its own
-            // into: the comparison is of two sorted lists of a dictionary's entries.
-            constants: dictionary
-                .iter()
-                .map(|(name, constant)| ConstantFacts {
-                    name: name.clone(),
-                    data_type: constant.data_type(),
-                    index: constant.index(),
-                    required: constant.is_required(),
-                })
-                .collect(),
-            options: function.options(),
-            // The registry ID is each host's own number, so only the **comparison** is portable:
-            // the two sides agree that the function came from the case's device, never on the
-            // number that says so.
-            device_is_the_cases: function.device().registry_id() == registry,
+        our_function_facts(&function, registry)
+    }
+
+    fn library_facts(&mut self, library: Handle) -> Answer<LibraryFacts> {
+        let registry = self.device.registry_id();
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        Ok(LibraryFacts {
+            function_names: library.function_names(),
+            library_type: library.library_type(),
+            install_name: library.install_name().map(str::to_owned),
+            // The registry ID is each host's own number, so only the **comparison** is portable,
+            // as it is for a function's own device.
+            device_is_the_cases: library.device().registry_id() == registry,
         })
+    }
+
+    fn function_facts_from_descriptor(
+        &mut self,
+        library: Handle,
+        descriptor: &FunctionDescriptorSpec,
+    ) -> Answer<FunctionFacts> {
+        let registry = self.device.registry_id();
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let mut made = metal2vulkan_runtime::FunctionDescriptor::new(&descriptor.name);
+        if !descriptor.constants.is_empty() {
+            made.constant_values = Some(our_constants(&descriptor.constants));
+        }
+        made.options = descriptor.options;
+        let function = library
+            .new_function_with_descriptor(&made)
+            .map_err(|error| Failure::of(&error))?;
+        our_function_facts(&function, registry)
     }
 
     fn constant_data_offset(&mut self, encoder: Handle, index: u32) -> Answer<u64> {
