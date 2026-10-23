@@ -77,6 +77,7 @@ pub mod format_copies;
 pub mod frame_chains;
 pub mod fresh_contents;
 pub mod function_bindings;
+pub mod function_facts;
 pub mod half_output_blends;
 pub mod half_read_nans;
 pub mod half_storage_writes;
@@ -94,6 +95,7 @@ pub mod mesh_draws;
 pub mod nearest_positions;
 pub mod norm_storage_writes;
 pub mod pass_bytes;
+pub mod pipeline_facts;
 pub mod pixel_downscales;
 pub mod pixel_samplers;
 pub mod pvrtc_cpu_order;
@@ -157,6 +159,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in function_bindings::all() {
+        cases.push(Box::new(case));
+    }
+    for case in function_facts::all() {
+        cases.push(Box::new(case));
+    }
+    for case in pipeline_facts::all() {
         cases.push(Box::new(case));
     }
     for case in compressed_blits::all() {

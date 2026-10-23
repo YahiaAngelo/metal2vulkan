@@ -552,6 +552,11 @@ pub struct RenderPipelineSpec<'a> {
     /// `rasterizationEnabled`. A `vertex void` function has no position to rasterize, so its
     /// pipeline must disable it and must carry no fragment stage.
     pub rasterization: bool,
+    /// `label`, which the made state answers back as its own `label`; `None` is Metal's nil.
+    pub label: Option<&'a str>,
+    /// `supportIndirectCommandBuffers`: an indirect command buffer's render commands may set the
+    /// state, which the made state answers back.
+    pub support_indirect_command_buffers: bool,
 }
 
 impl<'a> RenderPipelineSpec<'a> {
@@ -581,7 +586,23 @@ impl<'a> RenderPipelineSpec<'a> {
             samples: 1,
             vertex_layout: None,
             rasterization: true,
+            label: None,
+            support_indirect_command_buffers: false,
         }
+    }
+
+    /// The pipeline whose descriptor carries `label`, which the made state answers back.
+    #[must_use]
+    pub const fn labelled(mut self, label: &'a str) -> Self {
+        self.label = Some(label);
+        self
+    }
+
+    /// The pipeline whose descriptor sets `supportIndirectCommandBuffers`.
+    #[must_use]
+    pub const fn for_indirect_commands(mut self) -> Self {
+        self.support_indirect_command_buffers = true;
+        self
     }
 
     /// The pipeline of a `vertex void` function that writes its answer through a buffer: its stage
@@ -616,7 +637,8 @@ impl<'a> RenderPipelineSpec<'a> {
     }
 
     /// The words a case's input fingerprint covers: the functions, every attachment, the depth and
-    /// stencil formats where the pipeline names them, and the sample count.
+    /// stencil formats where the pipeline names them, the sample count, and the label and the
+    /// indirect-command support where it states them.
     pub fn words(&self) -> Vec<u8> {
         let mut bytes = self.vertex.words();
         match &self.fragment {
@@ -644,6 +666,13 @@ impl<'a> RenderPipelineSpec<'a> {
         }
         if let Some(layout) = &self.vertex_layout {
             bytes.extend(layout.words());
+        }
+        if let Some(label) = self.label {
+            bytes.push(0xfd);
+            bytes.extend(label.as_bytes());
+        }
+        if self.support_indirect_command_buffers {
+            bytes.push(0xfc);
         }
         bytes
     }

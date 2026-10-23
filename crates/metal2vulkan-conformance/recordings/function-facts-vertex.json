@@ -1,0 +1,253 @@
+{
+  "format": 1,
+  "case": "function-facts-vertex",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "rt6_resolves.ll",
+      "entry": "rt6_resolve_full",
+      "source_sha256": "826f30ea88e648ce64e04e26abdfaa51c2c81fdd933f41e0a5b621eb7c9d18e9"
+    },
+    {
+      "fixture": "rt6_resolves.air.ll",
+      "entry": "rt6_resolve_full",
+      "source_sha256": "deacd509ddf64f7fe146057f3097edfb6582b0033fd623a9d2ec49db7596aec9"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "826f30ea88e648ce64e04e26abdfaa51c2c81fdd933f41e0a5b621eb7c9d18e9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "deacd509ddf64f7fe146057f3097edfb6582b0033fd623a9d2ec49db7596aec9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "entry",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "2f95ba120953e8e58166d3ef848f9096363dfe22cbfe17836689e64a1a79b50e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "constants",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "facts",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "name",
+                      "observed": {
+                        "value": {
+                          "lines": [
+                            "rt6_resolve_full"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "name": "function_type",
+                      "observed": {
+                        "value": {
+                          "fields": {
+                            "name": {
+                              "lines": [
+                                "MTLFunctionTypeVertex"
+                              ]
+                            },
+                            "raw": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "patch_type",
+                      "observed": {
+                        "value": {
+                          "fields": {
+                            "name": {
+                              "lines": [
+                                "MTLPatchTypeNone"
+                              ]
+                            },
+                            "raw": {
+                              "uint": 0
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "patch_control_point_count",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "None",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "options",
+                      "observed": {
+                        "value": {
+                          "fields": {
+                            "names": {
+                              "set": []
+                            },
+                            "raw": {
+                              "uint": 0
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "device",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    },
+                    {
+                      "name": "vertex_attributes",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "None",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "stage_input_attributes",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "None",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "function_constants",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "count",
+                          "observed": {
+                            "value": {
+                              "uint": 0
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

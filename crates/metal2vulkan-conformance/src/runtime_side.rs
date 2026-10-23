@@ -21,6 +21,10 @@ use crate::function_bindings::{
     ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
     TextureFacts, ThreadgroupFacts, TypeFacts, DEPTH,
 };
+use crate::function_facts::{
+    AttributeFacts, ConstantAt, ConstantFacts, ConstantValue, FunctionFacts,
+};
+use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
     ColorState, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
@@ -422,6 +426,10 @@ pub(crate) struct PipelineFields {
     pub raster_sample_count: u32,
     pub rasterization_enabled: bool,
     pub vertex_descriptor: Option<VertexDescriptor>,
+    pub support_indirect_command_buffers: bool,
+    /// The label the creation's options carry, which is where the runtime takes
+    /// `MTLRenderPipelineDescriptor.label` from rather than from the descriptor itself.
+    pub label: Option<String>,
 }
 
 /// [`PipelineFields`] of `spec`: `Err` where the spec names a colour attachment past the eight a
@@ -442,6 +450,8 @@ pub(crate) fn pipeline_fields(spec: &RenderPipelineSpec<'_>) -> Answer<PipelineF
         raster_sample_count: spec.samples,
         rasterization_enabled: spec.rasterization,
         vertex_descriptor: spec.vertex_layout.as_ref().map(vertex_descriptor),
+        support_indirect_command_buffers: spec.support_indirect_command_buffers,
+        label: spec.label.map(str::to_owned),
     })
 }
 
@@ -520,6 +530,52 @@ struct EncoderAt {
     encoder: ArgumentEncoder,
     /// The argument buffer and the offset of the arguments in it; `None` until one is set.
     target: Option<(Handle, u64)>,
+}
+
+/// One stage-input attribute of ours, in the vocabulary both sides answer in.
+fn our_attribute(attribute: &metal2vulkan::reflection::Attribute) -> AttributeFacts {
+    AttributeFacts {
+        name: attribute.name().to_owned(),
+        attribute_index: attribute.attribute_index(),
+        attribute_type: attribute.attribute_type(),
+        active: attribute.is_active(),
+        patch_data: attribute.is_patch_data(),
+        patch_control_point_data: attribute.is_patch_control_point_data(),
+    }
+}
+
+/// The constant values the case states, as the runtime's `MTLFunctionConstantValues`.
+///
+/// The runtime holds values by index and by name, which is the two single setters; a range is
+/// **expanded** into one value an index from its first, which is what
+/// `setConstantValues:type:withRange:` means. The bytes are split by the type's own size, so a
+/// range of three `bool`s is three one-byte values at three indices.
+fn our_constants(values: &[ConstantValue]) -> metal2vulkan::library::FunctionConstantValues {
+    let mut built = metal2vulkan::library::FunctionConstantValues::defaults();
+    for value in values {
+        let one = |bytes: &[u8]| {
+            metal2vulkan::library::FunctionConstantValue::new(value.data_type, bytes.to_vec())
+        };
+        match &value.at {
+            ConstantAt::Index(index) => built = built.with_index(*index, one(&value.bytes)),
+            ConstantAt::Name(name) => built = built.with_name(name.clone(), one(&value.bytes)),
+            ConstantAt::Range { first, count } => {
+                let count = *count as usize;
+                let each = match count {
+                    0 => 0,
+                    count => value.bytes.len() / count,
+                };
+                for step in 0..count {
+                    let at = step * each;
+                    built = built.with_index(
+                        first + step as u32,
+                        one(&value.bytes[at..at.saturating_add(each).min(value.bytes.len())]),
+                    );
+                }
+            }
+        }
+    }
+    built
 }
 
 /// One reflected binding of ours, in the vocabulary both sides answer in.
@@ -1311,6 +1367,143 @@ impl Side for RuntimeSide<'_> {
             )
         })?;
         Ok(reflection.bindings().iter().map(our_binding).collect())
+    }
+
+    fn compute_pipeline_with_descriptor(
+        &mut self,
+        library: Handle,
+        spec: &ComputeStateSpec<'_>,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .new_function_with_name(spec.entry)
+            .map_err(|error| Failure::of(&error))?;
+        let mut descriptor = metal2vulkan::pipeline::ComputePipelineDescriptor::new(
+            StageSource::Function(function.function_descriptor()),
+        );
+        descriptor.support_indirect_command_buffers = spec.support_indirect_command_buffers;
+        descriptor.required_threads_per_threadgroup = spec.required_threads_per_threadgroup;
+        // The label is the creation's option rather than the descriptor's field, which is where
+        // the runtime takes `MTLComputePipelineDescriptor.label` from.
+        let mut options = PipelineOptions::default();
+        options.label = spec.label.map(str::to_owned);
+        let state = self
+            .device
+            .new_compute_pipeline_state(&descriptor, &options)
+            .map_err(|error| Failure::of(&error))?;
+        Ok(keep(&mut self.pipelines, state))
+    }
+
+    fn compute_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<ComputeStateFacts> {
+        let registry = self.device.registry_id();
+        let state = self
+            .pipelines
+            .get(state.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?;
+        let required = state.required_threads_per_threadgroup();
+        Ok(ComputeStateFacts {
+            label: state.label().map(str::to_owned),
+            // The registry ID is each host's own number, so only the **comparison** is portable.
+            device_is_the_cases: state.device().registry_id() == registry,
+            static_threadgroup_memory_length: u64::from(state.static_threadgroup_memory_length()),
+            support_indirect_command_buffers: state.support_indirect_command_buffers(),
+            imageblock_memory_length: state
+                .imageblock_memory_length_for_dimensions(size(imageblock)),
+            required_threads_per_threadgroup: [required.width, required.height, required.depth],
+        })
+    }
+
+    fn render_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<RenderStateFacts> {
+        let registry = self.device.registry_id();
+        let state = self
+            .render_pipelines
+            .get(state.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?;
+        let required = state.required_threads_per_tile_threadgroup();
+        Ok(RenderStateFacts {
+            label: state.label().map(str::to_owned),
+            device_is_the_cases: state.device().registry_id() == registry,
+            max_total_threads_per_threadgroup: u64::from(state.max_total_threads_per_threadgroup()),
+            threadgroup_size_matches_tile_size: state.threadgroup_size_matches_tile_size(),
+            imageblock_sample_length: state.imageblock_sample_length().ok(),
+            imageblock_memory_length: state
+                .imageblock_memory_length_for_dimensions(size(imageblock))
+                .ok(),
+            support_indirect_command_buffers: state.support_indirect_command_buffers(),
+            required_threads_per_tile_threadgroup: [
+                required.width,
+                required.height,
+                required.depth,
+            ],
+        })
+    }
+
+    fn function_facts(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        constants: &[ConstantValue],
+    ) -> Answer<FunctionFacts> {
+        let registry = self.device.registry_id();
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = match constants.is_empty() {
+            true => library.new_function_with_name(entry),
+            false => {
+                library.new_function_with_name_constant_values(entry, &our_constants(constants))
+            }
+        }
+        .map_err(|error| Failure::of(&error))?;
+        let dictionary = function
+            .function_constants_dictionary()
+            .map_err(|error| Failure::of(&error))?;
+        Ok(FunctionFacts {
+            name: function.name().to_owned(),
+            function_type: function
+                .function_type()
+                .map_err(|error| Failure::of(&error))?,
+            patch_type: function.patch_type().map_err(|error| Failure::of(&error))?,
+            patch_control_point_count: function
+                .patch_control_point_count()
+                .map_err(|error| Failure::of(&error))?,
+            vertex_attributes: function
+                .vertex_attributes()
+                .map_err(|error| Failure::of(&error))?
+                .map(|held| held.iter().map(our_attribute).collect()),
+            stage_input_attributes: function
+                .stage_input_attributes()
+                .map_err(|error| Failure::of(&error))?
+                .map(|held| held.iter().map(our_attribute).collect()),
+            // A `BTreeMap`, so the names are already in the order the Metal side sorts its own
+            // into: the comparison is of two sorted lists of a dictionary's entries.
+            constants: dictionary
+                .iter()
+                .map(|(name, constant)| ConstantFacts {
+                    name: name.clone(),
+                    data_type: constant.data_type(),
+                    index: constant.index(),
+                    required: constant.is_required(),
+                })
+                .collect(),
+            options: function.options(),
+            // The registry ID is each host's own number, so only the **comparison** is portable:
+            // the two sides agree that the function came from the case's device, never on the
+            // number that says so.
+            device_is_the_cases: function.device().registry_id() == registry,
+        })
     }
 
     fn constant_data_offset(&mut self, encoder: Handle, index: u32) -> Answer<u64> {
@@ -2219,9 +2412,14 @@ impl Side for RuntimeSide<'_> {
         descriptor.raster_sample_count = apart.raster_sample_count;
         descriptor.rasterization_enabled = apart.rasterization_enabled;
         descriptor.vertex_descriptor = apart.vertex_descriptor;
+        descriptor.support_indirect_command_buffers = apart.support_indirect_command_buffers;
+        // The label is the creation's option rather than the descriptor's field, which is where
+        // the runtime takes `MTLRenderPipelineDescriptor.label` from.
+        let mut options = PipelineOptions::default();
+        options.label = apart.label;
         let state = self
             .device
-            .new_render_pipeline_state(&descriptor, &PipelineOptions::default())
+            .new_render_pipeline_state(&descriptor, &options)
             .map_err(Failure::from_error)?;
         Ok(keep(&mut self.render_pipelines, state))
     }

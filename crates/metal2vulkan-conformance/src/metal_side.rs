@@ -26,6 +26,10 @@ use crate::function_bindings::{
     ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
     TextureFacts, ThreadgroupFacts, TypeFacts,
 };
+use crate::function_facts::{
+    AttributeFacts, ConstantAt, ConstantFacts, ConstantValue, FunctionFacts,
+};
+use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
     Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
@@ -37,21 +41,24 @@ use crate::sparse_query::{
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
 use metal2vulkan::metal::state::{DepthStencilDescriptor, StencilDescriptor};
-use metal2vulkan::metal::{BindingAccess, BindingType, PixelFormat, RenderStages};
+use metal2vulkan::metal::{
+    BindingAccess, BindingType, FunctionOptions, FunctionType, PatchType, PixelFormat, RenderStages,
+};
 use metal2vulkan_runtime::SparsePageSize;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::AnyThread;
-use objc2_foundation::{NSArray, NSObjectProtocol, NSRange, NSString, NSURL};
+use objc2_foundation::{NSArray, NSDictionary, NSObjectProtocol, NSRange, NSString, NSURL};
 use objc2_metal::{
-    MTLArgumentDescriptor, MTLArgumentEncoder, MTLArrayType, MTLAttributeFormat, MTLBarrierScope,
-    MTLBinding, MTLBindingAccess, MTLBindingType, MTLBlendFactor, MTLBlendOperation,
-    MTLBlitCommandEncoder, MTLBuffer, MTLBufferBinding, MTLClearColor, MTLColorWriteMask,
-    MTLCommandBuffer, MTLCommandBufferHandler, MTLCommandBufferStatus, MTLCommandEncoder,
-    MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder, MTLComputePipelineDescriptor,
-    MTLComputePipelineReflection, MTLComputePipelineState, MTLCreateSystemDefaultDevice,
-    MTLDataType, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLDispatchType,
-    MTLEvent, MTLFunction, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType,
+    MTLArgumentDescriptor, MTLArgumentEncoder, MTLArrayType, MTLAttribute, MTLAttributeFormat,
+    MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType, MTLBlendFactor,
+    MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLBufferBinding, MTLClearColor,
+    MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferHandler, MTLCommandBufferStatus,
+    MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder,
+    MTLComputePipelineDescriptor, MTLComputePipelineReflection, MTLComputePipelineState,
+    MTLCreateSystemDefaultDevice, MTLDataType, MTLDepthStencilDescriptor, MTLDepthStencilState,
+    MTLDevice, MTLDispatchType, MTLEvent, MTLFunction, MTLFunctionConstant,
+    MTLFunctionConstantValues, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType,
     MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType,
     MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor,
     MTLMultisampleDepthResolveFilter, MTLMultisampleStencilResolveFilter, MTLOrigin,
@@ -66,7 +73,7 @@ use objc2_metal::{
     MTLStoreActionOptions, MTLStructMember, MTLStructType, MTLTexture, MTLTextureBinding,
     MTLTextureDescriptor, MTLTextureReferenceType, MTLTextureSwizzle, MTLTextureSwizzleChannels,
     MTLTextureType, MTLTextureUsage, MTLThreadgroupBinding, MTLTileRenderPipelineDescriptor,
-    MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction, MTLViewport,
+    MTLVertexAttribute, MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction, MTLViewport,
     MTLVisibilityResultMode, MTLVisibleFunctionTable,
 };
 
@@ -251,6 +258,116 @@ fn conforming<'a, P: ?Sized>(
 fn our_data_type(raw: usize) -> Answer<metal2vulkan::metal::DataType> {
     metal2vulkan::metal::DataType::try_from(raw as u32)
         .map_err(|_| Failure::named("UnknownDataType", format!("MTLDataType({raw})")))
+}
+
+/// The translator's `MTLFunctionType` for a raw Metal ordinal.
+fn our_function_type(raw: usize) -> Answer<FunctionType> {
+    FunctionType::try_from(raw as u32)
+        .map_err(|_| Failure::named("UnknownFunctionType", format!("MTLFunctionType({raw})")))
+}
+
+/// The translator's `MTLPatchType` for a raw Metal ordinal.
+fn our_patch_type(raw: usize) -> Answer<PatchType> {
+    PatchType::try_from(raw as u32)
+        .map_err(|_| Failure::named("UnknownPatchType", format!("MTLPatchType({raw})")))
+}
+
+/// One `MTLVertexAttribute`'s six facts, in the vocabulary both sides answer in.
+///
+/// # Why this and [`stage_input_attribute_facts`] are two functions, each taking its own class
+///
+/// `MTLVertexAttribute` and `MTLAttribute` are two Objective-C classes that state the same six
+/// facts and share no protocol, so there is nothing to be generic over, and one `macro_rules!` over
+/// the six getters would read better than two near-identical bodies. It would also hide them: the
+/// coverage derivation reads the leg's calls out of `fn` bodies, and a call written inside a macro
+/// sits in no function at all, so both classes would be exercised by a case and credited to
+/// nothing.
+///
+/// And the attribute arrives as a **parameter** rather than as a `for` loop's variable, which is
+/// the shape [`metal_binding`] already uses for the same reason: the derivation types a receiver
+/// from a `let`, a parameter or a closure's parameter, and a loop variable types as nothing, so
+/// six getters read straight off one would resolve to no item either.
+fn vertex_attribute_facts(attribute: &MTLVertexAttribute) -> Answer<AttributeFacts> {
+    Ok(AttributeFacts {
+        name: attribute.name().to_string(),
+        attribute_index: attribute.attributeIndex() as u32,
+        attribute_type: our_data_type(attribute.attributeType().0)?,
+        active: attribute.isActive(),
+        patch_data: attribute.isPatchData(),
+        patch_control_point_data: attribute.isPatchControlPointData(),
+    })
+}
+
+/// One `MTLAttribute`'s six facts. [`vertex_attribute_facts`] says why the two are not one.
+fn stage_input_attribute_facts(attribute: &MTLAttribute) -> Answer<AttributeFacts> {
+    Ok(AttributeFacts {
+        name: attribute.name().to_string(),
+        attribute_index: attribute.attributeIndex() as u32,
+        attribute_type: our_data_type(attribute.attributeType().0)?,
+        active: attribute.isActive(),
+        patch_data: attribute.isPatchData(),
+        patch_control_point_data: attribute.isPatchControlPointData(),
+    })
+}
+
+/// `vertexAttributes`' list in the vocabulary both sides answer in; `None` is Metal's nil.
+fn our_vertex_attributes(
+    list: Option<&NSArray<MTLVertexAttribute>>,
+) -> Answer<Option<Vec<AttributeFacts>>> {
+    let Some(list) = list else { return Ok(None) };
+    let mut found = Vec::new();
+    for attribute in list {
+        found.push(vertex_attribute_facts(&attribute)?);
+    }
+    Ok(Some(found))
+}
+
+/// `stageInputAttributes`' list in the vocabulary both sides answer in; `None` is Metal's nil.
+fn our_stage_input_attributes(
+    list: Option<&NSArray<MTLAttribute>>,
+) -> Answer<Option<Vec<AttributeFacts>>> {
+    let Some(list) = list else { return Ok(None) };
+    let mut found = Vec::new();
+    for attribute in list {
+        found.push(stage_input_attribute_facts(&attribute)?);
+    }
+    Ok(Some(found))
+}
+
+/// The `MTLFunctionConstantValues` the case's values build, each through the setter its
+/// [`ConstantAt`] names.
+fn constant_values(values: &[ConstantValue]) -> Retained<MTLFunctionConstantValues> {
+    let built = MTLFunctionConstantValues::new();
+    for value in values {
+        let bytes = std::ptr::NonNull::from(value.bytes.as_slice()).cast::<std::ffi::c_void>();
+        let data_type = MTLDataType(value.data_type.as_raw() as usize);
+        // SAFETY: each pointer is to `value.bytes`, which outlives the call, and each holds the
+        // bytes the case states for the type and the count it states. The index, the range and
+        // the name are the case's own; Metal checks them against the function's own constants
+        // when the pipeline state compiles, and a value naming no constant is ignored.
+        unsafe {
+            match &value.at {
+                ConstantAt::Index(index) => {
+                    built.setConstantValue_type_atIndex(bytes, data_type, *index as usize);
+                }
+                ConstantAt::Range { first, count } => {
+                    built.setConstantValues_type_withRange(
+                        bytes,
+                        data_type,
+                        NSRange::new(*first as usize, *count as usize),
+                    );
+                }
+                ConstantAt::Name(name) => {
+                    built.setConstantValue_type_withName(
+                        bytes,
+                        data_type,
+                        &NSString::from_str(name),
+                    );
+                }
+            }
+        }
+    }
+    built
 }
 
 /// The translator's `MTLBindingAccess` for a raw Metal ordinal.
@@ -1741,6 +1858,179 @@ impl Side for MetalSide {
         Ok(found)
     }
 
+    fn compute_pipeline_with_descriptor(
+        &mut self,
+        library: Handle,
+        spec: &ComputeStateSpec<'_>,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .newFunctionWithName(&NSString::from_str(spec.entry))
+            .ok_or_else(|| Failure::named("NoSuchFunction", spec.entry.to_owned()))?;
+        let descriptor = MTLComputePipelineDescriptor::new();
+        descriptor.setComputeFunction(Some(&function));
+        // Set only where the case states one. `setLabel:nil` on a pipeline descriptor fails an
+        // assertion inside Metal and ends the process ("label must not be nil", measured on this
+        // M3 Max while recording this family), and Metal's own default is already nil, so a case
+        // that means a nil label is a case that makes this call not at all.
+        if let Some(label) = spec.label {
+            descriptor.setLabel(Some(&NSString::from_str(label)));
+        }
+        descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
+        if let Some(threads) = spec.required_threads_per_threadgroup {
+            descriptor.setRequiredThreadsPerThreadgroup(size(threads));
+        }
+        let state = self
+            .device
+            .newComputePipelineStateWithDescriptor_options_reflection_error(
+                &descriptor,
+                MTLPipelineOption::None,
+                None,
+            )
+            .map_err(|error| {
+                Failure::named(
+                    "NewComputePipelineState",
+                    error.localizedDescription().to_string(),
+                )
+            })?;
+        Ok(keep(&mut self.pipelines, state))
+    }
+
+    fn compute_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<ComputeStateFacts> {
+        let registry = self.device.registryID();
+        // Declared, so the coverage derivation types the receiver: the pool's own element type is
+        // this side's `Vec`, which names no Metal type the walk can read off a field.
+        let state: &Retained<ProtocolObject<dyn MTLComputePipelineState>> = self
+            .pipelines
+            .get(state.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?;
+        let required = state.requiredThreadsPerThreadgroup();
+        Ok(ComputeStateFacts {
+            label: state.label().map(|label| label.to_string()),
+            // The registry ID is each host's own number, so only the **comparison** is portable.
+            device_is_the_cases: state.device().registryID() == registry,
+            static_threadgroup_memory_length: state.staticThreadgroupMemoryLength() as u64,
+            support_indirect_command_buffers: state.supportIndirectCommandBuffers(),
+            // SAFETY: the dimensions are the case's own three positive extents, which the call
+            // multiplies by the kernel's imageblock cell size and nothing else.
+            imageblock_memory_length: unsafe {
+                state.imageblockMemoryLengthForDimensions(size(imageblock))
+            } as u64,
+            required_threads_per_threadgroup: [
+                required.width as u64,
+                required.height as u64,
+                required.depth as u64,
+            ],
+        })
+    }
+
+    fn render_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<RenderStateFacts> {
+        let registry = self.device.registryID();
+        let state: &Retained<ProtocolObject<dyn MTLRenderPipelineState>> = &self
+            .render_pipelines
+            .get(state.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?
+            .state;
+        let required = state.requiredThreadsPerTileThreadgroup();
+        Ok(RenderStateFacts {
+            label: state.label().map(|label| label.to_string()),
+            device_is_the_cases: state.device().registryID() == registry,
+            max_total_threads_per_threadgroup: state.maxTotalThreadsPerThreadgroup() as u64,
+            threadgroup_size_matches_tile_size: state.threadgroupSizeMatchesTileSize(),
+            imageblock_sample_length: Some(state.imageblockSampleLength() as u64),
+            imageblock_memory_length: Some(
+                state.imageblockMemoryLengthForDimensions(size(imageblock)) as u64,
+            ),
+            support_indirect_command_buffers: state.supportIndirectCommandBuffers(),
+            required_threads_per_tile_threadgroup: [
+                required.width as u64,
+                required.height as u64,
+                required.depth as u64,
+            ],
+        })
+    }
+
+    fn function_facts(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        constants: &[ConstantValue],
+    ) -> Answer<FunctionFacts> {
+        let registry = self.device.registryID();
+        let library: &Retained<ProtocolObject<dyn MTLLibrary>> = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let name = NSString::from_str(entry);
+        let function: Retained<ProtocolObject<dyn MTLFunction>> = match constants.is_empty() {
+            true => library
+                .newFunctionWithName(&name)
+                .ok_or_else(|| Failure::named("NoSuchFunction", entry.to_owned()))?,
+            false => {
+                let values = constant_values(constants);
+                library
+                    .newFunctionWithName_constantValues_error(&name, &values)
+                    .map_err(|error| {
+                        Failure::named(
+                            "NewFunctionWithConstantValues",
+                            error.localizedDescription().to_string(),
+                        )
+                    })?
+            }
+        };
+        // Each list bound to a local of its declared type, as the bindings walk does: the
+        // coverage derivation types a receiver from what bound it, so a call made inside a `for`
+        // header or on an `Option`'s contents names no type at all.
+        let vertex: Option<Retained<NSArray<MTLVertexAttribute>>> = function.vertexAttributes();
+        let stage_in: Option<Retained<NSArray<MTLAttribute>>> = function.stageInputAttributes();
+        let dictionary: Retained<NSDictionary<NSString, MTLFunctionConstant>> =
+            function.functionConstantsDictionary();
+        let mut found = Vec::new();
+        for key in dictionary.allKeys() {
+            let constant: Retained<MTLFunctionConstant> = dictionary
+                .objectForKey(&key)
+                .ok_or_else(|| Failure::named("NoSuchConstant", key.to_string()))?;
+            found.push(ConstantFacts {
+                name: constant.name().to_string(),
+                data_type: our_data_type(constant.r#type().0)?,
+                index: constant.index() as u32,
+                required: constant.required(),
+            });
+        }
+        // A dictionary has no order, so the facts are sorted here and the comparison is of two
+        // sorted lists: `allKeys` is free to answer in any order and a case still compares the
+        // same constant against the same constant.
+        found.sort_by(|left, right| left.name.cmp(&right.name));
+        let count = function.patchControlPointCount();
+        Ok(FunctionFacts {
+            name: function.name().to_string(),
+            function_type: our_function_type(function.functionType().0)?,
+            patch_type: our_patch_type(function.patchType().0)?,
+            // Metal answers -1 where there is no count, which the vocabulary spells `None`.
+            patch_control_point_count: u32::try_from(count).ok(),
+            vertex_attributes: our_vertex_attributes(vertex.as_deref())?,
+            stage_input_attributes: our_stage_input_attributes(stage_in.as_deref())?,
+            constants: found,
+            options: FunctionOptions::try_from(function.options().0 as u32)
+                .map_err(|error| Failure::named("UnknownFunctionOptions", error.to_string()))?,
+            // The registry ID is each host's own number, so only the **comparison** is portable:
+            // the two sides agree that the function came from the case's device, never on the
+            // number that says so.
+            device_is_the_cases: function.device().registryID() == registry,
+        })
+    }
+
     fn constant_data_offset(&mut self, encoder: Handle, index: u32) -> Answer<u64> {
         let (buffer, arguments) = self
             .argument_encoders
@@ -2459,7 +2749,10 @@ impl Side for MetalSide {
     }
 
     fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {
-        let state = &self
+        // Declared, so the coverage derivation types the receiver: the pool's element is this
+        // side's own struct, which names no Metal type the walk can read off a field, and these
+        // three getters were therefore attributed to no item while being compared exactly.
+        let state: &Retained<ProtocolObject<dyn MTLRenderPipelineState>> = &self
             .render_pipelines
             .get(state.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0)))?
@@ -2613,6 +2906,12 @@ impl Side for MetalSide {
         if let Some(fragment) = &spec.fragment {
             descriptor.setFragmentFunction(Some(&*function(fragment)?));
         }
+        // Set only where the case states one: `setLabel:nil` ends Metal's process, as the
+        // compute descriptor's does.
+        if let Some(label) = spec.label {
+            descriptor.setLabel(Some(&NSString::from_str(label)));
+        }
+        descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
         descriptor.setRasterSampleCount(spec.samples as usize);
         descriptor.setRasterizationEnabled(spec.rasterization);
         if let Some(layout) = &spec.vertex_layout {

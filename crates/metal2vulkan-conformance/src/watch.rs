@@ -232,6 +232,43 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.encode_argument(encoder, write)
     }
 
+    fn compute_pipeline_with_descriptor(
+        &mut self,
+        library: Handle,
+        spec: &crate::pipeline_facts::ComputeStateSpec<'_>,
+    ) -> Answer<Handle> {
+        let _span = self.watch("compute_pipeline_with_descriptor");
+        self.inner.compute_pipeline_with_descriptor(library, spec)
+    }
+
+    fn compute_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<crate::pipeline_facts::ComputeStateFacts> {
+        let _span = self.watch("compute_pipeline_facts");
+        self.inner.compute_pipeline_facts(state, imageblock)
+    }
+
+    fn render_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<crate::pipeline_facts::RenderStateFacts> {
+        let _span = self.watch("render_pipeline_facts");
+        self.inner.render_pipeline_facts(state, imageblock)
+    }
+
+    fn function_facts(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        constants: &[crate::function_facts::ConstantValue],
+    ) -> Answer<crate::function_facts::FunctionFacts> {
+        let _span = self.watch("function_facts");
+        self.inner.function_facts(library, entry, constants)
+    }
+
     fn compute_pipeline_bindings(
         &mut self,
         library: Handle,
