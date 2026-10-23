@@ -35,7 +35,7 @@
                         "value": "absent",
                         "digest": {
                           "kind": "sha256",
-                          "hex": "a8e0f39de5863873d91a6a196784316a2c1fa6dc99f9d83150db968313296ffa"
+                          "hex": "c2ab219a94d98482d4908335c60f18c3370d5022666810ba99ca232f297c5395"
                         }
                       }
                     },
@@ -983,130 +983,6 @@
                                 },
                                 "tail_size_in_bytes": {
                                   "uint": 131072
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  ]
-                },
-                {
-                  "name": "MTLPixelFormatRGBA8Unorm/Type2DMultisample/256x128x1/levels-1/samples-2/slices-1/target",
-                  "observed": {
-                    "value": "absent"
-                  },
-                  "children": [
-                    {
-                      "name": "texture",
-                      "observed": {
-                        "value": {
-                          "variant": {
-                            "name": "Ok",
-                            "payload": {
-                              "fields": {
-                                "first_mipmap_in_tail": {
-                                  "uint": 1
-                                },
-                                "is_sparse": {
-                                  "bool": true
-                                },
-                                "tail_size_in_bytes": {
-                                  "uint": 0
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  ]
-                },
-                {
-                  "name": "MTLPixelFormatR32Float/Type2DMultisample/256x128x1/levels-1/samples-2/slices-1/target",
-                  "observed": {
-                    "value": "absent"
-                  },
-                  "children": [
-                    {
-                      "name": "texture",
-                      "observed": {
-                        "value": {
-                          "variant": {
-                            "name": "Ok",
-                            "payload": {
-                              "fields": {
-                                "first_mipmap_in_tail": {
-                                  "uint": 1
-                                },
-                                "is_sparse": {
-                                  "bool": true
-                                },
-                                "tail_size_in_bytes": {
-                                  "uint": 0
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  ]
-                },
-                {
-                  "name": "MTLPixelFormatRGBA8Unorm/Type2DMultisample/256x128x1/levels-1/samples-4/slices-1/target",
-                  "observed": {
-                    "value": "absent"
-                  },
-                  "children": [
-                    {
-                      "name": "texture",
-                      "observed": {
-                        "value": {
-                          "variant": {
-                            "name": "Ok",
-                            "payload": {
-                              "fields": {
-                                "first_mipmap_in_tail": {
-                                  "uint": 1
-                                },
-                                "is_sparse": {
-                                  "bool": true
-                                },
-                                "tail_size_in_bytes": {
-                                  "uint": 0
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  ]
-                },
-                {
-                  "name": "MTLPixelFormatR32Float/Type2DMultisample/256x128x1/levels-1/samples-4/slices-1/target",
-                  "observed": {
-                    "value": "absent"
-                  },
-                  "children": [
-                    {
-                      "name": "texture",
-                      "observed": {
-                        "value": {
-                          "variant": {
-                            "name": "Ok",
-                            "payload": {
-                              "fields": {
-                                "first_mipmap_in_tail": {
-                                  "uint": 1
-                                },
-                                "is_sparse": {
-                                  "bool": true
-                                },
-                                "tail_size_in_bytes": {
-                                  "uint": 0
                                 }
                               }
                             }

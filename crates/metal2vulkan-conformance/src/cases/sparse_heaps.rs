@@ -58,6 +58,7 @@ pub const TAILS_BY_LEVELS: &str = "sparse-tails-by-level-count";
 pub const TAILS_BY_SHAPE: &str = "sparse-tails-by-shape";
 pub const TAILS_BY_TYPE: &str = "sparse-tails-by-texture-type";
 pub const TAILS_WIDE: &str = "sparse-tails-wide-and-short";
+pub const TAILS_MULTISAMPLED: &str = "sparse-tails-multisampled";
 
 /// The heap every case of the family makes: 1 MiB in 16-KiB pages, the lane's own.
 const HEAP: SparseHeapSpec = SparseHeapSpec::new(1 << 20);
@@ -116,6 +117,7 @@ pub fn all() -> Vec<SparseHeapCase> {
         tails_by_shape(),
         tails_by_texture_type(),
         tails_wide_and_short(),
+        tails_multisampled(),
     ]
 }
 
@@ -226,17 +228,6 @@ fn tails_by_texture_type() -> SparseHeapCase {
             }
         }
     }
-    // A multisampled sparse texture is one level and a render target, which is what Metal
-    // describes one of.
-    for samples in [2, 4] {
-        for format in [PixelFormat::RGBA8Unorm, PixelFormat::R32Float] {
-            textures.push(
-                T::texture_2d(format, [256, 128], 1)
-                    .of_type(TextureType::Type2DMultisample, 1, 1)
-                    .multisampled(samples),
-            );
-        }
-    }
     SparseHeapCase {
         name: TAILS_BY_TYPE,
         textures,
@@ -285,6 +276,43 @@ fn tails_wide_and_short() -> SparseHeapCase {
     }
     SparseHeapCase {
         name: TAILS_WIDE,
+        textures,
+        asks_heap: false,
+    }
+}
+
+/// The multisample pair at 2 and 4 samples, in a case of its own.
+///
+/// Apart from the single-sampled types because a venue's **sample-count** gap is the one gap in
+/// this family a device honestly has: `sparseResidency2Samples` and `4Samples` are optional Vulkan
+/// features, and llvmpipe has neither. With these rows inside the type sweep, the four textures it
+/// cannot make labelled the other 176 it answered perfectly, because the suite's `LacksFeature`
+/// verdict is a whole-case outcome produced only where a run **aborts**, and this case records each
+/// texture's answer and goes on. Here the gap has its own row and the type sweep stays readable.
+///
+/// It still reads as `Refused` rather than `LacksFeature` on such a venue, and that is a product
+/// bug rather than anything this case can arrange: the runtime refuses with
+/// `Unsupported { feature: SparseTextures { missing: SparseResidencySamples(2) }, needs:
+/// NotRepresentable }`, and `verdict::device_gap_of` counts only `Needs::AnyOf` and the two driver
+/// defects as a device's gap. `NotRepresentable` means "no Vulkan 1.2+ mechanism exists for these
+/// semantics", which is not what is true here: the mechanism exists and the device has not got it,
+/// which is `Needs::AnyOf`.
+///
+/// A multisampled sparse texture is one level and a render target, which is what Metal describes
+/// one of.
+fn tails_multisampled() -> SparseHeapCase {
+    let mut textures = Vec::new();
+    for samples in [2, 4] {
+        for format in [PixelFormat::RGBA8Unorm, PixelFormat::R32Float] {
+            textures.push(
+                T::texture_2d(format, [256, 128], 1)
+                    .of_type(TextureType::Type2DMultisample, 1, 1)
+                    .multisampled(samples),
+            );
+        }
+    }
+    SparseHeapCase {
+        name: TAILS_MULTISAMPLED,
         textures,
         asks_heap: false,
     }
