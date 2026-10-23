@@ -564,15 +564,20 @@ impl Case for CompressedBlits {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // Our side's padded copies go through a tightly packed scratch buffer, and its texture
-        // over a buffer whose rows lie apart is a shadow image. Both are performance notices the
-        // runtime announces once per device, and both leave the bytes exactly Metal's: the only
-        // site loosened is the set of notices, which Metal holds empty, and the allowance fails
-        // the case if neither notice fired.
-        vec![
-            crate::replay::notice_allowance(Degradation::StagedTextureCopy.code()),
-            crate::replay::notice_allowance(Degradation::ShadowedTexture.code()),
-        ]
+        // Our side's padded copies go through a tightly packed scratch buffer, a performance
+        // notice the runtime announces once per device, and one that leaves the bytes exactly
+        // Metal's: the only site loosened is the set of notices, which Metal holds empty, and the
+        // allowance fails the case if the notice did not fire.
+        //
+        // The shadowed-texture notice is deliberately not named too. These rows' texture over a
+        // buffer could in principle reach its bytes through a shadow image, but no venue of this
+        // suite announces it for them -- measured on MoltenVK and on lavapipe, under the exact
+        // and the default policy alike -- so naming it would be a tolerance nothing justifies.
+        // A venue that does announce it will read as a divergence here, which is the point: it
+        // is then a difference a human has not seen yet.
+        vec![crate::replay::notice_allowance(
+            Degradation::StagedTextureCopy.code(),
+        )]
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {

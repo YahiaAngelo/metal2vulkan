@@ -304,6 +304,14 @@ impl Case for FormatCopies {
         // texture is where that shows (lavapipe does; this Mac does not). The bytes the copies
         // moved still compare exactly: the only site loosened is the set of notices, which Metal
         // holds empty, and the allowance fails the case if the notice did not fire.
+        //
+        // Only a pair that touches `Depth32Float` names it. A `Depth16Unorm` or `Stencil8` pair
+        // holds no 32-bit float depth for a device to flush, so the notice cannot fire there and
+        // naming it would be a tolerance nothing can justify.
+        let pair = self.pair();
+        if pair.from != PixelFormat::Depth32Float && pair.to != PixelFormat::Depth32Float {
+            return Vec::new();
+        }
         vec![crate::replay::notice_allowance(
             Degradation::DepthDenormals.code(),
         )]
