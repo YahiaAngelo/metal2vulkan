@@ -51,3 +51,25 @@ edits one.
 | `report` | Verdict counts and the matrix of case against venue |
 | `work`, `runtime_work` | The copy-and-fill vocabulary a case states as data, and the runtime side that runs it |
 | `measured` | The committed Metal measurements a ported case reads, under the public fixtures |
+| `cases` | The case set itself, one module per family |
+
+## The case set
+
+| Family | What it compares | Metal's answer |
+|---|---|---|
+| `pass_bytes` | The words a compute pass wrote, exhaustively over a small input space | run on Metal |
+| `math_routines` | The words `frexp` and `ilogb` write, scalar and per lane, over both widths | run on Metal |
+| `stage_in_regions` | How a stage-in region clamps a dispatch's indices | run on Metal |
+| `extended_range_planes` | A two-plane extended-range texture joined into one and split back again | run on Metal |
+| `texture_buffer_fills` | Which bytes a fill changed over a texture made on a buffer | carried; `fillTexture:` is Apple SPI |
+| `texture_fills`, `sample_fills` | Which bytes a texture fill, and a multisample sample fill, changed | carried; `fillTexture:` is Apple SPI |
+| `two_plane_heap_blits`, `two_plane_copies` | What a blit or a copy moved across a two-plane surface | carried; the surface calls are Apple SPI |
+| `mesh_draws` | The texels each mesh threadgroup's primitive drew, and the grids Metal draws nothing for | run on Metal |
+| `mesh_barriers` | Whether a reader draw sees a writer draw's words across a memory barrier | run on Metal |
+| `mesh_commands` | What an indirect command buffer's own-state mesh commands drew | run on Metal |
+| `surface_fills` | Which bytes one private texture fill changed over a surface's plane or a buffer | carried; `fillTexture:` is Apple SPI |
+| `indirect_private_types` | An indirect render command's read-back for each primitive type | carried; the getters are private |
+
+A carried answer is our own measurement of this chip, stated in the shape the case emits, and its
+case forbids re-recording with the reason why. Record mode refuses such a case rather than
+pretending it can ask Metal again.

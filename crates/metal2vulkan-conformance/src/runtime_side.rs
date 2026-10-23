@@ -8,13 +8,14 @@
 //! answers `NeverReturned` as a recorded fact rather than blocking the suite.
 
 use crate::case::{
-    Answer, Bindings, Failure, Fill, Handle, IndirectReadBack, MeshFunctions, MeshStep,
-    PassOutcome, PlaneTexture, ShaderSource, Side, StageInRegion, StageInput, Venue,
+    Answer, Bindings, CommandDraw, Failure, Fill, Handle, IndirectReadBack, MeshCommand,
+    MeshFunctions, MeshStep, PassOutcome, PlaneTexture, ShaderSource, Side, StageInRegion,
+    StageInput, Venue,
 };
 use crate::transcript::{Negative, Value};
 use metal2vulkan::metal::{
     BarrierScope, IndexType, IndirectCommandType, PixelFormat, PrimitiveType, RenderStages,
-    TextureUsage,
+    ResourceUsage, TextureUsage,
 };
 use metal2vulkan::pipeline::{
     ColorAttachmentDescriptor, MeshPipelineDescriptor, StageInputAttributeDescriptor,
@@ -22,8 +23,9 @@ use metal2vulkan::pipeline::{
 };
 use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue, ComputePipelineState,
-    Device, DrawPrimitiveType, IndirectCommand, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr,
-    Library, LoadAction, PipelineOptions, Region, RenderPassDescriptor, RenderPipelineState,
+    Device, DrawPrimitiveType, IndirectCommand, IndirectCommandBuffer,
+    IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
+    LoadAction, PipelineOptions, Region, RenderPassDescriptor, RenderPipelineState,
     ResourceOptions, ResourceRef, Size, StoreAction, Texture, TextureDescriptor,
 };
 use std::time::Duration;
@@ -43,6 +45,8 @@ pub struct RuntimeSide<'a> {
     command_buffers: Vec<CommandBuffer>,
     /// The mesh render pipeline states the case has made.
     mesh_pipelines: Vec<RenderPipelineState>,
+    /// The indirect command buffers the case has made.
+    command_buffers_indirect: Vec<IndirectCommandBuffer>,
     /// The degrade-notice codes the device has delivered so far, which `announced` takes away.
     notices: Box<dyn FnMut() -> Vec<String> + 'a>,
 }
@@ -60,6 +64,7 @@ impl<'a> RuntimeSide<'a> {
             textures: Vec::new(),
             command_buffers: Vec::new(),
             mesh_pipelines: Vec::new(),
+            command_buffers_indirect: Vec::new(),
             notices: Box::new(notices),
         }
     }
@@ -86,6 +91,33 @@ impl<'a> RuntimeSide<'a> {
         self.buffers
             .get(handle.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
+    }
+
+    /// The descriptor of a mesh render pipeline of `library`'s `functions`.
+    fn mesh_descriptor(
+        &self,
+        library: Handle,
+        functions: &MeshFunctions<'_>,
+    ) -> Answer<MeshPipelineDescriptor> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let stage = |name: &str| -> Answer<StageSource> {
+            Ok(StageSource::Function(
+                library
+                    .new_function_with_name(name)
+                    .map_err(Failure::from_error)?
+                    .function_descriptor(),
+            ))
+        };
+        let mut descriptor = MeshPipelineDescriptor::new(stage(functions.mesh)?);
+        descriptor.object = functions.object.map(stage).transpose()?;
+        descriptor.fragment = Some(stage(functions.fragment)?);
+        for attachment in &mut descriptor.color_attachments[..functions.attachments as usize] {
+            *attachment = Some(ColorAttachmentDescriptor::new(TARGET_PIXEL_FORMAT));
+        }
+        Ok(descriptor)
     }
 
     /// The texture `handle` names.
@@ -490,24 +522,7 @@ impl Side for RuntimeSide<'_> {
     }
 
     fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {
-        let library = self
-            .libraries
-            .get(library.0 as usize)
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
-        let stage = |name: &str| -> Answer<StageSource> {
-            Ok(StageSource::Function(
-                library
-                    .new_function_with_name(name)
-                    .map_err(Failure::from_error)?
-                    .function_descriptor(),
-            ))
-        };
-        let mut descriptor = MeshPipelineDescriptor::new(stage(functions.mesh)?);
-        descriptor.object = functions.object.map(stage).transpose()?;
-        descriptor.fragment = Some(stage(functions.fragment)?);
-        for attachment in &mut descriptor.color_attachments[..functions.attachments as usize] {
-            *attachment = Some(ColorAttachmentDescriptor::new(TARGET_PIXEL_FORMAT));
-        }
+        let descriptor = self.mesh_descriptor(library, functions)?;
         let state = self
             .device
             .new_mesh_render_pipeline_state(&descriptor, &PipelineOptions::default())
@@ -662,6 +677,169 @@ impl Side for RuntimeSide<'_> {
         }
         encoder.end_encoding().map_err(Failure::from_error)?;
         command_buffer.commit().map_err(Failure::from_error)?;
+        if command_buffer.wait_until_completed_for(WAIT).is_err() {
+            return Ok(PassOutcome {
+                refused,
+                status: Value::Nothing(Negative::NeverReturned),
+                error: None,
+            });
+        }
+        Ok(PassOutcome {
+            refused,
+            status: status_value(command_buffer.status()),
+            error: command_buffer
+                .error()
+                .map(|error| Value::unit_variant(format!("{error:?}"))),
+        })
+    }
+
+    fn mesh_pipeline_for_commands(
+        &mut self,
+        library: Handle,
+        functions: &MeshFunctions<'_>,
+    ) -> Answer<Handle> {
+        let mut descriptor = self.mesh_descriptor(library, functions)?;
+        descriptor.support_indirect_command_buffers = true;
+        let state = self
+            .device
+            .new_mesh_render_pipeline_state(&descriptor, &PipelineOptions::default())
+            .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.mesh_pipelines, state))
+    }
+
+    fn mesh_command_buffer(&mut self, commands: &[MeshCommand]) -> Answer<Handle> {
+        let mut descriptor = IndirectCommandBufferDescriptor::new();
+        descriptor.command_types = IndirectCommandType::DRAW_MESH_THREADGROUPS
+            .union(IndirectCommandType::DRAW_MESH_THREADS);
+        descriptor.inherit_pipeline_state = false;
+        descriptor.inherit_buffers = false;
+        descriptor.max_object_buffer_bind_count = 1;
+        descriptor.max_mesh_buffer_bind_count = 1;
+        let made = self
+            .device
+            .new_indirect_command_buffer(
+                &descriptor,
+                commands.len() as u64,
+                ResourceOptions::shared(),
+            )
+            .map_err(Failure::from_error)?;
+        for (at, command) in commands.iter().enumerate() {
+            let encoded = made
+                .indirect_render_command_at(at as u64)
+                .map_err(Failure::from_error)?;
+            let state = self
+                .mesh_pipelines
+                .get(command.pipeline.0 as usize)
+                .ok_or_else(|| {
+                    Failure::named(
+                        "NoSuchHandle",
+                        format!("mesh pipeline {}", command.pipeline.0),
+                    )
+                })?
+                .clone();
+            encoded
+                .set_render_pipeline_state(&state)
+                .map_err(Failure::from_error)?;
+            for (buffer, index) in &command.object_buffers {
+                let buffer = self.held(*buffer)?.clone();
+                encoded
+                    .set_object_buffer(Some(&buffer), 0, *index)
+                    .map_err(Failure::from_error)?;
+            }
+            for (buffer, index) in &command.mesh_buffers {
+                let buffer = self.held(*buffer)?.clone();
+                encoded
+                    .set_mesh_buffer(Some(&buffer), 0, *index)
+                    .map_err(Failure::from_error)?;
+            }
+            match command.draw {
+                CommandDraw::Threadgroups {
+                    groups,
+                    object,
+                    mesh,
+                } => encoded.draw_mesh_threadgroups(size(groups), size(object), size(mesh)),
+                CommandDraw::Threads {
+                    threads,
+                    object,
+                    mesh,
+                } => encoded.draw_mesh_threads(size(threads), size(object), size(mesh)),
+            }
+            .map_err(Failure::from_error)?;
+        }
+        Ok(keep(&mut self.command_buffers_indirect, made))
+    }
+
+    fn execute_mesh_commands(
+        &mut self,
+        targets: &[Handle],
+        commands: Handle,
+        used: &[Handle],
+    ) -> Answer<PassOutcome> {
+        let attachments: Vec<Texture> = targets
+            .iter()
+            .map(|handle| self.held_texture(*handle).cloned())
+            .collect::<Answer<Vec<Texture>>>()?;
+        let resident: Vec<Buffer> = used
+            .iter()
+            .map(|handle| self.held(*handle).cloned())
+            .collect::<Answer<Vec<Buffer>>>()?;
+        let icb = self
+            .command_buffers_indirect
+            .get(commands.0 as usize)
+            .ok_or_else(|| {
+                Failure::named("NoSuchHandle", format!("command buffer {}", commands.0))
+            })?
+            .clone();
+        let mut pass = RenderPassDescriptor::new();
+        for (attachment, target) in pass.color_attachments.iter_mut().zip(&attachments) {
+            attachment.texture = Some(target.clone());
+            attachment.load_action = LoadAction::Clear;
+            attachment.clear_color = ClearColor::new(0.0, 0.0, 0.0, 0.0);
+            attachment.store_action = StoreAction::Store;
+        }
+        let command_buffer = self
+            .queue()?
+            .command_buffer()
+            .map_err(Failure::from_error)?;
+        let mut encoder = command_buffer
+            .render_command_encoder(&pass)
+            .map_err(Failure::from_error)?;
+        let stages = RenderStages::OBJECT
+            .union(RenderStages::MESH)
+            .union(RenderStages::FRAGMENT);
+        let mut refused = Vec::new();
+        for buffer in &resident {
+            refused.push(
+                encoder
+                    .use_resource(
+                        ResourceRef::Buffer(buffer),
+                        ResourceUsage::READ.union(ResourceUsage::WRITE),
+                        stages,
+                    )
+                    .err()
+                    .map(|error| Failure::of(&error)),
+            );
+        }
+        refused.push(
+            encoder
+                .execute_commands_in_buffer(&icb, 0..icb.size())
+                .err()
+                .map(|error| Failure::of(&error)),
+        );
+        encoder.end_encoding().map_err(Failure::from_error)?;
+        let committed = command_buffer
+            .commit()
+            .err()
+            .map(|error| Failure::of(&error));
+        if committed.is_some() {
+            refused.push(committed);
+            return Ok(PassOutcome {
+                refused,
+                status: status_value(command_buffer.status()),
+                error: None,
+            });
+        }
+        refused.push(None);
         if command_buffer.wait_until_completed_for(WAIT).is_err() {
             return Ok(PassOutcome {
                 refused,

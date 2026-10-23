@@ -1,13 +1,23 @@
-//! The suite's cases.
+//! The suite's case set.
 //!
-//! Two seed families prove the loop end to end, chosen to be as unlike each other as the first
-//! increment allows: one compares the bytes a pass wrote, the other a typed answer a getter gives.
-//! Neither can fault a GPU.
+//! Two seed families proved the loop end to end, chosen to be as unlike each other as the first
+//! increment allowed: one compares the bytes a compute pass wrote, the other a typed answer a
+//! getter gives.
+//!
+//! The rest are ports of the runtime lanes whose expectation is already a transcript of a Metal
+//! probe's printed lines, which is what made them the first batch. Where Metal's whole path is
+//! public, record mode **runs** the probe rather than copying it: the mesh draws, the mesh draws
+//! behind a barrier, and the mesh draws of an indirect command buffer's own-state commands. Where
+//! it is not, the case carries our own measurement and forbids re-recording: the private texture
+//! fills, and an indirect command's read-back through private getters.
+//!
+//! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
 pub mod extended_range_planes;
 pub mod indirect_private_types;
 pub mod math_routines;
 pub mod mesh_barriers;
+pub mod mesh_commands;
 pub mod mesh_draws;
 pub mod pass_bytes;
 pub mod sample_fills;
@@ -53,6 +63,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in mesh_barriers::all() {
         cases.push(Box::new(case));
     }
+    cases.push(Box::new(mesh_commands::own_state_commands()));
     cases.push(Box::new(surface_fills::over_planes_and_buffers()));
     cases
 }

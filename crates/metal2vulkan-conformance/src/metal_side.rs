@@ -13,8 +13,8 @@
 //! ours, and a case that holds one must name what justifies it.
 
 use crate::case::{
-    Answer, Bindings, Failure, Handle, MeshFunctions, MeshStep, PassOutcome, ShaderSource, Side,
-    StageInRegion, StageInput, Venue,
+    Answer, Bindings, CommandDraw, Failure, Handle, MeshCommand, MeshFunctions, MeshStep,
+    PassOutcome, ShaderSource, Side, StageInRegion, StageInput, Venue,
 };
 use crate::transcript::Value;
 use metal2vulkan::metal::PixelFormat;
@@ -25,11 +25,13 @@ use objc2_metal::{
     MTLAttributeFormat, MTLBarrierScope, MTLBuffer, MTLClearColor, MTLCommandBuffer,
     MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder,
     MTLComputePipelineDescriptor, MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDevice,
-    MTLIndexType, MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLOrigin,
-    MTLPipelineOption, MTLPixelFormat, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLSize,
-    MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLTexture,
-    MTLTextureDescriptor, MTLTextureUsage,
+    MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
+    MTLIndirectCommandType, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction,
+    MTLMeshRenderPipelineDescriptor, MTLOrigin, MTLPipelineOption, MTLPixelFormat, MTLRegion,
+    MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineState, MTLRenderStages,
+    MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSize, MTLStageInputOutputDescriptor,
+    MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor,
+    MTLTextureUsage,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -47,6 +49,8 @@ pub struct MetalSide {
     command_buffers: Vec<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
     /// The mesh render pipeline states the case has made.
     mesh_pipelines: Vec<Retained<ProtocolObject<dyn MTLRenderPipelineState>>>,
+    /// The indirect command buffers the case has made.
+    command_buffers_indirect: Vec<Retained<ProtocolObject<dyn MTLIndirectCommandBuffer>>>,
     /// The scratch directory the metallibs are built in, removed when the side is dropped.
     scratch: Scratch,
 }
@@ -68,6 +72,7 @@ impl MetalSide {
             textures: Vec::new(),
             command_buffers: Vec::new(),
             mesh_pipelines: Vec::new(),
+            command_buffers_indirect: Vec::new(),
             scratch: Scratch::new()?,
         })
     }
@@ -513,40 +518,153 @@ impl Side for MetalSide {
         Vec::new()
     }
 
-    fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {
-        let library = self
-            .libraries
-            .get(library.0 as usize)
-            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
-        let function = |name: &str| {
-            library
-                .newFunctionWithName(&NSString::from_str(name))
-                .ok_or_else(|| Failure::named("NoSuchFunction", name.to_owned()))
-        };
-        let descriptor = MTLMeshRenderPipelineDescriptor::new();
-        // SAFETY: each function is of this library, and the descriptor is this call's own.
+    fn mesh_pipeline_for_commands(
+        &mut self,
+        library: Handle,
+        functions: &MeshFunctions<'_>,
+    ) -> Answer<Handle> {
+        let descriptor = self.mesh_descriptor(library, functions)?;
+        descriptor.setSupportIndirectCommandBuffers(true);
+        self.made_mesh_pipeline(&descriptor)
+    }
+
+    fn mesh_command_buffer(&mut self, commands: &[MeshCommand]) -> Answer<Handle> {
+        let descriptor = MTLIndirectCommandBufferDescriptor::new();
+        descriptor.setCommandTypes(
+            MTLIndirectCommandType::DrawMeshThreadgroups | MTLIndirectCommandType::DrawMeshThreads,
+        );
+        descriptor.setInheritPipelineState(false);
+        descriptor.setInheritBuffers(false);
+        // SAFETY: one object and one mesh binding, which is what every command of a case binds.
         unsafe {
-            descriptor.setMeshFunction(Some(&*function(functions.mesh)?));
-            if let Some(object) = functions.object {
-                descriptor.setObjectFunction(Some(&*function(object)?));
+            descriptor.setMaxObjectBufferBindCount(1);
+            descriptor.setMaxMeshBufferBindCount(1);
+        }
+        // SAFETY: the count is the commands the case encodes, and every command below is inside
+        // it.
+        let made = unsafe {
+            self.device
+                .newIndirectCommandBufferWithDescriptor_maxCommandCount_options(
+                    &descriptor,
+                    commands.len().max(1),
+                    MTLResourceOptions::StorageModeShared,
+                )
+        }
+        .ok_or_else(|| {
+            Failure::named(
+                "NewIndirectCommandBuffer",
+                format!("{} commands returned nil", commands.len()),
+            )
+        })?;
+        for (at, command) in commands.iter().enumerate() {
+            // SAFETY: `at` is below the buffer's command count, just set to `commands.len()`.
+            let encoded = unsafe { made.indirectRenderCommandAtIndex(at) };
+            let state = self
+                .mesh_pipelines
+                .get(command.pipeline.0 as usize)
+                .ok_or_else(|| {
+                    Failure::named(
+                        "NoSuchHandle",
+                        format!("mesh pipeline {}", command.pipeline.0),
+                    )
+                })?;
+            encoded.setRenderPipelineState(state);
+            for (buffer, index) in &command.object_buffers {
+                let buffer = self.held(*buffer)?;
+                // SAFETY: the buffer is at least as long as the function's binding, and the
+                // command outlives the call.
+                unsafe { encoded.setObjectBuffer_offset_atIndex(buffer, 0, *index as usize) };
             }
-            descriptor.setFragmentFunction(Some(&*function(functions.fragment)?));
-            let attachments = descriptor.colorAttachments();
-            for at in 0..functions.attachments as usize {
-                attachments
-                    .objectAtIndexedSubscript(at)
-                    .setPixelFormat(TARGET_PIXEL_FORMAT);
+            for (buffer, index) in &command.mesh_buffers {
+                let buffer = self.held(*buffer)?;
+                // SAFETY: as the object buffer's.
+                unsafe { encoded.setMeshBuffer_offset_atIndex(buffer, 0, *index as usize) };
+            }
+            let size = |axes: [u32; 3]| MTLSize {
+                width: axes[0] as usize,
+                height: axes[1] as usize,
+                depth: axes[2] as usize,
+            };
+            match command.draw {
+                CommandDraw::Threadgroups {
+                    groups,
+                    object,
+                    mesh,
+                } => encoded
+                    .drawMeshThreadgroups_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
+                        size(groups),
+                        size(object),
+                        size(mesh),
+                    ),
+                CommandDraw::Threads {
+                    threads,
+                    object,
+                    mesh,
+                } => encoded.drawMeshThreads_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
+                    size(threads),
+                    size(object),
+                    size(mesh),
+                ),
             }
         }
-        let state = self
-            .device
-            .newRenderPipelineStateWithMeshDescriptor_options_reflection_error(
-                &descriptor,
-                MTLPipelineOption::None,
-                None,
-            )
-            .map_err(|error| Failure::named("NewMeshRenderPipelineState", error.to_string()))?;
-        Ok(keep(&mut self.mesh_pipelines, state))
+        Ok(keep(&mut self.command_buffers_indirect, made))
+    }
+
+    fn execute_mesh_commands(
+        &mut self,
+        targets: &[Handle],
+        commands: Handle,
+        used: &[Handle],
+    ) -> Answer<PassOutcome> {
+        let icb = self
+            .command_buffers_indirect
+            .get(commands.0 as usize)
+            .ok_or_else(|| {
+                Failure::named("NoSuchHandle", format!("command buffer {}", commands.0))
+            })?
+            .clone();
+        let resident: Vec<&ProtocolObject<dyn MTLResource>> = used
+            .iter()
+            .map(|handle| self.held(*handle).map(ProtocolObject::from_ref))
+            .collect::<Answer<Vec<_>>>()?;
+        let (command_buffer, encoder) = self.pass(targets)?;
+        let stages = MTLRenderStages::Object | MTLRenderStages::Mesh | MTLRenderStages::Fragment;
+        for resource in &resident {
+            encoder.useResource_usage_stages(
+                resource,
+                MTLResourceUsage::Read | MTLResourceUsage::Write,
+                stages,
+            );
+        }
+        // SAFETY: the range is the buffer's own command count.
+        unsafe {
+            encoder.executeCommandsInBuffer_withRange(
+                &icb,
+                objc2_foundation::NSRange::new(0, icb.size()),
+            );
+        }
+        encoder.endEncoding();
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        // Metal's calls answer nothing, so no step of this side can refuse: one `None` per
+        // resident resource, one for the execution and one for the commit, as the runtime side
+        // answers them.
+        let refused = vec![None; resident.len() + 2];
+        let error = command_buffer
+            .error()
+            .map(|error| Value::unit_variant(format!("code {}", error.code())));
+        let status = Value::unit_variant(status_word(command_buffer.status()));
+        keep(&mut self.command_buffers, command_buffer);
+        Ok(PassOutcome {
+            refused,
+            status,
+            error,
+        })
+    }
+
+    fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {
+        let descriptor = self.mesh_descriptor(library, functions)?;
+        self.made_mesh_pipeline(&descriptor)
     }
 
     fn render_target(&mut self, width: u32, height: u32) -> Answer<Handle> {
@@ -574,31 +692,7 @@ impl Side for MetalSide {
     }
 
     fn mesh_pass(&mut self, targets: &[Handle], steps: &[MeshStep]) -> Answer<PassOutcome> {
-        let attachments: Vec<Retained<ProtocolObject<dyn MTLTexture>>> = targets
-            .iter()
-            .map(|handle| self.held_texture(*handle).map(Retained::from))
-            .collect::<Answer<Vec<_>>>()?;
-        let pass = MTLRenderPassDescriptor::renderPassDescriptor();
-        for (at, target) in attachments.iter().enumerate() {
-            // SAFETY: `at` is below the eight attachments every Metal pass holds.
-            let attachment = unsafe { pass.colorAttachments().objectAtIndexedSubscript(at) };
-            attachment.setTexture(Some(target));
-            attachment.setLoadAction(MTLLoadAction::Clear);
-            attachment.setClearColor(MTLClearColor {
-                red: 0.0,
-                green: 0.0,
-                blue: 0.0,
-                alpha: 0.0,
-            });
-            attachment.setStoreAction(MTLStoreAction::Store);
-        }
-        let command_buffer = self
-            .queue
-            .commandBuffer()
-            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
-        let encoder = command_buffer
-            .renderCommandEncoderWithDescriptor(&pass)
-            .ok_or_else(|| Failure::named("RenderCommandEncoder", "returned nil".to_owned()))?;
+        let (command_buffer, encoder) = self.pass(targets)?;
         // Metal's encoder methods answer nothing, so no step of this side can refuse. A refusal
         // of ours then compares against Metal's answer and reads as a refusal.
         let refused = vec![None; steps.len()];
@@ -625,6 +719,93 @@ impl Side for MetalSide {
 const TARGET_PIXEL_FORMAT: MTLPixelFormat = MTLPixelFormat::RGBA32Uint;
 
 impl MetalSide {
+    /// The descriptor of a mesh render pipeline of `library`'s `functions`.
+    fn mesh_descriptor(
+        &self,
+        library: Handle,
+        functions: &MeshFunctions<'_>,
+    ) -> Answer<Retained<MTLMeshRenderPipelineDescriptor>> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = |name: &str| {
+            library
+                .newFunctionWithName(&NSString::from_str(name))
+                .ok_or_else(|| Failure::named("NoSuchFunction", name.to_owned()))
+        };
+        let descriptor = MTLMeshRenderPipelineDescriptor::new();
+        // SAFETY: each function is of this library, and the descriptor is this call's own.
+        unsafe {
+            descriptor.setMeshFunction(Some(&*function(functions.mesh)?));
+            if let Some(object) = functions.object {
+                descriptor.setObjectFunction(Some(&*function(object)?));
+            }
+            descriptor.setFragmentFunction(Some(&*function(functions.fragment)?));
+            let attachments = descriptor.colorAttachments();
+            for at in 0..functions.attachments as usize {
+                attachments
+                    .objectAtIndexedSubscript(at)
+                    .setPixelFormat(TARGET_PIXEL_FORMAT);
+            }
+        }
+        Ok(descriptor)
+    }
+
+    /// The state `descriptor` makes, kept by handle.
+    fn made_mesh_pipeline(
+        &mut self,
+        descriptor: &MTLMeshRenderPipelineDescriptor,
+    ) -> Answer<Handle> {
+        let state = self
+            .device
+            .newRenderPipelineStateWithMeshDescriptor_options_reflection_error(
+                descriptor,
+                MTLPipelineOption::None,
+                None,
+            )
+            .map_err(|error| Failure::named("NewMeshRenderPipelineState", error.to_string()))?;
+        Ok(keep(&mut self.mesh_pipelines, state))
+    }
+
+    /// One command buffer and one render encoder over `targets`, each attachment cleared to zero
+    /// and stored.
+    #[allow(clippy::type_complexity)]
+    fn pass(
+        &self,
+        targets: &[Handle],
+    ) -> Answer<(
+        Retained<ProtocolObject<dyn MTLCommandBuffer>>,
+        Retained<ProtocolObject<dyn MTLRenderCommandEncoder>>,
+    )> {
+        let attachments: Vec<Retained<ProtocolObject<dyn MTLTexture>>> = targets
+            .iter()
+            .map(|handle| self.held_texture(*handle).map(Retained::from))
+            .collect::<Answer<Vec<_>>>()?;
+        let pass = MTLRenderPassDescriptor::renderPassDescriptor();
+        for (at, target) in attachments.iter().enumerate() {
+            // SAFETY: `at` is below the eight attachments every Metal pass holds.
+            let attachment = unsafe { pass.colorAttachments().objectAtIndexedSubscript(at) };
+            attachment.setTexture(Some(target));
+            attachment.setLoadAction(MTLLoadAction::Clear);
+            attachment.setClearColor(MTLClearColor {
+                red: 0.0,
+                green: 0.0,
+                blue: 0.0,
+                alpha: 0.0,
+            });
+            attachment.setStoreAction(MTLStoreAction::Store);
+        }
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+        let encoder = command_buffer
+            .renderCommandEncoderWithDescriptor(&pass)
+            .ok_or_else(|| Failure::named("RenderCommandEncoder", "returned nil".to_owned()))?;
+        Ok((command_buffer, encoder))
+    }
+
     /// Encode one of a case's render-pass steps into `encoder`.
     fn encode_step(
         &self,

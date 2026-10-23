@@ -380,6 +380,40 @@ pub trait Side {
         Err(Failure::unavailable("mesh_pass"))
     }
 
+    /// `newRenderPipelineStateWithMeshDescriptor:` as [`mesh_pipeline`] does, with
+    /// `supportIndirectCommandBuffers` set, so an indirect command may set the state.
+    ///
+    /// [`mesh_pipeline`]: Side::mesh_pipeline
+    fn mesh_pipeline_for_commands(
+        &mut self,
+        library: Handle,
+        functions: &MeshFunctions<'_>,
+    ) -> Answer<Handle> {
+        let _ = (library, functions);
+        Err(Failure::unavailable("mesh_pipeline_for_commands"))
+    }
+
+    /// `newIndirectCommandBufferWithDescriptor:maxCommandCount:options:` of `commands` commands
+    /// of both mesh draw kinds, binding its own pipeline state, one object buffer and one mesh
+    /// buffer, then every command of `commands` encoded by the host in order.
+    fn mesh_command_buffer(&mut self, commands: &[MeshCommand]) -> Answer<Handle> {
+        let _ = commands;
+        Err(Failure::unavailable("mesh_command_buffer"))
+    }
+
+    /// One command buffer with one render pass over `targets`, each cleared to zero and stored,
+    /// which makes `used` resident for the object, mesh and fragment stages, executes every
+    /// command of `commands`, then `endEncoding`, `commit` and a bounded wait.
+    fn execute_mesh_commands(
+        &mut self,
+        targets: &[Handle],
+        commands: Handle,
+        used: &[Handle],
+    ) -> Answer<PassOutcome> {
+        let _ = (targets, commands, used);
+        Err(Failure::unavailable("execute_mesh_commands"))
+    }
+
     /// A texture over `buffer`: over one plane of the surface the buffer stands for, or over the
     /// buffer itself ([`PlaneTexture`]).
     ///
@@ -400,6 +434,37 @@ pub trait Side {
         let _ = (texture, fill);
         Err(Failure::unavailable("fill_texture"))
     }
+}
+
+/// One render command the host encodes into an indirect command buffer: the command's own pipeline
+/// state, the buffers it binds, and its one mesh draw.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MeshCommand {
+    /// The state the command sets, from [`Side::mesh_pipeline_for_commands`].
+    pub pipeline: Handle,
+    /// The object buffers the command binds, each at its index.
+    pub object_buffers: Vec<(Handle, u32)>,
+    /// The mesh buffers the command binds, each at its index.
+    pub mesh_buffers: Vec<(Handle, u32)>,
+    /// The command's draw: `drawMeshThreadgroups` of a grid, or `drawMeshThreads` of threads.
+    pub draw: CommandDraw,
+}
+
+/// An indirect render command's mesh draw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandDraw {
+    /// `drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`.
+    Threadgroups {
+        groups: [u32; 3],
+        object: [u32; 3],
+        mesh: [u32; 3],
+    },
+    /// `drawMeshThreads:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:`.
+    Threads {
+        threads: [u32; 3],
+        object: [u32; 3],
+        mesh: [u32; 3],
+    },
 }
 
 /// A texture a case makes over a buffer: over one plane of the surface the buffer stands for, or
