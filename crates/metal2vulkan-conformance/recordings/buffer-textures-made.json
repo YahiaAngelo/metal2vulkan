@@ -1,0 +1,2657 @@
+{
+  "format": 1,
+  "case": "buffer-textures-made",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "requests",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "62ab3aec1d9642a3733d19e231e35e3408bc72811c16605edda7f276accd531d"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-0/pitch-256/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-0/pitch-300/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-0/pitch-4096/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-4/pitch-256/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-8/pitch-256/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-16/pitch-256/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-20/pitch-256/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-33/pitch-256/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-64/pitch-256/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/managed/over-4096-shared/offset-0/pitch-256/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-managed/offset-0/pitch-256/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/private/over-4096-shared/offset-0/pitch-256/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/TextureBuffer/64x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-private/offset-0/pitch-256/row-256",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 64
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Uint/TextureBuffer/12x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-0/pitch-256/row-12",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 13
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 12
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Uint/TextureBuffer/16x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-512/pitch-64/row-64",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 73
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 16
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/TextureBuffer/8x1x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-0/pitch-256/row-128",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 9
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 125
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/Type2D/16x4x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-0/pitch-64/row-64",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 16
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 4
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/Type2D/16x4x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-0/pitch-256/row-64",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 16
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 4
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/Type2D/16x4x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-1024/pitch-64/row-64",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 16
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 4
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/Type2D/16x4x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-1024/pitch-256/row-64",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 16
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 4
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Uint/Type2D/3x2x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-256/pitch-32/row-12",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 53
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/8x8x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-0/pitch-256/row-8",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 10
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Unorm/Type2D/8x8x1/levels-1/samples-1/slices-1/usage-0x3/shared/over-4096-shared/offset-0/pitch-32/row-32",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture_type",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "pixel_format",
+                      "observed": {
+                        "value": {
+                          "uint": 70
+                        }
+                      }
+                    },
+                    {
+                      "name": "width",
+                      "observed": {
+                        "value": {
+                          "uint": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "height",
+                      "observed": {
+                        "value": {
+                          "uint": 8
+                        }
+                      }
+                    },
+                    {
+                      "name": "depth",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "mipmap_level_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "array_length",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample_count",
+                      "observed": {
+                        "value": {
+                          "uint": 1
+                        }
+                      }
+                    },
+                    {
+                      "name": "usage",
+                      "observed": {
+                        "value": {
+                          "uint": 3
+                        }
+                      }
+                    },
+                    {
+                      "name": "storage_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "cpu_cache_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 0
+                        }
+                      }
+                    },
+                    {
+                      "name": "hazard_tracking_mode",
+                      "observed": {
+                        "value": {
+                          "uint": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "gpu_optimized",
+                      "observed": {
+                        "value": {
+                          "bool": true
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": {
+        "stopped": {
+          "call": "buffer_texture",
+          "message": "Offset of a buffer-backed texture with pixelFormat(MTLPixelFormatR32Uint) must be aligned to 16 bytes, found offset(4)"
+        }
+      }
+    }
+  ]
+}

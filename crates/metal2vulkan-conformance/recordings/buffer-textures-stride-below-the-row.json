@@ -1,0 +1,89 @@
+{
+  "format": 1,
+  "case": "buffer-textures-stride-below-the-row",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": {
+        "never_returned": {
+          "from": "AGX's own assertion text, which this suite's own whole-set replay prints from the driver (`AGX: Texture read/write assertion failed: bytes_per_row >= used_bytes_per_row`), and the refusal-surface stream's finding of 2026-10-23 that Metal ends the process on it",
+          "call": "newTextureWithDescriptor:offset:bytesPerRow:/pitch-below-the-row"
+        }
+      },
+      "device": "apple-m3-max",
+      "runs": 1,
+      "outcomes": [
+        {
+          "runs": 1,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "request",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "fdc1550828d2a85f85ded46d4ad09b5d1045e8863e28c14e95ea3aade2304172"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "newTextureWithDescriptor:offset:bytesPerRow:/pitch-below-the-row",
+                  "observed": {
+                    "value": {
+                      "nothing": "never_returned"
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "not_run"
+    }
+  ]
+}

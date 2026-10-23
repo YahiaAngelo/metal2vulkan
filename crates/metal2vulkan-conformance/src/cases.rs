@@ -26,6 +26,7 @@
 
 pub mod border_swizzles;
 pub mod buffer_blits;
+pub mod buffer_textures;
 pub mod chroma_pairs;
 pub mod color_write_masks;
 pub mod command_queues;
@@ -237,6 +238,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.extend(compute_threadgroups::all());
     cases.extend(buffer_blits::all());
+    cases.extend(buffer_textures::all());
     cases.extend(simdgroup_lockstep::all());
     for case in sparse_tiles::all() {
         cases.push(Box::new(case));
