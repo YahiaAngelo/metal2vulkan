@@ -245,9 +245,13 @@ pub struct ObjectChurn {
     pub vk_buffer_views_destroyed: u64,
     /// `vkFreeMemory` calls of the process.
     pub vk_memory_freed: u64,
-    /// `vkCreateImage` calls of the process (`creation.rs`).
+    /// `vkCreateImage` calls of the process (`creation.rs`). An image a making took from the
+    /// recycler is not one of these, so this and `images_recycled` are separate tallies and do
+    /// not sum to the images a run used: reading 0 here beside 2 recycled is a run that made
+    /// none, not a contradiction.
     pub vk_images_made: u64,
-    /// `vkCreateBuffer` calls of the process.
+    /// `vkCreateBuffer` calls of the process. As with `vk_images_made`, a buffer taken from the
+    /// recycler is not one of these; `buffers_recycled` counts those.
     pub vk_buffers_made: u64,
     /// `vkCreateImageView` calls of the process.
     pub vk_image_views_made: u64,
