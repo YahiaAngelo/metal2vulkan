@@ -686,6 +686,72 @@ fn a_reset_shows_in_every_pass_not_yet_submitted() {
     });
 }
 
+/// Our probe `rs`'s resets to another screen (the M3 Max under macOS 27.0.1, each case in a
+/// process of its own, repeated alike): a pass over the identity of a mutable map of `taken`
+/// pixels a side, reset to the identity of `now` pixels after its encoder opened, after
+/// `end_encoding` or after `commit` while the command buffer waits, keeps the screen it took and
+/// shades its physical pixels to the 32-pixel tiles of `now` where `now` spans one tile fewer than
+/// `taken`, else to `taken` (`(taken, now, target, shaded)`); reset before the encoder opened, the
+/// pass is the new map's, shading `now`. Each pixel at its centre, and without a notice.
+#[test]
+fn a_reset_to_another_screen_keeps_the_screen_the_pass_took() {
+    const AFTER: [(u32, u32, u64, u64); 10] = [
+        (16, 8, 64, 16),
+        (8, 16, 64, 8),
+        (64, 32, 64, 32),
+        (48, 24, 64, 32),
+        (40, 8, 64, 32),
+        (100, 50, 128, 100),
+        (128, 80, 128, 96),
+        (128, 40, 128, 128),
+        (200, 161, 256, 192),
+        (256, 200, 256, 224),
+    ];
+    const BEFORE: [(u32, u32, u64, u64); 3] = [(16, 8, 64, 8), (8, 16, 16, 16), (100, 50, 128, 50)];
+    let shades = |side: u64| {
+        let edge = side as f32 - 0.5;
+        (
+            (side * side) as usize,
+            [0, 0, side - 1, side - 1],
+            [[0.5, 0.5], [edge, edge]],
+        )
+    };
+    fresh(|fixture, messages| {
+        let device = &fixture.device;
+        let identity = |side: u32| descriptor(side, side, &[(1.0, 1.0)]);
+        let map_of = |side: u32| {
+            let mut made = identity(side);
+            made.mutability = Mutability::Mutable;
+            let map = device.new_rasterization_rate_map(&made).unwrap();
+            map.reset_using_descriptor(&identity(side)).unwrap();
+            map
+        };
+        for (taken, now, side, shaded_to) in AFTER {
+            for at in [ResetAt::Opened, ResetAt::Ended, ResetAt::Held] {
+                let map = map_of(taken);
+                let target = fixture.target(side);
+                reset_in_pass(fixture, &map, &target, &identity(now), at);
+                let case = format!("{taken} reset to {now} at {at:?}, target {side}");
+                assert_eq!(shaded(&target), shades(shaded_to), "{case}");
+            }
+        }
+        for (taken, now, side, shaded_to) in BEFORE {
+            let map = map_of(taken);
+            map.reset_using_descriptor(&identity(now)).unwrap();
+            let target = fixture.target(side);
+            fixture.draw(&map, &target, |_| {}).unwrap();
+            let case = format!("{taken} reset to {now} before the pass, target {side}");
+            assert_eq!(shaded(&target), shades(shaded_to), "{case}");
+        }
+        // Beyond the fixture's making and buffer, nothing: every map is the identity.
+        let kinds = counts(&messages.take_notices());
+        assert!(
+            kinds.keys().all(|kind| fixture.made.contains(kind)),
+            "{kinds:?}"
+        );
+    });
+}
+
 /// A command buffer of `queue` with a pass over `map` into a target of its own for each of
 /// `draws` (a draw of a triangle where true, no draw call where false), committed and completed.
 fn passes(

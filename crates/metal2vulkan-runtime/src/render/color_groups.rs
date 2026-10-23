@@ -478,7 +478,7 @@ impl RenderLowering {
         layout.depth_stencil.clone_from(&later.twin);
         let descriptor = project_descriptor(log.descriptor(), &grouping);
         let device = core.device().clone();
-        let rate_map = RateMappedPass::of(CALL, &descriptor, &layout)?;
+        let rate_map = RateMappedPass::of(CALL, &descriptor, &layout, log.screen())?;
         let shape = PassShape::of(&layout)?;
         let compatible = render_target::shared_compatible_pass(&device, &shape)?;
         let draws = core.command_buffer().begin_draws(&compatible)?;

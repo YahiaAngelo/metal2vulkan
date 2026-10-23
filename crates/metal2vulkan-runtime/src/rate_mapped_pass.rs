@@ -86,6 +86,20 @@
 //!   step), or whose encoding again is refused (the pass
 //!   checked against the map as reset), draws by the map as it took it, announced
 //!   (`rate-map-reset-unencoded`).
+//! - **A reset to another screen** (our probe `rs`, the M3 Max under macOS 27.0.1: 101 passes
+//!   over a mutable map of the identity of a square screen reset to the identity of another, each
+//!   case in a process of its own, repeats alike). A pass whose map was reset after its encoder
+//!   took it, whether after the encoder opened, after it ended or after the commit of a waiting
+//!   command buffer, keeps the screen it took: its default viewport, scissor and attachment-less
+//!   size are that screen's, and it shades the physical pixels to [`reset_bound`] on each axis:
+//!   to the 32-pixel tiles of the new screen where the new screen spans one tile fewer than the
+//!   screen taken (64 pixels reset to 32 or to 24 shades 32, 128 reset to 80 shades 96), else to
+//!   the screen taken (16 reset to 8 shades 16, 128 reset to 8, to 64 or to 100 shades 128, 8
+//!   reset to 16 shades 8), within the attachments. A reset before the encoder opened is the new
+//!   map's alone. The runtime's encoding again keeps the screen the pass took
+//!   (`RenderLog::screen`) and draws so over a map reset to the identity; over a map reset to
+//!   another, which no probe measured, it draws by the map as reset within the screen taken,
+//!   inside the near-equivalent the map's compile announces (`rasterization-rate-map`).
 //! - **A mutable map's pass past the screen** (the M3 Max under macOS 27.0.1, a quad far past the
 //!   clip volume): Metal rasterizes a pass over a `Mutable` map past the screen's edge along the
 //!   last tiles' lines, to a bound not found (a 64-pixel screen at half quality shaded 49 physical
@@ -158,6 +172,9 @@ pub(super) struct RateMappedPass {
     map: RasterizationRateMap,
     /// The map as the encoder took it, which its draws are planned by.
     state: Arc<MapState>,
+    /// The map's screen size as the pass first took it, which an encoding again for a reset
+    /// keeps (the module docs).
+    screen: [u32; 2],
     area: [u32; 2],
     /// Every layer of the map is the first's: each slice is rasterized alike.
     alike: bool,
@@ -195,17 +212,20 @@ pub(super) fn check_descriptor(
 
 impl RateMappedPass {
     /// The map of `descriptor`, whose pass renders as `layout`, checked against its render target
-    /// size where it has no attachments (the module docs); `None` for a pass without one.
+    /// size where it has no attachments (the module docs), its screen `screen` where the pass
+    /// took the map before (an encoding again for a reset keeps it), else the map's; `None` for a
+    /// pass without one.
     pub(super) fn of(
         call: &'static str,
         descriptor: &RenderPassDescriptor,
         layout: &PassLayout,
+        screen: Option<[u32; 2]>,
     ) -> Result<Option<RateMappedPass>, Error> {
         let Some(map) = &descriptor.rasterization_rate_map else {
             return Ok(None);
         };
         let state = map.state();
-        let screen = state.screen_size();
+        let screen = screen.unwrap_or_else(|| state.screen_size());
         let attached =
             layout.colors.iter().flatten().next().is_some() || layout.depth_stencil.is_some();
         let area = if !attached {
@@ -229,6 +249,7 @@ impl RateMappedPass {
             map: map.clone(),
             alike: state.layers_alike(),
             state,
+            screen,
             area,
         }))
     }
@@ -348,49 +369,93 @@ impl RateMappedPass {
                 .map(|()| plan)
             })
             .map_err(refusal)?;
-        let area = extent.map(f64::from);
+        // Over the identity reset to another screen, Metal's pass keeps the screen it took and
+        // shades physical pixels to `reset_bound`, along the identity (the module docs); the
+        // plan's refusals hold alike.
+        let now = compiled.screen_size();
+        if self.screen != now && compiled.is_identity() {
+            let bound = [0, 1].map(|a| reset_bound(self.screen[a], now[a]));
+            let [x0, y0, x1, y1] = match clip {
+                Some([x, y, w, h]) => [x, y, x.saturating_add(w), y.saturating_add(h)],
+                None => [0, 0, u32::MAX, u32::MAX],
+            };
+            let (sx, ex) = (x0.min(bound[0]), x1.min(bound[0]));
+            let (sy, ey) = (y0.min(bound[1]), y1.min(bound[1]));
+            let region = (
+                guest.map(|v| v as f32),
+                [sx, sy],
+                [ex.saturating_sub(sx), ey.saturating_sub(sy)],
+            );
+            return Ok(vec![on_device(region, viewport, extent)]);
+        }
         Ok(plan
             .regions()
             .iter()
             .map(|region| {
-                let [x, y, width, height] = region.viewport();
-                let [sx, sy] = region.scissor_offset();
-                let [sw, sh] = region.scissor_extent();
-                // The pixels whose centres lie in `[origin, origin + length)`: from
-                // `ceil(origin - 0.5)` up to `ceil(origin + length - 0.5)`.
-                let cut = |from: u32, size: u32, origin: f32, length: f32, limit: f64| {
-                    let centre = |edge: f64| (edge - 0.5).ceil().clamp(0.0, limit) as u32;
-                    let lo = centre(f64::from(origin));
-                    let hi = centre(f64::from(origin) + f64::from(length));
-                    let first = from.max(lo);
-                    let end = (from + size).min(hi).max(first);
-                    (first, end - first)
-                };
-                let (ox, ex) = cut(sx, sw, x, width, area[0]);
-                let (oy, ey) = cut(sy, sh, y, height, area[1]);
-                (
-                    vk::Viewport {
-                        x,
-                        y: y + height,
-                        width,
-                        height: -height,
-                        min_depth: viewport.znear as f32,
-                        max_depth: viewport.zfar as f32,
-                    },
-                    vk::Rect2D {
-                        // Inside the render area: each fits an `i32`.
-                        offset: vk::Offset2D {
-                            x: ox as i32,
-                            y: oy as i32,
-                        },
-                        extent: vk::Extent2D {
-                            width: ex,
-                            height: ey,
-                        },
-                    },
-                )
+                let r = (
+                    region.viewport(),
+                    region.scissor_offset(),
+                    region.scissor_extent(),
+                );
+                on_device(r, viewport, extent)
             })
             .collect())
+    }
+}
+
+/// The device's viewport and scissor of a region of a rate-mapped pass, `([x, y, width, height],
+/// scissor offset, scissor extent)` in physical pixels, its viewport y down: the scissor cut to the
+/// pixels whose centres lie inside the viewport and to the render area `extent` (the module docs),
+/// the depth range the guest's `viewport`'s.
+fn on_device(
+    ([x, y, width, height], [sx, sy], [sw, sh]): ([f32; 4], [u32; 2], [u32; 2]),
+    viewport: &Viewport,
+    extent: [u32; 2],
+) -> (vk::Viewport, vk::Rect2D) {
+    let area = extent.map(f64::from);
+    // The pixels whose centres lie in `[origin, origin + length)`: from `ceil(origin - 0.5)` up
+    // to `ceil(origin + length - 0.5)`.
+    let cut = |from: u32, size: u32, origin: f32, length: f32, limit: f64| {
+        let centre = |edge: f64| (edge - 0.5).ceil().clamp(0.0, limit) as u32;
+        let lo = centre(f64::from(origin));
+        let hi = centre(f64::from(origin) + f64::from(length));
+        let first = from.max(lo);
+        let end = from.saturating_add(size).min(hi).max(first);
+        (first, end - first)
+    };
+    let (ox, ex) = cut(sx, sw, x, width, area[0]);
+    let (oy, ey) = cut(sy, sh, y, height, area[1]);
+    (
+        vk::Viewport {
+            x,
+            y: y + height,
+            width,
+            height: -height,
+            min_depth: viewport.znear as f32,
+            max_depth: viewport.zfar as f32,
+        },
+        vk::Rect2D {
+            // Inside the render area: each fits an `i32`.
+            offset: vk::Offset2D {
+                x: ox as i32,
+                y: oy as i32,
+            },
+            extent: vk::Extent2D {
+                width: ex,
+                height: ey,
+            },
+        },
+    )
+}
+
+/// How far along one axis a pass over the identity shades, its map reset after the pass took it
+/// from a screen of `taken` pixels to one of `now` (the module docs, our probe `rs`): to the
+/// 32-pixel tiles of `now` where it spans one tile fewer than `taken`, else to `taken`.
+pub(super) fn reset_bound(taken: u32, now: u32) -> u32 {
+    let tiles = |side: u32| side.div_ceil(32);
+    match tiles(taken).checked_sub(tiles(now)) {
+        Some(1) => (tiles(now) * 32).min(taken),
+        _ => taken,
     }
 }
 

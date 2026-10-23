@@ -1656,7 +1656,7 @@ impl CommandBuffer {
         self.settle_end();
         // Metal's process ends here under some protection options (`command_buffer/protection.rs`).
         self.refuse_protected_encoder("render_command_encoder")?;
-        self.open_render(descriptor, None)
+        self.open_render(descriptor, None, None)
             .map(RenderCommandEncoder::new)
     }
 
@@ -1664,15 +1664,21 @@ impl CommandBuffer {
     /// residency an ended encoder of the committed command buffer started with, that encoder
     /// opened again (`render/replay.rs`): over a new `VkCommandBuffer` with no refusal of a
     /// committed command buffer, starting with that residency, logging nothing but where its pass
-    /// takes several color groups (`render/color_groups.rs`). Its layout is the first color
-    /// group's where the device draws the pass's colors in groups.
+    /// takes several color groups (`render/color_groups.rs`), and keeping `screen`, the screen
+    /// size of the pass's rasterization-rate map as the ended encoder took it, through a reset of
+    /// the map (`rate_mapped_pass.rs`). Its layout is the first color group's where the device
+    /// draws the pass's colors in groups.
     fn open_render(
         &self,
         given: &RenderPassDescriptor,
         again: Option<Residency>,
+        screen: Option<[u32; 2]>,
     ) -> Result<Box<RenderLowering>, Error> {
         const CALL: &str = "render_command_encoder";
         let device = self.device();
+        let screen = screen.or_else(|| {
+            (given.rasterization_rate_map.as_ref()).map(|map| map.state().screen_size())
+        });
         rate_mapped_pass::check_descriptor(CALL, device, given)?;
         let taken = render_pass::surface_stencil_loads(given);
         let descriptor = &*taken;
@@ -1688,10 +1694,10 @@ impl CommandBuffer {
         // whatever the device's rebinds, as does a pass over a rasterization-rate map, which a
         // reset of the map before its submission encodes again (`rate_mapped_pass.rs`).
         let log = match (&again, groups > 1) {
-            (_, true) => Some(device.shared().scheduler.spare_logs().render(given)),
+            (_, true) => Some(device.shared().scheduler.spare_logs().render(given, screen)),
             (None, false) => (device.shared().rebinds.any()
                 || given.rasterization_rate_map.is_some())
-            .then(|| device.shared().scheduler.spare_logs().render(given)),
+            .then(|| device.shared().scheduler.spare_logs().render(given, screen)),
             (Some(_), false) => None,
         };
         let projected;
@@ -1702,7 +1708,7 @@ impl CommandBuffer {
             }
             None => (full, None, descriptor),
         };
-        let rate_map = RateMappedPass::of(CALL, descriptor, &layout)?;
+        let rate_map = RateMappedPass::of(CALL, descriptor, &layout, screen)?;
         let shape = PassShape::of(&layout)?;
         let compatible = render_target::shared_compatible_pass(device, &shape)?;
         if again.is_none() {
@@ -3843,13 +3849,15 @@ impl RenderLowering {
     }
 
     /// An encoder of `command_buffer`'s, ended and committed, opened again over `descriptor`
-    /// with the `residency` it started with (`render/replay.rs`).
+    /// with the `residency` it started with, its rasterization-rate map's `screen` as it took it
+    /// (`render/replay.rs`).
     pub(super) fn replaying(
         command_buffer: &CommandBuffer,
         descriptor: &RenderPassDescriptor,
         residency: Residency,
+        screen: Option<[u32; 2]>,
     ) -> Result<Box<RenderLowering>, Error> {
-        command_buffer.open_render(descriptor, Some(residency))
+        command_buffer.open_render(descriptor, Some(residency), screen)
     }
 
     /// Refuse `call` as its lowering refused it, after it returned, for `error`

@@ -546,9 +546,14 @@ impl SpareLogs {
         self.blit.take().unwrap_or_else(CallLog::new)
     }
 
-    /// The log of a pass `descriptor` opens: in a kept one's room, or a new one.
-    pub(super) fn render(&self, descriptor: &RenderPassDescriptor) -> RenderLog {
-        RenderLog::new(descriptor, self.render.take())
+    /// The log of a pass `descriptor` opens, over a rasterization-rate map of `screen` pixels
+    /// where it has one: in a kept one's room, or a new one.
+    pub(super) fn render(
+        &self,
+        descriptor: &RenderPassDescriptor,
+        screen: Option<[u32; 2]>,
+    ) -> RenderLog {
+        RenderLog::new(descriptor, screen, self.render.take())
     }
 
     /// Clear `replay` and keep it for a next encoder, where its room is small enough
