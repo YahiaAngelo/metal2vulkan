@@ -27,7 +27,7 @@
 //! a venue that holds no texture buffer of a format answers its typed refusal at that row rather
 //! than leaving the rest of the sweep uncompared.
 //!
-//! The destination of each dispatch holds a fill byte beforehand ([`BLANK`]), so a texel the kernel
+//! The destination of each dispatch holds a fill byte beforehand (`BLANK`), so a texel the kernel
 //! did not write is a recorded value rather than whatever the allocator left there.
 //!
 //! A swizzle beside `ShaderWrite` usage is refused when the texture is made, by Metal and by the
@@ -130,7 +130,9 @@ pub fn float_sources() -> Vec<Source> {
         .map(|i| ((7 * i + 3) & 0xff) as u8)
         .collect();
     let unorm = codes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| [0, 1, 2, 3].map(|i| (f32::from(c[i]) / 255.0).to_bits()))
         .collect();
     let floats = [1.5f32, -2.25, 3.0e5, 0.125, 7.0, -0.5, 1024.0, 3.75];
@@ -161,7 +163,9 @@ pub fn float_sources() -> Vec<Source> {
             format: PixelFormat::RG32Float,
             bytes: bytes(&floats),
             texels: floats
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|f| [f[0].to_bits(), f[1].to_bits(), 0, one])
                 .collect(),
             alpha: false,
@@ -190,7 +194,9 @@ pub fn uint_sources() -> Vec<Source> {
             format: PixelFormat::RGBA16Uint,
             bytes: halves.iter().flat_map(|h| h.to_le_bytes()).collect(),
             texels: halves
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|h| [0, 1, 2, 3].map(|i| u32::from(h[i])))
                 .collect(),
             alpha: true,
@@ -882,7 +888,12 @@ mod tests {
         assert_eq!(past, AT.len() / 2, "{AT:?}");
         assert!(AT.iter().any(|&index| index < TEXELS));
         // The float sweep reads index 0 up to `GRID`, so its own second half is past the source.
-        assert!(GRID > TEXELS && GRID == 2 * TEXELS);
+        let beyond = (0..GRID).filter(|index| *index >= TEXELS).count();
+        assert_eq!(
+            beyond,
+            (GRID / 2) as usize,
+            "the float sweep reads as many indices past the source as inside it"
+        );
         for source in float_sources().iter().chain(&uint_sources()) {
             assert_eq!(
                 source.texels.len(),
