@@ -51,6 +51,7 @@ use crate::render::{
 };
 use crate::transcript::{ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value};
 use metal2vulkan::metal::{PixelFormat, PrimitiveType};
+use metal2vulkan_runtime::Degradation;
 
 /// The format both textures carry: a `float` stored as it is, so the chain's answer is arithmetic.
 const FORMAT: PixelFormat = PixelFormat::RGBA32Float;
@@ -202,10 +203,23 @@ impl Case for FrameChain {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // Nothing is loosened: every link stores or moves a `float` and computes nothing, so the
-        // chain's answer is exact or a link broke. No notice of ours applies -- nothing here
-        // stores a normalized channel.
-        Vec::new()
+        // No value is loosened: every link stores or moves a `float` and computes nothing, so the
+        // chain's answer is exact or a link broke. The normalized-conversion notice cannot apply,
+        // because nothing here stores a normalized channel.
+        // The one entry is a **notice declaration** on the notices site, which loosens no value.
+        // Metal announces nothing, so a notice of ours has to be declared or the comparison cannot
+        // be made at all, and `device-arithmetic` is the one this case's own functions imply:
+        // `tob_sample` divides the pixel's position by the sampled texture's extent, and our side
+        // records the note where a float division takes Vulkan's precision bounds rather than
+        // correct rounding (`metal2vulkan::pipeline::artifact`'s
+        // `PrecisionNote::DeviceArithmetic`). Which device does that is the device's answer; that
+        // this case can announce it is the case's own shape.
+        //
+        // Measured: it fires on lavapipe and not on MoltenVK on this M3 Max, and on lavapipe every
+        // word of this case's chain compared **exactly** -- the whole difference was the announcement.
+        vec![crate::replay::notice_allowance(
+            Degradation::DeviceArithmetic.code(),
+        )]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

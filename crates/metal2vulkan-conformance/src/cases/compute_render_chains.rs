@@ -65,6 +65,7 @@ use crate::transcript::{
     Aspect, ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value,
 };
 use metal2vulkan::metal::{PixelFormat, PrimitiveType};
+use metal2vulkan_runtime::Degradation;
 
 /// The format every texture of the family carries: a `float` stored as it is, so nothing of a
 /// normalized conversion stands between a value and its cross-check.
@@ -273,6 +274,17 @@ impl Subject {
         }
     }
 
+    /// Whether either function the row runs divides a `float`, which is the shape that decides
+    /// its `device-arithmetic` declaration.
+    ///
+    /// `tob_sample` divides the pixel's position by the sampled texture's extent and
+    /// `scout_write_f` divides a coordinate by 7 and by 5; `tob_solid`, `tob_write` and
+    /// `scout_read_f` divide nothing, and the two rows made of those compare exact on both venues
+    /// measured.
+    fn divides_a_float(&self) -> bool {
+        matches!(self.crossing, Crossing::KernelToFragment)
+    }
+
     /// The render pipeline the row makes.
     fn pipeline(&self) -> RenderPipelineSpec<'static> {
         RenderPipelineSpec::new(RECT, self.functions().0, &COLOR_STATE)
@@ -289,11 +301,29 @@ impl Case for ComputeRenderChain {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // Nothing is loosened. A `RGBA32Float` texel is the `float` the stage produced, so every
-        // value of every row is exact or it is a bug, and no notice of ours applies: the one
-        // notice a stored colour can carry is the normalized conversion, and nothing here stores a
+        // No value is loosened. A `RGBA32Float` texel is the `float` the stage produced, so every
+        // value of every row is exact or it is a bug, and the one notice a stored colour could
+        // carry -- the normalized conversion -- cannot apply, because nothing here stores a
         // normalized channel.
-        Vec::new()
+        // `device-arithmetic` is declared by the rows whose functions do the arithmetic the note
+        // covers: our side records it where a float division, remainder, square root, fused
+        // multiply-add or dot product takes Vulkan's precision bounds rather than correct rounding,
+        // which happens on a device whose float functions are not Metal's own
+        // (`metal2vulkan::pipeline::artifact`'s `PrecisionNote::DeviceArithmetic`). Which device
+        // that is, is the device's answer; which rows can announce it is the case's, and it is the
+        // ones whose functions divide a float.
+        //
+        // Measured: it fires on lavapipe and not on MoltenVK on this M3 Max, and on lavapipe every
+        // value compared **exactly** -- the whole difference was the announcement, which is what
+        // makes declaring it a declaration and not a tolerance. Metal announces nothing, so a
+        // notice of ours has to be declared or the comparison cannot be made at all.
+        let mut named = Vec::new();
+        if self.subject.divides_a_float() {
+            named.push(crate::replay::notice_allowance(
+                Degradation::DeviceArithmetic.code(),
+            ));
+        }
+        named
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
@@ -775,12 +805,36 @@ mod tests {
         }
     }
 
-    /// No row of the family loosens anything: the values are `float`s a stage produced and a
-    /// difference in one is the finding this family exists to make.
+    /// No row of the family loosens a value: every allowance is a notice declaration on the
+    /// notices site, and the one notice declared is the one the row's own functions imply.
     #[test]
     fn no_row_loosens_a_value() {
+        use crate::allowance::Justification;
         for case in all() {
-            assert!(case.allowances().is_empty(), "{}", case.name());
+            // Every allowance is a notice declaration on the notices site, so no row loosens a
+            // value, and the one notice declared is the one the row's own functions imply.
+            let codes: Vec<String> = case
+                .allowances()
+                .iter()
+                .map(|allowance| {
+                    assert_eq!(
+                        allowance.path,
+                        format!("case/{}/*", crate::replay::NOTICES_SITE),
+                        "{}: an allowance outside the notices site",
+                        case.name()
+                    );
+                    match &allowance.justified_by {
+                        Justification::Degradation(code) => code.clone(),
+                        other => panic!("{}: an unexpected tolerance: {other:?}", case.name()),
+                    }
+                })
+                .collect();
+            assert_eq!(
+                codes.contains(&Degradation::DeviceArithmetic.code().to_owned()),
+                case.subject.divides_a_float(),
+                "{}: the device-arithmetic notice is declared by the wrong row",
+                case.name()
+            );
             assert_eq!(case.metal_source(), MetalSource::Run);
             case.shaders().unwrap();
             let inputs = case.inputs().unwrap();

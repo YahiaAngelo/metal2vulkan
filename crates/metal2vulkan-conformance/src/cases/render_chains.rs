@@ -109,6 +109,7 @@ const FILL: Functions = Functions {
     fixture: TOB,
     vertex: "tob_rect",
     fragment: "tob_solid",
+    divides_a_float: false,
     half_output: false,
 };
 
@@ -118,6 +119,11 @@ struct Functions {
     fixture: &'static str,
     vertex: &'static str,
     fragment: &'static str,
+    /// Whether the fragment function divides a `float`: `tob_sample` divides the pixel's position
+    /// by the sampled texture's extent, and nothing else here does.
+    ///
+    /// This is the shape that decides the row's `device-arithmetic` declaration, and nothing else.
+    divides_a_float: bool,
     /// Whether the fragment function returns a `half` colour output rather than a `float` one.
     ///
     /// This is the shape that decides one of the row's notice declarations and nothing else: our
@@ -152,6 +158,7 @@ const SUBJECTS: &[Subject] = &[
             fixture: TOB,
             vertex: "tob_rect",
             fragment: "tob_sample",
+            divides_a_float: true,
             half_output: false,
         },
         filter: SamplerMinMagFilter::Nearest,
@@ -164,6 +171,7 @@ const SUBJECTS: &[Subject] = &[
             fixture: TGP,
             vertex: "tgp_rect",
             fragment: "tgp_layer",
+            divides_a_float: false,
             half_output: true,
         },
         filter: SamplerMinMagFilter::Nearest,
@@ -176,6 +184,7 @@ const SUBJECTS: &[Subject] = &[
             fixture: TGP,
             vertex: "tgp_rect",
             fragment: "tgp_layer",
+            divides_a_float: false,
             half_output: true,
         },
         filter: SamplerMinMagFilter::Linear,
@@ -339,6 +348,22 @@ impl Case for RenderChain {
         if self.subject.sample.half_output {
             named.push(crate::replay::notice_allowance(
                 Degradation::HalfOutputFastMathBlend.code(),
+            ));
+        }
+        // `device-arithmetic` is the second declaration, and it is declared by the rows whose
+        // functions do the arithmetic the note covers: our side records it where a float
+        // division, remainder, square root, fused multiply-add or dot product takes Vulkan's
+        // precision bounds rather than correct rounding, which happens on a device whose float
+        // functions are not Metal's own (`metal2vulkan::pipeline::artifact`'s
+        // `PrecisionNote::DeviceArithmetic`). Which device that is, is the device's answer; which
+        // rows can announce it is the case's, and it is the ones that divide a float.
+        //
+        // Measured: it fires on lavapipe and not on MoltenVK on this M3 Max, and on lavapipe every
+        // value of every row of this family compared **exactly** -- the whole difference was the
+        // announcement, which is what makes declaring it a declaration and not a tolerance.
+        if self.subject.sample.divides_a_float {
+            named.push(crate::replay::notice_allowance(
+                Degradation::DeviceArithmetic.code(),
             ));
         }
         named
@@ -692,6 +717,12 @@ mod tests {
                 codes.contains(&Degradation::HalfOutputFastMathBlend.code().to_owned()),
                 case.subject.sample.half_output,
                 "{}: the half-output notice is declared by the wrong row",
+                case.name()
+            );
+            assert_eq!(
+                codes.contains(&Degradation::DeviceArithmetic.code().to_owned()),
+                case.subject.sample.divides_a_float,
+                "{}: the device-arithmetic notice is declared by the wrong row",
                 case.name()
             );
         }
