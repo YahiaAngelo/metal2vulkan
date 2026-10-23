@@ -32,6 +32,91 @@
 //! - **the threadgroup kernel** (`a27_ob1_threadgroup`): a `threadgroup uint *` argument, which is
 //!   the only way to reach `MTLThreadgroupBinding`'s.
 //!
+//! # `MTLDataType`, swept
+//!
+//! `MTLDataType` is the vocabulary every reflected binding, struct member, array element and
+//! pointee uses to say what it holds, so an implementation that mis-reports one of its 97 values
+//! mis-describes a shader's interface to every consumer that reflects it. The five kernels above
+//! reach sixteen of those values between them. Ten more cases sweep it, each over a committed
+//! fixture written for the reflection lane rather than a copy of one
+//! (`fixtures/public/reflection/`, reached by the `<directory>/<name>` form
+//! [`crate::fixture`] documents):
+//!
+//! - **the six `encoder_types` kernels**, one struct per MSL scalar, vector and matrix type that
+//!   `MTLDataType` names — 66 of them — each held alone behind a `device` pointer
+//!   (`encoder_types_plain_*`) and again after a texture in an argument buffer
+//!   (`encoder_types_tail_*`);
+//! - **`argument_buffers`' `reflection_argument_buffers`**, whose argument buffer holds arrays of
+//!   textures, samplers, pointers, inline constants and structs, a nested argument buffer, an
+//!   indirect command buffer and a compute pipeline state;
+//! - **`encoder_arrays`' `encoder_arrays`**, ten argument buffers each holding one two-element
+//!   array of structs, which is where an array's `stride` and `argumentIndexStride` are Metal's
+//!   own arithmetic rather than a size the source states;
+//! - **`textures`' `reflection_textures`**, thirteen texture types across four component types,
+//!   which is where `textureDataType` is derived from a template parameter;
+//! - **`tables_in_arguments`' `reflection_tables_in_arguments`**, a visible function table and an
+//!   array of two inside an argument buffer.
+//!
+//! ## What each swept value moves, and why none of it is vacuous
+//!
+//! A reflection case that read back the type its own source declared would compare nothing, 66
+//! times over. None of these sites is that. For each swept member type Metal **derives**, and the
+//! numbers below are the ones Metal answered on an Apple M3 Max under Metal 27.0.1, read off these
+//! cases' own committed recordings:
+//!
+//! - `bufferDataSize` and `bufferAlignment` of the struct the pointer argument points at, from
+//!   Metal's own alignment rules and nothing in the text. Over the 66 types they take **16
+//!   distinct (size, alignment) pairs**: `float` 4 and 4, `float3` 16 and 16, `float2x3` 32 and
+//!   16, `half2x2` 8 and **4**, `half3x2` 12 and 4, `bool` 1 and 1, `long4` 32 and 32.
+//! - the **offset** Metal computes for that member where it follows a texture in an argument
+//!   buffer, which the texture's 8 bytes and the member's own alignment decide together: 8 for
+//!   `float`, `half`, `char`, `bool` and `long`, 16 for `float3`, `float4`, `int3` and `long2`,
+//!   32 for `long3` and `long4`.
+//! - the **struct size** that offset and member leave, which Metal rounds up to the struct's own
+//!   alignment rather than reporting the C size: the struct holding a texture and a `float`
+//!   occupies 12 bytes (the committed AIR says `dereferenceable(12)`) and Metal's reflection
+//!   answers **16**; a texture and a `bool` is 9 and answers 16; a texture and a `half4x3` is 40
+//!   and answers 40. That rounding is a rule an implementation can get wrong in either direction
+//!   and no source line states it.
+//! - an array's `stride`, `arrayLength` and `argumentIndexStride`, counted and multiplied by
+//!   Metal: a pipeline's reflection gives an array of resources, and of resource-only structs,
+//!   stride **0**, and gives an array whose element holds a constant its element's size.
+//!
+//! So a value whose alignment or size an implementation gets wrong moves a number the case did not
+//! supply.
+//!
+//! The numbers alone do not separate every value, and saying which ones they do not is part of the
+//! claim rather than a footnote to it. Size and alignment collapse the 66 into those 16 classes,
+//! and the largest are wide: 13 types answer 4 and 4 (`MTLDataTypeFloat`, `MTLDataTypeInt`,
+//! `MTLDataTypeUInt`, `MTLDataTypeHalf2`, `MTLDataTypeBFloat2`, `MTLDataTypeShort2`,
+//! `MTLDataTypeUShort2`, `MTLDataTypeChar3`, `MTLDataTypeChar4`, `MTLDataTypeUChar3`,
+//! `MTLDataTypeUChar4`, `MTLDataTypeBool3`, `MTLDataTypeBool4`), 13 more answer 8 and 8, 7 answer
+//! 2 and 2, and 3 answer 1 and 1. **Within a class the separating site is the `dataType`
+//! enumerator itself**, and nothing else in the tree distinguishes those values at all.
+//!
+//! Reading that enumerator back is **not** the case reading its own declaration. What a case
+//! supplies is a fixture's AIR; the enumerator is each side's own mapping from an AIR type to
+//! Metal's vocabulary, which the Metal leg takes from `MTLStructMember.dataType` and ours derives
+//! from the metadata ABI (`metal2vulkan`'s `reflection::types`, off `air.arg_type_name`). Two
+//! independent derivations of one answer is a comparison, and mapping `bfloat` to
+//! `MTLDataTypeHalf`, or a signed type to its unsigned neighbour, is exactly the class of bug it
+//! catches — one no size could see, because those pairs have the same size.
+//!
+//! ## The values this sweep does not reach
+//!
+//! - `MTLDataTypeNone`, which is what a getter answers for a type it has no name for, so no
+//!   well-formed declaration produces it;
+//! - the sixteen packed pixel types (`MTLDataTypeR8Unorm` through `MTLDataTypeRGB9E5Float`), which
+//!   a struct can state only as an imageblock member, and whose reflection a compute pipeline does
+//!   not answer — `function-bindings-imageblock` records what Metal does answer for a kernel's
+//!   imageblock, and it holds no struct type. Reaching them needs a render pipeline's tile
+//!   reflection, which `MTLArgument`'s deprecation puts out of this harness's reach (above);
+//! - `MTLDataTypeIntersectionFunctionTable`, `MTLDataTypePrimitiveAccelerationStructure` and
+//!   `MTLDataTypeInstanceAccelerationStructure`, ray tracing's, out of this project's scope;
+//! - `MTLDataTypeTensor`, Metal 4's, likewise;
+//! - `MTLDataTypeDepthStencilState`, which an argument buffer can hold only through MSL's
+//!   `depth_stencil_state`, a render-encoder type no compute kernel takes.
+//!
 //! # Why this family is safe
 //!
 //! Each case makes one compute pipeline state and reads its reflection. Nothing is dispatched,
@@ -53,6 +138,9 @@ use crate::transcript::{Digest, Node, Observed, Sites};
 
 /// The site the reflection's answer sits at.
 const BINDINGS: &str = "bindings";
+
+/// The fixture holding one struct per MSL scalar, vector and matrix type `MTLDataType` names.
+const DATA_TYPES: &str = "reflection/encoder_types";
 
 /// A case over one kernel's reflected arguments.
 pub struct FunctionBindingsCase {
@@ -104,6 +192,77 @@ pub fn all() -> Vec<FunctionBindingsCase> {
             name: "function-bindings-imageblock",
             fixture: "a4_imageblock_extent",
             entry: "a4_imageblock_extent",
+        },
+        // The `MTLDataType` sweep. Six kernels hold one struct per MSL scalar, vector and matrix
+        // type the enumeration names, in two shapes: behind a `device` pointer, where the derived
+        // numbers are the pointee's size and alignment, and after a texture in an argument buffer,
+        // where they are the member's offset and the struct's size. The split into three is the
+        // fixture's: 22 arguments a kernel, which is a buffer-slot count every device has.
+        FunctionBindingsCase {
+            name: "function-bindings-data-types-pointer-floats",
+            fixture: DATA_TYPES,
+            entry: "encoder_types_plain_0",
+        },
+        FunctionBindingsCase {
+            name: "function-bindings-data-types-pointer-integers",
+            fixture: DATA_TYPES,
+            entry: "encoder_types_plain_1",
+        },
+        FunctionBindingsCase {
+            name: "function-bindings-data-types-pointer-narrow",
+            fixture: DATA_TYPES,
+            entry: "encoder_types_plain_2",
+        },
+        FunctionBindingsCase {
+            name: "function-bindings-data-types-member-floats",
+            fixture: DATA_TYPES,
+            entry: "encoder_types_tail_0",
+        },
+        FunctionBindingsCase {
+            name: "function-bindings-data-types-member-integers",
+            fixture: DATA_TYPES,
+            entry: "encoder_types_tail_1",
+        },
+        FunctionBindingsCase {
+            name: "function-bindings-data-types-member-narrow",
+            fixture: DATA_TYPES,
+            entry: "encoder_types_tail_2",
+        },
+        // The argument buffer whose members are the resource types and the arrays of them:
+        // `MTLDataTypeArray` over a texture, a sampler, a pointer, an inline constant and a
+        // struct, each with the `stride` and `argumentIndexStride` Metal derived, beside an
+        // indirect command buffer, a compute pipeline state, a depth texture and a nested
+        // argument buffer. Its second argument states no `[[id]]` at all, so every index in it is
+        // Metal's own assignment.
+        FunctionBindingsCase {
+            name: "function-bindings-data-types-arrays",
+            fixture: "reflection/argument_buffers",
+            entry: "reflection_argument_buffers",
+        },
+        // Ten argument buffers, each one two-element array of structs: which arrays Metal gives
+        // stride 0 (resource-only elements) and which their element's size. Neither number is in
+        // the source, and the two answers differ by the element's own composition alone.
+        FunctionBindingsCase {
+            name: "function-bindings-data-types-array-strides",
+            fixture: "reflection/encoder_arrays",
+            entry: "encoder_arrays",
+        },
+        // Thirteen texture types over four component types, where `textureDataType` is derived
+        // from a template parameter the binding never names: `MTLDataTypeFloat`,
+        // `MTLDataTypeHalf`, `MTLDataTypeUInt` and `MTLDataTypeInt` off `texture2d<float>`,
+        // `texture2d<half>`, `texture2d<uint>` and `texture3d<int>`.
+        FunctionBindingsCase {
+            name: "function-bindings-data-types-texture-components",
+            fixture: "reflection/textures",
+            entry: "reflection_textures",
+        },
+        // A visible function table and an array of two inside an argument buffer, beside an
+        // inline constant: `MTLDataTypeVisibleFunctionTable` as a member's and an array element's
+        // type rather than as a binding's.
+        FunctionBindingsCase {
+            name: "function-bindings-data-types-tables",
+            fixture: "reflection/tables_in_arguments",
+            entry: "reflection_tables_in_arguments",
         },
     ]
 }
