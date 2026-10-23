@@ -12,7 +12,7 @@ use crate::runtime_side::RuntimeSide;
 /// records its outcomes with their frequencies rather than whichever run came last.
 ///
 /// A case whose work nothing orders asks for more through
-/// [`Case::record_runs`](crate::case::Case::record_runs).
+/// [`crate::case::Case::record_runs`].
 pub const RECORD_RUNS: u32 = 3;
 
 /// The cases `names` selects, or every case where `names` is empty.
@@ -103,13 +103,16 @@ fn record_one(case: &dyn Case) -> Result<std::path::PathBuf, String> {
             crate::record::record(case, &mut side, case.record_runs(), level, validated)
                 .map_err(|error| error.to_string())?
         }
-        crate::case::MetalSource::Carried { from, .. } => {
+        crate::case::MetalSource::Carried {
+            from, measured_on, ..
+        } => {
             let (runs, transcript) = case
                 .carried_transcript()?
                 .ok_or_else(|| format!("{}: it carries no answer", case.name()))?;
             crate::record::carried(
                 level,
                 from,
+                measured_on,
                 crate::recording::ORACLE_CHIP,
                 runs,
                 transcript,

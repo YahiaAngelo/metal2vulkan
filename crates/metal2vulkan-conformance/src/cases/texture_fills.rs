@@ -681,6 +681,7 @@ impl Case for TextureFills {
 
     fn metal_source(&self) -> MetalSource {
         MetalSource::carried_only(MEASURED_IN, NO_PUBLIC_CALL)
+            .measured_on(crate::recording::APPLE_M4)
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {

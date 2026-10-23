@@ -826,6 +826,9 @@ pub enum MetalSource {
     Carried {
         from: &'static str,
         re_record: ReRecord,
+        /// The chip the carried measurement was taken on, which is the oracle's unless the case
+        /// says otherwise ([`MetalSource::measured_on`]).
+        measured_on: &'static str,
     },
 }
 
@@ -835,6 +838,7 @@ impl MetalSource {
         Self::Carried {
             from,
             re_record: ReRecord::Allowed,
+            measured_on: crate::recording::ORACLE_CHIP,
         }
     }
 
@@ -844,6 +848,26 @@ impl MetalSource {
         Self::Carried {
             from,
             re_record: ReRecord::Forbidden { reason },
+            measured_on: crate::recording::ORACLE_CHIP,
+        }
+    }
+
+    /// The same carried answer, measured on `chip` rather than on the oracle this round records
+    /// on.
+    ///
+    /// A case says this where its table predates the oracle — the two families carrying an Apple
+    /// M4's values — so the recording holds the chip in a field a reader and the report can see,
+    /// instead of in the `from` prose where nothing could.
+    pub const fn measured_on(self, chip: &'static str) -> Self {
+        match self {
+            Self::Carried {
+                from, re_record, ..
+            } => Self::Carried {
+                from,
+                re_record,
+                measured_on: chip,
+            },
+            Self::Run => Self::Run,
         }
     }
 

@@ -699,6 +699,7 @@ fn record_mode_refuses_a_case_that_must_not_be_re_recorded() {
             re_record: ReRecord::Forbidden {
                 reason: "its Metal leg faults the GPU",
             },
+            measured_on: crate::recording::ORACLE_CHIP,
         },
         ..WordsCase::new("words", 2)
     };
@@ -922,6 +923,75 @@ fn every_seed_case_states_its_inputs_and_its_metal_source() {
         case.shaders()
             .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
     }
+}
+
+/// A carried answer taken on another chip says so in its recording, in a field, and one taken on
+/// the oracle says nothing extra.
+///
+/// Two families here hold an Apple M4's values under a key that names this M3 Max — the machine is
+/// gone, so they cannot be re-taken. Before the field existed the fact lived only in the
+/// provenance's prose, where no reader and no check could reach it. This test is what keeps the
+/// field honest in both directions: a case that starts carrying another chip's values without
+/// saying so fails here, and a case that claims another chip while the oracle took its values
+/// fails too.
+#[test]
+fn a_carried_answer_taken_on_another_chip_names_it() {
+    use crate::recording::{Provenance, APPLE_M4, ORACLE_CHIP};
+    let mut elsewhere = Vec::new();
+    for case in crate::cases::all() {
+        let claimed = match case.metal_source() {
+            MetalSource::Carried { measured_on, .. } => measured_on,
+            MetalSource::Run => continue,
+        };
+        let recorded = crate::recording::read(case.name())
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()))
+            .answer(MetalLevel::NEWEST)
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()))
+            .provenance
+            .clone();
+        let Provenance::Carried { measured_on, .. } = &recorded else {
+            panic!("{}: a carried case recorded as {recorded:?}", case.name());
+        };
+        assert_eq!(measured_on, claimed, "{}", case.name());
+        if claimed != ORACLE_CHIP {
+            elsewhere.push(case.name());
+        }
+        assert_eq!(
+            recorded.measured_elsewhere(),
+            (claimed != ORACLE_CHIP).then_some(claimed),
+            "{}",
+            case.name()
+        );
+    }
+    // The two families, and no others. A third would mean a table nobody noticed came from another
+    // machine.
+    assert!(
+        elsewhere
+            .iter()
+            .any(|name| name.starts_with("texture-fills-")),
+        "texture_fills carries the M4's digests: {elsewhere:?}"
+    );
+    assert!(
+        elsewhere.contains(&crate::cases::two_plane_heap_blits::HEAP_BLITS),
+        "two_plane_heap_blits carries the M4's digests: {elsewhere:?}"
+    );
+    for name in &elsewhere {
+        assert!(
+            name.starts_with("texture-fills-")
+                || *name == crate::cases::two_plane_heap_blits::HEAP_BLITS,
+            "{name} carries another chip's values and is not one of the two known families"
+        );
+    }
+    // The file says the chip only where it differs: an oracle-taken recording holds no such field.
+    let on_oracle = crate::recording::read(crate::cases::surface_fills::SURFACE_FILLS).unwrap();
+    assert_eq!(
+        on_oracle.answers[0].provenance.measured_elsewhere(),
+        None,
+        "a recording taken on the oracle names no other chip"
+    );
+    assert!(!serde_json::to_string(&on_oracle.answers[0].provenance)
+        .unwrap()
+        .contains(APPLE_M4));
 }
 
 #[test]
