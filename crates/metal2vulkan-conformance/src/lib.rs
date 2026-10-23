@@ -63,6 +63,7 @@ pub mod runtime_work;
 pub mod scheduled_handlers;
 pub mod shared_events;
 pub mod sparse_query;
+pub mod surface;
 pub mod texture;
 pub mod texture_query;
 pub mod transcript;

@@ -31,6 +31,20 @@
 //! alone: CoreVideo lays out a buffer of the same OSType and size, and the derivation must agree
 //! with Apple's own answer plane for plane.
 //!
+//! # Two families, one surface
+//!
+//! A **rotated framebuffer-only target** needs a surface for the same reason: Metal makes such a
+//! texture over an IOSurface alone, and asserts on `framebufferOnly` over anything else. So it
+//! shares this module rather than declaring a second `IOSurfaceRef`, a second opaque type with a
+//! second Objective-C encoding, and a second owner — which is what it had before the two were
+//! merged. [`Surface::single_plane`] is its constructor and [`Surface::is_as_asked`] its read-back,
+//! beside the two-plane pair, and `crate::metal_side` holds one pool of [`Surface`] for both.
+//!
+//! The two differ only in the layout they ask for and where that layout comes from: a plane
+//! texture's is derived from the format's bit depth and subsampling ([`planes_of`]), and a rotated
+//! target's is the case's own plane extent and stride, which must clear a rule of Metal's that
+//! **ends the process** when it is broken (`crate::surface::PlaneSpec::unsafe_stride`).
+//!
 //! The frameworks are reached through their C functions (CoreFoundation and IOSurface), as
 //! `metal2vulkan-validation`'s own surface probe reaches them; each object made here is released
 //! here.
@@ -55,6 +69,9 @@ unsafe impl RefEncode for IoSurfaceOpaque {
 type CfType = *const c_void;
 type CfAllocator = *const c_void;
 type CfMutableDictionary = *mut c_void;
+
+/// `kIOSurfaceLockReadOnly`, which a read-back takes so the lock does not dirty the surface.
+pub const READ_ONLY: u32 = 1;
 
 /// `kCFNumberSInt64Type`.
 const NUMBER_SINT64: isize = 4;
@@ -86,6 +103,7 @@ extern "C" {
     static kIOSurfaceWidth: CfType;
     static kIOSurfaceHeight: CfType;
     static kIOSurfaceBytesPerElement: CfType;
+    static kIOSurfaceBytesPerRow: CfType;
     static kIOSurfacePixelFormat: CfType;
     static kIOSurfaceAllocSize: CfType;
     static kIOSurfacePlaneInfo: CfType;
@@ -108,6 +126,11 @@ extern "C" {
     fn IOSurfaceGetHeightOfPlane(surface: *mut IoSurfaceOpaque, plane: usize) -> usize;
     fn IOSurfaceGetBytesPerRowOfPlane(surface: *mut IoSurfaceOpaque, plane: usize) -> usize;
     fn IOSurfaceGetBytesPerElementOfPlane(surface: *mut IoSurfaceOpaque, plane: usize) -> usize;
+    // A surface made without a plane dictionary answers these, and answers `IOSurfaceGetPlaneCount`
+    // 0 rather than 1, so a single-plane read-back cannot go through the plane queries above.
+    fn IOSurfaceGetWidth(surface: *mut IoSurfaceOpaque) -> usize;
+    fn IOSurfaceGetHeight(surface: *mut IoSurfaceOpaque) -> usize;
+    fn IOSurfaceGetBytesPerRow(surface: *mut IoSurfaceOpaque) -> usize;
 }
 
 /// One plane of a surface: where it lies in the allocation, and how its elements are shaped.
@@ -344,6 +367,148 @@ impl Surface {
         })
     }
 
+    /// A surface of one plane: `size` texels of `bytes_per_element` bytes, its rows
+    /// `bytes_per_row` apart, every byte `pad`.
+    ///
+    /// Made **without** a plane dictionary, which is what a rotated framebuffer-only target lies
+    /// over, so the surface answers `IOSurfaceGetPlaneCount` 0 and its layout is read back through
+    /// the top-level queries ([`Surface::is_as_asked`]) rather than the plane ones.
+    ///
+    /// No OSType is stated. A rotated target's format is Metal's, not CoreVideo's, and the surface
+    /// only has to hold bytes of the right shape; asking for a four-character code Apple would
+    /// reinterpret is how a layout stops being the one the case states.
+    pub fn single_plane(
+        size: [u32; 2],
+        bytes_per_element: u32,
+        bytes_per_row: u32,
+        pad: u8,
+    ) -> Result<Surface, String> {
+        // SAFETY: IOSurface's key constants, read once each.
+        let (width, height, element, row) = unsafe {
+            (
+                kIOSurfaceWidth,
+                kIOSurfaceHeight,
+                kIOSurfaceBytesPerElement,
+                kIOSurfaceBytesPerRow,
+            )
+        };
+        let values = [
+            number(u64::from(size[0])),
+            number(u64::from(size[1])),
+            number(u64::from(bytes_per_element)),
+            number(u64::from(bytes_per_row)),
+        ];
+        let properties = dictionary(&[
+            (width, values[0].0),
+            (height, values[1].0),
+            (element, values[2].0),
+            (row, values[3].0),
+        ]);
+        // SAFETY: a live dictionary of IOSurface's own keys, read during the call.
+        let made = unsafe { IOSurfaceCreate(properties.0) };
+        let surface = NonNull::new(made).map(Surface).ok_or_else(|| {
+            format!(
+                "IOSurfaceCreate answered null for {}x{} at {bytes_per_row} bytes a row",
+                size[0], size[1]
+            )
+        })?;
+        surface.pad_with(pad)?;
+        Ok(surface)
+    }
+
+    /// Whether a single-plane surface came out laid as it was asked for: its extent and its row
+    /// pitch.
+    ///
+    /// The same reason [`Surface::planes_are_as_asked`] exists, for the surfaces that have no
+    /// planes: `IOSurfaceCreate` reads the properties as a request, and a surface whose rows are
+    /// not where the case says they are would make a recorded layout a lie — every byte compared
+    /// at the wrong offset, with both sides agreeing about the wrong thing. It is a failure and
+    /// never a repitched copy.
+    ///
+    /// The allocation is allowed to be **larger** than the plane needs, and usually is: measured
+    /// here, a 16x64 plane asked for a 272-byte stride came back in 32,768 bytes, 15,360 more than
+    /// the 17,408 the plane holds. So the length is the case's stride times its rows, and
+    /// `IOSurfaceGetAllocSize` is only ever checked for being enough.
+    pub fn is_as_asked(&self, size: [u32; 2], bytes_per_row: u32) -> Result<(), String> {
+        let surface = self.as_ptr();
+        // SAFETY: top-level queries of a live surface made without a plane dictionary.
+        let (width, height, row, allocated) = unsafe {
+            (
+                IOSurfaceGetWidth(surface),
+                IOSurfaceGetHeight(surface),
+                IOSurfaceGetBytesPerRow(surface),
+                IOSurfaceGetAllocSize(surface),
+            )
+        };
+        let wanted = bytes_per_row as usize * size[1] as usize;
+        if (width, height, row) != (size[0] as usize, size[1] as usize, bytes_per_row as usize) {
+            return Err(format!(
+                "the surface came out {width}x{height} at {row} bytes a row, and the case states \
+                 {}x{} at {bytes_per_row}",
+                size[0], size[1]
+            ));
+        }
+        if allocated < wanted {
+            return Err(format!(
+                "the surface holds {allocated} bytes, and the case's plane is {wanted}"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Set every byte of the allocation to `pad`, so a byte no pass touched is visibly untouched
+    /// rather than zero.
+    fn pad_with(&self, pad: u8) -> Result<(), String> {
+        self.with_base(0, |base, length| {
+            // SAFETY: `length` bytes of the locked allocation, which the closure's caller checked.
+            unsafe { std::ptr::write_bytes(base, pad, length) };
+            Ok(())
+        })
+    }
+
+    /// `length` bytes of the allocation from its base, as the host reads a plane back.
+    pub fn read(&self, length: usize) -> Result<Vec<u8>, String> {
+        let mut bytes = vec![0u8; length];
+        self.with_base(READ_ONLY, |base, allocated| {
+            if allocated < length {
+                return Err(format!(
+                    "the surface holds {allocated} bytes, and the case's plane is {length}"
+                ));
+            }
+            // SAFETY: `length` bytes of the locked allocation into a vector of that many.
+            unsafe { std::ptr::copy_nonoverlapping(base, bytes.as_mut_ptr(), length) };
+            Ok(())
+        })?;
+        Ok(bytes)
+    }
+
+    /// Run `act` over the locked allocation's base and its length.
+    ///
+    /// One place that locks, so no caller can take a base address without the lock that makes
+    /// reading or writing it defined, and none can forget the unlock on an early return.
+    fn with_base(
+        &self,
+        options: u32,
+        act: impl FnOnce(*mut u8, usize) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let surface = self.as_ptr();
+        // SAFETY: a live surface; the base address is valid until the unlock below, and the
+        // closure is given the allocation's own length.
+        unsafe {
+            let locked = IOSurfaceLock(surface, options, core::ptr::null_mut());
+            if locked != 0 {
+                return Err(format!("IOSurfaceLock answered {locked}"));
+            }
+            let base = IOSurfaceGetBaseAddress(surface).cast::<u8>();
+            let answered = match base.is_null() {
+                true => Err("IOSurfaceGetBaseAddress answered null".to_owned()),
+                false => act(base, IOSurfaceGetAllocSize(surface)),
+            };
+            IOSurfaceUnlock(surface, options, core::ptr::null_mut());
+            answered
+        }
+    }
+
     /// The surface, as Metal's `newTextureWithDescriptor:iosurface:plane:` takes it.
     pub fn as_ptr(&self) -> *mut IoSurfaceOpaque {
         self.0.as_ptr()
@@ -392,33 +557,20 @@ impl Surface {
         Ok(())
     }
 
-    /// Write `bytes` from the surface's base, which is where a case's stand-in buffer begins.
+    /// Write `bytes` from the surface's base, which is where a case's stand-in buffer begins, and
+    /// where a rotated plane's first row begins too.
     pub fn fill(&self, bytes: &[u8]) -> Result<(), String> {
-        let surface = self.as_ptr();
-        // SAFETY: the surface is live; its allocation is checked to hold `bytes`, and the lock
-        // keeps the base address valid until the unlock.
-        unsafe {
-            let allocated = IOSurfaceGetAllocSize(surface);
+        self.with_base(0, |base, allocated| {
             if allocated < bytes.len() {
                 return Err(format!(
                     "the surface holds {allocated} bytes, and the case's buffer is {}",
                     bytes.len()
                 ));
             }
-            let locked = IOSurfaceLock(surface, 0, core::ptr::null_mut());
-            if locked != 0 {
-                return Err(format!("IOSurfaceLock answered {locked}"));
-            }
-            let base = IOSurfaceGetBaseAddress(surface).cast::<u8>();
-            let written = if base.is_null() {
-                Err("IOSurfaceGetBaseAddress answered null".to_owned())
-            } else {
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), base, bytes.len());
-                Ok(())
-            };
-            IOSurfaceUnlock(surface, 0, core::ptr::null_mut());
-            written
-        }
+            // SAFETY: `bytes.len()` bytes into the locked allocation, just checked to hold them.
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), base, bytes.len()) };
+            Ok(())
+        })
     }
 }
 

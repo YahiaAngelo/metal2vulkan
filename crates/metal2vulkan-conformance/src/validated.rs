@@ -578,6 +578,16 @@ impl<S: Side> Side for Announcing<S> {
         self.inner.depth_stencil_state(spec)
     }
 
+    fn write_plane(&mut self, target: Handle, bytes: &[u8]) -> Answer<()> {
+        self.at("write_plane");
+        self.inner.write_plane(target, bytes)
+    }
+
+    fn read_plane(&mut self, target: Handle) -> Answer<Vec<u8>> {
+        self.at("read_plane");
+        self.inner.read_plane(target)
+    }
+
     fn render(&mut self, work: &[crate::render::RenderWork]) -> Answer<PassOutcome> {
         self.at("render");
         self.inner.render(work)

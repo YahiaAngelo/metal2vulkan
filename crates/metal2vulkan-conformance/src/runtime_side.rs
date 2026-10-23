@@ -91,6 +91,15 @@ pub struct RuntimeSide<'a> {
     /// name for one of the pools above, and not another name for the depth and stencil states
     /// either.
     heaps: Vec<Heap>,
+    /// Which buffer stands for the surface behind a texture handle that lies over an IOSurface
+    /// plane.
+    ///
+    /// **A lookup, not a pool, and not another name for `heaps` or `buffers`.** The buffer it
+    /// names is a case's own and already lives in `buffers`; what this adds is the way back from
+    /// the texture handle to it, which a rotated target's plane read and write need and nothing
+    /// else does. There is no surface on this side at all — the stand-in buffer is the whole point
+    /// of the family, and is why these cases run where there is no IOSurface.
+    planes: Vec<(Handle, Buffer)>,
     /// The degrade-notice codes the device has delivered so far, which `announced` takes away.
     notices: Box<dyn FnMut() -> Vec<String> + 'a>,
 }
@@ -114,6 +123,7 @@ impl<'a> RuntimeSide<'a> {
             command_buffers_indirect: Vec::new(),
             depth_stencil_states: Vec::new(),
             heaps: Vec::new(),
+            planes: Vec::new(),
             notices: Box::new(notices),
         }
     }
@@ -1611,6 +1621,9 @@ impl Side for RuntimeSide<'_> {
     }
 
     fn target(&mut self, spec: &TargetSpec) -> Answer<Handle> {
+        if let Some(plane) = &spec.surface {
+            return self.surface_target(spec, plane);
+        }
         let mut descriptor = TextureDescriptor::texture_2d(
             spec.format,
             u64::from(spec.size[0]),
@@ -1779,6 +1792,35 @@ impl Side for RuntimeSide<'_> {
             .new_depth_stencil_state(spec)
             .map_err(Failure::from_error)?;
         Ok(keep(&mut self.depth_stencil_states, state))
+    }
+
+    fn write_plane(&mut self, target: Handle, bytes: &[u8]) -> Answer<()> {
+        let buffer = self.held_plane(target)?.clone();
+        if bytes.len() != buffer.length() as usize {
+            return Err(Failure::named(
+                "PlaneLength",
+                format!("{} bytes for a plane of {}", bytes.len(), buffer.length()),
+            ));
+        }
+        let contents = buffer.contents().ok_or_else(|| {
+            Failure::named("NoContents", "the plane's buffer is not host-visible")
+        })?;
+        // SAFETY: the buffer is of shared storage and at least `bytes.len()` bytes long, checked
+        // just above, and no command uses it now: a case writes the plane before it opens its pass.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), contents.as_ptr(), bytes.len()) };
+        Ok(())
+    }
+
+    fn read_plane(&mut self, target: Handle) -> Answer<Vec<u8>> {
+        let buffer = self.held_plane(target)?.clone();
+        let length = buffer.length() as usize;
+        let contents = buffer.contents().ok_or_else(|| {
+            Failure::named("NoContents", "the plane's buffer is not host-visible")
+        })?;
+        // SAFETY: the buffer's own `length` bytes of shared storage, and the caller waited for the
+        // command buffer that wrote them.
+        let bytes = unsafe { std::slice::from_raw_parts(contents.as_ptr(), length) };
+        Ok(bytes.to_vec())
     }
 
     fn render(&mut self, work: &[RenderWork]) -> Answer<PassOutcome> {
@@ -2584,6 +2626,84 @@ pub fn resource_options(storage: Storage) -> ResourceOptions {
 }
 
 /// Encode one render pass of a program into `command_buffer`, answering the first refusal it met.
+impl RuntimeSide<'_> {
+    /// The buffer standing for the surface behind the texture `target`.
+    fn held_plane(&self, target: Handle) -> Answer<&Buffer> {
+        self.planes
+            .iter()
+            .find(|(held, _)| *held == target)
+            .map(|(_, buffer)| buffer)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NotOverASurface",
+                    format!("texture {} lies over no surface plane", target.0),
+                )
+            })
+    }
+
+    /// A framebuffer-only rotated texture over a buffer standing for an IOSurface plane
+    /// (`Buffer::new_texture_with_iosurface_plane`), whose bytes start as the plane's pad byte.
+    ///
+    /// The runtime's stand-in is a buffer rather than a surface, which is the whole reason a case
+    /// of this family runs where there is no IOSurface at all. The **stride rule Metal asserts on**
+    /// is checked here too ([`crate::surface::PlaneSpec::unsafe_stride`]): not because the runtime
+    /// would end the process, but so the two sides refuse the same planes and a case cannot pass on
+    /// one side by asking a question the other was never allowed to be asked.
+    fn surface_target(
+        &mut self,
+        spec: &TargetSpec,
+        plane: &crate::surface::PlaneSpec,
+    ) -> Answer<Handle> {
+        if plane.unsafe_stride(spec.size) {
+            return Err(Failure::named(
+                "WouldEndMetalsProcess",
+                format!(
+                    "a plane of {} bytes a row behind a {} texel row",
+                    plane.row_pitch,
+                    spec.size[0] * plane.texel
+                ),
+            ));
+        }
+        let length = plane.length() as u64;
+        let buffer = self
+            .device
+            .new_buffer(length, ResourceOptions::shared())
+            .map_err(Failure::from_error)?;
+        let contents = buffer.contents().ok_or_else(|| {
+            Failure::named("NoContents", "the plane's buffer is not host-visible")
+        })?;
+        // SAFETY: the buffer was just made with `length` bytes of shared storage and no command
+        // uses it yet.
+        unsafe { std::ptr::write_bytes(contents.as_ptr(), plane.pad, length as usize) };
+        let mut descriptor = TextureDescriptor::texture_2d(
+            spec.format,
+            u64::from(spec.size[0]),
+            u64::from(spec.size[1]),
+            false,
+        );
+        let mut usage = TextureUsage::RENDER_TARGET;
+        if spec.shader_read {
+            usage |= TextureUsage::SHADER_READ;
+        }
+        if spec.shader_write {
+            usage |= TextureUsage::SHADER_WRITE;
+        }
+        descriptor.usage = usage;
+        descriptor.resource_options = ResourceOptions::shared();
+        descriptor.framebuffer_only = true;
+        descriptor.rotation = u64::from(plane.rotation);
+        let texture = buffer
+            .new_texture_with_iosurface_plane(
+                &descriptor,
+                metal2vulkan_runtime::IoSurfacePlane::new(0, u64::from(plane.row_pitch), false),
+            )
+            .map_err(Failure::from_error)?;
+        let handle = keep(&mut self.textures, texture);
+        self.planes.push((handle, buffer));
+        Ok(handle)
+    }
+}
+
 fn encode_pass(
     command_buffer: &CommandBuffer,
     pass: &RenderPass,
@@ -2729,6 +2849,10 @@ fn encode_pass(
             RenderStep::VisibilityResultMode { mode, offset } => encoder
                 .set_visibility_result_mode(*mode, *offset)
                 .map_err(Failure::from_error)?,
+            RenderStep::BlendColor(channels) => {
+                let [red, green, blue, alpha] = channels.0;
+                encoder.set_blend_color(red, green, blue, alpha);
+            }
             RenderStep::Draw {
                 primitive,
                 first,

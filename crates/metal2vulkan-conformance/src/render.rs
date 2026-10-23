@@ -78,6 +78,13 @@ pub struct TargetSpec {
     /// set an arbitrary code, so they go in through `replaceRegion:`, which no private texture
     /// takes.
     pub shared: bool,
+    /// A **framebuffer-only texture over one plane of an IOSurface**, rather than a texture of its
+    /// own memory ([`crate::surface::PlaneSpec`]).
+    ///
+    /// This is the one target shape that is not a plain descriptor: `framebufferOnly` and a
+    /// rotation are Apple SPI on the descriptor, and Metal makes such a texture over an IOSurface
+    /// alone. A side that cannot make one answers its own typed refusal.
+    pub surface: Option<crate::surface::PlaneSpec>,
 }
 
 impl TargetSpec {
@@ -90,6 +97,7 @@ impl TargetSpec {
             shader_read: true,
             shader_write: false,
             shared: false,
+            surface: None,
         }
     }
 
@@ -107,7 +115,17 @@ impl TargetSpec {
             shader_read: false,
             shader_write: false,
             shared: false,
+            surface: None,
         }
+    }
+
+    /// The target as a framebuffer-only texture over one plane of an IOSurface, of `plane`'s
+    /// rotation and stride. Such a texture is of shared storage, as the surface's bytes are.
+    #[must_use]
+    pub const fn over_plane(mut self, plane: crate::surface::PlaneSpec) -> Self {
+        self.surface = Some(plane);
+        self.shared = true;
+        self
     }
 
     /// The target of shared storage, so the host may write its texels with `replaceRegion:`.
@@ -142,6 +160,13 @@ impl TargetSpec {
         bytes.push(u8::from(self.shader_read));
         bytes.push(u8::from(self.shader_write));
         bytes.push(u8::from(self.shared));
+        match &self.surface {
+            Some(plane) => {
+                bytes.push(1);
+                bytes.extend(plane.words());
+            }
+            None => bytes.push(0),
+        }
         bytes
     }
 }
@@ -847,6 +872,41 @@ impl ViewportRect {
     }
 }
 
+/// `setBlendColor:green:blue:alpha:`'s four channels, which a `BlendColor` or `BlendAlpha` blend
+/// factor reads.
+///
+/// Its own type for the same reason [`ViewportRect`] is: two blend colours are the same blend
+/// colour when their four numbers hold the same bits, which is how the input fingerprint reads them
+/// too ([`BlendColorChannels::words`]). Comparing the bits rather than the numbers keeps the
+/// equality reflexive, so the type is honestly [`Eq`] despite holding `f32`s -- and [`RenderStep`]
+/// keeps its `Eq` derive, which a bare `[f32; 4]` in a variant would have cost it.
+#[derive(Clone, Copy, Debug)]
+pub struct BlendColorChannels(pub [f32; 4]);
+
+impl PartialEq for BlendColorChannels {
+    fn eq(&self, other: &Self) -> bool {
+        self.words() == other.words()
+    }
+}
+
+impl Eq for BlendColorChannels {}
+
+impl BlendColorChannels {
+    /// The four channels, red first.
+    pub const fn new(channels: [f32; 4]) -> Self {
+        Self(channels)
+    }
+
+    /// The words a case's input fingerprint covers: every channel by its bits, so a blend colour
+    /// that moves by one `f32` step is a change to the case's inputs.
+    pub fn words(&self) -> Vec<u8> {
+        self.0
+            .iter()
+            .flat_map(|channel| channel.to_bits().to_le_bytes())
+            .collect()
+    }
+}
+
 /// One command a case encodes into a render pass, in the order it lists them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RenderStep {
@@ -881,6 +941,10 @@ pub enum RenderStep {
     VertexBytes { bytes: Vec<u8>, index: u32 },
     /// `setViewport:`.
     Viewport(ViewportRect),
+    /// `setBlendColor:green:blue:alpha:`, the four channels a `BlendColor` or `BlendAlpha` factor
+    /// reads. An encoder call rather than a field of the pass, so a case states it where it makes
+    /// it.
+    BlendColor(BlendColorChannels),
     /// `setVisibilityResultMode:offset:`. A pass that sets one needs a visibility-result buffer
     /// ([`RenderPass::counting_into`]); setting it without one is a refusal a case may be asking
     /// about.
@@ -970,6 +1034,7 @@ impl RenderStep {
             RenderStep::FragmentSampler { .. } => "setFragmentSamplerState",
             RenderStep::VertexBytes { .. } => "setVertexBytes",
             RenderStep::Viewport(_) => "setViewport",
+            RenderStep::BlendColor(_) => "setBlendColor",
             RenderStep::VisibilityResultMode { .. } => "setVisibilityResultMode",
             RenderStep::Draw { .. } => "drawPrimitives",
             RenderStep::DrawIndexed { .. } => "drawIndexedPrimitives",
@@ -1004,6 +1069,7 @@ impl RenderStep {
                 bytes.extend(index.to_le_bytes());
             }
             RenderStep::Viewport(rect) => bytes.extend(rect.words()),
+            RenderStep::BlendColor(channels) => bytes.extend(channels.words()),
             RenderStep::VisibilityResultMode { mode, offset } => {
                 bytes.extend(mode.raw().to_le_bytes());
                 bytes.extend(offset.to_le_bytes());
