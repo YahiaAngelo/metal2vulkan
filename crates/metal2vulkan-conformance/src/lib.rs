@@ -69,6 +69,7 @@ pub mod texture_query;
 pub mod transcript;
 pub mod validated;
 pub mod verdict;
+pub mod watch;
 pub mod work;
 
 #[cfg(target_os = "macos")]
