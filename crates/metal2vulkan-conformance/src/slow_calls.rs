@@ -15,10 +15,30 @@
 //! own per-call totals moved a median 1.28x and as much as 2.43x, so a 2x margin would fire on the
 //! machine being busy while a 10x margin did not move a verdict.
 //!
-//! # The ledger is an expectation, not an allowlist, and it is held in both directions
+//! # Why this is a second file and not a row in the known-gaps ledger
 //!
-//! The same shape as [`crate::known_refusals`], for the same reason: a known gap that makes every
-//! run red teaches everyone to stop reading the report, which costs us the next real one.
+//! [`crate::known_gaps`] holds refusals and divergences in **one** file on an explicit argument:
+//! `AGENTS.md` forbids parallel string lists, and two ledgers for two kinds of correctness verdict
+//! would be exactly that. That argument has to be answered here rather than ignored, because this
+//! is a third file of the same shape.
+//!
+//! It is answered by the line the cost half already draws. A gap row is a **correctness** verdict
+//! on a case at a site, held by `replay`, which needs no Metal. A row here is a **cost** result on
+//! a call, held by `times`, which needs both legs on one machine. The counters half made the same
+//! split deliberately and for the same reason — its `CostVerdict` is `Within`/`Over`/`Unmeasured`
+//! rather than a new `Verdict` variant, because a count is ours and not Metal's and must never
+//! touch a correctness verdict. Folding a ratio and a band into a file whose rows name a verdict
+//! and a venue would put cost inside the correctness vocabulary, which is the thing both halves
+//! have been careful not to do.
+//!
+//! What it does share is the mechanism, and that is on purpose: a known gap that makes every run
+//! red teaches everyone to stop reading the report, which costs us the next real one.
+//!
+//! **If the round would rather have one file, this folds into it**: the row gains a verdict kind
+//! and a ratio, and `held` moves beside `known_gaps::held`. Nothing here depends on being separate
+//! except the argument above.
+//!
+//! # The ledger is an expectation, not an allowlist, and it is held in both directions
 //!
 //! - **A call over the margin that the ledger does not list fails the run** ([`Expectation::Unlisted`]).
 //! - **A listed call that has come back inside the band also fails the run**
