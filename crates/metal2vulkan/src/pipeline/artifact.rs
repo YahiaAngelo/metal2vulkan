@@ -1159,6 +1159,17 @@ pub enum PrecisionNote {
     /// allows, not the reference's. Quad operations are not concerned: a quad is the same 2x2
     /// pixels on every device.
     ///
+    /// A device whose fragment subgroup holds fewer than two quads runs it as a partly occupied
+    /// simdgroup (`Tier::PartialFragment`), which Metal permits: there the operation combines the
+    /// one quad's pixels alone, so a reduction ahead of a `discard_fragment` counts no quad the
+    /// discard drops, where an Apple GPU's 32-lane simdgroup counts the dropped quads of its 8x4
+    /// pixel block. Measured on arm64 lavapipe, whose fragment stage states one subgroup size,
+    /// 4 (`[minSubgroupSize, maxSubgroupSize]` is `[4, 4]`): the thirteen shapes of
+    /// `runtime_lane::discard_hoist` all answer the survivors, where Metal's answer counts the
+    /// dropped quads in four of them. No required subgroup size reaches 32 lanes there, and
+    /// nothing in Vulkan relates the invocations of two fragment subgroups, so no exact form
+    /// exists on such a device.
+    ///
     /// Validation derives no tolerance and no explanation from it: a difference stays a
     /// mismatch for review, deferred in C3 until an exact path exists.
     FragmentSimdgroupGrouping,

@@ -2707,7 +2707,11 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   (the profile does not take `DriverDeviation::MetalFragmentSimdgroups`): the operation runs over
   the pixels the device's rasterizer packs into a subgroup, so a sum, a ballot or a shuffle combines
   other pixels than on an Apple GPU, whose packing is measured, and the lane is the pixel's place in
-  the device's subgroup.
+  the device's subgroup. A device whose fragment subgroup holds fewer than two quads combines the
+  one quad's pixels alone, so a reduction ahead of a `discard_fragment` counts no quad the discard
+  drops, where an Apple GPU's simdgroup counts the dropped quads of its 8x4 pixel block; the
+  device states one fragment subgroup size, so no required size widens it, and no exact form
+  exists there.
 - `metal2vulkan-degrade-blended-write-rounding` (precision). `PrecisionNote::BlendedWriteRounding`:
   A fragment function writes a float to a half-float color channel of a render pipeline under
   `TextureWriteRoundingMode::NearestEven` that blends with factors other than one and zero
