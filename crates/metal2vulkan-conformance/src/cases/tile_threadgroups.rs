@@ -32,16 +32,19 @@
 //! the device's gap, and the run stops at that call, so the row reads as the refusal it is rather
 //! than as one divergence per cell a refused dispatch never wrote.
 
+use crate::allowance::{Allowance, Justification, Loosening};
 use crate::case::{
     Abort, Case, Failure, Handle, Input, MetalSource, Side, TextureRole, TextureSpec,
     TilePipelineSpec, TileStep,
 };
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
+use crate::replay::NOTICES_SITE;
 use crate::transcript::{
     Aspect, ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value,
 };
 use metal2vulkan::metal::PixelFormat;
+use metal2vulkan_runtime::Degradation;
 
 /// The tile's side, and the threadgroup's, as the probe drew them.
 const SIDE: u32 = 32;
@@ -81,6 +84,44 @@ const EVEN_SHAPES: &[&[[u32; 2]]] = &[
     &[[2, 18]],
     &[[14, 4]],
 ];
+
+/// The degrade notices a tile render pass may announce, each of which a case of this family
+/// loosens its notices site by. Metal announces none, so a notice our side announced is the one
+/// field of these cases that may differ at all — every record and every cell compares exactly.
+///
+/// It is a list and not a device query, because a case never branches on the device: a case asks by
+/// running and reads what came back. The list holds exactly the kinds measured on the two venues of
+/// this round, MoltenVK 1.4.2 on this M3 Max and lavapipe in the local container. A third venue
+/// that announces a kind not here fails the case until its kind is added, which is the model
+/// working: an announced difference nobody named is not an announced difference.
+pub const TILE_PASS_NOTICES: &[Degradation] = &[
+    // The attachments a tile dispatch stages are copied into its scratch before the dispatch and
+    // back after it (`render/tile_dispatch.rs`), which is what a tile dispatch costs on a device
+    // whose imageblock is not Metal's.
+    Degradation::TileDispatchScratch,
+    // The pass is split at the barrier the tile dispatch's scratch needs.
+    Degradation::RenderPassSplit,
+    // A render target of a format whose NaN encoding the device copies its own way: the blur's
+    // `RGBA16Float` attachment.
+    Degradation::DeviceNanEncoding,
+    // A stage's compiler rewrote its fast-math arithmetic as it made the pipeline.
+    Degradation::FastMathRewrites,
+];
+
+/// The allowances a case of this family keeps: one over its notices site per kind of
+/// [`TILE_PASS_NOTICES`], and nothing anywhere else.
+pub fn tile_notice_allowances() -> Vec<Allowance> {
+    TILE_PASS_NOTICES
+        .iter()
+        .map(|kind| {
+            Allowance::new(
+                format!("case/{NOTICES_SITE}/*"),
+                Loosening::Unchecked,
+                Justification::notice(*kind),
+            )
+        })
+        .collect()
+}
 
 /// The blur's source extent, its origin in it, and its color scale, as the lane's probe set them.
 const SOURCE: [u32; 2] = [160, 160];
@@ -636,6 +677,10 @@ impl Case for TileThreadgroups {
         MetalSource::Run
     }
 
+    fn allowances(&self) -> Vec<Allowance> {
+        tile_notice_allowances()
+    }
+
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
         let fixture = self.fixture();
         [RUNTIME_TEXT, METAL_TEXT]
@@ -974,10 +1019,15 @@ mod tests {
         }
     }
 
-    /// Every case of the family states its inputs and its tile descriptors, and none of them
-    /// carries an allowance: a tile dispatch's layout is exact or it is a bug.
+    /// Every case of the family states its inputs and its tile descriptors, and loosens **only**
+    /// its notices site, by a degrade notice it names.
+    ///
+    /// This is the family's whole tolerance story in one assertion: a tile dispatch's thread
+    /// layout, its records and its cells are exact or they are a bug, and the one field that may
+    /// differ from Metal is a notice our side announced. A case that ever loosened a record or a
+    /// cell would fail here.
     #[test]
-    fn every_case_states_its_inputs_and_loosens_nothing() {
+    fn every_case_loosens_its_notices_alone() {
         for case in all() {
             let inputs = case.inputs().unwrap();
             assert!(
@@ -987,9 +1037,26 @@ mod tests {
                 "{}: no tile pipeline in its inputs",
                 case.name()
             );
-            assert!(case.allowances().is_empty(), "{}", case.name());
             assert_eq!(case.metal_source(), MetalSource::Run);
             case.shaders().unwrap();
+            let allowances = case.allowances();
+            assert_eq!(allowances.len(), TILE_PASS_NOTICES.len(), "{}", case.name());
+            for allowance in &allowances {
+                assert_eq!(
+                    allowance.path,
+                    format!("case/{NOTICES_SITE}/*"),
+                    "{}: an allowance outside the notices site",
+                    case.name()
+                );
+                match &allowance.justified_by {
+                    Justification::Degradation(code) => assert!(
+                        TILE_PASS_NOTICES.iter().any(|kind| kind.code() == code),
+                        "{}: {code} is not a tile-pass notice",
+                        case.name()
+                    ),
+                    other => panic!("{}: an unexpected tolerance: {other:?}", case.name()),
+                }
+            }
         }
     }
 }
