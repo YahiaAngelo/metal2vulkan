@@ -5,11 +5,15 @@
 //! by its name and then its payload. A site a case loosened compares under its allowance, and only
 //! once the allowance's justification holds ([`crate::allowance`]).
 //!
-//! Where Metal answered a call and we returned a typed error, the site is a refusal rather than a
-//! divergence: the owner's rule keeps that outcome visible instead of burying it in a failure
-//! count.
+//! Where Metal answered a call and we returned a typed error, the site is a **refusal**, and no
+//! allowance can make it anything else. A refusal is its own verdict so that it stays visible
+//! rather than being buried in a failure count, and it is never compliant, because plain Metal is
+//! the behavioural oracle and the owner's standing rule is that what Metal allows, we must allow.
+//! A case may name what *documents* its refusal — Metal's own API validation refusing the same
+//! call is the one thing that can — and the justification is still checked, but it buys an
+//! explanation in the report and not a pass. See [`crate::validated`].
 
-use crate::allowance::{Allowance, Loosening, Unjustified};
+use crate::allowance::{Allowance, Loosening, Offered, Unjustified};
 use crate::diff::{Divergence, DivergenceKind, Side};
 use crate::transcript::{ByteLayout, Gaps, Node, Observed, Shape, Transcript, Value};
 
@@ -31,12 +35,20 @@ pub struct Announced {
 }
 
 /// A site where Metal answered a call and we returned a typed error.
+///
+/// Never compliant, whatever the case names at the site. A refusal of something plain Metal does
+/// is a gap of ours, and the suite's job is to say so rather than to launder it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Refusal {
     /// The site, as node names from the root.
     pub path: String,
     /// Our typed error, as the report prints it.
     pub ours: String,
+    /// What the case named to **document** the refusal, where it named something and that thing
+    /// holds ([`Allowance::justified_by`]): the words of Metal's own API validation refusing the
+    /// same call, typically. It explains the row; it does not excuse it. `None` where the case
+    /// named nothing, which is a refusal nobody has accounted for at all.
+    pub documented_by: Option<String>,
 }
 
 /// An allowance that does not hold: the case names it, and why it cannot be used.
@@ -59,6 +71,25 @@ pub struct Comparison {
 }
 
 impl Comparison {
+    /// Note that the allowance at `path` does not hold, unless the same fault is already held.
+    ///
+    /// The same allowance is examined twice — once before the walk, so an allowance naming a
+    /// justification that is gone fails whether or not it fires, and again where it does fire —
+    /// and one fault reported twice reads as two.
+    fn note_bad(&mut self, path: &str, why: Unjustified) {
+        if self
+            .bad_allowances
+            .iter()
+            .any(|held| held.path == path && held.why == why)
+        {
+            return;
+        }
+        self.bad_allowances.push(BadAllowance {
+            path: path.to_owned(),
+            why,
+        });
+    }
+
     /// Whether every field matched exactly and every allowance held unused.
     pub fn is_exact(&self) -> bool {
         self.announced.is_empty()
@@ -68,15 +99,15 @@ impl Comparison {
     }
 }
 
-/// Compare `ours` against the recorded `metal`, under a case's `allowances`, with `announced` the
-/// degrade-notice codes our run delivered.
+/// Compare `ours` against the recorded `metal`, under a case's `allowances`, with `offered` what
+/// the run and its recording offer to justify a difference.
 pub fn compare(
     metal: &Transcript,
     ours: &Transcript,
     allowances: &[Allowance],
-    announced: &[String],
+    offered: Offered<'_>,
 ) -> Comparison {
-    compare_run(metal, ours, allowances, announced, false)
+    compare_run(metal, ours, allowances, offered, false)
 }
 
 /// [`compare`] where `stopped` says the run stopped at a call that did not answer.
@@ -88,34 +119,33 @@ pub fn compare_run(
     metal: &Transcript,
     ours: &Transcript,
     allowances: &[Allowance],
-    announced: &[String],
+    offered: Offered<'_>,
     stopped: bool,
 ) -> Comparison {
     let mut found = Comparison::default();
     // Every allowance names a justification that must exist, whether or not the allowance fires.
-    // A case that keeps an allowance for a notice kind or a documented difference that has since
-    // gone fails here rather than comparing under it.
+    // A case that keeps an allowance for a notice kind, a documented difference or a Metal
+    // validation check that has since gone fails here rather than comparing under it.
     for allowance in allowances {
         let missing = match &allowance.justified_by {
             justification @ crate::allowance::Justification::Degradation(code) => {
-                match justification.unjustified(std::slice::from_ref(code)) {
+                let announced = std::slice::from_ref(code);
+                match justification.unjustified(&Offered::new(announced, offered.metal_validation))
+                {
                     // The run's own notices are checked where the allowance fires, not here.
                     Some(Unjustified::NoticeNotAnnounced(_)) | None => None,
                     other => other,
                 }
             }
-            justification => justification.unjustified(announced),
+            justification => justification.unjustified(&offered),
         };
         if let Some(why) = missing {
-            found.bad_allowances.push(BadAllowance {
-                path: allowance.path.clone(),
-                why,
-            });
+            found.note_bad(&allowance.path, why);
         }
     }
     let mut walk = Walk {
         allowances,
-        announced,
+        offered,
         stopped,
         found: &mut found,
     };
@@ -123,10 +153,22 @@ pub fn compare_run(
     found
 }
 
+/// Whether the sides' answers at one site are Metal answering a call and us refusing it.
+fn refused(metal: &Value, ours: &Value) -> bool {
+    matches!(
+        (metal, ours),
+        (
+            Value::Variant { name: recorded, .. },
+            Value::Variant { name: read, .. },
+        ) if recorded == "Ok" && read == "Err"
+    )
+}
+
 /// The comparison's state as it descends.
 struct Walk<'a> {
     allowances: &'a [Allowance],
-    announced: &'a [String],
+    /// What the run and its recording offer to justify a difference.
+    offered: Offered<'a>,
     /// Whether the run stopped before the end: a site only Metal reached is then no divergence.
     stopped: bool,
     found: &'a mut Comparison,
@@ -300,6 +342,12 @@ impl Walk<'_> {
         if metal == ours {
             return;
         }
+        // A refusal is settled before any allowance is consulted, because no allowance may turn
+        // one into a pass: Metal answered the call and we did not.
+        if refused(metal, ours) {
+            self.refusal(path, ours);
+            return;
+        }
         // An allowance over the whole site holds whatever kind of value moved there, so a case can
         // justify a notice it announced or a set that gained a member, not only a number that
         // drifted.
@@ -372,11 +420,6 @@ impl Walk<'_> {
             ) => {
                 if recorded == read {
                     self.value(&format!("{path}/{read}"), expected, actual);
-                } else if recorded == "Ok" && read == "Err" {
-                    self.found.refusals.push(Refusal {
-                        path: path.to_owned(),
-                        ours: crate::diff::print(actual),
-                    });
                 } else {
                     self.found.divergences.push(Divergence::new(
                         path,
@@ -427,6 +470,43 @@ impl Walk<'_> {
         }
     }
 
+    /// Note that we refused a call Metal answered, with whatever the case named to document it.
+    ///
+    /// The case's own allowances at the site are still held to their justifications: a site may
+    /// name several, so the documentation is the first whose justification **holds**, as
+    /// [`Walk::allowed`] picks one. Where none holds, the first that does not is noted as a fault
+    /// of its own, because a case must not claim an explanation it cannot show. What a
+    /// justification cannot do is remove the row from [`Comparison::refusals`].
+    fn refusal(&mut self, path: &str, ours: &Value) {
+        let mut documented_by = None;
+        let mut first_unjustified = None;
+        for allowance in self
+            .allowances
+            .iter()
+            .filter(|allowance| allowance.covers(path))
+        {
+            match allowance.justified_by.unjustified(&self.offered) {
+                None => {
+                    documented_by = Some(allowance.justified_by.describe());
+                    break;
+                }
+                Some(why) => {
+                    first_unjustified = first_unjustified.or(Some((allowance.path.clone(), why)));
+                }
+            }
+        }
+        if documented_by.is_none() {
+            if let Some((path, why)) = first_unjustified {
+                self.found.note_bad(&path, why);
+            }
+        }
+        self.found.refusals.push(Refusal {
+            path: path.to_owned(),
+            ours: crate::diff::print(ours),
+            documented_by,
+        });
+    }
+
     /// Note that the sides observed different kinds of value at one site.
     fn mismatched_kind(&mut self, path: &str, metal: &Value, ours: &Value) {
         self.found.divergences.push(Divergence::new(
@@ -457,7 +537,7 @@ impl Walk<'_> {
         let mut first_unjustified = None;
         let mut held = None;
         for allowance in covering {
-            match allowance.justified_by.unjustified(self.announced) {
+            match allowance.justified_by.unjustified(&self.offered) {
                 None => {
                     held = Some(allowance);
                     break;
@@ -469,10 +549,8 @@ impl Walk<'_> {
         }
         let Some(allowance) = held else {
             let (allowance, why) = first_unjustified.expect("a covering allowance");
-            self.found.bad_allowances.push(BadAllowance {
-                path: allowance.path.clone(),
-                why,
-            });
+            let path = allowance.path.clone();
+            self.found.note_bad(&path, why);
             return false;
         };
         let difference = crate::allowance::difference(metal, ours);

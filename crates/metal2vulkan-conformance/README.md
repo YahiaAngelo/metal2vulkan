@@ -14,10 +14,73 @@ Comparison is exact by default. A loosened field names either a degrade notice's
 notice did not fire. A site may name several, because a notice is announced once per device per
 kind: the difference is justified where any of them holds.
 
+A site where plain Metal answered a call and we returned a typed error is a **refusal**, and no
+allowance can make it anything else: it counts in its own verdict and is never compliant.
+
+<<<<<<< HEAD
 A replay holds the runtime to exact answers. `conformance replay --default-policy` replays under
 the runtime's own defaults instead — the fast form of every speed-for-accuracy choice, which is
 what a consumer runs — so the suite can say whether a difference is the policy's or the
 implementation's.
+=======
+## The known-refusals ledger
+
+`known-refusals.tsv` holds the refusals we have written down as open gaps. Each row is an **open
+bug with a todo behind it** — not an accepted difference, not permission for anything. It exists so
+that one case holding a known gap visible does not make every run red, because a report that is
+always red is a report nobody reads, and that would cost us the next real refusal.
+
+It changes the **exit status** and nothing else. Every row is still printed as a `Refused` row, with
+our error and with Metal's own words where its API validation refuses the call too, and still
+counted in the `refused` number.
+
+It is an expectation, not an allowlist, and `replay` holds it in **both** directions:
+
+- a refusal the ledger does not list fails the run — a new gap appeared;
+- a row the ledger lists that is no longer refused **also** fails the run, saying the gap looks
+  fixed and the row must go.
+
+That second direction is the point: closing a gap forces the ledger edit, so a row cannot outlive
+the bug it stands for and the file cannot rot into a silencer. A row is held only against the cases
+a run selected, so replaying one case does not read every other row as fixed.
+>>>>>>> dad2932 (Expect the refusals we have written down, in both directions)
+
+## Two Metal oracles
+
+Each recording holds **two** Metal facts, and never collapses them.
+
+**Plain Metal is the behavioural oracle**, because that is how a consumer runs the runtime: its
+transcript is what comparison uses, and matching it is what the suite asks for.
+
+**The same case under Metal's own API validation layer is a second recorded fact**
+(`Validated::{Ran, Stopped, NotRun}`). It is never compared with our behaviour.
+
+**A validated stop is not Metal refusing the call.** Where plain Metal answers and we return a
+typed error, that is a gap of ours whatever its validation layer thinks, so the row is `Refused`
+and is not compliant. The validated fact may **document** such a refusal
+(`Justification::MetalValidation`) — a refusal Metal's own validation also refuses reads
+differently from one Metal is happy with, and the first is the better bug report — and it is held
+to its evidence: the case names the words Metal's validation used, and the claim holds only where
+the recording's message contains them. An unexercised leg documents nothing. So the claim buys an
+explanation in the report, never a pass, and it cannot be made at all unless the validated leg
+really ran.
+
+`record` takes the validated leg in a **child process** of the command, under `MTL_DEBUG_LAYER=1`
+with `MTL_DEBUG_LAYER_ERROR_MODE=nslog`. Two reasons, both measured rather than assumed:
+
+- Metal reads `MTL_DEBUG_LAYER` as it initialises, so one process cannot run both legs.
+- Metal's validation reports by assertion, and its **default** error mode ends the process.
+  `nslog` is the one mode that reports every check and lets the call run, so the suite's own
+  process never has the layer on and no assertion of Apple's can end a record run.
+
+The child announces each call it makes on its standard error, so Metal's own output and those
+markers interleave in order and each complaint is attributed to the call that provoked it. Nothing
+is matched against Apple's wording, so a check in a release the suite has not seen is still
+recorded. `NSLog`'s timestamp and process prefix are stripped, because a recording holds nothing
+host-specific.
+
+A Metal-less host reads the validated fact out of the recording like everything else, so the axis
+is as portable as the rest of a case.
 
 ## This crate is not the validation suite
 
@@ -47,8 +110,10 @@ edits one.
 | `case` | The case API and the vocabulary both sides answer in |
 | `runtime_side` | `metal2vulkan-runtime` as a side |
 | `metal_side` | Native Metal as a side (macOS only), which record mode runs |
+| `validated` | The second oracle: the same case under Metal's API validation layer, in a child process |
 | `record`, `replay` | Taking Metal's answer, and comparing a run against it |
 | `report` | Verdict counts and the matrix of case against venue |
+<<<<<<< HEAD
 | `work`, `runtime_work` | The copy-and-fill vocabulary a case states as data, and the runtime side that runs it |
 | `measured` | The committed Metal measurements a ported case reads, under the public fixtures |
 | `cases` | The case set itself, one module per family |
@@ -73,3 +138,6 @@ edits one.
 A carried answer is our own measurement of this chip, stated in the shape the case emits, and its
 case forbids re-recording with the reason why. Record mode refuses such a case rather than
 pretending it can ask Metal again.
+=======
+| `known_refusals` | The ledger of open gaps, held in both directions; it sets the exit status, never a verdict |
+>>>>>>> dad2932 (Expect the refusals we have written down, in both directions)

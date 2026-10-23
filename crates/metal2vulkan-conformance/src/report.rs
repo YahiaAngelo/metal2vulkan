@@ -3,6 +3,7 @@
 //! Errors are counted apart from verdicts. A stale recording is not a verdict, and printing it as
 //! one would let it read as coverage.
 
+use crate::known_refusals::{against, Expectation, KnownRefusal};
 use crate::replay::{ReplayError, Replayed};
 use crate::verdict::Verdict;
 use std::collections::{BTreeMap, BTreeSet};
@@ -72,6 +73,24 @@ impl Report {
         self.errors.is_empty() && self.rows.iter().all(|row| row.verdict.is_compliant())
     }
 
+    /// How the run's refusals stand against the known-refusals `ledger`: nothing where the refused
+    /// set is exactly the ledger's rows over the cases the run selected, and otherwise every way
+    /// they differ ([`crate::known_refusals`]).
+    ///
+    /// This is what the command exits by. It does not touch a verdict: a refusal the ledger
+    /// expects is still a `Refused` row in the counts and is still printed in full, because the
+    /// ledger's rows are open bugs rather than accepted differences.
+    pub fn unexpected(&self, ledger: &[KnownRefusal]) -> Vec<Expectation> {
+        let mut found = against(&self.rows, ledger);
+        for error in &self.errors {
+            found.push(Expectation::NotLedgerable {
+                case: "a case that could not be replayed".to_owned(),
+                why: error.to_string(),
+            });
+        }
+        found
+    }
+
     /// Every row whose verdict is not one a compliant run may hold, for a test's failure message.
     pub fn failures(&self) -> Vec<&Replayed> {
         self.rows
@@ -118,6 +137,21 @@ impl Report {
             }
         }
         out.push_str(&self.matrix());
+        // Every justified difference is printed, not only the failures. A tolerance that is never
+        // read is a tolerance nobody is checking, and a refusal that Metal's own API validation
+        // justifies must not read as a bare "announced" cell: the owner's rule is that a refusal
+        // stays visible.
+        for row in &self.rows {
+            if let Verdict::Announced { fields } = &row.verdict {
+                out.push_str(&format!(
+                    "\n{} on {} differed, justified\n",
+                    row.case, row.venue
+                ));
+                for field in fields {
+                    out.push_str(&format!("  {field}\n"));
+                }
+            }
+        }
         for error in &self.errors {
             out.push_str(&format!("\nerror: {error}\n"));
         }

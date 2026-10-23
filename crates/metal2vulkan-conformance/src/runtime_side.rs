@@ -9,10 +9,11 @@
 
 use crate::case::{
     Answer, Bindings, CommandDraw, Failure, Fill, Handle, IndirectReadBack, MeshCommand,
-    MeshFunctions, MeshStep, PassOutcome, PlaneTexture, ShaderSource, Side, StageInRegion,
-    StageInput, Venue,
+    MeshFunctions, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, ShaderSource,
+    Side, StageInRegion, StageInput, Venue,
 };
 use crate::transcript::{Negative, Value};
+use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor};
 use metal2vulkan::metal::{
     BarrierScope, IndexType, IndirectCommandType, PixelFormat, PrimitiveType, RenderStages,
     ResourceUsage, TextureUsage,
@@ -25,8 +26,9 @@ use metal2vulkan_runtime::{
     Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue, ComputePipelineState,
     Device, DrawPrimitiveType, IndirectCommand, IndirectCommandBuffer,
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
-    LoadAction, PipelineOptions, Region, RenderPassDescriptor, RenderPipelineState,
-    ResourceOptions, ResourceRef, Size, StoreAction, Texture, TextureDescriptor,
+    LoadAction, PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor,
+    RenderPipelineState, ResourceOptions, ResourceRef, Size, StoreAction, Texture,
+    TextureDescriptor,
 };
 use std::time::Duration;
 
@@ -42,6 +44,9 @@ pub struct RuntimeSide<'a> {
     pipelines: Vec<ComputePipelineState>,
     buffers: Vec<Buffer>,
     textures: Vec<Texture>,
+    /// The rasterization-rate maps the case has made. Its own pool: a rate map is its own
+    /// runtime object, not another name for one of the pools above.
+    rate_maps: Vec<RasterizationRateMap>,
     command_buffers: Vec<CommandBuffer>,
     /// The mesh render pipeline states the case has made.
     mesh_pipelines: Vec<RenderPipelineState>,
@@ -62,6 +67,7 @@ impl<'a> RuntimeSide<'a> {
             pipelines: Vec::new(),
             buffers: Vec::new(),
             textures: Vec::new(),
+            rate_maps: Vec::new(),
             command_buffers: Vec::new(),
             mesh_pipelines: Vec::new(),
             command_buffers_indirect: Vec::new(),
@@ -125,6 +131,13 @@ impl<'a> RuntimeSide<'a> {
         self.textures
             .get(handle.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+    }
+
+    /// The rasterization-rate map `handle` names.
+    fn held_rate_map(&self, handle: Handle) -> Answer<&RasterizationRateMap> {
+        self.rate_maps
+            .get(handle.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("rate map {}", handle.0)))
     }
 
     /// One command buffer with one compute encoder: the pipeline set, `bindings` bound at 0 up,
@@ -951,6 +964,49 @@ impl Side for RuntimeSide<'_> {
             Some(failure) => Err(failure),
             None => Ok(status_value(command_buffer.status())),
         }
+    }
+
+    fn rate_map(&mut self, request: &RateMapRequest<'_>) -> Answer<Handle> {
+        let mut descriptor = RateMapDescriptor::new(request.screen);
+        descriptor.label = request.label.map(str::to_owned);
+        descriptor.layers = request
+            .layers
+            .iter()
+            .map(|layer| {
+                RateMapLayerDescriptor::new(layer.horizontal.clone(), layer.vertical.clone())
+            })
+            .collect();
+        let map = self
+            .device
+            .new_rasterization_rate_map(&descriptor)
+            .map_err(Failure::from_error)?;
+        Ok(keep(&mut self.rate_maps, map))
+    }
+
+    fn rate_map_facts(&mut self, map: Handle, layers: &[u64]) -> Answer<RateMapFacts> {
+        let map = self.held_rate_map(map)?;
+        let size = |size: Size| [size.width, size.height, size.depth];
+        let sized = map.parameter_buffer_size_and_align();
+        Ok(RateMapFacts {
+            label: map.label().map(str::to_owned),
+            screen_size: size(map.screen_size()),
+            physical_granularity: size(map.physical_granularity()),
+            layer_count: map.layer_count(),
+            physical_sizes: layers
+                .iter()
+                .map(|layer| size(map.physical_size_for_layer(*layer)))
+                .collect(),
+            parameter_size: sized.size,
+            parameter_align: sized.align,
+        })
+    }
+
+    fn copy_rate_map_parameters(&mut self, map: Handle, into: Handle, offset: u64) -> Answer<()> {
+        let buffer = self.held(into)?.clone();
+        let map = self.held_rate_map(map)?;
+        map.copy_parameter_data_to_buffer(&buffer, offset)
+            .map_err(Failure::from_error)?;
+        Ok(())
     }
 }
 

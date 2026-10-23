@@ -4,12 +4,15 @@
 //! increment allowed: one compares the bytes a compute pass wrote, the other a typed answer a
 //! getter gives.
 //!
-//! The rest are ports of the runtime lanes whose expectation is already a transcript of a Metal
-//! probe's printed lines, which is what made them the first batch. Where Metal's whole path is
-//! public, record mode **runs** the probe rather than copying it: the mesh draws, the mesh draws
+//! Most of the rest are ports of the runtime lanes whose expectation is already a transcript of a
+//! Metal probe's printed lines, which is what made them the first batch. Where Metal's whole path
+//! is public, record mode **runs** the probe rather than copying it: the mesh draws, the mesh draws
 //! behind a barrier, and the mesh draws of an indirect command buffer's own-state commands. Where
 //! it is not, the case carries our own measurement and forbids re-recording: the private texture
 //! fills, and an indirect command's read-back through private getters.
+//!
+//! [`rate_maps`] is the family where Metal's own API validation layer and plain Metal disagree,
+//! and it is what exercises the recording's second oracle ([`crate::validated`]).
 //!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
@@ -20,6 +23,7 @@ pub mod mesh_barriers;
 pub mod mesh_commands;
 pub mod mesh_draws;
 pub mod pass_bytes;
+pub mod rate_maps;
 pub mod sample_fills;
 pub mod stage_in_regions;
 pub mod surface_fills;
@@ -65,6 +69,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.push(Box::new(mesh_commands::own_state_commands()));
     cases.push(Box::new(surface_fills::over_planes_and_buffers()));
+    for case in rate_maps::all() {
+        cases.push(Box::new(case));
+    }
     cases
 }
 

@@ -13,12 +13,21 @@
 //!   where that entry is gone or the notice did not fire ([`allowance`]).
 //! - The **verdicts** stay apart ([`verdict`]): exact, announced, divergent, refused, unrecorded,
 //!   and per venue "lacks the device feature".
+//! - **Two Metal oracles** ([`validated`]). Plain Metal is the behavioural oracle, because that is
+//!   how a consumer runs the runtime. The same case under Metal's own API validation layer is a
+//!   second recorded fact, taken in a child process so no assertion of Apple's can end a record
+//!   run, and it is the only thing that may justify our refusing a call plain Metal answered.
 //! - **Record mode** ([`record`]) takes Metal's answer on this Mac and writes one recording per
 //!   case, keyed by chip, macOS build and Metal level, with the runs behind it and the set of
 //!   outcomes where behaviour varies. **Replay** ([`mod@replay`]) reads the recording, runs our side
 //!   and compares, and needs no Metal at all.
 //! - A **report** ([`report`]) over a selection gives the verdict counts and the matrix of case
 //!   against venue.
+//! - A **known-refusals ledger** ([`known_refusals`]) holds the gaps we have written down, so one
+//!   case that keeps an open bug visible does not make every run red. It changes the exit status
+//!   and nothing else: the row still reads `Refused` and still counts. It is an expectation, not
+//!   an allowlist — a refusal it does not list fails the run, and a row it lists that is no longer
+//!   refused fails the run too, so a row cannot outlive the bug it stands for.
 //!
 //! What stays out, because Metal has no counterpart and a host without Metal can have no answer:
 //! internal counters, and which variant or pipeline the implementation chose. Those stay device
@@ -35,6 +44,7 @@ pub mod compare;
 pub mod device;
 pub mod diff;
 pub mod fixture;
+pub mod known_refusals;
 pub mod measured;
 pub mod record;
 pub mod recording;
@@ -44,6 +54,7 @@ pub mod run;
 pub mod runtime_side;
 pub mod runtime_work;
 pub mod transcript;
+pub mod validated;
 pub mod verdict;
 pub mod work;
 

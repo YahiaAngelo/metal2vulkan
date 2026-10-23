@@ -196,7 +196,13 @@ pub fn print(value: &Value) -> String {
         Value::Int(word) => word.to_string(),
         Value::Float { bits, width } => format!("{width:?} {bits:#x}"),
         Value::Bytes(bytes) => format!("{} bytes", bytes.len()),
-        Value::Lines(lines) => format!("{} lines", lines.len()),
+        // One line is printed, because a typed error's payload is one line and a refusal's row is
+        // a bug report: "1 lines" told a reader nothing they could act on. More than one stays a
+        // count, so a long probe transcript does not fill the report.
+        Value::Lines(lines) => match lines.as_slice() {
+            [only] => format!("{only:?}"),
+            many => format!("{} lines", many.len()),
+        },
         Value::Set(words) => format!("{words:?}"),
         Value::List(values) => format!("{} values", values.len()),
         Value::Variant { name, payload } => match **payload {

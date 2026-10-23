@@ -14,12 +14,14 @@
 
 use crate::case::{
     Answer, Bindings, CommandDraw, Failure, Handle, MeshCommand, MeshFunctions, MeshStep,
-    PassOutcome, ShaderSource, Side, StageInRegion, StageInput, Venue,
+    PassOutcome, RateMapFacts, RateMapRequest, ShaderSource, Side, StageInRegion, StageInput,
+    Venue,
 };
 use crate::transcript::Value;
 use metal2vulkan::metal::PixelFormat;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
+use objc2::AnyThread;
 use objc2_foundation::{NSString, NSURL};
 use objc2_metal::{
     MTLAttributeFormat, MTLBarrierScope, MTLBuffer, MTLClearColor, MTLCommandBuffer,
@@ -27,11 +29,12 @@ use objc2_metal::{
     MTLComputePipelineDescriptor, MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDevice,
     MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
     MTLIndirectCommandType, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction,
-    MTLMeshRenderPipelineDescriptor, MTLOrigin, MTLPipelineOption, MTLPixelFormat, MTLRegion,
-    MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineState, MTLRenderStages,
-    MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSize, MTLStageInputOutputDescriptor,
-    MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor,
-    MTLTextureUsage,
+    MTLMeshRenderPipelineDescriptor, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
+    MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
+    MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
+    MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage,
+    MTLSize, MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode, MTLStoreAction,
+    MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -51,6 +54,9 @@ pub struct MetalSide {
     mesh_pipelines: Vec<Retained<ProtocolObject<dyn MTLRenderPipelineState>>>,
     /// The indirect command buffers the case has made.
     command_buffers_indirect: Vec<Retained<ProtocolObject<dyn MTLIndirectCommandBuffer>>>,
+    /// The rasterization-rate maps the case has made. Its own pool: a rate map is its own
+    /// Metal object, not another name for one of the pools above.
+    rate_maps: Vec<Retained<ProtocolObject<dyn MTLRasterizationRateMap>>>,
     /// The scratch directory the metallibs are built in, removed when the side is dropped.
     scratch: Scratch,
 }
@@ -73,6 +79,7 @@ impl MetalSide {
             command_buffers: Vec::new(),
             mesh_pipelines: Vec::new(),
             command_buffers_indirect: Vec::new(),
+            rate_maps: Vec::new(),
             scratch: Scratch::new()?,
         })
     }
@@ -91,6 +98,17 @@ impl MetalSide {
             .get(handle.0 as usize)
             .map(|texture| &**texture)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+    }
+
+    /// The rasterization-rate map `handle` names.
+    fn held_rate_map(
+        &self,
+        handle: Handle,
+    ) -> Answer<&ProtocolObject<dyn MTLRasterizationRateMap>> {
+        self.rate_maps
+            .get(handle.0 as usize)
+            .map(|map| &**map)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("rate map {}", handle.0)))
     }
 
     /// One command buffer with one compute encoder: the pipeline set, `bindings` bound at 0 up,
@@ -712,6 +730,93 @@ impl Side for MetalSide {
             status,
             error,
         })
+    }
+
+    fn rate_map(&mut self, request: &RateMapRequest<'_>) -> Answer<Handle> {
+        let descriptor = unsafe {
+            MTLRasterizationRateMapDescriptor::rasterizationRateMapDescriptorWithScreenSize(
+                MTLSize {
+                    width: request.screen[0] as usize,
+                    height: request.screen[1] as usize,
+                    depth: 0,
+                },
+            )
+        };
+        if let Some(label) = request.label {
+            descriptor.setLabel(Some(&NSString::from_str(label)));
+        }
+        for (at, layer) in request.layers.iter().enumerate() {
+            // `initWithSampleCount:horizontal:vertical:` reads `width` samples from `horizontal`
+            // and `height` from `vertical`, and answers nil for an axis of none, which is why
+            // `RateMapLayer` holds at least one sample on each.
+            let count = MTLSize {
+                width: layer.horizontal.len(),
+                height: layer.vertical.len(),
+                depth: 0,
+            };
+            // SAFETY: each pointer is to at least as many floats as its axis's count, and Metal
+            // copies the samples during the call.
+            let made = unsafe {
+                MTLRasterizationRateLayerDescriptor::initWithSampleCount_horizontal_vertical(
+                    MTLRasterizationRateLayerDescriptor::alloc(),
+                    count,
+                    std::ptr::NonNull::new(layer.horizontal.as_ptr().cast_mut())
+                        .ok_or_else(|| Failure::named("NoSamples", "a layer axis of none"))?,
+                    std::ptr::NonNull::new(layer.vertical.as_ptr().cast_mut())
+                        .ok_or_else(|| Failure::named("NoSamples", "a layer axis of none"))?,
+                )
+            };
+            // SAFETY: the index is inside the array the descriptor grows on demand.
+            unsafe { descriptor.setLayer_atIndex(Some(&made), at) };
+        }
+        let map = self
+            .device
+            .newRasterizationRateMapWithDescriptor(&descriptor)
+            .ok_or_else(|| Failure::named("NewRasterizationRateMap", "returned nil".to_owned()))?;
+        Ok(keep(&mut self.rate_maps, map))
+    }
+
+    fn rate_map_facts(&mut self, map: Handle, layers: &[u64]) -> Answer<RateMapFacts> {
+        let map = self.held_rate_map(map)?;
+        let size = |size: MTLSize| [size.width as u64, size.height as u64, size.depth as u64];
+        let sized = map.parameterBufferSizeAndAlign();
+        Ok(RateMapFacts {
+            label: map.label().map(|label| label.to_string()),
+            screen_size: size(map.screenSize()),
+            physical_granularity: size(map.physicalGranularity()),
+            layer_count: map.layerCount() as u64,
+            // SAFETY: `physicalSizeForLayer:` is not bounds-checked, and the case asks only about
+            // layer indices Metal's own answers are measured at.
+            physical_sizes: layers
+                .iter()
+                .map(|layer| size(unsafe { map.physicalSizeForLayer(*layer as usize) }))
+                .collect(),
+            parameter_size: sized.size as u64,
+            parameter_align: sized.align as u64,
+        })
+    }
+
+    fn copy_rate_map_parameters(&mut self, map: Handle, into: Handle, offset: u64) -> Answer<()> {
+        let buffer: Retained<ProtocolObject<dyn MTLBuffer>> = Retained::from(self.held(into)?);
+        let map = self.held_rate_map(map)?;
+        if u64::try_from(buffer.length()).unwrap_or(u64::MAX)
+            < offset + map.parameterBufferSizeAndAlign().size as u64
+        {
+            // Metal writes past the buffer's length here, so the case never asks it to: a short
+            // buffer is refused before the copy rather than measured.
+            return Err(Failure::named(
+                "PastTheBuffer",
+                format!(
+                    "{} parameter bytes at {offset} of a buffer of {}",
+                    map.parameterBufferSizeAndAlign().size,
+                    buffer.length()
+                ),
+            ));
+        }
+        // SAFETY: the buffer is of shared storage, is long enough for the parameter data at the
+        // offset, is kept alive by `self.buffers`, and no command uses it.
+        unsafe { map.copyParameterDataToBuffer_offset(&buffer, offset as usize) };
+        Ok(())
     }
 }
 

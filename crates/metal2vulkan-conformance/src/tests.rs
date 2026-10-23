@@ -2,7 +2,9 @@
 //! transcript, the comparison, the justification rule, the verdicts, the recording's staleness and
 //! the report are all checked where there is neither Metal nor Vulkan.
 
-use crate::allowance::{accepted_differences, accepted_slug, Allowance, Justification, Loosening};
+use crate::allowance::{
+    accepted_differences, accepted_slug, Allowance, Justification, Loosening, Offered, Unjustified,
+};
 use crate::case::{
     call, made, Abort, Answer, Case, Failure, Handle, Input, MetalSource, ReRecord, ShaderSource,
     Side, Venue,
@@ -549,8 +551,43 @@ fn a_typed_error_where_metal_answered_is_refused_not_divergent() {
     };
     assert_eq!(at.len(), 1, "{at:?}");
     assert!(at[0].starts_with("case/dispatch"), "{at:?}");
-    // Metal's validation let the case run, so nothing excuses the refusal.
-    assert_eq!(*metal_validation, None);
+    // The recording's validated leg let the case run, so nothing excuses the refusal — and the
+    // verdict says which of the three facts that is rather than leaving it to be guessed at.
+    assert_eq!(*metal_validation, Validated::Ran.describe());
+    let printed = replayed.verdict.to_string();
+    assert!(
+        printed.contains("plain Metal answered the call"),
+        "{printed}"
+    );
+    assert!(printed.contains("let the case run"), "{printed}");
+}
+
+/// A refusal whose recording never took a validated leg says so, rather than reading as a case
+/// Metal's validation let through. The two are different facts and the report must tell them
+/// apart: one is a bug of ours, the other is a missing measurement.
+#[test]
+fn a_refusal_with_no_validated_leg_says_the_fact_is_missing() {
+    let case = WordsCase::new("words", 2);
+    let mut recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
+    recording.answers[0].validated = Validated::NotRun;
+    let mut side = StubSide::new(Vec::new()).refusing(
+        "dispatch",
+        Failure::named("Error::Invalid", "the encoder refused the dispatch"),
+    );
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    let Verdict::Refused {
+        metal_validation, ..
+    } = &replayed.verdict
+    else {
+        panic!("not refused: {}", replayed.verdict);
+    };
+    assert_eq!(*metal_validation, Validated::NotRun.describe());
+    assert!(
+        metal_validation.contains("never run under it"),
+        "{metal_validation}"
+    );
+    // Never a pass, whatever the validated leg says.
+    assert!(!replayed.verdict.is_compliant());
 }
 
 #[test]
@@ -716,7 +753,7 @@ fn a_set_diff_prints_what_is_missing_and_what_is_extra() {
         "kinds",
         Observed::value(Value::set(["b", "c", "d"])),
     )]);
-    let found = compare(&metal, &ours, &[], &[]);
+    let found = compare(&metal, &ours, &[], Offered::notices(&[]));
     assert_eq!(found.divergences.len(), 1);
     let printed = found.divergences[0].to_string();
     assert!(printed.contains("2 in both"), "{printed}");
@@ -736,7 +773,7 @@ fn an_ordered_list_of_lines_names_the_line_that_moved() {
         &lines(&["one", "two", "three"]),
         &lines(&["one", "TWO", "three"]),
         &[],
-        &[],
+        Offered::notices(&[]),
     );
     assert_eq!(found.divergences.len(), 1);
     let printed = found.divergences[0].to_string();
@@ -751,7 +788,7 @@ fn a_negative_fact_differs_from_a_value_rather_than_from_an_absent_field() {
         Observed::value(Value::Nothing(Negative::DidNotBlock)),
     )]);
     let ours = Transcript::new(vec![Node::leaf("blocked", Observed::value(Value::Uint(3)))]);
-    let found = compare(&metal, &ours, &[], &[]);
+    let found = compare(&metal, &ours, &[], Offered::notices(&[]));
     assert_eq!(found.divergences.len(), 1);
     assert!(matches!(
         found.divergences[0].kind,
@@ -773,7 +810,12 @@ fn the_tree_descends_to_the_leaf_that_moved() {
             )],
         )])
     };
-    let found = compare(&tree(Value::Uint(1)), &tree(Value::Uint(2)), &[], &[]);
+    let found = compare(
+        &tree(Value::Uint(1)),
+        &tree(Value::Uint(2)),
+        &[],
+        Offered::notices(&[]),
+    );
     assert_eq!(found.divergences.len(), 1);
     assert_eq!(found.divergences[0].path, "case/level-0/level-1/level-2");
 }
@@ -804,7 +846,7 @@ fn the_gaps_between_rows_compare_where_the_case_asks() {
             "bytes",
             Observed::bytes(bytes(0x00), layout(gaps)),
         )]);
-        let found = compare(&metal, &ours, &[], &[]);
+        let found = compare(&metal, &ours, &[], Offered::notices(&[]));
         assert_eq!(found.divergences.len(), divergences, "{gaps:?}");
     }
 }
@@ -823,8 +865,19 @@ fn a_digest_only_recording_compares_by_its_digest() {
             Observed::value(Value::Bytes(bytes.to_vec())).digested(Digest::sha256(bytes)),
         )])
     };
-    assert!(compare(&digested(b"same"), &ours(b"same"), &[], &[]).is_exact());
-    let found = compare(&digested(b"same"), &ours(b"other"), &[], &[]);
+    assert!(compare(
+        &digested(b"same"),
+        &ours(b"same"),
+        &[],
+        Offered::notices(&[])
+    )
+    .is_exact());
+    let found = compare(
+        &digested(b"same"),
+        &ours(b"other"),
+        &[],
+        Offered::notices(&[]),
+    );
     assert!(matches!(
         found.divergences.first().map(|d| &d.kind),
         Some(DivergenceKind::Digest { .. })
@@ -900,4 +953,471 @@ fn the_carried_table_of_the_private_type_getters_is_metals_measured_one() {
     // The command type of an indexed draw of type 9 is none, and its record keeps type 9.
     assert_eq!(answers(9, "indexed"), (Value::Uint(0), some(0), some(9)));
     assert_eq!(answers(9, "direct"), (Value::Uint(1), some(0), some(9)));
+}
+
+/// The validated oracle's reader attributes a complaint to the call the marker before it named,
+/// strips `NSLog`'s host-specific prefix, and drops the layer's own banner.
+#[test]
+fn the_validated_leg_reads_metals_own_words() {
+    let said = format!(
+        "2026-10-23 07:33:40.512 conformance[51249:39389017] {}\n\
+         {}rate_map\n\
+         2026-10-23 07:33:40.513 conformance[51249:39389017] RasterizationRateMap Layers \
+         Validation\n\
+         layerCount (0) must be >0 and <=2.\n\
+         layers must not be nil.\n",
+        "Metal API Validation Enabled",
+        crate::validated::MARKER,
+    );
+    let read = crate::validated::read(&said).expect("a complaint");
+    let Validated::Stopped { call, message } = &read else {
+        panic!("{read:?}");
+    };
+    assert_eq!(call, "rate_map");
+    // The complaint keeps Metal's words and none of this host's: no process id, no timestamp.
+    assert_eq!(
+        message,
+        "RasterizationRateMap Layers Validation\nlayerCount (0) must be >0 and <=2.\n\
+         layers must not be nil."
+    );
+    assert!(!message.contains("51249"), "{message}");
+    // A leg the layer complained about nothing in is not a stop.
+    assert_eq!(
+        crate::validated::read(&format!(
+            "2026-10-23 07:33:40.512 conformance[1:2] Metal API Validation Enabled\n{}rate_map\n",
+            crate::validated::MARKER
+        )),
+        None
+    );
+}
+
+/// A refusal the recording's validated oracle justifies holds, and the same allowance holds for
+/// nothing else: not where the validated leg let the call run, not where it was never taken, and
+/// not where Apple's check has moved.
+#[test]
+fn metals_validation_justifies_a_refusal_and_only_a_recorded_one() {
+    let says = "screenSize.width (0) must be >0 and <=32768.";
+    let justification = Justification::metal_validation(says);
+    let stopped = Validated::Stopped {
+        call: "rate_map".to_owned(),
+        message: format!("RasterizationRateMap Layers Validation\n{says}"),
+    };
+    assert_eq!(
+        justification.unjustified(&Offered::new(&[], &stopped)),
+        None
+    );
+    assert_eq!(
+        justification.unjustified(&Offered::new(&[], &Validated::Ran)),
+        Some(Unjustified::MetalValidationRan)
+    );
+    // The one the whole axis turns on: an unexercised validated leg justifies nothing.
+    assert_eq!(
+        justification.unjustified(&Offered::notices(&[])),
+        Some(Unjustified::MetalValidationNotRun)
+    );
+    let moved = Validated::Stopped {
+        call: "rate_map".to_owned(),
+        message: "screenSize.width (0) must be >0 and <=16384.".to_owned(),
+    };
+    assert!(matches!(
+        justification.unjustified(&Offered::new(&[], &moved)),
+        Some(Unjustified::MetalValidationSaysOtherwise { .. })
+    ));
+}
+
+/// A refusal stays a refusal however well documented it is.
+///
+/// Metal's API validation stopping a call is not Metal refusing it: plain Metal answered, so the
+/// row is `Refused` and is not compliant, and the justification buys the words in the report and
+/// nothing else. Where the recording holds no such fact, the claim itself fails too.
+#[test]
+fn a_refusal_reads_by_what_metals_validation_did() {
+    let says = "screenSize.width (0) must be >0 and <=32768.";
+    let metal = Transcript::new(vec![Node::leaf(
+        "map",
+        Observed::value(Value::ok(Value::Absent)),
+    )]);
+    let ours = Transcript::new(vec![Node::leaf(
+        "map",
+        Observed::value(Value::error("Error::Invalid", Value::Absent)),
+    )]);
+    let allowances = vec![Allowance::new(
+        "case/map",
+        Loosening::Unchecked,
+        Justification::metal_validation(says),
+    )];
+    let stopped = Validated::Stopped {
+        call: "rate_map".to_owned(),
+        message: says.to_owned(),
+    };
+    let found = crate::compare::compare_run(
+        &metal,
+        &ours,
+        &allowances,
+        Offered::new(&[], &stopped),
+        true,
+    );
+    // The refusal is not laundered into an announced difference: it stays its own row.
+    assert_eq!(found.refusals.len(), 1, "{found:?}");
+    assert!(found.announced.is_empty(), "{found:?}");
+    assert!(found.bad_allowances.is_empty(), "{found:?}");
+    // What the justification bought: Metal's own words beside the row, and nothing else.
+    assert_eq!(
+        found.refusals[0].documented_by,
+        Some(Justification::metal_validation(says).describe())
+    );
+    let verdict = Verdict::of(&found, &stopped);
+    assert_eq!(verdict.word(), "refused");
+    assert!(!verdict.is_compliant(), "a refusal is never compliant");
+    let printed = verdict.to_string();
+    assert!(printed.contains("documented, not excused"), "{printed}");
+    assert!(printed.contains(says), "{printed}");
+
+    // Without the validated leg the claim fails too, so the case says it has no explanation
+    // rather than offering one nobody took.
+    let found =
+        crate::compare::compare_run(&metal, &ours, &allowances, Offered::notices(&[]), true);
+    assert_eq!(found.bad_allowances.len(), 1, "{found:?}");
+    assert_eq!(
+        found.bad_allowances[0].why,
+        Unjustified::MetalValidationNotRun
+    );
+    assert_eq!(found.refusals.len(), 1, "{found:?}");
+    assert_eq!(found.refusals[0].documented_by, None);
+    // A claim that does not hold fails the case on its own, ahead of the refusal it was made for.
+    assert!(!Verdict::of(&found, &Validated::NotRun).is_compliant());
+}
+
+/// A refusal nothing documents is still exactly one refusal, and the words say plain Metal
+/// answered. This is the shape the ported lanes will mostly meet.
+#[test]
+fn an_undocumented_refusal_is_one_row_and_names_no_excuse() {
+    let metal = Transcript::new(vec![Node::leaf(
+        "map",
+        Observed::value(Value::ok(Value::Absent)),
+    )]);
+    let ours = Transcript::new(vec![Node::leaf(
+        "map",
+        Observed::value(Value::error("Error::Invalid", Value::Absent)),
+    )]);
+    let found =
+        crate::compare::compare_run(&metal, &ours, &[], Offered::new(&[], &Validated::Ran), true);
+    assert_eq!(found.refusals.len(), 1, "{found:?}");
+    assert_eq!(found.refusals[0].documented_by, None);
+    let verdict = Verdict::of(&found, &Validated::Ran);
+    assert_eq!(verdict.word(), "refused");
+    assert!(!verdict.is_compliant());
+    let printed = verdict.to_string();
+    assert!(
+        printed.contains("plain Metal answered the call"),
+        "{printed}"
+    );
+    assert!(!printed.contains("documented"), "{printed}");
+}
+
+/// The rate-map cases state the descriptor they feed, name the words Metal's validation used, and
+/// keep the refusal's allowance to the call's own site.
+#[test]
+fn the_rate_map_cases_name_what_justifies_them() {
+    let cases = crate::cases::rate_maps::all();
+    let names: Vec<&str> = cases.iter().map(|case| case.name()).collect();
+    assert_eq!(
+        names,
+        vec![
+            crate::cases::rate_maps::NO_LAYERS,
+            crate::cases::rate_maps::ZERO_SCREEN_WIDTH
+        ]
+    );
+    for case in &cases {
+        // Record mode runs both on Metal: neither can fault the GPU, because neither reaches it.
+        assert_eq!(case.metal_source(), MetalSource::Run);
+        assert!(case.metal_source().forbidden().is_none());
+        // Every case states its own inputs, and the descriptor is what it feeds.
+        let inputs = case.inputs().unwrap();
+        assert!(
+            inputs.iter().any(|input| input.name == "descriptor"),
+            "{inputs:?}"
+        );
+        // Every allowance names something that exists.
+        for allowance in case.allowances() {
+            match &allowance.justified_by {
+                Justification::MetalValidation { says } => {
+                    assert_eq!(says, crate::cases::rate_maps::ZERO_WIDTH_SAYS);
+                    // Loosened at the refused call alone, so every other answer still compares.
+                    assert_eq!(allowance.path, "case/map");
+                }
+                other => panic!("an unexpected tolerance: {other:?}"),
+            }
+        }
+    }
+    // Only the refusal case names the validated oracle.
+    let resting = |case: &crate::cases::rate_maps::RateMapCase| {
+        case.allowances().iter().any(|allowance| {
+            matches!(
+                allowance.justified_by,
+                Justification::MetalValidation { .. }
+            )
+        })
+    };
+    assert!(!resting(&cases[0]));
+    assert!(resting(&cases[1]));
+}
+
+/// The announcing side forwards **every** `Side` call, and this is what keeps it from rotting.
+///
+/// `Side` gives most of its calls a default that answers `Failure::unavailable`, so a method the
+/// announcing wrapper forgets to forward makes `Announcing<MetalSide>` answer "no such call" where
+/// `MetalSide` answers perfectly well — and the compiler says nothing, because the default is
+/// there to be inherited. The trait grows with every ported batch, so the guard must be mechanical
+/// rather than a list somebody remembers to extend.
+///
+/// Comparing transcripts through a stub does not do it: a stub that does not implement the method
+/// either inherits the same default, so both sides agree and the check is vacuous. (Verified by
+/// removing a forward and watching such a check pass.) So the guard reads the two sources and
+/// compares the method names directly: a call `Side` declares and `Announcing` does not forward
+/// fails here, naming it.
+#[test]
+fn the_announcing_side_forwards_every_call() {
+    /// The names of the `fn` items `block` declares at one level of indentation.
+    fn methods(source: &str, opening: &str) -> std::collections::BTreeSet<String> {
+        let from = source
+            .find(opening)
+            .unwrap_or_else(|| panic!("no {opening} in the source"))
+            + opening.len();
+        let rest = &source[from..];
+        // The block ends at the first `}` in the first column, which closes it.
+        let to = rest.find("\n}\n").unwrap_or(rest.len());
+        rest[..to]
+            .lines()
+            .filter_map(|line| {
+                line.strip_prefix("    fn ")
+                    .or(line.strip_prefix("    pub fn "))
+            })
+            .filter_map(|rest| rest.split('(').next())
+            .map(|name| name.trim().to_owned())
+            .collect()
+    }
+    let declared = methods(include_str!("case.rs"), "\npub trait Side {");
+    let forwarded = methods(
+        include_str!("validated.rs"),
+        "\nimpl<S: Side> Side for Announcing<S> {",
+    );
+    assert!(declared.len() > 10, "the trait was not found: {declared:?}");
+    let missing: Vec<&String> = declared.difference(&forwarded).collect();
+    assert!(
+        missing.is_empty(),
+        "validated::Announcing does not forward {missing:?}, so it answers Unavailable where the \
+         side it wraps answers. Forward each of them."
+    );
+    let extra: Vec<&String> = forwarded.difference(&declared).collect();
+    assert!(
+        extra.is_empty(),
+        "Announcing forwards {extra:?}, which Side no longer declares"
+    );
+}
+
+/// Wrapping a side changes nothing a case observes: the announcing wrapper is a marker on standard
+/// error and nothing else. This catches a forward wired to the wrong inner call, which the
+/// name-set check above cannot see.
+#[test]
+fn announcing_a_side_changes_no_transcript() {
+    let transcript_of = |case: &dyn Case, announcing: bool| {
+        let inputs = case.inputs().unwrap_or_default();
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(&inputs));
+        if announcing {
+            let mut side = crate::validated::Announcing::new(StubSide::new(vec![0; 4096]));
+            let _ = case.run(&mut side, &mut sites);
+        } else {
+            let mut side = StubSide::new(vec![0; 4096]);
+            let _ = case.run(&mut side, &mut sites);
+        }
+        sites.finish()
+    };
+    for case in crate::cases::all() {
+        assert_eq!(
+            transcript_of(case.as_ref(), false),
+            transcript_of(case.as_ref(), true),
+            "{}: the announcing side answered otherwise than the side it wraps",
+            case.name()
+        );
+    }
+}
+
+/// The committed recordings hold the second Metal oracle, and hold all three of its answers.
+///
+/// This ties the recordings to the cases: a re-record that lost the validated leg, or an Apple
+/// release whose wording moved, fails here with no device and no Metal, instead of surfacing as a
+/// puzzling verdict later. It is also the standing proof that the axis has been exercised — the
+/// thing the suite could not say before these cases existed.
+#[test]
+fn the_committed_recordings_carry_all_three_validated_answers() {
+    let validated = |case: &str| {
+        crate::recording::read(case)
+            .unwrap_or_else(|why| panic!("{case}: {why}"))
+            .answer(MetalLevel::NEWEST)
+            .unwrap_or_else(|why| panic!("{case}: {why}"))
+            .validated
+            .clone()
+    };
+    let says = |case: &str, words: &str| match validated(case) {
+        Validated::Stopped { call, message } => {
+            assert_eq!(call, "rate_map", "{case}");
+            assert!(message.contains(words), "{case}: {message}");
+        }
+        other => panic!("{case}: {other:?}"),
+    };
+    // Stopped: Metal's own API validation refuses what plain Metal answered, in its own words.
+    says(
+        crate::cases::rate_maps::NO_LAYERS,
+        crate::cases::rate_maps::NO_LAYERS_SAYS,
+    );
+    says(
+        crate::cases::rate_maps::ZERO_SCREEN_WIDTH,
+        crate::cases::rate_maps::ZERO_WIDTH_SAYS,
+    );
+    // Ran: the layer had nothing to say about a compute case, and the plain answer stood.
+    for case in crate::cases::pass_bytes::all() {
+        assert_eq!(validated(case.name()), Validated::Ran, "{}", case.name());
+    }
+    // NotRun: a carried answer was never run here at all, and the file says so rather than
+    // implying Metal's validation was content with it.
+    assert_eq!(
+        validated(crate::cases::indirect_private_types::PRIVATE_TYPE_GETTERS),
+        Validated::NotRun
+    );
+}
+
+/// The committed ledger parses, every row names a gap, and each row's case is a real case.
+///
+/// A row whose case has been renamed away would otherwise read as "no longer refused" forever, or
+/// never be held at all, and either way the row would stop meaning anything.
+#[test]
+fn the_known_refusals_ledger_parses_and_names_real_cases() {
+    let ledger = crate::known_refusals::ledger().unwrap();
+    assert!(
+        !ledger.is_empty(),
+        "the ledger is empty; drop the machinery"
+    );
+    for known in &ledger {
+        assert!(
+            crate::cases::named(&known.case).is_some(),
+            "{}: no such case",
+            known.case
+        );
+        assert!(known.site.starts_with("case/"), "{known:?}");
+        assert!(!known.error.is_empty(), "{known:?}");
+        // A row is an open bug, so it says where the fix belongs.
+        assert!(
+            known.waiting_on.len() > 40,
+            "{}: the gap is not described: {}",
+            known.case,
+            known.waiting_on
+        );
+    }
+    // The one row this round added, and what it is waiting on.
+    let screen_width = ledger
+        .iter()
+        .find(|known| known.case == crate::cases::rate_maps::ZERO_SCREEN_WIDTH)
+        .expect("the zero-screen-width refusal");
+    assert_eq!(screen_width.site, "case/map");
+    assert!(
+        screen_width.waiting_on.contains("rate_map.rs"),
+        "{}",
+        screen_width.waiting_on
+    );
+}
+
+/// A malformed ledger is refused rather than read loosely: a row must carry all four fields, and
+/// must name the gap it waits on.
+#[test]
+fn a_ledger_row_without_its_gap_is_refused() {
+    let parse = crate::known_refusals::parse;
+    assert!(parse("# just a comment\n\n").unwrap().is_empty());
+    let row = "a-case\tcase/map\tErr(Error::Invalid)\tthe runtime refuses what Metal does";
+    assert_eq!(parse(row).unwrap().len(), 1);
+    let why = parse("a-case\tcase/map\tErr(Error::Invalid)\t").unwrap_err();
+    assert!(why.contains("names no gap"), "{why}");
+    let why = parse("a-case\tcase/map").unwrap_err();
+    assert!(why.contains("four"), "{why}");
+}
+
+/// The ledger is an expectation held in both directions, and it changes no verdict.
+#[test]
+fn the_ledger_fails_on_a_new_refusal_and_on_one_that_is_gone() {
+    use crate::known_refusals::{against, Expectation, KnownRefusal};
+    let case = WordsCase::new("words", 2);
+    let recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
+    let mut side = StubSide::new(Vec::new()).refusing(
+        "dispatch",
+        Failure::named("Error::Invalid", "the encoder refused the dispatch"),
+    );
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    // The verdict is untouched by any ledger: a refusal stays a refusal and stays non-compliant.
+    assert_eq!(replayed.verdict.word(), "refused");
+    assert!(!replayed.verdict.is_compliant());
+    let rows = vec![replayed];
+
+    // Nothing written down: the refusal is a new gap and fails the run.
+    let found = against(&rows, &[]);
+    assert_eq!(found.len(), 1, "{found:?}");
+    let Expectation::Unlisted {
+        case: named,
+        site,
+        error,
+        ..
+    } = &found[0]
+    else {
+        panic!("{found:?}");
+    };
+    assert_eq!(named, "words");
+    assert_eq!(site, "case/dispatch");
+
+    // Written down exactly: nothing unexpected, so the run may exit 0.
+    let listed = vec![KnownRefusal {
+        case: "words".to_owned(),
+        site: site.clone(),
+        error: error.clone(),
+        waiting_on: "the stub refuses the dispatch, which is the point of the stub".to_owned(),
+    }];
+    assert_eq!(against(&rows, &listed), Vec::new());
+
+    // The direction that keeps the file from rotting: the same ledger against a run that did NOT
+    // refuse fails, and says the row must go.
+    let mut clean = StubSide::new(words(&[1, 2]));
+    let passed = replay_against(&case, &mut clean, &recording).unwrap();
+    assert_eq!(passed.verdict.word(), "exact");
+    let found = against(std::slice::from_ref(&passed), &listed);
+    assert_eq!(found.len(), 1, "{found:?}");
+    let Expectation::NoLongerRefused(known) = &found[0] else {
+        panic!("{found:?}");
+    };
+    assert_eq!(known.case, "words");
+    let printed = found[0].to_string();
+    assert!(printed.contains("looks fixed"), "{printed}");
+    assert!(printed.contains("drop the row"), "{printed}");
+
+    // A row is held only against the cases a run selected, so replaying one case does not read
+    // every other row as fixed.
+    let elsewhere = vec![KnownRefusal {
+        case: "another-case".to_owned(),
+        site: "case/map".to_owned(),
+        error: "Err(Error::Invalid)".to_owned(),
+        waiting_on: "a gap of some other case, which this run did not select".to_owned(),
+    }];
+    assert_eq!(
+        against(&rows, &elsewhere).len(),
+        1,
+        "the unlisted one alone"
+    );
+
+    // A divergence is never a ledger row: only a refusal is ever an expected gap.
+    let mut wrong = StubSide::new(words(&[1, 9]));
+    let diverged = replay_against(&case, &mut wrong, &recording).unwrap();
+    assert_eq!(diverged.verdict.word(), "divergent");
+    let found = against(std::slice::from_ref(&diverged), &[]);
+    assert!(
+        matches!(found.as_slice(), [Expectation::NotLedgerable { .. }]),
+        "{found:?}"
+    );
 }
