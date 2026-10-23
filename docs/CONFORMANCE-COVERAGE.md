@@ -10,9 +10,10 @@ The suite reaches Metal through `objc2-metal`, whose Rust name for a binding is 
 
 Its limits, measured rather than asserted:
 
-- **451 of 546 call sites** in the Metal leg resolve to an item of the SDK. 30 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
-- **95 call sites' receivers did not type.** They cost the count 7 selectors, which the suite calls and which this attributes to no item:
+- **451 of 550 call sites** in the Metal leg resolve to an item of the SDK. 30 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
+- **99 call sites' receivers did not type.** They cost the count 8 selectors, which the suite calls and which this attributes to no item:
   - `type`, bound by `MTLArgument`, `MTLArgumentDescriptor`, `MTLBinding`, `MTLPointerType`, `MTLTensorReferenceType`, `MTLTextureReferenceType`
+  - `count`, bound by `MTL4CounterHeap`, `MTL4CounterHeapDescriptor`
   - `executeCommandsInBuffer:withRange:`, bound by `MTL4ComputeCommandEncoder`, `MTL4RenderCommandEncoder`, `MTLComputeCommandEncoder`, `MTLRenderCommandEncoder`
   - `imageblockSampleLength`, bound by `MTL4RenderPassDescriptor`, `MTLRenderPassDescriptor`, `MTLRenderPipelineState`
   - `index`, bound by `MTLArgument`, `MTLArgumentDescriptor`, `MTLBinding`, `MTLFunctionConstant`
@@ -271,8 +272,8 @@ An implemented container no case's Metal leg touches. These are the families of 
 | `Side` methods the Metal leg reaches an SDK item through | 48 |
 | SDK items a case's Metal leg reaches, median | 31 |
 | the same, least and most | 0 and 83 |
-| Metal call sites in the leg | 546 |
-| distinct selectors the leg sends | 227 |
+| Metal call sites in the leg | 550 |
+| distinct selectors the leg sends | 228 |
 | of those, resolved to an item of the coverage map | 220 |
 | oracles the recordings name | `apple-m3-max` ×693 |
 
