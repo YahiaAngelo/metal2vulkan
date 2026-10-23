@@ -79,6 +79,14 @@ pub enum DivergenceKind {
     Negative {
         metal: Option<Negative>,
         ours: Option<Negative>,
+        /// What the side that observed a value observed, in one line, where exactly one side did.
+        ///
+        /// It is here because the notices site is this shape: Metal announces nothing and we
+        /// announce a code, so without the value the difference reads "we observed a value" and
+        /// names no notice — although at that site **the notice is the whole difference**. A
+        /// known-gaps row's answer is that printed line, so the row would record a difference
+        /// without saying which notice it was waiting on.
+        observed: Option<String>,
     },
     /// The digest both sides took differs, where the recording carries no value to diff.
     Digest { metal: String, ours: String },
@@ -174,12 +182,23 @@ impl std::fmt::Display for DivergenceKind {
             DivergenceKind::Kind { metal, ours } => {
                 write!(out, "Metal observed a {metal}, we observed a {ours}")
             }
-            DivergenceKind::Negative { metal, ours } => match (metal, ours) {
-                (Some(fact), None) => write!(out, "Metal recorded {fact:?}, we observed a value"),
-                (None, Some(fact)) => write!(out, "we recorded {fact:?}, Metal observed a value"),
-                (Some(metal), Some(ours)) => write!(out, "Metal {metal:?}, ours {ours:?}"),
-                (None, None) => write!(out, "a negative fact"),
-            },
+            DivergenceKind::Negative {
+                metal,
+                ours,
+                observed,
+            } => {
+                let value = observed.as_deref().unwrap_or("a value");
+                match (metal, ours) {
+                    (Some(fact), None) => {
+                        write!(out, "Metal recorded {fact:?}, we observed {value}")
+                    }
+                    (None, Some(fact)) => {
+                        write!(out, "we recorded {fact:?}, Metal observed {value}")
+                    }
+                    (Some(metal), Some(ours)) => write!(out, "Metal {metal:?}, ours {ours:?}"),
+                    (None, None) => write!(out, "a negative fact"),
+                }
+            }
             DivergenceKind::Digest { metal, ours } => {
                 write!(out, "the digest is {metal} on Metal and {ours} here")
             }

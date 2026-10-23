@@ -913,13 +913,21 @@ fn a_negative_fact_differs_from_a_value_rather_than_from_an_absent_field() {
     let ours = Transcript::new(vec![Node::leaf("blocked", Observed::value(Value::Uint(3)))]);
     let found = compare(&metal, &ours, &[], Offered::notices(&[]));
     assert_eq!(found.divergences.len(), 1);
-    assert!(matches!(
-        found.divergences[0].kind,
-        DivergenceKind::Negative {
-            metal: Some(Negative::DidNotBlock),
-            ours: None
-        }
-    ));
+    let DivergenceKind::Negative {
+        metal,
+        ours,
+        observed,
+    } = &found.divergences[0].kind
+    else {
+        panic!("{:?}", found.divergences[0]);
+    };
+    assert_eq!(*metal, Some(Negative::DidNotBlock));
+    assert_eq!(*ours, None);
+    // The value the other side observed is named, not left as "a value": at the notices site the
+    // value IS the whole difference, and a known-gaps row's answer is this printed line.
+    assert_eq!(observed.as_deref(), Some("3 (0x3)"));
+    let printed = found.divergences[0].kind.to_string();
+    assert!(printed.contains("we observed 3 (0x3)"), "{printed}");
 }
 
 #[test]
@@ -3553,5 +3561,79 @@ fn the_runtime_side_forwards_every_field_of_a_pipeline_spec() {
     assert!(
         crate::runtime_side::pipeline_fields(&past).is_err(),
         "a ninth colour attachment"
+    );
+}
+
+/// A divergence that **is** a notice names the notice each side announced, and a known-gaps row
+/// carries it.
+///
+/// The shape: our side announces a degrade notice where Metal announces nothing, and every other
+/// field is bit-exact. The whole difference is the notice, so a row whose answer did not name it
+/// would record a difference without saying what it was waiting on. The notices site used to print
+/// "Metal recorded AnnouncedNothing, we observed a value", which names nothing a reader can act on.
+///
+/// It is a divergence and not a tolerance on purpose: where the product's own degrade note says
+/// validation derives no explanation from it, loosening the site here would be this suite
+/// overruling the product's stated contract.
+#[test]
+fn a_divergence_that_is_a_notice_names_the_notice_each_side_announced() {
+    use crate::known_gaps::{against, Expectation, Expects, KnownGap};
+    let case = WordsCase::new("ledger-notice-only", 2);
+    // Metal announces nothing; the case names no tolerance.
+    let recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
+    let code = Degradation::ShaderColorConversion.code();
+
+    let mut side = StubSide::new(words(&[1, 2]))
+        .on("llvmpipe (LLVM 21.1.8, 128 bits)")
+        .announcing(&[Degradation::ShaderColorConversion]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert_eq!(replayed.verdict.word(), "divergent");
+    let Verdict::Divergent { found, .. } = &replayed.verdict else {
+        panic!("{:?}", replayed.verdict);
+    };
+    // The notice is the only difference: the two sites the notices record sit at.
+    let set = found
+        .iter()
+        .find(|divergence| divergence.path.ends_with("/set"))
+        .unwrap_or_else(|| panic!("{found:?}"));
+    let answer = set.kind.to_string();
+    // Metal's side of it, and ours, in the one line a row's answer field holds.
+    assert!(answer.contains("AnnouncedNothing"), "{answer}");
+    assert!(answer.contains(code), "{answer}");
+
+    let rows: Vec<KnownGap> = found
+        .iter()
+        .map(|divergence| KnownGap {
+            case: case.name().to_owned(),
+            venue: "llvmpipe".to_owned(),
+            expects: Expects::Divergent,
+            site: divergence.path.clone(),
+            answer: divergence.kind.to_string(),
+            waiting_on: format!(
+                "our side announces {code} on this venue where Metal announces nothing, with every \
+                 other field bit-exact; the product's degrade note derives no tolerance, so this \
+                 stays a difference until the notice goes"
+            ),
+        })
+        .collect();
+    assert_eq!(against(std::slice::from_ref(&replayed), &rows), Vec::new());
+
+    // Both directions, as for any other row: the venue that does not announce it is clean, and the
+    // day this venue stops announcing it the rows fail and must go.
+    let mut elsewhere = StubSide::new(words(&[1, 2])).on("Apple M3 Max");
+    let exact = replay_against(&case, &mut elsewhere, &recording).unwrap();
+    assert_eq!(exact.verdict.word(), "exact");
+    assert_eq!(against(std::slice::from_ref(&exact), &rows), Vec::new());
+
+    let mut fixed = StubSide::new(words(&[1, 2])).on("llvmpipe (LLVM 21.1.8, 128 bits)");
+    let gone = replay_against(&case, &mut fixed, &recording).unwrap();
+    assert_eq!(gone.verdict.word(), "exact");
+    let found = against(std::slice::from_ref(&gone), &rows);
+    assert_eq!(found.len(), rows.len(), "{found:?}");
+    assert!(
+        found
+            .iter()
+            .all(|why| matches!(why, Expectation::NoLongerHeld { .. })),
+        "{found:?}"
     );
 }

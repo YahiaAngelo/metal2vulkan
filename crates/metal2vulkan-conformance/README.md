@@ -68,9 +68,15 @@ replaying one case does not read every other row as fixed, and a run on one venu
 another venue's rows as fixed.
 
 A row's identity is its case, the verdict it expects, the site and the answer there, so a gap that
-changed into another gap at the same site is a new gap and not the old one. A case that both
-diverges and refuses holds its refused sites in the `Divergent` verdict alongside the differences,
-so neither row can go unchecked behind the other: a divergence never launders a refusal.
+changed into another gap at the same site is a new gap and not the old one. Where the difference
+**is** a notice — our side announces a degrade code and Metal announces nothing, every other field
+bit-exact — the row's answer names what each side announced, because that is the whole difference
+and a row that did not name it would record a gap without saying what it waits on. Such a site is a
+divergence and not a tolerance: where the product's own degrade note says validation derives no
+explanation from it, loosening the site here would be this suite overruling the product's stated
+contract. A case that both diverges and refuses holds its refused sites in the `Divergent` verdict alongside
+the differences, so neither row can go unchecked behind the other: a divergence never launders a
+refusal.
 
 ## A site the venue honestly lacks
 

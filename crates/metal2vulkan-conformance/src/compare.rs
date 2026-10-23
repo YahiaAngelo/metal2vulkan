@@ -517,6 +517,12 @@ impl Walk<'_> {
                     DivergenceKind::Negative {
                         metal: fact(metal),
                         ours: fact(ours),
+                        // The side that observed a value, printed, so the site names what it was.
+                        observed: match (fact(metal), fact(ours)) {
+                            (Some(_), None) => Some(crate::diff::print(ours)),
+                            (None, Some(_)) => Some(crate::diff::print(metal)),
+                            _ => None,
+                        },
                     },
                 ));
             }
