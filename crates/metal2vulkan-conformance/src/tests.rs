@@ -3767,3 +3767,105 @@ fn both_sides_state_every_field_of_a_texture_request() {
         assert_eq!(distinct.len(), 4, "{sources:?}");
     }
 }
+
+/// Every case states the inputs its own recording's answers were taken from, and the cases that
+/// no longer do are exactly the ones named here.
+///
+/// A case whose [`crate::case::Case::inputs`] no longer fingerprint to its recording's is
+/// `Unrecorded` at replay. That verdict is this suite's bookkeeping, not Metal's answer, and it
+/// names no cause: the case reads exactly as it reads when no one has recorded it at all. What
+/// moves a fingerprint is a widening of a shared vocabulary -- a field on a texture request, a
+/// step on a work list -- and it moves it for every family that states the widened thing, not
+/// only for the family the widening was made for. Found through a replay, a restaled family is
+/// one whole-set GPU run plus a name-by-name verdict diff away, and it still looks like a family
+/// nobody has recorded.
+///
+/// This is the same fact with no device and no oracle: it reads the committed recordings and
+/// names the case and the input whose fingerprint moved.
+///
+/// Three cases are stale as this is written, and the list is a set rather than a floor so that
+/// re-recording one without striking it from here fails too. All three state an unwritten buffer,
+/// whose fingerprint was widened from the buffer's length alone to its length and its storage
+/// mode after their answers were taken. Their Metal answers did not move; only the key did, so
+/// what each needs is a re-record. The lengths behind the three recorded digests, recovered from
+/// them, are 64, 4099 and 614400 bytes.
+#[test]
+fn every_cases_inputs_are_the_ones_its_recording_was_taken_from() {
+    /// The cases whose committed answers were taken under an older input fingerprint.
+    const STALE: [&str; 3] = [
+        "buffer-blit-any-range",
+        "buffer-blit-overlapping-copies",
+        "buffer-fills-of-every-size",
+    ];
+    let mut moved: std::collections::BTreeMap<&str, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let mut checked = 0usize;
+    let mut unrecorded = Vec::new();
+    for case in crate::cases::all() {
+        let Ok(recording) = crate::recording::read(case.name()) else {
+            // A case nothing has recorded yet is unrecorded for that reason alone.
+            unrecorded.push(case.name());
+            continue;
+        };
+        let inputs = case
+            .inputs()
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        let fed = crate::case::inputs_node(&inputs);
+        for answer in &recording.answers {
+            for outcome in &answer.outcomes {
+                let Some(recorded) = outcome.transcript.root.child(crate::case::INPUTS_SITE) else {
+                    moved
+                        .entry(case.name())
+                        .or_default()
+                        .push("its recording states no input fingerprint".to_owned());
+                    continue;
+                };
+                checked += 1;
+                if *recorded == fed {
+                    continue;
+                }
+                let why = moved.entry(case.name()).or_default();
+                for input in &recorded.children {
+                    match fed.child(&input.name) {
+                        Some(ours) if ours.observed == input.observed => {}
+                        Some(_) => why.push(format!("{} differs", input.name)),
+                        None => why.push(format!("{} is missing", input.name)),
+                    }
+                }
+                for input in &fed.children {
+                    if recorded.child(&input.name).is_none() {
+                        why.push(format!("{} is extra", input.name));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        checked > 0,
+        "the suite holds no recorded answer to check an input fingerprint against"
+    );
+    let found: std::collections::BTreeSet<&str> = moved.keys().copied().collect();
+    let named: std::collections::BTreeSet<&str> = STALE.into_iter().collect();
+    let said = |cases: &std::collections::BTreeSet<&str>| {
+        cases
+            .iter()
+            .map(|case| match moved.get(case) {
+                Some(why) => format!("{case}: {}", why.join(", ")),
+                None => format!("{case}: states its recording's inputs"),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(
+        found,
+        named,
+        "{checked} recorded answers checked. These cases no longer state the inputs their \
+         recordings were taken from, so each is Unrecorded at replay for a reason that is this \
+         suite's and not Metal's:\n{}\nand these are named here as stale but state their \
+         recording's inputs, so their line is spent:\n{}\n(cases with no recording at all, which \
+         this says nothing about: {})",
+        said(&found.difference(&named).copied().collect()),
+        said(&named.difference(&found).copied().collect()),
+        unrecorded.join(", ")
+    );
+}

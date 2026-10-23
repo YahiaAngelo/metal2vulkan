@@ -359,6 +359,25 @@ impl Case for ExtendedSwizzles {
         MetalSource::Run
     }
 
+    /// One notice, and it is the dispatch's shape rather than any format's arithmetic.
+    ///
+    /// Each op reads every lane of its sweep in one dispatch, in groups of at most 64 threads,
+    /// and no lane count here is a whole number of such groups. Our side runs the interior and
+    /// the partial edge as dispatches of their own and announces
+    /// `metal2vulkan-degrade-split-dispatch` for it. Metal announces nothing, which is a
+    /// difference at the notices site and nowhere else.
+    ///
+    /// The loosening reaches `case/notices/*` alone. Every texel this family records is still
+    /// compared bit for bit, which is the point of the family: a swizzle moves channels and an
+    /// extended-range or packed format decides what a channel's bits are, and neither is a
+    /// tolerance. `every_recorded_swizzle_is_the_unswizzled_texture_swizzled` and
+    /// `every_recorded_packed_read_is_metals_rule` hold those words to Metal's own answers.
+    fn allowances(&self) -> Vec<crate::allowance::Allowance> {
+        vec![crate::replay::notice_allowance(
+            metal2vulkan_runtime::Degradation::SplitDispatch.code(),
+        )]
+    }
+
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
         let mut shaders = Vec::new();
         let mut entries: Vec<&str> = OPS.iter().map(|(_, kernel)| *kernel).collect();
