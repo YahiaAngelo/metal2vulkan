@@ -22,26 +22,73 @@ the runtime's own defaults instead — the fast form of every speed-for-accuracy
 what a consumer runs — so the suite can say whether a difference is the policy's or the
 implementation's.
 
-## The known-refusals ledger
+## The known-gaps ledger
 
-`known-refusals.tsv` holds the refusals we have written down as open gaps. Each row is an **open
-bug with a todo behind it** — not an accepted difference, not permission for anything. It exists so
-that one case holding a known gap visible does not make every run red, because a report that is
-always red is a report nobody reads, and that would cost us the next real refusal.
+`known-gaps.tsv` holds the gaps we have written down as open. Each row is an **open bug with a todo
+behind it** — not an accepted difference, not permission for anything. It exists so that one case
+holding a known gap visible does not make every run red, because a report that is always red is a
+report nobody reads, and that would cost us the next real gap.
 
-It changes the **exit status** and nothing else. Every row is still printed as a `Refused` row, with
-our error and with Metal's own words where its API validation refuses the call too, and still
-counted in the `refused` number.
+It changes the **exit status** and nothing else. Every row is still printed as a `Refused` or
+`Divergent` row, with our answer and Metal's, with Metal's own words where its API validation
+refuses the call too, and still counted in the suite's own numbers.
 
-It is an expectation, not an allowlist, and `replay` holds it in **both** directions:
+A row names the verdict it expects:
 
-- a refusal the ledger does not list fails the run — a new gap appeared;
-- a row the ledger lists that is no longer refused **also** fails the run, saying the gap looks
+- **`refused`** — a call plain Metal answered and we returned a typed error for;
+- **`divergent`** — a field that differs with nothing we announced to justify it.
+
+Both are bugs of ours by the owner's standing rule, both have to stay visible, and both need the
+same discipline, so they share one file and one mechanism. Nothing else is ever written down: an
+unrecorded case and a stale recording must fail loudly, and a venue that honestly lacks a feature
+the case needs is not a gap of ours at all — that is its own verdict, per site.
+
+A row may also name the **venue** it is expected on, because a gap can be one venue's and not
+another's: a pipeline the runtime refuses on MoltenVK for a structural reason can translate on
+lavapipe, and a global row would then fail the lavapipe run for existing. The field is held, without
+case, against the venue's own description — its device name, driver, API version and Metal level —
+so a row can name one device (`Apple M3 Max`), one implementation (`llvmpipe`) or a family of them,
+and a venue that joins later needs no new vocabulary. `*` means every venue, and it is the
+**stronger** claim rather than the looser one: the row is then held on every venue the run selected
+its case on, so widening a row's scope makes it harder to satisfy. That is what stops a
+venue-scoped row from becoming a way to silence a venue. A venue pattern that matches nothing holds
+the row nowhere, so its gap reads as unlisted and the run fails — a typo is loud.
+
+It is an expectation, not an allowlist, and `replay` holds it in **both** directions, per venue:
+
+- a refusal or a divergence the ledger does not list fails the run — a new gap appeared;
+- a row the ledger lists that the run no longer holds **also** fails the run, saying the gap looks
   fixed and the row must go.
 
 That second direction is the point: closing a gap forces the ledger edit, so a row cannot outlive
-the bug it stands for and the file cannot rot into a silencer. A row is held only against the cases
-a run selected, so replaying one case does not read every other row as fixed.
+the bug it stands for and the file cannot rot into a silencer. It has already earned its keep twice
+in this round — a product fix landed and the replay named four stale rows before anybody reasoned
+about the fix. A row is held only against the cases a run selected and the venues it ran on, so
+replaying one case does not read every other row as fixed, and a run on one venue does not read
+another venue's rows as fixed.
+
+A row's identity is its case, the verdict it expects, the site and the answer there, so a gap that
+changed into another gap at the same site is a new gap and not the old one. Where the difference
+**is** a notice — our side announces a degrade code and Metal announces nothing, every other field
+bit-exact — the row's answer names what each side announced, because that is the whole difference
+and a row that did not name it would record a gap without saying what it waits on. Such a site is a
+divergence and not a tolerance: where the product's own degrade note says validation derives no
+explanation from it, loosening the site here would be this suite overruling the product's stated
+contract. A case that both diverges and refuses holds its refused sites in the `Divergent` verdict alongside
+the differences, so neither row can go unchecked behind the other: a divergence never launders a
+refusal.
+
+## A site the venue honestly lacks
+
+A device's honest gap must never read as a refusal of ours. Where a typed error names capabilities
+a device could enable, or a driver measured to run the thing wrong, the site is the **venue's** gap
+and not ours: it is never a refusal, never a ledger row, and the rest of the case still compares,
+so a divergence anywhere else in the same case still fails. The case's verdict is then
+`lacks-feature`, which is neither a pass nor a failure and is never counted as coverage.
+
+Two shapes reach that verdict: the case **stopping** at such a call, and a case carrying on past
+one, which is recorded per site. The second matters because until it existed a case that did not
+have to stop could not say the venue lacked anything, and the site read as a gap of ours.
 
 ## Two Metal oracles
 
@@ -218,7 +265,7 @@ edits one.
 | `cost` | The cost half: the counts our side moved, their regions, their bounds and the three cost verdicts |
 | `work`, `runtime_work`, `metal_work` | The copy-and-fill vocabulary a case states as data, and the two sides that run it |
 | `measured` | The committed Metal measurements a ported case reads, under the public fixtures |
-| `known_refusals` | The ledger of open gaps, held in both directions; it sets the exit status, never a verdict |
+| `known_gaps` | The ledger of open gaps — a refusal or a divergence, per venue — held in both directions; it sets the exit status, never a verdict |
 | `cases` | The case set itself, one module per family |
 
 ## The case set

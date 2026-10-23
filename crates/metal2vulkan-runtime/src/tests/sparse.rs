@@ -416,29 +416,74 @@ fn sparse_support_names_what_is_missing() {
     );
 }
 
-/// A device that binds no sparse memory refuses a sparse heap or texture as the runtime's gap,
-/// the tile map's ordinary images; any other need as the device's lack, naming it.
+/// A sparse need the runtime has not built is the runtime's gap, and one the device simply does
+/// not have is the device's, named by the Vulkan capability it is.
+///
+/// The two must not be confused in either direction, because a consumer reads the difference and
+/// acts on it, and the conformance suite scores it: `Needs::NotRepresentable` used to cover every
+/// need past sparse binding, so a device without `sparseResidency2Samples` made our refusal read
+/// as unbuilt work of ours. `Needs::DeviceCapability` is the one word that says "the device lacks
+/// it" for a capability the compile layer's vocabulary does not name -- which the sparse ones are
+/// not, on purpose (`super::super::sparse::device`), since only the runtime needs them.
 #[test]
-fn a_device_without_sparse_binding_is_the_runtime_gap() {
-    for need in [SparseNeed::SparseBinding, SparseNeed::SparseBindingQueue] {
-        assert_eq!(
-            sparse_refusal(need),
-            Error::NotImplemented(RuntimeGap::SparseTileMaps)
-        );
-    }
+fn a_sparse_need_is_the_runtime_gap_or_the_devices_and_never_the_wrong_one() {
+    // Ours: the exact path exists and is not built. Sparse binding and its queue family take the
+    // tile map's ordinary images; a metadata aspect is a binding the runtime does not do.
     for need in [
-        SparseNeed::SparseResidencyImage2D,
-        SparseNeed::SparseResidencyImage3D,
-        SparseNeed::SparseResidencySamples(4),
-        SparseNeed::SparseImageFormat,
+        SparseNeed::SparseBinding,
+        SparseNeed::SparseBindingQueue,
         SparseNeed::SparseMetadata,
     ] {
         assert_eq!(
             sparse_refusal(need),
-            Error::Unsupported(Unsupported::not_representable(Feature::SparseTextures {
-                missing: need
-            }))
+            Error::NotImplemented(RuntimeGap::SparseTileMaps),
+            "{need:?}"
         );
+    }
+    // The device's: a Vulkan 1.0 capability it either has or does not, named as the device would
+    // name it, so the refusal reads as the device's gap and not as our unbuilt work.
+    for (need, capability) in [
+        (SparseNeed::SparseResidencyImage2D, "sparseResidencyImage2D"),
+        (SparseNeed::SparseResidencyImage3D, "sparseResidencyImage3D"),
+        (
+            SparseNeed::SparseResidencySamples(2),
+            "sparseResidency2Samples",
+        ),
+        (
+            SparseNeed::SparseResidencySamples(4),
+            "sparseResidency4Samples",
+        ),
+        (
+            SparseNeed::SparseResidencySamples(8),
+            "sparseResidency8Samples",
+        ),
+        (
+            SparseNeed::SparseResidencySamples(16),
+            "sparseResidency16Samples",
+        ),
+    ] {
+        assert_eq!(
+            sparse_refusal(need),
+            Error::Unsupported(Unsupported::device_capability(
+                Feature::SparseTextures { missing: need },
+                capability
+            )),
+            "{need:?}"
+        );
+    }
+    // A need Vulkan has no one member for is still the device's, named in words rather than by a
+    // member that does not exist.
+    for need in [
+        SparseNeed::SparseResidencySamples(32),
+        SparseNeed::SparseImageFormat,
+    ] {
+        let Error::Unsupported(unsupported) = sparse_refusal(need) else {
+            panic!("{need:?}");
+        };
+        let metal2vulkan::error::Needs::DeviceCapability(words) = unsupported.needs else {
+            panic!("{need:?}: {:?}", unsupported.needs);
+        };
+        assert!(words.contains("sparse residency"), "{need:?}: {words}");
     }
 }
 

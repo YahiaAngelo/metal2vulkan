@@ -5,7 +5,8 @@ The refusal surface is read from the construction sites of the typed refusals, o
 
 - the translator's and the AIR front end's `Unsupported` (a `Feature` and its `Needs`): the
   constructors `Unsupported::not_implemented`, `not_representable`, `needs`, `needs_any_of`,
-  `driver_defect`, `runtime_driver_defect`, `metal_gpu_family`, and `Unsupported { .. }`
+  `driver_defect`, `runtime_driver_defect`, `metal_gpu_family`, `device_capability`, and
+  `Unsupported { .. }`
   literals, in the `src` of crates/metal2vulkan-air, crates/metal2vulkan and
   crates/metal2vulkan-runtime;
 - the runtime's `RuntimeGap` (`Error::NotImplemented`) and `AppleOnly` (`Error::AppleOnly`);
@@ -54,6 +55,7 @@ CONSTRUCTORS = {
     "driver_defect": "DriverDefect",
     "runtime_driver_defect": "RuntimeDriverDefect",
     "metal_gpu_family": "MetalGpuFamily",
+    "device_capability": "DeviceCapability",
 }
 
 # Binder refusals of a valid bind state: a device limit or an unestablished reading. The other
@@ -217,6 +219,11 @@ def conditions(kind, needs_text):
         return {"every device (not implemented)"}
     if kind == "NotRepresentable":
         return {"every device (no Vulkan mechanism)"}
+    if kind == "DeviceCapability":
+        # A Vulkan capability the compile layer's vocabulary does not name, which only the runtime
+        # needs: the device's own gap, so the condition is the devices without it and never "every
+        # device". The site names it as a string, so there is no capability token to read.
+        return {"devices without the capability the site names"}
     toks = re.findall(CAP_TOKENS, needs_text)
     if kind == "AnyOf":
         caps = sorted({f"{a}::{b}" for a, b in toks if a.startswith("Vk") or a == "ApiVersion"})

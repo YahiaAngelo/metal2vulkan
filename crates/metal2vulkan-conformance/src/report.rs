@@ -5,7 +5,7 @@
 
 use crate::compare::Unfired;
 use crate::cost::{self, CostVerdict, Counts, Region};
-use crate::known_refusals::{against, Expectation, KnownRefusal};
+use crate::known_gaps::{against, Expectation, KnownGap};
 use crate::replay::{ReplayError, Replayed};
 use crate::verdict::Verdict;
 use std::collections::{BTreeMap, BTreeSet};
@@ -132,14 +132,14 @@ impl Report {
         self.errors.is_empty() && self.rows.iter().all(|row| row.verdict.is_compliant())
     }
 
-    /// How the run's refusals stand against the known-refusals `ledger`: nothing where the refused
+    /// How the run's refusals stand against the known-gaps `ledger`: nothing where the refused
     /// set is exactly the ledger's rows over the cases the run selected, and otherwise every way
-    /// they differ ([`crate::known_refusals`]).
+    /// they differ ([`crate::known_gaps`]).
     ///
     /// This is what the command exits by. It does not touch a verdict: a refusal the ledger
     /// expects is still a `Refused` row in the counts and is still printed in full, because the
     /// ledger's rows are open bugs rather than accepted differences.
-    pub fn unexpected(&self, ledger: &[KnownRefusal]) -> Vec<Expectation> {
+    pub fn unexpected(&self, ledger: &[KnownGap]) -> Vec<Expectation> {
         let mut found = against(&self.rows, ledger);
         for error in &self.errors {
             found.push(Expectation::NotLedgerable {

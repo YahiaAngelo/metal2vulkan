@@ -1833,6 +1833,13 @@ pub fn call<T>(
         }
         Err(failure) => {
             sites.push(Node::leaf(at, Observed::value(failure.value.clone())));
+            // A device's honest gap is recorded at the site, not only where it stops the case.
+            // The whole-case `LacksFeature` verdict comes from an abort, so without this a case
+            // that carries on past an unsupported call would have that site read as a refusal of
+            // ours — the one thing the verdict exists to prevent.
+            if let Some(needs) = &failure.lacks {
+                sites.device_gap(at, needs.clone());
+            }
             Err(Abort {
                 at: at.to_owned(),
                 failure,

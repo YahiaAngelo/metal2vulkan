@@ -497,6 +497,23 @@ impl Element {
 #[serde(deny_unknown_fields)]
 pub struct Transcript {
     pub root: Node,
+    /// The sites where the **venue honestly lacks** what the call needed, by their paths from the
+    /// root, each with what it lacks ([`crate::verdict::device_gap`]).
+    ///
+    /// Our side's own fact about the device, not an observation of anything Metal did, so it is
+    /// kept apart from the tree: it is never compared, never fingerprinted and never written to a
+    /// recording ([`Vec::is_empty`] skips it), and Metal's side never holds one, because the fact
+    /// is read from a typed runtime error. A recording from before this field existed reads it as
+    /// empty.
+    ///
+    /// Why it exists: a device's honest gap must not read as a refusal of ours, and until now the
+    /// only way to say so was to **stop the case** — the whole-case
+    /// [`LacksFeature`](crate::verdict::Verdict::LacksFeature) verdict comes from an abort. A case
+    /// whose one unsupported site is not fatal could not say it at all, so coverage on a venue
+    /// that lacks one feature read as a gap of ours at that site, which is the one thing the
+    /// verdict exists to prevent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub device_gaps: Vec<(String, String)>,
 }
 
 impl Transcript {
@@ -504,7 +521,16 @@ impl Transcript {
     pub fn new(children: Vec<Node>) -> Self {
         Self {
             root: Node::branch("case", children),
+            device_gaps: Vec::new(),
         }
+    }
+
+    /// What the venue lacks at `path`, where it lacks anything.
+    pub fn device_gap_at(&self, path: &str) -> Option<&str> {
+        self.device_gaps
+            .iter()
+            .find(|(site, _)| site == path)
+            .map(|(_, needs)| needs.as_str())
     }
 
     /// Every degrade notice the transcript records, by code, with how many times it was
@@ -549,6 +575,7 @@ fn collect_notices(node: &Node, found: &mut BTreeMap<String, u64>) {
 #[derive(Debug, Default)]
 pub struct Sites {
     nodes: Vec<Node>,
+    device_gaps: Vec<(String, String)>,
 }
 
 impl Sites {
@@ -570,6 +597,17 @@ impl Sites {
     /// Add a site holding `value`.
     pub fn value(&mut self, name: impl Into<NodeName>, value: Value) {
         self.leaf(name, Observed::value(value));
+    }
+
+    /// Record that the venue honestly lacks `needs` at the site named `name`, which
+    /// [`Transcript::device_gaps`] carries by its path from the root.
+    ///
+    /// Every failing call goes through [`crate::case::call`], which records this whenever the
+    /// typed error names capabilities a device could enable or a measured driver defect, so a
+    /// case needs no code of its own and cannot forget to say it.
+    pub fn device_gap(&mut self, name: &str, needs: impl Into<String>) {
+        self.device_gaps
+            .push((format!("case/{name}"), needs.into()));
     }
 
     /// Add the two sites that record what a device announced: the exact set of degrade-notice
@@ -602,6 +640,9 @@ impl Sites {
 
     /// The transcript of the sites emitted so far.
     pub fn finish(self) -> Transcript {
-        Transcript::new(self.nodes)
+        Transcript {
+            root: Node::branch("case", self.nodes),
+            device_gaps: self.device_gaps,
+        }
     }
 }

@@ -5,7 +5,7 @@
 //! no Metal answer is counted rather than skipped; and a device that honestly lacks a feature the
 //! case needs is neither a pass nor a failure, because conflating the two makes coverage fiction.
 
-use crate::compare::Comparison;
+use crate::compare::{Comparison, DeviceGap};
 use crate::diff::Divergence;
 use crate::recording::Validated;
 use metal2vulkan::error::{Needs, Unsupported};
@@ -20,7 +20,19 @@ pub enum Verdict {
     /// announced.
     Announced { fields: Vec<String> },
     /// A field differs with nothing to justify it: the bug class.
-    Divergent { found: Vec<Divergence> },
+    Divergent {
+        found: Vec<Divergence>,
+        /// The sites we also refused, as their paths and our errors, in the form
+        /// [`Verdict::Refused`] prints.
+        ///
+        /// Carried here because a case may hold both, and a divergence must not launder a
+        /// refusal. The verdict is `Divergent`, since that is the more severe of the two, but the
+        /// refused sites are still printed, and the known-gaps ledger still holds its refusal rows
+        /// against them in both directions. Without this a refusal row of a case that also
+        /// diverges would read as "no longer refused" — the ledger failing for the wrong reason —
+        /// or, worse, be dropped on that reading while the gap was still there.
+        refused: Vec<String>,
+    },
     /// We returned a typed error where Metal answered the call.
     ///
     /// **Never compliant, and no allowance can change that.** Plain Metal is the behavioural
@@ -65,6 +77,12 @@ pub enum Verdict {
     Unrecorded { why: String },
     /// The venue honestly lacks what the case needs, by the typed refusal it gave: neither a pass
     /// nor a failure.
+    ///
+    /// Two shapes reach it, and both are the device's own gap. The case may have **stopped** at
+    /// the call, which is what `replay` reads from the abort. Or the case may have carried on and
+    /// one of its sites be the venue's gap ([`DeviceGap`]), in which case `needs` names each site
+    /// and what it lacks, and the rest of the case compared normally — a divergence or a refusal
+    /// anywhere else in it still fails.
     LacksFeature { needs: String },
 }
 
@@ -82,21 +100,14 @@ impl Verdict {
                     },
                 ));
             }
-            return Verdict::Divergent { found: diverged };
+            return Verdict::Divergent {
+                found: diverged,
+                refused: refused_sites(found),
+            };
         }
         if !found.refusals.is_empty() {
             return Verdict::Refused {
-                at: found
-                    .refusals
-                    .iter()
-                    .map(|refusal| match &refusal.documented_by {
-                        Some(documented) => format!(
-                            "{}: {} (documented, not excused, by {documented})",
-                            refusal.path, refusal.ours
-                        ),
-                        None => format!("{}: {}", refusal.path, refusal.ours),
-                    })
-                    .collect(),
+                at: refused_sites(found),
                 metal_validation: validated.describe(),
             };
         }
@@ -111,6 +122,21 @@ impl Verdict {
                     .map(|site| format!("{}: {}", site.path, site.ours))
                     .collect(),
                 justified: announced_fields(found),
+            };
+        }
+        // After everything that fails, and before the verdicts that claim the case compared: a
+        // site the venue honestly cannot run is neither a pass nor a failure, so a case holding
+        // one must not read as `Exact` — that would claim coverage the venue did not give — while
+        // a divergence or a refusal elsewhere in the same case still fails, which is what makes
+        // this safe to be compliant.
+        if !found.device_gaps.is_empty() {
+            return Verdict::LacksFeature {
+                needs: found
+                    .device_gaps
+                    .iter()
+                    .map(DeviceGap::to_string)
+                    .collect::<Vec<String>>()
+                    .join("; "),
             };
         }
         if found.announced.is_empty() {
@@ -155,10 +181,16 @@ impl std::fmt::Display for Verdict {
             Verdict::Announced { fields } => {
                 write!(out, "announced: {}", fields.join("; "))
             }
-            Verdict::Divergent { found } => {
+            Verdict::Divergent { found, refused } => {
                 out.write_str("divergent")?;
                 for divergence in found {
                     write!(out, "\n  {divergence}")?;
+                }
+                // A refusal is never hidden behind a divergence: plain Metal answered the call
+                // and we did not, which is a gap of its own kind however the rest of the case
+                // compared.
+                for site in refused {
+                    write!(out, "\n  and refused {site}")?;
                 }
                 Ok(())
             }
@@ -187,6 +219,25 @@ impl std::fmt::Display for Verdict {
             Verdict::LacksFeature { needs } => write!(out, "lacks the device feature: {needs}"),
         }
     }
+}
+
+/// How the report prints each site where plain Metal answered a call and we returned a typed
+/// error, with whatever the case named to document it.
+///
+/// One function, because the same form is read back by the known-gaps ledger, and a refusal
+/// printed two ways would be two rows for one gap.
+fn refused_sites(found: &Comparison) -> Vec<String> {
+    found
+        .refusals
+        .iter()
+        .map(|refusal| match &refusal.documented_by {
+            Some(documented) => format!(
+                "{}: {} (documented, not excused, by {documented})",
+                refusal.path, refusal.ours
+            ),
+            None => format!("{}: {}", refusal.path, refusal.ours),
+        })
+        .collect()
 }
 
 /// How the report prints each difference a run made inside a justified allowance.
@@ -236,6 +287,13 @@ pub fn device_gap_of(unsupported: &Unsupported) -> Option<String> {
             "{:?} needs any of {alternatives:?}",
             unsupported.feature
         )),
+        // A Vulkan capability the compile layer's vocabulary does not name, which only the
+        // runtime needs: a sparse heap's residency, as `timelineSemaphore` would be. The device's
+        // own gap by construction — a device with it runs the input — so it belongs here and not
+        // among the refusals.
+        Needs::DeviceCapability(capability) => {
+            Some(format!("{:?} needs {capability}", unsupported.feature))
+        }
         Needs::DriverDefect(workaround) => Some(format!(
             "{:?} on a driver measured to run it wrong ({workaround:?})",
             unsupported.feature

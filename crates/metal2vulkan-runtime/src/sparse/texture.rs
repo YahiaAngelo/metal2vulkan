@@ -19,20 +19,53 @@ use std::sync::Mutex;
 
 /// The refusal of a sparse heap or texture on a device that lacks `need`, where a function may
 /// read the image's own residency (the sparse arm of a slot without a tile map; elsewhere the
-/// runtime emulates the texture). A device that binds no sparse memory (`sparseBinding`,
-/// or the queue family's bit) makes no sparse resident image, but an ordinary image whose unmapped
-/// texels a tile map answers is an exact path: the runtime's gap, `NotImplemented(SparseTileMaps)`,
-/// not the device's lack. Any other need is the device's: `Unsupported(Feature::SparseTextures)`,
-/// naming it.
+/// runtime emulates the texture).
+///
+/// Two kinds of need, kept apart, because a consumer reads the difference and acts on it.
+///
+/// **Ours.** A device that binds no sparse memory (`sparseBinding`, or the queue family's bit)
+/// makes no sparse resident image, but an ordinary image whose unmapped texels a tile map answers
+/// is an exact path, and it is not built: the runtime's gap, `NotImplemented(SparseTileMaps)`. A
+/// sparse image whose memory needs a metadata aspect bound is the same shape — the binding exists
+/// and the runtime does not do it.
+///
+/// **The device's.** Residency of the texture's type or sample count, and the sparse image formats
+/// the device lists, are Vulkan 1.0 capabilities a device either has or does not. They are outside
+/// the compile layer's capability vocabulary on purpose (`super::device`), so the refusal names
+/// them with `Needs::DeviceCapability`. It used to say `NotRepresentable`, which claims no Vulkan
+/// mechanism exists on any device: a device without `sparseResidency2Samples` therefore made our
+/// refusal read as unbuilt work of ours, and the conformance suite scored it as a refusal rather
+/// than as the venue's own gap.
 pub(crate) fn sparse_refusal(need: SparseNeed) -> Error {
-    match need {
-        SparseNeed::SparseBinding | SparseNeed::SparseBindingQueue => {
-            Error::NotImplemented(RuntimeGap::SparseTileMaps)
+    let capability = match need {
+        // The exact path exists and the runtime has not built it: ours to answer for.
+        SparseNeed::SparseBinding | SparseNeed::SparseBindingQueue | SparseNeed::SparseMetadata => {
+            return Error::NotImplemented(RuntimeGap::SparseTileMaps)
         }
-        need => Error::Unsupported(Unsupported::not_representable(Feature::SparseTextures {
-            missing: need,
-        })),
-    }
+        SparseNeed::SparseResidencyImage2D => "sparseResidencyImage2D",
+        SparseNeed::SparseResidencyImage3D => "sparseResidencyImage3D",
+        SparseNeed::SparseResidencySamples(2) => "sparseResidency2Samples",
+        SparseNeed::SparseResidencySamples(4) => "sparseResidency4Samples",
+        SparseNeed::SparseResidencySamples(8) => "sparseResidency8Samples",
+        SparseNeed::SparseResidencySamples(16) => "sparseResidency16Samples",
+        // A sample count Vulkan has no `sparseResidencyNSamples` member for: still the device's
+        // own gap, named for what it is rather than by a member that does not exist.
+        SparseNeed::SparseResidencySamples(_) => "sparse residency of the texture's sample count",
+        SparseNeed::SparseImageFormat => {
+            "sparse residency of the texture's format, type, sample count and usage \
+             (vkGetPhysicalDeviceSparseImageFormatProperties lists none)"
+        }
+        // A need the vocabulary gained since: not claimed to be the device's without knowing.
+        _ => {
+            return Error::Unsupported(Unsupported::not_implemented(Feature::SparseTextures {
+                missing: need,
+            }))
+        }
+    };
+    Error::Unsupported(Unsupported::device_capability(
+        Feature::SparseTextures { missing: need },
+        capability,
+    ))
 }
 
 /// How a sparse image's memory is laid out in the device's sparse units.

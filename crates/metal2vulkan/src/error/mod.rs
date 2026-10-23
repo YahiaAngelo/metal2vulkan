@@ -157,6 +157,7 @@ impl Error {
                 Needs::NotImplemented | Needs::NotRepresentable => Permanence::Input,
                 Needs::DriverDefect(_)
                 | Needs::RuntimeDriverDefect(_)
+                | Needs::DeviceCapability(_)
                 | Needs::MetalGpuFamily(_)
                 | Needs::MetalRefuses(_) => Permanence::InputAndDevice,
             },
@@ -392,6 +393,17 @@ impl Unsupported {
         }
     }
 
+    /// Run on a device with `capability`, which this device does not have and which the compile
+    /// layer's vocabulary does not name ([`Needs::DeviceCapability`]).
+    pub fn device_capability(feature: Feature, capability: &'static str) -> Unsupported {
+        Unsupported {
+            feature,
+            needs: Needs::DeviceCapability(capability),
+            location: None,
+            symbol: None,
+        }
+    }
+
     /// Translatable if the device had every capability of any one alternative.
     pub fn needs_any_of(feature: Feature, alternatives: Vec<Vec<Capability>>) -> Unsupported {
         Unsupported {
@@ -481,6 +493,25 @@ impl fmt::Display for Unsupported {
 pub enum Needs {
     /// Enabling every capability of any one alternative would make it translatable.
     AnyOf(Vec<Vec<Capability>>),
+    /// A device capability the compile layer's vocabulary does not name, which this device does
+    /// not have: named by its Vulkan member name (`"sparseResidencyImage2D"`) or, where it is not
+    /// one member, in words. **The device's own gap**, not unbuilt work of ours: a device with the
+    /// capability runs the input.
+    ///
+    /// Why a variant of its own rather than [`Needs::AnyOf`]. `AnyOf` names its capabilities as
+    /// [`Capability`], and `Capability::Feature`'s vocabulary — [`VkFeature::ALL`], generated from
+    /// the exposure table — *is* the compile profile's feature set, so anything named there enters
+    /// every profile, cache key and digest. A capability only the **runtime** needs is deliberately
+    /// outside it: a sparse heap's `sparseBinding` and `sparseResidency*`, its queue family's
+    /// sparse bit, and the sparse image formats a device lists, as `timelineSemaphore` would be
+    /// (`sparse::device`). Before this variant there was no way for such a refusal to say "the
+    /// device lacks it": the remaining words were [`Needs::NotImplemented`], which claims we have
+    /// not built the thing, and [`Needs::NotRepresentable`], which claims no Vulkan mechanism
+    /// exists for it on any device. Both are false of a device that simply does not have a Vulkan
+    /// 1.0 feature, and both read to a consumer as our unbuilt work.
+    ///
+    /// No compile profile, cache key or digest holds it; only the runtime refuses so.
+    DeviceCapability(&'static str),
     /// Not implemented by this translator version on any device.
     NotImplemented,
     /// No Vulkan 1.2+ mechanism exists for these semantics.
