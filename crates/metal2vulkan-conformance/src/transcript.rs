@@ -656,9 +656,15 @@ impl Sites {
     /// Every failing call goes through [`crate::case::call`], which records this whenever the
     /// typed error names capabilities a device could enable or a measured driver defect, so a
     /// case needs no code of its own and cannot forget to say it.
+    /// Recording the same site twice is a no-op, so the one place that reads a case's
+    /// [`Abort`](crate::case::Abort) may record the venue's gap at the site that stopped the case
+    /// without having to know whether [`crate::case::call`] already did.
     pub fn device_gap(&mut self, name: &str, needs: impl Into<String>) {
-        self.device_gaps
-            .push((format!("case/{name}"), needs.into()));
+        let path = format!("case/{name}");
+        if self.device_gaps.iter().any(|(site, _)| *site == path) {
+            return;
+        }
+        self.device_gaps.push((path, needs.into()));
     }
 
     /// Add the two sites that record what a device announced: the exact set of degrade-notice

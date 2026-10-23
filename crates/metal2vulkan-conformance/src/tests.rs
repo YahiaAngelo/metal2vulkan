@@ -32,8 +32,11 @@ struct StubSide {
     status: &'static str,
     /// The notice codes `announced` hands over, once.
     notices: Vec<String>,
-    /// A call that fails, by its name, with the failure it gives.
-    refuse: Option<(&'static str, Failure)>,
+    /// The calls that fail, each by its name, with the failure it gives. A list rather than one,
+    /// because a case may record a refusal at a site it carries on past **and** stop at a later
+    /// call the venue cannot make, and the two together are a shape the verdicts have to get
+    /// right.
+    refuse: Vec<(&'static str, Failure)>,
     /// The device name the side's venue answers, so a test can hold a venue-scoped ledger row
     /// against one venue and not another.
     device: &'static str,
@@ -46,7 +49,7 @@ impl StubSide {
             output,
             status: "Completed",
             notices: Vec::new(),
-            refuse: None,
+            refuse: Vec::new(),
             device: "stub",
             made: 0,
         }
@@ -64,15 +67,15 @@ impl StubSide {
     }
 
     fn refusing(mut self, call: &'static str, failure: Failure) -> Self {
-        self.refuse = Some((call, failure));
+        self.refuse.push((call, failure));
         self
     }
 
     /// The failure the side was told to give at `call`, if any.
     fn refusal(&self, call: &str) -> Option<Failure> {
         self.refuse
-            .as_ref()
-            .filter(|(named, _)| *named == call)
+            .iter()
+            .find(|(named, _)| *named == call)
             .map(|(_, failure)| failure.clone())
     }
 
@@ -1337,6 +1340,201 @@ fn a_venue_that_lacks_the_feature_is_its_own_outcome() {
     // It is neither a pass nor a failure, and it never counts as a divergence.
     assert!(replayed.verdict.is_compliant());
     assert_eq!(replayed.verdict.word(), "lacks-feature");
+}
+
+/// A case that records a refusal at a site it **carries on past**, and then stops at a call the
+/// venue honestly cannot make.
+///
+/// This shape had no case in the tree, which is why the hole below went unreached: the only user
+/// of [`crate::case::probe`] makes no abortable call after it, and every site that records a
+/// failure by hand either runs to the end or aborts at once. So the shape is written here, where
+/// it costs no device and cannot be refactored away by a case author.
+///
+/// `hand_built` chooses how the case says it stopped: through [`made`], which records the venue's
+/// gap as it emits the site, or through an `Abort` the case builds itself, which 122 sites in the
+/// suite do and which records no such thing. Both have to reach the same verdict.
+struct StoppedCase {
+    name: &'static str,
+    hand_built: bool,
+}
+
+impl StoppedCase {
+    fn new(name: &'static str, hand_built: bool) -> Self {
+        Self { name, hand_built }
+    }
+
+    /// The transcript a side that answered everything emits: Metal's answer for this case.
+    ///
+    /// It holds a site **after** the one that stops our run, so a green verdict here also says
+    /// the comparison was told the run stopped: without that, the site Metal alone reached would
+    /// be a divergence and no verdict of this case could ever be `lacks-feature`.
+    fn metal(&self) -> Transcript {
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(&self.inputs().unwrap()));
+        sites.value(SWEPT, Value::ok(Value::Uint(11)));
+        sites.value("library", Value::ok(Value::Absent));
+        sites.value(STOPS, Value::ok(Value::Absent));
+        sites.value("after", Value::Uint(13));
+        sites.notices(NOTICES_SITE, &[] as &[&str]);
+        sites.finish()
+    }
+}
+
+/// The site the case sweeps over and carries on past.
+const SWEPT: &str = "swept";
+
+/// The site the case stops at.
+const STOPS: &str = "stops";
+
+impl Case for StoppedCase {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::Run
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        Ok(vec![Input::bytes("calls", b"one sweep and one stop")])
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        // A sweep: one refused entry compares as a refusal at its own site and the run goes on.
+        crate::case::probe(
+            sites,
+            SWEPT,
+            side.texture_2d(
+                metal2vulkan::metal::PixelFormat::RGBA8Unorm,
+                [1, 1],
+                4,
+                &[0u8; 4],
+            ),
+            |_| Value::Uint(11),
+        );
+        let source = ShaderSource {
+            bitcode: &[],
+            air_text: "",
+            entry: "stop",
+        };
+        let library = made(sites, "library", side.library(&source))?;
+        if !self.hand_built {
+            made(sites, STOPS, side.compute_pipeline(library, "stop"))?;
+        } else {
+            match side.compute_pipeline(library, "stop") {
+                Ok(_) => sites.value(STOPS, Value::ok(Value::Absent)),
+                Err(failure) => {
+                    sites.push(Node::leaf(STOPS, Observed::value(failure.recorded())));
+                    return Err(Abort {
+                        at: STOPS.to_owned(),
+                        failure,
+                    });
+                }
+            }
+        }
+        sites.value("after", Value::Uint(13));
+        Ok(())
+    }
+}
+
+/// A refusal of **ours** at a site the run carried on past outranks the venue's own gap at the
+/// site that stopped it, and the ledger can name it.
+///
+/// The hole this closes, which was the most severe form of a refusal going missing found in this
+/// round: `replay` answered `LacksFeature` straight off the abort, **before** comparing anything,
+/// so a refusal already recorded at an earlier site vanished behind a verdict that
+/// [`Verdict::is_compliant`] answers true for. The run stayed green. `verdict.rs` states the
+/// invariant it broke in as many words — "a divergence or a refusal anywhere else in the same case
+/// still fails, which is what makes this safe to be compliant" — so this is also the test that
+/// catches that claim being false.
+///
+/// Both ways a case can say it stopped are exercised, because they record different things: the
+/// hand-built `Abort` records the typed error and not the fact that the venue is what lacks it,
+/// and without `replay` recording that fact at the one place it reads the abort, this case's
+/// stopping site would itself read as a refusal of ours.
+#[test]
+fn a_refusal_before_the_venues_own_gap_outranks_it() {
+    use crate::known_gaps::{against, Expectation, Expects, KnownGap, EVERY_VENUE};
+    let lacking = || {
+        let mut failure = Failure::named("Error::Unsupported", "no pipeline of that shape");
+        failure.lacks = Some("the device enables no such capability".to_owned());
+        failure
+    };
+    for hand_built in [false, true] {
+        let case = StoppedCase::new("stopped-after-a-refusal", hand_built);
+        let recording = recording_of(&case, case.metal(), 3);
+
+        // Only the venue's gap: the case is its own outcome, as it was before, and the allowances
+        // it never reached are not reported as a blind spot.
+        let mut lacks = StubSide::new(Vec::new()).refusing("pipeline", lacking());
+        let only_lacking = replay_against(&case, &mut lacks, &recording).unwrap();
+        assert_eq!(
+            only_lacking.verdict.word(),
+            "lacks-feature",
+            "hand_built {hand_built}: {}",
+            only_lacking.verdict
+        );
+        assert!(only_lacking.verdict.is_compliant());
+        assert!(
+            only_lacking
+                .verdict
+                .to_string()
+                .contains("no such capability"),
+            "{}",
+            only_lacking.verdict
+        );
+        assert_eq!(only_lacking.allowances.unfired, Vec::new());
+
+        // And with a refusal of ours at the site the run carried on past, that refusal is the
+        // verdict: non-compliant, named at its own site, and the venue's gap still reported.
+        let mut both = StubSide::new(Vec::new())
+            .refusing(
+                "texture",
+                Failure::named("Error::Invalid", "the runtime refuses this texture"),
+            )
+            .refusing("pipeline", lacking());
+        let replayed = replay_against(&case, &mut both, &recording).unwrap();
+        assert_eq!(
+            replayed.verdict.word(),
+            "refused",
+            "hand_built {hand_built}: {}",
+            replayed.verdict
+        );
+        assert!(!replayed.verdict.is_compliant());
+        let Verdict::Refused { at, .. } = &replayed.verdict else {
+            panic!("{}", replayed.verdict);
+        };
+        let [printed] = at.as_slice() else {
+            panic!("the swept site alone, not the stopping one: {at:?}");
+        };
+        let (site, answer) = printed.split_once(": ").expect("a site and an answer");
+        let (site, answer) = (site.to_owned(), answer.to_owned());
+        assert_eq!(site, "case/swept");
+        assert!(answer.contains("Error::Invalid"), "{answer}");
+
+        // The ledger can name it, in both directions, which is what being `Refused` buys.
+        let rows = vec![replayed];
+        let found = against(&rows, &[]);
+        let [Expectation::Unlisted { expects, .. }] = found.as_slice() else {
+            panic!("{found:?}");
+        };
+        assert_eq!(*expects, Expects::Refused);
+        let listed = vec![KnownGap {
+            case: "stopped-after-a-refusal".to_owned(),
+            venue: EVERY_VENUE.to_owned(),
+            expects: Expects::Refused,
+            site: site.clone(),
+            answer: answer.clone(),
+            waiting_on: "the stub refuses the swept texture, which is the point of the stub"
+                .to_owned(),
+        }];
+        assert_eq!(against(&rows, &listed), Vec::new());
+        let found = against(std::slice::from_ref(&only_lacking), &listed);
+        let [gone @ Expectation::NoLongerHeld { .. }] = found.as_slice() else {
+            panic!("{found:?}");
+        };
+        assert!(gone.to_string().contains("drop the row"), "{gone}");
+    }
 }
 
 #[test]
