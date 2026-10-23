@@ -2485,11 +2485,19 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
         "scheduler_wakes_host",
         "wakes_spared",
         "wakes_handler_threads",
+        // Process-dependent rather than thread-dependent, and no more boundable for it: a reading
+        // of what is alive now, a release another thread got round to, an object found already
+        // made, and waits borrowed from whatever ran before the case.
+        "memory_blocks_live",
+        "empty_memory_blocks_live",
+        "sampler_sets_destroyed",
+        "pipeline_layouts_shared",
+        "shader_modules_shared",
+        "completed_waits",
     ] {
         assert!(racy(count).is_some(), "{count}");
     }
-    // Counts of work items rather than of thread arrivals, which held still over every round of
-    // every measurement: one slot return and one completed wait a command buffer.
+    // Counts a case's own calls produce, which held still alone and in both case sets.
     for count in [
         "command_buffers_deferred",
         "command_buffers_submitted",
@@ -2497,7 +2505,10 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
         "commands_replayed.cmd_draw",
         "render_passes_made",
         "slot_returns",
-        "completed_waits",
+        // The `_made` partner of a `_shared` count stays gated: finding one already made only
+        // lowers it, and the gate is an upper bound.
+        "pipeline_layouts_made",
+        "shader_modules_made",
     ] {
         assert!(racy(count).is_none(), "{count}");
     }

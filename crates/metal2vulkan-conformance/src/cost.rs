@@ -91,6 +91,57 @@ pub fn excluded(name: &str) -> Option<&'static str> {
     None
 }
 
+/// Why a count of what is alive, parked or waiting **at the instant the counts were read** is
+/// reported and never gated.
+///
+/// It is not work a case did; it is a reading of process-wide state that happens to be taken at
+/// the case's boundary. Measured on this M3 Max: two replays of the whole set on the same binary
+/// over the same 350 cases put `empty_memory_blocks_live` over its bound on
+/// `xr-two-planes-rgb10a8-2p-xr10-srgb` in one run and on `depth16-texel-reads`,
+/// `texture-fills-53` and `sample-fills-d32-2` in the other, and `memory_blocks_live` over it in
+/// the second run only. Run alone, the same three texture-buffer cases read
+/// `empty_memory_blocks_live` 2 and `memory_blocks_live` 1 where inside the set they read 0 or 1.
+/// A count that lands on a different case every run cannot be bounded on any of them.
+const INSTANTANEOUS: &str = "a reading of what was alive, parked or waiting at the instant the \
+     counts were read, which is process-wide state and not work the case did: measured landing on \
+     a different case in each of two replays of the same binary over the same cases";
+
+/// Why a count of what an object's **release** got round to is reported and never gated: the same
+/// reason as the `object_churn.` tree, for the counts that live outside it.
+///
+/// Measured: `sampler_sets_destroyed` reached 1 where the measurement's most was 0 on
+/// `xr-two-planes-rgb10a8-2p-xr10-srgb` in two replays of the whole set, and reads 0 when that
+/// case runs alone.
+const RELEASED: &str = "what a release got round to destroying, which runs on whichever thread \
+     drops the object and may land in a later case's window";
+
+/// Why a count of an object **found already made** rather than made is reported and never gated.
+///
+/// Whether this case makes a pipeline layout or finds one depends on what every case before it in
+/// the same process made, so the split between the two is a fact about the selection and not about
+/// the case. Its partner stays gated and loses nothing: finding one only ever **lowers** the
+/// `_made` count, and the gate is an upper bound.
+///
+/// Measured: `depth16-texel-reads` run alone makes 2 pipeline layouts and shares none; inside the
+/// 350-case set it makes 1 and shares 1. Two and two.
+const FOUND: &str = "an object found already made rather than made, which depends on what every \
+     case before it in the same process made. Its `_made` partner stays gated, and loses nothing: \
+     finding one only lowers that count, and the gate is an upper bound";
+
+/// Why `completed_waits` is reported and never gated.
+///
+/// It looked like the one deterministic breach — exactly one over its bound, in the same three
+/// cases, in two replays of the whole set. The contrast run says otherwise: run **alone**, those
+/// cases wait 25, 225 and 5 times; inside the 350-case set they wait 30, 230 and 10, and inside
+/// the 126-case set the bounds were taken from, 29, 229 and 9. So the case's own waits are the
+/// smaller number and the rest are waits of whatever ran before it, landing in this case's window
+/// because the completion waiter is a thread of ours. How many it borrows moves with the
+/// selection, which is why a bound on it is a bound on the selection.
+const BORROWED: &str = "waits a case is charged for that belong to whatever ran before it: the \
+     completion waiter is a thread of ours, so a wait lands in whichever case's window it reaches. \
+     Measured: 25, 225 and 5 waits when three cases run alone against 30, 230 and 10 inside the \
+     whole set";
+
 /// Why a count of an object made because no spare was free is reported and never gated.
 const POOLED: &str = "an object made because no spare was free, where a spare comes back on \
      another thread: which case has to make one depends on when that thread returned the one \
@@ -118,11 +169,35 @@ const POOLED: &str = "an object made because no spare was free, where a spare co
 /// others': a fence is made where no spare one is free, and a spare comes back on the completion
 /// thread.
 ///
-/// What is **not** here, on the same evidence: `slot_returns` and `completed_waits` count work
-/// items rather than thread arrivals, one a command buffer, and they held still over every round
-/// of every measurement and every replay.
-const RACY: [(&str, &str); 8] = [
+/// `completed_waits` is the one that had to be read a third time, and it is the sharpest warning
+/// against trusting a measurement over an argument: it held still over every round of every
+/// measurement here, then came in at **exactly one over** its bound in the same three cases in two
+/// replays of a larger case set — which reads like a regression and is not one. See [`BORROWED`].
+/// `slot_returns` beside it stays gated: it counts work items, one a command buffer, and has held
+/// still alone and in both case sets.
+const RACY: [(&str, &str); 24] = [
     ("fences_made", POOLED),
+    // What is alive, parked or waiting at the instant the counts were read.
+    ("memory_blocks_live", INSTANTANEOUS),
+    ("empty_memory_blocks_live", INSTANTANEOUS),
+    ("dedicated_memory_blocks_live", INSTANTANEOUS),
+    ("host_imports_live", INSTANTANEOUS),
+    ("dma_buf_memories_live", INSTANTANEOUS),
+    ("dma_buf_image_memories_live", INSTANTANEOUS),
+    ("shadow_merge_kept_images_live", INSTANTANEOUS),
+    ("freed_memory_parked", INSTANTANEOUS),
+    ("freed_memory_waiting", INSTANTANEOUS),
+    ("host_import_releases_pending", INSTANTANEOUS),
+    ("host_imports_resident", INSTANTANEOUS),
+    // A release the owning thread got round to, outside the `object_churn.` tree.
+    ("sampler_sets_destroyed", RELEASED),
+    // Found already made rather than made. Named one by one rather than by the `_shared` suffix,
+    // which `set_zero_writes_if_shapes_shared` also carries and which is a per-draw count of the
+    // case's own work.
+    ("pipeline_layouts_shared", FOUND),
+    ("shader_modules_shared", FOUND),
+    ("sampler_sets_shared", FOUND),
+    ("completed_waits", BORROWED),
     ("command_pools_made", POOLED),
     ("spare_command_pools_", POOLED),
     ("live_tables_uploaded", POOLED),

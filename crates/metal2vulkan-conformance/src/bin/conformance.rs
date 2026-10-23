@@ -4,7 +4,7 @@
 //! ```text
 //! conformance record [case ...]
 //! conformance replay [--cpu] [--default-policy] [case ...]
-//! conformance cost [--cpu] [--default-policy] [--runs N] [--write] [case ...]
+//! conformance cost [--cpu] [--default-policy] [--runs N] [--write] [--show] [case ...]
 //! conformance cases
 //! ```
 //!
@@ -56,6 +56,7 @@ fn command() -> Result<bool, String> {
     let mut names = Vec::new();
     let mut runs = 2;
     let mut write = false;
+    let mut show = false;
     let mut words = words.peekable();
     while let Some(word) = words.next() {
         match word.as_str() {
@@ -64,6 +65,7 @@ fn command() -> Result<bool, String> {
             "--default-policy" => policy = Policy::Default,
             "--exact-policy" => policy = Policy::Exact,
             "--write" => write = true,
+            "--show" => show = true,
             "--runs" => {
                 let value = words.next().ok_or("--runs wants a number")?;
                 runs = value
@@ -83,7 +85,7 @@ fn command() -> Result<bool, String> {
             Ok(true)
         }
         "record" => record(&cases),
-        "cost" => cost(venues, policy, &cases, runs, write),
+        "cost" => cost(venues, policy, &cases, runs, write, show),
         metal2vulkan_conformance::validated::LEG_VERB => validated_leg(&cases),
         "replay" => {
             let report = run::replay_on_under(venues, policy, &cases)?;
@@ -142,6 +144,7 @@ fn cost(
     cases: &[Box<dyn metal2vulkan_conformance::case::Case>],
     runs: u32,
     write: bool,
+    show: bool,
 ) -> Result<bool, String> {
     let (venue, measured) = run::cost_on_under(venues, policy, cases, runs)?;
     let words = format!(
@@ -188,6 +191,13 @@ fn cost(
             }
         }
         raced += one.moved_by_a_race().len();
+        // `--show` prints every count the case moved. What a contrast run needs: the same case in
+        // a selection of one and inside the whole set, count by count.
+        if show {
+            for (count, value) in one.counts.iter() {
+                println!("    = {count} {value}");
+            }
+        }
     }
     // How much of the runtime's counted surface the selection reaches: the cost half's own
     // coverage number, tracked the way "unrecorded" is rather than left to a feeling.
