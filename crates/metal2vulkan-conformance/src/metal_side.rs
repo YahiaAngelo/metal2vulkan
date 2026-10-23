@@ -17,6 +17,7 @@ use crate::case::{
     PassOutcome, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion,
     StageInput, TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
+use crate::queue_slots::QueueSlots;
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
 use metal2vulkan::metal::PixelFormat;
@@ -1065,6 +1066,38 @@ impl Side for MetalSide {
         })
     }
 
+    fn queue_slots(&mut self, max: Option<u32>, cap: u32) -> Answer<QueueSlots> {
+        let queue = match max {
+            None => self.device.newCommandQueue(),
+            Some(max) => self
+                .device
+                .newCommandQueueWithMaxCommandBufferCount(max as usize),
+        }
+        .ok_or_else(|| Failure::named("NewCommandQueue", format!("{max:?} returned nil")))?;
+        let other = self
+            .device
+            .newCommandQueue()
+            .ok_or_else(|| Failure::named("NewCommandQueue", "the second queue returned nil"))?;
+        crate::queue_slots::probe(
+            cap,
+            move || {
+                // Each make gets an autorelease pool of its own, and that is load-bearing rather
+                // than tidy. `commandBuffer` answers an autoreleased object; the `Retained` is a
+                // second reference, so without a pool that drains, the probe's own release frees
+                // nothing, the slot never comes back, and the blocked make it is meant to release
+                // stays blocked (measured: the whole probe timed out). A worker thread has no pool
+                // of its own, so one is made here.
+                objc2::rc::autoreleasepool(|_| {
+                    queue
+                        .commandBuffer()
+                        .map(Made)
+                        .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))
+                })
+            },
+            || objc2::rc::autoreleasepool(|_| other.commandBuffer().is_some()),
+        )
+    }
+
     fn makes_texture(&mut self, query: &HeapTextureQuery) -> Answer<bool> {
         let descriptor = queried_descriptor(query);
         // The texture, where Metal makes one, is released as this statement ends: the case asks
@@ -1073,6 +1106,19 @@ impl Side for MetalSide {
         Ok(self.device.newTextureWithDescriptor(&descriptor).is_some())
     }
 }
+
+/// A command buffer the slot probe holds, so the thread that frees a slot need not be the thread
+/// that made it.
+///
+/// `objc2` gives `MTLCommandBuffer` no `Send`, because Metal documents a command buffer as unsafe
+/// to *encode into* from more than one thread. The probe encodes into none: it makes each command
+/// buffer on one thread and only ever releases it from another, and releasing an Objective-C object
+/// off the thread that made it is sound, since the retain count is atomic.
+pub struct Made(pub Retained<ProtocolObject<dyn MTLCommandBuffer>>);
+
+// SAFETY: as the type's documentation states: the probe never encodes into a held command buffer,
+// and the only operation that crosses threads is the release.
+unsafe impl Send for Made {}
 
 /// Metal's descriptor for a queried one: every field the case names, by its raw ordinal, so a
 /// private format and a private usage bit reach Metal as readily as a public one.

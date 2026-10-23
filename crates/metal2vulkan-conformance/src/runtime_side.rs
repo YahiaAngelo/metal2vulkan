@@ -13,6 +13,7 @@ use crate::case::{
     ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
     TilePipelineSpec, TileStep, Venue,
 };
+use crate::queue_slots::QueueSlots;
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::{Negative, Value};
 use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor};
@@ -1242,6 +1243,26 @@ impl Side for RuntimeSide<'_> {
             size: answered.size,
             align: answered.align,
         })
+    }
+
+    fn queue_slots(&mut self, max: Option<u32>, cap: u32) -> Answer<QueueSlots> {
+        let queue = match max {
+            None => self.device.new_command_queue(),
+            Some(max) => self
+                .device
+                .new_command_queue_with_max_command_buffer_count(max as usize),
+        }
+        .map_err(Failure::from_error)?;
+        let other = self
+            .device
+            .new_command_queue()
+            .map_err(Failure::from_error)?;
+        let making = queue.clone();
+        crate::queue_slots::probe(
+            cap,
+            move || making.command_buffer().map_err(Failure::from_error),
+            || other.command_buffer().is_ok(),
+        )
     }
 
     fn makes_texture(&mut self, query: &HeapTextureQuery) -> Answer<bool> {

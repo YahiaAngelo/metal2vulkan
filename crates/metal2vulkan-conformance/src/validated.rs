@@ -445,4 +445,13 @@ impl<S: Side> Side for Announcing<S> {
         self.at("makes_texture");
         self.inner.makes_texture(query)
     }
+
+    fn queue_slots(
+        &mut self,
+        max: Option<u32>,
+        cap: u32,
+    ) -> Answer<crate::queue_slots::QueueSlots> {
+        self.at("queue_slots");
+        self.inner.queue_slots(max, cap)
+    }
 }

@@ -46,6 +46,7 @@ pub mod diff;
 pub mod fixture;
 pub mod known_refusals;
 pub mod measured;
+pub mod queue_slots;
 pub mod record;
 pub mod recording;
 pub mod replay;

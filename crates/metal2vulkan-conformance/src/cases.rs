@@ -17,6 +17,7 @@
 //!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
+pub mod command_queues;
 pub mod depth_texel_reads;
 pub mod extended_range_planes;
 pub mod extended_range_two_planes;
@@ -98,6 +99,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in heap_metal_sizes::all() {
         cases.push(Box::new(case));
     }
+    cases.push(Box::new(command_queues::queue_slots()));
     cases
 }
 

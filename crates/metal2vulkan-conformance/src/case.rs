@@ -704,6 +704,26 @@ pub trait Side {
         let _ = query;
         Err(Failure::unavailable("makes_texture"))
     }
+
+    /// A command queue's limit on uncompleted command buffers, by the probe both sides run
+    /// ([`crate::queue_slots`]): the queue is made with `max` as its
+    /// `maxCommandBufferCount` (`newCommandQueue` where `max` is `None`), and at most `cap` command
+    /// buffers are made on a thread of its own.
+    ///
+    /// The whole experiment is one call because what it observes is an **order of events** — a make
+    /// that did not return, another queue's make that did, and the first one answering once a slot
+    /// came back — and a case cannot state that as a sequence of independent calls.
+    ///
+    /// Nothing is committed, so nothing reaches the GPU, and no make can be left unanswered: the
+    /// probe releases a blocked make by dropping a command buffer held uncommitted.
+    fn queue_slots(
+        &mut self,
+        max: Option<u32>,
+        cap: u32,
+    ) -> Answer<crate::queue_slots::QueueSlots> {
+        let _ = (max, cap);
+        Err(Failure::unavailable("queue_slots"))
+    }
 }
 
 /// A tile render pipeline a case makes: `MTLTileRenderPipelineDescriptor`'s facts the cases state.
