@@ -24,6 +24,7 @@
 //!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
+pub mod astc_textures;
 pub mod border_swizzles;
 pub mod buffer_blits;
 pub mod buffer_textures;
@@ -109,6 +110,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in etc_textures::all() {
+        cases.push(Box::new(case));
+    }
+    for case in astc_textures::all() {
         cases.push(Box::new(case));
     }
     for case in compressed_blits::all() {
