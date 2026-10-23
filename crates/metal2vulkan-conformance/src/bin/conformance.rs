@@ -382,6 +382,7 @@ fn cost(
         // The two reach directions are counted apart, by `cost::reach`, because they are not
         // equally safe and because a tally written here could swap them with nothing to catch it.
         let mut reach = metal2vulkan_conformance::cost::Reach::default();
+        let mut per_case = Vec::new();
         // A case landed since the last whole-set measurement has no bound, so this comparison has
         // nothing to compare and passes it over. That is right -- inventing a bound from the run
         // that is checking it would gate on itself -- but passing it over in silence makes the
@@ -413,6 +414,7 @@ fn cost(
             let here = metal2vulkan_conformance::cost::reach(&moved);
             reach.given_up += here.given_up;
             reach.taken_on += here.taken_on;
+            per_case.push(moved.clone());
             for one in &moved {
                 println!("  {one}");
                 drifted += 1;
@@ -431,6 +433,18 @@ fn cost(
              {} is the number to watch.",
             reach.given_up, reach.taken_on, reach.taken_on
         );
+        // Case by case answers "what moved"; by count it answers "does this belong to the thing
+        // that changed", which is the question a re-bless has to pass before it is blessed.
+        let by_count = metal2vulkan_conformance::cost::counts_that_moved(&per_case);
+        if !by_count.is_empty() {
+            println!("\nthe counts that moved, most cases first:");
+            for one in &by_count {
+                println!(
+                    "  {:<48} {:>4} case(s), {:>4} of them gated",
+                    one.count, one.cases, one.gated
+                );
+            }
+        }
         if !uncovered.is_empty() {
             println!(
                 "{} of the {} case(s) measured hold no bound on {venue}, so this comparison \

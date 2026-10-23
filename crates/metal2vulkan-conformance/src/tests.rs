@@ -5178,3 +5178,58 @@ fn the_diff_tool_reads_the_gate_and_not_the_noise() {
     // measurement that read exactly what the record holds.
     assert!(drift(&held, &held).is_empty());
 }
+
+/// The counts a whole re-measure moved, which is the shape the first question needs.
+///
+/// Case by case says what moved; by count it says whether the drift belongs to the path that
+/// changed. The two things this can get wrong are counting one case twice for a count that drifted
+/// in two ways there, and an order that is not the same on every run.
+#[test]
+fn the_counts_a_re_measure_moved_are_summed_over_cases_once_each() {
+    use crate::cost::{counts_that_moved, Drift, Drifted, Moved, Region};
+    let one = |count: &str, what: Drifted| Drift {
+        count: count.to_owned(),
+        region: Region::Submission,
+        what,
+        was: Some(2),
+        now: Some(3),
+    };
+    // Three cases. `command_buffers_begun` moved in all three, and in the first it moved twice --
+    // its bound and its gate -- which is still one case.
+    let per_case = vec![
+        vec![
+            one("command_buffers_begun", Drifted::GatedBound),
+            one("command_buffers_begun", Drifted::GateLost),
+            one("host_texel_copies", Drifted::GatedBound),
+        ],
+        vec![
+            one("command_buffers_begun", Drifted::GatedBound),
+            one("host_texel_copies", Drifted::GatedBound),
+        ],
+        vec![one("command_buffers_begun", Drifted::GateGained)],
+    ];
+    let moved = counts_that_moved(&per_case);
+    assert_eq!(
+        moved,
+        vec![
+            Moved {
+                count: "command_buffers_begun".to_owned(),
+                cases: 3,
+                gated: 2,
+            },
+            Moved {
+                count: "host_texel_copies".to_owned(),
+                cases: 2,
+                gated: 2,
+            },
+        ],
+        "a count is one case's drift however many lines it took there, most cases first"
+    );
+    // Reach alone is drift a reader must still see, with nothing gated under it.
+    let moved = counts_that_moved(&[vec![one("submit_infos", Drifted::GateGained)]]);
+    assert_eq!(moved[0].cases, 1);
+    assert_eq!(moved[0].gated, 0);
+    // Nothing moved, nothing summed: the summary cannot invent a row.
+    assert!(counts_that_moved(&[]).is_empty());
+    assert!(counts_that_moved(&[vec![], vec![]]).is_empty());
+}
