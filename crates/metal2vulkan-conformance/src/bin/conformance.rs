@@ -52,6 +52,20 @@ use metal2vulkan_conformance::device::{Policy, Venues};
 use metal2vulkan_conformance::known_gaps::Expectation;
 use metal2vulkan_conformance::run;
 
+/// What the command answers a bare invocation with. Printed rather than acted on: the verbs each
+/// take the device, and `replay` with no case named selects every case, so defaulting to it meant
+/// running the whole set against the GPU for anyone who typed the command to find out what it took.
+const USAGE: &str = "\
+conformance record [case ...]
+conformance replay [--cpu] [--default-policy] [case ...]
+conformance cost [--cpu] [--default-policy] [--runs N] [--write] [--show] [--alone] [--check] [case ...]
+conformance times [--cpu] [--default-policy] [--runs N] [--leg metal|ours] [--write] [--show]
+                   [--call NAME]... [--cold-shaders] [case ...]
+conformance cases
+
+A verb is required. `cases` lists the case set and takes no device; every other verb runs work on
+a GPU, and with no case named the whole set is selected.";
+
 fn main() -> std::process::ExitCode {
     match command() {
         Ok(compliant) if compliant => std::process::ExitCode::SUCCESS,
@@ -66,7 +80,14 @@ fn main() -> std::process::ExitCode {
 /// Run the command, answering whether the selection is compliant.
 fn command() -> Result<bool, String> {
     let mut words = std::env::args().skip(1);
-    let verb = words.next().unwrap_or_else(|| "replay".to_owned());
+    // No verb means no work, and the return is before anything reaches a device. Defaulting to
+    // `replay` here cost two whole-set runs against the only Metal venue in one day, both from
+    // reading the command's usage by invoking it bare; the GPU is shared with another project's
+    // measurements, so taking it is something to ask for rather than to receive by default.
+    let Some(verb) = words.next() else {
+        eprintln!("{USAGE}");
+        return Ok(false);
+    };
     let mut venues = Venues::Gpu;
     let mut policy = Policy::Exact;
     let mut names = Vec::new();
