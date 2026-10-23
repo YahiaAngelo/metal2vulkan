@@ -817,6 +817,28 @@ pub trait Side {
         Err(Failure::unavailable("render_pipeline_facts"))
     }
 
+    /// What a render pipeline **descriptor** answers of itself
+    /// ([`RenderDescriptorFacts`](crate::render_descriptors::RenderDescriptorFacts)): the whole of
+    /// `MTLRenderPipelineDescriptor`'s own surface, in the shape
+    /// [`spec`](crate::render_descriptors::DescriptorSpec) states.
+    ///
+    /// One call, for the reason [`Side::function_facts`] gives: the descriptor is mutable and the
+    /// observation is what it answers **after** a stated sequence of setters, a `reset` among them,
+    /// so a case cannot state it as independent calls over an object neither side's handle space
+    /// holds. No pipeline is made from the descriptor, which is what keeps the family off the GPU.
+    ///
+    /// [`Side::render_pipeline_facts`] is the **state**'s side of the same descriptor: what the
+    /// made object echoes back. This is the descriptor before any state exists, which is where
+    /// Metal's defaults are.
+    fn render_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &crate::render_descriptors::DescriptorSpec<'_>,
+    ) -> Answer<crate::render_descriptors::RenderDescriptorFacts> {
+        let _ = (library, spec);
+        Err(Failure::unavailable("render_descriptor_facts"))
+    }
+
     /// `newFunctionWithName:` of `entry`, or `newFunctionWithName:constantValues:error:` where
     /// `constants` holds a value, and what the function then answers about **itself**
     /// ([`crate::function_facts::FunctionFacts`]).

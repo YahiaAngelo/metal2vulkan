@@ -38,6 +38,11 @@ use crate::render::{
     Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, StepResource,
     TargetSpec,
 };
+use crate::render_descriptors::{
+    AttributeFacts as DescriptorAttributeFacts, ColorFacts, DescriptorSpec, LayoutFacts,
+    LinkedCounts, RenderDescriptorFacts, SuppliedLists, VertexDescriptorFacts, AWAY, READ_BUFFERS,
+    READ_COLORS, READ_VERTEX_SLOTS,
+};
 use crate::sparse_query::{
     HeapFacts, QueryPage, SparseHeapSpec, SparseTextureFacts, SparseTextureSpec, SparseTileQuery,
     TileSize,
@@ -60,26 +65,103 @@ use objc2_metal::{
     MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferHandler, MTLCommandBufferStatus,
     MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder,
     MTLComputePipelineDescriptor, MTLComputePipelineReflection, MTLComputePipelineState,
-    MTLCreateSystemDefaultDevice, MTLCullMode, MTLDataType, MTLDepthClipMode,
-    MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLDispatchType, MTLEvent,
-    MTLFunction, MTLFunctionConstant, MTLFunctionConstantValues, MTLHeap, MTLHeapDescriptor,
-    MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
-    MTLIndirectCommandType, MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary,
-    MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
-    MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
-    MTLPointerType, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
-    MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
-    MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
-    MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplePosition,
-    MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
-    MTLSamplerState, MTLScissorRect, MTLSharedEvent, MTLSize, MTLSparsePageSize,
-    MTLStageInputOutputDescriptor, MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction,
-    MTLStorageMode, MTLStoreAction, MTLStoreActionOptions, MTLStructMember, MTLStructType,
-    MTLTexture, MTLTextureBinding, MTLTextureDescriptor, MTLTextureReferenceType,
-    MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage,
-    MTLThreadgroupBinding, MTLTileRenderPipelineDescriptor, MTLTriangleFillMode,
-    MTLVertexAttribute, MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction, MTLViewport,
-    MTLVisibilityResultMode, MTLVisibleFunctionTable, MTLWinding,
+    MTLCreateSystemDefaultDevice,
+    MTLCullMode,
+    MTLDataType,
+    MTLDepthClipMode,
+    MTLDepthStencilDescriptor,
+    MTLDepthStencilState,
+    MTLDevice,
+    MTLDispatchType,
+    MTLEvent,
+    MTLFunction,
+    MTLFunctionConstant,
+    MTLFunctionConstantValues,
+    MTLHeap,
+    MTLHeapDescriptor,
+    MTLHeapType,
+    MTLIndexType,
+    MTLIndirectCommandBuffer,
+    MTLIndirectCommandBufferDescriptor,
+    MTLIndirectCommandType,
+    MTLIndirectComputeCommand,
+    MTLIndirectRenderCommand,
+    MTLLibrary,
+    MTLLinkedFunctions,
+    MTLLoadAction,
+    MTLMeshRenderPipelineDescriptor,
+    MTLMultisampleDepthResolveFilter,
+    MTLMultisampleStencilResolveFilter,
+    MTLMutability,
+    MTLOrigin,
+    MTLPipelineBufferDescriptor,
+    MTLPipelineBufferDescriptorArray,
+    MTLPipelineOption,
+    MTLPixelFormat,
+    MTLPointerType,
+    MTLPrimitiveTopologyClass,
+    MTLPrimitiveType,
+    MTLRasterizationRateLayerDescriptor,
+    MTLRasterizationRateMap,
+    MTLRasterizationRateMapDescriptor,
+    MTLRegion,
+    MTLRenderCommandEncoder,
+    MTLRenderPassDescriptor,
+    MTLRenderPipelineColorAttachmentDescriptor,
+    MTLRenderPipelineColorAttachmentDescriptorArray,
+    MTLRenderPipelineDescriptor,
+    MTLRenderPipelineReflection,
+    MTLRenderPipelineState,
+    MTLRenderStages,
+    MTLResource,
+    MTLResourceOptions,
+    MTLResourceUsage,
+    MTLSamplePosition,
+    MTLSamplerAddressMode,
+    MTLSamplerBorderColor,
+    MTLSamplerDescriptor,
+    MTLSamplerMinMagFilter,
+    MTLSamplerState,
+    MTLScissorRect,
+    MTLSharedEvent,
+    MTLSize,
+    MTLSparsePageSize,
+    MTLStageInputOutputDescriptor,
+    MTLStencilDescriptor,
+    MTLStencilOperation,
+    MTLStepFunction,
+    MTLStorageMode,
+    MTLStoreAction,
+    MTLStoreActionOptions,
+    MTLStructMember,
+    MTLStructType,
+    MTLTessellationControlPointIndexType,
+    MTLTessellationFactorFormat,
+    MTLTessellationFactorStepFunction,
+    MTLTessellationPartitionMode,
+    MTLTexture,
+    MTLTextureBinding,
+    MTLTextureDescriptor,
+    MTLTextureReferenceType,
+    MTLTextureSwizzle,
+    MTLTextureSwizzleChannels,
+    MTLTextureType,
+    MTLTextureUsage,
+    MTLThreadgroupBinding,
+    MTLTileRenderPipelineDescriptor,
+    MTLTriangleFillMode,
+    MTLVertexAttribute,
+    MTLVertexAttributeDescriptor,
+    MTLVertexAttributeDescriptorArray,
+    MTLVertexBufferLayoutDescriptor,
+    MTLVertexBufferLayoutDescriptorArray,
+    MTLVertexDescriptor,
+    MTLVertexFormat,
+    MTLVertexStepFunction,
+    MTLViewport,
+    MTLVisibilityResultMode,
+    MTLVisibleFunctionTable,
+    MTLWinding,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -846,6 +928,280 @@ fn size(axes: [u32; 3]) -> MTLSize {
 
 /// `MTLBufferLayoutStrideDynamic`, the stride a layout takes from the encoder's binding.
 const STRIDE_DYNAMIC: usize = usize::MAX;
+
+/// Set every field [`AWAY`] states on `descriptor`, each away from Metal's own default.
+///
+/// The label is set only because the table states one: `setLabel:nil` ends Metal's process, and
+/// nothing here ever passes nil.
+fn state_descriptor(descriptor: &Retained<MTLRenderPipelineDescriptor>) {
+    descriptor.setLabel(Some(&NSString::from_str(AWAY.label)));
+    // `sampleCount` is the **deprecated** spelling of the raster sample count, and this is the
+    // only one this side sends: the case reads both getters back, which is what says the two are
+    // one field of the runtime's. The deprecation is Apple's and the coverage map still lists the
+    // property as implemented, so there is no non-deprecated way to send the selector a case must
+    // send; the attribute is on the two call sites alone, with no `deprecated` anywhere else in
+    // this file inside it.
+    #[allow(deprecated)]
+    descriptor.setSampleCount(AWAY.sample_count as usize);
+    descriptor.setAlphaToCoverageEnabled(AWAY.alpha_to_coverage);
+    descriptor.setAlphaToOneEnabled(AWAY.alpha_to_one);
+    descriptor.setRasterizationEnabled(AWAY.rasterization_enabled);
+    descriptor.setDepthAttachmentPixelFormat(MTLPixelFormat(AWAY.depth_format.as_raw() as usize));
+    descriptor
+        .setStencilAttachmentPixelFormat(MTLPixelFormat(AWAY.stencil_format.as_raw() as usize));
+    descriptor.setTessellationFactorScaleEnabled(AWAY.tessellation_factor_scale_enabled);
+    descriptor.setTessellationFactorFormat(MTLTessellationFactorFormat(
+        AWAY.tessellation_factor_format.as_raw() as usize,
+    ));
+    descriptor.setTessellationFactorStepFunction(MTLTessellationFactorStepFunction(
+        AWAY.tessellation_factor_step_function.as_raw() as usize,
+    ));
+    descriptor.setTessellationOutputWindingOrder(MTLWinding(
+        AWAY.tessellation_output_winding_order.as_raw() as usize,
+    ));
+    // SAFETY: the amplification count, the topology class, the partition mode, the tessellation
+    // factor and the control-point index type are the stated table's own values, each a named
+    // value of Metal's own enumeration or a small positive number inside Metal's documented range
+    // (an amplification count of 2 of the device's 8, a factor of 12 of Metal's 64). Nothing is
+    // compiled from the descriptor, so no value here reaches a pipeline.
+    unsafe {
+        descriptor.setMaxVertexAmplificationCount(AWAY.max_vertex_amplification_count as usize);
+        descriptor.setInputPrimitiveTopology(MTLPrimitiveTopologyClass(
+            AWAY.input_primitive_topology.as_raw() as usize,
+        ));
+        descriptor.setTessellationPartitionMode(MTLTessellationPartitionMode(
+            AWAY.tessellation_partition_mode.as_raw() as usize,
+        ));
+        descriptor.setMaxTessellationFactor(AWAY.max_tessellation_factor as usize);
+        descriptor.setTessellationControlPointIndexType(MTLTessellationControlPointIndexType(
+            AWAY.tessellation_control_point_index_type.as_raw() as usize,
+        ));
+    }
+    descriptor.setSupportIndirectCommandBuffers(AWAY.support_indirect_command_buffers);
+    descriptor.setSupportAddingVertexBinaryFunctions(AWAY.support_adding_vertex_binary_functions);
+    descriptor
+        .setSupportAddingFragmentBinaryFunctions(AWAY.support_adding_fragment_binary_functions);
+    descriptor.setMaxVertexCallStackDepth(AWAY.max_vertex_call_stack_depth as usize);
+    descriptor.setMaxFragmentCallStackDepth(AWAY.max_fragment_call_stack_depth as usize);
+    let colors: Retained<MTLRenderPipelineColorAttachmentDescriptorArray> =
+        descriptor.colorAttachments();
+    for color in AWAY.colors {
+        // SAFETY: the index is below the eight colour attachments every Metal pipeline descriptor
+        // holds, which `every_stated_slot_is_read_back` keeps it to.
+        let attachment: Retained<MTLRenderPipelineColorAttachmentDescriptor> =
+            unsafe { colors.objectAtIndexedSubscript(color.index as usize) };
+        attachment.setPixelFormat(MTLPixelFormat(color.pixel_format.as_raw() as usize));
+        attachment.setBlendingEnabled(color.blending_enabled);
+        attachment.setSourceRGBBlendFactor(MTLBlendFactor(color.source_rgb.as_raw() as usize));
+        attachment
+            .setDestinationRGBBlendFactor(MTLBlendFactor(color.destination_rgb.as_raw() as usize));
+        attachment.setRgbBlendOperation(MTLBlendOperation(color.rgb_operation.as_raw() as usize));
+        attachment.setSourceAlphaBlendFactor(MTLBlendFactor(color.source_alpha.as_raw() as usize));
+        attachment.setDestinationAlphaBlendFactor(MTLBlendFactor(
+            color.destination_alpha.as_raw() as usize
+        ));
+        attachment
+            .setAlphaBlendOperation(MTLBlendOperation(color.alpha_operation.as_raw() as usize));
+        attachment.setWriteMask(MTLColorWriteMask(color.write_mask.as_raw() as usize));
+    }
+    let vertex_buffers: Retained<MTLPipelineBufferDescriptorArray> = descriptor.vertexBuffers();
+    let fragment_buffers: Retained<MTLPipelineBufferDescriptorArray> = descriptor.fragmentBuffers();
+    for (array, stated) in [
+        (&vertex_buffers, AWAY.vertex_buffers),
+        (&fragment_buffers, AWAY.fragment_buffers),
+    ] {
+        for (index, mutability) in stated {
+            // SAFETY: as the attachments', for the pipeline buffer array.
+            let slot: Retained<MTLPipelineBufferDescriptor> =
+                unsafe { array.objectAtIndexedSubscript(*index as usize) };
+            slot.setMutability(MTLMutability(mutability.as_raw() as usize));
+        }
+    }
+    let vertex_layout = MTLVertexDescriptor::vertexDescriptor();
+    let attributes: Retained<MTLVertexAttributeDescriptorArray> = vertex_layout.attributes();
+    for attribute in AWAY.attributes {
+        // SAFETY: as the attachments', for the attribute array.
+        let slot: Retained<MTLVertexAttributeDescriptor> =
+            unsafe { attributes.objectAtIndexedSubscript(attribute.index as usize) };
+        slot.setFormat(MTLVertexFormat(attribute.format.as_raw() as usize));
+        // SAFETY: the offset and the buffer index are the table's own numbers, inside the record
+        // and the buffer array the descriptor holds.
+        unsafe {
+            slot.setOffset(attribute.offset as usize);
+            slot.setBufferIndex(attribute.buffer_index as usize);
+        }
+    }
+    let layouts: Retained<MTLVertexBufferLayoutDescriptorArray> = vertex_layout.layouts();
+    for layout in AWAY.layouts {
+        // SAFETY: as the attributes', for the layout array.
+        let slot: Retained<MTLVertexBufferLayoutDescriptor> =
+            unsafe { layouts.objectAtIndexedSubscript(layout.index as usize) };
+        slot.setStepFunction(MTLVertexStepFunction(layout.step_function.as_raw() as usize));
+        // SAFETY: the stride and the rate are the table's own numbers.
+        unsafe {
+            slot.setStride(layout.stride as usize);
+            slot.setStepRate(layout.step_rate as usize);
+        }
+    }
+    descriptor.setVertexDescriptor(Some(&vertex_layout));
+}
+
+/// What `descriptor` answers of itself, every getter of its own surface.
+///
+/// Each list bound to a local of its declared type, as the bindings walk does: the coverage
+/// derivation types a receiver from what bound it, so a call made on a chained getter's answer
+/// names no type at all.
+fn read_descriptor(
+    descriptor: &Retained<MTLRenderPipelineDescriptor>,
+    supplied: bool,
+) -> RenderDescriptorFacts {
+    let colors: Retained<MTLRenderPipelineColorAttachmentDescriptorArray> =
+        descriptor.colorAttachments();
+    let mut attachments = Vec::new();
+    for index in 0..READ_COLORS {
+        // SAFETY: `READ_COLORS` is below the eight attachments every descriptor holds.
+        let attachment: Retained<MTLRenderPipelineColorAttachmentDescriptor> =
+            unsafe { colors.objectAtIndexedSubscript(index as usize) };
+        attachments.push(ColorFacts {
+            pixel_format: attachment.pixelFormat().0 as u32,
+            blending_enabled: attachment.isBlendingEnabled(),
+            source_rgb: attachment.sourceRGBBlendFactor().0 as u32,
+            destination_rgb: attachment.destinationRGBBlendFactor().0 as u32,
+            rgb_operation: attachment.rgbBlendOperation().0 as u32,
+            source_alpha: attachment.sourceAlphaBlendFactor().0 as u32,
+            destination_alpha: attachment.destinationAlphaBlendFactor().0 as u32,
+            alpha_operation: attachment.alphaBlendOperation().0 as u32,
+            write_mask: attachment.writeMask().0 as u32,
+        });
+    }
+    let vertex_buffers: Retained<MTLPipelineBufferDescriptorArray> = descriptor.vertexBuffers();
+    let fragment_buffers: Retained<MTLPipelineBufferDescriptorArray> = descriptor.fragmentBuffers();
+    let mutability = |array: &Retained<MTLPipelineBufferDescriptorArray>| -> Vec<u32> {
+        (0..READ_BUFFERS)
+            .map(|index| {
+                // SAFETY: `READ_BUFFERS` is below the buffer slots a pipeline descriptor holds.
+                let slot: Retained<MTLPipelineBufferDescriptor> =
+                    unsafe { array.objectAtIndexedSubscript(index as usize) };
+                slot.mutability().0 as u32
+            })
+            .collect()
+    };
+    let archives = descriptor.binaryArchives();
+    let vertex: Option<Retained<ProtocolObject<dyn MTLFunction>>> = descriptor.vertexFunction();
+    let fragment: Option<Retained<ProtocolObject<dyn MTLFunction>>> = descriptor.fragmentFunction();
+    let layout: Option<Retained<MTLVertexDescriptor>> = descriptor.vertexDescriptor();
+    RenderDescriptorFacts {
+        label: descriptor.label().map(|label| label.to_string()),
+        vertex_function: vertex.map(|held| held.name().to_string()),
+        fragment_function: fragment.map(|held| held.name().to_string()),
+        vertex_descriptor: layout.as_ref().map_or_else(
+            || VertexDescriptorFacts::empty(READ_VERTEX_SLOTS),
+            read_vertex_descriptor,
+        ),
+        // `sampleCount` is Apple's deprecated spelling; see `state_descriptor`.
+        #[allow(deprecated)]
+        sample_count: descriptor.sampleCount() as u64,
+        raster_sample_count: descriptor.rasterSampleCount() as u64,
+        alpha_to_coverage_enabled: descriptor.isAlphaToCoverageEnabled(),
+        alpha_to_one_enabled: descriptor.isAlphaToOneEnabled(),
+        rasterization_enabled: descriptor.isRasterizationEnabled(),
+        max_vertex_amplification_count: descriptor.maxVertexAmplificationCount() as u64,
+        colors: attachments,
+        depth_attachment_pixel_format: descriptor.depthAttachmentPixelFormat().0 as u32,
+        stencil_attachment_pixel_format: descriptor.stencilAttachmentPixelFormat().0 as u32,
+        input_primitive_topology: descriptor.inputPrimitiveTopology().0 as u32,
+        tessellation_partition_mode: descriptor.tessellationPartitionMode().0 as u32,
+        max_tessellation_factor: descriptor.maxTessellationFactor() as u64,
+        tessellation_factor_scale_enabled: descriptor.isTessellationFactorScaleEnabled(),
+        tessellation_factor_format: descriptor.tessellationFactorFormat().0 as u32,
+        tessellation_control_point_index_type: descriptor.tessellationControlPointIndexType().0
+            as u32,
+        tessellation_factor_step_function: descriptor.tessellationFactorStepFunction().0 as u32,
+        tessellation_output_winding_order: descriptor.tessellationOutputWindingOrder().0 as u32,
+        vertex_buffers: mutability(&vertex_buffers),
+        fragment_buffers: mutability(&fragment_buffers),
+        support_indirect_command_buffers: descriptor.supportIndirectCommandBuffers(),
+        // `len` and not `count`: the two are one Objective-C selector, and `count` is a selector
+        // `objc2-metal` binds on other types, so the coverage derivation would read it as a Metal
+        // call on the element type a preloaded-library getter answers.
+        binary_archives: archives.map_or(0, |held| held.len() as u64),
+        supplied: supplied.then(|| read_supplied(descriptor)),
+        support_adding_vertex_binary_functions: descriptor.supportAddingVertexBinaryFunctions(),
+        support_adding_fragment_binary_functions: descriptor.supportAddingFragmentBinaryFunctions(),
+        max_vertex_call_stack_depth: descriptor.maxVertexCallStackDepth() as u64,
+        max_fragment_call_stack_depth: descriptor.maxFragmentCallStackDepth() as u64,
+    }
+}
+
+/// The four per-stage lists of supplied objects, by how many each holds.
+///
+/// Read only where the shape asks for it: `reset` leaves `vertexPreloadedLibraries` nil and
+/// `objc2-metal`'s accessor for it panics on a nil ([`SuppliedLists`]).
+fn read_supplied(descriptor: &Retained<MTLRenderPipelineDescriptor>) -> SuppliedLists {
+    let vertex_libraries = descriptor.vertexPreloadedLibraries();
+    let fragment_libraries = descriptor.fragmentPreloadedLibraries();
+    SuppliedLists {
+        vertex_preloaded_libraries: vertex_libraries.len() as u64,
+        fragment_preloaded_libraries: fragment_libraries.len() as u64,
+        vertex_linked_functions: linked_counts(&descriptor.vertexLinkedFunctions()),
+        fragment_linked_functions: linked_counts(&descriptor.fragmentLinkedFunctions()),
+    }
+}
+
+/// What a vertex descriptor's first [`READ_VERTEX_SLOTS`] attribute and layout slots answer.
+fn read_vertex_descriptor(layout: &Retained<MTLVertexDescriptor>) -> VertexDescriptorFacts {
+    let attributes: Retained<MTLVertexAttributeDescriptorArray> = layout.attributes();
+    let layouts: Retained<MTLVertexBufferLayoutDescriptorArray> = layout.layouts();
+    VertexDescriptorFacts {
+        attributes: (0..READ_VERTEX_SLOTS)
+            .map(|index| {
+                // SAFETY: `READ_VERTEX_SLOTS` is below the attribute slots a vertex descriptor
+                // holds.
+                let slot: Retained<MTLVertexAttributeDescriptor> =
+                    unsafe { attributes.objectAtIndexedSubscript(index as usize) };
+                DescriptorAttributeFacts {
+                    format: slot.format().0 as u32,
+                    offset: slot.offset() as u64,
+                    buffer_index: slot.bufferIndex() as u64,
+                }
+            })
+            .collect(),
+        layouts: (0..READ_VERTEX_SLOTS)
+            .map(|index| {
+                // SAFETY: as the attributes', for the layout array.
+                let slot: Retained<MTLVertexBufferLayoutDescriptor> =
+                    unsafe { layouts.objectAtIndexedSubscript(index as usize) };
+                LayoutFacts {
+                    stride: slot.stride() as u64,
+                    step_function: slot.stepFunction().0 as u32,
+                    step_rate: slot.stepRate() as u64,
+                }
+            })
+            .collect(),
+    }
+}
+
+/// `MTLLinkedFunctions`' `functions`, `privateFunctions` and `binaryFunctions`, which answer the
+/// same shape.
+type Functions = Option<Retained<NSArray<ProtocolObject<dyn MTLFunction>>>>;
+
+/// `MTLLinkedFunctions`' `groups`, by call-site group name.
+type Groups = Option<Retained<NSDictionary<NSString, NSArray<ProtocolObject<dyn MTLFunction>>>>>;
+
+/// How many functions a stage's `MTLLinkedFunctions` holds, by kind; a list the object answers nil
+/// for is none, for the reason [`crate::render_descriptors`] gives.
+fn linked_counts(linked: &Retained<MTLLinkedFunctions>) -> LinkedCounts {
+    let functions: Functions = linked.functions();
+    let private: Functions = linked.privateFunctions();
+    let binary: Functions = linked.binaryFunctions();
+    let groups: Groups = linked.groups();
+    LinkedCounts {
+        functions: functions.map_or(0, |held| held.len() as u64),
+        private_functions: private.map_or(0, |held| held.len() as u64),
+        binary_functions: binary.map_or(0, |held| held.len() as u64),
+        groups: groups.map_or(0, |held| held.len() as u64),
+    }
+}
 
 /// Metal's vertex descriptor for `layout`. The case's enumerations are Metal's own, so each one
 /// crosses as its raw value.
@@ -2011,6 +2367,41 @@ impl Side for MetalSide {
                 required.depth as u64,
             ],
         })
+    }
+
+    fn render_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &DescriptorSpec<'_>,
+    ) -> Answer<RenderDescriptorFacts> {
+        let held: &Retained<ProtocolObject<dyn MTLLibrary>> = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = |entry: &str| {
+            held.newFunctionWithName(&NSString::from_str(entry))
+                .ok_or_else(|| Failure::named("NoSuchFunction", entry.to_owned()))
+        };
+        let descriptor = MTLRenderPipelineDescriptor::new();
+        let stages = |descriptor: &Retained<MTLRenderPipelineDescriptor>| -> Answer<()> {
+            descriptor.setVertexFunction(Some(&*function(spec.vertex)?));
+            if let Some(fragment) = spec.fragment {
+                descriptor.setFragmentFunction(Some(&*function(fragment)?));
+            }
+            Ok(())
+        };
+        stages(&descriptor)?;
+        if spec.shape.sets() {
+            state_descriptor(&descriptor);
+        }
+        if spec.shape.resets() {
+            // Metal's own reset, which is the item under test. The stage functions go back
+            // afterwards: `reset` clears them too, and a descriptor whose vertex function is nil
+            // answers a different shape from the one the defaults case recorded.
+            descriptor.reset();
+            stages(&descriptor)?;
+        }
+        Ok(read_descriptor(&descriptor, !spec.shape.resets()))
     }
 
     fn function_facts(

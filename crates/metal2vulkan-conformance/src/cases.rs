@@ -98,6 +98,7 @@ pub mod mesh_draws;
 pub mod nearest_positions;
 pub mod norm_storage_writes;
 pub mod pass_bytes;
+pub mod pipeline_descriptors;
 pub mod pipeline_facts;
 pub mod pixel_downscales;
 pub mod pixel_samplers;
@@ -172,6 +173,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in pipeline_facts::all() {
+        cases.push(Box::new(case));
+    }
+    for case in pipeline_descriptors::all() {
         cases.push(Box::new(case));
     }
     for case in compressed_blits::all() {

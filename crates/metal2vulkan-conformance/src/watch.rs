@@ -265,6 +265,15 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
         self.inner.render_pipeline_facts(state, imageblock)
     }
 
+    fn render_descriptor_facts(
+        &mut self,
+        library: Handle,
+        spec: &crate::render_descriptors::DescriptorSpec<'_>,
+    ) -> Answer<crate::render_descriptors::RenderDescriptorFacts> {
+        let _span = self.watch("render_descriptor_facts");
+        self.inner.render_descriptor_facts(library, spec)
+    }
+
     fn function_facts(
         &mut self,
         library: Handle,

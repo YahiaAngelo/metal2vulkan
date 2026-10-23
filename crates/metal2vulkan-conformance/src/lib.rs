@@ -69,6 +69,7 @@ pub mod queue_slots;
 pub mod record;
 pub mod recording;
 pub mod render;
+pub mod render_descriptors;
 pub mod replay;
 pub mod report;
 pub mod run;
