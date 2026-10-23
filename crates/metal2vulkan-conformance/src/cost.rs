@@ -758,7 +758,9 @@ impl std::fmt::Display for CostVerdict {
 /// command pools, memory blocks and descriptor sets across cases. A selection of a few cases does
 /// *more* fresh work than the same cases inside a whole-set run, so its counts are not the ones
 /// the bounds were measured over, and holding them to those bounds would fail honestly-identical
-/// work. Such a run is `Unmeasured`.
+/// work. Such a run is `Unmeasured`. The contrast ([`CostRecord::composed`]) does not lift that:
+/// the two shapes it compares are the two extremes of composition, and agreeing at both ends is no
+/// evidence about a selection in between.
 pub fn judge(
     records: &[CostRecord],
     venue: &str,
