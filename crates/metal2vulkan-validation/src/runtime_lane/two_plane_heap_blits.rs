@@ -320,6 +320,19 @@ fn random_bytes(count: u64, seed: u64) -> Vec<u8> {
         .collect()
 }
 
+/// The SHA-256 of every case's heap bytes before its blit, the cases in order.
+const INPUTS_SHA: &str = "467c8a9649bc870ed91ababb241ddd7fdaf4177f5a19775da894c2092133cc15";
+
+/// The inputs are the probes': the bytes every case's heap holds before its blit.
+#[test]
+fn the_inputs_are_the_probes() {
+    let mut sha = Sha256::new();
+    for case in &CASES {
+        sha.update(random_bytes(case.heap, case.seed));
+    }
+    assert_eq!(crate::hash::hex_encode(sha.finalize()), INPUTS_SHA);
+}
+
 /// Each case's heap holds Metal's bytes after the blit, and a copy whose alpha bytes pass the
 /// heap's end is announced.
 #[test]

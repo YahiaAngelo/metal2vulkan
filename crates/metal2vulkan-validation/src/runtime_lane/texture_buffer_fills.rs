@@ -342,6 +342,31 @@ fn digest(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// The SHA-256 of the buffer's first bytes, which every stream and group fills over, and of the
+/// longest of `tblf.m`'s patterns, whose stream the long cases fill with. Metal's own answer to
+/// the cases that change nothing (`r8-past-buffer`, `rgba8-width-0`) is this buffer's digest, so
+/// the probes filled over these bytes.
+const FIRST_BYTES_SHA: &str = "d71bdb461ee51a7eaa2204acf6826288db6dacdeffe7f165722cb1d4befe7ae0";
+const LONGEST_PATTERN_SHA: &str =
+    "b9f88571970f75c87bc561728251f69c4f906906dadfdda9cf0f58e489e49bd0";
+
+/// The inputs are the probes': the buffer's first bytes and the longest pattern, before any case
+/// claims Metal's bytes of a fill over them.
+#[test]
+fn the_inputs_are_the_probes() {
+    let sha = |bytes: &[u8]| crate::hash::hex_encode(Sha256::digest(bytes));
+    assert_eq!(
+        sha(&first_bytes()),
+        FIRST_BYTES_SHA,
+        "the buffer's first bytes"
+    );
+    assert_eq!(
+        sha(&probe_stream(LONGEST)),
+        LONGEST_PATTERN_SHA,
+        "the longest pattern"
+    );
+}
+
 /// The runs of `bytes` that differ from the buffer's first bytes, as the probe prints them.
 fn runs(bytes: &[u8]) -> String {
     let first = first_bytes();

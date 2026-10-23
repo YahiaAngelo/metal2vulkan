@@ -456,6 +456,25 @@ fn words(channels: u64) -> Vec<u8> {
         .collect()
 }
 
+/// The SHA-256 of the probe's words of one and of two channels, and of its `float4` values: the
+/// inputs every case loads and draws over.
+const WORDS_SHA: [&str; 2] = [
+    "df24dccce9d2b31886a249eeccd6f4ac331fc09c009bd555b65f7950d4ae865a",
+    "e0bdea941ab83e05377a3a285907e590f4fdc114a03a82870a70ce4bceaa84e9",
+];
+const VALUES_SHA: &str = "4a2001e9389d5b0da152bbea20675bb367ca1993bf6d427ebb04befbac0a1bfd";
+
+/// The inputs are the probes': the padded words and the drawn values.
+#[test]
+fn the_inputs_are_the_probes() {
+    use sha2::Digest;
+    let sha = |bytes: &[u8]| crate::hash::hex_encode(sha2::Sha256::digest(bytes));
+    for (channels, want) in [1, 2].into_iter().zip(WORDS_SHA) {
+        assert_eq!(sha(&words(channels)), want, "the words of {channels}");
+    }
+    assert_eq!(sha(&values()), VALUES_SHA, "the values");
+}
+
 /// The probe's `float4` values, one a texel.
 fn values() -> Vec<u8> {
     (0..WIDTH * HEIGHT)

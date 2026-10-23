@@ -368,6 +368,28 @@ fn filled(lane: &Lane, (pf, texel): (PixelFormat, u64), colors: &[[f64; 4]]) -> 
     Some(texels(lane, &texture, texel, colors.len() as u64))
 }
 
+/// The SHA-256 of the colors the probes filled with: the sweep's first 512 and the edges, each
+/// color's four `f64` bits little-endian.
+const SWEEP_SHA: &str = "8716c326453d2df7c2cbbc815322c70c718dba866028dafb2f0db04af4109d9d";
+const EDGES_SHA: &str = "e89a983e61ef13b541eb879e3c7a0888886a5b5f8a7fa234279947e8948b5b12";
+
+/// The inputs are the probes': both color lists, before any format claims Metal's texels of them.
+#[test]
+fn the_inputs_are_the_probes() {
+    let bits = |colors: &[[f64; 4]]| -> Vec<u8> {
+        colors
+            .iter()
+            .flat_map(|c| c.iter().flat_map(|v| v.to_bits().to_le_bytes()))
+            .collect()
+    };
+    assert_eq!(
+        sha256(&bits(&sweep_colors()[..512])),
+        SWEEP_SHA,
+        "the sweep"
+    );
+    assert_eq!(sha256(&bits(&edge_colors())), EDGES_SHA, "the edges");
+}
+
 /// Every format's texels of the probes' colors are Metal's.
 #[test]
 fn color_fills_write_metal_s_texels() {

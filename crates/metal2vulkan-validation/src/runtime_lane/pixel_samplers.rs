@@ -294,6 +294,21 @@ const METAL: [(&str, &str); 60] = [
 /// The probe's coordinates, `x` fastest: per integer `i` from -1 to 6 the texel edge `i` and one
 /// ulp either side (`2^-24` at 0), `i + 1/512`, `i + 0.25`, the centre `i + 0.5` and one ulp
 /// either side, `i + 0.75` and `i + 255/256`; `y` from a list of ten across and past the 3 rows.
+/// The SHA-256 of [`grid`]'s coordinates, `x` then `y` little-endian.
+const GRID_SHA: &str = "10064f01ccb480a13ee9b0853ba41bbc5e2dfa3d490ffaef9cbcc987f75249b9";
+
+/// The inputs are the probe's: its coordinates, before any configuration claims Metal's samples
+/// at them.
+#[test]
+fn the_inputs_are_the_probes() {
+    let mut sha = sha2::Sha256::new();
+    for cell in grid() {
+        sha.update(cell[0].to_le_bytes());
+        sha.update(cell[1].to_le_bytes());
+    }
+    assert_eq!(crate::hash::hex_encode(sha.finalize()), GRID_SHA);
+}
+
 fn grid() -> Vec<[f32; 2]> {
     let mut xs = Vec::new();
     for i in -1..=(W as i32 + 1) {

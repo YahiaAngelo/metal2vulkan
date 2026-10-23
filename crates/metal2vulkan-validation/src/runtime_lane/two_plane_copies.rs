@@ -1323,17 +1323,31 @@ fn fills_read_back_between_rows_as_metal_s() {
     });
 }
 
+/// The SHA-256 of seed 1's planes and of seed 2's bytes, pinned beside the FNV-1a words the probe
+/// printed of them, whose 32 bits alone leave a case's inputs loosely held.
+const INPUT_SHA: [&str; 3] = [
+    "bc4690d9570ceddf89ff6728f4e8c0288ae8a6141f24eac93edca8b0cf15c1fa",
+    "120c1f4739647fc263a294ff9132f8546e4faddd27fa3cb1a517213734d7cf16",
+    "6882fdfc3de4778888d9a66594366153eb4f4aedd40e58eb0c885e025256ffb4",
+];
+
 /// The generator gives the probe's texels: the FNV-1a digests the probe printed of seed 1's
-/// planes and of seed 2's bytes (the probe's results).
+/// planes and of seed 2's bytes (the probe's results), and their SHA-256.
 #[test]
 fn the_generator_is_the_probes() {
+    use sha2::Digest;
     let fnv = |bytes: &[u8]| {
         bytes.iter().fold(2_166_136_261u32, |h, &b| {
             (h ^ u32::from(b)).wrapping_mul(16_777_619)
         })
     };
+    let sha = |bytes: &[u8]| crate::hash::hex_encode(sha2::Sha256::digest(bytes));
     let (words, alpha) = planes(1, W * H);
+    let big = random_bytes(2, BIG);
     assert_eq!(fnv(&words), 0xa7c5_fb98);
     assert_eq!(fnv(&alpha), 0x5cc7_aa14);
-    assert_eq!(fnv(&random_bytes(2, BIG)), 0x778b_70a0);
+    assert_eq!(fnv(&big), 0x778b_70a0);
+    for (bytes, want) in [&words, &alpha, &big].into_iter().zip(INPUT_SHA) {
+        assert_eq!(sha(bytes), want);
+    }
 }

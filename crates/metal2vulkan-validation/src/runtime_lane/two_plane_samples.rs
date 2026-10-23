@@ -258,15 +258,25 @@ fn draws_that_sample_a_two_plane_texture_are_counted() {
     });
 }
 
+/// The SHA-256 of seed 4's planes and of seed 5's coordinates, pinned beside the FNV-1a words the
+/// probe printed of them, whose 32 bits alone leave a case's inputs loosely held.
+const INPUT_SHA: [&str; 3] = [
+    "a763539f6746b2fc54e795303a2a02ac9727cc31382c7e3b9b03cd63c1d7b7d3",
+    "96997d686459de2ca5fa082997cd27fcf23e0839edef9a3397f7f07c7457ff31",
+    "508d5b75cbb92c96744c9eb9651df674316de37fdf460e1e3a9568bfa5b78cb5",
+];
+
 /// The generator gives the probe's texels and coordinates: the FNV-1a digests the probe printed
-/// of seed 4's planes and of seed 5's coordinates (the probe's results).
+/// of seed 4's planes and of seed 5's coordinates (the probe's results), and their SHA-256.
 #[test]
 fn the_coordinates_are_the_probes() {
+    use sha2::Digest;
     let fnv = |bytes: &[u8]| {
         bytes.iter().fold(2_166_136_261u32, |h, &b| {
             (h ^ u32::from(b)).wrapping_mul(16_777_619)
         })
     };
+    let sha = |bytes: &[u8]| crate::hash::hex_encode(sha2::Sha256::digest(bytes));
     let (words, alpha) = planes(4, SIDE * SIDE);
     assert_eq!(fnv(&words), 0xa9c5_8e27);
     assert_eq!(fnv(&alpha), 0xe564_a75d);
@@ -276,4 +286,7 @@ fn the_coordinates_are_the_probes() {
         .flat_map(f32::to_le_bytes)
         .collect();
     assert_eq!(fnv(&coords), 0x1efe_3caa);
+    for (bytes, want) in [&words, &alpha, &coords].into_iter().zip(INPUT_SHA) {
+        assert_eq!(sha(bytes), want);
+    }
 }
