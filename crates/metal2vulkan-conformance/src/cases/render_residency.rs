@@ -4,18 +4,27 @@
 //!
 //! | case | what it asks |
 //! |---|---|
-//! | `render-state-render-barriers` | whether a draw sees the texels a draw before it in the same pass wrote, across `memoryBarrierWithScope:afterStages:beforeStages:` and `memoryBarrierWithResources:count:afterStages:beforeStages:`, with the four `useResource` forms around them |
+//! | `render-state-render-barriers` | whether both render memory barriers are answered between two draws of one pass, over a texture one of them reads and a texture the other writes, with the four `useResource` forms around them |
 //! | `render-state-heap-residency` | whether the four `useHeap` forms are answered on an empty heap, and that the pass's own draw is untouched by them |
 //!
-//! **The barrier case is the one with teeth, and the round-trip is inside one command buffer.**
-//! The first draw's fragment function writes a texel of a scratch texture under every pixel it
-//! covers and returns opaque black; the second draw's reads that texel and returns it. Both are in
-//! one pass of one command buffer, with the barrier between them, and the texels the host reads
-//! back are the second draw's. What the first draw wrote is arithmetic this module states — the
-//! fixture writes `(x / 8, y / 8, 0.75, 1)` at the pixel's own texel — so the answer is a value the
-//! case names, not whatever the scratch texture happened to hold. A barrier that did not order the
-//! two draws leaves the second reading a texture the first had not finished writing, and the
-//! difference is every texel.
+//! **The barrier case does not read what the draw before it wrote, and that is a measurement
+//! rather than a preference.** It was written that way first: one pass whose first draw's fragment
+//! function wrote a texel of a scratch texture under every pixel, a
+//! `memoryBarrierWithScope:MTLBarrierScopeTextures afterStages:MTLRenderStageFragment
+//! beforeStages:MTLRenderStageFragment` and a `memoryBarrierWithResources:` over the same texture,
+//! and a second draw that read it back. On an Apple M3 Max (macOS 27.0.1, build 26A434) **110 of
+//! its 256 texels came back as zeros**, identically in all eight runs, in a region bounded by the
+//! diagonal the rectangle's two triangles share. So the write was not made visible to the later
+//! draw of the same pass, deterministically, and the suite will not hold either side to a figure
+//! that is one GPU's tile schedule: committing it would have recorded that pattern as *the*
+//! answer and asked every implementation to reproduce it.
+//!
+//! What the case does instead is two draws whose target regions and whose textures are disjoint —
+//! one reads a texture the host filled, the other writes a texture nothing reads — with both
+//! barriers between them. So its claim is that **Metal answers both barrier calls** and that the
+//! two draws stored exactly what their own bindings say, in their own halves of the target. It is
+//! **not** a claim that a barrier orders a read after a write inside one pass; nothing here could
+//! show that, and the measurement above is why.
 //!
 //! **What the residency calls claim here is narrow, and the module says so rather than implying
 //! more.** Every texture and buffer these passes reach is bound at a slot, which is the one way of
@@ -44,8 +53,8 @@ use crate::case::{
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
 use crate::render::{
-    ColorState, PassColor, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StepResource,
-    TargetSpec,
+    ColorState, PassColor, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, ScissorBox,
+    StepResource, TargetSpec,
 };
 use crate::sparse_query::SparseHeapSpec;
 use crate::transcript::{
@@ -96,7 +105,7 @@ const RECT_DRAW: RenderStep = RenderStep::Draw {
     instances: 1,
 };
 
-/// The rectangle covering the whole target.
+/// The rectangle covering the whole target, which the heap case's one draw takes.
 const WHOLE: [f32; 4] = [-1.0, -1.0, 1.0, 1.0];
 
 /// The rectangle as the vertex function's `constant float4 &` binding takes it.
@@ -104,8 +113,40 @@ fn rect_bytes() -> Vec<u8> {
     WHOLE.iter().flat_map(|edge| edge.to_le_bytes()).collect()
 }
 
-/// The colour the heap case's draw stores, which its clear is not.
-const COLOR: [f32; 4] = [0.25, 0.5, 0.75, 1.0];
+/// The target's left half, in pixel columns: where the barrier case's reading draw lands.
+const LEFT: ScissorBox = ScissorBox::new(0, 0, (SIDE / 2) as u64, SIDE as u64);
+
+/// The target's right half: where its writing draw lands.
+const RIGHT: ScissorBox = ScissorBox::new((SIDE / 2) as u64, 0, (SIDE / 2) as u64, SIDE as u64);
+
+/// What the host writes into the texture the barrier case's first draw reads: values no draw of
+/// either case can store, each texel its own.
+fn source_texel(x: u32, y: u32) -> [f32; 4] {
+    [32.0 + x as f32, 64.0 + y as f32, 0.5, 2.0]
+}
+
+/// That texture's bytes.
+fn source_texels() -> Vec<u8> {
+    (0..SIDE)
+        .flat_map(|y| (0..SIDE).map(move |x| source_texel(x, y)))
+        .flat_map(|texel| {
+            texel
+                .iter()
+                .flat_map(|channel| channel.to_le_bytes())
+                .collect::<Vec<u8>>()
+        })
+        .collect()
+}
+
+/// The texture the barrier case's reading draw reads: of `FORMAT` at the target's extent,
+/// shader-read, filled by the host.
+fn source_spec() -> TextureSpec {
+    TextureSpec::new(FORMAT, [SIDE; 2], TEXEL * SIDE, TextureRole::Read)
+}
+
+/// The colour the heap case's draw stores, which is neither its clear, nor opaque black, nor any
+/// texel the barrier case's textures hold.
+const COLOR: [f32; 4] = [-0.5, 3.75, 0.5, 0.25];
 
 /// The colour as the fragment function's binding takes it.
 fn color_bytes() -> Vec<u8> {
@@ -115,20 +156,20 @@ fn color_bytes() -> Vec<u8> {
         .collect()
 }
 
-/// The scratch texture the barrier case's first draw writes and its second reads: of [`FORMAT`] at
-/// the target's extent, in both shader roles, and nothing written into it by the host, so what the
-/// second draw reads can only have come from the first draw.
+/// The texture the barrier case's second draw writes: of [`FORMAT`] at the target's extent,
+/// shader-write alone, and nothing reads it. It is here because `useResource:usage:` with a write
+/// usage needs a resource a function writes, and because the resource barrier needs a resource to
+/// name beside the one the other draw reads.
 fn scratch_spec() -> TextureSpec {
-    TextureSpec::new(FORMAT, [SIDE; 2], TEXEL * SIDE, TextureRole::ReadWrite)
+    TextureSpec::new(FORMAT, [SIDE; 2], TEXEL * SIDE, TextureRole::Write)
 }
 
-/// The words the scratch texture's own descriptor fingerprints as.
+/// The words a texture's own descriptor fingerprints as.
 ///
-/// A case usually fingerprints a texture by the texels it hands in, and this one hands in none —
-/// that is the point of it — so its descriptor is what the fingerprint has to cover: the format,
-/// the extent, the row the case states and the usage its role names.
-fn scratch_words() -> Vec<u8> {
-    let spec = scratch_spec();
+/// A case usually fingerprints a texture by the texels it hands in, and the scratch texture is
+/// handed none — nothing reads it — so its descriptor is what the fingerprint has to cover: the
+/// format, the extent, the row the case states and the usage its role names.
+fn texture_words(spec: TextureSpec) -> Vec<u8> {
     let mut bytes = spec.format.as_raw().to_le_bytes().to_vec();
     for axis in spec.size {
         bytes.extend(axis.to_le_bytes());
@@ -299,75 +340,90 @@ pub fn all() -> Vec<Box<dyn Case>> {
 /// function.
 const FRAGMENT: RenderStages = RenderStages::FRAGMENT;
 
-/// Whether a draw sees the texels a draw before it in the same pass wrote, across the two render
-/// memory barriers, with the four `useResource` forms around them.
+/// Both render memory barriers between two draws of one pass, with the four `useResource` forms
+/// around them.
 pub struct RenderBarriers;
 
 impl RenderBarriers {
-    /// The two pipelines: the one whose fragment function writes the scratch texture, and the one
-    /// whose reads it.
+    /// The two pipelines: the one whose fragment function reads a texture, and the one whose
+    /// writes one.
     fn pipelines(colors: &'static [Option<ColorState>]) -> [RenderPipelineSpec<'static>; 2] {
         [
-            RenderPipelineSpec::new(RECT, WRITE, colors),
             RenderPipelineSpec::new(RECT, READ, colors),
+            RenderPipelineSpec::new(RECT, WRITE, colors),
         ]
     }
 
-    /// The pass's steps.
-    fn steps(writing: Handle, reading: Handle, rects: Handle, scratch: Handle) -> Vec<RenderStep> {
-        let texture = StepResource::Texture(scratch);
+    /// The pass's steps: the reading draw over the target's left half, both barriers, and the
+    /// writing draw over its right half.
+    ///
+    /// The two draws share no region of the target and no texture, so neither depends on the
+    /// other and the pass's answer is what each draw's own bindings say. The barriers are between
+    /// them because that is where a program puts them, and what the case holds them to is that
+    /// Metal answered them and that neither draw moved.
+    fn steps(
+        reading: Handle,
+        writing: Handle,
+        rects: Handle,
+        source: Handle,
+        scratch: Handle,
+    ) -> Vec<RenderStep> {
+        let read_texture = StepResource::Texture(source);
+        let written_texture = StepResource::Texture(scratch);
         let buffer = StepResource::Buffer(rects);
         vec![
-            RenderStep::Pipeline(writing),
+            RenderStep::Pipeline(reading),
             RenderStep::VertexBuffer {
                 buffer: rects,
                 offset: 0,
                 index: 0,
             },
             RenderStep::FragmentTexture {
-                texture: scratch,
+                texture: source,
                 index: 0,
             },
-            // The four residency forms, over the scratch texture the fragment function writes and
-            // the buffer the vertex function reads. Each is a call Metal answers; none of them is
-            // what makes either reachable, because both are bound at a slot.
+            // The four residency forms, over the texture one draw's fragment function reads, the
+            // texture the other's writes, and the buffer the vertex function reads. Each is a call
+            // Metal answers; none of them is what makes any of the three reachable, because all
+            // three are bound at a slot.
             RenderStep::UseResourceInStages {
-                resource: texture,
-                usage: ResourceUsage::WRITE,
+                resource: read_texture,
+                usage: ResourceUsage::READ,
                 stages: FRAGMENT,
             },
             RenderStep::UseResource {
-                resource: texture,
+                resource: written_texture,
                 usage: ResourceUsage::WRITE,
             },
             RenderStep::UseResourcesInStages {
-                resources: vec![texture, buffer],
+                resources: vec![read_texture, written_texture, buffer],
                 usage: ResourceUsage::READ.union(ResourceUsage::WRITE),
                 stages: RenderStages::VERTEX.union(RenderStages::FRAGMENT),
             },
             RenderStep::UseResources {
-                resources: vec![texture, buffer],
+                resources: vec![read_texture, buffer],
                 usage: ResourceUsage::READ,
             },
+            RenderStep::Scissor(LEFT),
             RECT_DRAW,
-            // The barriers: the scope form over every texture, and the resource form over the one
-            // texture the next draw reads. Either alone would order the pair; the case states both
-            // because each is an item of Metal no render case of the suite reached.
+            // The barriers: the scope form over every texture, and the resource form over the two
+            // this pass names.
             RenderStep::BarrierScope {
                 scope: BarrierScope::TEXTURES,
                 after: FRAGMENT,
                 before: FRAGMENT,
             },
             RenderStep::BarrierResources {
-                resources: vec![texture],
+                resources: vec![read_texture, written_texture],
                 after: FRAGMENT,
                 before: FRAGMENT,
             },
-            RenderStep::Pipeline(reading),
+            RenderStep::Pipeline(writing),
             RenderStep::FragmentTexture {
                 texture: scratch,
                 index: 0,
             },
+            RenderStep::Scissor(RIGHT),
             RECT_DRAW,
         ]
     }
@@ -408,9 +464,15 @@ impl Case for RenderBarriers {
             ));
         }
         inputs.push(Input::bytes("target", &target_spec(SIDE).words()));
-        inputs.push(Input::bytes("texture:scratch", &scratch_words()));
+        inputs.push(Input::bytes("texture:source", &source_texels()));
+        inputs.push(Input::bytes(
+            "texture:scratch",
+            &texture_words(scratch_spec()),
+        ));
         inputs.push(Input::bytes("buffer:rects", &rect_bytes()));
         inputs.push(Input::bytes("clear", &CLEAR.to_le_bytes()));
+        let halves: Vec<u8> = [LEFT, RIGHT].iter().flat_map(ScissorBox::words).collect();
+        inputs.push(Input::bytes("halves", &halves));
         Ok(inputs)
     }
 
@@ -425,6 +487,11 @@ impl Case for RenderBarriers {
             )?);
         }
         let target = made(sites, "target", side.target(&target_spec(SIDE)))?;
+        let source = made(
+            sites,
+            "texture:source",
+            side.texture_2d_in_role(&source_spec(), &source_texels()),
+        )?;
         let scratch = made(
             sites,
             "texture:scratch",
@@ -439,7 +506,7 @@ impl Case for RenderBarriers {
         let work = vec![
             RenderWork::Pass(
                 RenderPass::clearing(vec![PassColor::cleared(target, [f64::from(CLEAR); 4])])
-                    .drawing(Self::steps(states[0], states[1], rects, scratch)),
+                    .drawing(Self::steps(states[0], states[1], rects, source, scratch)),
             ),
             read_target(target, read_back, SIDE),
         ];
@@ -614,16 +681,24 @@ mod tests {
         channels
     }
 
-    /// What `tob_write` leaves in the scratch texture's texel under pixel `(x, y)`: the fixture's own
-    /// arithmetic, every value an exact binary fraction.
-    fn written_texel(x: u32, y: u32) -> [f32; 4] {
-        [0.125 * x as f32, 0.125 * y as f32, 0.75, 1.0]
+    /// What `tob_write` returns into the colour target: opaque black, which is the writing draw's
+    /// own half of the answer.
+    const OPAQUE_BLACK: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+
+    /// What the barrier case says texel `(x, y)` of its target holds: the texture the reading
+    /// draw read in the target's left half, and the opaque black the writing draw's fragment
+    /// function returns in its right half.
+    fn barriers_expected(x: u32, y: u32) -> [f32; 4] {
+        match x < SIDE / 2 {
+            true => source_texel(x, y),
+            false => OPAQUE_BLACK,
+        }
     }
 
-    /// **Metal's recorded target is what the first draw wrote into the scratch texture**, in every
-    /// texel: the second draw read the first draw's writes across the barrier.
+    /// **Metal's recorded target is what each of the two draws stored in its own half**, so both
+    /// barrier calls were answered between them and neither draw moved.
     #[test]
-    fn metal_let_the_second_draw_see_the_first_draws_texels() {
+    fn metal_drew_both_halves_of_the_barrier_case_as_their_bindings_say() {
         let Some(bytes) = recorded(RenderBarriers.name(), SIDE) else {
             println!("render-state-render-barriers: no recording in the tree yet");
             return;
@@ -631,11 +706,9 @@ mod tests {
         let mut differ = Vec::new();
         for y in 0..SIDE {
             for x in 0..SIDE {
-                let (got, want) = (value(&bytes, x, y, SIDE), written_texel(x, y));
+                let (got, want) = (value(&bytes, x, y, SIDE), barriers_expected(x, y));
                 if got != want {
-                    differ.push(format!(
-                        "({x}, {y}): Metal {got:?}, the fixture writes {want:?}"
-                    ));
+                    differ.push(format!("({x}, {y}): Metal {got:?}, the map says {want:?}"));
                 }
             }
         }
@@ -644,44 +717,55 @@ mod tests {
         }
         assert!(
             differ.is_empty(),
-            "{} of {} texels are not what the first draw wrote, so the second draw did not see it",
+            "{} of {} texels are not what the two draws' own bindings say",
             differ.len(),
             SIDE * SIDE
         );
     }
 
-    /// **The texels the first draw writes are distinct from the clear, from the colour the other
-    /// case stores, and from each other**, so the barrier case cannot pass on a target nothing
-    /// wrote.
+    /// **The barrier case's two halves are values nothing else here leaves**, so it cannot pass on
+    /// a target one of its draws never reached.
     ///
-    /// This is the check the round's own vacuity incident earns: a draw that wrote nothing and a
-    /// round trip whose two halves never met both read as a pass when the values on either side
-    /// are indistinguishable. Here they are not.
+    /// This is the check the round's own vacuity incident earns: a draw that wrote nothing, and a
+    /// pair of halves whose values cannot be told apart, both read as a pass. Here the left half
+    /// is a texel no draw can compute, each one its own, and the right half is a constant neither
+    /// the clear nor any of those texels.
     #[test]
-    fn the_written_texels_are_a_value_nothing_else_leaves() {
-        let written: BTreeSet<[u32; 4]> = (0..SIDE)
-            .flat_map(|y| (0..SIDE).map(move |x| written_texel(x, y).map(f32::to_bits)))
+    fn the_two_halves_are_values_nothing_else_leaves() {
+        let read: BTreeSet<[u32; 4]> = (0..SIDE)
+            .flat_map(|y| (0..SIDE).map(move |x| source_texel(x, y).map(f32::to_bits)))
             .collect();
         assert_eq!(
-            written.len(),
+            read.len(),
             (SIDE * SIDE) as usize,
             "two texels answer alike"
         );
-        assert!(!written.contains(&[CLEAR; 4].map(f32::to_bits)));
-        assert!(!written.contains(&COLOR.map(f32::to_bits)));
-        // Opaque black is what the writing draw's fragment function returns into the target, so
-        // the target holding it anywhere would mean the reading draw never ran.
-        assert!(!written.contains(&[0.0, 0.0, 0.0, 1.0].map(f32::to_bits)));
-        // Zero is what an untouched texture of shared storage may read, so a second draw that saw
-        // nothing of the first is told apart from one that saw all of it.
-        assert!(!written.contains(&[0.0; 4].map(f32::to_bits)));
-        // The scratch texture is in both shader roles and the host writes nothing into it, which
-        // is what makes the first draw the only source of what the second reads.
-        assert_eq!(scratch_spec().role, TextureRole::ReadWrite);
+        for other in [[CLEAR; 4], OPAQUE_BLACK, COLOR, [0.0; 4]] {
+            assert!(!read.contains(&other.map(f32::to_bits)), "{other:?}");
+        }
+        assert_ne!(OPAQUE_BLACK, [CLEAR; 4]);
+        assert_ne!(OPAQUE_BLACK, COLOR);
+        // The two halves are the whole target between them, so every texel is one draw's answer
+        // and the clear appears nowhere -- which is what says both draws ran.
+        assert_eq!(LEFT.width + RIGHT.width, u64::from(SIDE));
+        assert_eq!(LEFT.x, 0);
+        assert_eq!(RIGHT.x, LEFT.width);
+        for rect in [LEFT, RIGHT] {
+            assert_eq!(rect.y, 0);
+            assert_eq!(rect.height, u64::from(SIDE));
+            assert!(!rect.past([SIDE; 2]));
+        }
+        // The check sees a rectangle that reaches past the target, so a green run means these are
+        // inside rather than that it cannot fire.
+        assert!(ScissorBox::new(0, 0, u64::from(SIDE) + 1, 1).past([SIDE; 2]));
+        // One texture is read-only and the other write-only, so neither draw can reach the
+        // other's, which is what makes the two halves independent.
+        assert_eq!(source_spec().role, TextureRole::Read);
+        assert_eq!(scratch_spec().role, TextureRole::Write);
         assert_eq!(layout(SIDE).extent(), plane(SIDE) as usize);
         // The two pipelines are two pipelines.
-        let [writing, reading] = RenderBarriers::pipelines(&PLAIN);
-        assert_ne!(writing.words(), reading.words());
+        let [reading, writing] = RenderBarriers::pipelines(&PLAIN);
+        assert_ne!(reading.words(), writing.words());
     }
 
     /// **The heap case's target is the colour its binding holds**, in every texel: the four

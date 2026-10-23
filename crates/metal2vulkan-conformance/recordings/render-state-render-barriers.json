@@ -1,0 +1,374 @@
+{
+  "format": 1,
+  "case": "render-state-render-barriers",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "tob_renders.ll",
+      "entry": "tob_rect+tob_solid+tob_write+tob_read",
+      "source_sha256": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+    },
+    {
+      "fixture": "tob_renders.air.ll",
+      "entry": "tob_rect+tob_solid+tob_write+tob_read",
+      "source_sha256": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 8,
+      "outcomes": [
+        {
+          "runs": 8,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+                        }
+                      }
+                    },
+                    {
+                      "name": "render-pipeline:0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "34bfffe6085e59aca331c2455b1226602416a43ca0d3fa60e8b757cd50ca0d4d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "render-pipeline:1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "bef9dae775fb49f6193039ef7c048003c81046d41698efd041246d4d3bd47d6e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a4ead74e2478c9a99b18bd17e46c9e653d10c730ef20d00962a5b227a5a40fd8"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:source",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "185e6aba6815336be1f16ad8d8fe66d9de55d330d326d20513c15868fa3e6914"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:scratch",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "eeab18abdebf79a5b7214778a072b0bb7f23217fe11c2e2816ca3c981fa275ad"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:rects",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3c43320431ddfab2380e4ffed4fd3d9080a724aadbc60afc1653dc880f4c06d7"
+                        }
+                      }
+                    },
+                    {
+                      "name": "clear",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "7e66234cd745b3e9b22f591477558fb610f17f820abbf0aa5aaf6759da6e1701"
+                        }
+                      }
+                    },
+                    {
+                      "name": "halves",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "794d3f1b08803bb9e9f958d497c37cecf2781c29391255ae822ac814fd0fd4b2"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render-pipeline:0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render-pipeline:1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture:source",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture:scratch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:rects",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pieces",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "pass",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "read",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texels",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAQgAAgEIAAAA/AAAAQAAABEIAAIBCAAAAPwAAAEAAAAhCAACAQgAAAD8AAABAAAAMQgAAgEIAAAA/AAAAQAAAEEIAAIBCAAAAPwAAAEAAABRCAACAQgAAAD8AAABAAAAYQgAAgEIAAAA/AAAAQAAAHEIAAIBCAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAEIAAIJCAAAAPwAAAEAAAARCAACCQgAAAD8AAABAAAAIQgAAgkIAAAA/AAAAQAAADEIAAIJCAAAAPwAAAEAAABBCAACCQgAAAD8AAABAAAAUQgAAgkIAAAA/AAAAQAAAGEIAAIJCAAAAPwAAAEAAABxCAACCQgAAAD8AAABAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAABCAACEQgAAAD8AAABAAAAEQgAAhEIAAAA/AAAAQAAACEIAAIRCAAAAPwAAAEAAAAxCAACEQgAAAD8AAABAAAAQQgAAhEIAAAA/AAAAQAAAFEIAAIRCAAAAPwAAAEAAABhCAACEQgAAAD8AAABAAAAcQgAAhEIAAAA/AAAAQAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAQgAAhkIAAAA/AAAAQAAABEIAAIZCAAAAPwAAAEAAAAhCAACGQgAAAD8AAABAAAAMQgAAhkIAAAA/AAAAQAAAEEIAAIZCAAAAPwAAAEAAABRCAACGQgAAAD8AAABAAAAYQgAAhkIAAAA/AAAAQAAAHEIAAIZCAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAEIAAIhCAAAAPwAAAEAAAARCAACIQgAAAD8AAABAAAAIQgAAiEIAAAA/AAAAQAAADEIAAIhCAAAAPwAAAEAAABBCAACIQgAAAD8AAABAAAAUQgAAiEIAAAA/AAAAQAAAGEIAAIhCAAAAPwAAAEAAABxCAACIQgAAAD8AAABAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAABCAACKQgAAAD8AAABAAAAEQgAAikIAAAA/AAAAQAAACEIAAIpCAAAAPwAAAEAAAAxCAACKQgAAAD8AAABAAAAQQgAAikIAAAA/AAAAQAAAFEIAAIpCAAAAPwAAAEAAABhCAACKQgAAAD8AAABAAAAcQgAAikIAAAA/AAAAQAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAQgAAjEIAAAA/AAAAQAAABEIAAIxCAAAAPwAAAEAAAAhCAACMQgAAAD8AAABAAAAMQgAAjEIAAAA/AAAAQAAAEEIAAIxCAAAAPwAAAEAAABRCAACMQgAAAD8AAABAAAAYQgAAjEIAAAA/AAAAQAAAHEIAAIxCAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAEIAAI5CAAAAPwAAAEAAAARCAACOQgAAAD8AAABAAAAIQgAAjkIAAAA/AAAAQAAADEIAAI5CAAAAPwAAAEAAABBCAACOQgAAAD8AAABAAAAUQgAAjkIAAAA/AAAAQAAAGEIAAI5CAAAAPwAAAEAAABxCAACOQgAAAD8AAABAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAABCAACQQgAAAD8AAABAAAAEQgAAkEIAAAA/AAAAQAAACEIAAJBCAAAAPwAAAEAAAAxCAACQQgAAAD8AAABAAAAQQgAAkEIAAAA/AAAAQAAAFEIAAJBCAAAAPwAAAEAAABhCAACQQgAAAD8AAABAAAAcQgAAkEIAAAA/AAAAQAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAQgAAkkIAAAA/AAAAQAAABEIAAJJCAAAAPwAAAEAAAAhCAACSQgAAAD8AAABAAAAMQgAAkkIAAAA/AAAAQAAAEEIAAJJCAAAAPwAAAEAAABRCAACSQgAAAD8AAABAAAAYQgAAkkIAAAA/AAAAQAAAHEIAAJJCAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAEIAAJRCAAAAPwAAAEAAAARCAACUQgAAAD8AAABAAAAIQgAAlEIAAAA/AAAAQAAADEIAAJRCAAAAPwAAAEAAABBCAACUQgAAAD8AAABAAAAUQgAAlEIAAAA/AAAAQAAAGEIAAJRCAAAAPwAAAEAAABxCAACUQgAAAD8AAABAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAABCAACWQgAAAD8AAABAAAAEQgAAlkIAAAA/AAAAQAAACEIAAJZCAAAAPwAAAEAAAAxCAACWQgAAAD8AAABAAAAQQgAAlkIAAAA/AAAAQAAAFEIAAJZCAAAAPwAAAEAAABhCAACWQgAAAD8AAABAAAAcQgAAlkIAAAA/AAAAQAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAQgAAmEIAAAA/AAAAQAAABEIAAJhCAAAAPwAAAEAAAAhCAACYQgAAAD8AAABAAAAMQgAAmEIAAAA/AAAAQAAAEEIAAJhCAAAAPwAAAEAAABRCAACYQgAAAD8AAABAAAAYQgAAmEIAAAA/AAAAQAAAHEIAAJhCAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAEIAAJpCAAAAPwAAAEAAAARCAACaQgAAAD8AAABAAAAIQgAAmkIAAAA/AAAAQAAADEIAAJpCAAAAPwAAAEAAABBCAACaQgAAAD8AAABAAAAUQgAAmkIAAAA/AAAAQAAAGEIAAJpCAAAAPwAAAEAAABxCAACaQgAAAD8AAABAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAABCAACcQgAAAD8AAABAAAAEQgAAnEIAAAA/AAAAQAAACEIAAJxCAAAAPwAAAEAAAAxCAACcQgAAAD8AAABAAAAQQgAAnEIAAAA/AAAAQAAAFEIAAJxCAAAAPwAAAEAAABhCAACcQgAAAD8AAABAAAAcQgAAnEIAAAA/AAAAQAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAQgAAnkIAAAA/AAAAQAAABEIAAJ5CAAAAPwAAAEAAAAhCAACeQgAAAD8AAABAAAAMQgAAnkIAAAA/AAAAQAAAEEIAAJ5CAAAAPwAAAEAAABRCAACeQgAAAD8AAABAAAAYQgAAnkIAAAA/AAAAQAAAHEIAAJ5CAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 256,
+                            "rows": 16,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": {
+        "stopped": {
+          "call": "render",
+          "message": "Memory Barrier With Scope Validation\nafterStages (0x2) can not contain MTLRenderStageTile or MTLRenderStageFragment on this device\nMemory Barrier With Resources Validation\nafterStages (0x2) can not contain MTLRenderStageTile or MTLRenderStageFragment on this device"
+        }
+      }
+    }
+  ]
+}

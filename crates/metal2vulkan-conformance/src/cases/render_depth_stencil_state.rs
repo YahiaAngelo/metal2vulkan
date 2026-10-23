@@ -10,7 +10,7 @@
 //!
 //! | case | what it sets, and what the target then says |
 //! |---|---|
-//! | `render-state-depth-bias` | `setDepthBias:slopeScale:clamp:` over a flat triangle at the depth already stored, and over a sloped one, under `MTLCompareFunctionLess` |
+//! | `render-state-depth-bias` | `setDepthBias:slopeScale:clamp:` over a flat triangle at the depth already stored, and over a sloped one with and without a slope scale and a clamp, under `MTLCompareFunctionLess` |
 //! | `render-state-depth-clip` | `setDepthClipMode:` over a triangle in front of the near plane, which `Clip` discards and `Clamp` draws |
 //! | `render-state-stencil-references` | `setStencilReferenceValue:` and `setStencilFrontReferenceValue:backReferenceValue:` under a state whose two faces both compare `Equal` |
 //!
@@ -29,7 +29,7 @@
 //!   one minimum resolvable difference is what makes it pass;
 //! - the sloped triangle's depth crosses the stored depth in the middle of its cell, and its slope
 //!   is one eightieth of the depth range a pixel, so a slope scale of minus two moves the row the
-//!   crossing lands on by exactly two;
+//!   crossing lands on by exactly two, and a clamp of one row's worth of depth moves it by one;
 //! - the near triangle is in front of the near plane, so `Clip` has nothing to draw and `Clamp`
 //!   has the near plane's own depth, which is less than the stored one.
 //!
@@ -393,7 +393,7 @@ fn prefill_steps(prefill: Handle, writing: Handle, positions: Handle) -> Vec<Ren
 // render-state-depth-bias
 
 /// The cell each flat-triangle bias draw is confined to, and the bias it sets.
-fn bias_cells() -> [(ScissorBox, DepthBiasValues); 4] {
+fn bias_cells() -> [(ScissorBox, DepthBiasValues); 3] {
     [
         // No bias: the flat triangle sits at exactly the stored depth, so `Less` fails.
         (cell(0, 0), DepthBiasValues::new(0.0, 0.0, 0.0)),
@@ -401,15 +401,8 @@ fn bias_cells() -> [(ScissorBox, DepthBiasValues); 4] {
         (cell(1, 0), DepthBiasValues::new(-1.0, 0.0, 0.0)),
         // The bias set back to none, which the first cell's answer is the control for.
         (cell(2, 0), DepthBiasValues::new(0.0, 0.0, 0.0)),
-        // The same bias as the second cell's, held by a clamp far smaller than one minimum
-        // resolvable difference of a `Depth32Float` depth near 0.5 (which is 2^-24).
-        (cell(3, 0), DepthBiasValues::new(-1.0, 0.0, HELD_CLAMP)),
     ]
 }
-
-/// The clamp the fourth cell states: negative, so it bounds a negative offset, and small enough
-/// that the bounded offset leaves the depth at [`STORED_DEPTH`] exactly once a `float` holds it.
-const HELD_CLAMP: f32 = -1e-9;
 
 /// The cell the sloped triangle is drawn into with no slope scale, eight rows tall so the row its
 /// depth crosses [`STORED_DEPTH`] on is inside it.
@@ -418,9 +411,26 @@ const SLOPE_PLAIN: ScissorBox = ScissorBox::new(0, 4, 4, 8);
 /// The cell the sloped triangle is drawn into under a slope scale of [`SLOPE_SCALE`].
 const SLOPE_SCALED: ScissorBox = ScissorBox::new(4, 4, 4, 8);
 
-/// The slope scale the second sloped draw sets: minus two, which moves the crossing by exactly two
-/// pixel rows.
+/// The cell the sloped triangle is drawn into under the same slope scale and a clamp that bounds
+/// its offset to half of it.
+const SLOPE_HELD: ScissorBox = ScissorBox::new(8, 4, 4, 8);
+
+/// The slope scale the second and third sloped draws set: minus two, which is two pixel rows'
+/// worth of this triangle's depth, so it moves the row the crossing lands on by exactly two.
 const SLOPE_SCALE: f32 = -2.0;
+
+/// The clamp the third sloped draw states: negative, so it bounds a negative offset, and one pixel
+/// row's worth of depth, so the bounded offset moves the crossing by one row instead of two.
+///
+/// **It is the clamp the case states because it is the one that can be read.** A clamp that bounds
+/// a *constant* bias cannot be: measured on an Apple M3 Max (macOS 27.0.1, build 26A434), a bias
+/// of -1 under a clamp of -1e-9 drew exactly as the same bias under no clamp did, over eight runs.
+/// One minimum resolvable difference of a `Depth32Float` depth near 0.5 is `2^-24`, and -1e-9 is
+/// far below it, so a depth bounded to -1e-9 is the stored depth once a `float` holds it -- and it
+/// passed `Less` anyway, which reads as the comparison seeing more precision than the attachment
+/// stores. A clamp whose own magnitude is a fortieth of the depth range leaves no room for that
+/// reading, and it is the form a program actually uses: a bound on a slope-scaled offset.
+const HELD_CLAMP: f32 = -0.0125;
 
 /// `setDepthBias:slopeScale:clamp:` over a flat triangle at the stored depth and a sloped one that
 /// crosses it.
@@ -470,6 +480,13 @@ impl DepthBias {
             0.0,
         )));
         steps.push(RenderStep::Scissor(SLOPE_SCALED));
+        steps.push(TRIANGLE_DRAW);
+        steps.push(RenderStep::DepthBias(DepthBiasValues::new(
+            0.0,
+            SLOPE_SCALE,
+            HELD_CLAMP,
+        )));
+        steps.push(RenderStep::Scissor(SLOPE_HELD));
         steps.push(TRIANGLE_DRAW);
         steps
     }
@@ -535,10 +552,11 @@ impl Case for DepthBias {
             biases.extend(box_of.words());
             biases.extend(bias.words());
         }
-        for box_of in [SLOPE_PLAIN, SLOPE_SCALED] {
+        for box_of in [SLOPE_PLAIN, SLOPE_SCALED, SLOPE_HELD] {
             biases.extend(box_of.words());
         }
         biases.extend(SLOPE_SCALE.to_le_bytes());
+        biases.extend(HELD_CLAMP.to_le_bytes());
         inputs.push(Input::bytes("biases", &biases));
         Ok(inputs)
     }
@@ -1131,9 +1149,20 @@ mod tests {
     }
 
     /// Whether the sloped triangle's fragment in `row` survives `MTLCompareFunctionLess` against
-    /// [`STORED_DEPTH`] under a slope scale of `slope_scale`.
-    fn sloped_passes(row: u32, slope_scale: f64) -> bool {
-        sloped_depth(row) + slope_scale * SLOPE_PER_ROW < STORED_DEPTH
+    /// [`STORED_DEPTH`] under a depth offset of `offset`.
+    fn sloped_passes(row: u32, offset: f64) -> bool {
+        sloped_depth(row) + offset < STORED_DEPTH
+    }
+
+    /// The depth offset each of the three sloped cells draws under, in the order the case draws
+    /// them: none, the slope scale's own, and the slope scale's bounded by the clamp.
+    ///
+    /// Metal's offset is `m * slopeScale + r * depthBias`, bounded by `clamp` where that is not
+    /// zero -- toward zero, since a negative clamp bounds a negative offset. The constant term is
+    /// nothing here, so each cell's offset is arithmetic over `SLOPE_PER_ROW` alone.
+    fn sloped_offsets() -> [f64; 3] {
+        let scaled = f64::from(SLOPE_SCALE) * SLOPE_PER_ROW;
+        [0.0, scaled, scaled.max(f64::from(HELD_CLAMP))]
     }
 
     /// What the depth cases' fragment function returns in every channel.
@@ -1150,7 +1179,7 @@ mod tests {
         // inside rather than that the check cannot fire.
         assert!(ScissorBox::new(0, 0, SIDE as u64 + 1, 1).past([SIDE; 2]));
         let mut cells: Vec<ScissorBox> = bias_cells().iter().map(|(rect, _)| *rect).collect();
-        cells.extend([SLOPE_PLAIN, SLOPE_SCALED]);
+        cells.extend([SLOPE_PLAIN, SLOPE_SCALED, SLOPE_HELD]);
         cells.extend([CONTROL_CELL, CLIPPED_CELL, CLAMPED_CELL, CLIPPED_AGAIN_CELL]);
         cells.extend(reference_draws().iter().map(|draw| draw.cell));
         for rect in cells {
@@ -1185,15 +1214,21 @@ mod tests {
         // depth range, which a `Depth32Float` holds to a part in sixteen million, so no row's
         // answer turns on rounding.
         for row in SLOPE_PLAIN.y..SLOPE_PLAIN.y + SLOPE_PLAIN.height {
-            for scale in [0.0, f64::from(SLOPE_SCALE)] {
-                let margin =
-                    (sloped_depth(row as u32) + scale * SLOPE_PER_ROW - STORED_DEPTH).abs();
-                assert!(margin > 1e-3, "row {row} at slope scale {scale}: {margin}");
+            for offset in sloped_offsets() {
+                let margin = (sloped_depth(row as u32) + offset - STORED_DEPTH).abs();
+                assert!(
+                    margin > 1e-3,
+                    "row {row} at an offset of {offset}: {margin}"
+                );
             }
         }
-        // The clamp the fourth bias cell states is far below one minimum resolvable difference of
-        // a `Depth32Float` depth near the stored one, which is `2^-24`.
-        assert!(f64::from(HELD_CLAMP).abs() < 2f64.powi(-24) / 16.0);
+        // The clamp the third sloped cell states bounds the slope-scaled offset to half of it, so
+        // its own reading is one pixel row rather than two. Stated in the `f32` Metal is handed,
+        // because the nearest `f32` to half a row's depth is not the `f64` that names it.
+        assert_eq!(
+            HELD_CLAMP,
+            (f64::from(SLOPE_SCALE) * SLOPE_PER_ROW / 2.0) as f32
+        );
     }
 
     /// **The two sloped cells disagree, by exactly the rows the slope scale moves.**
@@ -1201,39 +1236,48 @@ mod tests {
     /// Stated over the arithmetic, so it holds with no device: a slope scale of minus two subtracts
     /// two rows' worth of depth, so the crossing moves two rows and the scaled cell draws two more.
     #[test]
-    fn the_slope_scale_moves_the_crossing_by_two_rows() {
-        let rows = |scale: f64| -> BTreeSet<u32> {
+    fn the_slope_scale_moves_the_crossing_by_two_rows_and_the_clamp_by_one() {
+        let rows = |offset: f64| -> BTreeSet<u32> {
             (SLOPE_PLAIN.y..SLOPE_PLAIN.y + SLOPE_PLAIN.height)
-                .filter(|row| sloped_passes(*row as u32, scale))
+                .filter(|row| sloped_passes(*row as u32, offset))
                 .map(|row| row as u32)
                 .collect()
         };
-        let plain = rows(0.0);
-        let scaled = rows(f64::from(SLOPE_SCALE));
-        assert!(
-            plain.is_subset(&scaled),
-            "the slope scale lost a row the plain draw had: {plain:?} against {scaled:?}"
+        let [none, scaled, held] = sloped_offsets().map(rows);
+        // Each offset keeps every row the smaller one had and adds to it, so the three cells are
+        // nested and the differences between them are the readings.
+        assert!(none.is_subset(&held) && held.is_subset(&scaled));
+        assert_eq!(
+            scaled.len() - none.len(),
+            2,
+            "the slope scale moved the crossing by {} rows, not two: {none:?} against {scaled:?}",
+            scaled.len() - none.len()
         );
         assert_eq!(
-            scaled.len() - plain.len(),
-            2,
-            "the slope scale moved the crossing by {} rows, not two: {plain:?} against {scaled:?}",
-            scaled.len() - plain.len()
+            held.len() - none.len(),
+            1,
+            "the clamp left the crossing {} rows from the unbiased one, not one: {none:?} against \
+             {held:?}",
+            held.len() - none.len()
         );
-        // Neither cell is all-drawn or all-clear, so each is a boundary the case can read rather
-        // than one more whole cell.
+        // No cell is all-drawn or all-clear, so each is a boundary the case can read rather than
+        // one more whole cell.
         let whole = SLOPE_PLAIN.height as usize;
-        for (what, rows) in [("plain", &plain), ("scaled", &scaled)] {
+        for (what, rows) in [("plain", &none), ("scaled", &scaled), ("held", &held)] {
             assert!(
                 !rows.is_empty() && rows.len() < whole,
                 "the {what} sloped cell is {} of {whole} rows",
                 rows.len()
             );
         }
-        // The two cells are the same eight rows of the target, so the two answers are comparable.
-        assert_eq!(SLOPE_PLAIN.y, SLOPE_SCALED.y);
-        assert_eq!(SLOPE_PLAIN.height, SLOPE_SCALED.height);
-        assert_ne!(SLOPE_PLAIN.x, SLOPE_SCALED.x);
+        // The three cells are the same eight rows of the target, in three columns, so their
+        // answers are comparable.
+        for rect in [SLOPE_SCALED, SLOPE_HELD] {
+            assert_eq!(rect.y, SLOPE_PLAIN.y);
+            assert_eq!(rect.height, SLOPE_PLAIN.height);
+            assert_ne!(rect.x, SLOPE_PLAIN.x);
+        }
+        assert_ne!(SLOPE_SCALED.x, SLOPE_HELD.x);
     }
 
     /// **Metal's recorded target holds what the bias each draw was given says it should.**
@@ -1260,29 +1304,27 @@ mod tests {
         );
         // And the bias set back to none puts it behind the test again.
         assert!(!held[2], "the bias was not set back to none");
-        // The clamp bounds the offset, so the same bias no longer carries it.
-        assert!(
-            !held[3],
-            "a clamp of {HELD_CLAMP} did not bound a bias of -1: the clamp either does not apply \
-             to a negative offset or bounds it the other way, which is a finding about Metal and \
-             not about this case's arithmetic"
-        );
-        // The sloped pair: the rows each drew, against the rows its depth and slope scale say.
-        for (rect, scale) in [(SLOPE_PLAIN, 0.0), (SLOPE_SCALED, f64::from(SLOPE_SCALE))] {
+        // The three sloped cells: the rows each drew, against the rows its depth and its offset
+        // say. The second is the slope scale's reading and the third is the clamp's.
+        for (rect, offset) in [SLOPE_PLAIN, SLOPE_SCALED, SLOPE_HELD]
+            .into_iter()
+            .zip(sloped_offsets())
+        {
             let want: BTreeSet<u32> = (rect.y..rect.y + rect.height)
-                .filter(|row| sloped_passes(*row as u32, scale))
+                .filter(|row| sloped_passes(*row as u32, offset))
                 .map(|row| row as u32)
                 .collect();
             assert_eq!(
                 drawn_rows(&bytes, rect, WHITE_TEXEL),
                 want,
-                "the rows {rect:?} drew at slope scale {scale} are not the rows its depth says"
+                "the rows {rect:?} drew at a depth offset of {offset} are not the rows its depth \
+                 says"
             );
         }
         // Every texel outside every cell holds the clear, which says the prefill wrote no colour
         // and no region draw escaped its scissor rectangle.
         let mut used: Vec<ScissorBox> = cells.iter().map(|(rect, _)| *rect).collect();
-        used.extend([SLOPE_PLAIN, SLOPE_SCALED]);
+        used.extend([SLOPE_PLAIN, SLOPE_SCALED, SLOPE_HELD]);
         assert_cleared_outside(&bytes, &used);
     }
 

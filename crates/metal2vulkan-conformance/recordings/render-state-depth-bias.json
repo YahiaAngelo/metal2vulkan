@@ -1,0 +1,405 @@
+{
+  "format": 1,
+  "case": "render-state-depth-bias",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "cfb_sample_depth.ll",
+      "entry": "cfb_depth_vertex+cfb_depth_white",
+      "source_sha256": "74c81e7f285981029ba0533bce0e6fd92488ddac8cc69cbd9b553194a62f847f"
+    },
+    {
+      "fixture": "cfb_sample_depth.air.ll",
+      "entry": "cfb_depth_vertex+cfb_depth_white",
+      "source_sha256": "55d1012774719aaf36eafecc0596d4821453dd2171da0d71dcf8ad6ea3fce9dd"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 8,
+      "outcomes": [
+        {
+          "runs": 8,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "74c81e7f285981029ba0533bce0e6fd92488ddac8cc69cbd9b553194a62f847f"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "55d1012774719aaf36eafecc0596d4821453dd2171da0d71dcf8ad6ea3fce9dd"
+                        }
+                      }
+                    },
+                    {
+                      "name": "render-pipeline:0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "847fa8272d7cde14957efd4a13c4528c0aba380d1bf564df4a4f3d900a158ac6"
+                        }
+                      }
+                    },
+                    {
+                      "name": "render-pipeline:1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "92a1f5b28fe58fcc37ce6b2d5df66589ca430c4db864962a11ab670933d06931"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target:color",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a4ead74e2478c9a99b18bd17e46c9e653d10c730ef20d00962a5b227a5a40fd8"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target:depth",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "5d2c3e687d4420bfe09f6b82f306a2f8611835849ead802bb4e8fb1b9118e8ac"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:positions",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "64c5d7d5ec15a6c9942c2129b6dd567a0dc7b2b65238a888cb0ff38e6233ceac"
+                        }
+                      }
+                    },
+                    {
+                      "name": "state:writing",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "51d1e97a68ae9a64e6152e9257c6ceb49a9aff04b88eb09554de2d188533257a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "state:testing",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "559c4e90ca2ce43f043d4b89ba65a3e34a73f6d7e5b6a196bb08d05cc05ba612"
+                        }
+                      }
+                    },
+                    {
+                      "name": "clear:color",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "7e66234cd745b3e9b22f591477558fb610f17f820abbf0aa5aaf6759da6e1701"
+                        }
+                      }
+                    },
+                    {
+                      "name": "clear:depth",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6c3c396ed6b5c36dcae172271f462051b1266b851e92df3deea8ac65478fd712"
+                        }
+                      }
+                    },
+                    {
+                      "name": "biases",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9d079b65b3d86fa3105ece814b3c14ca23e7a12f2a851dd25c6f4a42f103bd50"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render-pipeline:0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render-pipeline:1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target:color",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target:depth",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:positions",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "state:writing",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "state:testing",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pieces",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "pass",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "read",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texels",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAIA/AACAPwAAgD8AAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwAAA8MAAAPDAAADwwA=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 256,
+                            "rows": 16,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": {
+        "stopped": {
+          "call": "render",
+          "message": "Set Depth Bias Validation\nredundant setDepthBias."
+        }
+      }
+    }
+  ]
+}
