@@ -108,26 +108,77 @@ pub const WHY_COLD_IS_NOT_JUDGED: &str =
 /// not judged, which is a missing verdict rather than a false red.
 pub const QUIET_ENOUGH: f64 = 4.0;
 
-/// Whether the gate judges a measurement taken under `shaders` on a host at `load`.
+/// **How far the load may move across one measurement before its two halves are not one
+/// condition.** A factor, applied to the larger reading over the smaller.
 ///
-/// Warm and quiet, and neither for a reason the caller prints: a cold reading does not separate
-/// our compile cost from first use on a new device ([`WHY_COLD_IS_NOT_JUDGED`]), and a loaded
-/// host moves our leg and not Metal's ([`QUIET_ENOUGH`]). A host that answers no load average is
-/// judged: a missing reading is not evidence of a busy machine.
-pub fn judges(shaders: crate::run::Shaders, load: Option<f64>) -> Result<(), String> {
+/// This number is stated and not localised, exactly as [`QUIET_ENOUGH`] was: what is measured is
+/// that load inflates our leg and not Metal's, not the rate at which it does so. A doubling is
+/// where the two halves of a run stop being comparable by any reasonable reading, and naming it
+/// as one constant means a later measurement can replace it instead of arguing with it.
+pub const LOAD_MAY_MOVE: f64 = 2.0;
+
+/// Whether the gate judges a measurement taken under `shaders` on a host whose one-minute load
+/// average was `before` when it started and `after` when it finished.
+///
+/// Warm, quiet, and quiet *throughout*; otherwise it answers the reason for the caller to print.
+///
+/// - A cold reading does not separate our compile cost from first use on a new device
+///   ([`WHY_COLD_IS_NOT_JUDGED`]).
+/// - A loaded host moves our leg and not Metal's ([`QUIET_ENOUGH`]), so **both** readings have to
+///   be at or under the bound. Checking only the first blesses a run that became contended while
+///   it ran, which is not hypothetical: a measurement here began on an empty device queue and
+///   finished at a load average of 74.84 because other work landed during it.
+/// - The two readings also have to agree within [`LOAD_MAY_MOVE`]. Two samples under the bound
+///   that differ by a factor turn the run into two measurements of two machines, and the pooled
+///   figure is of neither.
+///
+/// A host that answers no load average is judged on what it does answer, and judged outright if
+/// it answers nothing: a missing reading is not evidence of a busy machine.
+pub fn judges(
+    shaders: crate::run::Shaders,
+    before: Option<f64>,
+    after: Option<f64>,
+) -> Result<(), String> {
     if matches!(shaders, crate::run::Shaders::Cold) {
         return Err(WHY_COLD_IS_NOT_JUDGED.to_owned());
     }
-    match load {
-        Some(load) if load > QUIET_ENOUGH => Err(format!(
-            "the margin is reported and not judged: this host's one-minute load average is \
-             {load:.2} and the gate\nwants it at {QUIET_ENOUGH:.1} or under. Our leg spends its \
-             cost on the calling thread's CPU where Metal's\nlargest calls sit blocked on the \
-             GPU, so load moves our ratios and leaves Metal's -- measured, 4.5x\nagainst 1.6x \
-             on one identical case set. Re-run it on a quiet host for a verdict."
-        )),
-        _ => Ok(()),
+    let why_load = |what: &str, seen: f64| {
+        format!(
+            "the margin is reported and not judged: this host's one-minute load average {what} \
+             {seen:.2}\nand the gate wants it at {QUIET_ENOUGH:.1} or under, start to finish. Our \
+             leg spends its cost on the\ncalling thread's CPU where Metal's largest calls sit \
+             blocked on the GPU, so load moves our ratios\nand leaves Metal's -- measured, 4.5x \
+             against 1.6x on one identical case set. Re-run it on a\nquiet host for a verdict."
+        )
+    };
+    if let Some(before) = before {
+        if before > QUIET_ENOUGH {
+            return Err(why_load("was", before));
+        }
     }
+    if let Some(after) = after {
+        if after > QUIET_ENOUGH {
+            return Err(why_load("reached", after));
+        }
+    }
+    // Both under the bound, but not under the same conditions throughout.
+    if let (Some(before), Some(after)) = (before, after) {
+        let (low, high) = if before < after {
+            (before, after)
+        } else {
+            (after, before)
+        };
+        if low > 0.0 && high / low > LOAD_MAY_MOVE {
+            return Err(format!(
+                "the margin is reported and not judged: this host's one-minute load average moved \
+                 from {before:.2}\nto {after:.2} across the measurement, more than the {LOAD_MAY_MOVE:.1}x \
+                 the gate allows. Both readings are under\nthe bound, but the run measured two \
+                 machines rather than one and the pooled figure is of neither.\nRe-run it on a \
+                 host that stays put for a verdict."
+            ));
+        }
+    }
+    Ok(())
 }
 /// One call we have written down as costing an order of magnitude more than Metal's.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -347,10 +398,10 @@ mod tests {
     #[test]
     fn the_gate_does_not_judge_a_cold_measurement() {
         assert!(
-            judges(crate::run::Shaders::Warm, Some(0.5)).is_ok(),
+            judges(crate::run::Shaders::Warm, Some(0.5), Some(0.5)).is_ok(),
             "the warm gate is off on a quiet host"
         );
-        let cold = judges(crate::run::Shaders::Cold, Some(0.5)).expect_err(
+        let cold = judges(crate::run::Shaders::Cold, Some(0.5), Some(0.5)).expect_err(
             "a cold measurement was judged, and its readings do not separate the two causes",
         );
         assert!(
@@ -365,19 +416,86 @@ mod tests {
     /// evidence of a busy machine.
     #[test]
     fn the_gate_does_not_judge_a_loaded_host() {
-        let busy = judges(crate::run::Shaders::Warm, Some(QUIET_ENOUGH + 0.01))
-            .expect_err("a loaded host was judged, and its ratios are not the two stacks'");
+        let busy = judges(
+            crate::run::Shaders::Warm,
+            Some(QUIET_ENOUGH + 0.01),
+            Some(QUIET_ENOUGH + 0.01),
+        )
+        .expect_err("a loaded host was judged, and its ratios are not the two stacks'");
         assert!(
             busy.contains("load average"),
             "the reason does not say what it read: {busy}"
         );
         assert!(
-            judges(crate::run::Shaders::Warm, Some(QUIET_ENOUGH)).is_ok(),
+            judges(
+                crate::run::Shaders::Warm,
+                Some(QUIET_ENOUGH),
+                Some(QUIET_ENOUGH)
+            )
+            .is_ok(),
             "the bound itself is refused, so no host can ever meet it"
         );
         assert!(
-            judges(crate::run::Shaders::Warm, None).is_ok(),
+            judges(crate::run::Shaders::Warm, None, None).is_ok(),
             "a host with no load average was refused a verdict for not having one"
+        );
+    }
+
+    /// **A run that became contended while it ran is refused**, which one reading before the
+    /// measurement could never catch. This is the case that happened: a whole-set pass started on
+    /// an empty device queue and finished at a load average of 74.84 because other work landed
+    /// during it.
+    #[test]
+    fn the_gate_does_not_judge_a_run_that_became_loaded() {
+        let climbed = judges(
+            crate::run::Shaders::Warm,
+            Some(0.5),
+            Some(QUIET_ENOUGH + 10.0),
+        )
+        .expect_err("a run that started quiet and finished loaded was judged");
+        assert!(
+            climbed.contains("reached"),
+            "the reason does not say the load rose during the run: {climbed}"
+        );
+        // And the other way: quiet at the end says nothing about a loaded start.
+        assert!(
+            judges(
+                crate::run::Shaders::Warm,
+                Some(QUIET_ENOUGH + 10.0),
+                Some(0.5)
+            )
+            .is_err(),
+            "a run that started loaded was judged on how quiet it ended"
+        );
+    }
+
+    /// **Two readings under the bound that disagree are two machines, not one.** The pooled
+    /// figure is then of neither, so the run is refused even though both samples are quiet.
+    #[test]
+    fn the_gate_does_not_judge_a_host_that_moved_under_it() {
+        let moved = judges(
+            crate::run::Shaders::Warm,
+            Some(1.0),
+            Some(LOAD_MAY_MOVE + 1.0),
+        );
+        assert!(
+            moved.is_err(),
+            "a host that moved by more than {LOAD_MAY_MOVE}x under the measurement was judged"
+        );
+        let why = moved.unwrap_err();
+        assert!(
+            why.contains("moved from"),
+            "the reason does not say the load moved: {why}"
+        );
+        // Exactly at the allowance is still one machine.
+        assert!(
+            judges(crate::run::Shaders::Warm, Some(1.0), Some(LOAD_MAY_MOVE)).is_ok(),
+            "the allowance itself is refused"
+        );
+        // A quiet host at rest reads near zero on both sides and must not trip the ratio.
+        assert!(
+            judges(crate::run::Shaders::Warm, Some(0.0), Some(0.0)).is_ok(),
+            "an idle host was refused for having no load to compare"
         );
     }
 
