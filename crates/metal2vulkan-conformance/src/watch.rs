@@ -28,12 +28,14 @@
 //! collected, which Metal has no counterpart for at all. Timing them would put the harness's own
 //! bookkeeping in the table.
 
+use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
     Answer, ArgumentSlot, Bindings, Fill, FragmentFill, FragmentFilled, Handle, IndirectReadBack,
     MeshCommand, MeshFunctions, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest,
     SamplerSpec, ShaderSource, Side, StageInRegion, StageInput, TextureSpec, TileFacts,
     TilePipelineSpec, TileStep, Venue,
 };
+use crate::function_bindings::BindingFacts;
 use crate::transcript::Value;
 use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{BindingAccess, PixelFormat, RenderStages};
@@ -188,6 +190,60 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
     fn argument_buffer(&mut self, slots: &[ArgumentSlot]) -> Answer<Handle> {
         let _span = self.watch("argument_buffer");
         self.inner.argument_buffer(slots)
+    }
+
+    fn argument_encoder(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        buffer_index: u32,
+    ) -> Answer<Handle> {
+        let _span = self.watch("argument_encoder");
+        self.inner.argument_encoder(library, entry, buffer_index)
+    }
+
+    fn argument_encoder_with_arguments(
+        &mut self,
+        arguments: &[ArgumentDescriptorSpec],
+    ) -> Answer<Handle> {
+        let _span = self.watch("argument_encoder_with_arguments");
+        self.inner.argument_encoder_with_arguments(arguments)
+    }
+
+    fn argument_encoder_facts(&mut self, encoder: Handle, label: &str) -> Answer<EncoderFacts> {
+        let _span = self.watch("argument_encoder_facts");
+        self.inner.argument_encoder_facts(encoder, label)
+    }
+
+    fn set_argument_buffer(
+        &mut self,
+        encoder: Handle,
+        buffer: Handle,
+        offset: u64,
+        element: Option<u64>,
+    ) -> Answer<()> {
+        let _span = self.watch("set_argument_buffer");
+        self.inner
+            .set_argument_buffer(encoder, buffer, offset, element)
+    }
+
+    fn encode_argument(&mut self, encoder: Handle, write: &ArgumentWrite) -> Answer<()> {
+        let _span = self.watch("encode_argument");
+        self.inner.encode_argument(encoder, write)
+    }
+
+    fn compute_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        entry: &str,
+    ) -> Answer<Vec<BindingFacts>> {
+        let _span = self.watch("compute_pipeline_bindings");
+        self.inner.compute_pipeline_bindings(library, entry)
+    }
+
+    fn constant_data_offset(&mut self, encoder: Handle, index: u32) -> Answer<u64> {
+        let _span = self.watch("constant_data_offset");
+        self.inner.constant_data_offset(encoder, index)
     }
 
     fn dispatch(

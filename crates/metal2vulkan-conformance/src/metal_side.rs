@@ -12,11 +12,16 @@
 //! Metal announces no degrade notice, so this side announces none: a notice in a transcript is
 //! ours, and a case that holds one must name what justifies it.
 
+use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
     Answer, ArgumentSlot, Bindings, CommandDraw, Failure, FragmentFill, FragmentFilled, Handle,
     MeshCommand, MeshFunctions, MeshStep, PassOutcome, RateMapFacts, RateMapRequest, SamplerSpec,
     ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
     TilePipelineSpec, TileStep, Venue,
+};
+use crate::function_bindings::{
+    ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
+    TextureFacts, ThreadgroupFacts, TypeFacts,
 };
 use crate::queue_slots::QueueSlots;
 use crate::render::{
@@ -29,34 +34,36 @@ use crate::sparse_query::{
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
 use metal2vulkan::metal::state::{DepthStencilDescriptor, StencilDescriptor};
-use metal2vulkan::metal::{BindingAccess, PixelFormat, RenderStages};
+use metal2vulkan::metal::{BindingAccess, BindingType, PixelFormat, RenderStages};
 use metal2vulkan_runtime::SparsePageSize;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::AnyThread;
-use objc2_foundation::{NSObjectProtocol, NSString, NSURL};
+use objc2_foundation::{NSArray, NSObjectProtocol, NSRange, NSString, NSURL};
 use objc2_metal::{
-    MTLAttributeFormat, MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType,
-    MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLClearColor,
-    MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferHandler, MTLCommandBufferStatus,
-    MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder,
-    MTLComputePipelineDescriptor, MTLComputePipelineState, MTLCreateSystemDefaultDevice,
-    MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction, MTLHeap,
-    MTLHeapDescriptor, MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer,
+    MTLArgumentDescriptor, MTLArgumentEncoder, MTLArrayType, MTLAttributeFormat, MTLBarrierScope,
+    MTLBinding, MTLBindingAccess, MTLBindingType, MTLBlendFactor, MTLBlendOperation,
+    MTLBlitCommandEncoder, MTLBuffer, MTLBufferBinding, MTLClearColor, MTLColorWriteMask,
+    MTLCommandBuffer, MTLCommandBufferHandler, MTLCommandBufferStatus, MTLCommandEncoder,
+    MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder, MTLComputePipelineDescriptor,
+    MTLComputePipelineReflection, MTLComputePipelineState, MTLCreateSystemDefaultDevice,
+    MTLDataType, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction,
+    MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer,
     MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand,
     MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
     MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
-    MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
+    MTLPointerType, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
     MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
     MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplePosition,
     MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
     MTLSamplerState, MTLSharedEvent, MTLSize, MTLSparsePageSize, MTLStageInputOutputDescriptor,
     MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction,
-    MTLStoreActionOptions, MTLTexture, MTLTextureDescriptor, MTLTextureSwizzle,
-    MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage, MTLTileRenderPipelineDescriptor,
+    MTLStoreActionOptions, MTLStructMember, MTLStructType, MTLTexture, MTLTextureBinding,
+    MTLTextureDescriptor, MTLTextureReferenceType, MTLTextureSwizzle, MTLTextureSwizzleChannels,
+    MTLTextureType, MTLTextureUsage, MTLThreadgroupBinding, MTLTileRenderPipelineDescriptor,
     MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction, MTLViewport,
-    MTLVisibilityResultMode,
+    MTLVisibilityResultMode, MTLVisibleFunctionTable,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -95,6 +102,10 @@ pub struct MetalSide {
     /// another name for one of the pools above, and not another name for the depth and stencil
     /// states either.
     heaps: Vec<Retained<ProtocolObject<dyn MTLHeap>>>,
+    /// The argument encoders the case has made, each with the argument buffer it writes into. Its
+    /// own pool: an `MTLArgumentEncoder` is its own Metal object, not another name for one of the
+    /// pools above.
+    argument_encoders: Vec<ArgumentEncoderAt>,
     /// **Every IOSurface this side made, and the only thing that owns one.** Not a pool a handle
     /// names: a surface is not a case's object at all — the case states a buffer, or a plane's
     /// rotation and stride, and this side turns it into the surface Metal needs. They are kept so
@@ -155,6 +166,282 @@ impl RenderPipeline {
     }
 }
 
+/// One argument encoder of the case's, with where its arguments go.
+///
+/// The target is kept beside the encoder because `constantDataAtIndex:` answers an **address**,
+/// and the fact a case compares is its offset inside the arguments: to take that offset the side
+/// needs the argument buffer the encoder was given and where in it the arguments start.
+struct ArgumentEncoderAt {
+    encoder: Retained<ProtocolObject<dyn MTLArgumentEncoder>>,
+    /// The argument buffer and the offset of the arguments in it; `None` until one is set.
+    target: Option<(Handle, u64)>,
+}
+
+/// The array of Objective-C pointers one of `MTLArgumentEncoder`'s range setters takes, with a
+/// null for each nil the case named, and the range it covers.
+///
+/// Its own function so the eight range setters share one spelling: each takes
+/// `NonNull<*const ProtocolObject<dyn T>>` over the whole range, and a hand-written array per
+/// setter is eight chances to get a length or a first index wrong.
+fn pointer_array<T: ?Sized>(
+    objects: &[Option<Retained<ProtocolObject<T>>>],
+) -> Vec<*const ProtocolObject<T>> {
+    objects
+        .iter()
+        .map(|object| match object {
+            Some(object) => &**object as *const ProtocolObject<T>,
+            None => std::ptr::null(),
+        })
+        .collect()
+}
+
+/// The range a range setter writes: `elements.len()` arguments from `first`.
+///
+/// Refused where the case named no element at all: Metal's array setters read `range.length`
+/// pointers from the array they are handed, and an empty slice has no address to hand them. No
+/// case states an empty range, and this says so rather than passing a dangling pointer.
+fn range_of<T>(first: u32, elements: &[T]) -> Answer<NSRange> {
+    if elements.is_empty() {
+        return Err(Failure::named(
+            "EmptyRange",
+            "a range setter of no element".to_owned(),
+        ));
+    }
+    Ok(NSRange::new(first as usize, elements.len()))
+}
+
+/// A binding as the subprotocol it conforms to, with the conformance **asked of the object**
+/// rather than assumed from its `type`.
+///
+/// `objc2` offers no cast between two protocol objects: `ProtocolObject::from_ref` needs a static
+/// conformance, which `dyn MTLBinding` to `dyn MTLBufferBinding` is not, and a protocol object
+/// cannot be downcast. The alternative is `msg_send!`, which sends a selector with no receiver type
+/// at all — and that is how `MTLTextureBinding`'s `arrayLength` came to be read by
+/// `texture_accesses` while the coverage document still counted every one of its items unexercised:
+/// a selector sent without a receiver is a call nothing, including that derivation, can check. So
+/// the cast is spelled once, here, and `conformsToProtocol:` makes its precondition a test rather
+/// than a comment.
+fn conforming<'a, P: ?Sized>(
+    binding: &'a ProtocolObject<dyn MTLBinding>,
+    protocol: &std::ffi::CStr,
+) -> Answer<&'a ProtocolObject<P>> {
+    let declared = objc2::runtime::AnyProtocol::get(protocol)
+        .ok_or_else(|| Failure::named("NoSuchProtocol", protocol.to_string_lossy().into_owned()))?;
+    if !binding.conformsToProtocol(declared) {
+        return Err(Failure::named(
+            "NotConforming",
+            format!(
+                "a binding of MTLBindingType({}) does not conform to {}",
+                binding.r#type().0,
+                protocol.to_string_lossy()
+            ),
+        ));
+    }
+    // SAFETY: `ProtocolObject<P>` is a `repr(transparent)` wrapper over the same Objective-C
+    // object whatever `P` is, and the object was just asked, and answered, that it conforms to
+    // `P`'s protocol, so every selector `P` declares is one it responds to.
+    Ok(unsafe { &*std::ptr::from_ref(binding).cast::<ProtocolObject<P>>() })
+}
+
+/// The translator's `MTLDataType` for a raw Metal ordinal.
+fn our_data_type(raw: usize) -> Answer<metal2vulkan::metal::DataType> {
+    metal2vulkan::metal::DataType::try_from(raw as u32)
+        .map_err(|_| Failure::named("UnknownDataType", format!("MTLDataType({raw})")))
+}
+
+/// The translator's `MTLBindingAccess` for a raw Metal ordinal.
+fn our_access(raw: usize) -> Answer<BindingAccess> {
+    BindingAccess::try_from(raw as u32)
+        .map_err(|_| Failure::named("UnknownBindingAccess", format!("MTLBindingAccess({raw})")))
+}
+
+/// The translator's `MTLTextureType` for a raw Metal ordinal.
+fn our_texture_type(raw: usize) -> Answer<metal2vulkan::metal::TextureType> {
+    metal2vulkan::metal::TextureType::try_from(raw as u32)
+        .map_err(|_| Failure::named("UnknownTextureType", format!("MTLTextureType({raw})")))
+}
+
+/// One binding of Metal's reflection, in the vocabulary both sides answer in.
+///
+/// Which subprotocol to read is decided by the binding's own `type`, which is how Metal states it:
+/// `MTLBindingTypeBuffer` is the fact that the binding conforms to `MTLBufferBinding`.
+fn metal_binding(binding: &ProtocolObject<dyn MTLBinding>) -> Answer<BindingFacts> {
+    let kind = binding.r#type();
+    let mut facts = BindingFacts {
+        name: binding.name().to_string(),
+        binding_type: BindingType::try_from(kind.0 as u32).map_err(|_| {
+            Failure::named("UnknownBindingType", format!("MTLBindingType({})", kind.0))
+        })?,
+        access: our_access(binding.access().0)?,
+        index: binding.index() as u32,
+        used: binding.isUsed(),
+        argument: binding.isArgument(),
+        buffer: None,
+        threadgroup: None,
+        texture: None,
+    };
+    if kind == MTLBindingType::Buffer {
+        let held: &ProtocolObject<dyn MTLBufferBinding> = conforming(binding, c"MTLBufferBinding")?;
+        let struct_type = held.bufferStructType();
+        let pointer_type = held.bufferPointerType();
+        facts.buffer = Some(BufferFacts {
+            alignment: held.bufferAlignment() as u64,
+            data_size: held.bufferDataSize() as u64,
+            data_type: our_data_type(held.bufferDataType().0)?,
+            struct_type: struct_type
+                .as_deref()
+                .map(|held| metal_struct(held, crate::function_bindings::DEPTH))
+                .transpose()?,
+            pointer_type: pointer_type
+                .as_deref()
+                .map(|held| metal_pointer(held, crate::function_bindings::DEPTH))
+                .transpose()?,
+        });
+    }
+    if kind == MTLBindingType::ThreadgroupMemory {
+        let held: &ProtocolObject<dyn MTLThreadgroupBinding> =
+            conforming(binding, c"MTLThreadgroupBinding")?;
+        facts.threadgroup = Some(ThreadgroupFacts {
+            alignment: held.threadgroupMemoryAlignment() as u64,
+            data_size: held.threadgroupMemoryDataSize() as u64,
+        });
+    }
+    if kind == MTLBindingType::Texture {
+        let held: &ProtocolObject<dyn MTLTextureBinding> =
+            conforming(binding, c"MTLTextureBinding")?;
+        facts.texture = Some(TextureFacts {
+            texture_type: our_texture_type(held.textureType().0)?,
+            data_type: our_data_type(held.textureDataType().0)?,
+            depth: held.isDepthTexture(),
+            array_length: held.arrayLength() as u32,
+        });
+    }
+    Ok(facts)
+}
+
+/// A struct type of Metal's: its members, and whether `memberByName:` finds each of them.
+fn metal_struct(held: &MTLStructType, depth: u32) -> Answer<StructFacts> {
+    let members = held.members();
+    let mut found = Vec::new();
+    let mut by_name = true;
+    for member in &members {
+        let name = member.name();
+        by_name &= held
+            .memberByName(&name)
+            .is_some_and(|other| other.name().to_string() == name.to_string());
+        found.push(metal_member(&member, depth)?);
+    }
+    Ok(StructFacts {
+        members: found,
+        found_by_name: by_name,
+    })
+}
+
+fn metal_member(member: &MTLStructMember, depth: u32) -> Answer<MemberFacts> {
+    Ok(MemberFacts {
+        name: member.name().to_string(),
+        offset: member.offset() as u64,
+        data_type: our_data_type(member.dataType().0)?,
+        argument_index: member.argumentIndex() as u32,
+        kind: match depth {
+            0 => TypeFacts::Deeper,
+            _ => metal_detail(
+                member.structType().as_deref(),
+                member.arrayType().as_deref(),
+                member.textureReferenceType().as_deref(),
+                member.pointerType().as_deref(),
+                depth - 1,
+            )?,
+        },
+    })
+}
+
+/// Which of the four type getters answered, in the order Metal declares them.
+fn metal_detail(
+    held_struct: Option<&MTLStructType>,
+    held_array: Option<&MTLArrayType>,
+    held_reference: Option<&MTLTextureReferenceType>,
+    held_pointer: Option<&MTLPointerType>,
+    depth: u32,
+) -> Answer<TypeFacts> {
+    if let Some(held) = held_struct {
+        return Ok(TypeFacts::Struct(metal_struct(held, depth)?));
+    }
+    if let Some(held) = held_array {
+        return Ok(TypeFacts::Array(Box::new(metal_array(held, depth)?)));
+    }
+    if let Some(held) = held_reference {
+        return Ok(TypeFacts::TextureReference(metal_reference(held)?));
+    }
+    if let Some(held) = held_pointer {
+        return Ok(TypeFacts::Pointer(Box::new(metal_pointer(held, depth)?)));
+    }
+    Ok(TypeFacts::Plain)
+}
+
+/// What a texture an argument buffer holds says it is.
+///
+/// A function of its own, like the three beside it, rather than four getters read where the type
+/// getter answered: the receiver of a call is typed by what declares it, and a binding an `if let`
+/// pattern made carries no declared type, so reading these four there named their container to
+/// nobody. The same four calls, with the receiver a parameter, resolve to `MTLTextureReferenceType`.
+fn metal_reference(held: &MTLTextureReferenceType) -> Answer<ReferenceFacts> {
+    Ok(ReferenceFacts {
+        data_type: our_data_type(held.textureDataType().0)?,
+        texture_type: our_texture_type(held.textureType().0)?,
+        access: our_access(held.access().0)?,
+        depth: held.isDepthTexture(),
+    })
+}
+
+fn metal_array(held: &MTLArrayType, depth: u32) -> Answer<ArrayFacts> {
+    Ok(ArrayFacts {
+        element_type: our_data_type(held.elementType().0)?,
+        array_length: held.arrayLength() as u32,
+        stride: held.stride() as u64,
+        argument_index_stride: held.argumentIndexStride() as u32,
+        element: match depth {
+            0 => TypeFacts::Deeper,
+            _ => metal_detail(
+                held.elementStructType().as_deref(),
+                held.elementArrayType().as_deref(),
+                held.elementTextureReferenceType().as_deref(),
+                held.elementPointerType().as_deref(),
+                depth - 1,
+            )?,
+        },
+    })
+}
+
+fn metal_pointer(held: &MTLPointerType, depth: u32) -> Answer<PointerFacts> {
+    Ok(PointerFacts {
+        element_type: our_data_type(held.elementType().0)?,
+        access: our_access(held.access().0)?,
+        alignment: held.alignment() as u64,
+        data_size: held.dataSize() as u64,
+        element_is_argument_buffer: held.elementIsArgumentBuffer(),
+        element: match depth {
+            0 => TypeFacts::Deeper,
+            // A pointer declares no texture-reference getter of its own, which is the nil here.
+            _ => metal_detail(
+                held.elementStructType().as_deref(),
+                held.elementArrayType().as_deref(),
+                None,
+                None,
+                depth - 1,
+            )?,
+        },
+    })
+}
+
+/// The head of a non-empty array, as the pointer a range setter takes.
+fn array_head<T>(elements: &[T]) -> Answer<std::ptr::NonNull<T>> {
+    elements
+        .first()
+        .map(std::ptr::NonNull::from)
+        .ok_or_else(|| Failure::named("EmptyRange", "a range setter of no element".to_owned()))
+}
+
 impl MetalSide {
     /// The system default device and a queue on it.
     pub fn new() -> Result<Self, String> {
@@ -178,6 +465,7 @@ impl MetalSide {
             argument_residents: Vec::new(),
             depth_stencil_states: Vec::new(),
             heaps: Vec::new(),
+            argument_encoders: Vec::new(),
             surfaces: Vec::new(),
             planes: Vec::new(),
             scratch: Scratch::new()?,
@@ -206,6 +494,21 @@ impl MetalSide {
             .get(handle.0 as usize)
             .map(|sampler| &**sampler)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("sampler {}", handle.0)))
+    }
+
+    /// The argument encoder `handle` names.
+    ///
+    /// Retained rather than borrowed, because a case's write reaches the encoder and the pools of
+    /// the resources it writes in one call, and the residency it then records needs the side
+    /// mutably.
+    fn held_encoder(
+        &self,
+        handle: Handle,
+    ) -> Answer<Retained<ProtocolObject<dyn MTLArgumentEncoder>>> {
+        self.argument_encoders
+            .get(handle.0 as usize)
+            .map(|at| at.encoder.clone())
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("argument encoder {}", handle.0)))
     }
 
     /// The heap `handle` names.
@@ -1013,6 +1316,452 @@ impl Side for MetalSide {
         let buffer = self.buffer(&words)?;
         self.argument_residents.push((buffer, named));
         Ok(buffer)
+    }
+
+    fn argument_encoder(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        buffer_index: u32,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .newFunctionWithName(&NSString::from_str(entry))
+            .ok_or_else(|| Failure::named("NoSuchFunction", entry.to_owned()))?;
+        // SAFETY: the case names a buffer index the function really takes an argument buffer at,
+        // which is what its own fixture declares; Metal raises for any other index, so a case of
+        // that shape is not written here.
+        let encoder = unsafe { function.newArgumentEncoderWithBufferIndex(buffer_index as usize) };
+        Ok(keep(
+            &mut self.argument_encoders,
+            ArgumentEncoderAt {
+                encoder,
+                target: None,
+            },
+        ))
+    }
+
+    fn argument_encoder_with_arguments(
+        &mut self,
+        arguments: &[ArgumentDescriptorSpec],
+    ) -> Answer<Handle> {
+        let descriptors: Vec<Retained<MTLArgumentDescriptor>> = arguments
+            .iter()
+            .map(|spec| {
+                let descriptor = MTLArgumentDescriptor::argumentDescriptor();
+                descriptor.setDataType(MTLDataType(spec.data_type.as_raw() as usize));
+                descriptor.setIndex(spec.index as usize);
+                descriptor.setArrayLength(spec.array_length as usize);
+                descriptor.setAccess(MTLBindingAccess(spec.access.as_raw() as usize));
+                descriptor.setTextureType(MTLTextureType(spec.texture_type.as_raw() as usize));
+                descriptor.setConstantBlockAlignment(spec.constant_block_alignment as usize);
+                descriptor
+            })
+            .collect();
+        let encoder = self
+            .device
+            .newArgumentEncoderWithArguments(&NSArray::from_retained_slice(&descriptors))
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewArgumentEncoderWithArguments",
+                    format!("{} descriptor(s) returned nil", descriptors.len()),
+                )
+            })?;
+        Ok(keep(
+            &mut self.argument_encoders,
+            ArgumentEncoderAt {
+                encoder,
+                target: None,
+            },
+        ))
+    }
+
+    fn argument_encoder_facts(&mut self, encoder: Handle, label: &str) -> Answer<EncoderFacts> {
+        let registry = self.device.registryID();
+        let held = self.held_encoder(encoder)?;
+        held.setLabel(Some(&NSString::from_str(label)));
+        Ok(EncoderFacts {
+            encoded_length: held.encodedLength() as u64,
+            alignment: held.alignment() as u64,
+            label: held.label().map(|label| label.to_string()),
+            // The registry ID is each host's own number, so only the **comparison** is portable:
+            // the two sides agree that the encoder came from the case's device, never on the
+            // number that says so.
+            device_is_the_cases: held.device().registryID() == registry,
+        })
+    }
+
+    fn set_argument_buffer(
+        &mut self,
+        encoder: Handle,
+        buffer: Handle,
+        offset: u64,
+        element: Option<u64>,
+    ) -> Answer<()> {
+        let held_buffer: Retained<ProtocolObject<dyn MTLBuffer>> =
+            Retained::from(self.held(buffer)?);
+        let held = self.held_encoder(encoder)?;
+        let arguments = offset + element.unwrap_or(0) * held.encodedLength() as u64;
+        // SAFETY: the buffer outlives the encoder's use of it (this side's own pool owns it), and
+        // the case states an offset whose arguments lie inside its own buffer.
+        unsafe {
+            match element {
+                None => held.setArgumentBuffer_offset(Some(&held_buffer), offset as usize),
+                Some(element) => held.setArgumentBuffer_startOffset_arrayElement(
+                    Some(&held_buffer),
+                    offset as usize,
+                    element as usize,
+                ),
+            }
+        }
+        self.argument_encoders[encoder.0 as usize].target = Some((buffer, arguments));
+        Ok(())
+    }
+
+    fn encode_argument(&mut self, encoder: Handle, write: &ArgumentWrite) -> Answer<()> {
+        let target = self
+            .argument_encoders
+            .get(encoder.0 as usize)
+            .and_then(|at| at.target)
+            .map(|(buffer, _)| buffer);
+        let textures = |handles: &[Option<Handle>]| -> Answer<Vec<_>> {
+            handles
+                .iter()
+                .map(|handle| {
+                    handle
+                        .map(|h| self.held_texture(h).map(Retained::from))
+                        .transpose()
+                })
+                .collect()
+        };
+        let samplers = |handles: &[Option<Handle>]| -> Answer<Vec<_>> {
+            handles
+                .iter()
+                .map(|handle| {
+                    handle
+                        .map(|h| self.held_sampler(h).map(Retained::from))
+                        .transpose()
+                })
+                .collect()
+        };
+        let buffers = |handles: &[Option<Handle>]| -> Answer<Vec<_>> {
+            handles
+                .iter()
+                .map(|handle| handle.map(|h| self.held(h).map(Retained::from)).transpose())
+                .collect()
+        };
+        let computes = |handles: &[Option<Handle>]| -> Answer<Vec<_>> {
+            handles
+                .iter()
+                .map(|handle| {
+                    handle
+                        .map(|h| {
+                            self.pipelines
+                                .get(h.0 as usize)
+                                .map(|state| Retained::from(&**state))
+                                .ok_or_else(|| {
+                                    Failure::named("NoSuchHandle", format!("pipeline {}", h.0))
+                                })
+                        })
+                        .transpose()
+                })
+                .collect()
+        };
+        let renders = |handles: &[Option<Handle>]| -> Answer<Vec<_>> {
+            handles
+                .iter()
+                .map(|handle| {
+                    handle
+                        .map(|h| {
+                            self.render_pipelines
+                                .get(h.0 as usize)
+                                .map(|held| Retained::from(&*held.state))
+                                .ok_or_else(|| {
+                                    Failure::named(
+                                        "NoSuchHandle",
+                                        format!("render pipeline {}", h.0),
+                                    )
+                                })
+                        })
+                        .transpose()
+                })
+                .collect()
+        };
+        let commands = |handles: &[Option<Handle>]| -> Answer<Vec<_>> {
+            handles
+                .iter()
+                .map(|handle| {
+                    handle
+                        .map(|h| {
+                            self.command_buffers_indirect
+                                .get(h.0 as usize)
+                                .map(|held| Retained::from(&**held))
+                                .ok_or_else(|| {
+                                    Failure::named(
+                                        "NoSuchHandle",
+                                        format!("indirect command buffer {}", h.0),
+                                    )
+                                })
+                        })
+                        .transpose()
+                })
+                .collect()
+        };
+        // Every range setter takes a pointer to an array of Objective-C pointers over the whole
+        // range, so each is written through this one shape.
+        let held = self.held_encoder(encoder)?;
+        match write {
+            ArgumentWrite::Texture { texture, index } => {
+                let held_textures = textures(&[*texture])?;
+                // SAFETY: the texture outlives the call (this side's pool owns it), and the index
+                // is the case's own, which Metal answers for or complains about itself.
+                unsafe {
+                    held.setTexture_atIndex(held_textures[0].as_deref(), *index as usize);
+                }
+            }
+            ArgumentWrite::Textures {
+                textures: ts,
+                first,
+            } => {
+                let held_textures = textures(ts)?;
+                let pointers = pointer_array(&held_textures);
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: `pointers` is an array of `pointers.len()` Objective-C pointers, which
+                // is the range's length, and each object it names outlives the call.
+                unsafe {
+                    held.setTextures_withRange(array_head(&pointers)?, range);
+                }
+            }
+            ArgumentWrite::Sampler { sampler, index } => {
+                let held_samplers = samplers(&[*sampler])?;
+                // SAFETY: as for `setTexture:atIndex:`.
+                unsafe {
+                    held.setSamplerState_atIndex(held_samplers[0].as_deref(), *index as usize);
+                }
+            }
+            ArgumentWrite::Samplers {
+                samplers: ss,
+                first,
+            } => {
+                let held_samplers = samplers(ss)?;
+                let pointers = pointer_array(&held_samplers);
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: as for `setTextures:withRange:`.
+                unsafe {
+                    held.setSamplerStates_withRange(array_head(&pointers)?, range);
+                }
+            }
+            ArgumentWrite::Buffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let held_buffers = buffers(&[*buffer])?;
+                // SAFETY: as for `setTexture:atIndex:`; the offset is the case's own and lies
+                // inside the buffer it names.
+                unsafe {
+                    held.setBuffer_offset_atIndex(
+                        held_buffers[0].as_deref(),
+                        *offset as usize,
+                        *index as usize,
+                    );
+                }
+            }
+            ArgumentWrite::Buffers { buffers: bs, first } => {
+                let handles: Vec<Option<Handle>> = bs.iter().map(|(handle, _)| *handle).collect();
+                let held_buffers = buffers(&handles)?;
+                let pointers = pointer_array(&held_buffers);
+                let offsets: Vec<usize> = bs.iter().map(|(_, at)| *at as usize).collect();
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: both arrays hold the range's length of elements, and each buffer they
+                // name outlives the call.
+                unsafe {
+                    held.setBuffers_offsets_withRange(
+                        array_head(&pointers)?,
+                        std::ptr::NonNull::from(&offsets[0]),
+                        range,
+                    );
+                }
+            }
+            ArgumentWrite::ComputePipelineState { state, index } => {
+                let held_states = computes(&[*state])?;
+                // SAFETY: as for `setTexture:atIndex:`.
+                unsafe {
+                    held.setComputePipelineState_atIndex(
+                        held_states[0].as_deref(),
+                        *index as usize,
+                    );
+                }
+            }
+            ArgumentWrite::ComputePipelineStates { states, first } => {
+                let held_states = computes(states)?;
+                let pointers = pointer_array(&held_states);
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: as for `setTextures:withRange:`.
+                unsafe {
+                    held.setComputePipelineStates_withRange(array_head(&pointers)?, range);
+                }
+            }
+            ArgumentWrite::RenderPipelineState { state, index } => {
+                let held_states = renders(&[*state])?;
+                // SAFETY: as for `setTexture:atIndex:`.
+                unsafe {
+                    held.setRenderPipelineState_atIndex(held_states[0].as_deref(), *index as usize);
+                }
+            }
+            ArgumentWrite::RenderPipelineStates { states, first } => {
+                let held_states = renders(states)?;
+                let pointers = pointer_array(&held_states);
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: as for `setTextures:withRange:`.
+                unsafe {
+                    held.setRenderPipelineStates_withRange(array_head(&pointers)?, range);
+                }
+            }
+            ArgumentWrite::IndirectCommandBuffer { commands: c, index } => {
+                let held_commands = commands(&[*c])?;
+                // SAFETY: as for `setTexture:atIndex:`.
+                unsafe {
+                    held.setIndirectCommandBuffer_atIndex(
+                        held_commands[0].as_deref(),
+                        *index as usize,
+                    );
+                }
+            }
+            ArgumentWrite::IndirectCommandBuffers { commands: c, first } => {
+                let held_commands = commands(c)?;
+                let pointers = pointer_array(&held_commands);
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: as for `setTextures:withRange:`.
+                unsafe {
+                    held.setIndirectCommandBuffers_withRange(array_head(&pointers)?, range);
+                }
+            }
+            ArgumentWrite::VisibleFunctionTable { table, index } => match table {
+                // SAFETY: nil is what the case states, and the index is its own.
+                None => unsafe { held.setVisibleFunctionTable_atIndex(None, *index as usize) },
+                // No case states one, and neither side holds a pool of them, so both answer the
+                // same "no such call" rather than one of them inventing an object.
+                Some(_) => return Err(Failure::unavailable("visible_function_table_handle")),
+            },
+            ArgumentWrite::VisibleFunctionTables { tables, first } => {
+                if tables.iter().any(Option::is_some) {
+                    return Err(Failure::unavailable("visible_function_table_handle"));
+                }
+                let pointers: Vec<*const ProtocolObject<dyn MTLVisibleFunctionTable>> =
+                    tables.iter().map(|_| std::ptr::null()).collect();
+                let range = range_of(*first, &pointers)?;
+                // SAFETY: as for `setTextures:withRange:`, over an array of nils.
+                unsafe {
+                    held.setVisibleFunctionTables_withRange(array_head(&pointers)?, range);
+                }
+            }
+            ArgumentWrite::Constant { index, bytes } => {
+                // SAFETY: the index is the case's own; the call answers where the constant goes,
+                // and Metal complains itself where no argument has it.
+                let at = unsafe { held.constantDataAtIndex(*index as usize) };
+                // SAFETY: the address is the constant's inside the argument buffer's contents, and
+                // the case states a constant no longer than the argument it names, which its own
+                // layout facts compare.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        bytes.as_ptr(),
+                        at.as_ptr().cast::<u8>(),
+                        bytes.len(),
+                    );
+                }
+            }
+        }
+        // A texture a function reaches through an argument buffer is resident only where the
+        // encoder was told so, so binding the buffer makes it resident.
+        if let Some(buffer) = target {
+            let named = write.textures();
+            if !named.is_empty() {
+                self.argument_residents.push((buffer, named));
+            }
+        }
+        Ok(())
+    }
+
+    fn compute_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        entry: &str,
+    ) -> Answer<Vec<BindingFacts>> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .newFunctionWithName(&NSString::from_str(entry))
+            .ok_or_else(|| Failure::named("NoSuchFunction", entry.to_owned()))?;
+        let mut reflection = None;
+        // SAFETY: the function is of this library, and `reflection` is this call's own
+        // out-parameter.
+        let state = unsafe {
+            self.device
+                .newComputePipelineStateWithFunction_options_reflection_error(
+                    &function,
+                    MTLPipelineOption::BindingInfo,
+                    Some(&mut reflection),
+                )
+        }
+        .map_err(|error| {
+            Failure::named(
+                "NewComputePipelineState",
+                error.localizedDescription().to_string(),
+            )
+        })?;
+        // Declared, not inferred: the coverage derivation types a receiver from what bound it,
+        // and an `Option` the creation filled in through an out-parameter names no type at all.
+        let reflection: Retained<MTLComputePipelineReflection> = reflection.ok_or_else(|| {
+            Failure::named(
+                "NoReflection",
+                "the creation answered no reflection".to_owned(),
+            )
+        })?;
+        // Bound to a local rather than called in the `for` header: the coverage derivation reads
+        // a receiver by walking back from the dot, and in a `for` header that walk swallows the
+        // loop variable, so the call would resolve to no type at all.
+        let bindings = reflection.bindings();
+        let mut found = Vec::new();
+        for binding in &bindings {
+            found.push(metal_binding(&binding)?);
+        }
+        // The state is kept so it outlives the reflection its creation answered, as the render
+        // pipelines' pool does.
+        keep(&mut self.pipelines, state);
+        Ok(found)
+    }
+
+    fn constant_data_offset(&mut self, encoder: Handle, index: u32) -> Answer<u64> {
+        let (buffer, arguments) = self
+            .argument_encoders
+            .get(encoder.0 as usize)
+            .ok_or_else(|| {
+                Failure::named("NoSuchHandle", format!("argument encoder {}", encoder.0))
+            })?
+            .target
+            .ok_or_else(|| {
+                Failure::named("NoArgumentBuffer", "no argument buffer is set".to_owned())
+            })?;
+        let base = self.held(buffer)?.contents().as_ptr() as usize + arguments as usize;
+        let held = self.held_encoder(encoder)?;
+        // SAFETY: the index is the case's own; the call answers an address inside the argument
+        // buffer's contents, and nothing is read or written through it here.
+        let at = unsafe { held.constantDataAtIndex(index as usize) };
+        (at.as_ptr() as usize)
+            .checked_sub(base)
+            .map(|offset| offset as u64)
+            .ok_or_else(|| {
+                Failure::named(
+                    "ConstantBeforeTheArguments",
+                    "constantDataAtIndex: answered an address below the arguments".to_owned(),
+                )
+            })
     }
 
     fn dispatch(
