@@ -676,6 +676,54 @@ pub trait Side {
         let _ = (targets, tile, steps);
         Err(Failure::unavailable("tile_pass"))
     }
+
+    /// `heapTextureSizeAndAlignWithDescriptor:` of the descriptor `query` names
+    /// ([`crate::texture_query`]).
+    ///
+    /// A pure getter: it compiles nothing, allocates nothing and reaches no GPU, so a case over it
+    /// is safe on every device and its answer can be re-measured on the oracle as often as anybody
+    /// asks.
+    fn heap_texture_size_and_align(
+        &mut self,
+        query: &crate::texture_query::HeapTextureQuery,
+    ) -> Answer<crate::texture_query::SizeAndAlign> {
+        let _ = query;
+        Err(Failure::unavailable("heap_texture_size_and_align"))
+    }
+
+    /// Whether `newTextureWithDescriptor:` of the descriptor `query` names answers a texture.
+    ///
+    /// The answer is a **fact about the descriptor**, not about the object: Metal answers nil for a
+    /// descriptor it describes no texture of, and the runtime answers a typed `Nil` error for the
+    /// same descriptor, which is the same fact in the two APIs' spellings. So both sides answer
+    /// `false` there, and a side that refuses the call for any other reason answers its typed
+    /// error, which compares as a refusal.
+    ///
+    /// A case asks this only of descriptors Metal makes no texture of, so nothing is allocated.
+    fn makes_texture(&mut self, query: &crate::texture_query::HeapTextureQuery) -> Answer<bool> {
+        let _ = query;
+        Err(Failure::unavailable("makes_texture"))
+    }
+
+    /// A command queue's limit on uncompleted command buffers, by the probe both sides run
+    /// ([`crate::queue_slots`]): the queue is made with `max` as its
+    /// `maxCommandBufferCount` (`newCommandQueue` where `max` is `None`), and at most `cap` command
+    /// buffers are made on a thread of its own.
+    ///
+    /// The whole experiment is one call because what it observes is an **order of events** — a make
+    /// that did not return, another queue's make that did, and the first one answering once a slot
+    /// came back — and a case cannot state that as a sequence of independent calls.
+    ///
+    /// Nothing is committed, so nothing reaches the GPU, and no make can be left unanswered: the
+    /// probe releases a blocked make by dropping a command buffer held uncommitted.
+    fn queue_slots(
+        &mut self,
+        max: Option<u32>,
+        cap: u32,
+    ) -> Answer<crate::queue_slots::QueueSlots> {
+        let _ = (max, cap);
+        Err(Failure::unavailable("queue_slots"))
+    }
 }
 
 /// A tile render pipeline a case makes: `MTLTileRenderPipelineDescriptor`'s facts the cases state.

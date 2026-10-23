@@ -17,6 +17,8 @@ use crate::case::{
     PassOutcome, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion,
     StageInput, TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
 };
+use crate::queue_slots::QueueSlots;
+use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
 use metal2vulkan::metal::PixelFormat;
 use objc2::rc::Retained;
@@ -35,7 +37,7 @@ use objc2_metal::{
     MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage,
     MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
     MTLSamplerState, MTLSize, MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode,
-    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
     MTLTileRenderPipelineDescriptor,
 };
 
@@ -1052,6 +1054,94 @@ impl Side for MetalSide {
             error,
         })
     }
+
+    fn heap_texture_size_and_align(&mut self, query: &HeapTextureQuery) -> Answer<SizeAndAlign> {
+        let descriptor = queried_descriptor(query);
+        let answered = self
+            .device
+            .heapTextureSizeAndAlignWithDescriptor(&descriptor);
+        Ok(SizeAndAlign {
+            size: answered.size as u64,
+            align: answered.align as u64,
+        })
+    }
+
+    fn queue_slots(&mut self, max: Option<u32>, cap: u32) -> Answer<QueueSlots> {
+        let queue = match max {
+            None => self.device.newCommandQueue(),
+            Some(max) => self
+                .device
+                .newCommandQueueWithMaxCommandBufferCount(max as usize),
+        }
+        .ok_or_else(|| Failure::named("NewCommandQueue", format!("{max:?} returned nil")))?;
+        let other = self
+            .device
+            .newCommandQueue()
+            .ok_or_else(|| Failure::named("NewCommandQueue", "the second queue returned nil"))?;
+        crate::queue_slots::probe(
+            cap,
+            move || {
+                // Each make gets an autorelease pool of its own, and that is load-bearing rather
+                // than tidy. `commandBuffer` answers an autoreleased object; the `Retained` is a
+                // second reference, so without a pool that drains, the probe's own release frees
+                // nothing, the slot never comes back, and the blocked make it is meant to release
+                // stays blocked (measured: the whole probe timed out). A worker thread has no pool
+                // of its own, so one is made here.
+                objc2::rc::autoreleasepool(|_| {
+                    queue
+                        .commandBuffer()
+                        .map(Made)
+                        .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))
+                })
+            },
+            || objc2::rc::autoreleasepool(|_| other.commandBuffer().is_some()),
+        )
+    }
+
+    fn makes_texture(&mut self, query: &HeapTextureQuery) -> Answer<bool> {
+        let descriptor = queried_descriptor(query);
+        // The texture, where Metal makes one, is released as this statement ends: the case asks
+        // this only of descriptors Metal makes none of, and nothing here keeps a handle, so no
+        // sweep of the family holds a texture it does not read.
+        Ok(self.device.newTextureWithDescriptor(&descriptor).is_some())
+    }
+}
+
+/// A command buffer the slot probe holds, so the thread that frees a slot need not be the thread
+/// that made it.
+///
+/// `objc2` gives `MTLCommandBuffer` no `Send`, because Metal documents a command buffer as unsafe
+/// to *encode into* from more than one thread. The probe encodes into none: it makes each command
+/// buffer on one thread and only ever releases it from another, and releasing an Objective-C object
+/// off the thread that made it is sound, since the retain count is atomic.
+pub struct Made(pub Retained<ProtocolObject<dyn MTLCommandBuffer>>);
+
+// SAFETY: as the type's documentation states: the probe never encodes into a held command buffer,
+// and the only operation that crosses threads is the release.
+unsafe impl Send for Made {}
+
+/// Metal's descriptor for a queried one: every field the case names, by its raw ordinal, so a
+/// private format and a private usage bit reach Metal as readily as a public one.
+fn queried_descriptor(query: &HeapTextureQuery) -> Retained<MTLTextureDescriptor> {
+    let descriptor = MTLTextureDescriptor::new();
+    descriptor.setTextureType(MTLTextureType(query.texture_type.as_raw() as usize));
+    descriptor.setPixelFormat(MTLPixelFormat(query.format.as_raw() as usize));
+    // SAFETY: each extent, count and index is a case's own, and the setters read nothing but the
+    // value they are given.
+    unsafe {
+        descriptor.setWidth(query.size[0] as usize);
+        descriptor.setHeight(query.size[1] as usize);
+        descriptor.setDepth(query.size[2] as usize);
+        descriptor.setMipmapLevelCount(query.levels as usize);
+        descriptor.setSampleCount(query.samples as usize);
+        descriptor.setArrayLength(query.array_length as usize);
+    }
+    descriptor.setUsage(MTLTextureUsage(query.usage.as_raw() as usize));
+    descriptor.setStorageMode(match query.storage {
+        Storage::Shared => MTLStorageMode::Shared,
+        Storage::Private => MTLStorageMode::Private,
+    });
+    descriptor
 }
 
 /// The pixel format [`crate::case::TARGET_FORMAT`] names, as Metal spells it.
