@@ -234,22 +234,20 @@ impl Case for ExtendedRangeBlend {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // The runtime blends an extended-range attachment in the shader, from the texel's tile
-        // value, and `rt6_samples` is a fast-math module whose stored `half4` output records
-        // `half-output-fast-math-blend`; a device whose blend source is not Metal's records
-        // `extended-range-blend-source`, and one whose stored codes are its own records
-        // `extended-range-blends-stored-codes`. Only the notice set is loosened, so every stored
-        // code still compares exactly: a device that blends as Metal does shows as announced with
-        // nothing differing, and one that does not shows the code. Each line fails the case if its
-        // notice stops firing, so none can outlive its reason.
-        [
-            Degradation::HalfOutputFastMathBlend,
-            Degradation::ExtendedRangeBlendSource,
-            Degradation::ExtendedRangeBlendsStoredCodes,
-        ]
-        .iter()
-        .map(|kind| crate::replay::notice_allowance(kind.code()))
-        .collect()
+        // `rt6_samples` is a fast-math module, so a pipeline that stores its `half4` fill into a
+        // color attachment announces that the half output's rounding into the attachment may not be
+        // Metal's. Only the notice set is loosened, so every stored code still compares exactly: a
+        // device that blends as Metal does shows as announced with nothing differing -- which is
+        // what this M3 Max and lavapipe both show -- and one that does not shows the code. The
+        // allowance fails the case if the notice stops firing, so it cannot outlive its reason.
+        //
+        // The two extended-range blend kinds (`extended-range-blend-source` and
+        // `extended-range-blends-stored-codes`) are deliberately **not** named here: neither fired
+        // on either venue of this round, and an allowance no run justified is a claim without
+        // evidence. A venue that needs one adds it with the run that shows it.
+        vec![crate::replay::notice_allowance(
+            Degradation::HalfOutputFastMathBlend.code(),
+        )]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
