@@ -27,8 +27,11 @@ fn root() -> PathBuf {
 #[test]
 fn the_conformance_coverage_document_is_what_the_sources_derive() {
     let script = root().join("scripts/conformance-coverage/coverage.py");
+    // `-B` so the run leaves no `__pycache__` beside the script: a test writes nothing into the
+    // tree it is checking.
     let run = Command::new("python3")
         .arg("-I")
+        .arg("-B")
         .arg(&script)
         .arg("--check")
         .current_dir(root())
