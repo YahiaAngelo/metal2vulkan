@@ -5,6 +5,7 @@
 //! Neither can fault a GPU.
 
 pub mod indirect_private_types;
+pub mod math_routines;
 pub mod pass_bytes;
 pub mod stage_in_regions;
 
@@ -17,6 +18,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(indirect_private_types::private_type_getters()));
+    for case in math_routines::all() {
+        cases.push(Box::new(case));
+    }
     cases.push(Box::new(stage_in_regions::stage_in_region_clamps()));
     cases
 }

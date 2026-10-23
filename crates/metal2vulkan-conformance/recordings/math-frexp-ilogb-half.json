@@ -1,0 +1,416 @@
+{
+  "format": 1,
+  "case": "math-frexp-ilogb-half",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "kernel_frexp_ilogb.ll",
+      "entry": "frexp_ilogb_half",
+      "source_sha256": "9b677fa212c70d88f945c7a1d7edad37907e5b33df97575d36db3d5ccb103d27"
+    },
+    {
+      "fixture": "kernel_frexp_ilogb.air.ll",
+      "entry": "frexp_ilogb_half",
+      "source_sha256": "25ae8a74391937db33545d25fc52011f19e82fc5ebe9a03ea4b272b1faface8a"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9b677fa212c70d88f945c7a1d7edad37907e5b33df97575d36db3d5ccb103d27"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "25ae8a74391937db33545d25fc52011f19e82fc5ebe9a03ea4b272b1faface8a"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b4848f97ac30908a4a47065c199215c9c87534db66d203c2185d6220025cdabc"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "1a0295f4bf5986c5f74eca9153a6a4cb10b073a01a76ba4a457fd862c78966a4"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "output",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "frexp-mantissa",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAACAAAAAgAAAAAAAAAAAAAAAgAE4AAAAAAAAAAAAAAAAAIAAAACAAAAAAAAAAAAAAACAATgCAAA4AAABAAAAAAAAAAAAAAAAOAAAAQAAAAAAAAABOAgAALgAAAEAAAAAAAAAAAAAAAC4AAABAAAAAAAAAAE4CgAAOAAA6f///+j////o////ADgAAOn////o////ATgCAAC4AADp////6P///+j///8AuAAA6f///+j///8BOAQA/jsAAPL////x////8f////47AADy////8f///wE4FAAAOAAA8v////H////x////ADgAAPL////x////ATgCAAA4AADz////8v////L///8AOAAA8/////L///8BOAIA/zsAABAAAAAPAAAADwAAAP87AAAQAAAADwAAAAE4HAAAfAAAAAAAAP///3////9/AHwAAAAAAAD///9/ATgKAAD8AAAAAAAA////f////38A/AAAAAAAAP///38BOAwAAX4AAAAAAAAAAACAAAAAgAF+AAAAAAAAAAAAgAE4DgBV/gAAAAAAAAAAAIAAAACAVf4AAAAAAAAAAACAATgWAAF8AAAAAAAAAAAAgAAAAIABfAAAAAAAAAAAAIABOAwAVTkAAP/////+/////v///1U5AAD//////v///wE4EADwuAAABAAAAAMAAAADAAAA8LgAAAQAAAADAAAAATgOAEA6AAAHAAAABgAAAAYAAABAOgAABwAAAAYAAAABOAoA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 576
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 1,
+                            "row_pitch": 32,
+                            "rows": 18,
+                            "image_pitch": 576,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "frexp-exponent",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAACAAAAAgAAAAAAAAAAAAAAAgAE4AAAAAAAAAAAAAAAAAIAAAACAAAAAAAAAAAAAAACAATgCAAA4AAABAAAAAAAAAAAAAAAAOAAAAQAAAAAAAAABOAgAALgAAAEAAAAAAAAAAAAAAAC4AAABAAAAAAAAAAE4CgAAOAAA6f///+j////o////ADgAAOn////o////ATgCAAC4AADp////6P///+j///8AuAAA6f///+j///8BOAQA/jsAAPL////x////8f////47AADy////8f///wE4FAAAOAAA8v////H////x////ADgAAPL////x////ATgCAAA4AADz////8v////L///8AOAAA8/////L///8BOAIA/zsAABAAAAAPAAAADwAAAP87AAAQAAAADwAAAAE4HAAAfAAAAAAAAP///3////9/AHwAAAAAAAD///9/ATgKAAD8AAAAAAAA////f////38A/AAAAAAAAP///38BOAwAAX4AAAAAAAAAAACAAAAAgAF+AAAAAAAAAAAAgAE4DgBV/gAAAAAAAAAAAIAAAACAVf4AAAAAAAAAAACAATgWAAF8AAAAAAAAAAAAgAAAAIABfAAAAAAAAAAAAIABOAwAVTkAAP/////+/////v///1U5AAD//////v///wE4EADwuAAABAAAAAMAAAADAAAA8LgAAAQAAAADAAAAATgOAEA6AAAHAAAABgAAAAYAAABAOgAABwAAAAYAAAABOAoA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 4,
+                                "length": 576
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 4,
+                            "row_elements": 1,
+                            "row_pitch": 32,
+                            "rows": 18,
+                            "image_pitch": 576,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "ilogb",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAACAAAAAgAAAAAAAAAAAAAAAgAE4AAAAAAAAAAAAAAAAAIAAAACAAAAAAAAAAAAAAACAATgCAAA4AAABAAAAAAAAAAAAAAAAOAAAAQAAAAAAAAABOAgAALgAAAEAAAAAAAAAAAAAAAC4AAABAAAAAAAAAAE4CgAAOAAA6f///+j////o////ADgAAOn////o////ATgCAAC4AADp////6P///+j///8AuAAA6f///+j///8BOAQA/jsAAPL////x////8f////47AADy////8f///wE4FAAAOAAA8v////H////x////ADgAAPL////x////ATgCAAA4AADz////8v////L///8AOAAA8/////L///8BOAIA/zsAABAAAAAPAAAADwAAAP87AAAQAAAADwAAAAE4HAAAfAAAAAAAAP///3////9/AHwAAAAAAAD///9/ATgKAAD8AAAAAAAA////f////38A/AAAAAAAAP///38BOAwAAX4AAAAAAAAAAACAAAAAgAF+AAAAAAAAAAAAgAE4DgBV/gAAAAAAAAAAAIAAAACAVf4AAAAAAAAAAACAATgWAAF8AAAAAAAAAAAAgAAAAIABfAAAAAAAAAAAAIABOAwAVTkAAP/////+/////v///1U5AAD//////v///wE4EADwuAAABAAAAAMAAAADAAAA8LgAAAQAAAADAAAAATgOAEA6AAAHAAAABgAAAAYAAABAOgAABwAAAAYAAAABOAoA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 8,
+                                "length": 576
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 8,
+                            "row_elements": 1,
+                            "row_pitch": 32,
+                            "rows": 18,
+                            "image_pitch": 576,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "precise-ilogb",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAACAAAAAgAAAAAAAAAAAAAAAgAE4AAAAAAAAAAAAAAAAAIAAAACAAAAAAAAAAAAAAACAATgCAAA4AAABAAAAAAAAAAAAAAAAOAAAAQAAAAAAAAABOAgAALgAAAEAAAAAAAAAAAAAAAC4AAABAAAAAAAAAAE4CgAAOAAA6f///+j////o////ADgAAOn////o////ATgCAAC4AADp////6P///+j///8AuAAA6f///+j///8BOAQA/jsAAPL////x////8f////47AADy////8f///wE4FAAAOAAA8v////H////x////ADgAAPL////x////ATgCAAA4AADz////8v////L///8AOAAA8/////L///8BOAIA/zsAABAAAAAPAAAADwAAAP87AAAQAAAADwAAAAE4HAAAfAAAAAAAAP///3////9/AHwAAAAAAAD///9/ATgKAAD8AAAAAAAA////f////38A/AAAAAAAAP///38BOAwAAX4AAAAAAAAAAACAAAAAgAF+AAAAAAAAAAAAgAE4DgBV/gAAAAAAAAAAAIAAAACAVf4AAAAAAAAAAACAATgWAAF8AAAAAAAAAAAAgAAAAIABfAAAAAAAAAAAAIABOAwAVTkAAP/////+/////v///1U5AAD//////v///wE4EADwuAAABAAAAAMAAAADAAAA8LgAAAQAAAADAAAAATgOAEA6AAAHAAAABgAAAAYAAABAOgAABwAAAAYAAAABOAoA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 12,
+                                "length": 576
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 12,
+                            "row_elements": 1,
+                            "row_pitch": 32,
+                            "rows": 18,
+                            "image_pitch": 576,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "frexp4-mantissa-lane1",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAACAAAAAgAAAAAAAAAAAAAAAgAE4AAAAAAAAAAAAAAAAAIAAAACAAAAAAAAAAAAAAACAATgCAAA4AAABAAAAAAAAAAAAAAAAOAAAAQAAAAAAAAABOAgAALgAAAEAAAAAAAAAAAAAAAC4AAABAAAAAAAAAAE4CgAAOAAA6f///+j////o////ADgAAOn////o////ATgCAAC4AADp////6P///+j///8AuAAA6f///+j///8BOAQA/jsAAPL////x////8f////47AADy////8f///wE4FAAAOAAA8v////H////x////ADgAAPL////x////ATgCAAA4AADz////8v////L///8AOAAA8/////L///8BOAIA/zsAABAAAAAPAAAADwAAAP87AAAQAAAADwAAAAE4HAAAfAAAAAAAAP///3////9/AHwAAAAAAAD///9/ATgKAAD8AAAAAAAA////f////38A/AAAAAAAAP///38BOAwAAX4AAAAAAAAAAACAAAAAgAF+AAAAAAAAAAAAgAE4DgBV/gAAAAAAAAAAAIAAAACAVf4AAAAAAAAAAACAATgWAAF8AAAAAAAAAAAAgAAAAIABfAAAAAAAAAAAAIABOAwAVTkAAP/////+/////v///1U5AAD//////v///wE4EADwuAAABAAAAAMAAAADAAAA8LgAAAQAAAADAAAAATgOAEA6AAAHAAAABgAAAAYAAABAOgAABwAAAAYAAAABOAoA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 16,
+                                "length": 576
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 16,
+                            "row_elements": 1,
+                            "row_pitch": 32,
+                            "rows": 18,
+                            "image_pitch": 576,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "frexp4-exponent-lane3",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAACAAAAAgAAAAAAAAAAAAAAAgAE4AAAAAAAAAAAAAAAAAIAAAACAAAAAAAAAAAAAAACAATgCAAA4AAABAAAAAAAAAAAAAAAAOAAAAQAAAAAAAAABOAgAALgAAAEAAAAAAAAAAAAAAAC4AAABAAAAAAAAAAE4CgAAOAAA6f///+j////o////ADgAAOn////o////ATgCAAC4AADp////6P///+j///8AuAAA6f///+j///8BOAQA/jsAAPL////x////8f////47AADy////8f///wE4FAAAOAAA8v////H////x////ADgAAPL////x////ATgCAAA4AADz////8v////L///8AOAAA8/////L///8BOAIA/zsAABAAAAAPAAAADwAAAP87AAAQAAAADwAAAAE4HAAAfAAAAAAAAP///3////9/AHwAAAAAAAD///9/ATgKAAD8AAAAAAAA////f////38A/AAAAAAAAP///38BOAwAAX4AAAAAAAAAAACAAAAAgAF+AAAAAAAAAAAAgAE4DgBV/gAAAAAAAAAAAIAAAACAVf4AAAAAAAAAAACAATgWAAF8AAAAAAAAAAAAgAAAAIABfAAAAAAAAAAAAIABOAwAVTkAAP/////+/////v///1U5AAD//////v///wE4EADwuAAABAAAAAMAAAADAAAA8LgAAAQAAAADAAAAATgOAEA6AAAHAAAABgAAAAYAAABAOgAABwAAAAYAAAABOAoA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 20,
+                                "length": 576
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 20,
+                            "row_elements": 1,
+                            "row_pitch": 32,
+                            "rows": 18,
+                            "image_pitch": 576,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "ilogb4-lane1",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAACAAAAAgAAAAAAAAAAAAAAAgAE4AAAAAAAAAAAAAAAAAIAAAACAAAAAAAAAAAAAAACAATgCAAA4AAABAAAAAAAAAAAAAAAAOAAAAQAAAAAAAAABOAgAALgAAAEAAAAAAAAAAAAAAAC4AAABAAAAAAAAAAE4CgAAOAAA6f///+j////o////ADgAAOn////o////ATgCAAC4AADp////6P///+j///8AuAAA6f///+j///8BOAQA/jsAAPL////x////8f////47AADy////8f///wE4FAAAOAAA8v////H////x////ADgAAPL////x////ATgCAAA4AADz////8v////L///8AOAAA8/////L///8BOAIA/zsAABAAAAAPAAAADwAAAP87AAAQAAAADwAAAAE4HAAAfAAAAAAAAP///3////9/AHwAAAAAAAD///9/ATgKAAD8AAAAAAAA////f////38A/AAAAAAAAP///38BOAwAAX4AAAAAAAAAAACAAAAAgAF+AAAAAAAAAAAAgAE4DgBV/gAAAAAAAAAAAIAAAACAVf4AAAAAAAAAAACAATgWAAF8AAAAAAAAAAAAgAAAAIABfAAAAAAAAAAAAIABOAwAVTkAAP/////+/////v///1U5AAD//////v///wE4EADwuAAABAAAAAMAAAADAAAA8LgAAAQAAAADAAAAATgOAEA6AAAHAAAABgAAAAYAAABAOgAABwAAAAYAAAABOAoA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 24,
+                                "length": 576
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 24,
+                            "row_elements": 1,
+                            "row_pitch": 32,
+                            "rows": 18,
+                            "image_pitch": 576,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "folded-lanes-and-popcount",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAACAAAAAgAAAAAAAAAAAAAAAgAE4AAAAAAAAAAAAAAAAAIAAAACAAAAAAAAAAAAAAACAATgCAAA4AAABAAAAAAAAAAAAAAAAOAAAAQAAAAAAAAABOAgAALgAAAEAAAAAAAAAAAAAAAC4AAABAAAAAAAAAAE4CgAAOAAA6f///+j////o////ADgAAOn////o////ATgCAAC4AADp////6P///+j///8AuAAA6f///+j///8BOAQA/jsAAPL////x////8f////47AADy////8f///wE4FAAAOAAA8v////H////x////ADgAAPL////x////ATgCAAA4AADz////8v////L///8AOAAA8/////L///8BOAIA/zsAABAAAAAPAAAADwAAAP87AAAQAAAADwAAAAE4HAAAfAAAAAAAAP///3////9/AHwAAAAAAAD///9/ATgKAAD8AAAAAAAA////f////38A/AAAAAAAAP///38BOAwAAX4AAAAAAAAAAACAAAAAgAF+AAAAAAAAAAAAgAE4DgBV/gAAAAAAAAAAAIAAAACAVf4AAAAAAAAAAACAATgWAAF8AAAAAAAAAAAAgAAAAIABfAAAAAAAAAAAAIABOAwAVTkAAP/////+/////v///1U5AAD//////v///wE4EADwuAAABAAAAAMAAAADAAAA8LgAAAQAAAADAAAAATgOAEA6AAAHAAAABgAAAAYAAABAOgAABwAAAAYAAAABOAoA"
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 28,
+                                "length": 576
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 28,
+                            "row_elements": 1,
+                            "row_pitch": 32,
+                            "rows": 18,
+                            "image_pitch": 576,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "not_run"
+    }
+  ]
+}
