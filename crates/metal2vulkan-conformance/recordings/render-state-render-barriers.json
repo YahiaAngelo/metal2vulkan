@@ -1,0 +1,734 @@
+{
+  "format": 1,
+  "case": "render-state-render-barriers",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "tob_renders.ll",
+      "entry": "tob_rect+tob_solid+tob_write+tob_read",
+      "source_sha256": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+    },
+    {
+      "fixture": "tob_renders.air.ll",
+      "entry": "tob_rect+tob_solid+tob_write+tob_read",
+      "source_sha256": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 8,
+      "outcomes": [
+        {
+          "runs": 8,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+                        }
+                      }
+                    },
+                    {
+                      "name": "render-pipeline:0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "34bfffe6085e59aca331c2455b1226602416a43ca0d3fa60e8b757cd50ca0d4d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "render-pipeline:1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "bef9dae775fb49f6193039ef7c048003c81046d41698efd041246d4d3bd47d6e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a4ead74e2478c9a99b18bd17e46c9e653d10c730ef20d00962a5b227a5a40fd8"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:source",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "185e6aba6815336be1f16ad8d8fe66d9de55d330d326d20513c15868fa3e6914"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:scratch",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "eeab18abdebf79a5b7214778a072b0bb7f23217fe11c2e2816ca3c981fa275ad"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:rects",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3c43320431ddfab2380e4ffed4fd3d9080a724aadbc60afc1653dc880f4c06d7"
+                        }
+                      }
+                    },
+                    {
+                      "name": "clear",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "7e66234cd745b3e9b22f591477558fb610f17f820abbf0aa5aaf6759da6e1701"
+                        }
+                      }
+                    },
+                    {
+                      "name": "halves",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "794d3f1b08803bb9e9f958d497c37cecf2781c29391255ae822ac814fd0fd4b2"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render-pipeline:0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render-pipeline:1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture:source",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture:scratch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:rects",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pieces",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "pass",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "read",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texels",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAQgAAgEIAAAA/AAAAQAAABEIAAIBCAAAAPwAAAEAAAAhCAACAQgAAAD8AAABAAAAMQgAAgEIAAAA/AAAAQAAAEEIAAIBCAAAAPwAAAEAAABRCAACAQgAAAD8AAABAAAAYQgAAgEIAAAA/AAAAQAAAHEIAAIBCAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAEIAAIJCAAAAPwAAAEAAAARCAACCQgAAAD8AAABAAAAIQgAAgkIAAAA/AAAAQAAADEIAAIJCAAAAPwAAAEAAABBCAACCQgAAAD8AAABAAAAUQgAAgkIAAAA/AAAAQAAAGEIAAIJCAAAAPwAAAEAAABxCAACCQgAAAD8AAABAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAABCAACEQgAAAD8AAABAAAAEQgAAhEIAAAA/AAAAQAAACEIAAIRCAAAAPwAAAEAAAAxCAACEQgAAAD8AAABAAAAQQgAAhEIAAAA/AAAAQAAAFEIAAIRCAAAAPwAAAEAAABhCAACEQgAAAD8AAABAAAAcQgAAhEIAAAA/AAAAQAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAQgAAhkIAAAA/AAAAQAAABEIAAIZCAAAAPwAAAEAAAAhCAACGQgAAAD8AAABAAAAMQgAAhkIAAAA/AAAAQAAAEEIAAIZCAAAAPwAAAEAAABRCAACGQgAAAD8AAABAAAAYQgAAhkIAAAA/AAAAQAAAHEIAAIZCAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAEIAAIhCAAAAPwAAAEAAAARCAACIQgAAAD8AAABAAAAIQgAAiEIAAAA/AAAAQAAADEIAAIhCAAAAPwAAAEAAABBCAACIQgAAAD8AAABAAAAUQgAAiEIAAAA/AAAAQAAAGEIAAIhCAAAAPwAAAEAAABxCAACIQgAAAD8AAABAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAABCAACKQgAAAD8AAABAAAAEQgAAikIAAAA/AAAAQAAACEIAAIpCAAAAPwAAAEAAAAxCAACKQgAAAD8AAABAAAAQQgAAikIAAAA/AAAAQAAAFEIAAIpCAAAAPwAAAEAAABhCAACKQgAAAD8AAABAAAAcQgAAikIAAAA/AAAAQAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAQgAAjEIAAAA/AAAAQAAABEIAAIxCAAAAPwAAAEAAAAhCAACMQgAAAD8AAABAAAAMQgAAjEIAAAA/AAAAQAAAEEIAAIxCAAAAPwAAAEAAABRCAACMQgAAAD8AAABAAAAYQgAAjEIAAAA/AAAAQAAAHEIAAIxCAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAEIAAI5CAAAAPwAAAEAAAARCAACOQgAAAD8AAABAAAAIQgAAjkIAAAA/AAAAQAAADEIAAI5CAAAAPwAAAEAAABBCAACOQgAAAD8AAABAAAAUQgAAjkIAAAA/AAAAQAAAGEIAAI5CAAAAPwAAAEAAABxCAACOQgAAAD8AAABAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAABCAACQQgAAAD8AAABAAAAEQgAAkEIAAAA/AAAAQAAACEIAAJBCAAAAPwAAAEAAAAxCAACQQgAAAD8AAABAAAAQQgAAkEIAAAA/AAAAQAAAFEIAAJBCAAAAPwAAAEAAABhCAACQQgAAAD8AAABAAAAcQgAAkEIAAAA/AAAAQAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAQgAAkkIAAAA/AAAAQAAABEIAAJJCAAAAPwAAAEAAAAhCAACSQgAAAD8AAABAAAAMQgAAkkIAAAA/AAAAQAAAEEIAAJJCAAAAPwAAAEAAABRCAACSQgAAAD8AAABAAAAYQgAAkkIAAAA/AAAAQAAAHEIAAJJCAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAEIAAJRCAAAAPwAAAEAAAARCAACUQgAAAD8AAABAAAAIQgAAlEIAAAA/AAAAQAAADEIAAJRCAAAAPwAAAEAAABBCAACUQgAAAD8AAABAAAAUQgAAlEIAAAA/AAAAQAAAGEIAAJRCAAAAPwAAAEAAABxCAACUQgAAAD8AAABAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAABCAACWQgAAAD8AAABAAAAEQgAAlkIAAAA/AAAAQAAACEIAAJZCAAAAPwAAAEAAAAxCAACWQgAAAD8AAABAAAAQQgAAlkIAAAA/AAAAQAAAFEIAAJZCAAAAPwAAAEAAABhCAACWQgAAAD8AAABAAAAcQgAAlkIAAAA/AAAAQAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAQgAAmEIAAAA/AAAAQAAABEIAAJhCAAAAPwAAAEAAAAhCAACYQgAAAD8AAABAAAAMQgAAmEIAAAA/AAAAQAAAEEIAAJhCAAAAPwAAAEAAABRCAACYQgAAAD8AAABAAAAYQgAAmEIAAAA/AAAAQAAAHEIAAJhCAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAEIAAJpCAAAAPwAAAEAAAARCAACaQgAAAD8AAABAAAAIQgAAmkIAAAA/AAAAQAAADEIAAJpCAAAAPwAAAEAAABBCAACaQgAAAD8AAABAAAAUQgAAmkIAAAA/AAAAQAAAGEIAAJpCAAAAPwAAAEAAABxCAACaQgAAAD8AAABAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAABCAACcQgAAAD8AAABAAAAEQgAAnEIAAAA/AAAAQAAACEIAAJxCAAAAPwAAAEAAAAxCAACcQgAAAD8AAABAAAAQQgAAnEIAAAA/AAAAQAAAFEIAAJxCAAAAPwAAAEAAABhCAACcQgAAAD8AAABAAAAcQgAAnEIAAAA/AAAAQAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAQgAAnkIAAAA/AAAAQAAABEIAAJ5CAAAAPwAAAEAAAAhCAACeQgAAAD8AAABAAAAMQgAAnkIAAAA/AAAAQAAAEEIAAJ5CAAAAPwAAAEAAABRCAACeQgAAAD8AAABAAAAYQgAAnkIAAAA/AAAAQAAAHEIAAJ5CAAAAPwAAAEAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 256,
+                            "rows": 16,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": {
+        "stopped": {
+          "call": "render",
+          "message": "Memory Barrier With Scope Validation\nafterStages (0x2) can not contain MTLRenderStageTile or MTLRenderStageFragment on this device\nMemory Barrier With Resources Validation\nafterStages (0x2) can not contain MTLRenderStageTile or MTLRenderStageFragment on this device"
+        }
+      }
+    }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "degraded": [
+        "metal2vulkan-degrade-render-pass-split"
+      ],
+      "bounds": {
+        "arena_pools_made": 1,
+        "argument_objects_retained": 3,
+        "argument_samplers_taken": 2,
+        "argument_tables_retained": 3,
+        "bare_starts": 1,
+        "batches_with_none_pending": 1,
+        "bind_views_worked_out": 2,
+        "command_buffers_begun": 4,
+        "command_buffers_begun_batch_barriers": 1,
+        "command_buffers_begun_batch_work": 1,
+        "command_buffers_begun_encoders": 2,
+        "command_buffers_deferred": 2,
+        "command_buffers_replayed_inline": 2,
+        "command_buffers_submitted": 4,
+        "commands_replayed.begin_command_buffer": 2,
+        "commands_replayed.cmd_begin_render_pass": 2,
+        "commands_replayed.cmd_bind_descriptor_sets": 2,
+        "commands_replayed.cmd_bind_pipeline": 2,
+        "commands_replayed.cmd_copy_image_to_buffer": 1,
+        "commands_replayed.cmd_draw": 2,
+        "commands_replayed.cmd_end_render_pass": 2,
+        "commands_replayed.cmd_pipeline_barrier": 2,
+        "commands_replayed.cmd_push_constants": 2,
+        "commands_replayed.cmd_set_blend_constants": 1,
+        "commands_replayed.cmd_set_cull_mode": 1,
+        "commands_replayed.cmd_set_depth_bias": 1,
+        "commands_replayed.cmd_set_depth_compare_op": 1,
+        "commands_replayed.cmd_set_depth_test_enable": 1,
+        "commands_replayed.cmd_set_depth_write_enable": 1,
+        "commands_replayed.cmd_set_front_face": 1,
+        "commands_replayed.cmd_set_primitive_restart_enable": 1,
+        "commands_replayed.cmd_set_primitive_topology": 1,
+        "commands_replayed.cmd_set_scissor": 2,
+        "commands_replayed.cmd_set_stencil_compare_mask": 1,
+        "commands_replayed.cmd_set_stencil_op": 1,
+        "commands_replayed.cmd_set_stencil_reference": 1,
+        "commands_replayed.cmd_set_stencil_test_enable": 1,
+        "commands_replayed.cmd_set_stencil_write_mask": 1,
+        "commands_replayed.cmd_set_viewport": 1,
+        "commands_replayed.end_command_buffer": 2,
+        "commits_handed_off": 1,
+        "completed_waits": 4,
+        "completed_where_seen": 1,
+        "creation_pipelines_drawn": 1,
+        "creation_pipelines_made": 1,
+        "dedicated_memory_blocks_live": 1,
+        "device_memory_allocated": 128,
+        "draw_shapes_made": 2,
+        "draw_states_recorded": 23,
+        "draws_settled": 2,
+        "driver_diagnostics_withheld": 1,
+        "encoder_command_buffers_begun": 2,
+        "finales_folded": 1,
+        "graphics_pipelines_looked_up": 2,
+        "host_texel_copies": 1,
+        "images_started_on_the_host": 2,
+        "inline_passes": 1,
+        "inline_passes_split": 1,
+        "inline_split_instances": 1,
+        "instance_splits_barrier": 1,
+        "new_buffer_bytes_cleared": 4112,
+        "object_churn.buffers_parked": 2,
+        "object_churn.buffers_recycled": 2,
+        "object_churn.images_own_memory": 3,
+        "object_churn.images_parked": 1,
+        "object_churn.images_recycled": 1,
+        "object_churn.textures_image": 3,
+        "object_churn.vk_image_bindings": 3,
+        "object_churn.vk_image_views_made": 4,
+        "object_churn.vk_images_destroyed": 4,
+        "object_churn.vk_images_made": 5,
+        "object_churn.vk_memory_allocations": 1,
+        "pipeline_layouts_made": 1,
+        "queue_submissions": 1,
+        "render_encoders_ended": 1,
+        "render_passes_begun_inline": 1,
+        "render_passes_begun_inline_splits": 1,
+        "render_passes_made": 1,
+        "scheduled_where_submitted": 1,
+        "scheduler_passes": 1,
+        "scheduler_sleeps": 1,
+        "scheduler_wakes_commit": 1,
+        "shader_modules_made": 2,
+        "slot_returns": 1,
+        "spare_command_pools_taken": 2,
+        "stage_tables_read": 8,
+        "submit_infos": 1,
+        "variant_pipelines_made": 1,
+        "variants_taken_back": 1,
+        "wakes_completion_waiters": 1,
+        "wakes_spared": 6
+      }
+    }
+  ],
+  "times": [
+    {
+      "leg": "metal",
+      "venue": "native Metal",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 66.61 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 289,
+      "times": {
+        "case": "render-state-render-barriers",
+        "calls": 10,
+        "in_calls": 63609459,
+        "on_cpu": 2201208,
+        "blocked": 61778668,
+        "elsewhere": 10849541,
+        "spend": 75817211,
+        "spend_least": 63120830,
+        "spend_most": 78399625,
+        "per_call": [
+          {
+            "call": "buffer",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 14375,
+            "on_cpu": 14583,
+            "blocked": 0,
+            "wall_least": 13042,
+            "wall_most": 22791,
+            "wall_total": 14375,
+            "on_cpu_total": 14583,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 49175375,
+            "on_cpu": 1304625,
+            "blocked": 48209334,
+            "wall_least": 41471458,
+            "wall_most": 56093417,
+            "wall_total": 49175375,
+            "on_cpu_total": 1304625,
+            "blocked_total": 48209334
+          },
+          {
+            "call": "read_buffer",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 14375,
+            "on_cpu": 14750,
+            "blocked": 0,
+            "wall_least": 9750,
+            "wall_most": 14958,
+            "wall_total": 14375,
+            "on_cpu_total": 14750,
+            "blocked_total": 0
+          },
+          {
+            "call": "render",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 11332334,
+            "on_cpu": 421125,
+            "blocked": 10832208,
+            "wall_least": 10652416,
+            "wall_most": 15200750,
+            "wall_total": 11332334,
+            "on_cpu_total": 421125,
+            "blocked_total": 10832208
+          },
+          {
+            "call": "render_pipeline",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 98666,
+            "on_cpu": 99000,
+            "blocked": 0,
+            "wall_least": 95041,
+            "wall_most": 187166,
+            "wall_total": 319750,
+            "on_cpu_total": 320375,
+            "blocked_total": 0
+          },
+          {
+            "call": "target",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 58125,
+            "on_cpu": 58333,
+            "blocked": 0,
+            "wall_least": 56125,
+            "wall_most": 95750,
+            "wall_total": 58125,
+            "on_cpu_total": 58333,
+            "blocked_total": 0
+          },
+          {
+            "call": "texture_2d_in_role",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 14500,
+            "on_cpu": 14708,
+            "blocked": 0,
+            "wall_least": 13792,
+            "wall_most": 28875,
+            "wall_total": 50042,
+            "on_cpu_total": 50458,
+            "blocked_total": 0
+          },
+          {
+            "call": "zeroed_buffer",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 5375,
+            "on_cpu": 5542,
+            "blocked": 0,
+            "wall_least": 4667,
+            "wall_most": 10667,
+            "wall_total": 5375,
+            "on_cpu_total": 5542,
+            "blocked_total": 0
+          }
+        ]
+      }
+    },
+    {
+      "leg": "ours",
+      "venue": "Apple M3 Max",
+      "chip": "apple-m3-max",
+      "os_build": "26A434",
+      "rounds": 8,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 66.61 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 376,
+      "times": {
+        "case": "render-state-render-barriers",
+        "calls": 10,
+        "in_calls": 19903167,
+        "on_cpu": 16473875,
+        "blocked": 3942375,
+        "elsewhere": 2732042,
+        "spend": 22635209,
+        "spend_least": 21819416,
+        "spend_most": 34665374,
+        "degraded": [
+          "metal2vulkan-degrade-render-pass-split"
+        ],
+        "per_call": [
+          {
+            "call": "buffer",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 23916,
+            "on_cpu": 24084,
+            "blocked": 0,
+            "wall_least": 22083,
+            "wall_most": 34875,
+            "wall_total": 23916,
+            "on_cpu_total": 24084,
+            "blocked_total": 0
+          },
+          {
+            "call": "library",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 2026541,
+            "on_cpu": 2028750,
+            "blocked": 0,
+            "wall_least": 1997166,
+            "wall_most": 5983291,
+            "wall_total": 2026541,
+            "on_cpu_total": 2028750,
+            "blocked_total": 0
+          },
+          {
+            "call": "read_buffer",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 3708,
+            "on_cpu": 4041,
+            "blocked": 0,
+            "wall_least": 3459,
+            "wall_most": 5000,
+            "wall_total": 3708,
+            "on_cpu_total": 4041,
+            "blocked_total": 0
+          },
+          {
+            "call": "render",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 4623042,
+            "on_cpu": 1500833,
+            "blocked": 2501708,
+            "wall_least": 3715458,
+            "wall_most": 7915875,
+            "wall_total": 4623042,
+            "on_cpu_total": 1500833,
+            "blocked_total": 2501708
+          },
+          {
+            "call": "render_pipeline",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 493750,
+            "on_cpu": 494083,
+            "blocked": 0,
+            "wall_least": 479875,
+            "wall_most": 706000,
+            "wall_total": 12518792,
+            "on_cpu_total": 11567791,
+            "blocked_total": 768625
+          },
+          {
+            "call": "target",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 189875,
+            "on_cpu": 190292,
+            "blocked": 0,
+            "wall_least": 173625,
+            "wall_most": 288292,
+            "wall_total": 189875,
+            "on_cpu_total": 190292,
+            "blocked_total": 0
+          },
+          {
+            "call": "texture_2d_in_role",
+            "least_calls": 2,
+            "most_calls": 2,
+            "wall": 83708,
+            "on_cpu": 84000,
+            "blocked": 0,
+            "wall_least": 76084,
+            "wall_most": 226291,
+            "wall_total": 229292,
+            "on_cpu_total": 230166,
+            "blocked_total": 0
+          },
+          {
+            "call": "zeroed_buffer",
+            "least_calls": 1,
+            "most_calls": 1,
+            "wall": 8125,
+            "on_cpu": 8250,
+            "blocked": 0,
+            "wall_least": 7458,
+            "wall_most": 14458,
+            "wall_total": 8125,
+            "on_cpu_total": 8250,
+            "blocked_total": 0
+          }
+        ]
+      }
+    }
+  ]
+}

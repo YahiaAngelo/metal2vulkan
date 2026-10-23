@@ -104,6 +104,9 @@ pub mod pvrtc_cpu_order;
 pub mod pvrtc_rows;
 pub mod rate_maps;
 pub mod render_chains;
+pub mod render_depth_stencil_state;
+pub mod render_residency;
+pub mod render_state;
 pub mod rgb10a2_srgb;
 pub mod rotated_planes;
 pub mod rotated_targets;
@@ -362,6 +365,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(render_chains::boxed());
     cases.extend(compute_render_chains::boxed());
     cases.extend(draw_state_changes::boxed());
+    cases.extend(render_state::all());
+    cases.extend(render_depth_stencil_state::all());
+    cases.extend(render_residency::all());
     cases.extend(frame_chains::boxed());
     cases
 }
