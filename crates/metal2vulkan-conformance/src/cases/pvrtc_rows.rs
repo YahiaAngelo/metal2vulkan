@@ -41,6 +41,7 @@ use crate::allowance::Allowance;
 use crate::case::{made, Abort, Case, Failure, Input, MetalSource, Side};
 use crate::transcript::{ByteLayout, Element, Node, Observed, Sites, Value};
 use crate::work::{Plane, Rect, Resource, Step, TextureSpec, Work};
+use metal2vulkan::metal::PixelFormat;
 use metal2vulkan_runtime::Degradation;
 
 /// The bytes one PVRTC block takes, 2-bit and 4-bit alike.
@@ -50,7 +51,9 @@ pub const BLOCK: u64 = 8;
 /// block reached is a recorded value and not whatever was there.
 pub const BEFORE: u8 = 0xee;
 
-/// One PVRTC format: the case's name, its raw `MTLPixelFormat`, and how wide its block is in
+/// One PVRTC format: the case's name, its raw `MTLPixelFormat` (stated as
+/// `PixelFormat::<name>.as_raw()`, so the value is named in the case's own text and not only
+/// in a comment beside it), and how wide its block is in
 /// texels (4 for a 4-bit format, 8 for a 2-bit one; every block is 4 texels high).
 pub struct Format {
     pub name: &'static str,
@@ -62,42 +65,42 @@ pub struct Format {
 pub const FORMATS: [Format; 8] = [
     Format {
         name: "pvrtc-rows-rgb-4bpp",
-        format: 162,
+        format: PixelFormat::PVRTCRGB4BPP.as_raw(),
         block_width: 4,
     },
     Format {
         name: "pvrtc-rows-rgb-4bpp-srgb",
-        format: 163,
+        format: PixelFormat::PVRTCRGB4BPPSRGB.as_raw(),
         block_width: 4,
     },
     Format {
         name: "pvrtc-rows-rgba-4bpp",
-        format: 166,
+        format: PixelFormat::PVRTCRGBA4BPP.as_raw(),
         block_width: 4,
     },
     Format {
         name: "pvrtc-rows-rgba-4bpp-srgb",
-        format: 167,
+        format: PixelFormat::PVRTCRGBA4BPPSRGB.as_raw(),
         block_width: 4,
     },
     Format {
         name: "pvrtc-rows-rgb-2bpp",
-        format: 160,
+        format: PixelFormat::PVRTCRGB2BPP.as_raw(),
         block_width: 8,
     },
     Format {
         name: "pvrtc-rows-rgb-2bpp-srgb",
-        format: 161,
+        format: PixelFormat::PVRTCRGB2BPPSRGB.as_raw(),
         block_width: 8,
     },
     Format {
         name: "pvrtc-rows-rgba-2bpp",
-        format: 164,
+        format: PixelFormat::PVRTCRGBA2BPP.as_raw(),
         block_width: 8,
     },
     Format {
         name: "pvrtc-rows-rgba-2bpp-srgb",
-        format: 165,
+        format: PixelFormat::PVRTCRGBA2BPPSRGB.as_raw(),
         block_width: 8,
     },
 ];

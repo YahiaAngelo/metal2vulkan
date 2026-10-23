@@ -29,6 +29,19 @@
 //! decide inside a case, so this family covers the formats whose texels are Metal's own bytes and
 //! says so.
 //!
+//! **What the family can tell apart, and what it cannot.** The compared value is bytes moved by
+//! `replace_region` and read back by `get_bytes`, so what the format decides here is the texel's
+//! size — which sets the extent, the pitch and the padding the layout compares — and whether Metal
+//! makes a texture of the format at all. Two formats of the same texel bytes that Metal both makes
+//! and copies verbatim are **indistinguishable by construction** in this family: the written
+//! pattern is seeded by the format's own ordinal (`TextureRoundTrip::written`), so their rows
+//! hold different bytes and compare the same behaviour. Measured, not reasoned: with the runtime
+//! leg patched to make every `RGB10A2Uint` texture as `RGB10A2Unorm` instead, this family's
+//! `texture-round-trip-91` still read `exact` on an Apple M3 Max, while the same patch to
+//! `R16Unorm` — a different texel size — diverged at 128 bytes. A format's *numeric* behaviour is
+//! another family's question: `norm_storage_writes` sweeps the normalized packings, and
+//! `shared_exponent_storage` `RGB9E5Float`'s word.
+//!
 //! Nothing here reaches the GPU: a texture is created and the host copies bytes into and out of it.
 
 use crate::case::{Abort, Case, Input, MetalSource, Side, TextureRole, TextureSpec};
@@ -48,83 +61,89 @@ pub const BEFORE: u8 = 0xee;
 ///
 /// The table is the case names' home, because a case names itself with a static string. Nothing
 /// here may drift: [`tests::the_table_is_exactly_the_formats_whose_texels_are_metals_bytes`] holds
-/// it against the predicate over every format Metal describes.
-const FORMATS: [(u32, u32, &str); 75] = [
-    (1, 1, "texture-round-trip-1"),      // MTLPixelFormatA8Unorm
-    (10, 1, "texture-round-trip-10"),    // MTLPixelFormatR8Unorm
-    (11, 1, "texture-round-trip-11"),    // MTLPixelFormatR8Unorm_sRGB
-    (12, 1, "texture-round-trip-12"),    // MTLPixelFormatR8Snorm
-    (13, 1, "texture-round-trip-13"),    // MTLPixelFormatR8Uint
-    (14, 1, "texture-round-trip-14"),    // MTLPixelFormatR8Sint
-    (20, 2, "texture-round-trip-20"),    // MTLPixelFormatR16Unorm
-    (22, 2, "texture-round-trip-22"),    // MTLPixelFormatR16Snorm
-    (23, 2, "texture-round-trip-23"),    // MTLPixelFormatR16Uint
-    (24, 2, "texture-round-trip-24"),    // MTLPixelFormatR16Sint
-    (25, 2, "texture-round-trip-25"),    // MTLPixelFormatR16Float
-    (30, 2, "texture-round-trip-30"),    // MTLPixelFormatRG8Unorm
-    (31, 2, "texture-round-trip-31"),    // MTLPixelFormatRG8Unorm_sRGB
-    (32, 2, "texture-round-trip-32"),    // MTLPixelFormatRG8Snorm
-    (33, 2, "texture-round-trip-33"),    // MTLPixelFormatRG8Uint
-    (34, 2, "texture-round-trip-34"),    // MTLPixelFormatRG8Sint
-    (40, 2, "texture-round-trip-40"),    // MTLPixelFormatB5G6R5Unorm
-    (41, 2, "texture-round-trip-41"),    // MTLPixelFormatA1BGR5Unorm
-    (42, 2, "texture-round-trip-42"),    // MTLPixelFormatABGR4Unorm
-    (43, 2, "texture-round-trip-43"),    // MTLPixelFormatBGR5A1Unorm
-    (53, 4, "texture-round-trip-53"),    // MTLPixelFormatR32Uint
-    (54, 4, "texture-round-trip-54"),    // MTLPixelFormatR32Sint
-    (55, 4, "texture-round-trip-55"),    // MTLPixelFormatR32Float
-    (60, 4, "texture-round-trip-60"),    // MTLPixelFormatRG16Unorm
-    (62, 4, "texture-round-trip-62"),    // MTLPixelFormatRG16Snorm
-    (63, 4, "texture-round-trip-63"),    // MTLPixelFormatRG16Uint
-    (64, 4, "texture-round-trip-64"),    // MTLPixelFormatRG16Sint
-    (65, 4, "texture-round-trip-65"),    // MTLPixelFormatRG16Float
-    (70, 4, "texture-round-trip-70"),    // MTLPixelFormatRGBA8Unorm
-    (71, 4, "texture-round-trip-71"),    // MTLPixelFormatRGBA8Unorm_sRGB
-    (72, 4, "texture-round-trip-72"),    // MTLPixelFormatRGBA8Snorm
-    (73, 4, "texture-round-trip-73"),    // MTLPixelFormatRGBA8Uint
-    (74, 4, "texture-round-trip-74"),    // MTLPixelFormatRGBA8Sint
-    (80, 4, "texture-round-trip-80"),    // MTLPixelFormatBGRA8Unorm
-    (81, 4, "texture-round-trip-81"),    // MTLPixelFormatBGRA8Unorm_sRGB
-    (90, 4, "texture-round-trip-90"),    // MTLPixelFormatRGB10A2Unorm
-    (91, 4, "texture-round-trip-91"),    // MTLPixelFormatRGB10A2Uint
-    (92, 4, "texture-round-trip-92"),    // MTLPixelFormatRG11B10Float
-    (93, 4, "texture-round-trip-93"),    // MTLPixelFormatRGB9E5Float
-    (94, 4, "texture-round-trip-94"),    // MTLPixelFormatBGR10A2Unorm
-    (554, 4, "texture-round-trip-554"),  // MTLPixelFormatBGR10_XR
-    (555, 4, "texture-round-trip-555"),  // MTLPixelFormatBGR10_XR_sRGB
-    (103, 8, "texture-round-trip-103"),  // MTLPixelFormatRG32Uint
-    (104, 8, "texture-round-trip-104"),  // MTLPixelFormatRG32Sint
-    (105, 8, "texture-round-trip-105"),  // MTLPixelFormatRG32Float
-    (110, 8, "texture-round-trip-110"),  // MTLPixelFormatRGBA16Unorm
-    (112, 8, "texture-round-trip-112"),  // MTLPixelFormatRGBA16Snorm
-    (113, 8, "texture-round-trip-113"),  // MTLPixelFormatRGBA16Uint
-    (114, 8, "texture-round-trip-114"),  // MTLPixelFormatRGBA16Sint
-    (115, 8, "texture-round-trip-115"),  // MTLPixelFormatRGBA16Float
-    (552, 8, "texture-round-trip-552"),  // MTLPixelFormatBGRA10_XR
-    (553, 8, "texture-round-trip-553"),  // MTLPixelFormatBGRA10_XR_sRGB
-    (123, 16, "texture-round-trip-123"), // MTLPixelFormatRGBA32Uint
-    (124, 16, "texture-round-trip-124"), // MTLPixelFormatRGBA32Sint
-    (125, 16, "texture-round-trip-125"), // MTLPixelFormatRGBA32Float
-    (84, 4, "texture-round-trip-84"),    // MTLPixelFormatARGB8Unorm
-    (26, 2, "texture-round-trip-26"),    // MTLPixelFormatR16Bfloat
-    (66, 4, "texture-round-trip-66"),    // MTLPixelFormatRG16Bfloat
-    (116, 8, "texture-round-trip-116"),  // MTLPixelFormatRGBA16Bfloat
-    (300, 4, "texture-round-trip-300"),  // MTLPixelFormatRGBX8Unorm
-    (301, 4, "texture-round-trip-301"),  // MTLPixelFormatRGBX8Unorm_sRGB
-    (302, 4, "texture-round-trip-302"),  // MTLPixelFormatRGBX8Snorm
-    (303, 4, "texture-round-trip-303"),  // MTLPixelFormatRGBX8Uint
-    (304, 4, "texture-round-trip-304"),  // MTLPixelFormatRGBX8Sint
-    (313, 8, "texture-round-trip-313"),  // MTLPixelFormatRGBX16Uint
-    (314, 8, "texture-round-trip-314"),  // MTLPixelFormatRGBX16Sint
-    (315, 8, "texture-round-trip-315"),  // MTLPixelFormatRGBX16Float
-    (323, 16, "texture-round-trip-323"), // MTLPixelFormatRGBX32Uint
-    (324, 16, "texture-round-trip-324"), // MTLPixelFormatRGBX32Sint
-    (325, 16, "texture-round-trip-325"), // MTLPixelFormatRGBX32Float
-    (576, 2, "texture-round-trip-576"),  // MTLPixelFormatR10Unorm_X6
-    (577, 2, "texture-round-trip-577"),  // MTLPixelFormatR10Unorm_X6_sRGB
-    (578, 4, "texture-round-trip-578"),  // MTLPixelFormatRG10Unorm_X12
-    (579, 4, "texture-round-trip-579"),  // MTLPixelFormatRG10Unorm_X12_sRGB
-    (586, 4, "texture-round-trip-586"),  // MTLPixelFormatRGB10A2Unorm_sRGB
+/// it against the predicate over every format Metal describes, and
+/// [`tests::every_case_names_its_own_format`] holds each name against its format's ordinal.
+///
+/// Each row names its format through [`PixelFormat`] rather than by ordinal. The two spellings
+/// were both here — the ordinal in the row and the enumerator in a comment beside it — which is
+/// the second spelling `crate::texture`'s raw `format` field exists to avoid, and a comment is
+/// not something the compiler or `scripts/conformance-coverage/` can hold to the row.
+const FORMATS: [(PixelFormat, u32, &str); 75] = [
+    (PixelFormat::A8Unorm, 1, "texture-round-trip-1"),
+    (PixelFormat::R8Unorm, 1, "texture-round-trip-10"),
+    (PixelFormat::R8UnormSRGB, 1, "texture-round-trip-11"),
+    (PixelFormat::R8Snorm, 1, "texture-round-trip-12"),
+    (PixelFormat::R8Uint, 1, "texture-round-trip-13"),
+    (PixelFormat::R8Sint, 1, "texture-round-trip-14"),
+    (PixelFormat::R16Unorm, 2, "texture-round-trip-20"),
+    (PixelFormat::R16Snorm, 2, "texture-round-trip-22"),
+    (PixelFormat::R16Uint, 2, "texture-round-trip-23"),
+    (PixelFormat::R16Sint, 2, "texture-round-trip-24"),
+    (PixelFormat::R16Float, 2, "texture-round-trip-25"),
+    (PixelFormat::RG8Unorm, 2, "texture-round-trip-30"),
+    (PixelFormat::RG8UnormSRGB, 2, "texture-round-trip-31"),
+    (PixelFormat::RG8Snorm, 2, "texture-round-trip-32"),
+    (PixelFormat::RG8Uint, 2, "texture-round-trip-33"),
+    (PixelFormat::RG8Sint, 2, "texture-round-trip-34"),
+    (PixelFormat::B5G6R5Unorm, 2, "texture-round-trip-40"),
+    (PixelFormat::A1BGR5Unorm, 2, "texture-round-trip-41"),
+    (PixelFormat::ABGR4Unorm, 2, "texture-round-trip-42"),
+    (PixelFormat::BGR5A1Unorm, 2, "texture-round-trip-43"),
+    (PixelFormat::R32Uint, 4, "texture-round-trip-53"),
+    (PixelFormat::R32Sint, 4, "texture-round-trip-54"),
+    (PixelFormat::R32Float, 4, "texture-round-trip-55"),
+    (PixelFormat::RG16Unorm, 4, "texture-round-trip-60"),
+    (PixelFormat::RG16Snorm, 4, "texture-round-trip-62"),
+    (PixelFormat::RG16Uint, 4, "texture-round-trip-63"),
+    (PixelFormat::RG16Sint, 4, "texture-round-trip-64"),
+    (PixelFormat::RG16Float, 4, "texture-round-trip-65"),
+    (PixelFormat::RGBA8Unorm, 4, "texture-round-trip-70"),
+    (PixelFormat::RGBA8UnormSRGB, 4, "texture-round-trip-71"),
+    (PixelFormat::RGBA8Snorm, 4, "texture-round-trip-72"),
+    (PixelFormat::RGBA8Uint, 4, "texture-round-trip-73"),
+    (PixelFormat::RGBA8Sint, 4, "texture-round-trip-74"),
+    (PixelFormat::BGRA8Unorm, 4, "texture-round-trip-80"),
+    (PixelFormat::BGRA8UnormSRGB, 4, "texture-round-trip-81"),
+    (PixelFormat::RGB10A2Unorm, 4, "texture-round-trip-90"),
+    (PixelFormat::RGB10A2Uint, 4, "texture-round-trip-91"),
+    (PixelFormat::RG11B10Float, 4, "texture-round-trip-92"),
+    (PixelFormat::RGB9E5Float, 4, "texture-round-trip-93"),
+    (PixelFormat::BGR10A2Unorm, 4, "texture-round-trip-94"),
+    (PixelFormat::BGR10XR, 4, "texture-round-trip-554"),
+    (PixelFormat::BGR10XRSRGB, 4, "texture-round-trip-555"),
+    (PixelFormat::RG32Uint, 8, "texture-round-trip-103"),
+    (PixelFormat::RG32Sint, 8, "texture-round-trip-104"),
+    (PixelFormat::RG32Float, 8, "texture-round-trip-105"),
+    (PixelFormat::RGBA16Unorm, 8, "texture-round-trip-110"),
+    (PixelFormat::RGBA16Snorm, 8, "texture-round-trip-112"),
+    (PixelFormat::RGBA16Uint, 8, "texture-round-trip-113"),
+    (PixelFormat::RGBA16Sint, 8, "texture-round-trip-114"),
+    (PixelFormat::RGBA16Float, 8, "texture-round-trip-115"),
+    (PixelFormat::BGRA10XR, 8, "texture-round-trip-552"),
+    (PixelFormat::BGRA10XRSRGB, 8, "texture-round-trip-553"),
+    (PixelFormat::RGBA32Uint, 16, "texture-round-trip-123"),
+    (PixelFormat::RGBA32Sint, 16, "texture-round-trip-124"),
+    (PixelFormat::RGBA32Float, 16, "texture-round-trip-125"),
+    (PixelFormat::ARGB8Unorm, 4, "texture-round-trip-84"),
+    (PixelFormat::R16Bfloat, 2, "texture-round-trip-26"),
+    (PixelFormat::RG16Bfloat, 4, "texture-round-trip-66"),
+    (PixelFormat::RGBA16Bfloat, 8, "texture-round-trip-116"),
+    (PixelFormat::RGBX8Unorm, 4, "texture-round-trip-300"),
+    (PixelFormat::RGBX8UnormSRGB, 4, "texture-round-trip-301"),
+    (PixelFormat::RGBX8Snorm, 4, "texture-round-trip-302"),
+    (PixelFormat::RGBX8Uint, 4, "texture-round-trip-303"),
+    (PixelFormat::RGBX8Sint, 4, "texture-round-trip-304"),
+    (PixelFormat::RGBX16Uint, 8, "texture-round-trip-313"),
+    (PixelFormat::RGBX16Sint, 8, "texture-round-trip-314"),
+    (PixelFormat::RGBX16Float, 8, "texture-round-trip-315"),
+    (PixelFormat::RGBX32Uint, 16, "texture-round-trip-323"),
+    (PixelFormat::RGBX32Sint, 16, "texture-round-trip-324"),
+    (PixelFormat::RGBX32Float, 16, "texture-round-trip-325"),
+    (PixelFormat::R10UnormX6, 2, "texture-round-trip-576"),
+    (PixelFormat::R10UnormX6SRGB, 2, "texture-round-trip-577"),
+    (PixelFormat::RG10UnormX12, 4, "texture-round-trip-578"),
+    (PixelFormat::RG10UnormX12SRGB, 4, "texture-round-trip-579"),
+    (PixelFormat::RGB10A2UnormSRGB, 4, "texture-round-trip-586"),
 ];
 
 /// The bytes of one texel of `pf`, for the uncompressed colour formats this family round-trips:
@@ -161,14 +180,10 @@ pub struct TextureRoundTrip {
 pub fn all() -> Vec<TextureRoundTrip> {
     FORMATS
         .iter()
-        .filter_map(|&(raw, texel, name)| {
-            // A raw value the translator's `MTLPixelFormat` no longer names makes no case, and
-            // the table's own guard test then fails rather than the family quietly shrinking.
-            Some(TextureRoundTrip {
-                name,
-                format: PixelFormat::try_from(raw).ok()?,
-                texel,
-            })
+        .map(|&(format, texel, name)| TextureRoundTrip {
+            name,
+            format,
+            texel,
         })
         .collect()
 }
@@ -338,21 +353,21 @@ mod tests {
     /// changed block silently falls out of, and the family's coverage would shrink unannounced.
     #[test]
     fn the_table_is_exactly_the_formats_whose_texels_are_metals_bytes() {
-        let tabled: BTreeSet<u32> = FORMATS.iter().map(|&(raw, _, _)| raw).collect();
+        let tabled: BTreeSet<PixelFormat> = FORMATS.iter().map(|&(format, _, _)| format).collect();
         assert_eq!(tabled.len(), FORMATS.len(), "the table repeats a format");
         let mut wanted = BTreeSet::new();
         for &pf in PixelFormat::ALL {
             let Some(bytes) = texel_bytes(pf) else {
                 continue;
             };
-            wanted.insert(pf.as_raw());
+            wanted.insert(pf);
             let row = FORMATS
                 .iter()
-                .find(|&&(raw, _, _)| raw == pf.as_raw())
+                .find(|&&(format, _, _)| format == pf)
                 .unwrap_or_else(|| panic!("{pf:?} is not in the table"));
             assert_eq!(row.1, bytes, "{pf:?} takes other bytes a texel");
         }
-        let extra: Vec<&u32> = tabled.difference(&wanted).collect();
+        let extra: Vec<&PixelFormat> = tabled.difference(&wanted).collect();
         assert!(
             extra.is_empty(),
             "the table holds {extra:?}, which no longer round-trip"

@@ -43,9 +43,11 @@ use crate::case::{made, Abort, Case, Failure, Input, MetalSource, Side};
 use crate::cases::compressed_moves::{out_tight, Expected, Model, Rng, Shape, SHAPES};
 use crate::transcript::{Node, Observed, Sites, Value};
 use crate::work::{Plane, Rect, Resource, Step, Work};
-use metal2vulkan::metal::TextureUsage;
+use metal2vulkan::metal::{PixelFormat, TextureUsage};
 
-/// One BC format: the case's name, its raw `MTLPixelFormat`, its block's bytes, and the sibling
+/// One BC format: the case's name, its raw `MTLPixelFormat` (stated as
+/// `PixelFormat::<name>.as_raw()`, so the value is named in the case's own text and not only
+/// in a comment beside it), its block's bytes, and the sibling
 /// format its view takes.
 struct Format {
     name: &'static str,
@@ -63,87 +65,87 @@ struct Format {
 const FORMATS: [Format; 14] = [
     Format {
         name: "compressed-views-bc1-rgba",
-        format: 130,
+        format: PixelFormat::BC1RGBA.as_raw(),
         block: 8,
-        sibling: (131, false),
+        sibling: (PixelFormat::BC1RGBASRGB.as_raw(), false),
     },
     Format {
         name: "compressed-views-bc1-rgba-srgb",
-        format: 131,
+        format: PixelFormat::BC1RGBASRGB.as_raw(),
         block: 8,
-        sibling: (130, false),
+        sibling: (PixelFormat::BC1RGBA.as_raw(), false),
     },
     Format {
         name: "compressed-views-bc2-rgba",
-        format: 132,
+        format: PixelFormat::BC2RGBA.as_raw(),
         block: 16,
-        sibling: (133, false),
+        sibling: (PixelFormat::BC2RGBASRGB.as_raw(), false),
     },
     Format {
         name: "compressed-views-bc2-rgba-srgb",
-        format: 133,
+        format: PixelFormat::BC2RGBASRGB.as_raw(),
         block: 16,
-        sibling: (132, false),
+        sibling: (PixelFormat::BC2RGBA.as_raw(), false),
     },
     Format {
         name: "compressed-views-bc3-rgba",
-        format: 134,
+        format: PixelFormat::BC3RGBA.as_raw(),
         block: 16,
-        sibling: (135, false),
+        sibling: (PixelFormat::BC3RGBASRGB.as_raw(), false),
     },
     Format {
         name: "compressed-views-bc3-rgba-srgb",
-        format: 135,
+        format: PixelFormat::BC3RGBASRGB.as_raw(),
         block: 16,
-        sibling: (134, false),
+        sibling: (PixelFormat::BC3RGBA.as_raw(), false),
     },
     Format {
         name: "compressed-views-bc4-r-unorm",
-        format: 140,
+        format: PixelFormat::BC4RUnorm.as_raw(),
         block: 8,
-        sibling: (141, true),
+        sibling: (PixelFormat::BC4RSnorm.as_raw(), true),
     },
     Format {
         name: "compressed-views-bc4-r-snorm",
-        format: 141,
+        format: PixelFormat::BC4RSnorm.as_raw(),
         block: 8,
-        sibling: (140, true),
+        sibling: (PixelFormat::BC4RUnorm.as_raw(), true),
     },
     Format {
         name: "compressed-views-bc5-rg-unorm",
-        format: 142,
+        format: PixelFormat::BC5RGUnorm.as_raw(),
         block: 16,
-        sibling: (143, true),
+        sibling: (PixelFormat::BC5RGSnorm.as_raw(), true),
     },
     Format {
         name: "compressed-views-bc5-rg-snorm",
-        format: 143,
+        format: PixelFormat::BC5RGSnorm.as_raw(),
         block: 16,
-        sibling: (142, true),
+        sibling: (PixelFormat::BC5RGUnorm.as_raw(), true),
     },
     Format {
         name: "compressed-views-bc6h-rgb-float",
-        format: 150,
+        format: PixelFormat::BC6HRGBFloat.as_raw(),
         block: 16,
-        sibling: (151, true),
+        sibling: (PixelFormat::BC6HRGBUfloat.as_raw(), true),
     },
     Format {
         name: "compressed-views-bc6h-rgb-ufloat",
-        format: 151,
+        format: PixelFormat::BC6HRGBUfloat.as_raw(),
         block: 16,
-        sibling: (150, true),
+        sibling: (PixelFormat::BC6HRGBFloat.as_raw(), true),
     },
     Format {
         name: "compressed-views-bc7-rgba-unorm",
-        format: 152,
+        format: PixelFormat::BC7RGBAUnorm.as_raw(),
         block: 16,
-        sibling: (153, false),
+        sibling: (PixelFormat::BC7RGBAUnormSRGB.as_raw(), false),
     },
     Format {
         name: "compressed-views-bc7-rgba-unorm-srgb",
-        format: 153,
+        format: PixelFormat::BC7RGBAUnormSRGB.as_raw(),
         block: 16,
-        sibling: (152, false),
+        sibling: (PixelFormat::BC7RGBAUnorm.as_raw(), false),
     },
 ];
 

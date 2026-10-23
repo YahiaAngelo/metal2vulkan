@@ -40,6 +40,7 @@ use crate::texture::{TextureRequest, Upload};
 use crate::transcript::{
     Aspect, ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value,
 };
+use metal2vulkan::metal::PixelFormat;
 use metal2vulkan_runtime::Degradation;
 
 /// The fixture whose kernel reads a texture's texels as floats.
@@ -97,6 +98,9 @@ impl Kind {
 struct Format {
     name: &'static str,
     /// The raw `MTLPixelFormat`, as `metal2vulkan::metal::PixelFormat` numbers it.
+    /// Each row states it as `PixelFormat::<name>.as_raw()` rather than as a number, so
+    /// the format a case puts to Metal is named in the case's own text and not only in a
+    /// comment beside it.
     format: u32,
     kind: Kind,
 }
@@ -106,37 +110,37 @@ struct Format {
 const FORMATS: [Format; 10] = [
     Format {
         name: "bc1-rgba",
-        format: 130,
+        format: PixelFormat::BC1RGBA.as_raw(),
         kind: Kind::Bc1,
     },
     Format {
         name: "bc1-rgba-srgb",
-        format: 131,
+        format: PixelFormat::BC1RGBASRGB.as_raw(),
         kind: Kind::Bc1,
     },
     Format {
         name: "bc2-rgba",
-        format: 132,
+        format: PixelFormat::BC2RGBA.as_raw(),
         kind: Kind::Bc2,
     },
     Format {
         name: "bc2-rgba-srgb",
-        format: 133,
+        format: PixelFormat::BC2RGBASRGB.as_raw(),
         kind: Kind::Bc2,
     },
     Format {
         name: "bc3-rgba",
-        format: 134,
+        format: PixelFormat::BC3RGBA.as_raw(),
         kind: Kind::Bc3,
     },
     Format {
         name: "bc3-rgba-srgb",
-        format: 135,
+        format: PixelFormat::BC3RGBASRGB.as_raw(),
         kind: Kind::Bc3,
     },
     Format {
         name: "bc4-r-unorm",
-        format: 140,
+        format: PixelFormat::BC4RUnorm.as_raw(),
         kind: Kind::Channels {
             count: 1,
             signed: false,
@@ -144,7 +148,7 @@ const FORMATS: [Format; 10] = [
     },
     Format {
         name: "bc4-r-snorm",
-        format: 141,
+        format: PixelFormat::BC4RSnorm.as_raw(),
         kind: Kind::Channels {
             count: 1,
             signed: true,
@@ -152,7 +156,7 @@ const FORMATS: [Format; 10] = [
     },
     Format {
         name: "bc5-rg-unorm",
-        format: 142,
+        format: PixelFormat::BC5RGUnorm.as_raw(),
         kind: Kind::Channels {
             count: 2,
             signed: false,
@@ -160,7 +164,7 @@ const FORMATS: [Format; 10] = [
     },
     Format {
         name: "bc5-rg-snorm",
-        format: 143,
+        format: PixelFormat::BC5RGSnorm.as_raw(),
         kind: Kind::Channels {
             count: 2,
             signed: true,

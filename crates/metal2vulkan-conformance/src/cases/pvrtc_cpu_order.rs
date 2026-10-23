@@ -51,9 +51,12 @@ use crate::case::{made, Abort, Case, Failure, Input, MetalSource, Side};
 use crate::cases::pvrtc_rows::{blocks, Linear, BEFORE, BLOCK};
 use crate::transcript::{ByteLayout, Element, Observed, Sites, Value};
 use crate::work::{Plane, Rect, Resource, Step, TextureSpec, Work};
+use metal2vulkan::metal::PixelFormat;
 use metal2vulkan_runtime::Degradation;
 
-/// One PVRTC format the lane walks in this test: the case's name, the raw `MTLPixelFormat`, and how
+/// One PVRTC format the lane walks in this test: the case's name, the raw `MTLPixelFormat`
+/// (stated as `PixelFormat::<name>.as_raw()`, so the value is named in the case's own text and
+/// not only in a comment beside it), and how
 /// wide its block is in texels.
 struct Format {
     name: &'static str,
@@ -65,32 +68,32 @@ struct Format {
 const FORMATS: [Format; 6] = [
     Format {
         name: "pvrtc-cpu-order-rgba-4bpp",
-        format: 166,
+        format: PixelFormat::PVRTCRGBA4BPP.as_raw(),
         block_width: 4,
     },
     Format {
         name: "pvrtc-cpu-order-rgb-4bpp-srgb",
-        format: 163,
+        format: PixelFormat::PVRTCRGB4BPPSRGB.as_raw(),
         block_width: 4,
     },
     Format {
         name: "pvrtc-cpu-order-rgb-2bpp",
-        format: 160,
+        format: PixelFormat::PVRTCRGB2BPP.as_raw(),
         block_width: 8,
     },
     Format {
         name: "pvrtc-cpu-order-rgb-2bpp-srgb",
-        format: 161,
+        format: PixelFormat::PVRTCRGB2BPPSRGB.as_raw(),
         block_width: 8,
     },
     Format {
         name: "pvrtc-cpu-order-rgba-2bpp",
-        format: 164,
+        format: PixelFormat::PVRTCRGBA2BPP.as_raw(),
         block_width: 8,
     },
     Format {
         name: "pvrtc-cpu-order-rgba-2bpp-srgb",
-        format: 165,
+        format: PixelFormat::PVRTCRGBA2BPPSRGB.as_raw(),
         block_width: 8,
     },
 ];

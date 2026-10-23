@@ -52,6 +52,7 @@ use crate::case::{made, Abort, Case, Failure, Input, MetalSource, Side};
 use crate::texture_query::Storage;
 use crate::transcript::{Aspect, ByteLayout, Element, Gaps, Node, Observed, Region, Sites, Value};
 use crate::work::{Plane, Rect, Resource, Step as WorkStep, TextureKind, TextureSpec, Work};
+use metal2vulkan::metal::PixelFormat;
 use metal2vulkan_runtime::Degradation;
 
 /// The byte a read-back's buffer holds before the copy, so a byte no block reached is a recorded
@@ -62,6 +63,9 @@ pub const BEFORE: u8 = 0xcd;
 struct Format {
     name: &'static str,
     /// The raw `MTLPixelFormat`, as `metal2vulkan::metal::PixelFormat` numbers it.
+    /// Each row states it as `PixelFormat::<name>.as_raw()` rather than as a number, so
+    /// the format a case puts to Metal is named in the case's own text and not only in a
+    /// comment beside it.
     format: u32,
     block: u64,
 }
@@ -71,72 +75,72 @@ struct Format {
 const FORMATS: [Format; 14] = [
     Format {
         name: "compressed-moves-bc1-rgba",
-        format: 130,
+        format: PixelFormat::BC1RGBA.as_raw(),
         block: 8,
     },
     Format {
         name: "compressed-moves-bc1-rgba-srgb",
-        format: 131,
+        format: PixelFormat::BC1RGBASRGB.as_raw(),
         block: 8,
     },
     Format {
         name: "compressed-moves-bc2-rgba",
-        format: 132,
+        format: PixelFormat::BC2RGBA.as_raw(),
         block: 16,
     },
     Format {
         name: "compressed-moves-bc2-rgba-srgb",
-        format: 133,
+        format: PixelFormat::BC2RGBASRGB.as_raw(),
         block: 16,
     },
     Format {
         name: "compressed-moves-bc3-rgba",
-        format: 134,
+        format: PixelFormat::BC3RGBA.as_raw(),
         block: 16,
     },
     Format {
         name: "compressed-moves-bc3-rgba-srgb",
-        format: 135,
+        format: PixelFormat::BC3RGBASRGB.as_raw(),
         block: 16,
     },
     Format {
         name: "compressed-moves-bc4-r-unorm",
-        format: 140,
+        format: PixelFormat::BC4RUnorm.as_raw(),
         block: 8,
     },
     Format {
         name: "compressed-moves-bc4-r-snorm",
-        format: 141,
+        format: PixelFormat::BC4RSnorm.as_raw(),
         block: 8,
     },
     Format {
         name: "compressed-moves-bc5-rg-unorm",
-        format: 142,
+        format: PixelFormat::BC5RGUnorm.as_raw(),
         block: 16,
     },
     Format {
         name: "compressed-moves-bc5-rg-snorm",
-        format: 143,
+        format: PixelFormat::BC5RGSnorm.as_raw(),
         block: 16,
     },
     Format {
         name: "compressed-moves-bc6h-rgb-float",
-        format: 150,
+        format: PixelFormat::BC6HRGBFloat.as_raw(),
         block: 16,
     },
     Format {
         name: "compressed-moves-bc6h-rgb-ufloat",
-        format: 151,
+        format: PixelFormat::BC6HRGBUfloat.as_raw(),
         block: 16,
     },
     Format {
         name: "compressed-moves-bc7-rgba-unorm",
-        format: 152,
+        format: PixelFormat::BC7RGBAUnorm.as_raw(),
         block: 16,
     },
     Format {
         name: "compressed-moves-bc7-rgba-unorm-srgb",
-        format: 153,
+        format: PixelFormat::BC7RGBAUnormSRGB.as_raw(),
         block: 16,
     },
 ];
