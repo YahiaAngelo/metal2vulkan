@@ -1,4 +1,4 @@
-//! Running a [`Work`] program on native Metal, through public `objc2-metal` calls alone.
+//! Running a [`Work`] program on native Metal.
 //!
 //! This exists because a carried-only row's stated reason was wrong. `two_plane_copies` and
 //! `two_plane_heap_blits` said the two-plane extended-range formats are Apple's private ones and so
@@ -8,23 +8,88 @@
 //! that confusion, and a case can only run on Metal if something runs the program.
 //!
 //! So the interpreter mirrors [`crate::runtime_work`] call for call, in the same order, with one
-//! blit encoder at a time, and refuses exactly the steps Metal really has no public call for:
-//! `fillTexture:` and `fillTextureColor:`, which are Apple SPI. A case built on those still carries
-//! its Metal answer; a case built on copies does not.
+//! blit encoder at a time.
 //!
-//! Nothing here is unsafe for the GPU that the probes these cases came from were not: the same
-//! shapes, through the same public calls, are what produced the tables in the first place.
+//! # Apple SPI is not the same thing as absent
+//!
+//! The pattern fill was the second stated reason a copy-and-fill case had to carry its answer, and
+//! it does not hold either. `fillTexture:level:slice:region:bytes:length:` has no public header, so
+//! `objc2-metal` binds nothing for it, but the selector is there: the committed probe
+//! `probes/surface_buffer_fills.m` calls it, and so does this interpreter, by selector, after
+//! **`respondsToSelector:`** — a release that drops it answers [`Failure::unavailable`] and the
+//! case reads as unrecorded rather than the process dying on an unrecognised selector. So a case
+//! built on [`Step::FillTexture`] can be recorded on Metal, which is what the heap-run cases of
+//! `texture_fills` are.
+//!
+//! The **colour** fills stay refused. `fillTexture:level:slice:region:color:` and
+//! `fillTexture:level:slice:region:color:pixelFormat:` are reachable the same way, and the probe
+//! checks both selectors, but no case here needs them yet and an arm nothing calls is dead code.
+//! A `Fill::Color` case still carries its Metal answer; whoever needs one adds the arm beside the
+//! pattern fill's.
+//!
+//! # Two shapes this side must never hand Metal
+//!
+//! Reaching the fill means reaching its two known hazards, so both are refused before anything is
+//! encoded rather than left to the device
+//! (`metal2vulkan_runtime::Error::EmptyFillPattern` and `LongTextureBufferFillPattern` record what
+//! each does on an Apple M3 Max):
+//!
+//! - a **pattern of no bytes**, where plain Metal reads a unit's bytes from the pattern's address
+//!   all the same — bytes the call never gave it;
+//! - a **texture buffer's pattern over 32,752 bytes**, where **Metal's process ends** in the call.
+//!   That is one of the shapes the round's safety rule names, and it is reachable from here the
+//!   moment the arm exists.
+//!
+//! Nothing else here is unsafe for the GPU that the probes these cases came from were not: the same
+//! shapes, through the same calls, are what produced the tables in the first place.
 
 use crate::case::{Answer, Failure};
 use crate::work::{Done, Plane, Rect, Resource, Step, TextureKind, TextureSpec, Work};
 use objc2::rc::Retained;
-use objc2::runtime::ProtocolObject;
+use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject, Sel};
+use objc2::sel;
 use objc2_metal::{
     MTLBlitCommandEncoder, MTLBlitOption, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder,
     MTLCommandQueue, MTLDevice, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLOrigin, MTLPixelFormat,
     MTLRegion, MTLResourceOptions, MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor,
     MTLTextureType, MTLTextureUsage,
 };
+
+/// `fillTexture:level:slice:region:bytes:length:` (Apple SPI), the pattern fill. Named as a
+/// function because `sel!` interns on first use.
+fn fill_texture_selector() -> Sel {
+    sel!(fillTexture:level:slice:region:bytes:length:)
+}
+
+/// The longest pattern a **texture buffer's** fill may take: past this Metal's process ends in the
+/// call (`metal2vulkan_runtime::Error::LongTextureBufferFillPattern`, measured on an Apple M3 Max).
+/// A fill of any other texture takes a pattern of any length.
+const LONGEST_TEXTURE_BUFFER_PATTERN: usize = 32_752;
+
+/// The pattern fill's two known hazards, refused before anything is encoded.
+///
+/// It decides from the pattern's length and the target's kind alone, so a test reaches both
+/// refusals without a device — and, for the second, without ever building the shape that ends
+/// Metal's process to watch the guard hold.
+fn refused_pattern(pattern: usize, texture_buffer: bool) -> Option<Failure> {
+    if pattern == 0 {
+        return Some(Failure::named(
+            "EmptyFillPattern",
+            "a fill of no pattern bytes: plain Metal reads a unit's bytes from the pattern's \
+             address all the same",
+        ));
+    }
+    if texture_buffer && pattern > LONGEST_TEXTURE_BUFFER_PATTERN {
+        return Some(Failure::named(
+            "LongTextureBufferFillPattern",
+            format!(
+                "a texture buffer's fill of {pattern} pattern bytes, past the \
+                 {LONGEST_TEXTURE_BUFFER_PATTERN} where Metal's process ends in the call"
+            ),
+        ));
+    }
+    None
+}
 
 /// A resource the program made on Metal.
 enum Made {
@@ -408,14 +473,18 @@ impl Run<'_> {
     /// Run one step.
     fn step(&mut self, step: &Step) -> Answer<()> {
         match step {
-            // The two fills are Apple SPI: `fillTexture:` and `fillTextureColor:` are the calls
-            // that have no public form, and they are the only reason a copy-and-fill case has to
-            // carry its Metal answer. The format a case names is not the reason.
-            Step::FillTexture { .. } => Err(Failure::unavailable(
-                "fillTexture:level:slice:region:pattern: (Apple SPI)",
-            )),
+            Step::FillTexture {
+                texture,
+                level,
+                slice,
+                region,
+                pattern,
+            } => self.fill_texture(*texture, *level, *slice, region, pattern),
+            // The colour fills are reachable by selector exactly as the pattern fill is, and the
+            // probe checks both, but no case here needs one and an arm nothing calls is dead code.
+            // Such a case carries its Metal answer; whoever needs one adds the arm above.
             Step::FillTextureColor { .. } => Err(Failure::unavailable(
-                "fillTextureColor:level:slice:region:color:packedInFormat: (Apple SPI)",
+                "fillTexture:level:slice:region:color:pixelFormat: (Apple SPI, no arm built)",
             )),
             Step::CopyBufferToTexture {
                 buffer,
@@ -638,6 +707,54 @@ impl Run<'_> {
         }
     }
 
+    /// `fillTexture:level:slice:region:bytes:length:` (Apple SPI): every unit of `region` of the
+    /// texture's `level` and `slice` takes `pattern`'s bytes.
+    ///
+    /// The selector is looked up and checked before it is sent, and both of the call's known
+    /// hazards are refused first (the module docs).
+    fn fill_texture(
+        &mut self,
+        texture: usize,
+        level: u64,
+        slice: u64,
+        region: &Rect,
+        pattern: &[u8],
+    ) -> Answer<()> {
+        let held = self.texture(texture)?;
+        if let Some(refusal) = refused_pattern(
+            pattern.len(),
+            held.textureType() == MTLTextureType::TypeTextureBuffer,
+        ) {
+            return Err(refusal);
+        }
+        let encoder = self.encoder()?;
+        let selector = fill_texture_selector();
+        if !encoder.respondsToSelector(selector) {
+            return Err(Failure::unavailable(
+                "fillTexture:level:slice:region:bytes:length:",
+            ));
+        }
+        let target: &AnyObject = encoder.as_ref();
+        let bytes = pattern.as_ptr().cast::<std::ffi::c_void>();
+        // SAFETY: the selector is there, checked just above, and takes the arguments the committed
+        // probe `probes/surface_buffer_fills.m` declares and Metal's own
+        // `methodSignatureForSelector:` confirmed. `pattern` outlives the call, which copies its
+        // bytes as `fillBuffer:` does, and it is neither empty nor past the length that ends
+        // Metal's process, both refused above.
+        unsafe {
+            let _: () = objc2::msg_send![
+                target,
+                fillTexture: &*held,
+                level: level as usize,
+                slice: slice as usize,
+                region: region_of(region),
+                bytes: bytes,
+                length: pattern.len(),
+            ];
+        }
+        Ok(())
+    }
+
     /// Close the blit encoder, if one is open.
     fn end_encoding(&mut self) {
         if let Some(encoder) = self.encoder.take() {
@@ -721,5 +838,51 @@ fn option_of(plane: Plane) -> MTLBlitOption {
         Plane::Whole => MTLBlitOption::empty(),
         Plane::Depth => MTLBlitOption::DepthFromDepthStencil,
         Plane::Stencil => MTLBlitOption::StencilFromDepthStencil,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{refused_pattern, LONGEST_TEXTURE_BUFFER_PATTERN};
+    use crate::case::Failure;
+    use crate::transcript::Value;
+
+    /// The variant a refusal records as, so a test names the hazard rather than its prose.
+    fn variant(refusal: &Failure) -> String {
+        let Value::Variant { payload, .. } = &refusal.value else {
+            panic!("a refusal records as an error variant: {:?}", refusal.value);
+        };
+        match payload.as_ref() {
+            Value::Variant { name, .. } => name.clone(),
+            other => panic!("an error carries its variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_empty_fill_pattern_is_refused_for_every_target() {
+        for texture_buffer in [false, true] {
+            let refusal = refused_pattern(0, texture_buffer)
+                .expect("a fill of no pattern bytes is refused before it is encoded");
+            assert_eq!(variant(&refusal), "EmptyFillPattern");
+        }
+    }
+
+    /// The length that ends Metal's process is a texture buffer's alone, and the refusal starts one
+    /// byte past the longest pattern a texture buffer's fill is known to survive. This is the only
+    /// proof of that guard there can be: the round forbids a case that ends Metal's process, so the
+    /// shape itself is never built.
+    #[test]
+    fn a_texture_buffer_s_pattern_is_refused_one_byte_past_what_metal_survives() {
+        assert!(
+            refused_pattern(LONGEST_TEXTURE_BUFFER_PATTERN, true).is_none(),
+            "the longest measured pattern is the longest allowed, not the first refused"
+        );
+        let refusal = refused_pattern(LONGEST_TEXTURE_BUFFER_PATTERN + 1, true)
+            .expect("one byte more ends Metal's process, so it is refused");
+        assert_eq!(variant(&refusal), "LongTextureBufferFillPattern");
+        assert!(
+            refused_pattern(LONGEST_TEXTURE_BUFFER_PATTERN + 1, false).is_none(),
+            "the hazard is the texture buffer's; another texture's fill takes any length"
+        );
     }
 }

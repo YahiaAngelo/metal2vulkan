@@ -21,6 +21,13 @@
 //! may clamp); a differing format prints its cases on one `XR-TEXTURE-FILLS-DIFFERS` line. The
 //! two-plane formats in private textures of their own memory replay `tfl4.swift` the same way, 8
 //! texels wide (`OWN_TWO_PLANES`).
+//!
+//! A heap case's digest holds each changed run's first 64 bytes and its length, which is what the
+//! probes printed. Exactly two cases of the whole table have a longer run -- `b5` of 550 and of
+//! 551, one run of 92 bytes -- so those runs are compared whole against Metal's own, measured on
+//! this M3 Max by the conformance cases `texture-fills-heap-run-550-b5` and `-551-b5`
+//! (`WHOLE_RUNS`); a longer run the table does not hold fails rather than passing on its first 64
+//! bytes.
 
 use super::degrade_notices::{assert_made_once, forced, loses_depth_denormals, on_device};
 use super::degrade_notices::{
@@ -256,6 +263,67 @@ fn digest(text: &str) -> String {
     hex(&Sha256::digest(text.as_bytes()))[..16].to_owned()
 }
 
+/// The bytes of a changed run the two-plane formatter prints; past this it prints the run's length
+/// alone, so [`whole_run`] compares the rest against Metal's.
+const SHOWN: usize = 64;
+
+/// Metal's whole changed run for each case whose run is longer than [`SHOWN`]: the format, the
+/// case, the run's offset in the heap, and every byte of it.
+///
+/// Measured on this M3 Max (macOS 27.0.1, 26A434, three runs, one outcome) by the conformance cases
+/// `texture-fills-heap-run-550-b5` and `texture-fills-heap-run-551-b5`, which run this very program
+/// on native Metal through `fillTexture:level:slice:region:bytes:length:` and record every byte of
+/// the heap. Both hold one run, 92 bytes at offset 0, and no other byte of the heap changes: level
+/// 0's rows are 16 bytes (`4 w` rounded down to 16, `w` 7) and the fill writes 4 bytes a texel at
+/// `y · 16 + 4 x`, so the five rows of seven texels overlap into one run of `4 · 16 + 28` bytes.
+const WHOLE_RUNS: [(u32, &str, usize, &str); 2] = [
+    (
+        550,
+        "b5",
+        0,
+        concat!(
+            "80818283808182838081828380818283808182838081828380818283808182838081828380818283",
+            "80818283808182838081828380818283808182838081828380818283808182838081828380818283",
+            "808182838081828380818283"
+        ),
+    ),
+    (
+        551,
+        "b5",
+        0,
+        concat!(
+            "80818283808182838081828380818283808182838081828380818283808182838081828380818283",
+            "80818283808182838081828380818283808182838081828380818283808182838081828380818283",
+            "808182838081828380818283"
+        ),
+    ),
+];
+
+/// Hold `run`, case `name` of format `raw` at byte `at` of the heap, to Metal's whole run
+/// ([`WHOLE_RUNS`]): the bytes past [`SHOWN`] are in no digest, so they are compared here or they
+/// are compared nowhere. A run this long that the table does not hold is a run nobody measured,
+/// which fails rather than passing on the strength of its first 64 bytes.
+fn whole_run(raw: u32, name: &str, at: usize, run: &[u8]) {
+    let metal = WHOLE_RUNS
+        .iter()
+        .find(|&&(format, case, offset, _)| format == raw && case == name && offset == at)
+        .map(|&(_, _, _, bytes)| bytes);
+    let metal = metal.unwrap_or_else(|| {
+        panic!(
+            "{raw} {name}: a changed run of {} bytes at {at}, past the {SHOWN} the digest \
+             holds, and Metal's bytes there are unmeasured: {}",
+            run.len(),
+            hex(run)
+        )
+    });
+    assert_eq!(
+        hex(run).as_str(),
+        metal,
+        "{raw} {name}: the changed run at {at} differs from Metal's past the {SHOWN} bytes the \
+         digest holds"
+    );
+}
+
 /// The fill of `case` into `texture` by `blit`.
 fn fill(
     blit: &mut metal2vulkan_runtime::BlitCommandEncoder,
@@ -394,11 +462,12 @@ fn two_plane_case(
         while j < got.len() && got[j] != 0xee {
             j += 1;
         }
-        // The digest holds the run's first 64 bytes and its length. The `b5` cases of 550 and
-        // 551 have a 92-byte run, so 28 of its bytes are in no comparison; Metal's words there
-        // were never recorded and closing it needs a probe of the whole run, not a guess.
-        let shown = hex(&got[i..j.min(i + 64)]);
-        let more = if j - i > 64 {
+        let shown = hex(&got[i..j.min(i + SHOWN)]);
+        let more = if j - i > SHOWN {
+            // The digest holds this run's first `SHOWN` bytes and its length, so the rest of it
+            // would be in no comparison. Metal's whole run is measured now, so compare against
+            // that instead of widening the digest, whose value is the probes' truncated one.
+            whole_run(raw, name, i, &got[i..j]);
             format!("...({})", j - i)
         } else {
             String::new()
@@ -674,4 +743,26 @@ fn own_two_plane_fills_write_metal_s_bytes() {
         }
         assert!(wrong.is_empty(), "fills unlike Metal's: {wrong:?}");
     });
+}
+
+/// Metal's whole runs are as long as the runs the formatter elides, so a mangled literal is caught
+/// here rather than read as a difference the first time a GPU lane runs.
+#[test]
+fn the_measured_whole_runs_are_longer_than_the_digest_shows() {
+    assert!(!WHOLE_RUNS.is_empty());
+    for (raw, name, at, bytes) in WHOLE_RUNS {
+        assert!(
+            bytes.len() % 2 == 0,
+            "{raw} {name} at {at}: an odd number of hex digits"
+        );
+        assert!(
+            bytes.chars().all(|digit| digit.is_ascii_hexdigit()),
+            "{raw} {name} at {at}: a digit that is not hexadecimal"
+        );
+        assert!(
+            bytes.len() / 2 > SHOWN,
+            "{raw} {name} at {at}: {} bytes, which the formatter would have shown whole",
+            bytes.len() / 2
+        );
+    }
 }

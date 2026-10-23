@@ -27,9 +27,11 @@
 //! recording's provenance says in words.
 
 use crate::allowance::{Allowance, Justification, Loosening};
-use crate::case::{answered, Abort, Case, Failure, Input, MetalSource, Side};
+use crate::case::{answered, made, Abort, Case, Failure, Input, MetalSource, Side};
 use crate::replay::{notice_allowance, NOTICES_SITE};
-use crate::transcript::{Digest, DigestKind, Node, Observed, Sites, Transcript};
+use crate::transcript::{
+    ByteLayout, Digest, DigestKind, Element, Node, Observed, Sites, Transcript, Value,
+};
 use crate::work::{Plane, Rect, Resource, Step, TextureSpec, Work};
 
 /// Where the carried values were measured.
@@ -790,6 +792,162 @@ impl Case for TextureFills {
         sites.push(Node::leaf(
             site(self.raw),
             Observed::absent().digested(Digest::sha256_prefix16(answers.join("\n").as_bytes())),
+        ));
+        Ok(())
+    }
+}
+
+/// The two cases whose whole changed run this family measures on Metal itself.
+///
+/// `two_plane_case`'s formatter cut each run at 64 bytes and wrote `...({n})`, and exactly two
+/// cases of the whole lane reach it: `b5` of 550 and of 551, whose texture is 7 by 5 texels, so the
+/// fill's rows (16 bytes each, level 0's `4 w` rounded down to 16) overlap into **one 92-byte run**
+/// and 28 of its bytes were in no comparison. Metal's bytes there had never been measured: the
+/// probes printed the same truncation the lane did.
+///
+/// These two cases measure them. Each runs the same program the family's `b5` row runs — a 7 by 5
+/// `RGB10A8_2P_XR10` (or its sRGB twin) at byte 0 of a shared placement heap of the probes' size,
+/// every byte of the heap `0xEE` through a buffer over it, one `fillTexture:` of the four-byte
+/// pattern, and the heap read back — but they record **every byte of the heap** and the whole run,
+/// so nothing of the answer is a projection.
+const HEAP_FILL_RUNS: [(&str, u32); 2] = [
+    ("texture-fills-heap-run-550-b5", 550),
+    ("texture-fills-heap-run-551-b5", 551),
+];
+
+/// The case name of [`HEAP_FILL_RUNS`]: the one case of the lane's twenty whose run is long enough
+/// to have been elided.
+const HEAP_FILL_CASE: &str = "b5";
+
+/// The heap's bytes these cases place their texture in, as the probes sized it.
+const HEAP_FILL_BYTES: u64 = 180_224;
+
+/// The whole changed runs of a heap's bytes: one line a run, `<at>+<length> <every byte>`.
+///
+/// This is [`heap_changed`] without the 64-byte cut and without `...({n})`. The two are not two
+/// spellings of one thing: `heap_changed` reproduces what the probes printed, which is what the
+/// carried digests are of, and this prints the bytes themselves, which is what these cases record.
+fn heap_run_lines(bytes: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == BEFORE {
+            at += 1;
+            continue;
+        }
+        let mut end = at;
+        while end < bytes.len() && bytes[end] != BEFORE {
+            end += 1;
+        }
+        let hex: String = bytes[at..end]
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        lines.push(format!("{at}+{} {hex}", end - at));
+        at = end;
+    }
+    lines
+}
+
+/// A case that measures one two-plane heap fill on Metal itself, byte for byte.
+pub struct TwoPlaneHeapFill {
+    name: &'static str,
+    raw: u32,
+}
+
+/// Both cases whose whole changed run this family measures on Metal itself.
+pub fn heap_fill_runs() -> Vec<TwoPlaneHeapFill> {
+    HEAP_FILL_RUNS
+        .iter()
+        .map(|&(name, raw)| TwoPlaneHeapFill { name, raw })
+        .collect()
+}
+
+impl TwoPlaneHeapFill {
+    /// The probe row the case runs.
+    fn probe(&self) -> Result<Probe, String> {
+        probe(self.raw, HEAP_FILL_CASE, false)
+    }
+}
+
+impl Case for TwoPlaneHeapFill {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// Metal runs this. `fillTexture:` is Apple SPI rather than absent, and
+    /// [`crate::metal_work`] reaches it by its selector after `respondsToSelector:`, so the answer
+    /// is measured on this chip instead of carried from somebody's terminal.
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::Run
+    }
+
+    /// What the work announced on MoltenVK, measured: the two-plane texture is shadowed in the
+    /// heap's bytes, which is the whole point of the case. Metal announces nothing, so the notices
+    /// site differs and this is what names it; every byte of the heap still compares exactly.
+    fn allowances(&self) -> Vec<Allowance> {
+        vec![notice_allowance(
+            metal2vulkan_runtime::Degradation::ShadowedTexture.code(),
+        )]
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        let p = self.probe()?;
+        let Fill::Bytes(n) = p.fill else {
+            return Err(format!("{} is not a pattern fill", self.name));
+        };
+        Ok(vec![
+            Input::bytes(
+                "case-geometry",
+                format!(
+                    "{HEAP_FILL_CASE} format {} {}x{} levels {} slices {} level {} slice {} \
+                     origin {:?} size {:?} heap {HEAP_FILL_BYTES}\n",
+                    self.raw,
+                    p.extent.0,
+                    p.extent.1,
+                    p.levels,
+                    p.slices,
+                    p.level,
+                    p.slice,
+                    p.origin,
+                    p.size
+                )
+                .as_bytes(),
+            ),
+            Input::bytes("fill-pattern", &pattern(n)),
+            Input::bytes("before", &[BEFORE]),
+        ])
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        let p = self.probe().map_err(|why| Abort {
+            at: "case".to_owned(),
+            failure: Failure::named("BadCase", why),
+        })?;
+        let work = heap_work(self.raw, &p, HEAP_FILL_BYTES, false);
+        let done = made(sites, "work", side.work(&work))?;
+        let bytes = done.read(0).map(<[u8]>::to_vec).map_err(|why| Abort {
+            at: "work".to_owned(),
+            failure: Failure::named("UnansweredRead", why),
+        })?;
+        if bytes.len() != HEAP_FILL_BYTES as usize {
+            return Err(Abort {
+                at: "work".to_owned(),
+                failure: Failure::named(
+                    "ShortReadBack",
+                    format!("{} bytes of {HEAP_FILL_BYTES}", bytes.len()),
+                ),
+            });
+        }
+        let digest = Digest::sha256(&bytes);
+        sites.push(Node::leaf(
+            "heap/changed",
+            Observed::value(Value::Lines(heap_run_lines(&bytes))),
+        ));
+        sites.push(Node::leaf(
+            "heap/bytes",
+            Observed::bytes(bytes, ByteLayout::buffer(0, HEAP_FILL_BYTES, Element::U8))
+                .digested(digest),
         ));
         Ok(())
     }

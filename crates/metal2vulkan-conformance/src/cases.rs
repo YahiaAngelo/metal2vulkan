@@ -135,6 +135,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in texture_fills::all() {
         cases.push(Box::new(case));
     }
+    for case in texture_fills::heap_fill_runs() {
+        cases.push(Box::new(case));
+    }
     for case in sample_fills::all() {
         cases.push(Box::new(case));
     }

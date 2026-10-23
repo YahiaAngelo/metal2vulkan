@@ -666,6 +666,19 @@ pub trait Side {
         Err(Failure::unavailable("work"))
     }
 
+    /// Run one full-screen fragment fill ([`FragmentFill`]) and answer the pass's status and the
+    /// target's bytes.
+    ///
+    /// Metal's whole path here is public, so both sides run it: `newRenderPipelineStateWithDescriptor:
+    /// error:` of the two functions over one color attachment of the case's format, a private
+    /// render target of the case's extent, one render pass that loads nothing and stores, the
+    /// fragment buffers set at 0 and up, one `drawPrimitives:`, then a blit of level 0 into a
+    /// shared buffer the host reads.
+    fn fragment_fill(&mut self, fill: &FragmentFill<'_>) -> Answer<FragmentFilled> {
+        let _ = fill;
+        Err(Failure::unavailable("fragment_fill"))
+    }
+
     /// `newRenderPipelineStateWithMeshDescriptor:options:reflection:error:` of the library's
     /// functions, over `functions.attachments` color attachments of [`TARGET_FORMAT`].
     fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {
@@ -1292,6 +1305,44 @@ impl Fill {
         }
         out
     }
+}
+
+/// One full-screen fragment fill: a classic vertex-and-fragment pipeline, a private render target
+/// of its own, one draw of three vertices, and the target's bytes read back through a blit.
+///
+/// This is the shape every store, clear and load question of a render pass is written in: the
+/// vertex function computes the full-screen triangle from its `[[vertex_id]]`, so the pass needs no
+/// vertex buffer, and what is observed is the bytes the fragment function's return value stored.
+/// The target is **private** and read back by a blit into a shared buffer, because that is how the
+/// probes measured it and storage mode is part of what a padded format's answer means.
+#[derive(Clone, Copy, Debug)]
+pub struct FragmentFill<'a> {
+    /// The library both functions come from.
+    pub library: Handle,
+    /// The vertex function, which takes no buffer.
+    pub vertex: &'a str,
+    /// The fragment function, whose return value the attachment stores.
+    pub fragment: &'a str,
+    /// The attachment's and the target's pixel format.
+    pub format: PixelFormat,
+    /// The target's extent in texels.
+    pub size: [u32; 2],
+    /// Bytes a row of the read-back, which the case states because the pitch is part of what it
+    /// means.
+    pub row_pitch: u32,
+    /// The buffers the pass sets as fragment buffers 0 and up, in order.
+    pub buffers: &'a [Handle],
+    /// The vertices the one `drawPrimitives:` of `MTLPrimitiveTypeTriangle` draws.
+    pub vertices: u32,
+}
+
+/// What a [`FragmentFill`] answered: the pass's command-buffer status and the target's bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FragmentFilled {
+    /// The render pass's command-buffer status, as a variant of its name.
+    pub status: Value,
+    /// The target's level 0, row after row at the fill's row pitch.
+    pub bytes: Vec<u8>,
 }
 
 /// The color format every mesh case's attachments take: `MTLPixelFormatRGBA32Uint`, whose texel is

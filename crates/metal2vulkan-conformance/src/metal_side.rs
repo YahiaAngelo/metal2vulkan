@@ -13,10 +13,10 @@
 //! ours, and a case that holds one must name what justifies it.
 
 use crate::case::{
-    Answer, ArgumentSlot, Bindings, CommandDraw, Failure, Handle, MeshCommand, MeshFunctions,
-    MeshStep, PassOutcome, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side,
-    StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep,
-    Venue,
+    Answer, ArgumentSlot, Bindings, CommandDraw, Failure, FragmentFill, FragmentFilled, Handle,
+    MeshCommand, MeshFunctions, MeshStep, PassOutcome, RateMapFacts, RateMapRequest, SamplerSpec,
+    ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, TileFacts,
+    TilePipelineSpec, TileStep, Venue,
 };
 use crate::queue_slots::QueueSlots;
 use crate::render::{
@@ -154,6 +154,69 @@ impl MetalSide {
             .get(handle.0 as usize)
             .map(|map| &**map)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("rate map {}", handle.0)))
+    }
+
+    /// Level 0 of `texture` read back through a blit into a shared buffer of its own, at
+    /// `row_pitch` bytes a row: what a private texture's bytes are, since the host reaches none of
+    /// them directly.
+    fn blit_out(
+        &mut self,
+        texture: &ProtocolObject<dyn MTLTexture>,
+        size: [u32; 2],
+        row_pitch: u32,
+    ) -> Answer<Vec<u8>> {
+        let length = row_pitch as usize * size[1] as usize;
+        let back = self
+            .device
+            .newBufferWithLength_options(length.max(1), MTLResourceOptions::StorageModeShared)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewBufferWithLength",
+                    format!("{length} bytes returned nil"),
+                )
+            })?;
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+        let blit = command_buffer
+            .blitCommandEncoder()
+            .ok_or_else(|| Failure::named("BlitCommandEncoder", "returned nil".to_owned()))?;
+        // SAFETY: the buffer holds `size[1]` rows of `row_pitch` bytes, which is what the copy
+        // writes, and the texture holds level 0 of that extent.
+        unsafe {
+            blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+                texture,
+                0,
+                0,
+                MTLOrigin { x: 0, y: 0, z: 0 },
+                MTLSize {
+                    width: size[0] as usize,
+                    height: size[1] as usize,
+                    depth: 1,
+                },
+                &back,
+                0,
+                row_pitch as usize,
+                length,
+            );
+        }
+        blit.endEncoding();
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        let mut bytes = vec![0u8; length];
+        // SAFETY: the buffer is shared storage of at least `length` bytes and the copy into it has
+        // completed.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                back.contents().as_ptr().cast::<u8>(),
+                bytes.as_mut_ptr(),
+                length,
+            );
+        }
+        keep(&mut self.buffers, back);
+        keep(&mut self.command_buffers, command_buffer);
+        Ok(bytes)
     }
 
     /// One command buffer with one compute encoder: the pipeline set, `bindings` bound at 0 up,
@@ -1002,6 +1065,95 @@ impl Side for MetalSide {
             status,
             error,
         })
+    }
+
+    fn fragment_fill(&mut self, fill: &FragmentFill<'_>) -> Answer<FragmentFilled> {
+        let format = MTLPixelFormat(fill.format.as_raw() as usize);
+        let (vertex, fragment) = {
+            let library = self.libraries.get(fill.library.0 as usize).ok_or_else(|| {
+                Failure::named("NoSuchHandle", format!("library {}", fill.library.0))
+            })?;
+            let function = |name: &str| {
+                library
+                    .newFunctionWithName(&NSString::from_str(name))
+                    .ok_or_else(|| Failure::named("NoSuchFunction", name.to_owned()))
+            };
+            (function(fill.vertex)?, function(fill.fragment)?)
+        };
+        let descriptor = MTLRenderPipelineDescriptor::new();
+        descriptor.setVertexFunction(Some(&vertex));
+        descriptor.setFragmentFunction(Some(&fragment));
+        // SAFETY: attachment 0 is inside the eight every Metal pipeline descriptor holds.
+        let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) };
+        attachment.setPixelFormat(format);
+        let state = self
+            .device
+            .newRenderPipelineStateWithDescriptor_error(&descriptor)
+            .map_err(|error| Failure::named("NewRenderPipelineState", error.to_string()))?;
+        // SAFETY: the descriptor constructor reads only the format and the size it is given.
+        let target_descriptor = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                format,
+                fill.size[0] as usize,
+                fill.size[1] as usize,
+                false,
+            )
+        };
+        target_descriptor.setUsage(MTLTextureUsage::RenderTarget);
+        target_descriptor.setStorageMode(MTLStorageMode::Private);
+        let target = self
+            .device
+            .newTextureWithDescriptor(&target_descriptor)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewTextureWithDescriptor",
+                    format!(
+                        "{:?} {}x{} render target returned nil",
+                        fill.format, fill.size[0], fill.size[1]
+                    ),
+                )
+            })?;
+        let bound: Vec<Retained<ProtocolObject<dyn MTLBuffer>>> = fill
+            .buffers
+            .iter()
+            .map(|handle| self.held(*handle).map(Retained::from))
+            .collect::<Answer<Vec<_>>>()?;
+        let pass = MTLRenderPassDescriptor::renderPassDescriptor();
+        // SAFETY: as the pipeline's attachment 0.
+        let color = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
+        color.setTexture(Some(&target));
+        color.setLoadAction(MTLLoadAction::DontCare);
+        color.setStoreAction(MTLStoreAction::Store);
+        let command_buffer = self
+            .queue
+            .commandBuffer()
+            .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+        let encoder = command_buffer
+            .renderCommandEncoderWithDescriptor(&pass)
+            .ok_or_else(|| Failure::named("RenderCommandEncoder", "returned nil".to_owned()))?;
+        encoder.setRenderPipelineState(&state);
+        for (index, buffer) in bound.iter().enumerate() {
+            // SAFETY: the buffer is at least as long as the function's binding, and the encoder
+            // outlives the call.
+            unsafe { encoder.setFragmentBuffer_offset_atIndex(Some(buffer), 0, index) };
+        }
+        // SAFETY: the pipeline is set, the vertex function reads no buffer, and the count is the
+        // case's own small one.
+        unsafe {
+            encoder.drawPrimitives_vertexStart_vertexCount(
+                MTLPrimitiveType::Triangle,
+                0,
+                fill.vertices as usize,
+            );
+        }
+        encoder.endEncoding();
+        command_buffer.commit();
+        command_buffer.waitUntilCompleted();
+        let status = Value::unit_variant(status_word(command_buffer.status()));
+        keep(&mut self.command_buffers, command_buffer);
+        let bytes = self.blit_out(&target, fill.size, fill.row_pitch)?;
+        keep(&mut self.textures, target);
+        Ok(FragmentFilled { status, bytes })
     }
 
     fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {

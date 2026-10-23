@@ -68,9 +68,10 @@
 //! recording holds nothing host-specific: the prefix carries this run's process id.
 
 use crate::case::{
-    Answer, ArgumentSlot, Bindings, Fill, Handle, IndirectReadBack, MeshCommand, MeshFunctions,
-    MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource,
-    Side, StageInRegion, StageInput, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
+    Answer, ArgumentSlot, Bindings, Fill, FragmentFill, FragmentFilled, Handle, IndirectReadBack,
+    MeshCommand, MeshFunctions, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest,
+    SamplerSpec, ShaderSource, Side, StageInRegion, StageInput, TextureSpec, TileFacts,
+    TilePipelineSpec, TileStep, Venue,
 };
 use crate::recording::Validated;
 use crate::transcript::Value;
@@ -363,6 +364,11 @@ impl<S: Side> Side for Announcing<S> {
     fn work(&mut self, work: &crate::work::Work) -> Answer<crate::work::Done> {
         self.at("work");
         self.inner.work(work)
+    }
+
+    fn fragment_fill(&mut self, fill: &FragmentFill<'_>) -> Answer<FragmentFilled> {
+        self.at("fragment_fill");
+        self.inner.fragment_fill(fill)
     }
 
     fn mesh_pipeline(&mut self, library: Handle, functions: &MeshFunctions<'_>) -> Answer<Handle> {
