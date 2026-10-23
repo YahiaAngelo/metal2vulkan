@@ -147,6 +147,52 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLVertexAttributeDescriptor` | 4 | 3 | 1 | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`… |
 | `MTLVertexBufferLayoutDescriptor` | 4 | 3 | 1 | `color_write_masks`, `discard_hoist`, `extended_range_blends`, `extended_range_targets`… |
 
+## By header, which is the family of behaviour
+
+A container is one Objective-C type; the SDK header it sits in is the family of Metal behaviour. This is the table to pick a batch from: a header with nothing exercised is a family the suite says nothing about, and the rest are ordered by how much of each is left.
+
+| header | implemented | exercised | unexercised |
+|---|---|---|---|
+| `MTLRenderCommandEncoder.h` | 119 | 21 | 98 |
+| `MTLRenderPipeline.h` | 114 | 34 | 80 |
+| `MTLArgument.h` | 77 | 1 | 76 |
+| `MTLDevice.h` | 73 | 22 | 51 |
+| `MTLLibrary.h` | 45 | 1 | 44 |
+| `MTLIndirectCommandEncoder.h` | 35 | 0 | 35 |
+| `MTLTexture.h` | 57 | 22 | 35 |
+| `MTLComputeCommandEncoder.h` | 36 | 4 | 32 |
+| `MTLComputePipeline.h` | 34 | 3 | 31 |
+| `MTLRasterizationRate.h` | 37 | 9 | 28 |
+| `MTLArgumentEncoder.h` | 23 | 0 | 23 |
+| `MTLRenderPass.h` | 41 | 19 | 22 |
+| `MTLIndirectCommandBuffer.h` | 26 | 6 | 20 |
+| `MTLBlitCommandEncoder.h` | 22 | 5 | 17 |
+| `MTLHeap.h` | 25 | 10 | 15 |
+| `MTLResource.h` | 12 | 0 | 12 |
+| `MTLSampler.h` | 19 | 8 | 11 |
+| `MTLBinaryArchive.h` | 9 | 0 | 9 |
+| `MTLCommandBuffer.h` | 21 | 12 | 9 |
+| `MTLEvent.h` | 12 | 3 | 9 |
+| `MTLStageInputOutputDescriptor.h` | 21 | 12 | 9 |
+| `MTLVertexDescriptor.h` | 19 | 10 | 9 |
+| `MTLResourceStateCommandEncoder.h` | 7 | 0 | 7 |
+| `MTLTypes.h` | 7 | 0 | 7 |
+| `MTLVisibleFunctionTable.h` | 7 | 0 | 7 |
+| `MTLLinkedFunctions.h` | 6 | 0 | 6 |
+| `MTLDepthStencil.h` | 15 | 10 | 5 |
+| `MTLDynamicLibrary.h` | 5 | 0 | 5 |
+| `MTLFunctionConstantValues.h` | 5 | 0 | 5 |
+| `MTLFunctionDescriptor.h` | 5 | 0 | 5 |
+| `MTLPipeline.h` | 5 | 0 | 5 |
+| `MTLBuffer.h` | 6 | 3 | 3 |
+| `MTLCommandQueue.h` | 4 | 1 | 3 |
+| `MTLFence.h` | 3 | 0 | 3 |
+| `MTLFunctionHandle.h` | 3 | 0 | 3 |
+| `MTLAllocation.h` | 1 | 0 | 1 |
+| `MTLCommandEncoder.h` | 2 | 1 | 1 |
+
+15 of 37 headers have no exercised item at all, 133 implemented items between them: `MTLAllocation.h`, `MTLArgumentEncoder.h`, `MTLBinaryArchive.h`, `MTLDynamicLibrary.h`, `MTLFence.h`, `MTLFunctionConstantValues.h`, `MTLFunctionDescriptor.h`, `MTLFunctionHandle.h`, `MTLIndirectCommandEncoder.h`, `MTLLinkedFunctions.h`, `MTLPipeline.h`, `MTLResource.h`, `MTLResourceStateCommandEncoder.h`, `MTLTypes.h`, `MTLVisibleFunctionTable.h`.
+
 ## Containers with no case at all
 
 An implemented container no case's Metal leg touches. These are the families of Metal behaviour the suite says nothing about.

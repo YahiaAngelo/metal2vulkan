@@ -598,6 +598,34 @@ def write(data) -> str:
         )
     w("")
 
+    w("## By header, which is the family of behaviour")
+    w("")
+    w(
+        "A container is one Objective-C type; the SDK header it sits in is the family of Metal "
+        "behaviour. This is the table to pick a batch from: a header with nothing exercised is a "
+        "family the suite says nothing about, and the rest are ordered by how much of each is left."
+    )
+    w("")
+    w("| header | implemented | exercised | unexercised |")
+    w("|---|---|---|---|")
+    by_header: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in implemented:
+        by_header[row["header"]].append(row)
+    def left(header: str) -> int:
+        return sum(1 for row in by_header[header] if (row["container"], row["name"]) not in exercised)
+    for header in sorted(by_header, key=lambda h: (-left(h), h)):
+        hit = len(by_header[header]) - left(header)
+        w(f"| `{header}` | {len(by_header[header])} | {hit} | {left(header)} |")
+    w("")
+    empty = [h for h in sorted(by_header) if left(h) == len(by_header[h])]
+    w(
+        f"{len(empty)} of {len(by_header)} headers have no exercised item at all, "
+        f"{sum(len(by_header[h]) for h in empty)} implemented items between them: "
+        + ", ".join(f"`{h}`" for h in empty)
+        + "."
+    )
+    w("")
+
     w("## Containers with no case at all")
     w("")
     w(
