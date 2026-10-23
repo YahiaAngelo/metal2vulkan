@@ -42,7 +42,7 @@ use crate::case::{answered, call, Abort, Case, Input, MetalSource, Side};
 use crate::measured::hex_bytes;
 use crate::replay::{notice_allowance, NOTICES_SITE};
 use crate::transcript::{Digest, DigestKind, Node, Observed, Sites, Transcript, Value};
-use crate::work::{Plane, Rect, Resource, Step, TextureSpec, Work};
+use crate::work::{Plane, Rect, Resource, Step, Storage, TextureSpec, Work};
 
 /// Where the carried values were measured.
 const MEASURED_IN: &str =
@@ -225,7 +225,7 @@ fn row_blit_work(blit: &RowBlit) -> Work {
     let texture = if blit.heap {
         let heap = work.add(Resource::HeapForTexture {
             spec,
-            private: false,
+            storage: Storage::Shared,
         });
         work.add(Resource::HeapTexture {
             heap,

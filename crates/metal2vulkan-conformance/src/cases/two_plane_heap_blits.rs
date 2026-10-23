@@ -44,7 +44,7 @@ use crate::case::{call, Abort, Case, Input, MetalSource, Side};
 use crate::measured::public_fixture;
 use crate::replay::{notice_allowance, NOTICES_SITE};
 use crate::transcript::{Digest, DigestKind, Node, Observed, Sites, Transcript, Value};
-use crate::work::{Resource, Step, TextureSpec, Work};
+use crate::work::{Resource, Step, Storage, TextureSpec, Work};
 
 /// The runs the carried cross-check table stands on: the probe ran each blit three times on the
 /// same bytes and every case twice, alike.
@@ -75,6 +75,16 @@ struct Case2P {
     seed: u64,
     /// The digest the probe printed of the heap's bytes after the blit.
     metal: &'static str,
+}
+
+impl Case2P {
+    /// Where the case's heap and its textures live: the storage mode its `private` flag names.
+    fn storage(&self) -> Storage {
+        match self.private {
+            true => Storage::Private,
+            false => Storage::Shared,
+        }
+    }
 }
 
 /// A case of one format whose source lies at 0 and whose destination at `at`.
@@ -397,14 +407,15 @@ impl HeapBlits {
 /// The program one case runs: the heap, its two textures, the seed's bytes written through a
 /// buffer over the whole heap, one blit, and the heap's bytes read back.
 fn case_work(work: &mut Work, case: &Case2P) {
+    let storage = case.storage();
     let heap = work.add(Resource::Heap {
         size: case.heap,
-        private: case.private,
+        storage,
     });
     let texture = |format: u32, [w, h]: [u64; 2], at: u64| Resource::HeapTexture {
         heap,
         spec: TextureSpec {
-            private: case.private,
+            storage,
             ..TextureSpec::texture_2d(format, w, h)
         },
         offset: at,

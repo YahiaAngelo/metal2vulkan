@@ -44,7 +44,7 @@
 //! shapes, through the same calls, are what produced the tables in the first place.
 
 use crate::case::{Answer, Failure};
-use crate::work::{Done, Plane, Rect, Resource, Step, TextureKind, TextureSpec, Work};
+use crate::work::{Done, Plane, Rect, Resource, Step, Storage, TextureKind, TextureSpec, Work};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject, Sel};
 use objc2::sel;
@@ -91,11 +91,13 @@ fn refused_pattern(pattern: usize, texture_buffer: bool) -> Option<Failure> {
     None
 }
 
-/// A resource the program made on Metal.
+/// A resource the program made on Metal, or a slot a [`Step::Release`] emptied.
 enum Made {
     Buffer(Retained<ProtocolObject<dyn MTLBuffer>>),
     Heap(Retained<ProtocolObject<dyn MTLHeap>>),
     Texture(Retained<ProtocolObject<dyn MTLTexture>>),
+    /// The resource a [`Step::Release`] dropped, as [`crate::runtime_work`] keeps one.
+    Released,
 }
 
 /// Run `work` on `device` through `queue`, answering what it read.
@@ -110,16 +112,42 @@ pub fn run(
         made.push(one);
     }
     let mut state = Run {
+        device,
         queue,
         made,
+        resources: &work.resources,
         command_buffer: None,
         encoder: None,
         reads: vec![None; work.reads()],
         next_read: 0,
         statuses: Vec::new(),
     };
-    for (at, step) in work.steps.iter().enumerate() {
-        state.step(step).map_err(|failure| at_step(at, failure))?;
+    // One autorelease pool per command buffer's worth of steps, and it is load-bearing rather than
+    // tidy. `commandBuffer` and `blitCommandEncoder` answer **autoreleased** objects, so the
+    // `Retained` this interpreter drops is a second reference and the first one outlives it. Two
+    // things follow where no pool drains: the objects accumulate for the whole program, and — the
+    // reason the pool is per command buffer rather than one around the program — a command buffer
+    // Metal still holds keeps every resource it referred to alive, so a `Step::Release` after it
+    // would free nothing and a case about what reused memory reads would quietly prove nothing.
+    // The pool closes where the case's own `Step::Commit` does, which is where the program says
+    // the work is done with.
+    let mut at = 0;
+    while at < work.steps.len() {
+        let end = work.steps[at..]
+            .iter()
+            .position(|step| matches!(step, Step::Commit))
+            .map_or(work.steps.len(), |found| at + found + 1);
+        objc2::rc::autoreleasepool(|_| -> Answer<()> {
+            for (index, step) in work.steps[at..end].iter().enumerate() {
+                state
+                    .step(step)
+                    .map_err(|failure| at_step(at + index, failure))?;
+            }
+            // A group the case left open is committed here, as `run` has always committed what the
+            // last step left open, so the pool drains with no command buffer live.
+            state.close()
+        })?;
+        at = end;
     }
     state.close()?;
     let reads = state
@@ -159,19 +187,10 @@ fn at_step(at: usize, failure: Failure) -> Failure {
     }
 }
 
-/// The storage mode and resource options a private or shared resource takes.
-fn options(private: bool) -> (MTLStorageMode, MTLResourceOptions) {
-    if private {
-        (
-            MTLStorageMode::Private,
-            MTLResourceOptions::StorageModePrivate,
-        )
-    } else {
-        (
-            MTLStorageMode::Shared,
-            MTLResourceOptions::StorageModeShared,
-        )
-    }
+/// The storage mode and resource options a [`Storage`] takes, which is
+/// [`crate::metal_side::storage_mode`]: one spelling of the three modes on this side.
+fn options(storage: Storage) -> (MTLStorageMode, MTLResourceOptions) {
+    crate::metal_side::storage_mode(storage)
 }
 
 /// The descriptor `spec` names, field for field as [`crate::runtime_work`] builds it: the same
@@ -186,7 +205,7 @@ fn descriptor(spec: &TextureSpec) -> Answer<Retained<MTLTextureDescriptor>> {
     if let Some(stated) = spec.usage {
         usage = MTLTextureUsage(stated as usize);
     }
-    let (storage, resource_options) = options(spec.private);
+    let (storage, resource_options) = options(spec.storage);
     if spec.kind == TextureKind::TextureBuffer {
         // SAFETY: the constructor reads only the format, the width, the options and the usage it
         // is given.
@@ -247,8 +266,8 @@ fn make(
         Some(Made::Texture(texture)) => Ok(texture),
         _ => Err(Failure::named("NoSuchResource", format!("texture {at}"))),
     };
-    let heap_of = |size: u64, private: bool| -> Answer<Made> {
-        let (_, resource_options) = options(private);
+    let heap_of = |size: u64, storage: Storage| -> Answer<Made> {
+        let (_, resource_options) = options(storage);
         let descriptor = MTLHeapDescriptor::new();
         descriptor.setType(MTLHeapType::Placement);
         descriptor.setSize(size as usize);
@@ -283,25 +302,23 @@ fn make(
             }
             Ok(Made::Buffer(buffer))
         }
-        Resource::PrivateBuffer { length } => {
+        Resource::UnwrittenBuffer { length, storage } => {
+            let (_, resource_options) = options(*storage);
             let buffer = device
-                .newBufferWithLength_options(
-                    (*length).max(1) as usize,
-                    MTLResourceOptions::StorageModePrivate,
-                )
+                .newBufferWithLength_options((*length).max(1) as usize, resource_options)
                 .ok_or_else(|| {
                     Failure::named(
                         "NewBufferWithLength",
-                        format!("{length} private bytes returned nil"),
+                        format!("{length} unwritten {} bytes returned nil", storage.word()),
                     )
                 })?;
             Ok(Made::Buffer(buffer))
         }
-        Resource::Heap { size, private } => heap_of(*size, *private),
-        Resource::HeapForTexture { spec, private } => {
+        Resource::Heap { size, storage } => heap_of(*size, *storage),
+        Resource::HeapForTexture { spec, storage } => {
             let descriptor = descriptor(spec)?;
             let sized = device.heapTextureSizeAndAlignWithDescriptor(&descriptor);
-            heap_of(sized.size as u64, *private)
+            heap_of(sized.size as u64, *storage)
         }
         Resource::HeapBuffer {
             heap,
@@ -409,8 +426,12 @@ fn make(
 
 /// The interpreter's state as it runs a program.
 struct Run<'a> {
+    /// The device, which a [`Step::Make`] makes a released resource on again.
+    device: &'a ProtocolObject<dyn MTLDevice>,
     queue: &'a ProtocolObject<dyn MTLCommandQueue>,
     made: Vec<Made>,
+    /// The program's declarations, which a [`Step::Make`] reads to make a released resource again.
+    resources: &'a [Resource],
     command_buffer: Option<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
     encoder: Option<Retained<ProtocolObject<dyn MTLBlitCommandEncoder>>>,
     reads: Vec<Option<Vec<u8>>>,
@@ -625,6 +646,8 @@ impl Run<'_> {
             // both public Metal. Neither is built here, because every case that needs one also
             // needs a private fill and so carries its answer anyway; a case that needs one without
             // a fill is where to build it.
+            Step::Release { resource } => self.release(*resource),
+            Step::Make { resource } => self.make_again(*resource),
             Step::ClearPass { .. } => Err(Failure::unavailable(
                 "a clearing render pass on the Metal side of a Work program (not built)",
             )),
@@ -752,6 +775,57 @@ impl Run<'_> {
                 length: pattern.len(),
             ];
         }
+        Ok(())
+    }
+
+    /// Drop this side's reference to the resource at `at`.
+    ///
+    /// Refused while a command buffer is open, as [`crate::runtime_work`] refuses it, and for the
+    /// same reason twice over here: Metal keeps its own reference to every resource an uncommitted
+    /// command buffer refers to, so the release would free nothing.
+    fn release(&mut self, at: usize) -> Answer<()> {
+        if self.command_buffer.is_some() || self.encoder.is_some() {
+            return Err(Failure::named(
+                "ReleaseWhileEncoding",
+                format!("resource {at}, with a command buffer still open"),
+            ));
+        }
+        match self.made.get(at) {
+            Some(Made::Released) | None => Err(Failure::named(
+                "NoSuchResource",
+                format!("resource {at} is not made"),
+            )),
+            // The assignment drops what the slot held, which releases this side's reference.
+            Some(_) => {
+                self.made[at] = Made::Released;
+                Ok(())
+            }
+        }
+    }
+
+    /// Make the resource at `at` again, from its own declaration.
+    fn make_again(&mut self, at: usize) -> Answer<()> {
+        match self.made.get(at) {
+            None => {
+                return Err(Failure::named(
+                    "NoSuchResource",
+                    format!("resource {at} is not declared"),
+                ))
+            }
+            Some(Made::Released) => {}
+            Some(_) => {
+                return Err(Failure::named(
+                    "AlreadyMade",
+                    format!("resource {at} is still made; release it first"),
+                ))
+            }
+        }
+        let declared = self
+            .resources
+            .get(at)
+            .ok_or_else(|| Failure::named("NoSuchResource", format!("resource {at}")))?;
+        let one = make(self.device, &self.made, declared)?;
+        self.made[at] = one;
         Ok(())
     }
 

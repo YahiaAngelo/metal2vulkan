@@ -40,6 +40,7 @@ pub mod extended_range_planes;
 pub mod extended_range_targets;
 pub mod extended_range_two_planes;
 pub mod format_copies;
+pub mod fresh_contents;
 pub mod half_write_nans;
 pub mod handler_waits;
 pub mod heap_metal_sizes;
@@ -220,6 +221,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in sparse_heaps::all() {
         cases.push(Box::new(case));
     }
+    cases.extend(fresh_contents::all());
     cases
 }
 
