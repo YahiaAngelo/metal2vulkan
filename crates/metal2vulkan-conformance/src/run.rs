@@ -2,7 +2,7 @@
 //!
 //! One function per leg, so the command, a test and a device lane all drive the same code.
 
-use crate::case::{Case, MetalSource};
+use crate::case::Case;
 use crate::device::{self, Notices, ScratchCache, Venues};
 use crate::replay::replay;
 use crate::report::Report;
@@ -30,7 +30,12 @@ pub fn replay_on(venues: Venues, cases: &[Box<dyn Case>]) -> Result<Report, Stri
     let notices = Notices::default();
     let cache = ScratchCache::new().map_err(|error| error.to_string())?;
     let device = device::open(venues, &notices, &cache)?;
+    // The notices a device announces as it is made are the venue's, not any case's: they say what
+    // this host's driver and release cost, once, before a case runs. They go in the report's venue
+    // line, and the sink is cleared so a case's own notices site holds only what its work
+    // announced.
     let mut report = Report::new();
+    report.venue_announced(&device.name().to_owned(), notices.take());
     for case in cases {
         let taker = notices.clone();
         let mut side = RuntimeSide::new(&device, move || taker.take());
@@ -59,12 +64,12 @@ fn record_one(case: &dyn Case) -> Result<std::path::PathBuf, String> {
     use crate::recording::Validated;
     let level = metal2vulkan_runtime::MetalLevel::NEWEST;
     let answer = match case.metal_source() {
-        MetalSource::Run => {
+        crate::case::MetalSource::Run => {
             let mut side = crate::metal_side::MetalSide::new()?;
             crate::record::record(case, &mut side, RECORD_RUNS, level, Validated::NotRun)
                 .map_err(|error| error.to_string())?
         }
-        MetalSource::Carried { from, .. } => {
+        crate::case::MetalSource::Carried { from, .. } => {
             let (runs, transcript) = case
                 .carried_transcript()?
                 .ok_or_else(|| format!("{}: it carries no answer", case.name()))?;

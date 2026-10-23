@@ -1,6 +1,6 @@
 //! The suite's cases.
 //!
-//! Two seed cases prove the loop end to end, chosen to be as unlike each other as the first
+//! Two seed families prove the loop end to end, chosen to be as unlike each other as the first
 //! increment allows: one compares the bytes a pass wrote, the other a typed answer a getter gives.
 //! Neither can fault a GPU.
 
@@ -11,10 +11,12 @@ use crate::case::Case;
 
 /// Every case of the suite, in the order the report lists them.
 pub fn all() -> Vec<Box<dyn Case>> {
-    vec![
-        Box::new(pass_bytes::srgb_decode_all_bytes()),
-        Box::new(indirect_private_types::private_type_getters()),
-    ]
+    let mut cases: Vec<Box<dyn Case>> = Vec::new();
+    for case in pass_bytes::all() {
+        cases.push(Box::new(case));
+    }
+    cases.push(Box::new(indirect_private_types::private_type_getters()));
+    cases
 }
 
 /// The case named `name`, where the suite holds one.

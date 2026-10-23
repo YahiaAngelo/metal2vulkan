@@ -9,22 +9,13 @@
 //! which is where a rounding difference hides and where one word moving is a readable failure. It
 //! reads no texture and no input buffer, binds one buffer, and cannot fault a GPU.
 
-use crate::case::{call, made, Abort, Case, Failure, Input, MetalSource, ShaderSource, Side};
+use crate::case::{call, made, Abort, Case, Failure, Input, MetalSource, Side};
+use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
 use crate::replay::NOTICES_SITE;
 use crate::transcript::{
     ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Transcript, Value,
 };
-use metal2vulkan_devtools::{engine_dir, llvm_assemble, AssembleError};
-
-/// The case's name: its recording's file name, and its row in the report.
-pub const SRGB_DECODE: &str = "pass-bytes-srgb-decode-all-bytes";
-
-/// The threads the seed runs: one per byte value.
-const THREADS: u32 = 256;
-
-/// The words each thread writes: four `float` lanes, then two words of four `half` lanes.
-const WORDS_PER_THREAD: u32 = 6;
 
 /// The threads in one threadgroup.
 const THREADS_PER_GROUP: u32 = 64;
@@ -32,40 +23,71 @@ const THREADS_PER_GROUP: u32 = 64;
 /// A case that compares the bytes a compute pass wrote with Metal's.
 pub struct PassBytes {
     name: &'static str,
-    /// The owned fixture, named without an extension: its `.ll` is what `llvm-as` assembles for
-    /// the runtime, and its `.air.ll` what Metal's assembler reads.
-    fixture: &'static str,
-    entry: &'static str,
+    /// The owned fixture the case runs.
+    fixture: Fixture,
     /// Threads in the grid, and words each writes.
     threads: u32,
     words_per_thread: u32,
 }
 
-/// The seed case.
+/// Every case of the family: an owned fixture that writes one buffer and takes its input from the
+/// thread position alone, swept over its whole small space.
+///
+/// Each is a self-contained compute pass that reads nothing, binds one buffer and cannot fault a
+/// GPU, and each is exhaustive over the edge of a conversion where Metal's rounding is the only
+/// answer there is.
+pub fn all() -> Vec<PassBytes> {
+    vec![
+        // Metal's sRGB decode of every one of the 256 byte values, in float and in half: six
+        // words a thread.
+        PassBytes::new(
+            "pass-bytes-srgb-decode-all-bytes",
+            "a1_srgb_decode_all_bytes",
+            256,
+            6,
+        ),
+        // Metal's sRGB encode over the bottom of the float range and the normal half bit
+        // patterns, packed to bytes: two words a thread.
+        PassBytes::new(
+            "pass-bytes-srgb-encode-sweep",
+            "a1_srgb_encode_sweep",
+            4096,
+            2,
+        ),
+        // `tanh` of every sixteenth half bit pattern, in half, in a half vector and through the
+        // fast float form: two words a thread.
+        PassBytes::new(
+            "pass-bytes-half-tanh-regimes",
+            "a1_half_tanh_regimes",
+            4096,
+            2,
+        ),
+        // The float-to-half conversion at and past the largest finite half, in both signs, and
+        // half addition overflowing there: two words a thread.
+        PassBytes::new(
+            "pass-bytes-quantize-f16-overflow",
+            "a1_quantize_f16_overflow",
+            2048,
+            2,
+        ),
+    ]
+}
+
+/// The first case of the family, which the suite's own tests use.
 pub fn srgb_decode_all_bytes() -> PassBytes {
-    PassBytes {
-        name: SRGB_DECODE,
-        fixture: "a1_srgb_decode_all_bytes",
-        entry: "a1_srgb_decode_all_bytes",
-        threads: THREADS,
-        words_per_thread: WORDS_PER_THREAD,
-    }
+    all().swap_remove(0)
 }
 
 impl PassBytes {
-    /// The fixture's committed text in the dialect `extension` names.
-    fn source(&self, extension: &str) -> Result<String, String> {
-        let path = engine_dir().join(format!("{}{extension}", self.fixture));
-        std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))
-    }
-
-    /// The fixture's bitcode, as `llvm-as` assembles its `.ll`.
-    fn bitcode(&self) -> Result<Vec<u8>, String> {
-        let path = engine_dir().join(format!("{}.ll", self.fixture));
-        llvm_assemble(&path).map_err(|error| match error {
-            AssembleError::Missing(why) => format!("no llvm-as: {why}"),
-            AssembleError::Rejected(why) => format!("llvm-as rejected {}: {why}", self.fixture),
-        })
+    /// A case of `fixture`, whose entry point is the fixture's own name, over `threads` threads
+    /// each writing `words_per_thread` words.
+    fn new(name: &'static str, fixture: &'static str, threads: u32, words_per_thread: u32) -> Self {
+        Self {
+            name,
+            fixture: Fixture::new(fixture),
+            threads,
+            words_per_thread,
+        }
     }
 
     /// The bytes the pass writes.
@@ -129,18 +151,16 @@ impl Case for PassBytes {
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
-        Ok(vec![
-            ShaderRef {
-                fixture: format!("{}.ll", self.fixture),
-                entry: self.entry.to_owned(),
-                source_sha256: crate::sha256_hex(self.source(".ll")?.as_bytes()),
-            },
-            ShaderRef {
-                fixture: format!("{}.air.ll", self.fixture),
-                entry: self.entry.to_owned(),
-                source_sha256: crate::sha256_hex(self.source(".air.ll")?.as_bytes()),
-            },
-        ])
+        [RUNTIME_TEXT, METAL_TEXT]
+            .into_iter()
+            .map(|extension| {
+                Ok(ShaderRef {
+                    fixture: format!("{}{extension}", self.fixture.name),
+                    entry: self.fixture.entry.to_owned(),
+                    source_sha256: crate::sha256_hex(self.fixture.text(extension)?.as_bytes()),
+                })
+            })
+            .collect()
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
@@ -152,11 +172,11 @@ impl Case for PassBytes {
         Ok(vec![
             Input {
                 name: "air".to_owned(),
-                digest: Digest::sha256(self.source(".ll")?.as_bytes()),
+                digest: Digest::sha256(self.fixture.text(RUNTIME_TEXT)?.as_bytes()),
             },
             Input {
                 name: "air-typed".to_owned(),
-                digest: Digest::sha256(self.source(".air.ll")?.as_bytes()),
+                digest: Digest::sha256(self.fixture.text(METAL_TEXT)?.as_bytes()),
             },
             Input::bytes("dispatch", &words),
             // The output buffer starts zeroed on both sides, so the bytes the pass did not write
@@ -170,21 +190,15 @@ impl Case for PassBytes {
             at: at.to_owned(),
             failure: Failure::named("FixtureNotRead", why),
         };
-        let bitcode = self.bitcode().map_err(|why| stop("library", why))?;
-        let air_text = self.source(".air.ll").map_err(|why| stop("library", why))?;
-        let source = ShaderSource {
-            bitcode: &bitcode,
-            air_text: &air_text,
-            entry: self.entry,
-        };
+        let loaded = self.fixture.loaded().map_err(|why| stop("library", why))?;
         let (groups, threads) = self.dispatch();
         let length = self.output_bytes() as usize;
 
-        let library = made(sites, "library", side.library(&source))?;
+        let library = made(sites, "library", side.library(&loaded.source()))?;
         let pipeline = made(
             sites,
             "pipeline",
-            side.compute_pipeline(library, self.entry),
+            side.compute_pipeline(library, self.fixture.entry),
         )?;
         let output = made(sites, "buffer/0", side.zeroed_buffer(length))?;
         let command_buffer = made(

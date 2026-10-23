@@ -34,6 +34,7 @@ pub mod cases;
 pub mod compare;
 pub mod device;
 pub mod diff;
+pub mod fixture;
 pub mod record;
 pub mod recording;
 pub mod replay;

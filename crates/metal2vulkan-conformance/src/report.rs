@@ -12,12 +12,21 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct Report {
     rows: Vec<Replayed>,
     errors: Vec<ReplayError>,
+    /// What each venue announced as its device was made: the venue's own notices, which belong to
+    /// no case. They are reported, never compared: a case's notices are the ones its own work
+    /// announced.
+    venue_notices: Vec<(String, Vec<String>)>,
 }
 
 impl Report {
     /// An empty report.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Record what `venue` announced as its device was made.
+    pub fn venue_announced(&mut self, venue: &str, codes: Vec<String>) {
+        self.venue_notices.push((venue.to_owned(), codes));
     }
 
     /// Add what replaying one case on one venue came to.
@@ -83,6 +92,11 @@ impl Report {
         }
         if !self.errors.is_empty() {
             out.push_str(&format!("  {:<14} {}\n", "errors", self.errors.len()));
+        }
+        for (venue, codes) in &self.venue_notices {
+            if !codes.is_empty() {
+                out.push_str(&format!("\n{venue} announced as it was made: {codes:?}\n"));
+            }
         }
         out.push_str(&self.matrix());
         for error in &self.errors {

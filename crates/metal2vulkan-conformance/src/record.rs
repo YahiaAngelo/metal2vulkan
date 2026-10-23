@@ -11,10 +11,7 @@
 //! as the answer is taken.
 
 use crate::case::{Case, Side};
-use crate::recording::{
-    self, Answer, Outcome, Provenance, Recording, Validated, ORACLE_CHIP, ORACLE_OS_BUILD,
-    ORACLE_OS_VERSION,
-};
+use crate::recording::{self, Answer, Outcome, Provenance, Recording, Validated};
 use crate::replay::NOTICES_SITE;
 use crate::transcript::{Sites, Transcript};
 use metal2vulkan_runtime::MetalLevel;
@@ -157,6 +154,7 @@ fn check_host() -> Result<(), RecordError> {
             .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
             .unwrap_or_default()
     };
+    use crate::recording::{ORACLE_CHIP, ORACLE_OS_BUILD, ORACLE_OS_VERSION};
     let version = read("-productVersion");
     let build = read("-buildVersion");
     if version == ORACLE_OS_VERSION && build == ORACLE_OS_BUILD {
