@@ -46,6 +46,7 @@ pub mod math_routines;
 pub mod mesh_barriers;
 pub mod mesh_commands;
 pub mod mesh_draws;
+pub mod nearest_positions;
 pub mod pass_bytes;
 pub mod pixel_downscales;
 pub mod pixel_samplers;
@@ -95,6 +96,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in format_copies::all() {
+        cases.push(Box::new(case));
+    }
+    for case in nearest_positions::all() {
         cases.push(Box::new(case));
     }
     for case in extended_range_planes::all() {
