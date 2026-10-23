@@ -23,6 +23,24 @@
 //!     the three draw-stage stores were not visible there in the first run of a fresh process
 //!     (twelve of twelve) and were in seven runs of eight once the process had run them. It is not
 //!     a contract to reproduce.
+//! - **Bit 24 is not the only read-only state, and the other one agrees with it.** A consumer's
+//!   production path reaches read-only backing through Apple's SPI instead:
+//!   `detachBacking`, then `replaceBackingWithRanges:readOnly:YES` over its pages (the ranges as
+//!   one `MTLResourceAddressRangeArray`), offered where the device answers
+//!   `supportsResourceDetachBacking`, which this M3 Max does. Measured against bit 24 over the
+//!   same programs, eight runs a shape, each with the writable control of its own creation path:
+//!   the two forms agree on **all ten shapes measurable under both**, byte for byte, error for
+//!   error and flap for flap, so what is written above holds for either state. The SPI pair also
+//!   behaves the same on a buffer made with `newBufferWithBytesNoCopy:` as on one made through the
+//!   private `MTLBufferDescriptor`, so the creation path does not enter it. A **detached** backing
+//!   is a different state and not this one: a command buffer that names a detached resource ends
+//!   in error, where one naming a read-only-replaced resource completes.
+//! - **Depth and stencil are measured in the bit-24 heap form alone**, and that is a limit of
+//!   Metal's rather than of the measurement: `detachBacking` answers NO for a heap of
+//!   `newHeapWithDescriptor:` in either storage mode, because Metal offers no heap over the
+//!   caller's bytes for it to detach (`MTLHeapDescriptor` answers no `setContents:`, `setNoCopy:`
+//!   or `setDeallocator:`, and the device does not respond to `newHeapWithBytesNoCopy:`). The
+//!   runtime's own `new_heap_with_bytes_no_copy` is an extension with no Metal counterpart.
 //! - **How.** A no-copy buffer made without the bit over a read-only view of the same pages
 //!   (`mach_vm_remap` sharing them, then `mprotect` read-only) behaved the same on every count
 //!   measured, and the probe above found it agreeing with bit 24 on **every one of its eleven

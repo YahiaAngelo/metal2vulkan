@@ -32,6 +32,22 @@
 //! So the two cases here are the two benign shapes a committed fixture can reach: a **pass's
 //! visibility result** written into read-only memory, and a **kernel's stores** into it.
 //!
+//! # Bit 24 is a validated stand-in for the SPI, not an assumed one
+//!
+//! Bit 24 is what this family's cases state, and it is not the state a consumer reaches in
+//! production: that one is Apple's SPI, `detachBacking` then
+//! `replaceBackingWithRanges:readOnly:YES` over the pages. The probe measured both forms over the
+//! same programs, eight runs a shape, each against the writable control of its own creation path,
+//! and they **agree on all ten shapes measurable under both** — byte for byte, error for error and
+//! flap for flap. So a case stated in bit 24 is a case about the production state too. The SPI pair
+//! behaves the same whichever call made the buffer, and a **detached** backing is a different state
+//! again: a command buffer naming a detached resource ends in error where one naming a
+//! read-only-replaced resource completes.
+//!
+//! These cases state bit 24 rather than the SPI because bit 24 is what the runtime's own public
+//! API offers (`ResourceOptions::PRIVATE_BIT`); reaching the SPI from a case would need a `Side`
+//! call for it on both legs, and the forms agreeing is what makes that unnecessary.
+//!
 //! # Every shape is asked twice, and the writable run is not breadth
 //!
 //! Against read-only memory alone, "the write was dropped" and "my program wrote nothing" read
