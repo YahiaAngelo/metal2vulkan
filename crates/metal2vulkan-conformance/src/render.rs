@@ -1980,7 +1980,9 @@ impl RenderWork {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
+    use std::collections::BTreeMap;
+    use std::fmt::Debug;
+    use std::mem::{discriminant, Discriminant};
 
     /// A target of its own memory fingerprints to exactly the bytes it did before a backing could
     /// be stated, and a target over a buffer appends its backing's words after them.
@@ -2041,80 +2043,336 @@ mod tests {
         Handle(0)
     }
 
-    /// Every piece of work a command buffer can hold names a Metal call no other piece names.
+    /// A resource to name in a residency or a barrier step. Which pool it came from is the call's
+    /// own parameter, and a buffer is as good as a texture for a guard that reads only the name.
+    fn resource() -> StepResource {
+        StepResource::Buffer(handle())
+    }
+
+    /// The lod clamps a sampler binding carries at a slot.
+    fn clamps() -> LodClamp {
+        LodClamp::new(0.0, 1.0)
+    }
+
+    /// The render stages a residency or a barrier step names.
+    fn stages() -> RenderStages {
+        RenderStages::VERTEX
+    }
+
+    /// Every kind of one vocabulary, from `first` through the successor each kind names.
     ///
-    /// The site a piece's answer is emitted at is its call, and two siblings sharing a name is the
-    /// failure that made one comparison report six cases as differing while comparing no bytes of
-    /// either side. So this holds the property rather than trusting the next author to notice.
-    #[test]
-    fn every_piece_of_work_names_a_call_no_other_piece_names() {
-        let pieces = [
-            RenderWork::Pass(RenderPass::sized([4, 4])),
-            RenderWork::ReadTexture {
+    /// This is where the exhaustiveness comes from: `after` is a `match` over every variant of its
+    /// enum with **no wildcard arm**, so a variant added to that enum does not compile until it is
+    /// given its own arm, and the arm of the kind it is placed after is what hands it to this walk.
+    /// A guard then reads the walk rather than an array written out beside the enum, which is what
+    /// a new variant can be added without touching.
+    ///
+    /// The walk is checked to be a list and not a cycle, so an arm naming a kind already walked
+    /// fails here, by name, instead of running forever.
+    fn every_kind<T: Debug>(first: T, after: impl Fn(&T) -> Option<T>) -> Vec<T> {
+        let mut kinds = vec![first];
+        let mut walked = vec![discriminant(&kinds[0])];
+        while let Some(next) = after(kinds.last().expect("the walk starts at its first kind")) {
+            assert!(
+                !walked.contains(&discriminant(&next)),
+                "the walk of {} returns to {next:?}, so it is a cycle rather than each kind once",
+                std::any::type_name::<T>()
+            );
+            walked.push(discriminant(&next));
+            kinds.push(next);
+        }
+        kinds
+    }
+
+    /// The site names more than one of `kinds` emits, each with the kinds that emit it.
+    ///
+    /// Empty is what every one of these vocabularies wants. The site a kind's answer is emitted at
+    /// **is** its name, so two siblings sharing one name is the failure that made a comparison
+    /// report six cases as differing while comparing no bytes of either side.
+    fn sharing_a_site<'a, T>(
+        kinds: &'a [T],
+        call: impl Fn(&'a T) -> &'static str,
+    ) -> BTreeMap<&'static str, Vec<&'a T>> {
+        let mut by_name: BTreeMap<&'static str, Vec<&'a T>> = BTreeMap::new();
+        for kind in kinds {
+            by_name.entry(call(kind)).or_default().push(kind);
+        }
+        by_name.retain(|_, with| with.len() > 1);
+        by_name
+    }
+
+    /// Every piece of work a command buffer can hold, one of each kind, in declaration order.
+    fn every_piece() -> Vec<RenderWork> {
+        every_kind(RenderWork::Pass(RenderPass::sized([4, 4])), piece_after)
+    }
+
+    /// The piece of work that follows `piece` in declaration order, or `None` after the last.
+    ///
+    /// One arm per variant and no wildcard: see [`every_kind`] for why that is the whole point.
+    fn piece_after(piece: &RenderWork) -> Option<RenderWork> {
+        Some(match piece {
+            RenderWork::Pass(_) => RenderWork::ReadTexture {
                 texture: handle(),
                 into: handle(),
                 offset: 0,
                 row_pitch: 16,
                 size: [4, 4],
             },
-            RenderWork::Dispatch(Dispatch {
+            RenderWork::ReadTexture { .. } => RenderWork::Dispatch(Dispatch {
                 pipeline: handle(),
                 buffers: Vec::new(),
                 textures: Vec::new(),
                 grid: [1, 1, 1],
                 threads: [1, 1, 1],
             }),
-            RenderWork::CopyBuffer {
+            RenderWork::Dispatch(_) => RenderWork::CopyBuffer {
                 from: handle(),
                 from_offset: 0,
                 into: handle(),
                 into_offset: 0,
                 length: 16,
             },
-            RenderWork::ComputeCommands {
+            RenderWork::CopyBuffer { .. } => RenderWork::ComputeCommands {
                 commands: handle(),
                 first: 0,
                 count: 1,
                 used: Vec::new(),
             },
-        ];
-        let named: BTreeSet<&str> = pieces.iter().map(RenderWork::call).collect();
-        assert_eq!(named.len(), pieces.len(), "{named:?}");
+            RenderWork::ComputeCommands { .. } => return None,
+        })
     }
 
-    /// Every step this module's four additions brought names a Metal call no other step names, so
-    /// a refusal reads as the call we refused and the fingerprint keys the step by its own name.
-    #[test]
-    fn the_four_added_steps_name_calls_no_other_step_names() {
-        let added = [
-            RenderStep::FragmentTexture {
+    /// Every step a pass can hold, one of each kind, in declaration order.
+    fn every_step() -> Vec<RenderStep> {
+        every_kind(RenderStep::Pipeline(handle()), step_after)
+    }
+
+    /// The step that follows `step` in declaration order, or `None` after the last.
+    ///
+    /// One arm per variant and no wildcard: see [`every_kind`] for why that is the whole point.
+    fn step_after(step: &RenderStep) -> Option<RenderStep> {
+        Some(match step {
+            RenderStep::Pipeline(_) => RenderStep::DepthStencilState(handle()),
+            RenderStep::DepthStencilState(_) => RenderStep::StencilReference(0),
+            RenderStep::StencilReference(_) => RenderStep::vertex_buffer(handle(), 0),
+            RenderStep::VertexBuffer { .. } => RenderStep::fragment_buffer(handle(), 0),
+            RenderStep::FragmentBuffer { .. } => RenderStep::FragmentTexture {
                 texture: handle(),
                 index: 0,
             },
-            RenderStep::FragmentSampler {
+            RenderStep::FragmentTexture { .. } => RenderStep::FragmentSampler {
                 sampler: handle(),
                 index: 0,
             },
-            RenderStep::VertexBytes {
+            RenderStep::FragmentSampler { .. } => RenderStep::VertexBytes {
                 bytes: Vec::new(),
                 index: 0,
             },
-            RenderStep::Viewport(ViewportRect::new([0.0; 2], [1.0; 2])),
+            RenderStep::VertexBytes { .. } => {
+                RenderStep::Viewport(ViewportRect::new([0.0; 2], [1.0; 2]))
+            }
+            RenderStep::Viewport(_) => RenderStep::BlendColor(BlendColorChannels::new([0.0; 4])),
+            RenderStep::BlendColor(_) => RenderStep::VisibilityResultMode {
+                mode: VisibilityResultMode::Counting,
+                offset: 0,
+            },
+            RenderStep::VisibilityResultMode { .. } => RenderStep::triangle(),
+            RenderStep::Draw { .. } => RenderStep::DrawIndexed {
+                primitive: PrimitiveType::Triangle,
+                count: 3,
+                index_type: IndexType::UInt16,
+                indices: handle(),
+                offset: 0,
+                instances: 1,
+                base_vertex: 0,
+                base_instance: 0,
+            },
+            RenderStep::DrawIndexed { .. } => RenderStep::DrawIndirect {
+                primitive: PrimitiveType::Triangle,
+                arguments: handle(),
+                offset: 0,
+            },
+            RenderStep::DrawIndirect { .. } => RenderStep::UseBuffer {
+                buffer: handle(),
+                write: false,
+                stages: crate::case::STAGE_VERTEX,
+            },
+            RenderStep::UseBuffer { .. } => RenderStep::ExecuteCommands {
+                commands: handle(),
+                first: 0,
+                count: 1,
+            },
+            RenderStep::ExecuteCommands { .. } => RenderStep::Scissor(ScissorBox::new(0, 0, 1, 1)),
+            RenderStep::Scissor(_) => RenderStep::Scissors(vec![ScissorBox::new(0, 0, 1, 1)]),
+            RenderStep::Scissors(_) => {
+                RenderStep::Viewports(vec![ViewportRect::new([0.0; 2], [1.0; 2])])
+            }
+            RenderStep::Viewports(_) => RenderStep::Cull(CullMode::None),
+            RenderStep::Cull(_) => RenderStep::FrontFacing(Winding::Clockwise),
+            RenderStep::FrontFacing(_) => RenderStep::FillMode(TriangleFillMode::Fill),
+            RenderStep::FillMode(_) => RenderStep::DepthClip(DepthClipMode::Clip),
+            RenderStep::DepthClip(_) => RenderStep::DepthBias(DepthBiasValues::new(0.0, 0.0, 0.0)),
+            RenderStep::DepthBias(_) => RenderStep::StencilReferences { front: 0, back: 0 },
+            RenderStep::StencilReferences { .. } => RenderStep::VertexBufferOffset {
+                offset: 0,
+                index: 0,
+            },
+            RenderStep::VertexBufferOffset { .. } => RenderStep::FragmentBufferOffset {
+                offset: 0,
+                index: 0,
+            },
+            RenderStep::FragmentBufferOffset { .. } => RenderStep::FragmentBytes {
+                bytes: Vec::new(),
+                index: 0,
+            },
+            RenderStep::FragmentBytes { .. } => RenderStep::VertexBuffers {
+                buffers: vec![(handle(), 0)],
+                first: 0,
+            },
+            RenderStep::VertexBuffers { .. } => RenderStep::FragmentBuffers {
+                buffers: vec![(handle(), 0)],
+                first: 0,
+            },
+            RenderStep::FragmentBuffers { .. } => RenderStep::VertexTexture {
+                texture: handle(),
+                index: 0,
+            },
+            RenderStep::VertexTexture { .. } => RenderStep::VertexTextures {
+                textures: vec![handle()],
+                first: 0,
+            },
+            RenderStep::VertexTextures { .. } => RenderStep::FragmentTextures {
+                textures: vec![handle()],
+                first: 0,
+            },
+            RenderStep::FragmentTextures { .. } => RenderStep::VertexSampler {
+                sampler: handle(),
+                index: 0,
+            },
+            RenderStep::VertexSampler { .. } => RenderStep::VertexSamplers {
+                samplers: vec![handle()],
+                first: 0,
+            },
+            RenderStep::VertexSamplers { .. } => RenderStep::FragmentSamplers {
+                samplers: vec![handle()],
+                first: 0,
+            },
+            RenderStep::FragmentSamplers { .. } => RenderStep::VertexSamplerClamped {
+                sampler: handle(),
+                clamp: clamps(),
+                index: 0,
+            },
+            RenderStep::VertexSamplerClamped { .. } => RenderStep::FragmentSamplerClamped {
+                sampler: handle(),
+                clamp: clamps(),
+                index: 0,
+            },
+            RenderStep::FragmentSamplerClamped { .. } => RenderStep::VertexSamplersClamped {
+                samplers: vec![(handle(), clamps())],
+                first: 0,
+            },
+            RenderStep::VertexSamplersClamped { .. } => RenderStep::FragmentSamplersClamped {
+                samplers: vec![(handle(), clamps())],
+                first: 0,
+            },
+            RenderStep::FragmentSamplersClamped { .. } => RenderStep::BarrierScope {
+                scope: BarrierScope::TEXTURES,
+                after: stages(),
+                before: stages(),
+            },
+            RenderStep::BarrierScope { .. } => RenderStep::BarrierResources {
+                resources: vec![resource()],
+                after: stages(),
+                before: stages(),
+            },
+            RenderStep::BarrierResources { .. } => RenderStep::UseResource {
+                resource: resource(),
+                usage: ResourceUsage::READ,
+            },
+            RenderStep::UseResource { .. } => RenderStep::UseResourceInStages {
+                resource: resource(),
+                usage: ResourceUsage::READ,
+                stages: stages(),
+            },
+            RenderStep::UseResourceInStages { .. } => RenderStep::UseResources {
+                resources: vec![resource()],
+                usage: ResourceUsage::READ,
+            },
+            RenderStep::UseResources { .. } => RenderStep::UseResourcesInStages {
+                resources: vec![resource()],
+                usage: ResourceUsage::READ,
+                stages: stages(),
+            },
+            RenderStep::UseResourcesInStages { .. } => RenderStep::UseHeap(handle()),
+            RenderStep::UseHeap(_) => RenderStep::UseHeapInStages {
+                heap: handle(),
+                stages: stages(),
+            },
+            RenderStep::UseHeapInStages { .. } => RenderStep::UseHeaps(vec![handle()]),
+            RenderStep::UseHeaps(_) => RenderStep::UseHeapsInStages {
+                heaps: vec![handle()],
+                stages: stages(),
+            },
+            RenderStep::UseHeapsInStages { .. } => return None,
+        })
+    }
+
+    /// Every piece of work a command buffer can hold names a Metal call no other piece names.
+    ///
+    /// The site a piece's answer is emitted at is its call, and two siblings sharing a name is the
+    /// failure that made one comparison report six cases as differing while comparing no bytes of
+    /// either side. So this holds the property rather than trusting the next author to notice: it
+    /// reads [`every_piece`], the walk the compiler keeps complete, and not a list written out
+    /// here, which is exactly how a variant added this round went unchecked until a reviewer
+    /// happened to see it.
+    #[test]
+    fn every_piece_of_work_names_a_call_no_other_piece_names() {
+        let pieces = every_piece();
+        let shared = sharing_a_site(&pieces, RenderWork::call);
+        assert!(
+            shared.is_empty(),
+            "pieces of work that hold one site between them: {shared:?}"
+        );
+    }
+
+    /// Every step a pass can hold names a Metal call no other step names, so a refusal reads as the
+    /// call we refused and the fingerprint keys the step by its own name.
+    ///
+    /// Read over [`every_step`], the walk the compiler keeps complete, so a step added to the
+    /// vocabulary is in this guard whether or not its author remembers it.
+    ///
+    /// One pair is permitted, named here and nowhere else, and only as this pair: a third step
+    /// joining them fails, as does either of them leaving. It is the pair documented at
+    /// [`RenderStep::call`] -- `UseBuffer` is an indirect command's own residency call and emits
+    /// the name `UseResource` emits. It is sound only while no case holds both. Neither can be
+    /// renamed away: `UseBuffer`'s own selector is `useResource:usage:stages:`, whose site name is
+    /// the one `UseResourceInStages` already emits, and a rename either way moves the committed
+    /// recording of every case that holds the step.
+    #[test]
+    fn every_step_names_a_call_no_other_step_names() {
+        let permitted = [
+            RenderStep::UseBuffer {
+                buffer: handle(),
+                write: false,
+                stages: crate::case::STAGE_VERTEX,
+            },
+            RenderStep::UseResource {
+                resource: resource(),
+                usage: ResourceUsage::READ,
+            },
         ];
-        let others = [
-            RenderStep::Pipeline(handle()),
-            RenderStep::DepthStencilState(handle()),
-            RenderStep::StencilReference(0),
-            RenderStep::vertex_buffer(handle(), 0),
-            RenderStep::fragment_buffer(handle(), 0),
-            RenderStep::triangle(),
-        ];
-        let named: BTreeSet<&str> = added
-            .iter()
-            .chain(&others)
-            .map(|step| step.call())
+        let steps = every_step();
+        let shared = sharing_a_site(&steps, RenderStep::call);
+        let kinds: Vec<Vec<Discriminant<RenderStep>>> = shared
+            .values()
+            .map(|with| with.iter().map(|step| discriminant(*step)).collect())
             .collect();
-        assert_eq!(named.len(), added.len() + others.len());
+        assert_eq!(
+            kinds,
+            vec![permitted.iter().map(discriminant).collect::<Vec<_>>()],
+            "the steps that hold one site between them are {shared:?}; the only pair this permits \
+             is {permitted:?}"
+        );
     }
 
     /// A viewport's six numbers all reach its words, and two viewports are equal exactly when
