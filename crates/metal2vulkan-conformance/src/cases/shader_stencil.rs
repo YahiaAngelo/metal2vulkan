@@ -224,6 +224,9 @@ impl ShaderStencil {
                 clear: CLEARED,
                 resolve: None,
                 filter: PassStencil::cleared(target, CLEARED).filter,
+                // Metal's default, which these rows say nothing about; the fingerprint writes the
+                // options only where they are not it, so stating it moves no recording.
+                options: PassStencil::cleared(target, CLEARED).options,
             },
         }
     }
