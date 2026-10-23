@@ -86,6 +86,7 @@ pub mod half_write_nans;
 pub mod handler_waits;
 pub mod heap_metal_sizes;
 pub mod host_page_writes;
+pub mod indirect_commands;
 pub mod indirect_private_types;
 pub mod int_attributes;
 pub mod level_sizes;
@@ -143,6 +144,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(indirect_private_types::private_type_getters()));
+    cases.extend(indirect_commands::boxed());
     for case in math_routines::all() {
         cases.push(Box::new(case));
     }

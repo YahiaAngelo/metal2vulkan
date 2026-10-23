@@ -36,6 +36,7 @@ use crate::case::{
     TilePipelineSpec, TileStep, Venue,
 };
 use crate::function_bindings::BindingFacts;
+use crate::indirect_commands::{CommandsMade, EncodedCommand, IcbDescriptor};
 use crate::transcript::Value;
 use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{BindingAccess, PixelFormat, RenderStages};
@@ -391,6 +392,36 @@ impl<S: Side, W: Watcher> Side for Watching<S, W> {
     fn mesh_command_buffer(&mut self, commands: &[MeshCommand]) -> Answer<Handle> {
         let _span = self.watch("mesh_command_buffer");
         self.inner.mesh_command_buffer(commands)
+    }
+
+    fn compute_pipeline_for_commands(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        stage_input: Option<&StageInput>,
+    ) -> Answer<Handle> {
+        let _span = self.watch("compute_pipeline_for_commands");
+        self.inner
+            .compute_pipeline_for_commands(library, entry, stage_input)
+    }
+
+    fn indirect_command_buffer(
+        &mut self,
+        descriptor: &IcbDescriptor,
+        commands: &[EncodedCommand],
+    ) -> Answer<CommandsMade> {
+        let _span = self.watch("indirect_command_buffer");
+        self.inner.indirect_command_buffer(descriptor, commands)
+    }
+
+    fn indirect_commands_size(&mut self, commands: Handle) -> Answer<u64> {
+        let _span = self.watch("indirect_commands_size");
+        self.inner.indirect_commands_size(commands)
+    }
+
+    fn reset_indirect_commands(&mut self, commands: Handle, first: u64, count: u64) -> Answer<()> {
+        let _span = self.watch("reset_indirect_commands");
+        self.inner.reset_indirect_commands(commands, first, count)
     }
 
     fn execute_mesh_commands(
