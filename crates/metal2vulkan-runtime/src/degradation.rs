@@ -2273,9 +2273,9 @@ degradations! {
         /// lanes, or a 16-bit float or 8-bit unorm one under a blend of the second source): in
         /// `float`, each step rounded, the sources and the blend color clamped to a normalized
         /// format's range, the device's conversion storing the result; or of an 8-bit sRGB format
-        /// under a blend of the second source in a module compiled with fast math, in the 8-bit
-        /// unorm blend's rounded forms over the decoded texel. Metal's blend for these is not
-        /// measured.
+        /// under a blend of the second source, or a one- or two-channel one under a lerp, in a
+        /// module compiled with fast math, or written by fewer than four lanes, in the 8-bit unorm
+        /// blend's rounded forms over the decoded texel. Metal's blend for these is not measured.
         UnmeasuredFetchBlend = "unmeasured-fetch-blend";
     }
 }

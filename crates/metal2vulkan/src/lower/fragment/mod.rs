@@ -632,6 +632,12 @@ pub fn blends_half_in_storage(cx: &SelectCx<'_>, color: u32) -> bool {
     fetch::blends_in_shader(cx, color, true)
 }
 
+/// Whether the function writes color attachment `color` in the storage form under a write mask
+/// that names none of its format's channels: the write stores nothing.
+pub fn stores_nothing_in_storage(cx: &SelectCx<'_>, color: u32) -> bool {
+    (cx.families.fragment.fetch.get(&color)).is_some_and(|sc| sc.writes && sc.view.stores_nothing())
+}
+
 /// Whether the function writes (or reads) color attachment `color` in the storage form, which the
 /// pipeline's color attachments do not hold.
 pub fn written_in_storage(cx: &SelectCx<'_>, color: u32) -> bool {

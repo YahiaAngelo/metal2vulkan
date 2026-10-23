@@ -371,3 +371,118 @@ fn a_narrow_output_blends_a_fetched_sixteen_bit_float_attachment() {
     }
     assert!(built > 0, "the class built nothing");
 }
+
+/// The attachments of [`attachments`], color 1 written unblended.
+fn unblended(pf: PixelFormat) -> RenderLinkInputs {
+    let mut r = attachments(pf, GUEST, ColorWriteMask::ALL);
+    if let Some(c) = r.color_attachments[1].as_mut() {
+        c.blending_enabled = false;
+    }
+    r
+}
+
+/// A one- or two-channel 8-bit sRGB attachment (`R8Unorm_sRGB`, `RG8Unorm_sRGB`) the function
+/// fetches, on every committed profile that orders fetch through the pixel interlock alone and
+/// renders the format itself: each entry of as many lanes as the format's channels or more, fast
+/// and safe math, compiles in the storage form through the format's integer view, unblended and
+/// under source-alpha over and the guest's blend, which the function computes
+/// (`extended_range::Blend::srgb8`): noted `UnmeasuredFetchBlend` exactly where that is not
+/// Metal's (a no-alpha form the 8-bit unorm blend does not build under fast math, or an output of
+/// fewer than four lanes, which blends as four whose missing lanes are zero), and its module passes
+/// L3. Before, each was refused `NotImplemented(FramebufferFetch)`.
+#[test]
+fn a_fetched_one_or_two_channel_srgb_attachment_is_written_and_blended() {
+    use crate::lower::arith::extended_range::blend::{BlendArith, BlendMath};
+    use crate::lower::arith::extended_range::Blend;
+    let fast_text = text();
+    let option = "!{!\"air.compile.fast_math_enable\"}";
+    let safe_text = fast_text.replacen(option, "!{!\"air.compile.fast_math_disable\"}", 1);
+    let (Some(fast), Some(safe)) = (assembled(&fast_text), assembled(&safe_text)) else {
+        return;
+    };
+    let over = BlendEquation {
+        source_rgb: BlendFactor::SourceAlpha,
+        destination_rgb: BlendFactor::OneMinusSourceAlpha,
+        rgb_operation: BlendOperation::Add,
+        source_alpha: BlendFactor::One,
+        destination_alpha: BlendFactor::OneMinusSourceAlpha,
+        alpha_operation: BlendOperation::Add,
+    };
+    let note = PrecisionNote::UnmeasuredFetchBlend;
+    let mut checked = 0;
+    for (stem, p) in committed_profiles().expect("profiles") {
+        if !crate::lower::fragment::interlock_orders(&p) {
+            continue;
+        }
+        for (pf, channels) in [
+            (PixelFormat::R8UnormSRGB, 1),
+            (PixelFormat::RG8UnormSRGB, 2),
+        ] {
+            // A device that renders the format through a word view: not this form.
+            if crate::metal::format::WordAttachment::of(pf, &p).is_some() {
+                continue;
+            }
+            for (entry, lanes) in ENTRIES {
+                if lanes < channels {
+                    continue;
+                }
+                for (bc, math) in [(&fast, BlendMath::Fast), (&safe, BlendMath::Rounded)] {
+                    let rounded = math == BlendMath::Rounded;
+                    let what = format!("{stem} {pf:?} {entry} rounded {rounded}");
+                    let r = unblended(pf);
+                    let a = compile_with(bc, entry, &p, &state(&r, &p))
+                        .unwrap_or_else(|e| panic!("{what} unblended: {e}"));
+                    assert_eq!(
+                        fetched(&a).map(|f| (f.0, f.1)),
+                        Some((true, None)),
+                        "{what}"
+                    );
+                    assert!(!a.precision.contains(&note), "{what}: {:?}", a.precision);
+                    link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{what}: L3: {e}"));
+                    for eq in [over, GUEST] {
+                        let what = format!("{what} {eq:?}");
+                        let r = attachments(pf, eq, ColorWriteMask::ALL);
+                        let a = compile_with(bc, entry, &p, &state(&r, &p))
+                            .unwrap_or_else(|e| panic!("{what}: {e}"));
+                        assert_eq!(fetched(&a), Some((true, Some(eq), rounded)), "{what}");
+                        let half = (math, BlendArith::Half);
+                        let exact = lanes == 4
+                            && Blend::srgb8(&eq, pf, ColorWriteMask::ALL, half)
+                                .is_ok_and(|(_, exact)| exact);
+                        assert_eq!(a.precision.contains(&note), !exact, "{what}");
+                        link_and_validate(&a, &p).unwrap_or_else(|e| panic!("{what}: L3: {e}"));
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 0, "no interlock profile took the storage form");
+    // A `half` output under fast math: its storage write is noted `HalfOutputFastMathBlend` where
+    // it stores a channel, and not under a mask that names none of the format's (blue into
+    // `R8Unorm_sRGB`), which stores nothing.
+    let fast_note = PrecisionNote::HalfOutputFastMathBlend;
+    for (stem, p) in committed_profiles().expect("profiles") {
+        let pf = PixelFormat::R8UnormSRGB;
+        if !crate::lower::fragment::interlock_orders(&p)
+            || crate::metal::format::WordAttachment::of(pf, &p).is_some()
+        {
+            continue;
+        }
+        for (mask, noted) in [(ColorWriteMask::RED, true), (ColorWriteMask::BLUE, false)] {
+            let mut r = unblended(pf);
+            if let Some(c) = r.color_attachments[1].as_mut() {
+                c.write_mask = mask;
+            }
+            let what = format!("{stem} {mask:?}");
+            let a = compile_with(&fast, "fbl_narrow_half4", &p, &state(&r, &p))
+                .unwrap_or_else(|e| panic!("{what}: {e}"));
+            assert_eq!(
+                a.precision.contains(&fast_note),
+                noted,
+                "{what}: {:?}",
+                a.precision
+            );
+        }
+    }
+}

@@ -1014,7 +1014,8 @@ fn a_half_output_without_fast_math_is_noted_where_its_attachment_blends() {
 /// (`StageIo::half_fast_colors`), and the pipeline's stage records
 /// `PrecisionNote::HalfOutputFastMathBlend` only where that attachment stores some channel
 /// (`color_writes::pipeline_writes`, `stores_output`): unblended or blended alike, but not under a
-/// write mask of none, blended or not, nor where the pipeline lacks the attachment's state. An
+/// write mask of none, blended or not, nor one naming none of its format's channels, nor where
+/// the pipeline lacks the attachment's state. An
 /// attachment that stores nothing holds nothing the output could differ by (the macOS 26
 /// window-server pass's colors of mask none beside its fetched one).
 #[test]
@@ -1062,6 +1063,23 @@ fn a_half_output_with_fast_math_is_noted_where_its_attachment_stores() {
             ))];
             let (notes, _) = pipeline_writes(&f, &rules, &colors, false).expect(what);
             assert_eq!(notes.contains(&note), want, "{stem}: {what}: {notes:?}");
+        }
+        // A one-channel format under a mask of blue alone stores nothing; under red it stores.
+        for (mask, want) in [
+            (ColorComponentFlags::B, false),
+            (ColorComponentFlags::R, true),
+        ] {
+            let colors = [Some(ColorAttachmentState::new(
+                Format::R16_SFLOAT,
+                mask,
+                over,
+            ))];
+            let (notes, _) = pipeline_writes(&f, &rules, &colors, false).expect("R16");
+            assert_eq!(
+                notes.contains(&note),
+                want,
+                "{stem}: R16 {mask:?}: {notes:?}"
+            );
         }
         // A pipeline without the attachment's state (none listed) records none.
         let (notes, _) = pipeline_writes(&f, &rules, &[], false).expect("no attachments");

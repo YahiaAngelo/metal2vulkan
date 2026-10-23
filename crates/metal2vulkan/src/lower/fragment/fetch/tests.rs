@@ -152,8 +152,8 @@ fn a_clean_state_takes_the_storage_form() {
     }
 }
 
-/// What the form does not model is `NotImplemented`: an amplified pipeline, a one- or two-channel
-/// sRGB format, and, for a written attachment only, a signed normalized format under a write mask
+/// What the form does not model is `NotImplemented`: an amplified pipeline, and, for a written
+/// attachment only, a signed normalized format under a write mask
 /// that keeps some of its channels, alpha to coverage, a returned sample mask at one sample, and a
 /// depth or stencil attachment without early fragment tests, but where each draw's plan checks its
 /// tests. Another format's blend is the generic one ([`StorageView::generic_blend`]).
@@ -165,10 +165,6 @@ fn unmodelled_states_are_not_implemented() {
     let mut amplified = r32.clone();
     amplified.amplified = true;
     assert_eq!(form(&amplified, false, READS, &p), ni);
-    for pf in [PixelFormat::R8UnormSRGB, PixelFormat::RG8UnormSRGB] {
-        let srgb = state(pf, |_| {});
-        assert_eq!(form(&srgb, false, READS, &p), ni, "{pf:?}");
-    }
     let generic = state(PixelFormat::R32Float, |c| {
         c.blending_enabled = true;
         c.destination_rgb_blend_factor = crate::metal::BlendFactor::One;
@@ -272,6 +268,60 @@ fn a_four_channel_srgb_attachment_takes_a_uint_view() {
                 assert_eq!(read.blend, None, "{stem} {pf:?} {destination:?}");
             }
         }
+    }
+}
+
+/// A one- or two-channel 8-bit sRGB attachment (`R8Unorm_sRGB`, `RG8Unorm_sRGB`) on a device that
+/// renders its format (MoltenVK, RADV) takes the storage form as a four-channel one does, through
+/// a view in the unsigned integer format of its texel (`R8_UINT`, `R16_UINT`), read and written,
+/// under a blend the function computes ([`extended_range::Blend::srgb8`]), and the two-channel
+/// one's under a mask that keeps one channel.
+#[test]
+fn a_one_or_two_channel_srgb_attachment_takes_a_uint_view() {
+    use crate::spv::ImageFormat as I;
+    for stem in ["moltenvk-m3", "amd-rdna3-radv"] {
+        let p = profile(stem, &[]);
+        for (pf, format, uint, declared) in [
+            (
+                PixelFormat::R8UnormSRGB,
+                vk::Format::R8_SRGB,
+                vk::Format::R8_UINT,
+                I::R8ui,
+            ),
+            (
+                PixelFormat::RG8UnormSRGB,
+                vk::Format::R8G8_SRGB,
+                vk::Format::R16_UINT,
+                I::R16ui,
+            ),
+        ] {
+            for use_ in [WRITES, READS] {
+                let view = form(&state(pf, |_| {}), false, use_, &p).expect("the storage form");
+                assert_eq!(
+                    (view.format, view.declared, view.numeric, view.uint_view),
+                    (
+                        format,
+                        expected_declaration(uint, use_, declared, &p),
+                        SampledType::Uint,
+                        Some(uint)
+                    ),
+                    "{stem} {pf:?} {use_:?}"
+                );
+                assert_eq!(view.read_class(), SampledType::Float, "{stem} {pf:?}");
+            }
+            let blended = state(pf, |c| {
+                c.blending_enabled = true;
+                c.destination_rgb_blend_factor = crate::metal::BlendFactor::OneMinusSourceAlpha;
+                c.destination_alpha_blend_factor = crate::metal::BlendFactor::OneMinusSourceAlpha;
+            });
+            let view = form(&blended, false, WRITES, &p).expect("the sRGB blend");
+            assert!(view.blend.is_some(), "{stem} {pf:?}");
+        }
+        let masked = state(PixelFormat::RG8UnormSRGB, |c| {
+            c.write_mask = ColorWriteMask::GREEN;
+        });
+        let view = form(&masked, false, WRITES, &p).expect("a masked write");
+        assert_eq!(view.kept, vk::ColorComponentFlags::R, "{stem}");
     }
 }
 

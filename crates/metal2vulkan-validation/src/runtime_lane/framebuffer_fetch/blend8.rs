@@ -320,9 +320,8 @@ fn draw(
     state: &RenderPipelineState,
     (pf, order): (PixelFormat, &[usize]),
     (output, texels, sources): (Output, &[[u8; 4]], &[[f64; 4]]),
-    color: [f32; 4],
+    (color, kinds): ([f32; 4], &[Degradation]),
 ) -> (Vec<u8>, Vec<Degradation>) {
-    let kinds = NOTES.map(Degradation::from_precision_note);
     let bpp = order.len();
     let bytes: Vec<u8> = texels
         .iter()
@@ -368,7 +367,8 @@ fn draw(
     .unwrap();
     let announced = counts(&messages.take_notices());
     let noted = kinds
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|k| announced.contains_key(k))
         .collect();
     (
@@ -460,7 +460,13 @@ fn a_blended_eight_bit_unorm_fetch_stores_metals_blend() {
                 };
                 let (texels, sources) = data(output);
                 let data = (output, texels.as_slice(), sources.as_slice());
-                let (read, noted) = draw((&lane, &messages), &state, (pf, order), data, [0.0; 4]);
+                let (read, noted) = draw(
+                    (&lane, &messages),
+                    &state,
+                    (pf, order),
+                    data,
+                    ([0.0; 4], &kinds),
+                );
                 let bpp = order.len();
                 let mut wrong = Vec::new();
                 for (i, &codes) in texels.iter().enumerate() {
@@ -652,7 +658,8 @@ fn other_blends_masks_and_the_blend_color_store_metals_blend() {
                 };
                 let (texels, sources) = data(output);
                 let data = (output, texels.as_slice(), sources.as_slice());
-                let (read, noted) = draw((&lane, &messages), &state, (pf, order), data, bc);
+                let (read, noted) =
+                    draw((&lane, &messages), &state, (pf, order), data, (bc, &kinds));
                 let float = output == Output::Float;
                 let read_as = |x: f64| rounded(float, clamp01(x));
                 let mut wrong = Vec::new();
@@ -730,6 +737,32 @@ pub(super) static SRGB_BYTES: std::sync::LazyLock<Vec<u8>> = std::sync::LazyLock
 /// texels are Metal's is printed. Each draw prints a `FETCH-BLEND8` line.
 #[test]
 fn a_blended_four_channel_srgb_fetch_stores_metals_blend() {
+    srgb_blends(&[
+        (PixelFormat::BGRA8UnormSRGB, &[2, 1, 0, 3]),
+        (PixelFormat::RGBA8UnormSRGB, &[0, 1, 2, 3]),
+    ]);
+}
+
+/// A blended 8-bit one- or two-channel sRGB attachment (`R8Unorm_sRGB`, `RG8Unorm_sRGB`) fetched,
+/// as [`a_blended_four_channel_srgb_fetch_stores_metals_blend`] draws it, its alpha read as 1 and
+/// a missing color channel as 0. Metal's answer (the M3 Max under macOS 27.0.1, our probe `sb.m`
+/// of the same shape over both formats) is the same arithmetic in every channel of every state,
+/// both outputs and both maths, but `R8Unorm_sRGB`'s source-alpha forms under fast math with a
+/// `half4`, which the function computes in the rounded forms and notes (`UnmeasuredFetchBlend`,
+/// beside the pipeline's `HalfOutputFastMathBlend`): those draws print their count of texels the
+/// model gives and assert nothing more. On a
+/// device that renders the format through a word view (`WordAttachment`) the pipeline is
+/// refused, printed.
+#[test]
+fn a_blended_one_or_two_channel_srgb_fetch_stores_metals_blend() {
+    srgb_blends(&[
+        (PixelFormat::R8UnormSRGB, &[0]),
+        (PixelFormat::RG8UnormSRGB, &[0, 1]),
+    ]);
+}
+
+/// The draws of the sRGB blend tests over `formats`, each with its bytes' channels.
+fn srgb_blends(formats: &[(PixelFormat, &[usize])]) {
     use BlendFactor as F;
     use BlendOperation as O;
     // Premultiplied over: `fma(d, 1 - a, s)` under fast math, `s + d (1 - a)` without.
@@ -747,20 +780,19 @@ fn a_blended_four_channel_srgb_fetch_stores_metals_blend() {
         Some(over_form),
         Some(over_form),
     );
-    let kinds = NOTES.map(Degradation::from_precision_note);
+    let unmeasured = Degradation::from_precision_note(PrecisionNote::UnmeasuredFetchBlend);
+    let kinds: Vec<Degradation> = (NOTES.map(Degradation::from_precision_note).into_iter())
+        .chain([unmeasured])
+        .collect();
     let (messages, _cache, lane) = lane_with(|options| {
-        options.announce_each = kinds.into_iter().collect();
+        options.announce_each = kinds.iter().copied().collect();
     });
     let device = lane.device.name();
     let bytes = &*SRGB_BYTES;
-    let formats: [(PixelFormat, &[usize]); 2] = [
-        (PixelFormat::BGRA8UnormSRGB, &[2, 1, 0, 3]),
-        (PixelFormat::RGBA8UnormSRGB, &[0, 1, 2, 3]),
-    ];
     let mut drawn = 0;
     for fixture in &FIXTURES {
         let library = library(&lane, fixture.stem);
-        for (pf, order) in formats {
+        for &(pf, order) in formats {
             for &(entry, output) in &fixture.cases[..2] {
                 for ([color, alpha], mask, bc, color_form, alpha_form) in
                     std::iter::once(over).chain(states())
@@ -783,7 +815,9 @@ fn a_blended_four_channel_srgb_fetch_stores_metals_blend() {
                     };
                     let (texels, sources) = data(output);
                     let data = (output, texels.as_slice(), sources.as_slice());
-                    let (read, noted) = draw((&lane, &messages), &state, (pf, order), data, bc);
+                    let (read, noted) =
+                        draw((&lane, &messages), &state, (pf, order), data, (bc, &kinds));
+                    let bpp = order.len();
                     let float = output == Output::Float;
                     let read_as = |x: f64| rounded(float, clamp01(x));
                     // A code as Metal's blend reads it: a color byte's step over 4095, alpha's
@@ -797,13 +831,18 @@ fn a_blended_four_channel_srgb_fetch_stores_metals_blend() {
                     };
                     let mut wrong = Vec::new();
                     for (i, &codes) in texels.iter().enumerate() {
-                        let got = &read[4 * i..4 * i + 4];
+                        let got = &read[bpp * i..bpp * i + bpp];
                         let s = returned(output, order, (i, codes), &sources);
+                        // A format without alpha reads it as 1.
+                        let da = match order.contains(&3) {
+                            true => decoded(3, codes[3]),
+                            false => 1.0,
+                        };
                         let operands = |c: usize| Operands {
                             s: read_as(s[c]),
                             sa: read_as(s[3]),
                             d: decoded(c, codes[c]),
-                            da: decoded(3, codes[3]),
+                            da,
                             c: read_as(f64::from(bc[c])),
                             ca: read_as(f64::from(bc[3])),
                         };
@@ -834,7 +873,15 @@ fn a_blended_four_channel_srgb_fetch_stores_metals_blend() {
                         }
                     }
                     let what = format!("{entry} {color:?} {alpha:?} {mask:?} {bc:?}");
-                    if through_inputs(&lane) {
+                    if noted.contains(&unmeasured) {
+                        println!(
+                            "FETCH-BLEND8 {what} {pf:?} | {device} | through {} | the model's \
+                             {}/{} texels | announced {noted:?}",
+                            form(&lane),
+                            TEXELS - wrong.len(),
+                            TEXELS,
+                        );
+                    } else if through_inputs(&lane) {
                         println!(
                             "FETCH-BLEND8 {what} {pf:?} | {device} | through {} | Metal's {}/{} \
                              texels | announced {noted:?}",
