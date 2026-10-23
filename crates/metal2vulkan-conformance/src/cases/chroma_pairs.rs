@@ -33,7 +33,9 @@
 //! blits out of such regions, four host copies in and four host reads out, three copies between
 //! two textures of the format off the pairs, and four copies into a texture of `GBGR422`,
 //! `BGRG422`, `RG8Unorm` and `R16Uint`. Each read-back's bytes are recorded whole under a layout
-//! that names the row and the texel, so a diff says which texel of which sub-case moved.
+//! that names the row and the texel, so a diff says which texel of which sub-case moved. Every
+//! byte compares exactly; the case's three allowances are on the notices site alone, for the three
+//! kinds a device that does not decode 4:2:2 texels as Metal does announces while moving them.
 //!
 //! [`ChromaTexels`] is the lane's texel table, over a 16 x 16 texture of the format holding the
 //! lane's pattern, reached two ways through the owned fixture `fpv_swizzled_reads`:
@@ -68,6 +70,7 @@ use crate::replay::notice_allowance;
 use crate::transcript::{ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value};
 use crate::work::{Plane, Rect, Resource, Step, TextureSpec as WorkTexture, Work};
 use metal2vulkan::metal::{PixelFormat, SamplerAddressMode, SamplerMinMagFilter};
+use metal2vulkan_runtime::Degradation;
 
 /// The textures' side, as the lane makes them.
 const SIDE: u64 = 16;
@@ -569,6 +572,24 @@ impl Case for ChromaCopies {
         MetalSource::Run
     }
 
+    fn allowances(&self) -> Vec<Allowance> {
+        // Every byte of every read-back compares exactly; what differs is the notices site, which
+        // Metal records empty. A device whose own driver does not decode 4:2:2 texels as Metal
+        // does reaches them through the texture's decoded twin, decodes a host copy's rows on the
+        // CPU where it does not run a pass for them, and stages a copy between two such textures
+        // -- three kinds, each announced once per device. Each is named here, so the difference is
+        // justified only while that notice really fires; on a device that needs none of them, none
+        // of the three fires and the report counts them as unused.
+        [
+            Degradation::CarriedDecodedTwin,
+            Degradation::CpuBlockDecode,
+            Degradation::StagedTextureCopy,
+        ]
+        .into_iter()
+        .map(|kind| notice_allowance(kind.code()))
+        .collect()
+    }
+
     fn inputs(&self) -> Result<Vec<Input>, String> {
         // The tables and the bytes they move, named one by one, so a diff of a failed input
         // fingerprint says which of them changed rather than "the program".
@@ -712,9 +733,7 @@ impl Case for ChromaTexels {
         // nothing, so the notices site differs and that notice is what justifies it; every texel
         // still compares exactly. On a device that needs no twin the allowance simply does not
         // fire, which the report counts.
-        vec![notice_allowance(
-            metal2vulkan_runtime::Degradation::CarriedDecodedTwin.code(),
-        )]
+        vec![notice_allowance(Degradation::CarriedDecodedTwin.code())]
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
