@@ -852,6 +852,102 @@ fn the_gaps_between_rows_compare_where_the_case_asks() {
     }
 }
 
+/// An allowance in units in the last place reaches a float **inside a byte column**.
+///
+/// This is the shape every exact-numbers case needs and the one easiest to assume is missing: a
+/// case's answer is a buffer of `float`s, not a `Value::Float`, and `Loosening::Ulps` is written
+/// against `Value::Float`. The comparison reaches it because it consults the allowance twice --
+/// once over the whole `Value::Bytes`, where `Ulps` cannot hold and so falls through, and again
+/// per element, where `Element::read` has turned the four bytes into a `Value::Float` of the
+/// column's width. So the loosening works, and it works at the right granularity: the element
+/// that moved further than the bound is still named.
+///
+/// The test pins all three facts, because each could regress on its own: one ulp inside a bound of
+/// one is announced, two ulps is not, and the bound counts in the column's own width (a `F16`
+/// column's ulp is not a `F32` column's).
+#[test]
+fn an_ulps_allowance_reaches_a_float_inside_a_byte_column() {
+    let layout = |element: Element, elements: u32| ByteLayout {
+        region: Region::Buffer {
+            offset: 0,
+            length: u64::from(elements * element.size()),
+        },
+        element,
+        row_offset: 0,
+        row_elements: elements,
+        row_pitch: elements * element.size(),
+        rows: 1,
+        image_pitch: elements * element.size(),
+        images: 1,
+        gaps: Gaps::Ignored,
+    };
+    let site = |bytes: Vec<u8>, element: Element, elements: u32| {
+        Transcript::new(vec![Node::leaf(
+            "output",
+            Observed::bytes(bytes, layout(element, elements)),
+        )])
+    };
+    let words =
+        |words: &[u32]| -> Vec<u8> { words.iter().flat_map(|word| word.to_le_bytes()).collect() };
+    let allowance = |ulps: u32| {
+        vec![Allowance::new(
+            "case/output",
+            Loosening::Ulps(ulps),
+            Justification::Degradation(Degradation::DeviceTranscendentals.code().to_owned()),
+        )]
+    };
+    let announced = [Degradation::DeviceTranscendentals.code().to_owned()];
+
+    // One ulp of a `F32` column, inside a bound of one: announced, nothing divergent.
+    let metal = site(words(&[0x3f80_0000, 0x4000_0000]), Element::F32, 2);
+    let ours = site(words(&[0x3f80_0001, 0x4000_0000]), Element::F32, 2);
+    let found = compare(&metal, &ours, &allowance(1), Offered::notices(&announced));
+    assert!(
+        found.divergences.is_empty(),
+        "one ulp inside a bound of one: {:?}",
+        found.divergences
+    );
+    assert_eq!(found.announced.len(), 1);
+    assert_eq!(found.announced[0].path, "case/output");
+    assert_eq!(found.announced[0].count, 1);
+
+    // Two ulps against the same bound: the element that moved too far is still named.
+    let far = site(words(&[0x3f80_0002, 0x4000_0000]), Element::F32, 2);
+    let found = compare(&metal, &far, &allowance(1), Offered::notices(&announced));
+    assert_eq!(found.divergences.len(), 1);
+    assert_eq!(found.divergences[0].path, "case/output");
+    assert!(
+        matches!(
+            found.divergences[0].kind,
+            DivergenceKind::Element {
+                element: Element::F32,
+                index: 0,
+                ..
+            }
+        ),
+        "{:?}",
+        found.divergences[0].kind
+    );
+
+    // The bound counts in the column's own width: the same two bytes are one ulp apart as a
+    // `F16` column and so are announced, where as a `F32` column they are not comparable at all.
+    let halves =
+        |pair: [u16; 2]| -> Vec<u8> { pair.iter().flat_map(|half| half.to_le_bytes()).collect() };
+    let metal_half = site(halves([0x3c00, 0x4000]), Element::F16, 2);
+    let ours_half = site(halves([0x3c01, 0x4000]), Element::F16, 2);
+    let found = compare(
+        &metal_half,
+        &ours_half,
+        &allowance(1),
+        Offered::notices(&announced),
+    );
+    assert!(
+        found.divergences.is_empty(),
+        "one ulp of a half column: {:?}",
+        found.divergences
+    );
+}
+
 #[test]
 fn a_digest_only_recording_compares_by_its_digest() {
     let digested = |bytes: &[u8]| {

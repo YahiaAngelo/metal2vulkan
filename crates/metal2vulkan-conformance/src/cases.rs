@@ -16,7 +16,9 @@
 //!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
+pub mod depth_texel_reads;
 pub mod extended_range_planes;
+pub mod extended_range_two_planes;
 pub mod indirect_private_types;
 pub mod math_routines;
 pub mod mesh_barriers;
@@ -24,6 +26,7 @@ pub mod mesh_commands;
 pub mod mesh_draws;
 pub mod pass_bytes;
 pub mod rate_maps;
+pub mod rgb10a2_srgb;
 pub mod sample_fills;
 pub mod stage_in_regions;
 pub mod surface_fills;
@@ -31,6 +34,7 @@ pub mod texture_buffer_fills;
 pub mod texture_fills;
 pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
+pub mod two_plane_samples;
 
 use crate::case::Case;
 
@@ -46,6 +50,18 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.push(Box::new(stage_in_regions::stage_in_region_clamps()));
     for case in extended_range_planes::all() {
+        cases.push(Box::new(case));
+    }
+    for case in depth_texel_reads::all() {
+        cases.push(Box::new(case));
+    }
+    for case in extended_range_two_planes::all() {
+        cases.push(Box::new(case));
+    }
+    for case in two_plane_samples::all() {
+        cases.push(Box::new(case));
+    }
+    for case in rgb10a2_srgb::all() {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(texture_buffer_fills::streams()));

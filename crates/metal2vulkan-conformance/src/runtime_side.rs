@@ -9,11 +9,11 @@
 
 use crate::case::{
     Answer, Bindings, CommandDraw, Failure, Fill, Handle, IndirectReadBack, MeshCommand,
-    MeshFunctions, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, ShaderSource,
-    Side, StageInRegion, StageInput, Venue,
+    MeshFunctions, MeshStep, PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, SamplerSpec,
+    ShaderSource, Side, StageInRegion, StageInput, TextureRole, TextureSpec, Venue,
 };
 use crate::transcript::{Negative, Value};
-use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor};
+use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor};
 use metal2vulkan::metal::{
     BarrierScope, IndexType, IndirectCommandType, PixelFormat, PrimitiveType, RenderStages,
     ResourceUsage, TextureUsage,
@@ -27,7 +27,7 @@ use metal2vulkan_runtime::{
     Device, DrawPrimitiveType, IndirectCommand, IndirectCommandBuffer,
     IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
     LoadAction, PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor,
-    RenderPipelineState, ResourceOptions, ResourceRef, Size, StoreAction, Texture,
+    RenderPipelineState, ResourceOptions, ResourceRef, SamplerState, Size, StoreAction, Texture,
     TextureDescriptor,
 };
 use std::time::Duration;
@@ -44,6 +44,9 @@ pub struct RuntimeSide<'a> {
     pipelines: Vec<ComputePipelineState>,
     buffers: Vec<Buffer>,
     textures: Vec<Texture>,
+    /// The sampler states the case has made. Its own pool: a sampler state is its own runtime
+    /// object, not another name for one of the pools above.
+    samplers: Vec<SamplerState>,
     /// The rasterization-rate maps the case has made. Its own pool: a rate map is its own
     /// runtime object, not another name for one of the pools above.
     rate_maps: Vec<RasterizationRateMap>,
@@ -67,6 +70,7 @@ impl<'a> RuntimeSide<'a> {
             pipelines: Vec::new(),
             buffers: Vec::new(),
             textures: Vec::new(),
+            samplers: Vec::new(),
             rate_maps: Vec::new(),
             command_buffers: Vec::new(),
             mesh_pipelines: Vec::new(),
@@ -133,6 +137,13 @@ impl<'a> RuntimeSide<'a> {
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
     }
 
+    /// The sampler state `handle` names.
+    fn held_sampler(&self, handle: Handle) -> Answer<&SamplerState> {
+        self.samplers
+            .get(handle.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("sampler {}", handle.0)))
+    }
+
     /// The rasterization-rate map `handle` names.
     fn held_rate_map(&self, handle: Handle) -> Answer<&RasterizationRateMap> {
         self.rate_maps
@@ -163,6 +174,11 @@ impl<'a> RuntimeSide<'a> {
             .iter()
             .map(|handle| self.held_texture(*handle).cloned())
             .collect::<Answer<Vec<Texture>>>()?;
+        let states: Vec<SamplerState> = bindings
+            .samplers
+            .iter()
+            .map(|handle| self.held_sampler(*handle).cloned())
+            .collect::<Answer<Vec<SamplerState>>>()?;
         let state = self
             .pipelines
             .get(pipeline.0 as usize)
@@ -188,6 +204,11 @@ impl<'a> RuntimeSide<'a> {
                 .set_texture(Some(texture), at as u32)
                 .map_err(Failure::from_error)?;
         }
+        for (at, sampler) in states.iter().enumerate() {
+            encoder
+                .set_sampler_state(Some(sampler), at as u32)
+                .map_err(Failure::from_error)?;
+        }
         for region in stage_in {
             match region {
                 StageInRegion::Direct { origin, size } => encoder
@@ -209,6 +230,15 @@ impl<'a> RuntimeSide<'a> {
         encoder.end_encoding().map_err(Failure::from_error)?;
         command_buffer.commit().map_err(Failure::from_error)?;
         Ok(keep(&mut self.command_buffers, command_buffer))
+    }
+}
+
+/// The usage a texture's role is.
+fn usage_of(role: TextureRole) -> TextureUsage {
+    match role {
+        TextureRole::Read => TextureUsage::SHADER_READ,
+        TextureRole::Write => TextureUsage::SHADER_WRITE,
+        TextureRole::ReadWrite => TextureUsage::SHADER_READ | TextureUsage::SHADER_WRITE,
     }
 }
 
@@ -374,6 +404,69 @@ impl Side for RuntimeSide<'_> {
             )
             .map_err(Failure::from_error)?;
         Ok(bytes)
+    }
+
+    fn texture_2d_in_role(&mut self, spec: &TextureSpec, bytes: &[u8]) -> Answer<Handle> {
+        let mut descriptor = TextureDescriptor::texture_2d(
+            spec.format,
+            spec.size[0].into(),
+            spec.size[1].into(),
+            false,
+        );
+        descriptor.usage = usage_of(spec.role);
+        descriptor.resource_options = ResourceOptions::shared();
+        let texture = self
+            .device
+            .new_texture(&descriptor)
+            .map_err(|error| Failure::of(&error))?;
+        if !bytes.is_empty() {
+            texture
+                .replace_region(
+                    Region::new_2d(0, 0, spec.size[0].into(), spec.size[1].into()),
+                    0,
+                    0,
+                    bytes,
+                    spec.row_pitch.into(),
+                    0,
+                )
+                .map_err(Failure::from_error)?;
+        }
+        Ok(keep(&mut self.textures, texture))
+    }
+
+    fn replace_region(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<()> {
+        let texture = self.held_texture(texture)?;
+        texture
+            .replace_region(
+                Region::new_2d(0, 0, size[0].into(), size[1].into()),
+                0,
+                0,
+                bytes,
+                row_pitch.into(),
+                0,
+            )
+            .map_err(Failure::from_error)
+    }
+
+    fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
+        let mut descriptor = SamplerDescriptor::new();
+        descriptor.min_filter = spec.min_filter;
+        descriptor.mag_filter = spec.mag_filter;
+        descriptor.s_address_mode = spec.s_address_mode;
+        descriptor.t_address_mode = spec.t_address_mode;
+        descriptor.border_color = spec.border_color;
+        descriptor.normalized_coordinates = spec.normalized_coordinates;
+        let sampler = self
+            .device
+            .new_sampler_state(&descriptor)
+            .map_err(|error| Failure::of(&error))?;
+        Ok(keep(&mut self.samplers, sampler))
     }
 
     fn dispatch(

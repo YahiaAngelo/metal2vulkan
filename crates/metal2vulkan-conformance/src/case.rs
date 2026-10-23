@@ -18,7 +18,10 @@ use crate::allowance::Allowance;
 use crate::recording::ShaderRef;
 use crate::transcript::{Node, NodeName, Observed, Sites, Transcript, Value};
 use crate::verdict::device_gap;
-use metal2vulkan::metal::{AttributeFormat, IndexType, PixelFormat, StepFunction};
+use metal2vulkan::metal::{
+    AttributeFormat, IndexType, PixelFormat, SamplerAddressMode, SamplerBorderColor,
+    SamplerMinMagFilter, StepFunction,
+};
 
 /// A shader as both sides can take it.
 ///
@@ -42,7 +45,8 @@ pub struct ShaderSource<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Handle(pub u32);
 
-/// What a dispatch binds: the buffers at 0 up, and the textures at 0 up.
+/// What a dispatch binds: the buffers at 0 up, the textures at 0 up, and the sampler states at 0
+/// up.
 ///
 /// One value rather than one argument per kind, so a case that binds a kind the vocabulary gains
 /// later does not change every call site, and so a reader of a case sees the whole argument table
@@ -53,6 +57,9 @@ pub struct Bindings<'a> {
     pub buffers: &'a [Handle],
     /// The textures, bound at Metal texture index 0 up in this order.
     pub textures: &'a [Handle],
+    /// The sampler states, bound at Metal sampler index 0 up in this order
+    /// (`setSamplerState:atIndex:`).
+    pub samplers: &'a [Handle],
 }
 
 impl<'a> Bindings<'a> {
@@ -61,6 +68,7 @@ impl<'a> Bindings<'a> {
         Self {
             buffers,
             textures: &[],
+            samplers: &[],
         }
     }
 
@@ -69,7 +77,139 @@ impl<'a> Bindings<'a> {
         Self {
             buffers: &[],
             textures,
+            samplers: &[],
         }
+    }
+
+    /// `textures` at 0 up, `buffers` at 0 up, and no sampler.
+    pub const fn new(textures: &'a [Handle], buffers: &'a [Handle]) -> Self {
+        Self {
+            buffers,
+            textures,
+            samplers: &[],
+        }
+    }
+
+    /// The bindings with `samplers` bound at sampler index 0 up.
+    #[must_use]
+    pub const fn sampled(mut self, samplers: &'a [Handle]) -> Self {
+        self.samplers = samplers;
+        self
+    }
+}
+
+/// What a case's texture is for, which is the usage and storage the side makes it with.
+///
+/// A case states this rather than letting each side choose, because Metal refuses a depth texture
+/// of shader-write usage and a sampled read of a write-only one: the role is part of what the case
+/// means.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextureRole {
+    /// `MTLTextureUsageShaderRead`: a texture a kernel reads or samples.
+    Read,
+    /// `MTLTextureUsageShaderWrite`: a texture a kernel writes.
+    Write,
+    /// Both, as [`Side::texture_2d`] makes one.
+    ReadWrite,
+}
+
+/// A 2D texture a case makes: `MTLTextureDescriptor`'s facts as the cases need them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextureSpec {
+    /// The pixel format, by its raw `MTLPixelFormat` value, so a case may name one of Apple's
+    /// private formats (the two-plane extended-range family) as readily as a public one.
+    pub format: PixelFormat,
+    pub size: [u32; 2],
+    /// Bytes a row of the bytes the case hands in and reads back. Every case states its own, since
+    /// the pitch is part of what the case means.
+    pub row_pitch: u32,
+    pub role: TextureRole,
+}
+
+impl TextureSpec {
+    /// A texture of `format`, `size` texels, at `row_pitch` bytes a row, in the role `role`.
+    pub const fn new(
+        format: PixelFormat,
+        size: [u32; 2],
+        row_pitch: u32,
+        role: TextureRole,
+    ) -> Self {
+        Self {
+            format,
+            size,
+            row_pitch,
+            role,
+        }
+    }
+}
+
+/// A sampler state a case makes: `MTLSamplerDescriptor`'s facts a sampled case states.
+///
+/// The vocabulary is Metal's own enumerations as the translator's public API names them, so a value
+/// a case writes reaches `MTLSamplerMinMagFilter`, `MTLSamplerAddressMode` and
+/// `MTLSamplerBorderColor` by their raw ordinals and reaches the runtime's descriptor unchanged.
+/// There is no second spelling to keep in step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SamplerSpec {
+    pub min_filter: SamplerMinMagFilter,
+    pub mag_filter: SamplerMinMagFilter,
+    pub s_address_mode: SamplerAddressMode,
+    pub t_address_mode: SamplerAddressMode,
+    pub border_color: SamplerBorderColor,
+    /// `normalizedCoordinates`: `false` is a pixel-coordinate sampler.
+    pub normalized_coordinates: bool,
+}
+
+impl SamplerSpec {
+    /// `MTLSamplerDescriptor`'s defaults: nearest filtering without mipmaps, clamp to edge,
+    /// transparent black borders, normalized coordinates.
+    pub const fn new() -> Self {
+        Self {
+            min_filter: SamplerMinMagFilter::Nearest,
+            mag_filter: SamplerMinMagFilter::Nearest,
+            s_address_mode: SamplerAddressMode::ClampToEdge,
+            t_address_mode: SamplerAddressMode::ClampToEdge,
+            border_color: SamplerBorderColor::TransparentBlack,
+            normalized_coordinates: true,
+        }
+    }
+
+    /// The defaults with `filter` as both the minifying and the magnifying filter.
+    pub const fn filtered(filter: SamplerMinMagFilter) -> Self {
+        let mut spec = Self::new();
+        spec.min_filter = filter;
+        spec.mag_filter = filter;
+        spec
+    }
+
+    /// The sampler with `mode` on both axes.
+    #[must_use]
+    pub const fn addressed(mut self, mode: SamplerAddressMode) -> Self {
+        self.s_address_mode = mode;
+        self.t_address_mode = mode;
+        self
+    }
+
+    /// The words the case's input fingerprint covers: every field, so a sampler state that moves
+    /// is a change to the case's inputs.
+    pub fn words(&self) -> Vec<u8> {
+        [
+            self.min_filter.as_raw(),
+            self.mag_filter.as_raw(),
+            self.s_address_mode.as_raw(),
+            self.t_address_mode.as_raw(),
+            self.border_color.as_raw(),
+            u32::from(self.normalized_coordinates),
+        ]
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .collect()
+    }
+}
+
+impl Default for SamplerSpec {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -280,6 +420,40 @@ pub trait Side {
     /// `getBytes:bytesPerRow:fromRegion:mipmapLevel:` of a texture's whole level 0, at `row_pitch`
     /// bytes a row.
     fn read_texture(&mut self, texture: Handle, size: [u32; 2], row_pitch: u32) -> Answer<Vec<u8>>;
+
+    /// A 2D texture the case describes whole ([`TextureSpec`]): one level, of shared storage, in
+    /// the usage its role names, whose level 0 is then `bytes` at the spec's row pitch.
+    ///
+    /// [`Side::texture_2d`] is the read-and-write case of this; a case that samples a texture, or
+    /// writes one of a format Metal holds no readable-and-writable texture of, states its role
+    /// here instead.
+    fn texture_2d_in_role(&mut self, spec: &TextureSpec, bytes: &[u8]) -> Answer<Handle> {
+        let _ = (spec, bytes);
+        Err(Failure::unavailable("texture_2d_in_role"))
+    }
+
+    /// `replaceRegion:mipmapLevel:withBytes:bytesPerRow:` of a texture's whole level 0, at
+    /// `row_pitch` bytes a row.
+    ///
+    /// A case that writes a texture twice in a stated order needs this: making it with its bytes
+    /// cannot say "the kernel wrote the alpha plane first, then the host wrote the colour words",
+    /// and that order is part of what such a case means.
+    fn replace_region(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<()> {
+        let _ = (texture, size, row_pitch, bytes);
+        Err(Failure::unavailable("replace_region"))
+    }
+
+    /// `newSamplerStateWithDescriptor:` of the state the case describes ([`SamplerSpec`]).
+    fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
+        let _ = spec;
+        Err(Failure::unavailable("sampler"))
+    }
 
     /// One command buffer with one compute encoder: the pipeline set, `bindings` bound at 0 up per
     /// kind, one `dispatchThreadgroups:threadsPerThreadgroup:`, and `commit`.

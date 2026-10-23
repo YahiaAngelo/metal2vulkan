@@ -14,8 +14,8 @@
 
 use crate::case::{
     Answer, Bindings, CommandDraw, Failure, Handle, MeshCommand, MeshFunctions, MeshStep,
-    PassOutcome, RateMapFacts, RateMapRequest, ShaderSource, Side, StageInRegion, StageInput,
-    Venue,
+    PassOutcome, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion,
+    StageInput, TextureRole, TextureSpec, Venue,
 };
 use crate::transcript::Value;
 use metal2vulkan::metal::PixelFormat;
@@ -33,8 +33,9 @@ use objc2_metal::{
     MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
     MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage,
-    MTLSize, MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode, MTLStoreAction,
-    MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+    MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter,
+    MTLSamplerState, MTLSize, MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode,
+    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -49,6 +50,9 @@ pub struct MetalSide {
     pipelines: Vec<Retained<ProtocolObject<dyn MTLComputePipelineState>>>,
     buffers: Vec<Retained<ProtocolObject<dyn MTLBuffer>>>,
     textures: Vec<Retained<ProtocolObject<dyn MTLTexture>>>,
+    /// The sampler states the case has made. Its own pool: a sampler state is its own Metal
+    /// object, not another name for one of the pools above.
+    samplers: Vec<Retained<ProtocolObject<dyn MTLSamplerState>>>,
     command_buffers: Vec<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
     /// The mesh render pipeline states the case has made.
     mesh_pipelines: Vec<Retained<ProtocolObject<dyn MTLRenderPipelineState>>>,
@@ -76,6 +80,7 @@ impl MetalSide {
             pipelines: Vec::new(),
             buffers: Vec::new(),
             textures: Vec::new(),
+            samplers: Vec::new(),
             command_buffers: Vec::new(),
             mesh_pipelines: Vec::new(),
             command_buffers_indirect: Vec::new(),
@@ -98,6 +103,14 @@ impl MetalSide {
             .get(handle.0 as usize)
             .map(|texture| &**texture)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+    }
+
+    /// The sampler state `handle` names.
+    fn held_sampler(&self, handle: Handle) -> Answer<&ProtocolObject<dyn MTLSamplerState>> {
+        self.samplers
+            .get(handle.0 as usize)
+            .map(|sampler| &**sampler)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("sampler {}", handle.0)))
     }
 
     /// The rasterization-rate map `handle` names.
@@ -131,6 +144,11 @@ impl MetalSide {
             .iter()
             .map(|handle| self.held_texture(*handle).map(Retained::from))
             .collect::<Answer<Vec<_>>>()?;
+        let states: Vec<Retained<ProtocolObject<dyn MTLSamplerState>>> = bindings
+            .samplers
+            .iter()
+            .map(|handle| self.held_sampler(*handle).map(Retained::from))
+            .collect::<Answer<Vec<_>>>()?;
         let state = self
             .pipelines
             .get(pipeline.0 as usize)
@@ -153,6 +171,11 @@ impl MetalSide {
             // SAFETY: the texture is of the kind and access the kernel declares at that slot, and
             // the encoder outlives the call.
             unsafe { encoder.setTexture_atIndex(Some(texture), at) };
+        }
+        for (at, sampler) in states.iter().enumerate() {
+            // SAFETY: the kernel declares a sampler at that slot, and the encoder outlives the
+            // call.
+            unsafe { encoder.setSamplerState_atIndex(Some(sampler), at) };
         }
         for region in stage_in {
             match region {
@@ -439,6 +462,129 @@ impl Side for MetalSide {
             );
         }
         Ok(bytes)
+    }
+
+    fn texture_2d_in_role(&mut self, spec: &TextureSpec, bytes: &[u8]) -> Answer<Handle> {
+        // SAFETY: the descriptor constructor reads only the format and the size it is given.
+        let descriptor = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                MTLPixelFormat(spec.format.as_raw() as usize),
+                spec.size[0] as usize,
+                spec.size[1] as usize,
+                false,
+            )
+        };
+        descriptor.setUsage(match spec.role {
+            TextureRole::Read => MTLTextureUsage::ShaderRead,
+            TextureRole::Write => MTLTextureUsage::ShaderWrite,
+            TextureRole::ReadWrite => MTLTextureUsage::ShaderRead | MTLTextureUsage::ShaderWrite,
+        });
+        descriptor.setStorageMode(MTLStorageMode::Shared);
+        let texture = self
+            .device
+            .newTextureWithDescriptor(&descriptor)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewTextureWithDescriptor",
+                    format!(
+                        "{:?} {}x{} returned nil",
+                        spec.format, spec.size[0], spec.size[1]
+                    ),
+                )
+            })?;
+        if !bytes.is_empty() {
+            if bytes.len() < spec.row_pitch as usize * spec.size[1] as usize {
+                return Err(Failure::named(
+                    "TooFewBytes",
+                    format!(
+                        "{} bytes for {} rows of {}",
+                        bytes.len(),
+                        spec.size[1],
+                        spec.row_pitch
+                    ),
+                ));
+            }
+            let region = MTLRegion {
+                origin: MTLOrigin { x: 0, y: 0, z: 0 },
+                size: MTLSize {
+                    width: spec.size[0] as usize,
+                    height: spec.size[1] as usize,
+                    depth: 1,
+                },
+            };
+            // SAFETY: `bytes` holds the rows of the pitch the region writes, checked just above.
+            unsafe {
+                texture.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+                    region,
+                    0,
+                    std::ptr::NonNull::from(bytes).cast(),
+                    spec.row_pitch as usize,
+                );
+            }
+        }
+        Ok(keep(&mut self.textures, texture))
+    }
+
+    fn replace_region(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<()> {
+        if bytes.len() < row_pitch as usize * size[1] as usize {
+            return Err(Failure::named(
+                "TooFewBytes",
+                format!("{} bytes for {} rows of {row_pitch}", bytes.len(), size[1]),
+            ));
+        }
+        let texture: Retained<ProtocolObject<dyn MTLTexture>> =
+            Retained::from(self.held_texture(texture)?);
+        let region = MTLRegion {
+            origin: MTLOrigin { x: 0, y: 0, z: 0 },
+            size: MTLSize {
+                width: size[0] as usize,
+                height: size[1] as usize,
+                depth: 1,
+            },
+        };
+        // SAFETY: `bytes` holds `size[1]` rows of `row_pitch` bytes, checked just above, which is
+        // the region the call writes.
+        unsafe {
+            texture.replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+                region,
+                0,
+                std::ptr::NonNull::from(bytes).cast(),
+                row_pitch as usize,
+            );
+        }
+        Ok(())
+    }
+
+    fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
+        let filter = |filter: metal2vulkan::metal::SamplerMinMagFilter| {
+            MTLSamplerMinMagFilter(filter.as_raw() as usize)
+        };
+        let address = |mode: metal2vulkan::metal::SamplerAddressMode| {
+            MTLSamplerAddressMode(mode.as_raw() as usize)
+        };
+        let descriptor = MTLSamplerDescriptor::new();
+        descriptor.setMinFilter(filter(spec.min_filter));
+        descriptor.setMagFilter(filter(spec.mag_filter));
+        descriptor.setSAddressMode(address(spec.s_address_mode));
+        descriptor.setTAddressMode(address(spec.t_address_mode));
+        descriptor.setBorderColor(MTLSamplerBorderColor(spec.border_color.as_raw() as usize));
+        descriptor.setNormalizedCoordinates(spec.normalized_coordinates);
+        let sampler = self
+            .device
+            .newSamplerStateWithDescriptor(&descriptor)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewSamplerStateWithDescriptor",
+                    format!("{spec:?} returned nil"),
+                )
+            })?;
+        Ok(keep(&mut self.samplers, sampler))
     }
 
     fn dispatch(
