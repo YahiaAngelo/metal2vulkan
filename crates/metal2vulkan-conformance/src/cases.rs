@@ -55,6 +55,7 @@ pub mod compressed_blits;
 pub mod compressed_decode;
 pub mod compressed_moves;
 pub mod compressed_views;
+pub mod compute_render_chains;
 pub mod compute_threadgroups;
 pub mod denormal_word_fetches;
 pub mod depth_texel_reads;
@@ -331,6 +332,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(rotated_targets::all());
     cases.extend(rotated_planes::all());
     cases.extend(render_chains::boxed());
+    cases.extend(compute_render_chains::boxed());
     cases
 }
 
