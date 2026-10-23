@@ -82,6 +82,7 @@ pub mod mesh_barriers;
 pub mod mesh_commands;
 pub mod mesh_draws;
 pub mod nearest_positions;
+pub mod norm_storage_writes;
 pub mod pass_bytes;
 pub mod pixel_downscales;
 pub mod pixel_samplers;
@@ -317,6 +318,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in shared_exponent_storage::all() {
         cases.push(Box::new(case));
     }
+    cases.extend(norm_storage_writes::NormStorageWrites::all());
     cases.extend(texel_swizzles::all());
     for case in swizzled_storage::all() {
         cases.push(Box::new(case));
