@@ -26,9 +26,11 @@
 //! still counted, because its rows are open bugs rather than accepted differences.
 //!
 //! `cost` is the other half ([`metal2vulkan_conformance::cost`]): it runs our side alone and says
-//! what the runtime did to answer each case, by count. `--runs N` runs the whole selection N times,
-//! each round on a fresh device, so a count that is not deterministic is seen to move rather than
-//! assumed; `--write` puts the bounds in the cases' own recordings. `replay` then holds each case
+//! what the runtime did to answer each case, by count. `--runs N` runs the whole selection N times
+//! (eight by default), each round on a fresh device, so a count that is not deterministic is seen
+//! to move rather than assumed; `--write` puts the bounds in the cases' own recordings, and
+//! `--show` prints every count a case moved, which is what a contrast run reads. `replay` then
+//! holds each case
 //! to them and reports the cost verdicts in their own section. Counts are ours and not Metal's, so
 //! they never touch a correctness verdict — but a case going over its bounds does fail the run, on
 //! its own line of the exit status.
@@ -54,7 +56,12 @@ fn command() -> Result<bool, String> {
     let mut venues = Venues::Gpu;
     let mut policy = Policy::Exact;
     let mut names = Vec::new();
-    let mut runs = 2;
+    // The rounds `cost` takes when nothing says otherwise. Eight, measured: a count the
+    // measurement never sees move is gated, and `host_texel_copies` in
+    // `chroma-pair-texel-reads-bgrg422` held at 2 over three rounds and over two whole-set
+    // replays, then reached 3 — and running that case alone for eight rounds moved it 2..3. A rare
+    // second arm is the one thing a thin measurement turns into a false regression.
+    let mut runs = 8;
     let mut write = false;
     let mut show = false;
     let mut words = words.peekable();
