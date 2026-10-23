@@ -252,6 +252,16 @@ reading that depends on what ran before the case — which is exactly what the t
 means. It is also why the record names both measurements, `measured` and `contrasted`: a record with
 no `contrasted` has had no contrast taken, and claims nothing about composition.
 
+The recordings' own history is the check on that claim, and it is the answer to the doubt a reader
+arrives with: a count like `command_buffers_begun`, which the contrast finds composition-dependent
+in 110 cases, looks as though the 328 cases where the two shapes agreed agreed only by accident of
+one selection. Over every re-measure of a case whose body did not change, where the selection size
+changed between the two measurements, and after the two shapes were split into their own commands,
+**11,376 gated readings across 132 counts survived the set growing 541 to 579 and 579 to 686
+without one of them moving.** A count moving in both directions is why it cannot take the
+`MONOTONE` shortcut — the lone run is not its ceiling, so there is no single reading to gate at
+without the contrast. It is not a reason to stop gating it.
+
 A whole-set record is still evidence for a whole-set run and nothing else, so a run of fewer cases
 reads `unmeasured`. To read one case's two shapes by hand:
 
