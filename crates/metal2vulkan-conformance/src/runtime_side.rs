@@ -32,7 +32,7 @@ use metal2vulkan::pipeline::{
 };
 use metal2vulkan_runtime::{
     BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue,
-    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor,
+    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor, Viewport,
 };
 use std::time::Duration;
 
@@ -1642,6 +1642,7 @@ impl Side for RuntimeSide<'_> {
         let buffers: Vec<Buffer> = self.buffers.clone();
         let states: Vec<RenderPipelineState> = self.render_pipelines.clone();
         let depth_stencil: Vec<DepthStencilState> = self.depth_stencil_states.clone();
+        let samplers: Vec<SamplerState> = self.samplers.clone();
         let computes: Vec<ComputePipelineState> = self.pipelines.clone();
         let texture = |handle: Handle| -> Answer<&Texture> {
             textures
@@ -1667,6 +1668,7 @@ impl Side for RuntimeSide<'_> {
                     &buffers,
                     &states,
                     &depth_stencil,
+                    &samplers,
                 ),
                 RenderWork::ReadTexture {
                     texture: from,
@@ -1913,7 +1915,13 @@ fn encode_pass(
     buffers: &[Buffer],
     states: &[RenderPipelineState],
     depth_stencil: &[DepthStencilState],
+    samplers: &[SamplerState],
 ) -> Answer<()> {
+    let sampler = |handle: Handle| -> Answer<&SamplerState> {
+        samplers
+            .get(handle.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("sampler {}", handle.0)))
+    };
     let texture = |handle: Handle| -> Answer<&Texture> {
         textures
             .get(handle.0 as usize)
@@ -2004,6 +2012,31 @@ fn encode_pass(
                 index,
             } => encoder
                 .set_fragment_buffer(Some(buffer(*held)?), *offset, *index)
+                .map_err(Failure::from_error)?,
+            RenderStep::FragmentTexture {
+                texture: held,
+                index,
+            } => encoder
+                .set_fragment_texture(Some(texture(*held)?), *index)
+                .map_err(Failure::from_error)?,
+            RenderStep::FragmentSampler {
+                sampler: held,
+                index,
+            } => encoder
+                .set_fragment_sampler_state(Some(sampler(*held)?), *index)
+                .map_err(Failure::from_error)?,
+            RenderStep::VertexBytes { bytes, index } => encoder
+                .set_vertex_bytes(bytes, *index)
+                .map_err(Failure::from_error)?,
+            RenderStep::Viewport(rect) => encoder
+                .set_viewport(Viewport::new(
+                    rect.origin[0],
+                    rect.origin[1],
+                    rect.size[0],
+                    rect.size[1],
+                    rect.depth[0],
+                    rect.depth[1],
+                ))
                 .map_err(Failure::from_error)?,
             RenderStep::VisibilityResultMode { mode, offset } => encoder
                 .set_visibility_result_mode(*mode, *offset)

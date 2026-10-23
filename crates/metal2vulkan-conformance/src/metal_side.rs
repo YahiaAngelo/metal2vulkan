@@ -33,7 +33,22 @@ use objc2_foundation::{NSString, NSURL};
 use objc2_metal::{
     MTLAttributeFormat, MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType,
     MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLClearColor,
-    MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder, MTLComputePipelineDescriptor, MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction, MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter, MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap, MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState, MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLSharedEvent, MTLSize, MTLStageInputOutputDescriptor, MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType, MTLTextureUsage, MTLTileRenderPipelineDescriptor, MTLVisibilityResultMode,
+    MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder,
+    MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder, MTLComputePipelineDescriptor,
+    MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDepthStencilDescriptor,
+    MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction, MTLIndexType, MTLIndirectCommandBuffer,
+    MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand,
+    MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
+    MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
+    MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
+    MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
+    MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
+    MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerAddressMode,
+    MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
+    MTLSharedEvent, MTLSize, MTLStageInputOutputDescriptor, MTLStencilDescriptor,
+    MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLTexture,
+    MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType,
+    MTLTextureUsage, MTLTileRenderPipelineDescriptor, MTLViewport, MTLVisibilityResultMode,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -2331,6 +2346,36 @@ impl MetalSide {
                     );
                 }
             }
+            RenderStep::FragmentTexture { texture, index } => {
+                let held = self.held_texture(*texture)?;
+                // SAFETY: the texture is of the kind and access the fragment function declares at
+                // that slot, and the encoder outlives the call.
+                unsafe { encoder.setFragmentTexture_atIndex(Some(held), *index as usize) };
+            }
+            RenderStep::FragmentSampler { sampler, index } => {
+                let held = self.held_sampler(*sampler)?;
+                // SAFETY: the fragment function declares a sampler at that slot, and the encoder
+                // outlives the call.
+                unsafe { encoder.setFragmentSamplerState_atIndex(Some(held), *index as usize) };
+            }
+            RenderStep::VertexBytes { bytes, index } => {
+                let pointer =
+                    std::ptr::NonNull::new(bytes.as_ptr().cast::<std::ffi::c_void>().cast_mut())
+                        .ok_or_else(|| Failure::named("NoBytes", "an empty inline binding"))?;
+                // SAFETY: `bytes` lives for the call, which copies them, and is at least as long
+                // as the vertex function's binding at that slot.
+                unsafe {
+                    encoder.setVertexBytes_length_atIndex(pointer, bytes.len(), *index as usize)
+                };
+            }
+            RenderStep::Viewport(rect) => encoder.setViewport(MTLViewport {
+                originX: rect.origin[0],
+                originY: rect.origin[1],
+                width: rect.size[0],
+                height: rect.size[1],
+                znear: rect.depth[0],
+                zfar: rect.depth[1],
+            }),
             RenderStep::VisibilityResultMode { mode, offset } => {
                 encoder.setVisibilityResultMode_offset(
                     MTLVisibilityResultMode(mode.raw() as usize),

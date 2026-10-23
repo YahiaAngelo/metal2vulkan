@@ -603,6 +603,56 @@ impl PassColor {
     }
 }
 
+/// One viewport: `MTLViewport`'s six numbers.
+///
+/// The depths are kept beside the rectangle because `znear` and `zfar` are part of the same Metal
+/// call, and a case that sets a viewport without saying what it does to depth would be two
+/// questions in one.
+///
+/// Two viewports are the same viewport when their six numbers hold the same bits, which is how the
+/// input fingerprint reads them too ([`ViewportRect::words`]). Comparing the bits rather than the
+/// numbers keeps the equality reflexive, so the type is honestly [`Eq`] despite holding `f64`s, and
+/// it is what a case wants: a viewport edge one `f64` step away is a different viewport.
+#[derive(Clone, Copy, Debug)]
+pub struct ViewportRect {
+    /// `originX` and `originY`, in pixels.
+    pub origin: [f64; 2],
+    /// `width` and `height`, in pixels; a negative extent mirrors the draw, as Metal's does.
+    pub size: [f64; 2],
+    /// `znear` and `zfar`.
+    pub depth: [f64; 2],
+}
+
+impl PartialEq for ViewportRect {
+    fn eq(&self, other: &Self) -> bool {
+        self.words() == other.words()
+    }
+}
+
+impl Eq for ViewportRect {}
+
+impl ViewportRect {
+    /// A viewport of `origin` and `size` over the whole depth range.
+    pub const fn new(origin: [f64; 2], size: [f64; 2]) -> Self {
+        Self {
+            origin,
+            size,
+            depth: [0.0, 1.0],
+        }
+    }
+
+    /// The words a case's input fingerprint covers: every number by its bits, so a viewport edge
+    /// that moves by one `f64` step is a change to the case's inputs.
+    pub fn words(&self) -> Vec<u8> {
+        self.origin
+            .iter()
+            .chain(&self.size)
+            .chain(&self.depth)
+            .flat_map(|number| number.to_bits().to_le_bytes())
+            .collect()
+    }
+}
+
 /// One command a case encodes into a render pass, in the order it lists them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RenderStep {
@@ -625,6 +675,18 @@ pub enum RenderStep {
         offset: u64,
         index: u32,
     },
+    /// `setFragmentTexture:atIndex:`.
+    FragmentTexture { texture: Handle, index: u32 },
+    /// `setFragmentSamplerState:atIndex:`.
+    FragmentSampler { sampler: Handle, index: u32 },
+    /// `setVertexBytes:length:atIndex:`: a vertex binding whose bytes the call copies.
+    ///
+    /// A case uses this where the binding is a handful of bytes that change every draw — a point's
+    /// two coordinates — because a buffer a draw would be hundreds of allocations saying the same
+    /// thing, and because the inline binding is its own Metal path.
+    VertexBytes { bytes: Vec<u8>, index: u32 },
+    /// `setViewport:`.
+    Viewport(ViewportRect),
     /// `setVisibilityResultMode:offset:`. A pass that sets one needs a visibility-result buffer
     /// ([`RenderPass::counting_into`]); setting it without one is a refusal a case may be asking
     /// about.
@@ -710,6 +772,10 @@ impl RenderStep {
             RenderStep::StencilReference(_) => "setStencilReferenceValue",
             RenderStep::VertexBuffer { .. } => "setVertexBuffer",
             RenderStep::FragmentBuffer { .. } => "setFragmentBuffer",
+            RenderStep::FragmentTexture { .. } => "setFragmentTexture",
+            RenderStep::FragmentSampler { .. } => "setFragmentSamplerState",
+            RenderStep::VertexBytes { .. } => "setVertexBytes",
+            RenderStep::Viewport(_) => "setViewport",
             RenderStep::VisibilityResultMode { .. } => "setVisibilityResultMode",
             RenderStep::Draw { .. } => "drawPrimitives",
             RenderStep::DrawIndexed { .. } => "drawIndexedPrimitives",
@@ -729,6 +795,21 @@ impl RenderStep {
                 bytes.extend(offset.to_le_bytes());
                 bytes.extend(index.to_le_bytes());
             }
+            // A texture or a sampler a step names is fingerprinted by the case through its own
+            // texels or its own descriptor words, as a buffer is, so only the binding index is the
+            // call's own parameter here.
+            RenderStep::FragmentTexture { index, .. }
+            | RenderStep::FragmentSampler { index, .. } => bytes.extend(index.to_le_bytes()),
+            // The inline bytes and the viewport are the case's own values rather than a handle, so
+            // they are part of what the case feeds its run and the fingerprint covers them whole.
+            RenderStep::VertexBytes {
+                bytes: inline,
+                index,
+            } => {
+                bytes.extend(inline);
+                bytes.extend(index.to_le_bytes());
+            }
+            RenderStep::Viewport(rect) => bytes.extend(rect.words()),
             RenderStep::VisibilityResultMode { mode, offset } => {
                 bytes.extend(mode.raw().to_le_bytes());
                 bytes.extend(offset.to_le_bytes());
@@ -902,5 +983,143 @@ impl RenderWork {
             RenderWork::ReadTexture { .. } => "copyFromTextureToBuffer",
             RenderWork::Dispatch(_) => "dispatchThreads",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    /// A handle to name in a step. Which handle a step holds never reaches the fingerprint, so any
+    /// one will do here.
+    fn handle() -> Handle {
+        Handle(0)
+    }
+
+    /// Every step this module's four additions brought names a Metal call no other step names, so
+    /// a refusal reads as the call we refused and the fingerprint keys the step by its own name.
+    #[test]
+    fn the_four_added_steps_name_calls_no_other_step_names() {
+        let added = [
+            RenderStep::FragmentTexture {
+                texture: handle(),
+                index: 0,
+            },
+            RenderStep::FragmentSampler {
+                sampler: handle(),
+                index: 0,
+            },
+            RenderStep::VertexBytes {
+                bytes: Vec::new(),
+                index: 0,
+            },
+            RenderStep::Viewport(ViewportRect::new([0.0; 2], [1.0; 2])),
+        ];
+        let others = [
+            RenderStep::Pipeline(handle()),
+            RenderStep::DepthStencilState(handle()),
+            RenderStep::StencilReference(0),
+            RenderStep::vertex_buffer(handle(), 0),
+            RenderStep::fragment_buffer(handle(), 0),
+            RenderStep::triangle(),
+        ];
+        let named: BTreeSet<&str> = added
+            .iter()
+            .chain(&others)
+            .map(|step| step.call())
+            .collect();
+        assert_eq!(named.len(), added.len() + others.len());
+    }
+
+    /// A viewport's six numbers all reach its words, and two viewports are equal exactly when
+    /// those words are: `-0.0` is not `0.0` here, which is the bit-exact equality the type claims.
+    #[test]
+    fn a_viewport_compares_and_fingerprints_by_its_bits() {
+        let rect = ViewportRect::new([4.5, 0.0], [1.0, 8.0]);
+        assert_eq!(rect.words().len(), 6 * 8);
+        assert_eq!(rect, rect);
+        for moved in [
+            ViewportRect::new([4.5f64.next_up(), 0.0], [1.0, 8.0]),
+            ViewportRect::new([4.5, -0.0], [1.0, 8.0]),
+            ViewportRect::new([4.5, 0.0], [-1.0, 8.0]),
+            ViewportRect {
+                depth: [0.0, 0.5],
+                ..rect
+            },
+        ] {
+            assert_ne!(rect, moved, "{moved:?}");
+            assert_ne!(rect.words(), moved.words(), "{moved:?}");
+        }
+    }
+
+    /// A viewport step's every number reaches its parameters, so a case whose viewport moved reads
+    /// as `Unrecorded` rather than comparing against the old viewport's answer.
+    #[test]
+    fn a_viewport_step_s_numbers_are_its_parameters() {
+        let rect = ViewportRect::new([4.25, 0.0], [1.5, 8.0]);
+        assert_eq!(RenderStep::Viewport(rect).parameters(), rect.words());
+        let moved = ViewportRect {
+            depth: [0.25, 1.0],
+            ..rect
+        };
+        assert_ne!(
+            RenderStep::Viewport(rect).parameters(),
+            RenderStep::Viewport(moved).parameters()
+        );
+    }
+
+    /// An inline vertex binding's bytes and its index are both its parameters: the bytes are the
+    /// case's own values, not a handle, so a draw whose position moved is a different input.
+    #[test]
+    fn inline_vertex_bytes_and_their_index_are_its_parameters() {
+        let step =
+            |bytes: Vec<u8>, index: u32| RenderStep::VertexBytes { bytes, index }.parameters();
+        assert_eq!(step(vec![1, 2, 3, 4], 0), vec![1, 2, 3, 4, 0, 0, 0, 0]);
+        assert_ne!(step(vec![1, 2, 3, 4], 0), step(vec![1, 2, 3, 5], 0));
+        assert_ne!(step(vec![1, 2, 3, 4], 0), step(vec![1, 2, 3, 4], 1));
+    }
+
+    /// A fragment texture's and a fragment sampler's binding index is its one parameter, and the
+    /// handle is not: the case fingerprints the texels and the sampler's descriptor itself. The two
+    /// are told apart by their call names, as every step is.
+    #[test]
+    fn a_fragment_texture_and_sampler_fingerprint_by_their_index() {
+        let texture = |index| {
+            RenderStep::FragmentTexture {
+                texture: handle(),
+                index,
+            }
+            .parameters()
+        };
+        let sampler = |index| {
+            RenderStep::FragmentSampler {
+                sampler: handle(),
+                index,
+            }
+            .parameters()
+        };
+        assert_eq!(texture(0), 0u32.to_le_bytes());
+        assert_ne!(texture(0), texture(1));
+        assert_ne!(sampler(0), sampler(1));
+        assert_eq!(texture(3), sampler(3));
+    }
+
+    /// A pass keys each step by its call name and then its parameters, so adding a variant
+    /// renumbers nothing: a pass of the steps the other cases use fingerprints to the same bytes
+    /// whether or not this module's four variants exist.
+    #[test]
+    fn a_step_contributes_its_name_and_its_parameters_and_no_discriminant() {
+        let steps = vec![
+            RenderStep::fragment_buffer(handle(), 1),
+            RenderStep::triangle(),
+        ];
+        let mut expected = Vec::new();
+        for step in &steps {
+            expected.extend(step.call().as_bytes());
+            expected.extend(step.parameters());
+        }
+        let pass = RenderPass::clearing(Vec::new()).drawing(steps);
+        assert!(pass.words().ends_with(&expected));
     }
 }
