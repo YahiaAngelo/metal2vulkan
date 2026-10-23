@@ -310,7 +310,6 @@
         "object_churn.vk_images_made": 1024,
         "pipeline_layouts_made": 2,
         "pooled_memory_blocks_made": 3,
-        "primaries_begun_ahead": 1,
         "queue_submissions": 512,
         "scheduled_where_submitted": 512,
         "scheduler_passes": 516,
@@ -326,15 +325,13 @@
         "wakes_spared": 3072
       },
       "moving": {
-        "commands_replayed.begin_command_buffer": 515,
-        "primaries_begun_ahead": 0
+        "commands_replayed.begin_command_buffer": 515
       },
       "composed": {
         "addressable_buffers_made": 2,
         "arena_pools_made": 2,
         "device_memory_allocated": 201326720,
-        "pooled_memory_blocks_made": 3,
-        "primaries_begun_ahead": 0
+        "pooled_memory_blocks_made": 3
       }
     }
   ]

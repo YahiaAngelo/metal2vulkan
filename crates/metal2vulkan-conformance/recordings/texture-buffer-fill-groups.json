@@ -8505,7 +8505,6 @@
         "object_churn.vk_buffers_destroyed": 203,
         "object_churn.vk_buffers_made": 203,
         "pooled_memory_blocks_made": 3,
-        "primaries_begun_ahead": 12,
         "queue_submissions": 226,
         "scheduled_where_submitted": 226,
         "scheduler_passes": 226,
@@ -8518,14 +8517,12 @@
         "wakes_spared": 1356
       },
       "moving": {
-        "commands_replayed.begin_command_buffer": 214,
-        "primaries_begun_ahead": 0
+        "commands_replayed.begin_command_buffer": 214
       },
       "composed": {
         "addressable_buffers_made": 2,
         "device_memory_allocated": 201326592,
-        "pooled_memory_blocks_made": 3,
-        "primaries_begun_ahead": 0
+        "pooled_memory_blocks_made": 3
       }
     }
   ]

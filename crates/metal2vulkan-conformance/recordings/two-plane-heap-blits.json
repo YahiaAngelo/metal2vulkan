@@ -21521,7 +21521,6 @@
         "object_churn.vk_images_made": 47,
         "owned_descriptor_pools": 75,
         "pooled_memory_blocks_made": 3,
-        "primaries_begun_ahead": 1,
         "queue_submissions": 75,
         "requirement_images_made": 15,
         "requirement_limits_asked": 15,
@@ -21536,15 +21535,13 @@
         "wakes_spared": 450
       },
       "moving": {
-        "commands_replayed.begin_command_buffer": 74,
-        "primaries_begun_ahead": 0
+        "commands_replayed.begin_command_buffer": 74
       },
       "composed": {
         "addressable_buffers_made": 2,
         "arena_pools_made": 3,
         "device_memory_allocated": 201326592,
-        "pooled_memory_blocks_made": 3,
-        "primaries_begun_ahead": 0
+        "pooled_memory_blocks_made": 3
       }
     }
   ]

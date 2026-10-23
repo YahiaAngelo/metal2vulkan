@@ -6117,7 +6117,6 @@
         "object_churn.vk_images_made": 10,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 4,
-        "primaries_begun_ahead": 1,
         "queue_submissions": 60,
         "sampler_sets_made": 1,
         "scheduled_where_submitted": 60,
@@ -6134,8 +6133,7 @@
         "wakes_spared": 360
       },
       "moving": {
-        "commands_replayed.begin_command_buffer": 59,
-        "primaries_begun_ahead": 0
+        "commands_replayed.begin_command_buffer": 59
       },
       "composed": {
         "addressable_buffers_made": 2,
@@ -6158,7 +6156,6 @@
         "finales_folded": 59,
         "pipeline_layouts_made": 1,
         "pooled_memory_blocks_made": 4,
-        "primaries_begun_ahead": 0,
         "sampler_sets_made": 1,
         "shader_modules_made": 1,
         "submit_infos": 61,

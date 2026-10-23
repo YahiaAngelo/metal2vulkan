@@ -143,10 +143,9 @@
         "object_churn.vk_buffer_bindings": 1,
         "object_churn.vk_buffers_made": 1,
         "pooled_memory_blocks_made": 3,
-        "primaries_begun_ahead": 1,
         "queue_submissions": 4,
         "scheduled_where_submitted": 4,
-        "scheduler_passes": 4,
+        "scheduler_passes": 3,
         "scheduler_sleeps": 2,
         "scheduler_wakes_commit": 4,
         "slot_returns": 4,
@@ -155,14 +154,10 @@
         "wakes_completion_waiters": 4,
         "wakes_spared": 27
       },
-      "moving": {
-        "primaries_begun_ahead": 0
-      },
       "composed": {
         "addressable_buffers_made": 2,
         "device_memory_allocated": 201326592,
-        "pooled_memory_blocks_made": 3,
-        "primaries_begun_ahead": 0
+        "pooled_memory_blocks_made": 3
       }
     }
   ]

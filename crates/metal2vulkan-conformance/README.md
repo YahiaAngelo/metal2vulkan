@@ -173,8 +173,14 @@ random on honest work. Each reason is written at its site in `cost.rs` with the 
   when one of our background threads ran, and everything on the asynchronous release path, whose
   counts may land in a later case's window;
 - one that is a reading of **what was alive at that instant** rather than work a case did;
-- one that says an object was **found already made** rather than made, which depends on what every
-  case before it in the same process made;
+- one that says an object was **found already made** rather than made, or that a making was
+  **begun ahead** by a thread finishing an earlier case's work, which depends on what every case
+  before it in the same process did;
+- one that is the **complement of a count already in this list**, such as the command-buffer
+  transitions that ran on our own waiter with no handler thread woken: one side of a coin whose
+  other side is thread arrival cannot be deterministic while that side is not;
+- one that moves when something has sat **past its quiet period**, which is a question about
+  elapsed time;
 - `completed_waits`, which charges a case for waits belonging to whatever ran before it.
 
 Totals stay gated where one exists, so nothing is lost: `command_buffers_deferred` holds the two
@@ -195,9 +201,22 @@ reads differently in the two shapes a measurement can have, and **neither bounds
   do ahead and the waits they borrow come from whatever ran before. A bound taken alone would fail
   such a count for ever.
 
-Measured over all 393 cases in both shapes, 3,442 readings differ: 3,207 larger alone and 235 larger
-in the set. So the gate holds a count only where the two shapes **agree**, at the larger of the two
-readings, and a count they disagree on is reported with both numbers as the evidence. Each shape is
+Measured over the whole case set in both shapes, thousands of readings differ, most of them larger
+alone and a minority larger in the set. So the gate holds a count only where the two shapes
+**agree**, at the larger of the two readings, and a count they disagree on is reported with both
+numbers as the evidence.
+
+**With one exception, and it is a list of names rather than a rule.** Where a count's larger reading
+is the *no-sharing extreme* — a case with nothing before it makes the object itself where a case in
+company finds it already made — that reading is a ceiling no composition can exceed, so the gate
+keeps the count there rather than giving it up. `cost.rs`'s `MONOTONE` holds those names, each with
+the measurement that earned it: a whole-set measurement in both shapes with **no case where the lone
+run read lower**, and a gap small enough that the bound still bites. `device_memory_allocated` passes
+the first test and fails the second — it counts bytes, so the two shapes differ by 268,435,456 where
+the largest of the object counts differs by 8, and a bound of 256 MiB on a case that allocates
+nothing in company is a number no regression can reach. A name earns a row on its own measurement,
+never by resembling one already there, and the code holds each row to its direction: a later
+measurement that reads the lone run *lower* reports that count like any other. Each shape is
 measured by its own command, into the same record, because one process cannot measure both cleanly:
 `bc1-rgba` run on its own reads `commands_replayed.cmd_dispatch` 4 in three invocations out of
 three, and 0 when the same leg runs after a whole-set leg in the same process.
