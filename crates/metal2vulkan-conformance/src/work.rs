@@ -141,6 +141,14 @@ pub enum Plane {
 pub enum Resource {
     /// A buffer holding `bytes`, in shared storage so the host reads it back.
     Buffer { bytes: Vec<u8> },
+    /// A buffer of `length` bytes of **private** storage, which no host call reaches.
+    ///
+    /// Its own variant rather than a flag on [`Resource::Buffer`], because a private buffer has no
+    /// bytes to be made with: a case that wants known bytes in one writes them with a
+    /// [`Step::FillBuffer`] or a copy, and that is part of what such a case means. Nothing here
+    /// assumes what a fresh buffer holds — Metal does not promise it — so a case over private
+    /// memory states its starting bytes rather than reading whatever the allocator left.
+    PrivateBuffer { length: u64 },
     /// A placement heap of `size` bytes.
     Heap { size: u64, private: bool },
     /// A buffer over `length` bytes of `heap` from `offset`.
@@ -242,6 +250,16 @@ pub enum Step {
         to: usize,
         to_offset: u64,
         length: u64,
+    },
+    /// `fillBuffer:range:value:`: every byte of `[offset, offset + length)` takes `value`.
+    ///
+    /// A fill of no bytes is a step of its own and not nothing: plain Metal skips it wherever its
+    /// range lies, and whether we do is a case.
+    FillBuffer {
+        buffer: usize,
+        offset: u64,
+        length: u64,
+        value: u8,
     },
     /// A render pass over one slice that clears it and draws nothing: how Metal writes a known
     /// value into a multisample texture, which no CPU copy reaches.

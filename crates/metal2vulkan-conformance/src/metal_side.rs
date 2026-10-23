@@ -416,6 +416,14 @@ impl Side for MetalSide {
         Ok(keep(&mut self.pipelines, pipeline))
     }
 
+    fn static_threadgroup_memory_length(&mut self, pipeline: Handle) -> Answer<u64> {
+        let state = self
+            .pipelines
+            .get(pipeline.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", pipeline.0)))?;
+        Ok(state.staticThreadgroupMemoryLength() as u64)
+    }
+
     fn buffer(&mut self, bytes: &[u8]) -> Answer<Handle> {
         let handle = self.zeroed_buffer(bytes.len())?;
         let buffer = self.held(handle)?;

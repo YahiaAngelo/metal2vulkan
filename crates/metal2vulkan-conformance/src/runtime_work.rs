@@ -168,6 +168,12 @@ fn make(device: &Device, made: &[Made], resource: &Resource) -> Answer<Made> {
             }
             Ok(Made::Buffer(buffer))
         }
+        Resource::PrivateBuffer { length } => {
+            let buffer = device
+                .new_buffer((*length).max(1), ResourceOptions::private())
+                .map_err(|error| Failure::of(&error))?;
+            Ok(Made::Buffer(buffer))
+        }
         Resource::Heap { size, private } => {
             let options = if *private {
                 ResourceOptions::private()
@@ -463,6 +469,17 @@ impl Run<'_> {
                         *to_offset,
                         *length,
                     )
+                    .map_err(|error| Failure::of(&error))
+            }
+            Step::FillBuffer {
+                buffer,
+                offset,
+                length,
+                value,
+            } => {
+                let buffer = self.buffer(*buffer)?;
+                self.encoder()?
+                    .fill_buffer(&buffer, *offset..*offset + *length, *value)
                     .map_err(|error| Failure::of(&error))
             }
             Step::ClearPass {

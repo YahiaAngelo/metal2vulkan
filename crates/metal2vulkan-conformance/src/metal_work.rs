@@ -214,6 +214,20 @@ fn make(
             }
             Ok(Made::Buffer(buffer))
         }
+        Resource::PrivateBuffer { length } => {
+            let buffer = device
+                .newBufferWithLength_options(
+                    (*length).max(1) as usize,
+                    MTLResourceOptions::StorageModePrivate,
+                )
+                .ok_or_else(|| {
+                    Failure::named(
+                        "NewBufferWithLength",
+                        format!("{length} private bytes returned nil"),
+                    )
+                })?;
+            Ok(Made::Buffer(buffer))
+        }
         Resource::Heap { size, private } => heap_of(*size, *private),
         Resource::HeapForTexture { spec, private } => {
             let descriptor = descriptor(spec)?;
@@ -517,6 +531,21 @@ impl Run<'_> {
                         *length as usize,
                     );
                 }
+                Ok(())
+            }
+            Step::FillBuffer {
+                buffer,
+                offset,
+                length,
+                value,
+            } => {
+                let buffer = self.buffer(*buffer)?;
+                let encoder = self.encoder()?;
+                encoder.fillBuffer_range_value(
+                    &buffer,
+                    objc2_foundation::NSRange::new(*offset as usize, *length as usize),
+                    *value,
+                );
                 Ok(())
             }
             // A render pass that clears one slice, and a per-sample read-back by a dispatch, are

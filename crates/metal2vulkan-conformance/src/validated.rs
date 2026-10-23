@@ -238,6 +238,11 @@ impl<S: Side> Side for Announcing<S> {
         self.inner.compute_pipeline(library, entry)
     }
 
+    fn static_threadgroup_memory_length(&mut self, pipeline: Handle) -> Answer<u64> {
+        self.at("static_threadgroup_memory_length");
+        self.inner.static_threadgroup_memory_length(pipeline)
+    }
+
     fn compute_pipeline_with_stage_input(
         &mut self,
         library: Handle,

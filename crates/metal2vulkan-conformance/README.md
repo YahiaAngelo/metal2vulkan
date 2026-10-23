@@ -167,7 +167,7 @@ edits one.
 | `record`, `replay` | Taking Metal's answer, and comparing a run against it |
 | `report` | Verdict counts and the matrix of case against venue |
 | `cost` | The cost half: the counts our side moved, their regions, their bounds and the three cost verdicts |
-| `work`, `runtime_work` | The copy-and-fill vocabulary a case states as data, and the runtime side that runs it |
+| `work`, `runtime_work`, `metal_work` | The copy-and-fill vocabulary a case states as data, and the two sides that run it |
 | `measured` | The committed Metal measurements a ported case reads, under the public fixtures |
 | `known_refusals` | The ledger of open gaps, held in both directions; it sets the exit status, never a verdict |
 | `cases` | The case set itself, one module per family |
@@ -194,6 +194,9 @@ edits one.
 | `chroma_pairs` | What a copy of a 4:2:2 chroma-pair texture moved, and what a kernel's `read()` of one answers | run on Metal |
 | `ycbcr_textures` | What Metal says about every two-plane YCbCr format's descriptors, and its `read()` of a `420v` surface's texels | the descriptors run on Metal; the texels carried, a YCbCr texture needs an IOSurface |
 | `ycbcr_minify` | Where a minified 10-bit YCbCr texture's linear footprint puts the switch, along each axis | carried; a YCbCr texture needs an IOSurface |
+| `compute_threadgroups` | What the threads of a 32-, 64- and 1024-thread threadgroup wrote through a simdgroup shuffle | run on Metal; the over-limit row carried from an Apple M4 |
+| `buffer_blits` | Where a blit encoder's buffer fills and copies landed, overlapping ones included | run on Metal |
+| `simdgroup_lockstep` | The threadgroup words two loops only a simdgroup's lockstep orders came to | run on Metal |
 
 A carried answer is our own measurement of this chip, stated in the shape the case emits, and its
 case forbids re-recording with the reason why. Record mode refuses such a case rather than
