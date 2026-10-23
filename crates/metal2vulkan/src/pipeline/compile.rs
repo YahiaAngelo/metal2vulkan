@@ -669,6 +669,46 @@ pub(crate) fn stage_reflection(
     })
 }
 
+/// What stage `fd`, its calls nesting `depth` deep through visible functions, may store through
+/// each slot its arguments bind: of the entry [`stage_reflection`] reads, its parameters' roles,
+/// declared accesses and slots alone (`reflection::entry_slot_writes`). It derives no type
+/// description, so an argument whose reflection Metal's answer has not been measured for does not
+/// refuse it: only the decode and the specialization can.
+pub(crate) fn stage_slot_writes(
+    fd: &FunctionDescriptor,
+    depth: u32,
+    m: &mut Meter,
+) -> Result<Vec<reflection::SlotWrite>, Error> {
+    let mut inputs = LowerInputs::new();
+    inputs.max_call_stack_depth = call_stack_input(depth);
+    guarded(|| {
+        with_request(
+            &fd.function,
+            &fd.constants,
+            (&fd.linked, &fd.libraries),
+            InputsFrom::Given(&inputs),
+            |r| {
+                let mut decoded = air::decode(r.bitcode, m)?;
+                if let Some(c) = r.container {
+                    decoded.abi.check_container(&decoded.module, c, m)?;
+                }
+                let mut req = spec_request(&decoded, r.entry, r.consts)?;
+                req.call_stack_depth = r.inputs.call_stack_depth();
+                let ep = air::canon::select(&decoded.module, &decoded.abi, &req.entry)?;
+                if !reflection::needs_resolution(ep, &decoded.abi.structs)
+                    && !reflection::specialization_decides_reads(&decoded.abi)
+                {
+                    return Ok(reflection::entry_slot_writes(ep));
+                }
+                let before = reflection::UnspecializedReads::of(&decoded.module, &decoded.abi, ep);
+                let spec = specialize_request(decoded, &req, r, m)?;
+                let read = reflection::specialized_reads(&spec, &before)?;
+                Ok(reflection::entry_slot_writes(&read))
+            },
+        )
+    })
+}
+
 /// Whether stage `fd`, its calls nesting `depth` deep through visible functions, uses a direct
 /// texture or sampler argument (`[[texture(n)]]`, `[[sampler(n)]]`, a texture array among them)
 /// that a pipeline's reflection lists as used: of the entry [`stage_reflection`] reads, its
@@ -2227,6 +2267,11 @@ fn compile_kept<K>(
     });
     let (numbered_samplers, numbering_differs) = numbered::samplers(&spec, unmeasured);
     let reflection = kept_reflection(&spec, &before)?;
+    // Kept whatever the reflection could describe: it reads the specialized entry's roles,
+    // declared accesses and slots alone, so a pipeline of this function always answers what it
+    // may store through each of its slots.
+    let slot_writes =
+        reflection::entry_slot_writes(&reflection::specialized_reads(&spec, &before)?);
     // Decoded AIR is not needed past emission.
     drop(spec);
     // The function's own side effects; the `ExecutionStatus` buffer's words (the resident-miss
@@ -2526,6 +2571,7 @@ fn compile_kept<K>(
         profile: p.fingerprint(),
         kernel,
         reflection,
+        slot_writes,
         specialized,
     });
     Ok((artifact, plan, kept))

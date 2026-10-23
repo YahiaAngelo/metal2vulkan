@@ -208,6 +208,13 @@ pub struct FunctionArtifact {
     /// compiled function answers its reflection without its AIR. `None` where a binding's answer
     /// is unmeasured (the reflection refuses it).
     pub(crate) reflection: Option<crate::reflection::StageReflection>,
+    /// What the stage may store through each slot its arguments bind, from the entry the function
+    /// compiled (`reflection::entry_slot_writes` over it), so a pipeline of the compiled function
+    /// answers it without its AIR. Never absent: the answer reads each parameter's role, declared
+    /// access and slot alone and derives no type description, so no unmeasured argument type can
+    /// take it away, and a per-slot gap is one undetermined answer among the others
+    /// (`SlotWritability::Unknown`).
+    pub(crate) slot_writes: Vec<crate::reflection::SlotWrite>,
     /// The notes of `precision` that hold only under some specializations, with their
     /// conditions: what its linked stage states as `StageModule::specialized_notes`.
     pub specialized: Vec<crate::pipeline::artifact::SpecializedNote>,

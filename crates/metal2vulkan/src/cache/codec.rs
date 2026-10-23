@@ -72,8 +72,8 @@ use crate::pipeline::vertex::{
 use crate::reflection::{
     ArrayType, Binding as ReflectionBinding, BindingKind, BufferBinding, DirectArgumentUse,
     LinkedUseAnswers, LinkedUseGap, ObjectPayloadBinding, PointerType, RenderPipelineReflection,
-    StageReflection, StructMember, StructType, TextureBinding, TextureReferenceType,
-    ThreadgroupBinding, TypeDetail, UnwrittenFragmentInputs,
+    SlotWritability, SlotWrite, SlotWriteGap, StageReflection, StructMember, StructType,
+    TextureBinding, TextureReferenceType, ThreadgroupBinding, TypeDetail, UnwrittenFragmentInputs,
 };
 use crate::spirv::serialize::RelocatableModule;
 use crate::vk;
@@ -1253,9 +1253,10 @@ codec_struct! {
     RelocatableModule { words, relocs, requirements }
     FunctionArtifact {
         key, module, interface, facts, subgroup, reconvergence, precision, strategies, blob,
-        requirements, variant_bits, profile, kernel, reflection, specialized,
+        requirements, variant_bits, profile, kernel, reflection, slot_writes, specialized,
     }
     StageReflection { bindings, attributes }
+    SlotWrite { name, parameter, binding_type, index, count, used, writes }
     RenderPipelineReflection { vertex, fragment, tile, object, mesh }
     LinkedUseAnswers {
         vertex_returns_value, fragment_writes_depth_unattached, stages_using_direct_arguments,
@@ -1349,6 +1350,8 @@ codec_struct! {
 codec_enum! {
     Reconvergence { Guaranteed, ImplementationDefined }
     LinkedUseGap { EndlessLoop, StackMemory, GatedOffMeshBuiltin, UnmeasuredColorWrite }
+    SlotWritability { Never, Maybe, Unknown(f0) }
+    SlotWriteGap { UnresolvedIndex, UnmeasuredPayloadStage, MemberRole }
     ImageblockMechanism { StorageImageInterlock }
     StorageAttachmentView { Attachment, SamplePlanes { layers } }
     StandInView { Image, SamplePlanes { layers } }

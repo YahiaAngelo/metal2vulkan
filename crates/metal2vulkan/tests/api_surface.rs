@@ -306,6 +306,10 @@ surface! {
         struct ObjectPayloadBinding N;
         struct PointerType N;
         struct RenderPipelineReflection N;
+        struct SlotWrite N;
+        enum SlotWriteGap N;
+        enum SlotWritability N;
+        struct SlotWrites N;
         struct StructMember N;
         struct StructType N;
         struct TextureBinding N;

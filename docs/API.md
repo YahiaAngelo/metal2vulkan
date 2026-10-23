@@ -269,6 +269,21 @@ for info in sampling.functions() {
   `Unsupported(Feature::Reflection)`.
 - A pipeline descriptor's `reflection(&budget)` answers what the `reflection:` out-parameter of
   Metal's creation call does.
+- A pipeline descriptor's `slot_writes(&budget)` answers, per stage, what the function may store
+  through the object bound at each slot its arguments bind (`SlotWrites`, one `SlotWrite` per
+  binding). `SlotWrite::may_write(slots, binding_type, index)` answers for one slot:
+  `SlotWritability::Never` where the declaration is read-only (a `constant` or `const device`
+  buffer, a texture declared `access::read` or `access::sample`, a sampler, a function table, an
+  acceleration structure, an imageblock, a mesh function's payload) and for a slot no argument
+  binds, `Maybe` where it is write-only or read-write, and `Unknown(SlotWriteGap)` for a slot that
+  one argument alone leaves undetermined.
+
+  The values are the ones `reflection` gives as `Binding::access`, worked out without the type
+  description a reflection must also give. That is why a state that compiles always answers here,
+  while its `reflection` is refused where Metal's answer for one argument's *type* was not
+  measured, and why uncertainty stays on the slot it belongs to instead of refusing the state:
+  a caller asking whether a read-only buffer may sit at a slot gets an answer per slot, and an
+  undetermined slot reads as neither writable nor read-only.
 - `function.argument_buffer_layout(index, &constants, &budget)` gives the layout of the argument
   buffer the function takes at a buffer index, as `newArgumentEncoderWithBufferIndex:` encodes it:
   its length, alignment, and each argument's offset and type by `[[id(n)]]`.
