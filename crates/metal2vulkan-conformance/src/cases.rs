@@ -43,6 +43,7 @@ pub mod half_write_nans;
 pub mod handler_waits;
 pub mod heap_metal_sizes;
 pub mod indirect_private_types;
+pub mod int_attributes;
 pub mod level_sizes;
 pub mod math_routines;
 pub mod mesh_barriers;
@@ -109,6 +110,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in discard_hoist::all() {
+        cases.push(Box::new(case));
+    }
+    for case in int_attributes::all() {
         cases.push(Box::new(case));
     }
     for case in extended_range_planes::all() {

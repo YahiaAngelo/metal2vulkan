@@ -1,0 +1,3068 @@
+{
+  "format": 1,
+  "case": "integer-vertex-attributes",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "dsx_int_attributes.ll",
+      "entry": "int_attribute_to_float4",
+      "source_sha256": "0c9ccc924f3218455abf738c01f52dae3ba38c3add963b0b170f8e35a986d88c"
+    },
+    {
+      "fixture": "dsx_int_attributes.air.ll",
+      "entry": "int_attribute_to_float4",
+      "source_sha256": "2e7e1ea56f5f17c062894a4b802e975802e86dcc4c565fdc1eaa504d6a535ce5"
+    },
+    {
+      "fixture": "dsx_int_attributes.ll",
+      "entry": "int_attribute_to_half4",
+      "source_sha256": "0c9ccc924f3218455abf738c01f52dae3ba38c3add963b0b170f8e35a986d88c"
+    },
+    {
+      "fixture": "dsx_int_attributes.air.ll",
+      "entry": "int_attribute_to_half4",
+      "source_sha256": "2e7e1ea56f5f17c062894a4b802e975802e86dcc4c565fdc1eaa504d6a535ce5"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "0c9ccc924f3218455abf738c01f52dae3ba38c3add963b0b170f8e35a986d88c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "2e7e1ea56f5f17c062894a4b802e975802e86dcc4c565fdc1eaa504d6a535ce5"
+                        }
+                      }
+                    },
+                    {
+                      "name": "records",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "86039f3e9e9f60fca51156261434d500896e9c238ee23fd7e44fd6d5b2e25d0f"
+                        }
+                      }
+                    },
+                    {
+                      "name": "pipelines",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9d0257eabfbea074557e3e4d965fd165810bfe60e282d277d0c36ba6215f3de0"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/records",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/answers",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar2/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar2/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar3/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar3/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar4/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar4/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Char/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Char/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Char2/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Char2/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Char3/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Char3/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Char4/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Char4/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort2/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort2/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort3/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort3/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort4/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort4/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Short/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Short/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Short2/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Short2/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Short3/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Short3/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Short4/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/Short4/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar2/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar2/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar3/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar3/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar4/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar4/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Char/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Char/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Char2/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Char2/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Char3/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Char3/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Char4/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Char4/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort2/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort2/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort3/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort3/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort4/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort4/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Short/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Short/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Short2/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Short2/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Short3/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Short3/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Short4/per-vertex/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_half4/Short4/constant/pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAABAAAAAAAAAAAAAAIA/AAD+QgAAAAAAAAAAAACAPwAAAEMAAAAAAAAAAAAAgD8AAEhDAAAAAAAAAAAAAIA/AAB+QwAAAAAAAAAAAACAPwAAf0MAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAABAAAAAAAAAAAAAAIA/AAD+QgAAAAAAAAAAAACAPwAAAEMAAAAAAAAAAAAAgD8AAEhDAAAAAAAAAAAAAIA/AAB+QwAAAAAAAAAAAACAPwAAf0MAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar2/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAAAAAACAPwAAgD8AAABDAAAAAAAAgD8AAABAAABIQwAAAAAAAIA/AAD+QgAAfkMAAAAAAACAPwAAAEMAAH9DAAAAAAAAgD8AAEhDAAAAAAAAAAAAAIA/AAB+QwAAgD8AAAAAAACAPwAAf0MAAABAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar2/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAAAAAACAPwAAgD8AAABDAAAAAAAAgD8AAABAAABIQwAAAAAAAIA/AAD+QgAAfkMAAAAAAACAPwAAAEMAAH9DAAAAAAAAgD8AAEhDAAAAAAAAAAAAAIA/AAB+QwAAgD8AAAAAAACAPwAAf0MAAABAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar3/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAH5DAACAPwAAgD8AAABDAAB/QwAAgD8AAABAAABIQwAAAAAAAIA/AAD+QgAAfkMAAIA/AACAPwAAAEMAAH9DAAAAQAAAgD8AAEhDAAAAAAAA/kIAAIA/AAB+QwAAgD8AAABDAACAPwAAf0MAAABAAABIQwAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar3/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAH5DAACAPwAAgD8AAABDAAB/QwAAgD8AAABAAABIQwAAAAAAAIA/AAD+QgAAfkMAAIA/AACAPwAAAEMAAH9DAAAAQAAAgD8AAEhDAAAAAAAA/kIAAIA/AAB+QwAAgD8AAABDAACAPwAAf0MAAABAAABIQwAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar4/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAH5DAACAPwAAgD8AAABDAAB/QwAAAEAAAABAAABIQwAAAAAAAP5CAAD+QgAAfkMAAIA/AAAAQwAAAEMAAH9DAAAAQAAASEMAAEhDAAAAAAAA/kIAAH5DAAB+QwAAgD8AAABDAAB/QwAAf0MAAABAAABIQwAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UChar4/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAH5DAACAPwAAgD8AAABDAAB/QwAAAEAAAABAAABIQwAAAAAAAP5CAAD+QgAAfkMAAIA/AAAAQwAAAEMAAH9DAAAAQAAASEMAAEhDAAAAAAAA/kIAAH5DAAB+QwAAgD8AAABDAAB/QwAAf0MAAABAAABIQwAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Char/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAIC/AAAAAAAAAAAAAIA/AAD+QgAAAAAAAAAAAACAPwAAAMMAAAAAAAAAAAAAgD8AAADAAAAAAAAAAAAAAIA/AADIQgAAAAAAAAAAAACAPwAAyMIAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Char/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAIC/AAAAAAAAAAAAAIA/AAD+QgAAAAAAAAAAAACAPwAAAMMAAAAAAAAAAAAAgD8AAADAAAAAAAAAAAAAAIA/AADIQgAAAAAAAAAAAACAPwAAyMIAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Char2/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAAAAAACAPwAAgD8AAADDAAAAAAAAgD8AAIC/AAAAwAAAAAAAAIA/AAD+QgAAyEIAAAAAAACAPwAAAMMAAMjCAAAAAAAAgD8AAADAAAAAAAAAAAAAAIA/AADIQgAAgD8AAAAAAACAPwAAyMIAAIC/AAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Char2/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAAAAAACAPwAAgD8AAADDAAAAAAAAgD8AAIC/AAAAwAAAAAAAAIA/AAD+QgAAyEIAAAAAAACAPwAAAMMAAMjCAAAAAAAAgD8AAADAAAAAAAAAAAAAAIA/AADIQgAAgD8AAAAAAACAPwAAyMIAAIC/AAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Char3/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAMhCAACAPwAAgD8AAADDAADIwgAAgD8AAIC/AAAAwAAAAAAAAIA/AAD+QgAAyEIAAIA/AACAPwAAAMMAAMjCAACAvwAAgD8AAADAAAAAAAAA/kIAAIA/AADIQgAAgD8AAADDAACAPwAAyMIAAIC/AAAAwAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Char3/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAMhCAACAPwAAgD8AAADDAADIwgAAgD8AAIC/AAAAwAAAAAAAAIA/AAD+QgAAyEIAAIA/AACAPwAAAMMAAMjCAACAvwAAgD8AAADAAAAAAAAA/kIAAIA/AADIQgAAgD8AAADDAACAPwAAyMIAAIC/AAAAwAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Char4/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAMhCAACAPwAAgD8AAADDAADIwgAAgL8AAIC/AAAAwAAAAAAAAP5CAAD+QgAAyEIAAIA/AAAAwwAAAMMAAMjCAACAvwAAAMAAAADAAAAAAAAA/kIAAMhCAADIQgAAgD8AAADDAADIwgAAyMIAAIC/AAAAwAAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Char4/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAMhCAACAPwAAgD8AAADDAADIwgAAgL8AAIC/AAAAwAAAAAAAAP5CAAD+QgAAyEIAAIA/AAAAwwAAAMMAAMjCAACAvwAAAMAAAADAAAAAAAAA/kIAAMhCAADIQgAAgD8AAADDAADIwgAAyMIAAIC/AAAAwAAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AEABFAAAAAAAAAAAAAIA/ADAARQAAAAAAAAAAAACAPwDgf0cAAAAAAAAAAAAAgD8A739HAAAAAAAAAAAAAIA/APB/RwAAAAAAAAAAAACAPwD/f0cAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AEABFAAAAAAAAAAAAAIA/ADAARQAAAAAAAAAAAACAPwDgf0cAAAAAAAAAAAAAgD8A739HAAAAAAAAAAAAAIA/APB/RwAAAAAAAAAAAACAPwD/f0cAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort2/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAwAEUAAAAAAACAPwAAgD8A4H9HAAAAAAAAgD8AEABFAO9/RwAAAAAAAIA/ADAARQDwf0cAAAAAAACAPwDgf0cA/39HAAAAAAAAgD8A739HAAAAAAAAAAAAAIA/APB/RwAAgD8AAAAAAACAPwD/f0cAEABFAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort2/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAwAEUAAAAAAACAPwAAgD8A4H9HAAAAAAAAgD8AEABFAO9/RwAAAAAAAIA/ADAARQDwf0cAAAAAAACAPwDgf0cA/39HAAAAAAAAgD8A739HAAAAAAAAAAAAAIA/APB/RwAAgD8AAAAAAACAPwD/f0cAEABFAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort3/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAwAEUA8H9HAACAPwAAgD8A4H9HAP9/RwAAgD8AEABFAO9/RwAAAAAAAIA/ADAARQDwf0cAAIA/AACAPwDgf0cA/39HABAARQAAgD8A739HAAAAAAAwAEUAAIA/APB/RwAAgD8A4H9HAACAPwD/f0cAEABFAO9/RwAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort3/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAwAEUA8H9HAACAPwAAgD8A4H9HAP9/RwAAgD8AEABFAO9/RwAAAAAAAIA/ADAARQDwf0cAAIA/AACAPwDgf0cA/39HABAARQAAgD8A739HAAAAAAAwAEUAAIA/APB/RwAAgD8A4H9HAACAPwD/f0cAEABFAO9/RwAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort4/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAwAEUA8H9HAACAPwAAgD8A4H9HAP9/RwAQAEUAEABFAO9/RwAAAAAAMABFADAARQDwf0cAAIA/AOB/RwDgf0cA/39HABAARQDvf0cA739HAAAAAAAwAEUA8H9HAPB/RwAAgD8A4H9HAP9/RwD/f0cAEABFAO9/RwAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/UShort4/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAwAEUA8H9HAACAPwAAgD8A4H9HAP9/RwAQAEUAEABFAO9/RwAAAAAAMABFADAARQDwf0cAAIA/AOB/RwDgf0cA/39HABAARQDvf0cA739HAAAAAAAwAEUA8H9HAPB/RwAAgD8A4H9HAP9/RwD/f0cAEABFAO9/RwAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Short/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgL8AAAAAAAAAAAAAgD8A/v9GAAAAAAAAAAAAAIA/AAAAxwAAAAAAAAAAAACAPwAQAEUAAAAAAAAAAAAAgD8AMADFAAAAAAAAAAAAAIA/AAB6RAAAAAAAAAAAAACAPwAAesQAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Short/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgL8AAAAAAAAAAAAAgD8A/v9GAAAAAAAAAAAAAIA/AAAAxwAAAAAAAAAAAACAPwAQAEUAAAAAAAAAAAAAgD8AMADFAAAAAAAAAAAAAIA/AAB6RAAAAAAAAAAAAACAPwAAesQAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Short2/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAAAAAACAPwAAgL8AEABFAAAAAAAAgD8A/v9GADAAxQAAAAAAAIA/AAAAxwAAekQAAAAAAACAPwAQAEUAAHrEAAAAAAAAgD8AMADFAAAAAAAAAAAAAIA/AAB6RAAAgL8AAAAAAACAPwAAesQA/v9GAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Short2/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAAAAAACAPwAAgL8AEABFAAAAAAAAgD8A/v9GADAAxQAAAAAAAIA/AAAAxwAAekQAAAAAAACAPwAQAEUAAHrEAAAAAAAAgD8AMADFAAAAAAAAAAAAAIA/AAB6RAAAgL8AAAAAAACAPwAAesQA/v9GAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Short3/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAHpEAACAPwAAgL8AEABFAAB6xAAAgD8A/v9GADAAxQAAAAAAAIA/AAAAxwAAekQAAIC/AACAPwAQAEUAAHrEAP7/RgAAgD8AMADFAAAAAAAAAMcAAIA/AAB6RAAAgL8AEABFAACAPwAAesQA/v9GADAAxQAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Short3/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAHpEAACAPwAAgL8AEABFAAB6xAAAgD8A/v9GADAAxQAAAAAAAIA/AAAAxwAAekQAAIC/AACAPwAQAEUAAHrEAP7/RgAAgD8AMADFAAAAAAAAAMcAAIA/AAB6RAAAgL8AEABFAACAPwAAesQA/v9GADAAxQAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Short4/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAHpEAACAvwAAgL8AEABFAAB6xAD+/0YA/v9GADAAxQAAAAAAAADHAAAAxwAAekQAAIC/ABAARQAQAEUAAHrEAP7/RgAwAMUAMADFAAAAAAAAAMcAAHpEAAB6RAAAgL8AEABFAAB6xAAAesQA/v9GADAAxQAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_float4/Short4/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAHpEAACAvwAAgL8AEABFAAB6xAD+/0YA/v9GADAAxQAAAAAAAADHAAAAxwAAekQAAIC/ABAARQAQAEUAAHrEAP7/RgAwAMUAMADFAAAAAAAAAMcAAHpEAAB6RAAAgL8AEABFAAB6xAAAesQA/v9GADAAxQAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAABAAAAAAAAAAAAAAIA/AAD+QgAAAAAAAAAAAACAPwAAAEMAAAAAAAAAAAAAgD8AAEhDAAAAAAAAAAAAAIA/AAB+QwAAAAAAAAAAAACAPwAAf0MAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAABAAAAAAAAAAAAAAIA/AAD+QgAAAAAAAAAAAACAPwAAAEMAAAAAAAAAAAAAgD8AAEhDAAAAAAAAAAAAAIA/AAB+QwAAAAAAAAAAAACAPwAAf0MAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar2/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAAAAAACAPwAAgD8AAABDAAAAAAAAgD8AAABAAABIQwAAAAAAAIA/AAD+QgAAfkMAAAAAAACAPwAAAEMAAH9DAAAAAAAAgD8AAEhDAAAAAAAAAAAAAIA/AAB+QwAAgD8AAAAAAACAPwAAf0MAAABAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar2/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAAAAAACAPwAAgD8AAABDAAAAAAAAgD8AAABAAABIQwAAAAAAAIA/AAD+QgAAfkMAAAAAAACAPwAAAEMAAH9DAAAAAAAAgD8AAEhDAAAAAAAAAAAAAIA/AAB+QwAAgD8AAAAAAACAPwAAf0MAAABAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar3/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAH5DAACAPwAAgD8AAABDAAB/QwAAgD8AAABAAABIQwAAAAAAAIA/AAD+QgAAfkMAAIA/AACAPwAAAEMAAH9DAAAAQAAAgD8AAEhDAAAAAAAA/kIAAIA/AAB+QwAAgD8AAABDAACAPwAAf0MAAABAAABIQwAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar3/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAH5DAACAPwAAgD8AAABDAAB/QwAAgD8AAABAAABIQwAAAAAAAIA/AAD+QgAAfkMAAIA/AACAPwAAAEMAAH9DAAAAQAAAgD8AAEhDAAAAAAAA/kIAAIA/AAB+QwAAgD8AAABDAACAPwAAf0MAAABAAABIQwAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar4/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAH5DAACAPwAAgD8AAABDAAB/QwAAAEAAAABAAABIQwAAAAAAAP5CAAD+QgAAfkMAAIA/AAAAQwAAAEMAAH9DAAAAQAAASEMAAEhDAAAAAAAA/kIAAH5DAAB+QwAAgD8AAABDAAB/QwAAf0MAAABAAABIQwAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UChar4/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAH5DAACAPwAAgD8AAABDAAB/QwAAAEAAAABAAABIQwAAAAAAAP5CAAD+QgAAfkMAAIA/AAAAQwAAAEMAAH9DAAAAQAAASEMAAEhDAAAAAAAA/kIAAH5DAAB+QwAAgD8AAABDAAB/QwAAf0MAAABAAABIQwAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Char/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAIC/AAAAAAAAAAAAAIA/AAD+QgAAAAAAAAAAAACAPwAAAMMAAAAAAAAAAAAAgD8AAADAAAAAAAAAAAAAAIA/AADIQgAAAAAAAAAAAACAPwAAyMIAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Char/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAIC/AAAAAAAAAAAAAIA/AAD+QgAAAAAAAAAAAACAPwAAAMMAAAAAAAAAAAAAgD8AAADAAAAAAAAAAAAAAIA/AADIQgAAAAAAAAAAAACAPwAAyMIAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Char2/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAAAAAACAPwAAgD8AAADDAAAAAAAAgD8AAIC/AAAAwAAAAAAAAIA/AAD+QgAAyEIAAAAAAACAPwAAAMMAAMjCAAAAAAAAgD8AAADAAAAAAAAAAAAAAIA/AADIQgAAgD8AAAAAAACAPwAAyMIAAIC/AAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Char2/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAAAAAACAPwAAgD8AAADDAAAAAAAAgD8AAIC/AAAAwAAAAAAAAIA/AAD+QgAAyEIAAAAAAACAPwAAAMMAAMjCAAAAAAAAgD8AAADAAAAAAAAAAAAAAIA/AADIQgAAgD8AAAAAAACAPwAAyMIAAIC/AAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Char3/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAMhCAACAPwAAgD8AAADDAADIwgAAgD8AAIC/AAAAwAAAAAAAAIA/AAD+QgAAyEIAAIA/AACAPwAAAMMAAMjCAACAvwAAgD8AAADAAAAAAAAA/kIAAIA/AADIQgAAgD8AAADDAACAPwAAyMIAAIC/AAAAwAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Char3/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAMhCAACAPwAAgD8AAADDAADIwgAAgD8AAIC/AAAAwAAAAAAAAIA/AAD+QgAAyEIAAIA/AACAPwAAAMMAAMjCAACAvwAAgD8AAADAAAAAAAAA/kIAAIA/AADIQgAAgD8AAADDAACAPwAAyMIAAIC/AAAAwAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Char4/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAMhCAACAPwAAgD8AAADDAADIwgAAgL8AAIC/AAAAwAAAAAAAAP5CAAD+QgAAyEIAAIA/AAAAwwAAAMMAAMjCAACAvwAAAMAAAADAAAAAAAAA/kIAAMhCAADIQgAAgD8AAADDAADIwgAAyMIAAIC/AAAAwAAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Char4/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAA/kIAAMhCAACAPwAAgD8AAADDAADIwgAAgL8AAIC/AAAAwAAAAAAAAP5CAAD+QgAAyEIAAIA/AAAAwwAAAMMAAMjCAACAvwAAAMAAAADAAAAAAAAA/kIAAMhCAADIQgAAgD8AAADDAADIwgAAyMIAAIC/AAAAwAAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAABFAAAAAAAAAAAAAIA/AEAARQAAAAAAAAAAAACAPwDgf0cAAAAAAAAAAAAAgD8A4H9HAAAAAAAAAAAAAIA/AACAfwAAAAAAAAAAAACAPwAAgH8AAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAABFAAAAAAAAAAAAAIA/AEAARQAAAAAAAAAAAACAPwDgf0cAAAAAAAAAAAAAgD8A4H9HAAAAAAAAAAAAAIA/AACAfwAAAAAAAAAAAACAPwAAgH8AAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort2/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAABAAEUAAAAAAACAPwAAgD8A4H9HAAAAAAAAgD8AAABFAOB/RwAAAAAAAIA/AEAARQAAgH8AAAAAAACAPwDgf0cAAIB/AAAAAAAAgD8A4H9HAAAAAAAAAAAAAIA/AACAfwAAgD8AAAAAAACAPwAAgH8AAABFAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort2/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAABAAEUAAAAAAACAPwAAgD8A4H9HAAAAAAAAgD8AAABFAOB/RwAAAAAAAIA/AEAARQAAgH8AAAAAAACAPwDgf0cAAIB/AAAAAAAAgD8A4H9HAAAAAAAAAAAAAIA/AACAfwAAgD8AAAAAAACAPwAAgH8AAABFAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort3/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAABAAEUAAIB/AACAPwAAgD8A4H9HAACAfwAAgD8AAABFAOB/RwAAAAAAAIA/AEAARQAAgH8AAIA/AACAPwDgf0cAAIB/AAAARQAAgD8A4H9HAAAAAABAAEUAAIA/AACAfwAAgD8A4H9HAACAPwAAgH8AAABFAOB/RwAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort3/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAABAAEUAAIB/AACAPwAAgD8A4H9HAACAfwAAgD8AAABFAOB/RwAAAAAAAIA/AEAARQAAgH8AAIA/AACAPwDgf0cAAIB/AAAARQAAgD8A4H9HAAAAAABAAEUAAIA/AACAfwAAgD8A4H9HAACAPwAAgH8AAABFAOB/RwAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort4/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAABAAEUAAIB/AACAPwAAgD8A4H9HAACAfwAAAEUAAABFAOB/RwAAAAAAQABFAEAARQAAgH8AAIA/AOB/RwDgf0cAAIB/AAAARQDgf0cA4H9HAAAAAABAAEUAAIB/AACAfwAAgD8A4H9HAACAfwAAgH8AAABFAOB/RwAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/UShort4/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAABAAEUAAIB/AACAPwAAgD8A4H9HAACAfwAAAEUAAABFAOB/RwAAAAAAQABFAEAARQAAgH8AAIA/AOB/RwDgf0cAAIB/AAAARQDgf0cA4H9HAAAAAABAAEUAAIB/AACAfwAAgD8A4H9HAACAfwAAgH8AAABFAOB/RwAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Short/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgL8AAAAAAAAAAAAAgD8AAABHAAAAAAAAAAAAAIA/AAAAxwAAAAAAAAAAAACAPwAAAEUAAAAAAAAAAAAAgD8AQADFAAAAAAAAAAAAAIA/AAB6RAAAAAAAAAAAAACAPwAAesQAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Short/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAAAAAAAAAACAPwAAgL8AAAAAAAAAAAAAgD8AAABHAAAAAAAAAAAAAIA/AAAAxwAAAAAAAAAAAACAPwAAAEUAAAAAAAAAAAAAgD8AQADFAAAAAAAAAAAAAIA/AAB6RAAAAAAAAAAAAACAPwAAesQAAAAAAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Short2/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAAAAAACAPwAAgL8AAABFAAAAAAAAgD8AAABHAEAAxQAAAAAAAIA/AAAAxwAAekQAAAAAAACAPwAAAEUAAHrEAAAAAAAAgD8AQADFAAAAAAAAAAAAAIA/AAB6RAAAgL8AAAAAAACAPwAAesQAAABHAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Short2/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAAAAAACAPwAAgL8AAABFAAAAAAAAgD8AAABHAEAAxQAAAAAAAIA/AAAAxwAAekQAAAAAAACAPwAAAEUAAHrEAAAAAAAAgD8AQADFAAAAAAAAAAAAAIA/AAB6RAAAgL8AAAAAAACAPwAAesQAAABHAAAAAAAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Short3/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAHpEAACAPwAAgL8AAABFAAB6xAAAgD8AAABHAEAAxQAAAAAAAIA/AAAAxwAAekQAAIC/AACAPwAAAEUAAHrEAAAARwAAgD8AQADFAAAAAAAAAMcAAIA/AAB6RAAAgL8AAABFAACAPwAAesQAAABHAEAAxQAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Short3/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAHpEAACAPwAAgL8AAABFAAB6xAAAgD8AAABHAEAAxQAAAAAAAIA/AAAAxwAAekQAAIC/AACAPwAAAEUAAHrEAAAARwAAgD8AQADFAAAAAAAAAMcAAIA/AAB6RAAAgL8AAABFAACAPwAAesQAAABHAEAAxQAAgD8="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Short4/per-vertex",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAHpEAACAvwAAgL8AAABFAAB6xAAAAEcAAABHAEAAxQAAAAAAAADHAAAAxwAAekQAAIC/AAAARQAAAEUAAHrEAAAARwBAAMUAQADFAAAAAAAAAMcAAHpEAAB6RAAAgL8AAABFAAB6xAAAesQAAABHAEAAxQAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "int_attribute_to_half4/Short4/constant",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": {
+                          "bytes": "AAAAAAAAAMcAAHpEAACAvwAAgL8AAABFAAB6xAAAAEcAAABHAEAAxQAAAAAAAADHAAAAxwAAekQAAIC/AAAARQAAAEUAAHrEAAAARwBAAMUAQADFAAAAAAAAAMcAAHpEAAB6RAAAgL8AAABFAAB6xAAAesQAAABHAEAAxQAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 128
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 8,
+                            "image_pitch": 128,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}
