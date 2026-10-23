@@ -28,6 +28,7 @@ const STALE_PUSHES: RuntimeDriverDefect =
 const BAKED_SAMPLERS: RuntimeDriverDefect = RuntimeDriverDefect::ImmutableSamplersLostAfterCopies;
 const SET_SUPPORT: RuntimeDriverDefect = RuntimeDriverDefect::SetLayoutSupportUnderstated;
 const PART_VIEWS: RuntimeDriverDefect = RuntimeDriverDefect::LazilyAllocatedSubresourceViews;
+const BIND_COPIES: RuntimeDriverDefect = RuntimeDriverDefect::HostTransferImagesCopiedAtBind;
 
 /// Every committed profile's driver has its defects at every release and GPU but those a probe
 /// found clean: MoltenVK the multisampled depth/stencil colour copies, the inexact depths past
@@ -36,7 +37,8 @@ const PART_VIEWS: RuntimeDriverDefect = RuntimeDriverDefect::LazilyAllocatedSubr
 /// buffers after their signal, the frees that fail pending work, the destroys that fail a
 /// submission encoding meanwhile, the pushed sets' unset buffer sizes, the set layouts its support
 /// query refuses though it runs them and the textureless views of some of a lazily allocated
-/// image's levels or layers; lavapipe the colour copies, the depth/stencil resolve of the
+/// image's levels or layers and the block-compressed image it copies out of host memory at bind
+/// time with a one-block row pitch; lavapipe the colour copies, the depth/stencil resolve of the
 /// first layer and level, the explicit plane's rows past its height and the baked samplers lost
 /// after a copy;
 /// RADV the multisampled copies that convert float NaNs, and the implicit
@@ -72,6 +74,7 @@ fn the_committed_profiles_drivers_have_their_defects() {
                     PUSHES,
                     SET_SUPPORT,
                     PART_VIEWS,
+                    BIND_COPIES,
                 ]
             }
             Some(DriverId::MESA_LLVMPIPE) => vec![COPIES, RESOLVES, PAST_HEIGHT, BAKED_SAMPLERS],
