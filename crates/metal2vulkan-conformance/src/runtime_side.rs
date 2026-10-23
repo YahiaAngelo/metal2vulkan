@@ -42,6 +42,10 @@ use std::time::Duration;
 /// The longest the side waits for a command buffer. A wait that runs out is recorded, not retried.
 const WAIT: Duration = Duration::from_secs(60);
 
+/// The bytes the handler-wait probe's command buffer fills, so it has real work to be scheduled and
+/// completed for rather than being an empty commit.
+const HANDLER_FILL: u64 = 64;
+
 /// The runtime side: the device, the queue the case's command buffers come from, and the objects
 /// the case has made, by handle.
 pub struct RuntimeSide<'a> {
@@ -1576,6 +1580,104 @@ impl Side for RuntimeSide<'_> {
             move || making.command_buffer().map_err(Failure::from_error),
             || other.command_buffer().is_ok(),
         )
+    }
+
+    fn handler_wait(&mut self, wait: crate::handler_waits::OwnWait) -> Answer<Value> {
+        use crate::handler_waits::{HandlerKind, WaitKind};
+        use std::sync::mpsc;
+        let queue = self
+            .device
+            .new_command_queue()
+            .map_err(Failure::from_error)?;
+        let buffer = self
+            .device
+            .new_buffer(HANDLER_FILL, ResourceOptions::shared())
+            .map_err(Failure::from_error)?;
+        let command_buffer = queue.command_buffer().map_err(Failure::from_error)?;
+        let mut blit = command_buffer
+            .blit_command_encoder()
+            .map_err(Failure::from_error)?;
+        blit.fill_buffer(&buffer, 0..HANDLER_FILL, 0x11)
+            .map_err(Failure::from_error)?;
+        blit.end_encoding().map_err(Failure::from_error)?;
+        let (sender, answer) = mpsc::channel();
+        let kind = wait.wait;
+        let handler: metal2vulkan_runtime::Handler = Box::new(move |own: &CommandBuffer| {
+            let answered = match kind {
+                WaitKind::UntilCompleted => own.wait_until_completed(),
+                WaitKind::UntilScheduled => own.wait_until_scheduled(),
+            };
+            let _ = sender.send(answered.err().map(|error| Failure::of(&error)));
+        });
+        match wait.from {
+            HandlerKind::Scheduled => command_buffer.add_scheduled_handler(handler),
+            HandlerKind::Completed => command_buffer.add_completed_handler(handler),
+        }
+        .map_err(Failure::from_error)?;
+        command_buffer.commit().map_err(Failure::from_error)?;
+        // Bounded, so a runtime that did not refuse the handler's wait is recorded rather than
+        // hanging the suite: the handler would then still be inside its wait and the command
+        // buffer would never complete.
+        if command_buffer.wait_until_completed_for(WAIT).is_err() {
+            return Ok(Value::Nothing(Negative::NeverReturned));
+        }
+        match answer.recv_timeout(WAIT) {
+            Ok(None) => Ok(Value::ok(Value::Absent)),
+            Ok(Some(failure)) => Err(failure),
+            Err(_) => Ok(Value::Nothing(Negative::NeverReturned)),
+        }
+    }
+
+    fn shared_event_rises(&mut self, label: &str) -> Answer<crate::shared_events::EventRise> {
+        use crate::shared_events::{EventRise, WAIT_MS};
+        let bound = Duration::from_millis(WAIT_MS);
+        let queue = self
+            .device
+            .new_command_queue()
+            .map_err(Failure::from_error)?;
+        let event = self
+            .device
+            .new_shared_event()
+            .map_err(Failure::from_error)?;
+        event.set_label(label);
+        let read_label = event.label();
+        let initial = event.signaled_value();
+        // The host's sets: a lower value leaves the event where it was.
+        event.set_signaled_value(5);
+        event.set_signaled_value(3);
+        event.set_signaled_value(5);
+        let after_host_sets = event.signaled_value();
+        let signal = |value: u64| -> Answer<u64> {
+            let command_buffer = queue.command_buffer().map_err(Failure::from_error)?;
+            command_buffer
+                .encode_signal_event(metal2vulkan_runtime::EventRef::from(&event), value)
+                .map_err(Failure::from_error)?;
+            command_buffer.commit().map_err(Failure::from_error)?;
+            if command_buffer.wait_until_completed_for(WAIT).is_err() {
+                return Err(Failure::named(
+                    "NeverCompleted",
+                    format!("the command buffer signalling {value}"),
+                ));
+            }
+            Ok(event.signaled_value())
+        };
+        let after_gpu_signals = [signal(3)?, signal(5)?];
+        let waits = [
+            event.wait_until_signaled_value(3, bound),
+            event.wait_until_signaled_value(5, bound),
+            event.wait_until_signaled_value(6, bound),
+        ];
+        let after_max_signal = signal(u64::MAX)?;
+        let waited_for_max = event.wait_until_signaled_value(u64::MAX, bound);
+        Ok(EventRise {
+            label: read_label,
+            initial,
+            after_host_sets,
+            after_gpu_signals,
+            waits,
+            after_max_signal,
+            waited_for_max,
+        })
     }
 
     fn makes_texture(&mut self, query: &HeapTextureQuery) -> Answer<bool> {

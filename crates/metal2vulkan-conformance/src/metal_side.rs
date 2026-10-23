@@ -34,16 +34,18 @@ use objc2_metal::{
     MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLClearColor,
     MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
     MTLComputeCommandEncoder, MTLComputePipelineDescriptor, MTLComputePipelineState,
-    MTLCreateSystemDefaultDevice, MTLDevice, MTLFunction, MTLIndexType, MTLIndirectCommandBuffer,
-    MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand,
-    MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLOrigin, MTLPipelineOption,
-    MTLPixelFormat, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
+    MTLCreateSystemDefaultDevice, MTLDevice, MTLEvent, MTLFunction, MTLIndexType,
+    MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType,
+    MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor,
+    MTLOrigin, MTLPipelineOption, MTLPixelFormat, MTLPrimitiveType,
+    MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
     MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
     MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerAddressMode,
-    MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLSize,
-    MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLTexture,
-    MTLTextureDescriptor, MTLTextureType, MTLTextureUsage, MTLTileRenderPipelineDescriptor,
+    MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
+    MTLSharedEvent, MTLSize, MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode,
+    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
+    MTLTileRenderPipelineDescriptor,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -1481,6 +1483,55 @@ impl Side for MetalSide {
             },
             || objc2::rc::autoreleasepool(|_| other.commandBuffer().is_some()),
         )
+    }
+
+    fn shared_event_rises(&mut self, label: &str) -> Answer<crate::shared_events::EventRise> {
+        use crate::shared_events::{EventRise, WAIT_MS};
+        let event = self
+            .device
+            .newSharedEvent()
+            .ok_or_else(|| Failure::named("NewSharedEvent", "returned nil".to_owned()))?;
+        event.setLabel(Some(&NSString::from_str(label)));
+        let read_label = event.label().map(|label| label.to_string());
+        let initial = event.signaledValue();
+        // The host's sets: a lower value leaves the event where it was.
+        event.setSignaledValue(5);
+        event.setSignaledValue(3);
+        event.setSignaledValue(5);
+        let after_host_sets = event.signaledValue();
+        let as_event: &ProtocolObject<dyn MTLEvent> = ProtocolObject::from_ref(&*event);
+        let signal = |value: u64| -> Answer<u64> {
+            // One autorelease pool per signal: the command buffer this answers is autoreleased,
+            // and a loop that makes several without a pool that drains keeps every one of them
+            // alive.
+            objc2::rc::autoreleasepool(|_| {
+                let command_buffer = self
+                    .queue
+                    .commandBuffer()
+                    .ok_or_else(|| Failure::named("CommandBuffer", "returned nil".to_owned()))?;
+                command_buffer.encodeSignalEvent_value(as_event, value);
+                command_buffer.commit();
+                command_buffer.waitUntilCompleted();
+                Ok(event.signaledValue())
+            })
+        };
+        let after_gpu_signals = [signal(3)?, signal(5)?];
+        let waits = [
+            event.waitUntilSignaledValue_timeoutMS(3, WAIT_MS),
+            event.waitUntilSignaledValue_timeoutMS(5, WAIT_MS),
+            event.waitUntilSignaledValue_timeoutMS(6, WAIT_MS),
+        ];
+        let after_max_signal = signal(u64::MAX)?;
+        let waited_for_max = event.waitUntilSignaledValue_timeoutMS(u64::MAX, WAIT_MS);
+        Ok(EventRise {
+            label: read_label,
+            initial,
+            after_host_sets,
+            after_gpu_signals,
+            waits,
+            after_max_signal,
+            waited_for_max,
+        })
     }
 
     fn makes_texture(&mut self, query: &HeapTextureQuery) -> Answer<bool> {

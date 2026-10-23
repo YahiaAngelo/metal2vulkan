@@ -868,6 +868,38 @@ pub trait Side {
         let _ = work;
         Err(Failure::unavailable("render"))
     }
+
+    /// What a wait made from a command buffer's own handler, for that same command buffer,
+    /// answered ([`crate::handler_waits`]).
+    ///
+    /// The whole experiment is one call because the fact it observes is only visible from inside a
+    /// handler: a command buffer is made with one small fill, the handler `wait.from` names makes
+    /// the wait `wait.wait` names on it, and the answer comes back on a channel. The answer is a
+    /// [`Value`]: `Ok` where the wait returned, the typed error where it did not.
+    ///
+    /// **Metal has no side here, deliberately.** Metal does not come back from this call — the
+    /// probe that measured it ended with it — so [`crate::metal_side::MetalSide`] leaves this
+    /// default in place and must go on leaving it. A case over it says
+    /// [`MetalSource::did_not_return`] and record mode refuses the row before anything is encoded.
+    ///
+    /// Our own leg cannot hang: the runtime refuses the wait at once, so the handler returns and
+    /// the command buffer completes, and the side waits for it with a bound.
+    fn handler_wait(&mut self, wait: crate::handler_waits::OwnWait) -> Answer<Value> {
+        let _ = wait;
+        Err(Failure::unavailable("handler_wait"))
+    }
+
+    /// What a shared event's value did, by the rising-value probe ([`crate::shared_events`]):
+    /// `newSharedEvent`, its label, the host's sets, two GPU signals, three host waits, and a
+    /// signal of `u64::MAX`.
+    ///
+    /// One call rather than a dozen, because the facts are a **sequence** — a value that did not
+    /// fall when a lower one was set — and a case cannot state that as independent calls whose
+    /// order nothing fixes.
+    fn shared_event_rises(&mut self, label: &str) -> Answer<crate::shared_events::EventRise> {
+        let _ = label;
+        Err(Failure::unavailable("shared_event_rises"))
+    }
 }
 
 /// A tile render pipeline a case makes: `MTLTileRenderPipelineDescriptor`'s facts the cases state.
