@@ -6,6 +6,11 @@ against Metal**, which is a different and narrower claim: an item is only verifi
 native Metal leg calls it, the case has a committed recording of Metal's answer, and our side's
 answer is compared with it.
 
+Two axes, because one of them alone reads as more than it is. The **items** axis is reachability:
+one call of a selector is enough, so a selector that takes an enum counts as exercised whatever
+value reached it. The **option space** axis (`option_space.py`) is depth: of each Metal enum's and
+option set's values, which ones the suite actually compared.
+
 Nothing here is a maintained list. Every number is derived, at the moment this runs, from four
 things already in the tree:
 
@@ -19,11 +24,15 @@ things already in the tree:
    says which of the suite's own vocabulary reaches each call.
 4. `crates/metal2vulkan-conformance/recordings/` — the committed recordings, which are what makes
    a case's Metal answer a recorded fact rather than an intention.
+5. `crates/metal2vulkan/src/metal/generated.rs` and the front end's — the SDK's enumerator names
+   and ordinals, which `scripts/regen-metal-enums/` extracts from the Metal headers. They are the
+   option-space axis's denominator; no value list is written here.
 
 Usage:
   coverage.py            write docs/CONFORMANCE-COVERAGE.md
   coverage.py --check    fail if docs/CONFORMANCE-COVERAGE.md is not what the sources derive
   coverage.py --api      (Mac only) fail if objc2_metal.tsv is not what objc2-metal's sources say
+  coverage.py --selftest run the option-space axis over inputs whose answers are known
 """
 
 import csv
@@ -39,6 +48,7 @@ ROOT = HERE.parent.parent
 sys.path.insert(0, str(HERE))
 
 import metal_leg  # noqa: E402  (the resolver, beside this script)
+import option_space  # noqa: E402  (the option-space axis, beside this script)
 
 SUITE = ROOT / "crates/metal2vulkan-conformance"
 SRC = SUITE / "src"
@@ -434,6 +444,11 @@ def inventory():
         "keyed": keyed,
         "unlisted": unlisted,
         "gaps": known_gaps(),
+        # The second axis. A module with no case whose answer Metal ran puts no value to Metal,
+        # which is the same gate the items axis applies to a call.
+        "option_space": option_space.inventory(
+            ROOT, {module for module, family in families.items() if family["ran"]}
+        ),
     }
 
 
@@ -449,6 +464,188 @@ def _container(name: str) -> str:
 def families_line(modules: dict[str, set[str]]) -> str:
     """The families that reach an item, as the document prints them."""
     return ", ".join(f"`{module}`" for module in sorted(modules))
+
+
+def names_line(names: list[str]) -> str:
+    """Enumerator names as the document prints them."""
+    return ", ".join(f"`{name}`" for name in names)
+
+
+def write_option_space(w, space) -> None:
+    """The second axis: of each Metal enum's and option set's values, which the suite compared."""
+    rows = space["rows"]
+    values = sum(len(row["values"]) for row in rows)
+    compared = sum(len(row["compared"]) for row in rows)
+    shared = sum(len(row["shared"]) for row in rows)
+    missing = sum(len(row["missing"]) for row in rows)
+
+    w("## By option space, which is depth rather than reach")
+    w("")
+    w(
+        "The axis above counts a Metal **item** as exercised where one call of it ran. A selector "
+        "that takes an enum therefore counts whatever value reached it, so that axis says nothing "
+        "about how much of an enum the suite ever put to Metal. This one does, over the values "
+        "themselves."
+    )
+    w("")
+    w(
+        "The denominator is generated, never written here: "
+        "`crates/metal2vulkan/src/metal/generated.rs` and the front end's hold every enumerator "
+        "name and ordinal `scripts/regen-metal-enums/` extracts from the SDK's Metal headers. A "
+        "Metal type this tree models by hand instead has **no denominator here** and is listed "
+        "apart, below."
+    )
+    w("")
+    w("A value is **compared** where either of two things holds, which are different claims:")
+    w("")
+    w(
+        "- **answered** — the enumerator's name is in a committed recording's transcript of an "
+        "answer Metal **ran**. Metal named the value back at a site the comparison reads, so the "
+        "value is in the compared text itself."
+    )
+    w(
+        "- **in effect** — a case module's own text names the value, and that module has at least "
+        "one case whose recording is a Metal run. Metal's recorded answer was taken with the "
+        "value in effect, so what is compared is Metal's behaviour **under** it, even where no "
+        "site reads it back. A blend factor is this and not the first: what the recording holds is "
+        "the texels Metal blended with it."
+    )
+    w("")
+    w("What this axis cannot see, measured rather than asserted:")
+    w("")
+    w(
+        "- **A value Metal answers as a bare ordinal.** A transcript holds a `uint`, and nothing "
+        "in it says which enum the number belongs to, so only a site that records the enumerator's "
+        "**name** is read. The *answered* column is a floor by every site that records an ordinal "
+        "instead."
+    )
+    w(
+        "- **A value a case states as a raw ordinal.** A case may hand the Metal leg an enum's "
+        "ordinal as a number — a sweep over `0..n` rather than over named variants — and no "
+        "reading of the text can say which value a computed number is. So *in effect*, and the "
+        "*stated* column of the hand-modelled table below, are floors by every sweep written that "
+        "way: a type they report short of its values may in fact be swept exhaustively, and the "
+        "case is what says so. Read the case before taking a row of the work list as work."
+    )
+    w(
+        "- **Which case put a value in effect.** The unit is the case module, as it is for the "
+        "items axis: a value named anywhere in a module whose cases include a Metal run counts for "
+        "that module, even where one of its cases names it and the rest do not."
+    )
+    w(
+        f"- **A value only the suite's shared sources name** — {shared} of them. Some case puts it "
+        "to Metal through the render or texture vocabulary, but which case is not a property of "
+        "the text, so it is neither compared nor missing and has its own column."
+    )
+    w(
+        "- **Combinations.** Every column here is per value. A type whose values are all compared "
+        "says nothing about the pairs and triples of them, which is where most of the behaviour "
+        "an implementation can get wrong lives."
+    )
+    w(
+        "- **Metal's API validation is excluded.** Its complaints name enumerators, and the suite "
+        "records that leg and never compares it, so reading it would count Apple's prose as a "
+        "comparison. So are the cost and timing tables: a site name there is what was measured, "
+        "not an answer that was compared."
+    )
+    w(
+        "- **A `#[cfg(test)]` item is excluded.** One of the suite's unit tests names four blend "
+        "factors to assert that no case uses them; counting those would have this report the "
+        "opposite of what the code says."
+    )
+    w("")
+    w("| | |")
+    w("|---|---|")
+    w(f"| Metal enums and option sets with a generated value list | {len(rows)} |")
+    w(f"| their values | {values} |")
+    w(f"| values compared | {compared} |")
+    w(f"| share compared | {100.0 * compared / values:.0f}% |")
+    w(f"| values only the suite's shared sources name | {shared} |")
+    w(f"| values no source names and no recording holds | {missing} |")
+    whole = sum(1 for row in rows if not row["missing"] and not row["shared"])
+    w(f"| types every value of which is compared | {whole} |")
+    w(f"| types no value of which is compared | {sum(1 for r in rows if not r['compared'])} |")
+    w("")
+    largest = sorted(rows, key=lambda r: -len(r["values"]))[:4]
+    w(
+        "The share is weakly informative on its own: "
+        + ", ".join(f"`{row['metal']}`" for row in largest)
+        + f" hold {sum(len(row['values']) for row in largest)} of the {values} values between "
+        "them, so an aggregate over types this uneven is mostly theirs. The per-type table is the "
+        "one to read."
+    )
+    w("")
+    w(
+        "### Depth by type"
+    )
+    w("")
+    w(
+        "Deepest gap first, which is the order the work list reads in. *answered* and *in effect* "
+        "overlap; *compared* is their union."
+    )
+    w("")
+    w("| Metal type | values | compared | answered | in effect | shared only | missing |")
+    w("|---|---|---|---|---|---|---|")
+    for row in sorted(rows, key=lambda r: (-len(r["missing"]), -len(r["shared"]), r["metal"])):
+        w(
+            f"| `{row['metal']}` | {len(row['values'])} | {len(row['compared'])} | "
+            f"{len(row['answered'])} | {len(row['in_effect'])} | {len(row['shared'])} | "
+            f"{len(row['missing'])} |"
+        )
+    w("")
+    w("### The values not compared")
+    w("")
+    w(
+        "The work list. A name here is a value of Metal's that no committed recording holds and no "
+        "case module states **by name**: it is not a claim that Metal accepts the value on every "
+        "device, and not a claim that no case reaches it, because a case that sweeps a type by "
+        "ordinal states none of its values here. Each row is a question for the case, not a "
+        "verdict on it."
+    )
+    w("")
+    for row in sorted(rows, key=lambda r: (-len(r["missing"]), r["metal"])):
+        if not row["missing"]:
+            continue
+        w(f"- **`{row['metal']}`**, {len(row['missing'])} of {len(row['values'])}: "
+          + names_line(row["missing"]))
+    w("")
+    only = [row for row in rows if row["shared"]]
+    if only:
+        w(
+            "And the values only the suite's shared sources name, which some case reaches and this "
+            "cannot attribute:"
+        )
+        w("")
+        for row in sorted(only, key=lambda r: r["metal"]):
+            w(f"- **`{row['metal']}`**: " + names_line(row["shared"]))
+        w("")
+    w("### Metal types with no generated value list")
+    w("")
+    w(
+        "These the tree models by hand: a Rust item whose own doc comment opens by naming a Metal "
+        "type, and whose shape is a closed enum or a newtype over one integer. "
+        "`regen-metal-enums` holds no value list for them, so **this axis has no denominator "
+        "here**, and *declared* is our own sources' variant count rather than the SDK's — a "
+        "newtype option set declares none. There is no *answered* column either: a recording names "
+        "a value by its Metal enumerator, and for these types this has no list of those names to "
+        "match against. Giving one a denominator means appending its Metal name to "
+        "`scripts/regen-metal-enums/`'s `ENUMS` or `OPTIONS` and regenerating."
+    )
+    w("")
+    w(
+        f"These {len(space['by_hand'])} are what that shape finds, and the list is a floor: a type "
+        "the tree models without saying so on the item lands in neither table, and so is nowhere "
+        "in this axis at all."
+    )
+    w("")
+    w("| Metal type | the tree's type | declared | stated by a recorded case | shared only |")
+    w("|---|---|---|---|---|")
+    for row in space["by_hand"]:
+        w(
+            f"| `{row['metal']}` | `{row['rust']}` | {len(row['declared']) or '— a bit set'} | "
+            f"{len(row['stated'])} | {len(row['shared'])} |"
+        )
+    w("")
 
 
 def write(data) -> str:
@@ -478,6 +675,15 @@ def write(data) -> str:
         "*exercised* here only where a case's native Metal leg calls it; a case's Metal answer is "
         "a recorded fact only where the recording is committed. The two claims are different "
         "sizes, and only the second is conformance."
+    )
+    w("")
+    w(
+        "It says it along **two axes**, because either one alone reads as more than it is. The "
+        "**items** axis is reach: one call of a selector is enough, so a selector that takes an "
+        "enum counts as exercised whatever value reached it. The **option space** axis is depth: "
+        "of each Metal enum's and option set's values, which ones the suite compared. A high "
+        "number on the first and a low one on the second is what a suite that touches everything "
+        "shallowly looks like."
     )
     w("")
 
@@ -576,6 +782,8 @@ def write(data) -> str:
         "exercises nothing, however much Metal its code names."
     )
     w("")
+
+    write_option_space(w, data["option_space"])
 
     w("## By container")
     w("")
@@ -846,7 +1054,20 @@ def check_api() -> int:
     return 0
 
 
+def selftest() -> int:
+    """Run the option-space axis over inputs whose answers are known."""
+    import unittest
+
+    import test_option_space
+
+    loaded = unittest.TestLoader().loadTestsFromModule(test_option_space)
+    found = unittest.TextTestRunner(verbosity=2).run(loaded)
+    return 0 if found.wasSuccessful() else 1
+
+
 def main(argv: list[str]) -> int:
+    if "--selftest" in argv:
+        return selftest()
     if "--api" in argv:
         return check_api()
     text = write(inventory())

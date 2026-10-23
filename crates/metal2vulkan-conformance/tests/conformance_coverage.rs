@@ -12,6 +12,13 @@
 //!   cannot see. It derives per-case facts from the committed recordings, which is only the case
 //!   set if the case set and the recordings are the same names. A case with no recording, or a
 //!   recording no case claims, would leave the document counting something that is not the suite.
+//! - [`the_option_space_axis_still_measures_what_it_claims`] holds the second axis against the one
+//!   way a derivation over text fails silently. `--check` catches a number that went **stale**; it
+//!   cannot catch one that went **vacuous**, because a spelling the sources use that the regexes
+//!   no longer match, or a renamed recording key, lowers every count at once and the document
+//!   still reads like a measurement. So the axis is run over little trees whose answers are known
+//!   by construction, each asserting both that a value it should find is found and that a value it
+//!   must not count is not.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -23,9 +30,8 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// The document is what the sources and the recordings derive, as the generator writes it.
-#[test]
-fn the_conformance_coverage_document_is_what_the_sources_derive() {
+/// The generator run with `verb`, as its own words and its exit status.
+fn generator(verb: &str) -> (bool, String) {
     let script = root().join("scripts/conformance-coverage/coverage.py");
     // `-B` so the run leaves no `__pycache__` beside the script: a test writes nothing into the
     // tree it is checking.
@@ -33,16 +39,36 @@ fn the_conformance_coverage_document_is_what_the_sources_derive() {
         .arg("-I")
         .arg("-B")
         .arg(&script)
-        .arg("--check")
+        .arg(verb)
         .current_dir(root())
         .output()
-        .unwrap_or_else(|error| panic!("python3 {}: {error}", script.display()));
+        .unwrap_or_else(|error| panic!("python3 {} {verb}: {error}", script.display()));
     let out = format!(
         "{}{}",
         String::from_utf8_lossy(&run.stdout),
         String::from_utf8_lossy(&run.stderr)
     );
-    assert!(run.status.success(), "{out}");
+    (run.status.success(), out)
+}
+
+/// The document is what the sources and the recordings derive, as the generator writes it.
+#[test]
+fn the_conformance_coverage_document_is_what_the_sources_derive() {
+    let (ok, out) = generator("--check");
+    assert!(ok, "{out}");
+}
+
+/// The option-space axis finds the values it should and refuses the ones it should not.
+///
+/// `--check` holds the document to the sources, which catches a count that went stale. It cannot
+/// catch one that went vacuous: the axis reads the suite's text and its recordings, and a spelling
+/// it stops matching takes values out of every column at once, leaving a document that still reads
+/// like a measurement. `--selftest` runs the axis over trees it builds itself, where the answer is
+/// known, and each of its cases asserts both directions.
+#[test]
+fn the_option_space_axis_still_measures_what_it_claims() {
+    let (ok, out) = generator("--selftest");
+    assert!(ok, "{out}");
 }
 
 /// Every case of the suite has a committed recording, and every recording is a case's.

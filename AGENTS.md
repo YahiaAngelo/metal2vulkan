@@ -36,7 +36,7 @@ The translator's core lives in `crates/metal2vulkan-air/src/` and, in
 | `docs/ARCHITECTURE.md` | The translator's stages and module map |
 | `docs/FAST-PATHS.md` | The ledger of speed-for-accuracy defaults and their exact switches |
 | `docs/VALIDATION.md` | The validation ladder |
-| `docs/CONFORMANCE-COVERAGE.md` | Generated: which Metal items the conformance suite compares against Metal, and which it does not |
+| `docs/CONFORMANCE-COVERAGE.md` | Generated, along two axes: which Metal items the conformance suite compares against Metal, and which of each Metal enum's and option set's values it compared |
 | `CONTRIBUTING.md` | Build, test, golden tables |
 | `crates/metal2vulkan/src/env_vars.rs` | The `METAL2VULKAN_*` variables |
 

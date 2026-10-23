@@ -135,6 +135,7 @@ Edit the source, then regenerate:
 |---|---|---|
 | `docs/REFUSALS.md` | `python3 scripts/refusal-surface/refusal_surface.py` (`--check` to verify) | the code's refusal types; `reach.tsv` beside the script |
 | `docs/METAL-COVERAGE.md` | `python3 scripts/metal-coverage/coverage.py` (`--check` to verify) | `scripts/metal-coverage/coverage.tsv` |
+| `docs/CONFORMANCE-COVERAGE.md` | `python3 scripts/conformance-coverage/coverage.py` (`--check` to verify, `--selftest` for the option-space axis's own tests) | the suite's sources, its committed recordings, `scripts/metal-coverage/coverage.tsv`, `objc2_metal.tsv`, and the generated Metal enum tables |
 | `crates/metal2vulkan/src/spv.rs`, `crates/metal2vulkan/src/spirv_binary/table.rs` | `scripts/regen-spirv-grammar/regen-spirv-grammar.sh` | Khronos SPIRV-Headers' grammar JSON, and `items.txt` beside the script |
 | `crates/metal2vulkan-validation/profiles/*.json` | `scripts/regen-device-profiles/` | gpuinfo reports and local captures |
 
