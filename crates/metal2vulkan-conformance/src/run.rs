@@ -3,7 +3,7 @@
 //! One function per leg, so the command, a test and a device lane all drive the same code.
 
 use crate::case::Case;
-use crate::device::{self, Notices, ScratchCache, Venues};
+use crate::device::{self, Notices, Policy, ScratchCache, Venues};
 use crate::replay::replay_known;
 use crate::report::Report;
 use crate::runtime_side::RuntimeSide;
@@ -25,11 +25,20 @@ pub fn selected(names: &[String]) -> Result<Vec<Box<dyn Case>>, String> {
         .collect()
 }
 
-/// Replay `cases` on the venue `venues` names, as a report.
+/// Replay `cases` on the venue `venues` names, with exact answers, as a report.
 pub fn replay_on(venues: Venues, cases: &[Box<dyn Case>]) -> Result<Report, String> {
+    replay_on_under(venues, Policy::Exact, cases)
+}
+
+/// [`replay_on`] under `policy`: either form of every speed-for-accuracy choice.
+pub fn replay_on_under(
+    venues: Venues,
+    policy: Policy,
+    cases: &[Box<dyn Case>],
+) -> Result<Report, String> {
     let notices = Notices::default();
     let cache = ScratchCache::new().map_err(|error| error.to_string())?;
-    let device = device::open(venues, &notices, &cache)?;
+    let device = device::open_under(venues, policy, &notices, &cache)?;
     // The notices a device announces as it is made are the venue's, not any case's: they say what
     // this host's driver and release cost, once, before a case runs. They go in the report's venue
     // line, and the sink is cleared so a case's own notices site holds only what its work

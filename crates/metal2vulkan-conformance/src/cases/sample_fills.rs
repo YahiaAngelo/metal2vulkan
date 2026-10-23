@@ -440,7 +440,7 @@ impl Case for SampleFills {
             // back. The lane keeps the digest alone there, and so does this case: the site goes
             // unchecked, named, counted and reported, with that notice as the justification.
             allowances.push(Allowance::new(
-                site(self.row.name),
+                format!("case/{}", site(self.row.name)),
                 Loosening::Unchecked,
                 Justification::Degradation(
                     metal2vulkan_runtime::Degradation::DrawnDepthCopy

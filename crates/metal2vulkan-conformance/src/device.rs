@@ -105,8 +105,22 @@ fn loader() -> Option<PathBuf> {
     .find(|path| path.is_file())
 }
 
-/// The suite's device options: exact answers, every notice at every occurrence, the cache this
-/// run owns, and `notices`' sink.
+/// Which of the two forms of every speed-for-accuracy choice the device takes.
+///
+/// Both are the suite's business. `Exact` is what a conformance run should hold the runtime to;
+/// `Default` is what a consumer gets, and comparing a case under both is how the suite says
+/// whether a difference is the policy's or the implementation's. The owner's rule keeps both forms
+/// and asks for tests of both settings, so the command can select either.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Policy {
+    /// `DevicePolicy::exact_answers()`, with exact sampling: the accurate form of every choice.
+    Exact,
+    /// The runtime's own defaults: the fast form of every choice, which is what a consumer runs.
+    Default,
+}
+
+/// The suite's device options under `policy`: every notice at every occurrence, the cache this run
+/// owns, and `notices`' sink.
 ///
 /// `announce_each` over every kind is what makes a case's notices its own. A device announces a
 /// kind once by default, so on a shared device the first case to provoke a notice holds it and
@@ -114,11 +128,13 @@ fn loader() -> Option<PathBuf> {
 /// which cases ran before it in the same process. That would make the notices site — the suite's
 /// one mechanism for "a difference is a bug unless we announced it" — depend on the selection and
 /// its order. At every occurrence, each case's own work announces its own notices, so a case's
-/// verdict is the case's.
-pub fn options(notices: &Notices, cache: &ScratchCache) -> DeviceOptions {
+/// verdict is the case's, under either policy.
+pub fn options_under(policy: Policy, notices: &Notices, cache: &ScratchCache) -> DeviceOptions {
     let mut options = DeviceOptions::default();
-    options.policy = options.policy.exact_answers();
-    options.policy.sampling = metal2vulkan::device::SamplingPolicy::Exact;
+    if policy == Policy::Exact {
+        options.policy = options.policy.exact_answers();
+        options.policy.sampling = metal2vulkan::device::SamplingPolicy::Exact;
+    }
     options.announce_each = Degradation::ALL.iter().copied().collect();
     options.shader_cache = ShaderCacheOptions::in_directory(cache.path());
     options.loader = loader();
@@ -126,10 +142,25 @@ pub fn options(notices: &Notices, cache: &ScratchCache) -> DeviceOptions {
     options
 }
 
-/// The runtime's default device among the physical devices `venues` names.
-pub fn open(venues: Venues, notices: &Notices, cache: &ScratchCache) -> Result<Device, String> {
-    let mut options = options(notices, cache);
+/// The suite's device options: exact answers, the cache this run owns, and `notices`' sink.
+pub fn options(notices: &Notices, cache: &ScratchCache) -> DeviceOptions {
+    options_under(Policy::Exact, notices, cache)
+}
+
+/// The runtime's default device among the physical devices `venues` names, under `policy`.
+pub fn open_under(
+    venues: Venues,
+    policy: Policy,
+    notices: &Notices,
+    cache: &ScratchCache,
+) -> Result<Device, String> {
+    let mut options = options_under(policy, notices, cache);
     options.kinds = venues.kinds();
     Device::system_default_with(&options)
         .map_err(|error| format!("the runtime made no {venues:?} device: {error}"))
+}
+
+/// The runtime's default device among the physical devices `venues` names, with exact answers.
+pub fn open(venues: Venues, notices: &Notices, cache: &ScratchCache) -> Result<Device, String> {
+    open_under(venues, Policy::Exact, notices, cache)
 }

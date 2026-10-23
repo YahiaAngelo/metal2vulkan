@@ -717,7 +717,7 @@ impl Case for TextureFills {
             // Metal's to match: the lane skips the format there, and here the digest goes
             // unchecked, named, counted and reported, with that notice as the justification.
             allowances.push(Allowance::new(
-                site(self.raw),
+                format!("case/{}", site(self.raw)),
                 Loosening::Unchecked,
                 Justification::Degradation(
                     metal2vulkan_runtime::Degradation::RestrictedDepthUpload
