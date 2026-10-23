@@ -4,10 +4,24 @@
 //! one would let it read as coverage.
 
 use crate::compare::Unfired;
+use crate::cost::{self, CostVerdict, Counts, Region};
 use crate::known_refusals::{against, Expectation, KnownRefusal};
 use crate::replay::{ReplayError, Replayed};
 use crate::verdict::Verdict;
 use std::collections::{BTreeMap, BTreeSet};
+
+/// What the cost half says of one case on the venue the run was on: its own verdict, kept apart
+/// from the correctness one, and the counts behind it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CostRow {
+    pub case: String,
+    pub verdict: CostVerdict,
+    /// The counts the case's run moved, which the verdict was taken over.
+    pub counts: Counts,
+    /// How long the case's run took, in nanoseconds. **Advisory**: this half gates on counts, and
+    /// a time is reported so a reader can see where the counts are large.
+    pub nanos: u64,
+}
 
 /// A report over a selection of cases and venues.
 #[derive(Clone, Debug, Default)]
@@ -18,6 +32,9 @@ pub struct Report {
     /// no case. They are reported, never compared: a case's notices are the ones its own work
     /// announced.
     venue_notices: Vec<(String, Vec<String>)>,
+    /// What the cost half says of each case ([`crate::cost`]). Its own list and its own verdicts:
+    /// a count has no Metal counterpart, so it never touches a correctness row.
+    costs: Vec<CostRow>,
 }
 
 impl Report {
@@ -47,6 +64,42 @@ impl Report {
             Ok(row) => self.add(row),
             Err(error) => self.add_error(error),
         }
+    }
+
+    /// Add what the cost half says of one case.
+    pub fn add_cost(&mut self, row: CostRow) {
+        self.costs.push(row);
+    }
+
+    /// What the cost half says of each case.
+    pub fn cost_rows(&self) -> &[CostRow] {
+        &self.costs
+    }
+
+    /// How many cost rows hold each of the three cost verdicts.
+    pub fn cost_counts(&self) -> BTreeMap<&'static str, usize> {
+        let mut counts = BTreeMap::new();
+        for row in &self.costs {
+            *counts.entry(row.verdict.word()).or_default() += 1;
+        }
+        counts
+    }
+
+    /// Every case that did more work than its bounds allow.
+    pub fn cost_overruns(&self) -> Vec<&CostRow> {
+        self.costs
+            .iter()
+            .filter(|row| !row.verdict.is_within())
+            .collect()
+    }
+
+    /// Whether every cost row is within its bounds.
+    ///
+    /// Its own gate, kept apart from [`Report::is_compliant`]: a count is ours and not Metal's, so
+    /// going over a bound is never a conformance difference, and a conformance difference is never
+    /// a cost result. An unmeasured row does not fail this; it is counted as the gap it is.
+    pub fn cost_is_within(&self) -> bool {
+        self.costs.iter().all(|row| row.verdict.is_within())
     }
 
     /// The rows.
@@ -320,6 +373,70 @@ impl Report {
                 "\n{} on {}: {}\n",
                 row.case, row.venue, row.verdict
             ));
+        }
+        out.push_str(&self.render_cost());
+        out
+    }
+
+    /// The cost half of the report: its own verdict counts, where the work fell by region, and
+    /// every case that went over a bound in full.
+    ///
+    /// Empty where nothing measured the cost half, so a report of the correctness half alone reads
+    /// as it did.
+    pub fn render_cost(&self) -> String {
+        if self.costs.is_empty() {
+            return String::new();
+        }
+        let mut out = String::from("\ncost verdicts (ours, never Metal's: no Metal counterpart)\n");
+        for (word, count) in self.cost_counts() {
+            out.push_str(&format!("  {word:<14} {count}\n"));
+        }
+        let mut sums: BTreeMap<Region, u64> = BTreeMap::new();
+        for row in &self.costs {
+            for (region, count) in cost::by_region(&row.counts) {
+                *sums.entry(region).or_default() += count;
+            }
+        }
+        out.push_str("\nwhere the work fell, over the selection\n");
+        for region in Region::ALL {
+            out.push_str(&format!(
+                "  {:<14} {}\n",
+                region.word(),
+                sums.get(&region).copied().unwrap_or(0)
+            ));
+        }
+        // An unmeasured row is a hole in the gate, and holes are tracked the way `Unrecorded` is:
+        // one line each, with the reason, never a silent skip.
+        let unmeasured: Vec<&CostRow> = self
+            .costs
+            .iter()
+            .filter(|row| matches!(row.verdict, CostVerdict::Unmeasured { .. }))
+            .collect();
+        if !unmeasured.is_empty() {
+            out.push_str(&format!(
+                "\n{} case(s) have no cost bound on this venue\n",
+                unmeasured.len()
+            ));
+            let mut whys: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+            for row in unmeasured {
+                if let CostVerdict::Unmeasured { why } = &row.verdict {
+                    whys.entry(why.clone()).or_default().push(&row.case);
+                }
+            }
+            for (why, cases) in whys {
+                out.push_str(&format!("  {} case(s): {why}\n", cases.len()));
+                for case in cases {
+                    out.push_str(&format!("    {case}\n"));
+                }
+            }
+        }
+        for row in self.cost_overruns() {
+            out.push_str(&format!("\n{} cost more than its bounds\n", row.case));
+            if let CostVerdict::Over { over } = &row.verdict {
+                for one in over {
+                    out.push_str(&format!("  {one}\n"));
+                }
+            }
         }
         out
     }

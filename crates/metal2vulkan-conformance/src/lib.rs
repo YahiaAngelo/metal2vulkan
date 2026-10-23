@@ -41,6 +41,7 @@ pub mod allowance;
 pub mod case;
 pub mod cases;
 pub mod compare;
+pub mod cost;
 pub mod device;
 pub mod diff;
 pub mod fixture;
@@ -72,6 +73,7 @@ mod tests;
 
 pub use allowance::{Allowance, Justification, Loosening};
 pub use case::{Case, Input, MetalSource, ReRecord, Side, Venue};
+pub use cost::{CostBound, CostRecord, CostVerdict, Counts, Region};
 pub use recording::{Recording, SUITE_VERSION};
 pub use replay::{replay, replay_against, Replayed};
 pub use report::Report;

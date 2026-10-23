@@ -17,6 +17,7 @@
 //! is named by its committed fixture and its bitcode's digest, because a host without Metal cannot
 //! compile one.
 
+use crate::cost::CostRecord;
 use crate::transcript::Transcript;
 use metal2vulkan_runtime::MetalLevel;
 use serde::{Deserialize, Serialize};
@@ -262,6 +263,17 @@ pub struct Recording {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shaders: Vec<ShaderRef>,
     pub answers: Vec<Answer>,
+    /// What **our** side cost to produce the case's transcript, per venue
+    /// ([`crate::cost`]): the counts the runtime's own [`metal2vulkan_runtime::WorkCounts`] moved,
+    /// each with the most the measurement saw.
+    ///
+    /// It lives here, beside the Metal answers and in the same file, so a host with no Metal
+    /// replays the cost half unchanged with the rest of the recording. It is **not** a Metal fact
+    /// and nothing compares it with one: Metal has no counterpart for any of these counts, so they
+    /// never produce a correctness verdict. A recording taken before the cost half existed holds
+    /// none, and reads as `Unmeasured`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub costs: Vec<CostRecord>,
 }
 
 impl Recording {
@@ -273,7 +285,15 @@ impl Recording {
             suite_version: SUITE_VERSION,
             shaders,
             answers,
+            costs: Vec::new(),
         }
+    }
+
+    /// The same recording holding `costs`: what our side cost on each venue measured.
+    #[must_use]
+    pub fn with_costs(mut self, costs: Vec<CostRecord>) -> Self {
+        self.costs = costs;
+        self
     }
 
     /// The answer for the venue's declared Metal `level`, or why there is none.

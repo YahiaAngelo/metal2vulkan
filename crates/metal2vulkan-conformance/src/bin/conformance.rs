@@ -45,12 +45,22 @@ fn command() -> Result<bool, String> {
     let mut venues = Venues::Gpu;
     let mut policy = Policy::Exact;
     let mut names = Vec::new();
-    for word in words {
+    let mut runs = 2;
+    let mut write = false;
+    let mut words = words.peekable();
+    while let Some(word) = words.next() {
         match word.as_str() {
             "--cpu" => venues = Venues::Cpu,
             "--gpu" => venues = Venues::Gpu,
             "--default-policy" => policy = Policy::Default,
             "--exact-policy" => policy = Policy::Exact,
+            "--write" => write = true,
+            "--runs" => {
+                let value = words.next().ok_or("--runs wants a number")?;
+                runs = value
+                    .parse()
+                    .map_err(|_| format!("--runs {value}: not a number"))?;
+            }
             flag if flag.starts_with('-') => return Err(format!("unknown flag {flag}")),
             name => names.push(name.to_owned()),
         }
@@ -64,6 +74,7 @@ fn command() -> Result<bool, String> {
             Ok(true)
         }
         "record" => record(&cases),
+        "cost" => cost(venues, policy, &cases, runs, write),
         metal2vulkan_conformance::validated::LEG_VERB => validated_leg(&cases),
         "replay" => {
             let report = run::replay_on_under(venues, policy, &cases)?;
@@ -74,7 +85,18 @@ fn command() -> Result<bool, String> {
             // fails it too.
             let ledger = metal2vulkan_conformance::known_refusals::ledger()?;
             let unexpected = report.unexpected(&ledger);
-            if unexpected.is_empty() {
+            // The cost half is a gate of its own, so it has its own line in the exit status: a
+            // count going over its bound is never a conformance difference, and a conformance
+            // difference is never a cost result. Both must hold for the run to be green.
+            let within = report.cost_is_within();
+            if !within {
+                println!(
+                    "\n{} case(s) did more work than the measurement their bounds name; the \
+                     counts are listed above",
+                    report.cost_overruns().len()
+                );
+            }
+            if unexpected.is_empty() && within {
                 let expected = ledger
                     .iter()
                     .filter(|known| report.rows().iter().any(|row| row.case == known.case))
@@ -94,9 +116,87 @@ fn command() -> Result<bool, String> {
             Ok(false)
         }
         other => Err(format!(
-            "unknown command {other}: expected record, replay or cases"
+            "unknown command {other}: expected record, replay, cost or cases"
         )),
     }
+}
+
+/// Measure what the selection costs on a venue and print it, writing the bounds into the cases'
+/// own recordings with `--write`.
+///
+/// The whole selection runs `--runs` times in order, because a case's counts depend on what ran
+/// before it in the same process: the runtime pools command pools, memory blocks and descriptor
+/// sets across cases, so the measurement must have the shape the gate will have.
+fn cost(
+    venues: Venues,
+    policy: Policy,
+    cases: &[Box<dyn metal2vulkan_conformance::case::Case>],
+    runs: u32,
+    write: bool,
+) -> Result<bool, String> {
+    let (venue, measured) = run::cost_on_under(venues, policy, cases, runs)?;
+    let words = format!(
+        "{runs} run(s) of the whole selection on {venue}, in the case set's own order, the \
+         largest each count reached"
+    );
+    println!(
+        "cost on {venue}, over {runs} run(s) of {} case(s)",
+        cases.len()
+    );
+    println!("{words}\n");
+    let mut moved = 0;
+    let mut stopped = 0;
+    for one in &measured {
+        let regions = metal2vulkan_conformance::cost::by_region(&one.counts);
+        let region = |region: metal2vulkan_conformance::cost::Region| {
+            regions.get(&region).copied().unwrap_or(0)
+        };
+        use metal2vulkan_conformance::cost::Region;
+        println!(
+            "{:<44} {:>5} counts  transl {:>6}  api {:>8}  submit {:>8}  {:>8.3} ms",
+            one.case,
+            one.counts.len(),
+            region(Region::Translation),
+            region(Region::DeviceApi),
+            region(Region::Submission),
+            one.nanos as f64 / 1e6,
+        );
+        if let Some(why) = &one.stopped {
+            stopped += 1;
+            println!("    the run stopped: {why}");
+        }
+        let spread = one.moved();
+        if !spread.is_empty() {
+            moved += spread.len();
+            println!(
+                "    {} count(s) moved between runs, so they are reported and not gated:",
+                spread.len()
+            );
+            for (count, least, most) in spread {
+                println!("      {count} {least}..{most}");
+            }
+        }
+    }
+    println!(
+        "\n{} case(s) measured, {stopped} stopped before finishing, {moved} count reading(s) \
+         moved between runs",
+        measured.len()
+    );
+    if !write {
+        println!("nothing written; pass --write to put these bounds in the recordings");
+        return Ok(true);
+    }
+    let mut all = true;
+    for (case, written) in run::record_costs(&venue, &measured, &words) {
+        match written {
+            Ok(path) => println!("{case}: {}", path.display()),
+            Err(why) => {
+                all = false;
+                println!("{case}: not recorded: {why}");
+            }
+        }
+    }
+    Ok(all)
 }
 
 /// Take the selection's Metal answers, printing where each recording went.

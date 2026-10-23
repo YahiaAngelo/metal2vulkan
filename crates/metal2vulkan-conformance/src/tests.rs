@@ -2047,3 +2047,416 @@ fn the_report_says_how_many_answers_came_from_another_chip() {
     // failure. Counting it is the whole mechanism.
     assert!(report.is_compliant());
 }
+
+// The cost half: what our side did to produce a case's transcript. Counts, never Metal's, and
+// never a correctness verdict.
+
+/// The cost half reads **every** count the runtime keeps, and fails loudly on a field it cannot.
+///
+/// `WorkCounts` has 386 fields of its own plus three nested count structs, and a hand-written list
+/// of them would be stale the day a runtime change added one, so the reading comes out of the
+/// derived `Debug`. The risk that buys is a field of another shape being dropped silently, which
+/// would be a hole in the gate nobody could see — so a leaf that is not a count is an error here,
+/// and the only fields left out are the ones named with their reason.
+#[test]
+fn the_cost_half_reads_every_count_the_runtime_keeps() {
+    let counts = crate::cost::Counts::of(&metal2vulkan_runtime::WorkCounts::default())
+        .expect("the runtime's counts read as counts");
+    assert!(
+        counts.len() > 350,
+        "only {} counts were read, so the reading is not of the whole struct",
+        counts.len()
+    );
+    // One count from each nesting level, so a change that flattened or renamed a level fails here.
+    for name in [
+        "queue_submissions",
+        "variant_pipelines_made",
+        "commands_replayed.cmd_draw",
+        "object_churn.images_parked",
+        "shadow_keeps.render_cut",
+    ] {
+        assert_eq!(counts.get(name), 0, "{name} was not read");
+        assert!(
+            counts.iter().any(|(held, _)| held == name),
+            "{name} is not among the counts the cost half reads"
+        );
+    }
+    // The site tables are left out, and nothing of them leaks in under another name.
+    assert!(
+        !counts.iter().any(|(name, _)| name.contains("copy_sites")),
+        "a site table was read as a count"
+    );
+    assert!(crate::cost::excluded("copy_sites").is_some());
+    assert!(crate::cost::excluded("row_copy_regions_most").is_some());
+    assert!(crate::cost::excluded("batch_submit_nanos").is_some());
+    assert!(crate::cost::excluded("queue_submissions").is_none());
+}
+
+/// A field of the runtime's counts that is not a count fails the reading by name.
+///
+/// This is the guard that makes the test above load-bearing: without it, a runtime field of a new
+/// shape would simply not be counted, and the gate would quietly stop holding it.
+#[test]
+fn a_field_that_is_not_a_count_fails_the_reading() {
+    let shape = "WorkCounts {\n    queue_submissions: 3,\n    a_new_flag: true,\n}";
+    let why = crate::cost::Counts::read(shape).expect_err("a bool is not a count");
+    assert!(why.contains("a_new_flag"), "{why}");
+    assert!(why.contains("NOT_A_COUNT"), "{why}");
+    // And the same shape with the field left out reads fine, so the failure is the field's.
+    let read = crate::cost::Counts::read("WorkCounts {\n    queue_submissions: 3,\n}")
+        .expect("a count reads");
+    assert_eq!(read.get("queue_submissions"), 3);
+}
+
+/// Nesting, arrays and the site tables all come out of the reading as they went in.
+#[test]
+fn the_reading_follows_the_nesting_and_skips_the_site_tables() {
+    let shape = "\
+WorkCounts {
+    queue_submissions: 2,
+    commands_replayed: CommandsReplayed {
+        cmd_draw: 7,
+    },
+    copy_sites: [
+        CopySite {
+            command: \"vkCmdCopyBuffer\",
+            file: \"buffer.rs\",
+            line: 10,
+            calls: 1,
+        },
+        CopySite {
+            command: \"\",
+            file: \"\",
+            line: 0,
+            calls: 0,
+        },
+    ],
+    fences_made: 1,
+}";
+    let read = crate::cost::Counts::read(shape).expect("the shape reads");
+    assert_eq!(read.get("queue_submissions"), 2);
+    assert_eq!(read.get("commands_replayed.cmd_draw"), 7);
+    assert_eq!(read.get("fences_made"), 1);
+    assert_eq!(read.len(), 3, "{:?}", read);
+}
+
+/// The three regions are the ones the cost regime names, and the device API is the residual.
+#[test]
+fn the_work_is_attributed_to_the_three_regions() {
+    use crate::cost::{region_of, Region};
+    for name in [
+        "variant_pipelines_made",
+        "shader_modules_made",
+        "pipeline_layouts_shared",
+        "graphics_pipelines_looked_up",
+    ] {
+        assert_eq!(region_of(name), Region::Translation, "{name}");
+    }
+    for name in [
+        "commands_replayed.cmd_draw",
+        "queue_submissions",
+        "command_buffers_submitted",
+        "scheduler_passes",
+        "wakes_handler_threads",
+        "completed_waits",
+    ] {
+        assert_eq!(region_of(name), Region::Submission, "{name}");
+    }
+    // What a call does on the calling thread, including the counts whose names mention a pipeline
+    // or a submission but which are draws and binds.
+    for name in [
+        "draw_shapes_made",
+        "object_churn.images_parked",
+        "stage_tables_read",
+        "fills_recorded",
+        "provoking_last_pipeline_draws",
+        "instance_splits_pending_pipeline",
+    ] {
+        assert_eq!(region_of(name), Region::DeviceApi, "{name}");
+    }
+}
+
+/// A count the measurement never saw move is bounded at zero.
+///
+/// This is the whole point of the gate: a case that starts doing something it did not do before
+/// reads as `Over` rather than as nothing at all.
+#[test]
+fn a_count_the_measurement_never_saw_is_bounded_at_zero() {
+    let record = crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 2,
+        measured: "two runs of the whole selection".to_owned(),
+        degraded: Vec::new(),
+        bounds: vec![crate::cost::CostBound {
+            count: "queue_submissions".to_owned(),
+            region: crate::cost::Region::Submission,
+            most: 1,
+            range: None,
+        }],
+    };
+    let judge = |text: &str| {
+        crate::cost::judge(
+            std::slice::from_ref(&record),
+            "a venue",
+            true,
+            &crate::cost::Counts::read(text).expect("the shape reads"),
+            None,
+            &[],
+        )
+    };
+    // At the bound: within.
+    assert_eq!(
+        judge("WorkCounts {\n    queue_submissions: 1,\n}").word(),
+        "within"
+    );
+    // Over the bound: over, naming the count, the region, the bound and what was found.
+    let over = judge("WorkCounts {\n    queue_submissions: 2,\n}");
+    assert_eq!(over.word(), "over");
+    assert!(
+        over.to_string().contains(
+            "queue_submissions (submission) reached 2 where the \
+             measurement's most was 1"
+        ),
+        "{over}"
+    );
+    // A count nothing bounded, which the measurement never saw: over, bounded at zero.
+    let fresh = judge("WorkCounts {\n    queue_submissions: 1,\n    fences_made: 1,\n}");
+    assert_eq!(fresh.word(), "over");
+    assert!(fresh.to_string().contains("fences_made"), "{fresh}");
+}
+
+/// A count whose readings moved between runs of the same case on the same venue is reported, not
+/// gated: a bound that fails at random is worse than no bound.
+#[test]
+fn a_count_whose_readings_moved_is_reported_and_not_gated() {
+    let bound = |range: Option<u64>| crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 3,
+        measured: "three runs".to_owned(),
+        degraded: Vec::new(),
+        bounds: vec![crate::cost::CostBound {
+            count: "scheduler_passes".to_owned(),
+            region: crate::cost::Region::Submission,
+            most: 2,
+            range,
+        }],
+    };
+    let found = crate::cost::Counts::read("WorkCounts {\n    scheduler_passes: 9,\n}").unwrap();
+    // Deterministic in the measurement: held, and 9 is over 2.
+    let gated = bound(None);
+    assert_eq!(
+        crate::cost::judge(
+            std::slice::from_ref(&gated),
+            "a venue",
+            true,
+            &found,
+            None,
+            &[]
+        )
+        .word(),
+        "over"
+    );
+    assert_eq!(gated.gated(), 1);
+    // Seen to move between 0 and 2: reported, and 9 does not fail the run.
+    let moving = bound(Some(0));
+    assert_eq!(
+        crate::cost::judge(
+            std::slice::from_ref(&moving),
+            "a venue",
+            true,
+            &found,
+            None,
+            &[]
+        )
+        .word(),
+        "within"
+    );
+    assert_eq!(moving.gated(), 0);
+}
+
+/// Every way a run can fail to have a bound is its own `Unmeasured`, with the reason in words.
+///
+/// Four of them, and each matters: a venue the measurement was not taken on; a selection that is
+/// not the whole case set, because a case's counts depend on what ran before it; a run that
+/// stopped part way; and — the one the correctness half's own fix is about — a run the **device**
+/// degraded otherwise than the measurement did, whose lower counts are the device's gap and not a
+/// cost we saved.
+#[test]
+fn a_run_with_no_bound_that_stands_is_unmeasured_and_says_why() {
+    let record = crate::cost::CostRecord {
+        venue: "the measured venue".to_owned(),
+        runs: 2,
+        measured: "two runs".to_owned(),
+        degraded: vec!["half-nan-quieted".to_owned()],
+        bounds: vec![crate::cost::CostBound {
+            count: "queue_submissions".to_owned(),
+            region: crate::cost::Region::Submission,
+            most: 1,
+            range: None,
+        }],
+    };
+    let found = crate::cost::Counts::read("WorkCounts {\n    queue_submissions: 1,\n}").unwrap();
+    let records = std::slice::from_ref(&record);
+    let degraded = [String::from("half-nan-quieted")];
+    let why = |verdict: crate::cost::CostVerdict| match verdict {
+        crate::cost::CostVerdict::Unmeasured { why } => why,
+        other => panic!("{other:?}"),
+    };
+    // The measurement's own shape: within.
+    assert_eq!(
+        crate::cost::judge(records, "the measured venue", true, &found, None, &degraded).word(),
+        "within"
+    );
+    // Another venue.
+    let other = why(crate::cost::judge(
+        records,
+        "another venue",
+        true,
+        &found,
+        None,
+        &degraded,
+    ));
+    assert!(other.contains("another venue"), "{other}");
+    assert!(other.contains("the measured venue"), "{other}");
+    // A selection rather than the whole case set.
+    let part = why(crate::cost::judge(
+        records,
+        "the measured venue",
+        false,
+        &found,
+        None,
+        &degraded,
+    ));
+    assert!(part.contains("whole case set"), "{part}");
+    // A run that stopped part way.
+    let stopped = why(crate::cost::judge(
+        records,
+        "the measured venue",
+        true,
+        &found,
+        Some("the venue lacks 2x multisampling"),
+        &degraded,
+    ));
+    assert!(stopped.contains("2x multisampling"), "{stopped}");
+    // A run the device degraded otherwise: the gap must not read as a win.
+    let elsewhere = why(crate::cost::judge(
+        records,
+        "the measured venue",
+        true,
+        &found,
+        None,
+        &[],
+    ));
+    assert!(
+        elsewhere.contains("half-nan-quieted") && elsewhere.contains("device's gap"),
+        "{elsewhere}"
+    );
+}
+
+/// The cost record rides in the recording, and a recording written before the cost half existed
+/// still reads.
+#[test]
+fn the_cost_record_rides_in_the_recording() {
+    let answer = RecordedAnswer {
+        key: crate::recording::OracleKey::current(MetalLevel::NEWEST),
+        provenance: Provenance::MetalRun,
+        device: "a device".to_owned(),
+        runs: 1,
+        outcomes: vec![Outcome {
+            runs: 1,
+            transcript: Sites::new().finish(),
+        }],
+        validated: Validated::NotRun,
+    };
+    let costs = vec![crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 2,
+        measured: "two runs of the whole selection".to_owned(),
+        degraded: Vec::new(),
+        bounds: vec![crate::cost::CostBound {
+            count: "queue_submissions".to_owned(),
+            region: crate::cost::Region::Submission,
+            most: 1,
+            range: None,
+        }],
+    }];
+    let recording = Recording::new("a case", Vec::new(), vec![answer]).with_costs(costs.clone());
+    let text = serde_json::to_string_pretty(&recording).expect("it writes");
+    let read: Recording = serde_json::from_str(&text).expect("it reads back");
+    assert_eq!(read.costs, costs);
+    // A recording of the format as it was before the cost half holds no `costs` member at all: it
+    // reads, with no cost record, which is `Unmeasured` and never a pass. So the member is left
+    // out where it is empty, and the 127 recordings already committed stay byte for byte as they
+    // are until a cost measurement is written into them.
+    let mut without = recording.clone();
+    without.costs = Vec::new();
+    let text = serde_json::to_string(&without).expect("it writes");
+    assert!(!text.contains("costs"), "an empty cost half is not written");
+    let read: Recording = serde_json::from_str(&text).expect("it reads back");
+    assert!(read.costs.is_empty());
+}
+
+/// A measurement turns into bounds that name it, and a count whose runs disagreed carries its
+/// range.
+#[test]
+fn a_measurement_becomes_bounds_that_name_it() {
+    let cost = crate::cost::CaseCost {
+        case: "a case".to_owned(),
+        counts: crate::cost::Counts::read(
+            "WorkCounts {\n    queue_submissions: 2,\n    scheduler_passes: 5,\n}",
+        )
+        .unwrap(),
+        least: crate::cost::Counts::read(
+            "WorkCounts {\n    queue_submissions: 2,\n    scheduler_passes: 1,\n}",
+        )
+        .unwrap(),
+        runs: 3,
+        stopped: None,
+        degraded: vec!["a-code".to_owned()],
+        nanos: 1_000,
+    };
+    let record = cost.record("a venue", "three runs of the whole selection".to_owned());
+    assert_eq!(record.venue, "a venue");
+    assert_eq!(record.runs, 3);
+    assert_eq!(record.measured, "three runs of the whole selection");
+    assert_eq!(record.degraded, vec!["a-code".to_owned()]);
+    let submissions = record.bound("queue_submissions").expect("it is bounded");
+    assert_eq!((submissions.most, submissions.range), (2, None));
+    assert!(submissions.gated());
+    let passes = record.bound("scheduler_passes").expect("it is bounded");
+    assert_eq!((passes.most, passes.range), (5, Some(1)));
+    assert!(!passes.gated());
+    assert_eq!(record.gated(), 1);
+    assert_eq!(cost.moved(), vec![("scheduler_passes", 1, 5)]);
+}
+
+/// Re-taking a case's Metal answer keeps its cost record.
+///
+/// The two halves are measured by different legs — Metal's answer on this Mac, our cost on a venue
+/// — so a re-record must not empty the cost gate. Without this, every re-recording would silently
+/// turn the cost half off for the case it touched.
+#[test]
+fn re_recording_a_metal_answer_keeps_the_cost_record() {
+    let held = crate::recording::read(crate::cases::pass_bytes::all()[0].name())
+        .expect("a committed recording");
+    let costs = vec![crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 1,
+        measured: "one run".to_owned(),
+        degraded: Vec::new(),
+        bounds: Vec::new(),
+    }];
+    let kept = Recording::new(
+        held.case.clone(),
+        held.shaders.clone(),
+        held.answers.clone(),
+    )
+    .with_costs(costs.clone());
+    assert_eq!(kept.costs, costs);
+    // `record::write` reads what is committed and keeps its cost half, so this is the shape it
+    // writes. The call itself is not made here: it would write over a committed recording.
+    assert!(
+        include_str!("record.rs").contains("let costs = recording::read(case.name())"),
+        "record::write no longer keeps the cost half of the recording it replaces"
+    );
+}

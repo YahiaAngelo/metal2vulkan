@@ -154,9 +154,17 @@ pub fn never_returned(
 }
 
 /// Write `answers` as `case`'s recording.
+///
+/// The cost half of a recording already written is kept ([`Recording::costs`]): it is our side's
+/// measurement, taken on a venue rather than from Metal, so re-taking Metal's answer neither
+/// refreshes it nor invalidates it, and dropping it here would silently empty the cost gate every
+/// time a case was re-recorded.
 pub fn write(case: &dyn Case, answers: Vec<Answer>) -> Result<std::path::PathBuf, String> {
     let shaders = case.shaders()?;
-    recording::write(&Recording::new(case.name(), shaders, answers))
+    let costs = recording::read(case.name())
+        .map(|held| held.costs)
+        .unwrap_or_default();
+    recording::write(&Recording::new(case.name(), shaders, answers).with_costs(costs))
 }
 
 /// Count `transcript` among `outcomes`, as a new outcome or as another run of one already held.
