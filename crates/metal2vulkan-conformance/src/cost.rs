@@ -406,11 +406,80 @@ pub fn monotone(name: &str) -> Option<&'static str> {
         .map(|(_, worst)| *worst)
 }
 
+/// Counts that are **not a property of the case at all**, read off what the counter *is* in the
+/// runtime's own source rather than off whether a reading moved.
+///
+/// This is the third class, beside gated and merely reported, and it is the one a measurement
+/// cannot discover. A count here is shared state, a snapshot of it, or a split the machine's
+/// progress decides: no bound on it is a bound on the case, so the number of runs it survives says
+/// nothing. Deriving the class from "it moved between runs" is how a gate that can only loosen gets
+/// built — a count moves when the machine is busy and holds still when it is quiet, and a rule
+/// written from the quiet afternoon fires on the busy one. So each row cites its definition, and a
+/// measurement that corroborates it is noted as corroboration and never as the reason.
+///
+/// Two streams found this class the hard way on the same afternoon. One ran the whole set twice,
+/// same binary, same tree, same venue, nothing changed between runs, and got **four cases over
+/// bounds both times with only one case in common** — and found that only because its first log was
+/// truncated and it reran. The other read the counters behind its own movements and found every one
+/// of them process-shared. Neither symptom could be read off a single run, which is the property
+/// that makes this class worth naming rather than discovering again.
+const SHARED: [(&str, &str); 9] = [
+    // `work_counts.rs`: "every batch, by how far its queue's work ran behind its submission".
+    // Four buckets of one histogram, and which bucket a batch lands in is decided by how fast the
+    // GPU drained what was submitted before it, earlier cases included. The sum is the case's own
+    // batch count; the split is the machine's. `batches_with_none_pending` was the most widely
+    // gated count in the suite, at 440 cases, and `batches_with_one_pending` was bounded at 0 in
+    // all but one — so a batch that found one earlier batch still pending moved a count from the
+    // first bucket into a bound of zero in the second, in whichever cases the GPU happened to be
+    // behind. That is the shape of four-over-bounds-in-a-different-four-each-run.
+    ("batches_with_none_pending", QUEUE_DEPTH),
+    ("batches_with_one_pending", QUEUE_DEPTH),
+    ("batches_with_two_or_three_pending", QUEUE_DEPTH),
+    ("batches_with_four_or_more_pending", QUEUE_DEPTH),
+    // Groups "that stayed held past the pass that found no batch ready, while two or more earlier
+    // submissions of their `VkQueue` were not seen complete", and of those the ones that went
+    // "because a thread began to wait". Both are about what the host had seen finish, which is the
+    // same question as the histogram above. **No measurement corroborates these two**: they read 0
+    // in every case of the set today, so they are gated at zero and would fire the first time the
+    // queue ran behind. They are here on their definitions alone, which is the point of the class.
+    ("groups_kept_pending", QUEUE_DEPTH),
+    ("groups_sent_for_waits", QUEUE_DEPTH),
+    // "found a submission holding its place in the submissions' order and waited until that
+    // submission was made", on a device that cannot write heap sets while a command buffer binding
+    // them is pending. Whether a registration finds a submission holding the order is a race with
+    // that submission. Reads 0 on this venue, and is here on its definition.
+    ("registrations_waited", QUEUE_DEPTH),
+    // The two halves of a transition's thread that an earlier pass left gated because nothing had
+    // been seen to move them. Definition-first says otherwise, and consistency matters more than
+    // the reach: `scheduled_where_submitted` is documented as running "on the scheduler's thread
+    // as their last batch went, with no handler thread woken", the complement of
+    // `wakes_handler_threads`, exactly as `completed_where_seen` is; and `finales_apart` is forced
+    // apart partly by "whose last command buffer does not go to the queue as recorded", which is
+    // submission-path state. Neither has been seen to move. Both belong here anyway, because the
+    // reason a count is reported is what the counter counts.
+    ("scheduled_where_submitted", COMPLEMENT),
+    ("finales_apart", FOLDED),
+];
+
+/// Why a count of how far a queue's work ran behind is reported and never gated.
+const QUEUE_DEPTH: &str = "how far this `VkQueue`'s work ran behind when the case submitted, or \
+     what the host had seen complete by then: the machine's progress on work submitted before this \
+     case, not anything the case asked for";
+
+/// Where `name` is not a property of the case at all ([`SHARED`]).
+pub fn not_the_cases_own(name: &str) -> Option<&'static str> {
+    SHARED
+        .iter()
+        .find(|(count, _)| *count == name)
+        .map(|(_, why)| *why)
+}
+
 /// Why `name` is reported and never gated, where it is.
 pub fn racy(name: &str) -> Option<&'static str> {
     RACY.iter()
         .find(|(pattern, _)| name.starts_with(pattern))
         .map(|(_, why)| *why)
+        .or_else(|| not_the_cases_own(name))
 }
 
 /// Which region of the work a count belongs to.

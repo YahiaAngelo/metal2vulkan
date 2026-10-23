@@ -3244,17 +3244,63 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
     ] {
         assert!(racy(count).is_some(), "{count}");
     }
-    // And `finales_apart`, its partner, stays gated for the same reason
-    // `scheduled_where_submitted` does: nothing has been seen to move it.
-    assert!(racy("finales_apart").is_none());
-    // And the total `encoder_primaries_begun_ahead` splits stays gated, so no work escapes by it,
-    // as does what a case allocates even though what the pool hands back does not.
+    // The total `encoder_primaries_begun_ahead` splits stays gated, so no work escapes by it, as
+    // does what a case allocates even though what the pool hands back does not.
     assert!(racy("encoder_command_buffers_begun").is_none());
     assert!(racy("pooled_memory_blocks_made").is_none());
-    // `scheduled_where_submitted` is the same shape as `completed_where_seen` one transition
-    // earlier and is deliberately still gated: nothing has been seen to move it, and a row with no
-    // measurement behind it is a claim this half does not make.
-    assert!(racy("scheduled_where_submitted").is_none());
+    // `finales_apart` and `scheduled_where_submitted` were left gated by an earlier pass of this
+    // round *because nothing had been seen to move them*. That was the wrong test, and these two
+    // assertions are the reversal: "nothing has moved it" is a fact about the afternoon the
+    // measurement was taken, not about the count, and a rule written from a quiet machine fires on
+    // a busy one. Both are reported now, on their definitions.
+    for count in ["finales_apart", "scheduled_where_submitted"] {
+        assert!(racy(count).is_some(), "{count}");
+    }
+    // The third class: counts that are not a property of the case at all, read off what the
+    // counter *is* in the runtime's source and not off whether a reading moved. Four buckets of
+    // one queue-depth histogram — "every batch, by how far its queue's work ran behind its
+    // submission" — and the rest of the family that asks what the host had seen complete.
+    //
+    // `batches_with_none_pending` was the most widely gated count in the suite, at 440 cases, and
+    // it is why the whole set reported four cases over bounds twice with only one case in common:
+    // its sibling `batches_with_one_pending` was bounded at 0 almost everywhere, so a batch that
+    // found one earlier batch still pending moved a reading into a bound of zero, in whichever
+    // cases the GPU happened to be behind on that run.
+    //
+    // `groups_kept_pending` and `groups_sent_for_waits` read 0 in every case of the set, so **no
+    // measurement corroborates them**. They are here on their definitions alone, which is the whole
+    // point of the class: a measurement-first rule would have left them gated at zero, waiting to
+    // fail on someone else's busy afternoon.
+    for count in [
+        "batches_with_none_pending",
+        "batches_with_one_pending",
+        "batches_with_two_or_three_pending",
+        "batches_with_four_or_more_pending",
+        "groups_kept_pending",
+        "groups_sent_for_waits",
+        "registrations_waited",
+    ] {
+        assert!(
+            crate::cost::not_the_cases_own(count).is_some(),
+            "{count} is not the case's own"
+        );
+        assert!(racy(count).is_some(), "{count} must never be gated");
+    }
+    // And the class is a list of names, not a guess at a shape: a count whose definition makes it
+    // the case's own work stays out of it however much its name resembles one that is in.
+    for count in [
+        "batches_grouped",
+        "queue_submissions",
+        "submit_infos",
+        "encoder_command_buffers_begun",
+        "internal_submissions",
+        "owned_descriptor_pools",
+    ] {
+        assert!(
+            crate::cost::not_the_cases_own(count).is_none(),
+            "{count} is the case's own work"
+        );
+    }
     // A record that bounds both at 1, with neither seen to move.
     let record = crate::cost::CostRecord {
         venue: "a venue".to_owned(),
