@@ -20,9 +20,10 @@ use super::resolves::{lane, quiet, Lane};
 use super::WAIT;
 use crate::candidate::runtime_samples::encode_through;
 use crate::executor_contract::multisample::{ReadbackView, SampleRead};
+use metal2vulkan::error::Needs;
 use metal2vulkan::metal::{PixelFormat, TextureType, TextureUsage};
 use metal2vulkan_runtime::{
-    ClearColor, CommandBufferStatus, Degradation, LoadAction, Region, RenderPassDescriptor,
+    ClearColor, CommandBufferStatus, Degradation, Error, LoadAction, Region, RenderPassDescriptor,
     ResourceOptions, StoreAction, Texture, TextureDescriptor,
 };
 use sha2::{Digest, Sha256};
@@ -362,8 +363,21 @@ fn slice_of(texture: &Texture, pf: PixelFormat, slice: u64, array: bool) -> Text
         .unwrap()
 }
 
-/// Run `case` on `lane`: the probe's lines of every slice's samples after the fill.
-fn run(lane: &Lane, case: &Case) -> Vec<String> {
+/// `error`, refusing `what` of `case`, printed as a `SAMPLE-FILLS-SKIPPED` line where it is the
+/// device's own refusal: a typed `Unsupported` naming a capability the device lacks (a sample
+/// count it does not render, 2 on lavapipe, which Vulkan leaves optional). Any other error fails.
+fn refused_by_device(case: &str, what: &str, error: Error) {
+    match error {
+        Error::Unsupported(u) if u.needs != Needs::NotImplemented => {
+            println!("SAMPLE-FILLS-SKIPPED {case}: {what} refused by the device: {u}");
+        }
+        error => panic!("{case}: {what}: {error}"),
+    }
+}
+
+/// Run `case` on `lane`: the probe's lines of every slice's samples after the fill, or `None`
+/// where the device refuses the texture or the fill for a capability it lacks (printed).
+fn run(lane: &Lane, case: &Case) -> Option<Vec<String>> {
     let &(name, raw, samples, slices, slice, origin, size, fill, _) = case;
     let pf = PixelFormat::try_from(raw).unwrap();
     let device = &lane.device;
@@ -379,7 +393,13 @@ fn run(lane: &Lane, case: &Case) -> Vec<String> {
     descriptor.usage =
         TextureUsage::RENDER_TARGET | TextureUsage::SHADER_READ | TextureUsage::PIXEL_FORMAT_VIEW;
     descriptor.resource_options = ResourceOptions::private();
-    let texture = device.new_texture(&descriptor).unwrap();
+    let texture = match device.new_texture(&descriptor) {
+        Ok(texture) => texture,
+        Err(error) => {
+            refused_by_device(name, "the texture", error);
+            return None;
+        }
+    };
     let depth = matches!(
         pf,
         PixelFormat::Depth32Float | PixelFormat::Depth32FloatStencil8
@@ -418,7 +438,7 @@ fn run(lane: &Lane, case: &Case) -> Vec<String> {
     }
     let mut blit = command_buffer.blit_command_encoder().unwrap();
     let region = Region::new_3d(origin[0], origin[1], origin[2], size[0], size[1], size[2]);
-    match fill {
+    let filled = match fill {
         Fill::Bytes(pattern) => blit.fill_texture(&texture, 0, slice, region, &hex(pattern)),
         Fill::Color([r, g, b, a]) => blit.fill_texture_color(
             &texture,
@@ -428,9 +448,14 @@ fn run(lane: &Lane, case: &Case) -> Vec<String> {
             ClearColor::new(r, g, b, a),
             None,
         ),
-    }
-    .unwrap_or_else(|error| panic!("{name}: fill_texture: {error}"));
+    };
     blit.end_encoding().unwrap();
+    if let Err(error) = filled {
+        refused_by_device(name, "the fill", error);
+        command_buffer.commit().unwrap();
+        command_buffer.wait_until_completed_for(WAIT).unwrap();
+        return None;
+    }
     let (kernel, view, read, unit) = reading(pf);
     let extent = [WIDTH, HEIGHT];
     let read_slice = |pf: PixelFormat, kernel, read, layer| {
@@ -489,7 +514,7 @@ fn run(lane: &Lane, case: &Case) -> Vec<String> {
         }
     }
     out.extend(stencils);
-    out
+    Some(out)
 }
 
 /// Every case's samples are Metal's, but a depth whose drawn copy announced (once a device, at
@@ -501,7 +526,9 @@ fn multisample_fills_write_metal_s_samples() {
     let mut wrong = Vec::new();
     let mut drawn = false;
     for case in &CASES {
-        let lines = run(&lane, case);
+        let Some(lines) = run(&lane, case) else {
+            continue;
+        };
         let got = digest(&lines);
         drawn |= messages
             .take_notices()
