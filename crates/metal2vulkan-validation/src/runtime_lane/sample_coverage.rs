@@ -17,9 +17,12 @@
 //!
 //! Each draw here, a fullscreen triangle at depth 0.5 into a 16 x 16 target (`RGBA8Unorm` color
 //! and `Depth32Float` depth cleared to 0 and 1, the depth written under `Always`), is checked
-//! against that rule sample by sample. A sample count the device lacks (2 is optional in Vulkan:
-//! lavapipe offers 1 and 4), refused as `Unsupported` with `Feature::RasterSampleCount`, is
-//! skipped with a printed line, and the other counts are checked.
+//! against that rule sample by sample. A draw the device cannot run is skipped with a printed
+//! line, and the rest are checked: a sample count the device lacks (2 is optional in Vulkan:
+//! lavapipe offers 1 and 4), refused as `Unsupported` with `Feature::RasterSampleCount`, and a
+//! coverage read its driver answers wrong (lavapipe splits a clipped triangle's pixel into
+//! fragments of their own), refused with `Feature::PixelCoverage`. One sample is never refused,
+//! so every device draws that count's cases.
 
 use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
@@ -198,7 +201,12 @@ impl Lane {
             .new_render_pipeline_state(&d, &PipelineOptions::default())
         {
             Ok(pipeline) => pipeline,
-            Err(Error::Unsupported(u)) if u.feature == Feature::RasterSampleCount => {
+            Err(Error::Unsupported(u))
+                if matches!(
+                    u.feature,
+                    Feature::RasterSampleCount | Feature::PixelCoverage
+                ) =>
+            {
                 println!("{}: {n} samples refused: {u:?}", self.device.name());
                 return None;
             }
@@ -370,6 +378,7 @@ fn the_sample_coverage_applies_after_the_fragment_function() {
     let lane = Lane::new(&messages, &cache);
     let name = lane.device.name().to_owned();
     let mut wrong = Vec::new();
+    let mut drawn = 0;
     for samples in [1, 2, 4] {
         let all = (1u32 << samples) - 1;
         let masks = metal_masks(0.3, samples);
@@ -379,34 +388,46 @@ fn the_sample_coverage_applies_after_the_fragment_function() {
         let total = u64::from(all.count_ones()) * PIXELS as u64;
         let mut counter = Case::new(samples, 0.3);
         counter.fragment = Some("psc_counter");
-        let Some(got) = lane.draw(counter) else {
-            continue;
-        };
-        let runs = vec![[samples, all]; PIXELS];
-        let cleared = vec![0; PIXELS];
-        if got.colors != cleared || got.depths != covered || got.count != count || got.runs != runs
-        {
-            wrong.push(format!("{samples} samples, counter: {got:x?}"));
+        // Each of the three draws is refused on its own: a device that answers a coverage read
+        // wrong takes the other two, which read none.
+        if let Some(got) = lane.draw(counter) {
+            drawn += 1;
+            let runs = vec![[samples, all]; PIXELS];
+            let cleared = vec![0; PIXELS];
+            if got.colors != cleared
+                || got.depths != covered
+                || got.count != count
+                || got.runs != runs
+            {
+                wrong.push(format!("{samples} samples, counter: {got:x?}"));
+            }
         }
         let mut early = Case::new(samples, 0.3);
         early.fragment = Some("psc_early");
-        let got = lane.draw(early).expect("the sample count drawn");
-        if got.colors != covered || got.depths != every || got.count != total {
-            wrong.push(format!("{samples} samples, early tests: {got:x?}"));
+        if let Some(got) = lane.draw(early) {
+            drawn += 1;
+            if got.colors != covered || got.depths != every || got.count != total {
+                wrong.push(format!("{samples} samples, early tests: {got:x?}"));
+            }
         }
         let mut bare = Case::new(samples, 0.3);
         bare.fragment = None;
-        let got = lane.draw(bare).expect("the sample count drawn");
-        if got.depths != every || got.count != total {
-            wrong.push(format!("{samples} samples, no fragment function: {got:x?}"));
+        if let Some(got) = lane.draw(bare) {
+            drawn += 1;
+            if got.depths != every || got.count != total {
+                wrong.push(format!("{samples} samples, no fragment function: {got:x?}"));
+            }
         }
     }
     assert!(
         wrong.is_empty(),
-        "{name}: {} draws differ from Metal's:\n{}",
+        "{name}: {} of {drawn} draws differ from Metal's:\n{}",
         wrong.len(),
         wrong.join("\n")
     );
+    // One sample is never refused: its three draws.
+    assert!(drawn >= 3, "{name}: {drawn} draws");
+    eprintln!("{name}: {drawn} of 9 coverage draws are Metal's");
     drop(lane);
     let reported = messages.take();
     assert!(
