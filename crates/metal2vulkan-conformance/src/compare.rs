@@ -55,6 +55,35 @@ pub struct Refusal {
     pub documented_by: Option<String>,
 }
 
+/// A site where plain Metal answered a call and we returned a typed error that is the **venue's**
+/// honest gap rather than ours ([`crate::verdict::device_gap`]).
+///
+/// Neither a pass nor a failure, and never a [`Refusal`]: the typed error names capabilities a
+/// device could enable, or a driver measured to run the thing wrong, so the device truly lacks it
+/// and the owner's rule about refusing what Metal allows does not reach it. It is counted apart,
+/// printed with what it lacks, and the rest of the case still compares — which is what the
+/// whole-case [`LacksFeature`](crate::verdict::Verdict::LacksFeature) verdict cannot do, since
+/// that one comes from the case stopping.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviceGap {
+    /// The site, as node names from the root.
+    pub path: String,
+    /// What the venue lacks, in words.
+    pub needs: String,
+    /// Our typed error, as the report prints it.
+    pub ours: String,
+}
+
+impl std::fmt::Display for DeviceGap {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            out,
+            "{}: the venue lacks {} ({})",
+            self.path, self.needs, self.ours
+        )
+    }
+}
+
 /// A site where Metal did not return from the call and we gave a typed error.
 ///
 /// Its own outcome, because it is neither of the two it would otherwise be squeezed into. It is not
@@ -126,6 +155,9 @@ pub struct Comparison {
     pub announced: Vec<Announced>,
     pub divergences: Vec<Divergence>,
     pub refusals: Vec<Refusal>,
+    /// Sites the venue honestly cannot run ([`DeviceGap`]). Compliant, counted apart, and never
+    /// among the refusals.
+    pub device_gaps: Vec<DeviceGap>,
     /// Sites where Metal did not return from the call and we gave a typed error.
     pub never_returned: Vec<NeverReturned>,
     /// Allowances whose justification is gone. Each of these fails the case on its own: a
@@ -158,10 +190,14 @@ impl Comparison {
     }
 
     /// Whether every field matched exactly and every allowance held unused.
+    ///
+    /// A site the venue honestly lacks is not exact: Metal answered the call and we did not, so
+    /// the case did not compare there. It is compliant, which is a different question.
     pub fn is_exact(&self) -> bool {
         self.announced.is_empty()
             && self.divergences.is_empty()
             && self.refusals.is_empty()
+            && self.device_gaps.is_empty()
             && self.never_returned.is_empty()
             && self.bad_allowances.is_empty()
     }
@@ -216,6 +252,7 @@ pub fn compare_run(
         allowances,
         offered,
         stopped,
+        device_gaps: &ours.device_gaps,
         fired: &mut fired,
         found: &mut found,
     };
@@ -260,6 +297,9 @@ struct Walk<'a> {
     offered: Offered<'a>,
     /// Whether the run stopped before the end: a site only Metal reached is then no divergence.
     stopped: bool,
+    /// The sites our side said the venue honestly lacks ([`Transcript::device_gaps`]), so a
+    /// refusal there is read as the device's gap and not as ours.
+    device_gaps: &'a [(String, String)],
     /// One flag per allowance: whether the walk used it to justify a difference, or named it as
     /// what documents a refusal. What stays false is an allowance this run never needed.
     fired: &'a mut [bool],
@@ -590,6 +630,18 @@ impl Walk<'_> {
     /// of its own, because a case must not claim an explanation it cannot show. What a
     /// justification cannot do is remove the row from [`Comparison::refusals`].
     fn refusal(&mut self, path: &str, ours: &Value) {
+        // A device's honest gap is settled before anything else, and consults no allowance: the
+        // typed error names capabilities a device could enable or a driver measured to run the
+        // thing wrong, so the venue truly cannot run the call. It is not ours to answer for and
+        // it is not a tolerance either.
+        if let Some((_, needs)) = self.device_gaps.iter().find(|(site, _)| site == path) {
+            self.found.device_gaps.push(DeviceGap {
+                path: path.to_owned(),
+                needs: needs.clone(),
+                ours: crate::diff::print(ours),
+            });
+            return;
+        }
         let mut documented_by = None;
         let mut first_unjustified = None;
         for (at, allowance) in self

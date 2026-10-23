@@ -17,13 +17,14 @@
 //! fast form of every speed-for-accuracy choice, which is what a consumer runs. Comparing a case
 //! under both is how the suite says whether a difference is the policy's or the implementation's.
 //!
-//! The command's exit status is 0 only where the selection holds no surprise: no divergence, no
-//! unrecorded case, no stale recording, and exactly the refusals `known-refusals.tsv` expects — a
-//! refusal it does not list, and a row it lists that is no longer refused, each fail the run. A
-//! venue that lacks a feature a case needs does not spoil it.
+//! The command's exit status is 0 only where the selection holds no surprise: no unrecorded case,
+//! no stale recording, and exactly the gaps `known-gaps.tsv` expects — a refusal or a divergence
+//! it does not list, and a row it lists that the run no longer holds on a venue it names, each
+//! fail the run. A venue that lacks a feature a case needs does not spoil it.
 //!
-//! The ledger never changes a verdict. A refusal it expects is still printed as `Refused` and
-//! still counted, because its rows are open bugs rather than accepted differences.
+//! The ledger never changes a verdict. A gap it expects is still printed as `Refused` or
+//! `Divergent`, with our answer and Metal's, and still counted, because its rows are open bugs
+//! rather than accepted differences.
 //!
 //! `cost` is the other half ([`metal2vulkan_conformance::cost`]): it runs our side alone and says
 //! what the runtime did to answer each case, by count. `--runs N` runs the whole selection N times
@@ -99,11 +100,11 @@ fn command() -> Result<bool, String> {
         "replay" => {
             let report = run::replay_on_under(venues, policy, &cases)?;
             print!("{}", report.render());
-            // The known-refusals ledger decides the exit status and nothing else: each of its rows
-            // is still printed above as a `Refused` row and still counted there. It is held in
-            // both directions, so a new refusal fails the run and a row that is no longer refused
-            // fails it too.
-            let ledger = metal2vulkan_conformance::known_refusals::ledger()?;
+            // The known-gaps ledger decides the exit status and nothing else: each of its rows
+            // is still printed above as a `Refused` or `Divergent` row and still counted there.
+            // It is held in both directions and per venue, so a new gap fails the run and a row
+            // the run no longer holds fails it too.
+            let ledger = metal2vulkan_conformance::known_gaps::ledger()?;
             let unexpected = report.unexpected(&ledger);
             // The cost half is a gate of its own, so it has its own line in the exit status: a
             // count going over its bound is never a conformance difference, and a conformance
@@ -119,19 +120,25 @@ fn command() -> Result<bool, String> {
             if unexpected.is_empty() && within {
                 let expected = ledger
                     .iter()
-                    .filter(|known| report.rows().iter().any(|row| row.case == known.case))
+                    .filter(|known| {
+                        report
+                            .rows()
+                            .iter()
+                            .any(|row| row.case == known.case && known.covers_venue(&row.venue))
+                    })
                     .count();
                 if expected > 0 {
                     println!(
-                        "\nthe {expected} refusal(s) above are exactly the open gaps \
-                         known-refusals.tsv expects, each one a bug with a todo behind it"
+                        "\nthe {expected} row(s) above are exactly the open gaps \
+                         known-gaps.tsv expects on this venue, each one a bug with a todo behind \
+                         it"
                     );
                 }
                 return Ok(true);
             }
             println!();
             for why in &unexpected {
-                println!("not what known-refusals.tsv expects: {why}");
+                println!("not what known-gaps.tsv expects: {why}");
             }
             Ok(false)
         }

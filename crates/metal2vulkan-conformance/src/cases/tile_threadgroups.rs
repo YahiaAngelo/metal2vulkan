@@ -1028,7 +1028,7 @@ mod tests {
     /// run a case must be its own outcome rather than a failure or a pass.
     ///
     /// The other direction is the half that keeps the fix honest: what the bind stage has **not
-    /// built** stays ours to answer for, so the two mesh rows of `known-refusals.tsv`, whose
+    /// built** stays ours to answer for, so the two mesh rows of `known-gaps.tsv`, whose
     /// errors are `Error::Bind(Unsupported(MeshShading, NotImplemented))`, remain refusals.
     #[test]
     fn a_dispatch_the_device_cannot_take_is_the_devices_gap() {

@@ -35,6 +35,9 @@ struct StubSide {
     notices: Vec<String>,
     /// A call that fails, by its name, with the failure it gives.
     refuse: Option<(&'static str, Failure)>,
+    /// The device name the side's venue answers, so a test can hold a venue-scoped ledger row
+    /// against one venue and not another.
+    device: &'static str,
     made: u32,
 }
 
@@ -45,8 +48,15 @@ impl StubSide {
             status: "Completed",
             notices: Vec::new(),
             refuse: None,
+            device: "stub",
             made: 0,
         }
+    }
+
+    /// The same side on a venue of another name.
+    fn on(mut self, device: &'static str) -> Self {
+        self.device = device;
+        self
     }
 
     fn announcing(mut self, codes: &[Degradation]) -> Self {
@@ -75,12 +85,7 @@ impl StubSide {
 
 impl Side for StubSide {
     fn venue(&self) -> Venue {
-        Venue {
-            device: "stub".to_owned(),
-            driver: "stub".to_owned(),
-            api: "none".to_owned(),
-            metal_level: ORACLE_OS_VERSION.to_owned(),
-        }
+        venue_named(self.device)
     }
 
     fn library(&mut self, _source: &ShaderSource<'_>) -> Answer<Handle> {
@@ -112,7 +117,10 @@ impl Side for StubSide {
         _row_pitch: u32,
         _bytes: &[u8],
     ) -> Answer<Handle> {
-        Ok(self.handle())
+        match self.refusal("texture") {
+            Some(failure) => Err(failure),
+            None => Ok(self.handle()),
+        }
     }
 
     fn read_texture(
@@ -300,6 +308,103 @@ impl Case for WordsCase {
     }
 }
 
+/// A case written for the known-gaps ledger's own tests: one site that a side can be told to
+/// refuse **without stopping the case**, and one site whose value can move, so a test can hold a
+/// refusal row, a divergence row, or both of one case at once.
+///
+/// Its own case rather than a real one, on purpose. A test over a real case can only hold the gaps
+/// that case happens to have today, so the day the product fixes one the test keeps passing while
+/// proving nothing — and the point of the ledger's second direction is that a row cannot outlive
+/// its bug. This case owns its inputs and both of its outcomes, so each direction can be broken
+/// deliberately and watched to fail.
+struct LedgerCase {
+    name: &'static str,
+}
+
+impl LedgerCase {
+    fn new(name: &'static str) -> Self {
+        Self { name }
+    }
+
+    /// The transcript a side that answered everything, with `output` at the output site, emits:
+    /// Metal's answer for this case.
+    fn metal(&self, output: u64) -> Transcript {
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(&self.inputs().unwrap()));
+        sites.value("library", Value::ok(Value::Absent));
+        sites.value("texture", Value::ok(Value::Absent));
+        sites.value("pipeline", Value::ok(Value::Absent));
+        sites.value("buffer/0", Value::ok(Value::Absent));
+        sites.value("dispatch", Value::ok(Value::Absent));
+        sites.value("status", Value::ok(Value::unit_variant("Completed")));
+        sites.value("read-back", Value::ok(Value::Absent));
+        sites.value("output", Value::Uint(output));
+        sites.notices(NOTICES_SITE, &[] as &[&str]);
+        sites.finish()
+    }
+}
+
+impl Case for LedgerCase {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::Run
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        Ok(vec![Input::bytes("buffer:0", &[0u8; 4])])
+    }
+
+    fn allowances(&self) -> Vec<Allowance> {
+        Vec::new()
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        let source = ShaderSource {
+            bitcode: &[],
+            air_text: "",
+            entry: "gap",
+        };
+        let library = made(sites, "library", side.library(&source))?;
+        // Recorded and carried past, which is the whole point of the site: a refusal here is one
+        // site of the transcript rather than an abort, so one run can hold a refusal and a
+        // difference at the same time.
+        let _ = call(
+            sites,
+            "texture",
+            side.texture_2d(
+                metal2vulkan::metal::PixelFormat::RGBA8Unorm,
+                [1, 1],
+                4,
+                &[0u8; 4],
+            ),
+            |_| Value::Absent,
+        );
+        let pipeline = made(sites, "pipeline", side.compute_pipeline(library, "gap"))?;
+        let buffer = made(sites, "buffer/0", side.zeroed_buffer(4))?;
+        let command_buffer = made(
+            sites,
+            "dispatch",
+            side.dispatch(
+                pipeline,
+                &crate::case::Bindings::buffers(&[buffer]),
+                [1, 1, 1],
+                [1, 1, 1],
+            ),
+        )?;
+        call(sites, "status", side.wait(command_buffer), Clone::clone)?;
+        let bytes = call(sites, "read-back", side.read_buffer(buffer, 0, 4), |_| {
+            Value::Absent
+        })?;
+        let mut word = [0u8; 4];
+        word.copy_from_slice(&bytes[..4]);
+        sites.value("output", Value::Uint(u64::from(u32::from_le_bytes(word))));
+        Ok(())
+    }
+}
+
 /// The words `values` are, as little-endian bytes.
 fn words(values: &[u32]) -> Vec<u8> {
     values.iter().flat_map(|word| word.to_le_bytes()).collect()
@@ -341,7 +446,7 @@ fn one_word_moving_names_its_row_and_index() {
     );
     let mut side = StubSide::new(words(&[1, 2, 9, 4]));
     let replayed = replay_against(&case, &mut side, &recording).unwrap();
-    let Verdict::Divergent { found } = &replayed.verdict else {
+    let Verdict::Divergent { found, .. } = &replayed.verdict else {
         panic!("not divergent: {}", replayed.verdict);
     };
     assert_eq!(found.len(), 1, "{found:?}");
@@ -401,7 +506,7 @@ fn an_allowance_whose_notice_did_not_fire_fails_the_case() {
     // The bytes differ and the allowance would cover them, but no notice was announced.
     let mut side = StubSide::new(words(&[1, 7]));
     let replayed = replay_against(&case, &mut side, &recording).unwrap();
-    let Verdict::Divergent { found } = &replayed.verdict else {
+    let Verdict::Divergent { found, .. } = &replayed.verdict else {
         panic!("not divergent: {}", replayed.verdict);
     };
     let printed = format!("{found:?}");
@@ -1619,11 +1724,11 @@ fn the_committed_recordings_carry_all_three_validated_answers() {
 
 /// The committed ledger parses, every row names a gap, and each row's case is a real case.
 ///
-/// A row whose case has been renamed away would otherwise read as "no longer refused" forever, or
+/// A row whose case has been renamed away would otherwise read as "no longer held" forever, or
 /// never be held at all, and either way the row would stop meaning anything.
 #[test]
-fn the_known_refusals_ledger_parses_and_names_real_cases() {
-    let ledger = crate::known_refusals::ledger().unwrap();
+fn the_known_gaps_ledger_parses_and_names_real_cases() {
+    let ledger = crate::known_gaps::ledger().unwrap();
     assert!(
         !ledger.is_empty(),
         "the ledger is empty; drop the machinery"
@@ -1635,7 +1740,10 @@ fn the_known_refusals_ledger_parses_and_names_real_cases() {
             known.case
         );
         assert!(known.site.starts_with("case/"), "{known:?}");
-        assert!(!known.error.is_empty(), "{known:?}");
+        assert!(!known.answer.is_empty(), "{known:?}");
+        // A row says where it is expected, and says "everywhere" in words rather than by leaving
+        // the field blank.
+        assert!(!known.venue.is_empty(), "{known:?}");
         // A row is an open bug, so it says where the fix belongs.
         assert!(
             known.waiting_on.len() > 40,
@@ -1646,7 +1754,7 @@ fn the_known_refusals_ledger_parses_and_names_real_cases() {
     }
     // The rows this round left open, and what they are waiting on: `drawMeshThreads` whose
     // threads leave a partial object threadgroup, which Metal runs with the threads left over.
-    let partial: Vec<&crate::known_refusals::KnownRefusal> = ledger
+    let partial: Vec<&crate::known_gaps::KnownGap> = ledger
         .iter()
         .filter(|known| {
             known
@@ -1656,6 +1764,7 @@ fn the_known_refusals_ledger_parses_and_names_real_cases() {
         .collect();
     assert_eq!(partial.len(), 2, "{ledger:?}");
     for known in partial {
+        assert_eq!(known.expects, crate::known_gaps::Expects::Refused);
         assert!(known.site.ends_with("drawMeshThreads"), "{known:?}");
         assert!(
             known.waiting_on.contains("partial object threadgroup"),
@@ -1673,24 +1782,49 @@ fn the_known_refusals_ledger_parses_and_names_real_cases() {
     );
 }
 
-/// A malformed ledger is refused rather than read loosely: a row must carry all four fields, and
-/// must name the gap it waits on.
+/// A malformed ledger is refused rather than read loosely: a row must carry all six fields, must
+/// name a verdict the ledger can carry, must say which venue it holds on, and must name the gap it
+/// waits on.
 #[test]
-fn a_ledger_row_without_its_gap_is_refused() {
-    let parse = crate::known_refusals::parse;
+fn a_ledger_row_missing_a_field_is_refused() {
+    let parse = crate::known_gaps::parse;
     assert!(parse("# just a comment\n\n").unwrap().is_empty());
-    let row = "a-case\tcase/map\tErr(Error::Invalid)\tthe runtime refuses what Metal does";
+    let row =
+        "a-case\t*\trefused\tcase/map\tErr(Error::Invalid)\tthe runtime refuses what Metal does";
     assert_eq!(parse(row).unwrap().len(), 1);
-    let why = parse("a-case\tcase/map\tErr(Error::Invalid)\t").unwrap_err();
+    let why = parse("a-case\t*\trefused\tcase/map\tErr(Error::Invalid)\t").unwrap_err();
     assert!(why.contains("names no gap"), "{why}");
-    let why = parse("a-case\tcase/map").unwrap_err();
-    assert!(why.contains("four"), "{why}");
+    let why = parse("a-case\t*\trefused\tcase/map").unwrap_err();
+    assert!(why.contains("six"), "{why}");
+    // An unrecorded case and a stale recording are never written down, so no other word parses.
+    let why = parse("a-case\t*\tunrecorded\tcase/map\tnothing\tsome gap").unwrap_err();
+    assert!(why.contains("refused"), "{why}");
+    assert!(why.contains("divergent"), "{why}");
+    // "Everywhere" is said in words. An empty field is a row nobody scoped, which would read as a
+    // venue pattern matching nothing.
+    let why = parse("a-case\t\trefused\tcase/map\tErr(Error::Invalid)\tsome gap").unwrap_err();
+    assert!(why.contains("names no venue"), "{why}");
+    let row = parse("a-case\tllvmpipe\tdivergent\tcase/out\tMetal 1, ours 2\ta gap of ours")
+        .unwrap()
+        .remove(0);
+    assert_eq!(row.expects, crate::known_gaps::Expects::Divergent);
+    assert_eq!(row.venue, "llvmpipe");
+}
+
+/// A venue, for a test that holds a row against one venue and not another.
+fn venue_named(device: &str) -> Venue {
+    Venue {
+        device: device.to_owned(),
+        driver: "stub".to_owned(),
+        api: "none".to_owned(),
+        metal_level: ORACLE_OS_VERSION.to_owned(),
+    }
 }
 
 /// The ledger is an expectation held in both directions, and it changes no verdict.
 #[test]
 fn the_ledger_fails_on_a_new_refusal_and_on_one_that_is_gone() {
-    use crate::known_refusals::{against, Expectation, KnownRefusal};
+    use crate::known_gaps::{against, Expectation, Expects, KnownGap, EVERY_VENUE};
     let case = WordsCase::new("words", 2);
     let recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
     let mut side = StubSide::new(Vec::new()).refusing(
@@ -1708,24 +1842,35 @@ fn the_ledger_fails_on_a_new_refusal_and_on_one_that_is_gone() {
     assert_eq!(found.len(), 1, "{found:?}");
     let Expectation::Unlisted {
         case: named,
+        expects,
         site,
-        error,
+        answer,
         ..
     } = &found[0]
     else {
         panic!("{found:?}");
     };
     assert_eq!(named, "words");
+    assert_eq!(*expects, Expects::Refused);
     assert_eq!(site, "case/dispatch");
 
     // Written down exactly: nothing unexpected, so the run may exit 0.
-    let listed = vec![KnownRefusal {
+    let listed = vec![KnownGap {
         case: "words".to_owned(),
+        venue: EVERY_VENUE.to_owned(),
+        expects: Expects::Refused,
         site: site.clone(),
-        error: error.clone(),
+        answer: answer.clone(),
         waiting_on: "the stub refuses the dispatch, which is the point of the stub".to_owned(),
     }];
     assert_eq!(against(&rows, &listed), Vec::new());
+
+    // The row's identity is the verdict it expects as well as the site and the answer: the same
+    // site written down as a divergence does not cover a refusal.
+    let mut as_divergence = listed.clone();
+    as_divergence[0].expects = Expects::Divergent;
+    let found = against(&rows, &as_divergence);
+    assert_eq!(found.len(), 2, "{found:?}");
 
     // The direction that keeps the file from rotting: the same ledger against a run that did NOT
     // refuse fails, and says the row must go.
@@ -1734,20 +1879,22 @@ fn the_ledger_fails_on_a_new_refusal_and_on_one_that_is_gone() {
     assert_eq!(passed.verdict.word(), "exact");
     let found = against(std::slice::from_ref(&passed), &listed);
     assert_eq!(found.len(), 1, "{found:?}");
-    let Expectation::NoLongerRefused(known) = &found[0] else {
+    let Expectation::NoLongerHeld { gap, .. } = &found[0] else {
         panic!("{found:?}");
     };
-    assert_eq!(known.case, "words");
+    assert_eq!(gap.case, "words");
     let printed = found[0].to_string();
-    assert!(printed.contains("looks fixed"), "{printed}");
+    assert!(printed.contains("no longer refuses"), "{printed}");
     assert!(printed.contains("drop the row"), "{printed}");
 
     // A row is held only against the cases a run selected, so replaying one case does not read
     // every other row as fixed.
-    let elsewhere = vec![KnownRefusal {
+    let elsewhere = vec![KnownGap {
         case: "another-case".to_owned(),
+        venue: EVERY_VENUE.to_owned(),
+        expects: Expects::Refused,
         site: "case/map".to_owned(),
-        error: "Err(Error::Invalid)".to_owned(),
+        answer: "Err(Error::Invalid)".to_owned(),
         waiting_on: "a gap of some other case, which this run did not select".to_owned(),
     }];
     assert_eq!(
@@ -1756,15 +1903,311 @@ fn the_ledger_fails_on_a_new_refusal_and_on_one_that_is_gone() {
         "the unlisted one alone"
     );
 
-    // A divergence is never a ledger row: only a refusal is ever an expected gap.
-    let mut wrong = StubSide::new(words(&[1, 9]));
-    let diverged = replay_against(&case, &mut wrong, &recording).unwrap();
-    assert_eq!(diverged.verdict.word(), "divergent");
-    let found = against(std::slice::from_ref(&diverged), &[]);
+    // An unrecorded case is never a ledger row: only a refusal and a divergence are.
+    let stale = crate::replay::Replayed {
+        case: "words".to_owned(),
+        venue: venue_named("stub"),
+        verdict: Verdict::Unrecorded {
+            why: "no Metal answer at Metal level 99".to_owned(),
+        },
+        allowances: Default::default(),
+        measured_on: None,
+        ours: Sites::new().finish(),
+    };
+    let found = against(std::slice::from_ref(&stale), &[]);
     assert!(
         matches!(found.as_slice(), [Expectation::NotLedgerable { .. }]),
         "{found:?}"
     );
+}
+
+/// A row that names a venue is held on that venue, in **both** directions, and nowhere else.
+///
+/// The gap this closes: a row was global, so a case that plain Metal answers and we refuse on one
+/// venue for a structural reason — while the same pipeline translates on another — could not be
+/// written down at all. The row was needed by one run and failed the other for existing.
+///
+/// It is held on a case of this test's own ([`LedgerCase`]) rather than on a real one, because a
+/// test over a real case can only hold the gaps that case happens to have today: the day the
+/// product fixes one, such a test stops proving anything without saying so.
+#[test]
+fn a_venue_scoped_row_is_held_on_its_venue_and_nowhere_else() {
+    use crate::known_gaps::{against, Expectation, Expects, KnownGap};
+    let case = LedgerCase::new("ledger-venue-scope");
+    let recording = recording_of(&case, case.metal(7), 3);
+    let refusal = Failure::named("Error::Invalid", "this venue's pipeline is refused");
+
+    // One venue refuses; the other runs the same case exactly.
+    let mut refusing = StubSide::new(words(&[7]))
+        .on("Woven Vulkan")
+        .refusing("texture", refusal);
+    let refused = replay_against(&case, &mut refusing, &recording).unwrap();
+    assert_eq!(refused.verdict.word(), "refused");
+    let mut elsewhere = StubSide::new(words(&[7])).on("llvmpipe (LLVM 19.1.7, 128 bits)");
+    let exact = replay_against(&case, &mut elsewhere, &recording).unwrap();
+    assert_eq!(exact.verdict.word(), "exact");
+
+    let Verdict::Refused { at, .. } = &refused.verdict else {
+        panic!("{:?}", refused.verdict);
+    };
+    let (site, answer) = at[0].split_once(": ").unwrap();
+    let row = KnownGap {
+        case: case.name().to_owned(),
+        venue: "woven".to_owned(),
+        expects: Expects::Refused,
+        site: site.to_owned(),
+        answer: answer.to_owned(),
+        waiting_on: "the venue's own structural gap, written down for this test alone".to_owned(),
+    };
+    let listed = vec![row.clone()];
+
+    // On the venue it names, the row covers the refusal and the run may exit 0.
+    assert_eq!(against(std::slice::from_ref(&refused), &listed), Vec::new());
+    // On the other venue, the row is not held at all — neither direction — so a run there is clean
+    // rather than failing because another venue's gap is written down.
+    assert_eq!(against(std::slice::from_ref(&exact), &listed), Vec::new());
+
+    // BOTH directions on the venue it names. The row must not become a way to silence a venue, so
+    // a run on `Woven Vulkan` that stops refusing fails and names the gap the row waited on.
+    let mut fixed = StubSide::new(words(&[7])).on("Woven Vulkan");
+    let now_exact = replay_against(&case, &mut fixed, &recording).unwrap();
+    assert_eq!(now_exact.verdict.word(), "exact");
+    let found = against(std::slice::from_ref(&now_exact), &listed);
+    let [Expectation::NoLongerHeld { gap, venue }] = found.as_slice() else {
+        panic!("{found:?}");
+    };
+    assert_eq!(gap.venue, "woven");
+    assert_eq!(venue, "Woven Vulkan");
+
+    // And the other direction on the venue it does not name: the refusal appearing there is a new
+    // gap, because this row says nothing about that venue.
+    let mut other = StubSide::new(words(&[7]))
+        .on("llvmpipe (LLVM 19.1.7, 128 bits)")
+        .refusing(
+            "texture",
+            Failure::named("Error::Invalid", "this venue's pipeline is refused"),
+        );
+    let refused_elsewhere = replay_against(&case, &mut other, &recording).unwrap();
+    let found = against(std::slice::from_ref(&refused_elsewhere), &listed);
+    assert!(
+        matches!(found.as_slice(), [Expectation::Unlisted { .. }]),
+        "{found:?}"
+    );
+
+    // A row naming no venue is the STRONGER claim, not the looser one: it is then held on every
+    // venue the run selected the case on, so the venue that does not refuse fails it.
+    let mut global = listed.clone();
+    global[0].venue = crate::known_gaps::EVERY_VENUE.to_owned();
+    let rows = vec![refused.clone(), exact.clone()];
+    let found = against(&rows, &global);
+    let [Expectation::NoLongerHeld { venue, .. }] = found.as_slice() else {
+        panic!("{found:?}");
+    };
+    assert_eq!(venue, "llvmpipe (LLVM 19.1.7, 128 bits)");
+
+    // A venue pattern that matches nothing holds the row nowhere, so its gap reads as unlisted and
+    // the run fails: a typo is loud rather than silent.
+    let mut typo = listed.clone();
+    typo[0].venue = "wovenn".to_owned();
+    let found = against(std::slice::from_ref(&refused), &typo);
+    assert!(
+        matches!(found.as_slice(), [Expectation::Unlisted { .. }]),
+        "{found:?}"
+    );
+}
+
+/// A divergence is a ledger row of its own, held in **both** directions, and it is still printed
+/// and still counted as `Divergent`.
+///
+/// The gap this closes: the ledger covered refusals alone, so a known product bug that shows as a
+/// difference rather than as a typed error had nowhere to live and made the whole-set replay exit
+/// non-zero with no entry possible.
+#[test]
+fn a_divergence_row_is_held_in_both_directions() {
+    use crate::known_gaps::{against, Expectation, Expects, KnownGap, EVERY_VENUE};
+    let case = LedgerCase::new("ledger-divergence");
+    let recording = recording_of(&case, case.metal(7), 3);
+
+    let mut moved = StubSide::new(words(&[9]));
+    let diverged = replay_against(&case, &mut moved, &recording).unwrap();
+    // The ledger changes no verdict: the row is still `Divergent` and still non-compliant, so it
+    // is still printed and still counted in the suite's own numbers.
+    assert_eq!(diverged.verdict.word(), "divergent");
+    assert!(!diverged.verdict.is_compliant());
+    let Verdict::Divergent { found, .. } = &diverged.verdict else {
+        panic!("{:?}", diverged.verdict);
+    };
+    let [divergence] = found.as_slice() else {
+        panic!("{found:?}");
+    };
+    // The row carries our answer and Metal's, because the leaf fact that moved names both.
+    let answer = divergence.kind.to_string();
+    assert!(answer.contains("Metal 7"), "{answer}");
+    assert!(answer.contains("ours 9"), "{answer}");
+
+    // Unlisted, a divergence fails the run, and the report says which verdict it was.
+    let found = against(std::slice::from_ref(&diverged), &[]);
+    let [unlisted @ Expectation::Unlisted { expects, .. }] = found.as_slice() else {
+        panic!("{found:?}");
+    };
+    assert_eq!(*expects, Expects::Divergent);
+    assert!(unlisted.to_string().contains("divergent"), "{unlisted}");
+
+    let listed = vec![KnownGap {
+        case: case.name().to_owned(),
+        venue: EVERY_VENUE.to_owned(),
+        expects: Expects::Divergent,
+        site: divergence.path.clone(),
+        answer: answer.clone(),
+        waiting_on: "a difference this test writes down on purpose, to prove the row is held"
+            .to_owned(),
+    }];
+    assert_eq!(
+        against(std::slice::from_ref(&diverged), &listed),
+        Vec::new()
+    );
+
+    // The answer is part of the row's identity, so a difference that moved to another value is a
+    // new gap rather than this one.
+    let mut again = StubSide::new(words(&[8]));
+    let moved_again = replay_against(&case, &mut again, &recording).unwrap();
+    let found = against(std::slice::from_ref(&moved_again), &listed);
+    assert_eq!(found.len(), 2, "{found:?}");
+
+    // The direction that keeps the file from rotting, for a divergence as for a refusal: a run
+    // that no longer diverges fails and names the gap the row was waiting on.
+    let mut fixed = StubSide::new(words(&[7]));
+    let exact = replay_against(&case, &mut fixed, &recording).unwrap();
+    assert_eq!(exact.verdict.word(), "exact");
+    let found = against(std::slice::from_ref(&exact), &listed);
+    let [gone @ Expectation::NoLongerHeld { gap, .. }] = found.as_slice() else {
+        panic!("{found:?}");
+    };
+    assert!(gap.waiting_on.contains("on purpose"), "{gap:?}");
+    let printed = gone.to_string();
+    assert!(printed.contains("no longer diverges at"), "{printed}");
+    assert!(printed.contains("drop the row"), "{printed}");
+}
+
+/// A divergence never launders a refusal of the same case: the verdict carries both, and the
+/// ledger holds a refusal row against a case that also diverges.
+///
+/// Without this the refusal would vanish from the verdict — `Divergent` is the more severe of the
+/// two and used to be the only thing reported — so its row would read as "no longer refused" and
+/// somebody would drop a row whose gap was still there.
+#[test]
+fn a_divergence_does_not_launder_a_refusal_of_the_same_case() {
+    use crate::known_gaps::{against, Expects, KnownGap, EVERY_VENUE};
+    let case = LedgerCase::new("ledger-both");
+    let recording = recording_of(&case, case.metal(7), 3);
+    let mut side = StubSide::new(words(&[9])).refusing(
+        "texture",
+        Failure::named("Error::Invalid", "the texture was refused"),
+    );
+    let both = replay_against(&case, &mut side, &recording).unwrap();
+    let Verdict::Divergent { found, refused } = &both.verdict else {
+        panic!("{:?}", both.verdict);
+    };
+    assert_eq!(found.len(), 1, "{found:?}");
+    // The refusal is reported, not swallowed by the divergence.
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    let printed = both.verdict.to_string();
+    assert!(printed.contains("and refused case/texture"), "{printed}");
+
+    let (site, answer) = refused[0].split_once(": ").unwrap();
+    let rows = vec![
+        KnownGap {
+            case: case.name().to_owned(),
+            venue: EVERY_VENUE.to_owned(),
+            expects: Expects::Refused,
+            site: site.to_owned(),
+            answer: answer.to_owned(),
+            waiting_on: "a refusal of this test's own, beside a divergence of the same case"
+                .to_owned(),
+        },
+        KnownGap {
+            case: case.name().to_owned(),
+            venue: EVERY_VENUE.to_owned(),
+            expects: Expects::Divergent,
+            site: found[0].path.clone(),
+            answer: found[0].kind.to_string(),
+            waiting_on: "a divergence of this test's own, beside a refusal of the same case"
+                .to_owned(),
+        },
+    ];
+    // Both rows are held, so a case holding both gaps can reach exit 0 — and neither row can go
+    // unchecked behind the other.
+    assert_eq!(against(std::slice::from_ref(&both), &rows), Vec::new());
+
+    // Drop the refusal from the run and its row fails, although the divergence is still there.
+    let mut only_moved = StubSide::new(words(&[9]));
+    let diverged = replay_against(&case, &mut only_moved, &recording).unwrap();
+    let found = against(std::slice::from_ref(&diverged), &rows);
+    let [crate::known_gaps::Expectation::NoLongerHeld { gap, .. }] = found.as_slice() else {
+        panic!("{found:?}");
+    };
+    assert_eq!(gap.expects, Expects::Refused);
+}
+
+/// A site the venue honestly lacks is the **venue's** gap at that site, not a refusal of ours, and
+/// the rest of the case still compares.
+///
+/// The gap this closes: the `lacks-feature` verdict came from the case **stopping**, so a case
+/// that carried on past a call the device cannot take had that site read as a refusal of ours —
+/// the one thing the verdict exists to prevent. It is per site now, and a divergence anywhere else
+/// in the same case still fails, which is what makes it safe to be compliant.
+#[test]
+fn a_site_the_venue_lacks_is_the_venues_gap_and_not_a_refusal() {
+    use metal2vulkan::error::{Capability, Feature, Unsupported};
+    let case = LedgerCase::new("ledger-device-gap");
+    let recording = recording_of(&case, case.metal(7), 3);
+    // A typed refusal naming capabilities a device could enable: the device's own gap.
+    let lacking = Failure::of(&metal2vulkan_runtime::Error::Unsupported(
+        Unsupported::needs_any_of(
+            Feature::Format,
+            vec![vec![Capability::Feature(
+                metal2vulkan::device::VkFeature::ShaderStorageImageMultisample,
+            )]],
+        ),
+    ));
+    assert!(lacking.lacks.is_some(), "{lacking:?}");
+
+    let mut side = StubSide::new(words(&[7])).refusing("texture", lacking);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert_eq!(replayed.verdict.word(), "lacks-feature");
+    assert!(replayed.verdict.is_compliant());
+    let printed = replayed.verdict.to_string();
+    assert!(printed.contains("case/texture"), "{printed}");
+    assert!(printed.contains("the venue lacks"), "{printed}");
+    // The venue's own gap is never a ledger row, in either direction: it is not a bug of ours.
+    assert_eq!(
+        crate::known_gaps::against(std::slice::from_ref(&replayed), &[]),
+        Vec::new()
+    );
+
+    // The rest of the case still compares: a difference elsewhere in the same run still fails.
+    let lacking = Failure::of(&metal2vulkan_runtime::Error::Unsupported(
+        Unsupported::needs_any_of(
+            Feature::Format,
+            vec![vec![Capability::Feature(
+                metal2vulkan::device::VkFeature::ShaderStorageImageMultisample,
+            )]],
+        ),
+    ));
+    let mut moved = StubSide::new(words(&[9])).refusing("texture", lacking);
+    let replayed = replay_against(&case, &mut moved, &recording).unwrap();
+    assert_eq!(replayed.verdict.word(), "divergent");
+    assert!(!replayed.verdict.is_compliant());
+
+    // And a refusal that is ours to answer for is still ours: the same site, a typed error the
+    // device could not have enabled away, reads as `refused`.
+    let ours = Failure::of(&metal2vulkan_runtime::Error::Unsupported(
+        Unsupported::not_implemented(Feature::Format),
+    ));
+    assert!(ours.lacks.is_none(), "{ours:?}");
+    let mut unbuilt = StubSide::new(words(&[7])).refusing("texture", ours);
+    let replayed = replay_against(&case, &mut unbuilt, &recording).unwrap();
+    assert_eq!(replayed.verdict.word(), "refused");
 }
 
 #[test]
@@ -2082,7 +2525,7 @@ fn answering_where_metal_did_not_return_is_divergent() {
     );
     let mut side = StubSide::new(Vec::new());
     let replayed = replay_against(&case, &mut side, &recording).unwrap();
-    let Verdict::Divergent { found } = &replayed.verdict else {
+    let Verdict::Divergent { found, .. } = &replayed.verdict else {
         panic!("{}", replayed.verdict);
     };
     assert!(
