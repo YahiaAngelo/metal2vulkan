@@ -47,9 +47,13 @@ use metal2vulkan::metal::{
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
-/// A render encoder's log: the descriptor its pass was opened with, and its calls.
+/// A render encoder's log: the descriptor its pass was opened with, the screen of the
+/// rasterization-rate map its pass took, and its calls.
 pub(crate) struct RenderLog {
     descriptor: Box<RenderPassDescriptor>,
+    /// The screen size of the pass's rasterization-rate map as the pass took it, which its
+    /// encoding again keeps through a reset of the map (`rate_mapped_pass.rs`).
+    screen: Option<[u32; 2]>,
     calls: CallLog<RenderCall>,
     /// The arguments of its `draw_indexed_primitives` calls, in order
     /// (`RenderCall::DrawIndexedPrimitives`): in one list, not a box each.
@@ -63,14 +67,20 @@ pub(crate) struct RenderRoom {
 }
 
 impl RenderLog {
-    /// The log of a pass `descriptor` opens, before any call: in `room` where one is kept.
-    pub(crate) fn new(descriptor: &RenderPassDescriptor, room: Option<RenderRoom>) -> RenderLog {
+    /// The log of a pass `descriptor` opens, before any call, over a rasterization-rate map of
+    /// `screen` pixels where it has one: in `room` where one is kept.
+    pub(crate) fn new(
+        descriptor: &RenderPassDescriptor,
+        screen: Option<[u32; 2]>,
+        room: Option<RenderRoom>,
+    ) -> RenderLog {
         let (calls, indexed) = match room {
             Some(RenderRoom { calls, indexed }) => (calls, indexed),
             None => (CallLog::new(), Vec::new()),
         };
         RenderLog {
             descriptor: Box::new(descriptor.clone()),
+            screen,
             calls,
             indexed,
         }
@@ -83,6 +93,7 @@ impl RenderLog {
             descriptor,
             calls,
             mut indexed,
+            ..
         } = *self;
         drop(descriptor);
         if indexed.capacity() * std::mem::size_of::<DrawIndexed>() > SPARE_LOG_BYTES {
@@ -107,6 +118,11 @@ impl RenderLog {
         &self.descriptor
     }
 
+    /// The screen size of its pass's rasterization-rate map as the pass took it.
+    pub(crate) fn screen(&self) -> Option<[u32; 2]> {
+        self.screen
+    }
+
     /// Run its calls again on `encoder`, a later color group's of its pass
     /// (`render/color_groups.rs`). A call refused there was refused in the first group's
     /// encoder, whose answer the program had, or is a divergence the later group's encoder notes
@@ -123,7 +139,8 @@ impl RenderLog {
         command_buffer: &CommandBuffer,
         residency: Residency,
     ) -> Result<(Replayed, Option<Residency>), Error> {
-        let mut encoder = RenderLowering::replaying(command_buffer, &self.descriptor, residency)?;
+        let mut encoder =
+            RenderLowering::replaying(command_buffer, &self.descriptor, residency, self.screen)?;
         for (at, call) in self.calls.calls.iter().enumerate() {
             let ran = render(&mut encoder, (&self.calls, &self.indexed), call);
             self.calls.again(at, ran)?;

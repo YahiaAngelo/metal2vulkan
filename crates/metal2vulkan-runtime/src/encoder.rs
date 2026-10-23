@@ -1892,7 +1892,8 @@ impl EncoderCore {
         self.fails_command_buffer = Some(error);
     }
 
-    /// Metal's GPU hangs at this encoder (a direct draw of primitive type 9), as the command
+    /// Metal's GPU hangs at this encoder (a direct draw of primitive type 9, or a pass of no draw
+    /// call over a mutable rasterization-rate map, `rate_mapped_pass.rs`), as the command
     /// buffer commits: it fails from the encoder on with `CommandBufferError::GpuHang`, unless
     /// the encoder fails it otherwise first, and holds what follows (`State::hang_from`).
     pub(super) fn hang(&mut self) {

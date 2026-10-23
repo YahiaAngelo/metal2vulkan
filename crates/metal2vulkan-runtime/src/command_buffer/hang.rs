@@ -1,5 +1,7 @@
 //! A command buffer whose render encoder drew primitive type 9 directly, of 3 vertices or more,
-//! at which Metal's GPU hangs (`DrawPrimitiveType::Nine`, `CommandBufferError::GpuHang`).
+//! at which Metal's GPU hangs (`DrawPrimitiveType::Nine`, `CommandBufferError::GpuHang`), or
+//! whose render pass of no draw call over a mutable rasterization-rate map it hangs at
+//! (`rate_mapped_pass.rs`), held alike.
 //! Measured on the M3 Max (macOS 27.0.1, 33 hangs, queues warmed and not): it read `Scheduled`
 //! 0.68 to 13.2 ms after its commit (about 1 ms, or 4.6 ms and more: its submission's own time),
 //! and Metal failed it 28.3 to 46.2 ms after its commit, 27.5 to 28.9 ms after it read

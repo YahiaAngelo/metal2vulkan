@@ -347,6 +347,10 @@ pub(super) struct DeviceShared {
     /// Whether a rasterization-rate map of one or more layers was released (`rate_map.rs`): a
     /// map of no layers made after it is one Metal may draw from the released map's memory.
     pub(super) layered_rate_map_released: AtomicBool,
+    /// Whether a command buffer holding a render pass with a draw call over a `Mutable`
+    /// rasterization-rate map was committed (`rate_mapped_pass.rs`): before one, Metal's GPU hangs
+    /// at a pass of no draw call over such a map.
+    pub(super) mutable_rate_map_called: AtomicBool,
     /// Whether the runtime made a sparse image on the device: the driver's first sparse resource
     /// may wait for every queue's work (`DriverFact::FirstSparseResourceWaitsForQueues`).
     pub(super) sparse_image_made: AtomicBool,
@@ -1692,6 +1696,7 @@ impl Device {
                 limits.viewport_bounds_range,
             ),
             layered_rate_map_released: AtomicBool::new(false),
+            mutable_rate_map_called: AtomicBool::new(false),
             sparse_image_made: AtomicBool::new(false),
             owned_kernels: Mutex::new(OwnedKernels::default()),
             mipmap_scratch: Mutex::default(),

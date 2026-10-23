@@ -3284,5 +3284,12 @@ each item named states the rule in full.
 - **A mutable map's pass stops at the physical size**, where Metal rasterizes past the screen edge
   (an M3 Max: a 64-pixel half-rate map's pass to 49 by 49 pixels); announced with
   `rasterization-rate-map`.
-- **A pass of no draws over a mutable map stores its clear**, where Metal's GPU hangs.
+- **A pass whose map is reset to another screen after it took the map keeps the screen it took**,
+  as Metal's does (an M3 Max: over a reset to the identity, it shades to the new screen's 32-pixel
+  tiles where the new screen spans one tile fewer, else the whole screen taken); over a map reset
+  to one that is not the identity, which no probe measured, it draws by the map as reset within
+  the screen taken, announced with `rasterization-rate-map`.
+- **A rate-mapped pass's clear covers its attachments**, where Metal's covers the physical size
+  rounded up to 32-pixel tiles and leaves the attachments' other pixels as they were (an M3 Max: a
+  16-pixel identity map's pass into a 64-pixel attachment cleared 32 by 32 pixels).
 - **A rate-mapped pass draws region by region, and refuses a cutting scissor.**
