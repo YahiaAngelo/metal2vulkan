@@ -23,7 +23,9 @@
 //! site holds the whole announced set as one value, and a declaration unchecks that site, so the
 //! walk alone let one declaration excuse every other notice. The subset check is what makes the
 //! suite's central sentence — a difference is a bug unless we announced it — able to fail where it
-//! is stated.
+//! is stated. The same check also marks a declaration **used** where its own code was announced,
+//! because the walk marked only the first covering allowance and a case's second declaration could
+//! therefore never fire.
 
 use crate::allowance::{Allowance, Loosening, Offered, Unjustified};
 use crate::diff::{Divergence, DivergenceKind, ElementAt, GapAt, LineAt, Side};
