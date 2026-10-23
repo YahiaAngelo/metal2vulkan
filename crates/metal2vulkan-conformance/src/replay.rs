@@ -312,6 +312,20 @@ fn rank(verdict: &Verdict) -> u8 {
 
 /// The allowance a case needs to announce `code`, for a case whose own degrade notice is the
 /// difference: the notice site, loosened by the code it names.
+///
+/// Every notice our side announces must be named by the case, or the case is divergent at the
+/// notices site ([`crate::diff::DivergenceKind::UndeclaredNotice`]). **A value tolerance justified
+/// by a notice names it too, and that is deliberate** — it is not obvious, so it is written down
+/// here. An `Allowance` at a value site justified by `Degradation(code)` already says "this value
+/// differs because the device announced this degradation", which is a statement of the notice by
+/// any honest reading; asking its author for a second allowance here would be stating one fact
+/// twice, and two statements of one rule drift apart.
+///
+/// The failure direction is what settles it. Under this rule, when the value becomes exact and its
+/// tolerance is deleted, the declaration goes with it and the case reports the notice as undeclared
+/// at once — loudly, at the moment the answer may have changed. A bookkeeping declaration here
+/// would instead outlive its own reason and keep asserting that somebody examined a notice nobody
+/// has looked at since, which is the defect this check exists to close, one level up.
 pub fn notice_allowance(code: &str) -> crate::allowance::Allowance {
     crate::allowance::Allowance::new(
         format!("case/{NOTICES_SITE}/*"),
