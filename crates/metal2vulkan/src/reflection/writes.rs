@@ -41,7 +41,7 @@ use crate::air::abi::{
     AbiInt, AccelerationStructureKind, Access, EntryPoint, ImageblockKind, ParamBinding, ParamRole,
     Slot, Stage,
 };
-use crate::metal::BindingType;
+use crate::metal::{BindingAccess, BindingType};
 
 /// Whether a function may store through the object bound at one argument-table slot.
 #[non_exhaustive]
@@ -137,6 +137,16 @@ pub struct SlotWrite {
     /// its slot, and its declaration still states what a store through it could do, so it is
     /// answered like any other.
     pub used: bool,
+    /// The argument's declared access, exactly as [`Binding::access`](super::Binding::access)
+    /// answers it for the same argument (Metal's `MTLBindingAccess`); `None` where the
+    /// declaration states none, which is where [`writes`](Self::writes) is
+    /// [`SlotWritability::Unknown`] for a reason other than the slot
+    /// ([`SlotWriteGap::UnmeasuredPayloadStage`], [`SlotWriteGap::MemberRole`]).
+    ///
+    /// It is stated even where the slots the argument binds are not
+    /// ([`SlotWriteGap::UnresolvedIndex`]): what the function may do to the argument is known,
+    /// and only which slots it applies to is not.
+    pub access: Option<BindingAccess>,
     /// What the function may do to the object bound at the slot.
     pub writes: SlotWritability,
 }
@@ -249,11 +259,21 @@ impl SlotWrites {
     }
 }
 
-/// `MTLBindingAccess` of a declared access, as [`SlotWritability`] states it.
-fn writability(access: Access) -> SlotWritability {
+/// `MTLBindingAccess` of a declared access, as `derive::binding_access` answers it for the same
+/// argument's reflection.
+fn declared(access: Access) -> BindingAccess {
     match access {
-        Access::Read | Access::Sample => SlotWritability::Never,
-        Access::Write | Access::ReadWrite => SlotWritability::Maybe,
+        Access::Read | Access::Sample => BindingAccess::ReadOnly,
+        Access::Write => BindingAccess::WriteOnly,
+        Access::ReadWrite => BindingAccess::ReadWrite,
+    }
+}
+
+/// Whether a store may land through a binding of declared access `access`.
+fn writability(access: BindingAccess) -> SlotWritability {
+    match access {
+        BindingAccess::ReadOnly => SlotWritability::Never,
+        BindingAccess::WriteOnly | BindingAccess::ReadWrite => SlotWritability::Maybe,
     }
 }
 
@@ -284,14 +304,14 @@ fn slot_write(ep: &EntryPoint, p: &ParamBinding) -> Option<SlotWrite> {
     // An index and count a slot states, with the span of a single argument where the metadata
     // gives no count.
     let at = |slot: Slot| (stated(slot.index), stated(slot.count).map(|c| c.max(1)));
-    let (binding_type, index, count, writes) = match &p.role {
+    let (binding_type, index, count, access) = match &p.role {
         ParamRole::Buffer(b) | ParamRole::ArgumentBuffer(b) => {
             let (index, count) = at(b.location);
             (
                 Some(BindingType::Buffer),
                 index,
                 count,
-                writability(b.access),
+                Ok(declared(b.access)),
             )
         }
         ParamRole::Threadgroup(b) => {
@@ -300,7 +320,7 @@ fn slot_write(ep: &EntryPoint, p: &ParamBinding) -> Option<SlotWrite> {
                 Some(BindingType::ThreadgroupMemory),
                 index,
                 count,
-                writability(b.access),
+                Ok(declared(b.access)),
             )
         }
         ParamRole::Texture(t) => {
@@ -309,7 +329,7 @@ fn slot_write(ep: &EntryPoint, p: &ParamBinding) -> Option<SlotWrite> {
                 Some(BindingType::Texture),
                 index,
                 count,
-                writability(t.access),
+                Ok(declared(t.access)),
             )
         }
         ParamRole::Sampler { location } => {
@@ -318,7 +338,7 @@ fn slot_write(ep: &EntryPoint, p: &ParamBinding) -> Option<SlotWrite> {
                 Some(BindingType::Sampler),
                 index,
                 count,
-                SlotWritability::Never,
+                Ok(BindingAccess::ReadOnly),
             )
         }
         ParamRole::FunctionTable(o) => {
@@ -327,7 +347,7 @@ fn slot_write(ep: &EntryPoint, p: &ParamBinding) -> Option<SlotWrite> {
                 Some(BindingType::VisibleFunctionTable),
                 index,
                 count,
-                SlotWritability::Never,
+                Ok(BindingAccess::ReadOnly),
             )
         }
         ParamRole::IntersectionTable(o) => {
@@ -336,7 +356,7 @@ fn slot_write(ep: &EntryPoint, p: &ParamBinding) -> Option<SlotWrite> {
                 Some(BindingType::IntersectionFunctionTable),
                 index,
                 count,
-                SlotWritability::Never,
+                Ok(BindingAccess::ReadOnly),
             )
         }
         ParamRole::AccelerationStructure { kind, arg } => {
@@ -345,7 +365,12 @@ fn slot_write(ep: &EntryPoint, p: &ParamBinding) -> Option<SlotWrite> {
                 AccelerationStructureKind::Instance => BindingType::InstanceAccelerationStructure,
                 AccelerationStructureKind::Primitive => BindingType::PrimitiveAccelerationStructure,
             };
-            (Some(binding_type), index, count, SlotWritability::Never)
+            (
+                Some(binding_type),
+                index,
+                count,
+                Ok(BindingAccess::ReadOnly),
+            )
         }
         // An imageblock binds index 0 and is read-only, whichever the function does with it, as
         // Metal answers.
@@ -354,23 +379,28 @@ fn slot_write(ep: &EntryPoint, p: &ParamBinding) -> Option<SlotWrite> {
                 ImageblockKind::Implicit | ImageblockKind::Explicit => BindingType::Imageblock,
                 ImageblockKind::Data => BindingType::ImageblockData,
             };
-            (Some(binding_type), Some(0), Some(1), SlotWritability::Never)
+            (
+                Some(binding_type),
+                Some(0),
+                Some(1),
+                Ok(BindingAccess::ReadOnly),
+            )
         }
         // An object function fills its payload and a mesh function reads it; Metal's access for
         // one in any other stage is unmeasured.
         ParamRole::Payload { .. } => {
-            let writes = match ep.stage {
-                Stage::Object { .. } => SlotWritability::Maybe,
-                Stage::Mesh { .. } => SlotWritability::Never,
+            let access = match ep.stage {
+                Stage::Object { .. } => Ok(BindingAccess::ReadWrite),
+                Stage::Mesh { .. } => Ok(BindingAccess::ReadOnly),
                 Stage::Kernel { .. } | Stage::Vertex { .. } | Stage::Fragment { .. } => {
-                    SlotWritability::Unknown(SlotWriteGap::UnmeasuredPayloadStage)
+                    Err(SlotWriteGap::UnmeasuredPayloadStage)
                 }
             };
             (
                 Some(BindingType::ObjectPayload),
                 Some(u32::MAX),
                 Some(1),
-                writes,
+                access,
             )
         }
         // Builtins, stage inputs, the mesh grid and the mesh output bind no argument-table slot.
@@ -387,18 +417,14 @@ fn slot_write(ep: &EntryPoint, p: &ParamBinding) -> Option<SlotWrite> {
         | ParamRole::CommandBuffer(_)
         | ParamRole::ComputePipelineState(_)
         | ParamRole::RenderPipelineState(_)
-        | ParamRole::DepthStencilState(_) => (
-            None,
-            None,
-            None,
-            SlotWritability::Unknown(SlotWriteGap::MemberRole),
-        ),
+        | ParamRole::DepthStencilState(_) => (None, None, None, Err(SlotWriteGap::MemberRole)),
     };
-    // A slot or span only a function constant states leaves which slots the access applies to
-    // unknown.
-    let writes = match (binding_type, index, count) {
-        (Some(_), Some(_), Some(_)) | (None, _, _) => writes,
-        (Some(_), _, _) => SlotWritability::Unknown(SlotWriteGap::UnresolvedIndex),
+    // The declaration states the access; a slot or span only a function constant states leaves
+    // which slots that access applies to unknown.
+    let writes = match (access, index, count) {
+        (Err(gap), _, _) => SlotWritability::Unknown(gap),
+        (Ok(access), Some(_), Some(_)) => writability(access),
+        (Ok(_), _, _) => SlotWritability::Unknown(SlotWriteGap::UnresolvedIndex),
     };
     Some(SlotWrite {
         name: p.name.as_ref().map(ToString::to_string).unwrap_or_default(),
@@ -407,6 +433,7 @@ fn slot_write(ep: &EntryPoint, p: &ParamBinding) -> Option<SlotWrite> {
         index,
         count,
         used: !p.unused,
+        access: access.ok(),
         writes,
     })
 }

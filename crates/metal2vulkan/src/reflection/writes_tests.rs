@@ -11,7 +11,7 @@ use super::{SlotWritability, SlotWrite, SlotWriteGap};
 use crate::budget::Budget;
 use crate::error::{Error, Feature};
 use crate::library::Library;
-use crate::metal::BindingType;
+use crate::metal::{BindingAccess, BindingType};
 use crate::pipeline::{ComputePipelineDescriptor, FunctionDescriptor, StageSource};
 
 /// A kernel whose four bindings are, in declaration order:
@@ -164,13 +164,14 @@ fn the_slot_question_separates_the_read_only_slots_from_the_writable_ones() {
 /// and the other slots keep their own answers.
 #[test]
 fn an_undetermined_slot_stays_undetermined_and_leaves_the_others_alone() {
-    let answer = |name: &str, binding_type, index, count, writes| SlotWrite {
+    let answer = |name: &str, binding_type, index, count, access, writes| SlotWrite {
         name: name.to_owned(),
         parameter: 0,
         binding_type,
         index,
         count,
         used: true,
+        access,
         writes,
     };
     let slots = [
@@ -179,14 +180,17 @@ fn an_undetermined_slot_stays_undetermined_and_leaves_the_others_alone() {
             Some(BindingType::Buffer),
             Some(0),
             Some(1),
+            Some(BindingAccess::ReadOnly),
             SlotWritability::Never,
         ),
-        // A slot only a function constant states: which buffer slot it binds is unknown.
+        // A slot only a function constant states: the declared access is known (read-write), but
+        // which buffer slot it applies to is not.
         answer(
             "computed",
             Some(BindingType::Buffer),
             None,
             None,
+            Some(BindingAccess::ReadWrite),
             SlotWritability::Unknown(SlotWriteGap::UnresolvedIndex),
         ),
         answer(
@@ -194,6 +198,7 @@ fn an_undetermined_slot_stays_undetermined_and_leaves_the_others_alone() {
             Some(BindingType::Texture),
             Some(3),
             Some(1),
+            Some(BindingAccess::ReadOnly),
             SlotWritability::Never,
         ),
     ];
@@ -223,6 +228,7 @@ fn an_argument_array_covers_its_own_span_alone() {
         index: Some(2),
         count: Some(3),
         used: true,
+        access: Some(BindingAccess::ReadWrite),
         writes: SlotWritability::Maybe,
     }];
     let at = |index| SlotWrite::may_write(&slots, BindingType::Texture, index);
@@ -351,15 +357,21 @@ fn every_fixture_kernel_answers_and_agrees_with_its_reflection() {
                     (s.name.as_str(), s.binding_type, s.index, s.used),
                     "{at}: the two answers name different bindings"
                 );
+                // The declared access is the same value, not merely a compatible verdict.
+                assert_eq!(
+                    s.access,
+                    Some(b.access()),
+                    "{at}: {} disagrees with its reflection's access",
+                    b.name()
+                );
                 let by_access = match b.access() {
-                    crate::metal::BindingAccess::ReadOnly => SlotWritability::Never,
-                    crate::metal::BindingAccess::WriteOnly
-                    | crate::metal::BindingAccess::ReadWrite => SlotWritability::Maybe,
+                    BindingAccess::ReadOnly => SlotWritability::Never,
+                    BindingAccess::WriteOnly | BindingAccess::ReadWrite => SlotWritability::Maybe,
                 };
                 assert_eq!(
                     s.writes,
                     by_access,
-                    "{at}: {} disagrees with its reflection's access",
+                    "{at}: {} reads a verdict its access does not give",
                     b.name()
                 );
                 compared += 1;

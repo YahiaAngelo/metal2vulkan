@@ -936,9 +936,21 @@ impl RenderPipelineState {
     /// Only the slot is answered. A function may also reach textures through an argument buffer,
     /// a heap or a resource ID, which no slot's answer covers;
     /// [`vertex_writes_textures`](Self::vertex_writes_textures) and its siblings cover those
-    /// too. Refused as the reflection is (`Unsupported` with `Feature::Reflection` for an
-    /// argument of any kind whose answer Metal's has not been measured for, `Compile` for the
-    /// decode's errors). The refusal is kept and returned on every later call.
+    /// too.
+    ///
+    /// The answers come from the pipeline's slot writes
+    /// (`metal2vulkan::reflection::SlotWrite`), not from its reflection: a reflection must give
+    /// Metal's `MTLType` for every binding and refuses the whole function where Metal's answer
+    /// for one argument's *type* has not been measured, which refused every slot of the state,
+    /// read-only ones included. A state that compiles answers here.
+    ///
+    /// Refused for one slot alone (`Unsupported` with `Feature::Reflection`) where an argument
+    /// that may cover it leaves it undetermined: a slot only a function constant states, a
+    /// payload in a stage Metal's access for one is unmeasured in, or an argument whose role only
+    /// an argument-buffer member takes. Every other slot still answers, and a slot a determined
+    /// argument covers answers whatever else the state holds. The decode's own errors are
+    /// `Compile`. No refusal is remembered: only a successful set of answers is kept, so a later
+    /// call is answered again rather than handed the first failure.
     pub fn texture_access(
         &self,
         stages: RenderStages,
@@ -948,7 +960,7 @@ impl RenderPipelineState {
             Kind::Graphics(state) => state.texture_accesses()?,
             Kind::Tile(state) => state.texture_accesses()?,
         };
-        Ok(accesses.at(stages, index))
+        accesses.at(stages, index)
     }
 
     /// The pipeline's reflection, as its creation's out-parameter answers it where the options
@@ -1710,10 +1722,20 @@ impl GraphicsState {
         self.0.drawn.as_ref().unwrap_or(&self.0.descriptor)
     }
 
-    /// Its functions' texture slots and their accesses, from its reflection
-    /// ([`reflection`](Self::reflection)) the first time.
+    /// Its functions' texture slots and their accesses, from its slot writes the first time.
+    ///
+    /// Not from its reflection: that refuses the whole state where Metal's answer for one
+    /// argument's type has not been measured, which took every slot's access with it
+    /// (`pipeline::texture_access`). The slot writes read the functions' roles, declared accesses
+    /// and slots alone, so a state that compiles answers.
     fn texture_accesses(&self) -> Result<&TextureAccesses, Error> {
-        TextureAccesses::remembered(&self.0.texture_accesses, |budget| self.reflection(budget))
+        TextureAccesses::remembered(&self.0.texture_accesses, |budget| {
+            match self.descriptor() {
+                StateDescriptor::Vertex(descriptor) => descriptor.slot_writes(budget),
+                StateDescriptor::Mesh(descriptor) => descriptor.slot_writes(budget),
+            }
+            .map_err(device_error)
+        })
     }
 
     /// The pipeline's reflection ([`RenderPipelineState::compiled_reflection`]) of the descriptor

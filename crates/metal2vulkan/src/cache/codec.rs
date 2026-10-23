@@ -1256,7 +1256,7 @@ codec_struct! {
         requirements, variant_bits, profile, kernel, reflection, slot_writes, specialized,
     }
     StageReflection { bindings, attributes }
-    SlotWrite { name, parameter, binding_type, index, count, used, writes }
+    SlotWrite { name, parameter, binding_type, index, count, used, access, writes }
     RenderPipelineReflection { vertex, fragment, tile, object, mesh }
     LinkedUseAnswers {
         vertex_returns_value, fragment_writes_depth_unattached, stages_using_direct_arguments,
