@@ -589,23 +589,40 @@ impl Case for CompressedBlits {
         // Metal's: the only site loosened is the set of notices, which Metal holds empty, and the
         // allowance fails the case if the notice did not fire.
         //
-        // The shadowed-texture notice is deliberately not named, and four of these rows are
-        // **divergent** on both venues because of it: `bgra10xr`, `bgra10xr-srgb`, `rg11b10f` and
-        // `rgb9e5f` announce `shadowed-texture` on MoltenVK and on lavapipe alike, so their texture
-        // over a buffer does reach its bytes through a shadow image. The earlier reading that no
-        // venue announced it was
-        // taken through a comparison that could not see it -- one notice declaration unchecked the
-        // whole notices site, so the `staged-texture-copy` declaration above hid every other code
-        // the run announced. Every byte of all four still compares exactly with Metal.
+        // `shadowed-texture`, which every row of this family announces: its texture over a buffer
+        // reaches the buffer's bytes through a shadow image rather than an image aliasing them.
         //
-        // The rows stay divergent on purpose, which is what this comment always said should
-        // happen: it is a difference nobody has looked at, and naming the code here would turn an
-        // unexamined mechanism into a permanent excuse. Whoever takes it decides whether a shadow
-        // image is the right answer for these formats' texture-over-buffer, and declares the code
-        // or changes the runtime.
-        vec![crate::replay::notice_allowance(
-            Degradation::StagedTextureCopy.code(),
-        )]
+        // This comment used to leave the code undeclared and the rows divergent on purpose, on the
+        // grounds that naming an unexamined mechanism makes a permanent excuse of it, and it asked
+        // whoever took it to decide whether a shadow image is the right answer for these formats
+        // and then declare or change the runtime. The decision, and what it rests on:
+        //
+        // It is the right answer, because there is no other exact one. A texture over a buffer
+        // aliases the buffer's bytes with a linear image where the device can make one
+        // (`texture.rs`, `alias_image`); where it cannot, the only remaining way to reach those
+        // bytes exactly is to copy them into an image and back, which is this notice. These four
+        // are the formats the device makes no linear image of -- `BGRA10XR`, its sRGB twin,
+        // `RG11B10Float` and `RGB9E5Float`, whose linear tiling the device does not list
+        // (`linear_lack`) -- and Metal makes a texture over a buffer in all four, so refusing them
+        // is not open to us either. A cheaper exact form would have to come from the device
+        // gaining linear tiling for the format, not from a choice of ours.
+        //
+        // It is also the answer the suite has already made for this mechanism, not a new one: five
+        // cases across four other families declare `shadowed-texture` for a texture whose bytes no
+        // image can alias -- `two-plane-row-blits`, `texture-fills-heap-run-550-b5` and `-551-b5`,
+        // `surface-fills-over-planes-and-buffers`, and `buffer-texture-blits-to-and-from`. Leaving
+        // these four undeclared made them divergent at `case/notices` on every run while the same
+        // code was justified elsewhere, which is noise rather than an open question.
+        //
+        // It loosens no value. Every byte of all four rows compares exactly with Metal's; the whole
+        // difference the declaration covers is the announcement, which Metal holds empty because
+        // the copy is not a thing Metal has to do. Measured announced by all four rows on Apple
+        // M3 Max in the whole-set run this declaration was taken from; the earlier reading recorded
+        // the same code on lavapipe.
+        vec![
+            crate::replay::notice_allowance(Degradation::StagedTextureCopy.code()),
+            crate::replay::notice_allowance(Degradation::ShadowedTexture.code()),
+        ]
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
@@ -664,6 +681,41 @@ mod tests {
     fn the_formats_name_distinct_cases() {
         let named: BTreeSet<&str> = FORMATS.iter().map(|format| format.name).collect();
         assert_eq!(named.len(), FORMATS.len());
+    }
+
+    /// Every case of the family declares exactly the two notice codes it announces, and every
+    /// format declares the same two, because every row reaches its bytes the same way.
+    ///
+    /// Stated as the whole set rather than as "the codes are present", because a declaration fires
+    /// on its own code: a code announced and declared nowhere is a divergence at the notices site,
+    /// and a code declared that no row announces fires on no venue and names nothing the run
+    /// justifies. The set is the claim, in both directions.
+    #[test]
+    fn every_case_declares_exactly_the_two_notices_it_announces() {
+        use crate::allowance::Justification;
+        let wanted = vec![
+            Degradation::StagedTextureCopy.code().to_owned(),
+            Degradation::ShadowedTexture.code().to_owned(),
+        ];
+        for case in all() {
+            let codes: Vec<String> = case
+                .allowances()
+                .iter()
+                .map(|allowance| {
+                    assert_eq!(
+                        allowance.path,
+                        format!("case/{}/*", crate::replay::NOTICES_SITE),
+                        "{}: an allowance outside the notices site",
+                        case.name()
+                    );
+                    match &allowance.justified_by {
+                        Justification::Degradation(code) => code.clone(),
+                        other => panic!("{}: an unexpected tolerance: {other:?}", case.name()),
+                    }
+                })
+                .collect();
+            assert_eq!(codes, wanted, "{}", case.name());
+        }
     }
 
     /// Every format of the family has a rule, so [`CompressedBlits::rule`] cannot panic.
