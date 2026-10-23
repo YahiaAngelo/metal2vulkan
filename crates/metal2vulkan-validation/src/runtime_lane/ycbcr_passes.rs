@@ -45,6 +45,10 @@ use std::time::Duration;
 
 const WAIT: Duration = Duration::from_secs(60);
 
+/// The kinds this lane's loaded and blended passes announce, for `degrade_notices`' census.
+pub(super) const YCBCR_PASSES: [Degradation; 2] =
+    [Degradation::YCbCrLoadTiles, Degradation::YCbCrBlendRounding];
+
 /// The texture's width and height, even, so every format's chroma blocks tile it.
 const W: u64 = 40;
 const H: u64 = 24;
@@ -704,10 +708,7 @@ fn loaded_passes_store_the_tiles_they_reach_as_metal() {
             }
         }
         let notices = counts(&messages.take_notices());
-        assert!(
-            notices.contains_key(&Degradation::YCbCrLoadTiles),
-            "{notices:?}"
-        );
+        assert!(notices.contains_key(&YCBCR_PASSES[0]), "{notices:?}");
     });
 }
 
@@ -849,9 +850,6 @@ fn masked_blended_and_unstored_passes_are_metal_s() {
             }
         }
         let notices = counts(&messages.take_notices());
-        assert!(
-            notices.contains_key(&Degradation::YCbCrBlendRounding),
-            "{notices:?}"
-        );
+        assert!(notices.contains_key(&YCBCR_PASSES[1]), "{notices:?}");
     });
 }

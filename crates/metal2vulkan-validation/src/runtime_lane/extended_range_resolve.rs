@@ -11,20 +11,26 @@
 //! `extended-range-resolve`, each such channel here within one code of Metal's (the probe's 32
 //! pixels; `bind::ColorResolveFormat::extended_range` states the bounds over its 4096). A second
 //! pass draws every sample of a pixel alike, whose resolve is the code a single-sampled target of
-//! the same draw stores, as Metal's resolve of samples of one value is.
+//! the same draw stores, as Metal's resolve of samples of one value is. A sample count the device
+//! lacks (2 is optional in Vulkan: lavapipe offers 1 and 4), refused as `Unsupported` with
+//! `Feature::RasterSampleCount`, is skipped with a printed line, and the other counts are checked.
 
 use super::degrade_notices::assert_once;
 use super::{buffer_with, read_buffer, validated_device_with, Messages, ScratchCache, WAIT};
 use crate::air_library::AirLibrary;
 use crate::gpu::TEST_DEVICE;
+use metal2vulkan::error::Feature;
 use metal2vulkan::metal::{PixelFormat, PrimitiveType, TextureType, TextureUsage};
 use metal2vulkan::pipeline::{ColorAttachmentDescriptor, RenderPipelineDescriptor, StageSource};
 use metal2vulkan_devtools::{engine_dir, llvm_assemble};
 use metal2vulkan_runtime::{
-    BlitOption, ClearColor, CommandQueue, Degradation, Device, Library, LoadAction, Origin,
+    BlitOption, ClearColor, CommandQueue, Degradation, Device, Error, Library, LoadAction, Origin,
     PipelineOptions, RenderPassDescriptor, ResourceOptions, Size, StoreAction, Texture,
     TextureDescriptor,
 };
+
+/// The kinds this lane's resolves announce, for `degrade_notices`' census.
+pub(super) const XR_RESOLVE: [Degradation; 1] = [Degradation::ExtendedRangeResolve];
 
 /// The target's width and height.
 const WIDTH: u64 = 8;
@@ -274,16 +280,23 @@ impl Lane {
 
     /// Each pixel's codes after a pass drawing `colors` (each pixel's samples in turn) into a
     /// target of `pf` at `samples`: stored and resolved into a single-sampled texture past one
-    /// sample, else stored.
-    fn draw(&self, pf: PixelFormat, samples: u32, colors: &[[f32; 4]]) -> Vec<[u32; 4]> {
+    /// sample, else stored; `None`, with a printed line, where the device refuses the count.
+    fn draw(&self, pf: PixelFormat, samples: u32, colors: &[[f32; 4]]) -> Option<Vec<[u32; 4]>> {
         let mut d = RenderPipelineDescriptor::new(self.function("xrr_vertex"));
         d.fragment = Some(self.function("xrr_samples"));
         d.color_attachments[0] = Some(ColorAttachmentDescriptor::new(pf));
         d.raster_sample_count = samples;
-        let pipeline = self
+        let pipeline = match self
             .device
             .new_render_pipeline_state(&d, &PipelineOptions::default())
-            .unwrap_or_else(|e| panic!("{pf:?} at {samples}: {e}"));
+        {
+            Ok(pipeline) => pipeline,
+            Err(Error::Unsupported(u)) if u.feature == Feature::RasterSampleCount => {
+                println!("{}: {pf:?} at {samples} refused: {u:?}", self.device.name());
+                return None;
+            }
+            Err(e) => panic!("{pf:?} at {samples}: {e}"),
+        };
         let target = self.texture(pf, samples);
         let resolved = (samples > 1).then(|| self.texture(pf, 1));
         let bytes: Vec<u8> = colors
@@ -335,11 +348,12 @@ impl Lane {
         command_buffer.commit().unwrap();
         command_buffer.wait_until_completed_for(WAIT).unwrap();
         assert_eq!(command_buffer.error(), None, "{pf:?} at {samples}");
-        read_buffer(&out, 0, length)
+        let texels = read_buffer(&out, 0, length)
             .unwrap()
             .chunks(texel as usize)
             .map(|t| codes(pf, t))
-            .collect()
+            .collect();
+        Some(texels)
     }
 }
 
@@ -353,9 +367,13 @@ fn extended_range_resolves_are_metals_or_within_a_code() {
     let lane = Lane::new(&messages, &cache);
     let name = lane.device.name().to_owned();
     let mut wrong = Vec::new();
+    let mut drawn = 0;
     for &(pf, samples, metal) in &METAL {
         let colors = values(pf, samples);
-        let got = lane.draw(pf, samples, &colors);
+        let Some(got) = lane.draw(pf, samples, &colors) else {
+            continue;
+        };
+        drawn += 1;
         let (mut same, mut near) = (0, 0);
         for (px, (got, &metal)) in got.iter().zip(&metal).enumerate() {
             let metal = unpacked(metal);
@@ -377,8 +395,10 @@ fn extended_range_resolves_are_metals_or_within_a_code() {
             .iter()
             .flat_map(|&c| std::iter::repeat_n(c, samples as usize))
             .collect();
-        let stored = lane.draw(pf, 1, &firsts);
-        let resolved = lane.draw(pf, samples, &alike);
+        let stored = lane.draw(pf, 1, &firsts).expect("one sample");
+        let resolved = lane
+            .draw(pf, samples, &alike)
+            .expect("the count drawn above");
         if resolved != stored {
             wrong.push(format!(
                 "{pf:?} at {samples}, samples alike: resolved {resolved:x?} against stored \
@@ -386,6 +406,7 @@ fn extended_range_resolves_are_metals_or_within_a_code() {
             ));
         }
     }
+    assert!(drawn > 0, "{name}: no sample count drawn");
     assert!(
         wrong.is_empty(),
         "{name}: {} channels:\n{}",
@@ -394,10 +415,7 @@ fn extended_range_resolves_are_metals_or_within_a_code() {
     );
     assert_once(
         &messages.take_notices(),
-        &[
-            Degradation::ExtendedRangeResolve,
-            Degradation::ShaderResolve,
-        ],
+        &[XR_RESOLVE[0], Degradation::ShaderResolve],
     );
     drop(lane);
     let reported = messages.take();
