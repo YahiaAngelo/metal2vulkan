@@ -41,18 +41,12 @@ use objc2_metal::{
     MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferHandler, MTLCommandBufferStatus,
     MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder,
     MTLComputePipelineDescriptor, MTLComputePipelineState, MTLCreateSystemDefaultDevice,
-    MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction, MTLHeap,
-    MTLHeapDescriptor, MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer,
-    MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand,
-    MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
+    MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
     MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
     MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
     MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
-    MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerAddressMode,
-    MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
-    MTLSharedEvent, MTLSize, MTLSparsePageSize, MTLStageInputOutputDescriptor,
-    MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction,
+    MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplePosition, MTLSamplerAddressMode, MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState, MTLSharedEvent, MTLSize, MTLSparsePageSize, MTLStageInputOutputDescriptor, MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLStoreActionOptions,
     MTLTexture, MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType,
     MTLTextureUsage, MTLTileRenderPipelineDescriptor, MTLVertexDescriptor, MTLVertexFormat,
     MTLVertexStepFunction, MTLViewport, MTLVisibilityResultMode,
@@ -2952,6 +2946,22 @@ impl MetalSide {
         Ok(())
     }
 
+    /// The samples of the pass's own attachments, which is the count Metal holds its custom
+    /// sample positions to: the first attachment the pass states, and 1 for a pass with none.
+    fn pass_samples(&self, pass: &RenderPass) -> Answer<u32> {
+        let attached = pass
+            .colors
+            .iter()
+            .filter_map(|color| color.texture)
+            .chain(pass.depth.as_ref().map(|depth| depth.texture))
+            .chain(pass.stencil.as_ref().map(|stencil| stencil.texture))
+            .next();
+        match attached {
+            Some(handle) => Ok(self.held_texture(handle)?.sampleCount() as u32),
+            None => Ok(1),
+        }
+    }
+
     /// Encode one render pass of a program into `command_buffer`.
     fn encode_pass(
         &self,
@@ -2977,6 +2987,9 @@ impl MetalSide {
                 blue: color.clear[2],
                 alpha: color.clear[3],
             });
+            attachment.setStoreActionOptions(MTLStoreActionOptions::from_bits_retain(
+                color.options.raw() as usize,
+            ));
             if let Some(resolve) = color.resolve {
                 let resolve: Retained<ProtocolObject<dyn MTLTexture>> =
                     Retained::from(self.held_texture(resolve)?);
@@ -2991,6 +3004,9 @@ impl MetalSide {
             attachment.setLoadAction(MTLLoadAction(depth.load.raw() as usize));
             attachment.setStoreAction(MTLStoreAction(depth.store.raw() as usize));
             attachment.setClearDepth(depth.clear);
+            attachment.setStoreActionOptions(MTLStoreActionOptions::from_bits_retain(
+                depth.options.raw() as usize,
+            ));
             attachment.setDepthResolveFilter(MTLMultisampleDepthResolveFilter(
                 depth.filter.raw() as usize
             ));
@@ -3008,6 +3024,9 @@ impl MetalSide {
             attachment.setLoadAction(MTLLoadAction(stencil.load.raw() as usize));
             attachment.setStoreAction(MTLStoreAction(stencil.store.raw() as usize));
             attachment.setClearStencil(stencil.clear);
+            attachment.setStoreActionOptions(MTLStoreActionOptions::from_bits_retain(
+                stencil.options.raw() as usize,
+            ));
             attachment.setStencilResolveFilter(MTLMultisampleStencilResolveFilter(
                 stencil.filter.raw() as usize,
             ));
@@ -3024,6 +3043,29 @@ impl MetalSide {
             descriptor.setRenderTargetWidth(size[0] as usize);
             descriptor.setRenderTargetHeight(size[1] as usize);
             descriptor.setDefaultRasterSampleCount(1);
+        }
+        if !pass.positions.is_empty() {
+            // The one place the Metal leg encodes `setSamplePositions:count:`, so the guard that
+            // keeps the suite off Metal's fatal shapes is reached by every case that states
+            // positions, whatever else it does. The samples are the pass's own attachments', which
+            // is what Metal counts the positions against.
+            let samples = self.pass_samples(pass)?;
+            if let Some(refusal) = crate::render::forbidden_positions(&pass.positions, samples) {
+                return Err(refusal);
+            }
+            let positions: Vec<MTLSamplePosition> = pass
+                .positions
+                .iter()
+                .map(|position| MTLSamplePosition {
+                    x: position.x,
+                    y: position.y,
+                })
+                .collect();
+            // SAFETY: the pointer is to `positions.len()` positions that live for the call, and
+            // the count is at or below the pass's samples, which the guard above has just held.
+            unsafe {
+                descriptor.setSamplePositions_count(positions.as_ptr(), positions.len());
+            }
         }
         let encoder = command_buffer
             .renderCommandEncoderWithDescriptor(&descriptor)
