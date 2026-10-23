@@ -224,7 +224,7 @@ const COMPLEMENT: &str = "which of our own threads ran a command buffer's transi
 /// case's window is a question about elapsed time.
 ///
 /// Its partner `pooled_memory_blocks_made` stays gated, at the reading of the lone run
-/// ([`MONOTONE`]), so what a case *allocates* is still held; only what the pool got round to
+/// (the `MONOTONE` table), so what a case *allocates* is still held; only what the pool got round to
 /// handing back is not.
 ///
 /// Measured: it reached 1 where the measurement's most was 0 on `sample-positions-custom-2x` in two
@@ -365,8 +365,9 @@ const MONOTONE: [(&str, &str); 7] = [
     ("pipeline_layouts_made", "4 alone against 0 in company"),
 ];
 
-/// Where `name`'s reading with the case alone is its ceiling, and the worst gap the measurement saw
-/// ([`MONOTONE`]).
+/// Where `name`'s reading with the case alone is its ceiling, and the worst gap the measurement saw.
+///
+/// The names and the measurement that earned each are in this module's own `MONOTONE` table.
 ///
 /// The claim is about a direction, so the code holds it to one: a measurement that finds the lone
 /// run reading *lower* than the in-set run for such a count reports it like any other count the
