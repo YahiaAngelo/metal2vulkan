@@ -368,11 +368,24 @@ pub struct ComputeRun {
     pub census: ExecutedCensus,
 }
 
+/// The device an attempt refused on, as the engine knows it before the worker has read its clock:
+/// the facts a row on that device would have recorded.
+///
+/// The worker's reported form ([`OpenedDevice`]) is this plus what the attempt cost, and only the
+/// worker's own `run_on_device` has measured that, so this carries no figure rather than a
+/// placeholder for one. It is to [`OpenedDevice`] what [`ComputeRun`] is to [`DeviceRun`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefusedOn {
+    pub environment: serde_json::Value,
+    pub translator_fingerprint: String,
+    pub artifact: Option<artifact::ExecutedArtifact>,
+}
+
 /// What one run on an opened device came to: the run, or why it produced none; and, for a typed
 /// refusal after the device opened, that device, whose facts the refusal is stored with.
 pub struct RunAttempt {
     pub result: Result<ComputeRun, ExecutorError>,
-    pub refused_on: Option<OpenedDevice>,
+    pub refused_on: Option<RefusedOn>,
 }
 
 impl RunAttempt {
@@ -2707,53 +2720,47 @@ pub(crate) fn run_on_device(input: &DeviceInput) -> DeviceOutcome {
             }
         }
     };
-    // What the run cost in time, read around the run itself: the case's compiles, its device work
-    // and its readback, with the worker's own admission and preparation of the case outside it, so
-    // the figure a row records is the case on the device and nothing else. The clock is the one
-    // the pipeline-creation ceiling is checked against, so the two can never disagree.
-    let mut took = None;
-    let attempt = match prepare_on_device(input) {
-        Ok((prepared, worker)) => {
-            let clock = crate::budgets::CreationClock::start();
-            let attempt = run_prepared(&prepared, input.backend, &worker);
-            took = Some(clock.read());
-            attempt
-        }
-        Err(error) => RunAttempt::of(Err(error)),
-    };
     let recorded = |mut environment: serde_json::Value| {
         if let (Some(venue), Some(object)) = (&venue, environment.as_object_mut()) {
             object.insert(VENUE_PROFILE.into(), venue.record());
         }
         environment
     };
-    DeviceOutcome {
-        result: attempt.result.and_then(|run| {
-            // A run the worker reports is a run its clock read: only a case that never reached the
-            // device (its preparation failed) leaves no figure, and that is no run.
-            let timing = took
-                .and_then(|span| CaseTiming::of([span]))
-                .ok_or_else(|| {
-                    ExecutorError::from(format!(
-                        "the device run of case {} reports no timing",
-                        input.case.case_id
-                    ))
-                })?;
-            Ok(DeviceRun {
-                output: run.output,
-                spv_sha256: run.spv_sha256,
-                translator_fingerprint: run.translator_fingerprint,
-                environment: recorded(run.environment),
-                comparison: run.comparison,
-                census: run.census,
-                timing,
-            })
-        }),
-        refused_on: attempt.refused_on.map(|opened| OpenedDevice {
-            environment: recorded(opened.environment),
-            translator_fingerprint: opened.translator_fingerprint,
-            artifact: opened.artifact,
-        }),
+    // What the attempt cost in time, read around the attempt itself: the case's compiles, its
+    // device work and its readback, with the worker's own admission and preparation of the case
+    // outside it, so the figure is the case on the device and nothing else. The clock is the one
+    // the pipeline-creation ceiling is checked against, so the two can never disagree.
+    //
+    // The outcome is built here, inside the arm that read the clock, so a run and a refusal on an
+    // opened device each take the figure from it by construction: a case that never reached a
+    // device (its preparation failed) is the only outcome without one, and it is neither.
+    match prepare_on_device(input) {
+        Ok((prepared, worker)) => {
+            let clock = crate::budgets::CreationClock::start();
+            let attempt = run_prepared(&prepared, input.backend, &worker);
+            let timing = CaseTiming::of_one(clock.read());
+            DeviceOutcome {
+                result: attempt.result.map(|run| DeviceRun {
+                    output: run.output,
+                    spv_sha256: run.spv_sha256,
+                    translator_fingerprint: run.translator_fingerprint,
+                    environment: recorded(run.environment),
+                    comparison: run.comparison,
+                    census: run.census,
+                    timing,
+                }),
+                refused_on: attempt.refused_on.map(|opened| OpenedDevice {
+                    environment: recorded(opened.environment),
+                    translator_fingerprint: opened.translator_fingerprint,
+                    artifact: opened.artifact,
+                    timing,
+                }),
+            }
+        }
+        Err(error) => DeviceOutcome {
+            result: Err(error),
+            refused_on: None,
+        },
     }
 }
 
@@ -3193,6 +3200,7 @@ pub fn execute_prepared(
                     executor_abi: ENGINE_EXECUTOR_ABI.into(),
                     refusal: Refusal::of(&not_supported),
                     artifact: opened.artifact,
+                    timing: Some(opened.timing),
                 })?;
             }
             return Err(not_supported.into());

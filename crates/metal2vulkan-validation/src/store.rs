@@ -461,6 +461,12 @@ impl CorpusStore {
     pub fn upsert_refusal(&self, refusal: RefusalObservation) -> Result<(), String> {
         self.recover_transactions()?;
         refusal.validate_content()?;
+        require_timing(
+            "refusal",
+            &refusal.case_id,
+            &refusal.environment_id,
+            refusal.timing,
+        )?;
         let index = shard_index_for_hash(&refusal.air_sha256)?;
         self.validate_observation_identity(
             index,
@@ -1143,11 +1149,11 @@ fn validate_observation_output(case: &AuthoredCase, output_b64: &str) -> Result<
 /// A row this build stores records what its case cost in time, or it is not stored.
 ///
 /// The owner's rule is that every suite records timing for every case it runs, not a selection, and
-/// this is where that holds by construction: the two paths that produce a row — a Metal
-/// qualification and a candidate run on a device — each hand their own measurement to the store,
-/// and a path that measured nothing cannot write a row at all. Rows already on disk are kept as
-/// they are: a row recorded before the figure existed carries none, and reading one, or rewriting
-/// its shard around a new row, never goes through here.
+/// this is where that holds by construction: the paths that produce a row — a Metal qualification,
+/// a candidate run on a device, and an attempt that prepared the case and then refused — each hand
+/// their own measurement to the store, and a path that measured nothing cannot write a row at all.
+/// Rows already on disk are kept as they are: a row recorded before the figure existed carries
+/// none, and reading one, or rewriting its shard around a new row, never goes through here.
 fn require_timing(
     side: &str,
     case_id: &str,
@@ -1550,6 +1556,23 @@ mod tests {
         let mut rows = store.read_candidates(Backend::Vulkan).unwrap();
         assert_eq!(rows.len(), 1);
         assert!(rows.pop().unwrap().timing.is_some());
+
+        // A refused attempt is a case the suite ran: it prepared the case and compiled before it
+        // refused, so its row records what that cost on the same terms.
+        let mut untimed = refusal(&case, "env@engine", "stated");
+        untimed.timing = None;
+        let refused = store.upsert_refusal(untimed).unwrap_err();
+        assert!(
+            refused.contains("records no timing") && refused.contains("env@engine"),
+            "{refused}"
+        );
+        assert!(store.read_refusals(Backend::Vulkan).unwrap().is_empty());
+        store
+            .upsert_refusal(refusal(&case, "env@engine", "stated"))
+            .unwrap();
+        let mut refusals = store.read_refusals(Backend::Vulkan).unwrap();
+        assert_eq!(refusals.len(), 1);
+        assert!(refusals.pop().unwrap().timing.is_some());
 
         // A row a shard already holds without a figure is read as it is, and stays byte for byte
         // as it is when another row joins its shard.
@@ -2089,6 +2112,7 @@ mod tests {
 
     fn refusal(case: &AuthoredCase, slot: &str, leg: &str) -> RefusalObservation {
         RefusalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),

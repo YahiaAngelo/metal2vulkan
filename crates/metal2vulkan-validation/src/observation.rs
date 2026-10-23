@@ -47,6 +47,18 @@ pub struct CaseTiming {
 }
 
 impl CaseTiming {
+    /// The timing of one execution that took `span`: what a candidate run and a refused attempt on
+    /// an opened device each record. It cannot fail, so a caller that read a clock has a figure
+    /// without an unreachable error path to carry.
+    pub fn of_one(span: std::time::Duration) -> CaseTiming {
+        let micros = u64::try_from(span.as_micros()).unwrap_or(u64::MAX);
+        CaseTiming {
+            runs: 1,
+            total_micros: micros,
+            least_micros: micros,
+        }
+    }
+
     /// The timing of `runs` executions that each took the time `took` holds, in the order they
     /// ran. Returns `None` for no executions, which no recorded row has.
     pub fn of(took: impl IntoIterator<Item = std::time::Duration>) -> Option<CaseTiming> {
@@ -1464,6 +1476,13 @@ mod tests {
         use std::time::Duration;
         assert_eq!(CaseTiming::of([]), None);
         let one = CaseTiming::of([Duration::from_micros(700)]).unwrap();
+        // One execution, the form a candidate run and a refused attempt record. Compared field
+        // by field: `assert_eq!` on two timings holds whatever they are, by this type's design.
+        let alone = CaseTiming::of_one(Duration::from_micros(700));
+        assert_eq!(
+            (alone.runs, alone.total_micros, alone.least_micros),
+            (one.runs, one.total_micros, one.least_micros)
+        );
         assert_eq!(
             (one.runs, one.total_micros, one.least_micros),
             (1, 700, 700)

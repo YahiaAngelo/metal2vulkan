@@ -140,6 +140,7 @@ fn a_product_refusal_records_whether_the_binder_refused() {
 
 fn record(slot: &str, leg: &str) -> RefusalObservation {
     RefusalObservation {
+        timing: Some(crate::observation::test_timing()),
         case_id: "aa".repeat(32),
         air_sha256: "11".repeat(32),
         input_sha256: "22".repeat(32),
@@ -151,6 +152,64 @@ fn record(slot: &str, leg: &str) -> RefusalObservation {
         refusal: Refusal::of(&device_capability_missing()),
         artifact: None,
     }
+}
+
+/// A refused attempt's figure reaches no digest, no fingerprint and no verdict, exactly as a run's
+/// does. A refusal is a case the suite ran — it prepared the case and compiled, on an opened device
+/// or on the restricted device's own description, before it refused — so the row records what that
+/// cost; but what the row *decides* is its refusal class, and the figure must not touch it.
+#[test]
+fn a_refusals_timing_reaches_no_digest_no_fingerprint_and_no_verdict() {
+    let timed = |timing| {
+        let mut row = record("env@engine", "stated");
+        row.timing = timing;
+        row
+    };
+    let fast = crate::observation::CaseTiming {
+        runs: 1,
+        total_micros: 120,
+        least_micros: 120,
+    };
+    let slow = crate::observation::CaseTiming {
+        runs: 1,
+        total_micros: 7_000_000,
+        least_micros: 7_000_000,
+    };
+    // The figures differ where they are stored, so nothing below holds vacuously.
+    let member =
+        |row: &RefusalObservation| serde_json::to_value(row).unwrap().get("timing").cloned();
+    assert_ne!(member(&timed(Some(fast))), member(&timed(Some(slow))));
+    assert_eq!(member(&timed(None)), None);
+
+    let untimed = timed(None);
+    for row in [timed(None), timed(Some(fast)), timed(Some(slow))] {
+        assert_eq!(row.validate_content(), Ok(()));
+        assert_eq!(row.translator_fingerprint, "33".repeat(32));
+        // The verdict a refusal carries is its class and the product's outcome under it.
+        assert_eq!(row.refusal, untimed.refusal);
+        assert_eq!(row.refusal.class, untimed.refusal.class);
+        assert_eq!(row.refusal.product, untimed.refusal.product);
+    }
+    // Two refusals that differ only in their figures are one refusal.
+    assert_eq!(timed(Some(fast)), timed(Some(slow)));
+
+    // No load-bearing field moved: a timed refusal is the untimed one's bytes plus one member.
+    let without_timing = |row: &RefusalObservation| {
+        let mut value = serde_json::to_value(row).unwrap();
+        value.as_object_mut().unwrap().remove("timing");
+        value
+    };
+    let bytes = serde_json::to_string(&untimed).unwrap();
+    assert!(!bytes.contains("timing"));
+    let plain = serde_json::to_value(&untimed).unwrap();
+    assert_eq!(without_timing(&timed(Some(fast))), plain);
+    assert_eq!(without_timing(&timed(Some(slow))), plain);
+    // A refusal recorded before the figure existed round-trips to the bytes it had.
+    assert_eq!(
+        serde_json::to_string(&serde_json::from_str::<RefusalObservation>(&bytes).unwrap())
+            .unwrap(),
+        bytes
+    );
 }
 
 /// A record is an engine slot's, in the leg its environment ran, with a refusal whose class

@@ -148,6 +148,11 @@ pub struct OpenedDevice {
     /// What the run had compiled when it refused, which the refusal records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact: Option<ExecutedArtifact>,
+    /// What the refused attempt cost in time ([`CaseTiming`]), which the refusal records. The
+    /// worker's clock is read around everything after the case was prepared, which is every
+    /// attempt that gets this far — a refusal of the restricted device itself names one before it
+    /// opened, and that attempt is timed too — so this is not optional either.
+    pub timing: CaseTiming,
 }
 
 /// What the device half of one case came to.

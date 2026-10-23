@@ -141,6 +141,7 @@ fn row(
 /// not enable.
 fn refusal(case: &AuthoredCase, environment_id: &str, leg: &str) -> RefusalObservation {
     RefusalObservation {
+        timing: Some(crate::observation::test_timing()),
         case_id: case.case_id.clone(),
         air_sha256: case.air_sha256.clone(),
         input_sha256: case.computed_input_sha256().unwrap(),

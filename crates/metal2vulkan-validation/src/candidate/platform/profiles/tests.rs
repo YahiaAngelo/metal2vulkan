@@ -608,6 +608,7 @@ fn a_restriction_the_device_cannot_take_is_a_recorded_refusal() {
         opened.translator_fingerprint
     );
     let record = RefusalObservation {
+        timing: Some(crate::observation::test_timing()),
         case_id: "a".repeat(64),
         air_sha256: "b".repeat(64),
         input_sha256: "c".repeat(64),
