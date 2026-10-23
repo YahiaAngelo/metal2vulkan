@@ -17,6 +17,7 @@ use crate::queue_slots::QueueSlots;
 use crate::render::{
     ColorState, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
 };
+use crate::sparse_query::{QueryPage, SparseTileQuery, TileSize};
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::{Negative, Value};
 use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor};
@@ -2303,6 +2304,33 @@ impl Side for RuntimeSide<'_> {
             Err(metal2vulkan_runtime::Error::Nil(_)) => Ok(false),
             Err(error) => Err(Failure::of(&error)),
         }
+    }
+
+    fn sparse_tile_size(&mut self, query: &SparseTileQuery) -> Answer<TileSize> {
+        let samples = u64::from(query.samples);
+        let size = match query.page {
+            None => self
+                .device
+                .sparse_tile_size(query.texture_type, query.format, samples),
+            Some(page) => self.device.sparse_tile_size_for_page(
+                query.texture_type,
+                query.format,
+                samples,
+                page,
+            ),
+        };
+        Ok(TileSize {
+            width: size.width,
+            height: size.height,
+            depth: size.depth,
+        })
+    }
+
+    fn sparse_tile_size_in_bytes(&mut self, page: QueryPage) -> Answer<u64> {
+        Ok(match page {
+            None => self.device.sparse_tile_size_in_bytes(),
+            Some(page) => self.device.sparse_tile_size_in_bytes_for_page(page),
+        })
     }
 }
 

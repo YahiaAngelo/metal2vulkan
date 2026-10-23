@@ -61,6 +61,7 @@ pub mod scheduled_handlers;
 pub mod shared_events;
 pub mod simdgroup_lockstep;
 pub mod snorm_tile_store;
+pub mod sparse_tiles;
 pub mod stage_in_regions;
 pub mod surface_fills;
 pub mod texture_accesses;
@@ -212,6 +213,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     cases.extend(compute_threadgroups::all());
     cases.extend(buffer_blits::all());
     cases.extend(simdgroup_lockstep::all());
+    for case in sparse_tiles::all() {
+        cases.push(Box::new(case));
+    }
     cases
 }
 

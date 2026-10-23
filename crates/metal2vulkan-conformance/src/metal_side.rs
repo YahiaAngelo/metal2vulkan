@@ -22,10 +22,12 @@ use crate::queue_slots::QueueSlots;
 use crate::render::{
     Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
 };
+use crate::sparse_query::{QueryPage, SparseTileQuery, TileSize};
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
 use metal2vulkan::metal::state::{DepthStencilDescriptor, StencilDescriptor};
 use metal2vulkan::metal::{BindingAccess, PixelFormat, RenderStages};
+use metal2vulkan_runtime::SparsePageSize;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::AnyThread;
@@ -46,11 +48,11 @@ use objc2_metal::{
     MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
     MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerAddressMode,
     MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
-    MTLSharedEvent, MTLSize, MTLStageInputOutputDescriptor, MTLStencilDescriptor,
-    MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction, MTLTexture,
-    MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels, MTLTextureType,
-    MTLTextureUsage, MTLTileRenderPipelineDescriptor, MTLVertexDescriptor, MTLVertexFormat,
-    MTLVertexStepFunction, MTLViewport, MTLVisibilityResultMode,
+    MTLSharedEvent, MTLSize, MTLSparsePageSize, MTLStageInputOutputDescriptor,
+    MTLStencilDescriptor, MTLStencilOperation, MTLStepFunction, MTLStorageMode, MTLStoreAction,
+    MTLTexture, MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels,
+    MTLTextureType, MTLTextureUsage, MTLTileRenderPipelineDescriptor, MTLVertexDescriptor,
+    MTLVertexFormat, MTLVertexStepFunction, MTLViewport, MTLVisibilityResultMode,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -2270,6 +2272,54 @@ impl Side for MetalSide {
         // sweep of the family holds a texture it does not read.
         Ok(self.device.newTextureWithDescriptor(&descriptor).is_some())
     }
+
+    fn sparse_tile_size(&mut self, query: &SparseTileQuery) -> Answer<TileSize> {
+        let texture_type = MTLTextureType(query.texture_type.as_raw() as usize);
+        let format = MTLPixelFormat(query.format.as_raw() as usize);
+        let samples = query.samples as usize;
+        // SAFETY: both getters read the three scalars they are given and answer an `MTLSize`.
+        // Neither allocates, compiles or reaches the GPU, and neither takes an object.
+        let size = unsafe {
+            match query.page {
+                None => self
+                    .device
+                    .sparseTileSizeWithTextureType_pixelFormat_sampleCount(
+                        texture_type,
+                        format,
+                        samples,
+                    ),
+                Some(page) => self
+                    .device
+                    .sparseTileSizeWithTextureType_pixelFormat_sampleCount_sparsePageSize(
+                        texture_type,
+                        format,
+                        samples,
+                        metal_page(page),
+                    ),
+            }
+        };
+        Ok(TileSize {
+            width: size.width as u64,
+            height: size.height as u64,
+            depth: size.depth as u64,
+        })
+    }
+
+    fn sparse_tile_size_in_bytes(&mut self, page: QueryPage) -> Answer<u64> {
+        Ok(match page {
+            None => self.device.sparseTileSizeInBytes() as u64,
+            Some(page) => {
+                self.device
+                    .sparseTileSizeInBytesForSparsePageSize(metal_page(page)) as u64
+            }
+        })
+    }
+}
+
+/// Metal's `MTLSparsePageSize` for a case's page, by its raw value, so the two spellings cannot
+/// drift apart.
+fn metal_page(page: SparsePageSize) -> MTLSparsePageSize {
+    MTLSparsePageSize(page.raw() as isize)
 }
 
 /// A command buffer the slot probe holds, so the thread that frees a slot need not be the thread

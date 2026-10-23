@@ -853,6 +853,30 @@ pub trait Side {
         Err(Failure::unavailable("makes_texture"))
     }
 
+    /// `sparseTileSizeWithTextureType:pixelFormat:sampleCount:`, or its `sparsePageSize:` form
+    /// where the query names a page ([`crate::sparse_query`]).
+    ///
+    /// A pure getter, like [`heap_texture_size_and_align`](Side::heap_texture_size_and_align): it
+    /// compiles nothing, allocates nothing, reaches no GPU and asks nothing of the device's sparse
+    /// capabilities, so a case over it is safe on every device and answers on a venue that binds no
+    /// sparse memory at all.
+    fn sparse_tile_size(
+        &mut self,
+        query: &crate::sparse_query::SparseTileQuery,
+    ) -> Answer<crate::sparse_query::TileSize> {
+        let _ = query;
+        Err(Failure::unavailable("sparse_tile_size"))
+    }
+
+    /// `sparseTileSizeInBytes`, or `sparseTileSizeInBytesForSparsePageSize:` where `page` names
+    /// one: the bytes one sparse tile of that page takes.
+    ///
+    /// A pure getter, as [`sparse_tile_size`](Side::sparse_tile_size) is.
+    fn sparse_tile_size_in_bytes(&mut self, page: crate::sparse_query::QueryPage) -> Answer<u64> {
+        let _ = page;
+        Err(Failure::unavailable("sparse_tile_size_in_bytes"))
+    }
+
     /// A command queue's limit on uncompleted command buffers, by the probe both sides run
     /// ([`crate::queue_slots`]): the queue is made with `max` as its
     /// `maxCommandBufferCount` (`newCommandQueue` where `max` is `None`), and at most `cap` command

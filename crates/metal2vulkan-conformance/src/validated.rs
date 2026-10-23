@@ -468,6 +468,19 @@ impl<S: Side> Side for Announcing<S> {
         self.inner.makes_texture(query)
     }
 
+    fn sparse_tile_size(
+        &mut self,
+        query: &crate::sparse_query::SparseTileQuery,
+    ) -> Answer<crate::sparse_query::TileSize> {
+        self.at("sparse_tile_size");
+        self.inner.sparse_tile_size(query)
+    }
+
+    fn sparse_tile_size_in_bytes(&mut self, page: crate::sparse_query::QueryPage) -> Answer<u64> {
+        self.at("sparse_tile_size_in_bytes");
+        self.inner.sparse_tile_size_in_bytes(page)
+    }
+
     fn queue_slots(
         &mut self,
         max: Option<u32>,

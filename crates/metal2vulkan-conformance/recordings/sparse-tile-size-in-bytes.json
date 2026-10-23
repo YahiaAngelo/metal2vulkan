@@ -1,0 +1,230 @@
+{
+  "format": 1,
+  "case": "sparse-tile-size-in-bytes",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "queries",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "5c0cd9ef983b8f7feafebcae3b31cc0ad5b2ee8d3a4496ec0372c251bdefd0bf"
+                        }
+                      }
+                    },
+                    {
+                      "name": "asks-tile-bytes",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ceba568c991457a218ddcd43097c36533ce6f3f56dda885faf1bbf449b3f5189"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "tile-bytes/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "uint": 16384
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "tile-bytes/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "uint": 16384
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "tile-bytes/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "uint": 65536
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "tile-bytes/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "uint": 262144
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}
