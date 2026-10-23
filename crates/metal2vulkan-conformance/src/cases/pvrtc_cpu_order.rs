@@ -359,15 +359,57 @@ mod tests {
         }
     }
 
-    /// Metal's host order is a permutation of a level's blocks, and it is **not** the level's own
-    /// row order wherever the level holds more than one row of more than one block.
+    /// Every (level, pitch) the plans use places its blocks in a **permutation** of the level's
+    /// own bytes, and that permutation is not the level's row order.
     ///
-    /// Both halves matter. The first is what makes the rule a placement at all; the second is what
-    /// makes the cases worth recording, because a rule that happened to be row-major would make
-    /// every `put` read back exactly what the host wrote and prove nothing.
+    /// Both halves matter, and the first is load-bearing rather than tidy: the plan indexes a
+    /// buffer of `across * down` blocks by the order's position, so a shape whose order reached
+    /// past that buffer would be a panic rather than a comparison. It holds here because every
+    /// level these cases read is a whole number of blocks across and down in powers of two.
+    ///
+    /// It is **not** true in general, and the lane says so: a 3-block axis needs two bits, so its
+    /// order leaves positions no block takes. No case here reads such a level, and a case that did
+    /// would have to record those positions rather than index by them.
     #[test]
-    fn the_host_order_is_a_permutation_and_not_the_row_order() {
+    fn every_levels_host_order_is_a_permutation_of_its_own_bytes() {
+        let mut shapes = BTreeSet::new();
+        for format in &FORMATS {
+            let width = format.block_width;
+            for (side, levels) in [(16u64, 5u64), (32, 1)] {
+                for level in 0..levels {
+                    let texels = (side >> level).max(1);
+                    shapes.insert((texels.div_ceil(width), texels.div_ceil(4)));
+                }
+            }
+        }
+        assert!(shapes.len() >= 6, "only {} shapes to check", shapes.len());
         let mut mixing = 0usize;
+        for &(across, down) in &shapes {
+            let places: Vec<u64> = (0..down)
+                .flat_map(|y| (0..across).map(move |x| cpu_order(x, y, [across, down])))
+                .collect();
+            let distinct: BTreeSet<u64> = places.iter().copied().collect();
+            assert_eq!(
+                distinct,
+                (0..across * down).collect::<BTreeSet<u64>>(),
+                "{across}x{down}: the host order is no permutation of the level's bytes"
+            );
+            if places != (0..across * down).collect::<Vec<u64>>() {
+                mixing += 1;
+            }
+        }
+        assert!(
+            mixing >= 2,
+            "only {mixing} of the {} shapes place a block anywhere but its row-major byte, so the \
+             cases would round-trip whatever the rule said",
+            shapes.len()
+        );
+    }
+
+    /// The order is injective for every block count up to eight a side, holes or not: two blocks
+    /// never share a position, which is the part of the rule that holds everywhere.
+    #[test]
+    fn the_host_order_never_puts_two_blocks_in_one_place() {
         for across in 1..=8u64 {
             for down in 1..=8u64 {
                 let places: Vec<u64> = (0..down)
@@ -379,21 +421,8 @@ mod tests {
                     places.len(),
                     "{across}x{down}: the order repeats a position"
                 );
-                assert_eq!(
-                    distinct.iter().copied().max().unwrap_or(0),
-                    across * down - 1,
-                    "{across}x{down}: the order leaves a hole"
-                );
-                let rows: Vec<u64> = (0..across * down).collect();
-                if places != rows {
-                    mixing += 1;
-                }
             }
         }
-        assert!(
-            mixing >= 36,
-            "only {mixing} of the 64 shapes place a block anywhere but its row-major byte"
-        );
     }
 
     /// Every recorded host copy is the lane's Z order's, byte for byte.
