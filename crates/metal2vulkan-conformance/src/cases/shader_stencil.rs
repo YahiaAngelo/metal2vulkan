@@ -26,7 +26,7 @@
 //! buffer clear it and store, then loads it. The second row is the one that shows the output
 //! tested against a stencil the pass did not itself clear.
 //!
-//! The expectation is **computed, not copied** ([`tests::metal_rule`]): the module's test applies
+//! The expectation is **computed, not copied**: the module's `metal_rule` test applies
 //! Metal's own stencil rules — compare under the read mask, pick the failure or pass operation,
 //! write the result under the write mask — to the three draws, and checks the answer against the
 //! table the runtime lane carries. The lane's table was measured on an M4, a machine this project

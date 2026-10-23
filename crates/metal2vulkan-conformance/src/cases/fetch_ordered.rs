@@ -589,7 +589,7 @@ mod tests {
         for (at, channel) in CLEAR.iter().enumerate() {
             // Each clear channel is exactly representable as a `half`, so the stored code is the
             // clear and not a rounding of it.
-            assert_eq!(f64::from(f32::from(half_of(CLEARED[at]))), *channel);
+            assert_eq!(f64::from(half_of(CLEARED[at])), *channel);
         }
     }
 
