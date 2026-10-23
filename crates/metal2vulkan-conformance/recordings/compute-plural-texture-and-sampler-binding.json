@@ -1,0 +1,484 @@
+{
+  "format": 1,
+  "case": "compute-plural-texture-and-sampler-binding",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "xr_samples.ll",
+      "entry": "xr_sample_runtime",
+      "source_sha256": "ea925b19feda68c261f8ac9f406a525999757ef4ca50de08ec5d4018192b1a06"
+    },
+    {
+      "fixture": "xr_samples.air.ll",
+      "entry": "xr_sample_runtime",
+      "source_sha256": "3b790c44719c78270cde27fb25cb6386615ffed8a34ffb73bcb6637142e3d997"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ea925b19feda68c261f8ac9f406a525999757ef4ca50de08ec5d4018192b1a06"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3b790c44719c78270cde27fb25cb6386615ffed8a34ffb73bcb6637142e3d997"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e3ebadf5645df080f1f8b645c68ea17c2ef3365cd309df13eddd9264581b68ba"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "c084bcefca295f8cb5cfe4cf7329bceffd14341f2786de357003caa2d8436547"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texels",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "39e3d7b6b5d075d37d053ad89b24b41bef4f3c29760c84447cab3f3be1882241"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "640e494dd31edb66b0748239aa90547d77e8ab37843b5bc8352a5f39e5296f06"
+                        }
+                      }
+                    },
+                    {
+                      "name": "pass",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a150b6c62d410348c6030b137b6528d2528d3dad991f62c2e3bcb10f9ad07bb3"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/0",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pass",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "outcome",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "dispatch_type",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Serial",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "error",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "None",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/0/setComputePipelineState",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/1/setBuffer",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/2/setBuffer",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/3/setTexture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/4/setSamplerState",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/5/dispatchThreadgroups",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/6/setBufferOffset",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/7/setTextures",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/8/setSamplerStates",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/9/dispatchThreadgroups",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/10/setBufferOffset",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/11/setSamplerStateWithLodClamps",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/12/dispatchThreadgroups",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/13/setBufferOffset",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/14/setSamplerStatesWithLodClamps",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "step/15/dispatchThreadgroups",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-back/1",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "four-bindings",
+                  "observed": {
+                    "value": {
+                      "bytes": "wcBAPKGgID2JiIg9wcDAPQAAgD/BwMA80dBQPaGgoD2sqys/s7IyP7q5OT/BwEA/qKcnP6+uLj+2tTU/vbw8P8HAQDyhoCA9iYiIPcHAwD0AAIA/wcDAPNHQUD2hoKA9rKsrP7OyMj+6uTk/wcBAP6inJz+vri4/trU1P728PD/BwEA8oaAgPYmIiD3BwMA9AACAP8HAwDzR0FA9oaCgPayrKz+zsjI/urk5P8HAQD+opyc/r64uP7a1NT+9vDw/wcBAPKGgID2JiIg9wcDAPQAAgD/BwMA80dBQPaGgoD2sqys/s7IyP7q5OT/BwEA/qKcnP6+uLj+2tTU/vbw8P35+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn5+fn4="
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "buffer": {
+                            "offset": 0,
+                            "length": 320
+                          }
+                        },
+                        "element": "u32",
+                        "row_offset": 0,
+                        "row_elements": 80,
+                        "row_pitch": 320,
+                        "rows": 1,
+                        "image_pitch": 320,
+                        "images": 1,
+                        "gaps": "ignored"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": {
+        "stopped": {
+          "call": "compute_pass",
+          "message": "redundant setting of <AGXG15XFamilyTexture: 0xADDR>\n    label = <none>\n    textureType = MTLTextureType2D\n    pixelFormat = MTLPixelFormatRGBA8Unorm\n    width = 4\n    height = 4\n    depth = 1\n    arrayLength = 1\n    mipmapLevelCount = 1\n    sampleCount = 1\n    cpuCacheMode = MTLCPUCacheModeDefaultCache\n    storageMode = MTLStorageModeShared\n    hazardTrackingMode = MTLHazardTrackingModeTracked\n    resourceOptions = MTLResourceCPUCacheModeDefaultCache MTLResourceStorageModeShared MTLResourceHazardTrackingModeTracked\n    usage = MTLTextureUsageShaderRead\n    shareable = 0\n    framebufferOnly = 0\n    purgeableState = MTLPurgeableStateNonVolatile\n    swizzle = [MTLTextureSwizzleRed, MTLTextureSwizzleGreen, MTLTextureSwizzleBlue, MTLTextureSwizzleAlpha]\n    isCompressed = 0\n    parentTexture = <null>\n    parentRelativeLevel = 0\n    parentRelativeSlice = 0\n    buffer = <null>\n    bufferOffset = 0\n    bufferBytesPerRow = 0\n    iosurface = 0x0\n    iosurfacePlane = 0\n    allowGPUOptimizedContents = YES\n    label = <none>.\nredundant setting of <MTLDebugSamplerState: 0xADDR> -> <AGXG15XFamilySampler: 0xADDR>\n    label = <none>\n    device = <AGXG15CDevice: 0xADDR>\n        name = Apple M3 Max<MTLSamplerDescriptorInternal: 0xADDR>\n    label = <none>\n    minFilter = MTLSamplerMinMagFilterNearest\n    magFilter = MTLSamplerMinMagFilterNearest\n    mipFilter = MTLSamplerMipFilterNotMipmapped\n    maxAnisotropy = 1\n    sAddressMode = MTLSamplerAddressModeClampToEdge\n    tAddressMode = MTLSamplerAddressModeClampToEdge\n    rAddressMode = MTLSamplerAddressModeClampToEdge\n    normalizedCoordinates = 1\n    borderColor = MTLSamplerBorderColorTransparentBlack\n    borderColorcustomValue0 = 0\n    borderColorcustomValue1 = 0\n    borderColorcustomValue2 = 0\n    borderColorcustomValue3 = 0\n    forceSeamsOnCubemapFiltering = 0\n    lodMinClamp = 0\n    lodMaxClamp = 3.402823e+38\n    lodAverage = 0\n    compareFunction = MTLCompareFunctionNever\n    supportArgumentBuffers = 0\n    reductionMode = MTLSamplerReductionModeWeightedAverage\n    forceResourceIndex = 0\n    resourceIndex = 0\n    pixelFormat = MTLPixelFormatInvalid.\nredundant setting of <MTLDebugSamplerState: 0xADDR> -> <AGXG15XFamilySampler: 0xADDR>\n    label = <none>\n    device = <AGXG15CDevice: 0xADDR>\n        name = Apple M3 Max<MTLSamplerDescriptorInternal: 0xADDR>\n    label = <none>\n    minFilter = MTLSamplerMinMagFilterNearest\n    magFilter = MTLSamplerMinMagFilterNearest\n    mipFilter = MTLSamplerMipFilterNotMipmapped\n    maxAnisotropy = 1\n    sAddressMode = MTLSamplerAddressModeClampToEdge\n    tAddressMode = MTLSamplerAddressModeClampToEdge\n    rAddressMode = MTLSamplerAddressModeClampToEdge\n    normalizedCoordinates = 1\n    borderColor = MTLSamplerBorderColorTransparentBlack\n    borderColorcustomValue0 = 0\n    borderColorcustomValue1 = 0\n    borderColorcustomValue2 = 0\n    borderColorcustomValue3 = 0\n    forceSeamsOnCubemapFiltering = 0\n    lodMinClamp = 0\n    lodMaxClamp = 3.402823e+38\n    lodAverage = 0\n    compareFunction = MTLCompareFunctionNever\n    supportArgumentBuffers = 0\n    reductionMode = MTLSamplerReductionModeWeightedAverage\n    forceResourceIndex = 0\n    resourceIndex = 0\n    pixelFormat = MTLPixelFormatInvalid."
+        }
+      }
+    }
+  ]
+}
