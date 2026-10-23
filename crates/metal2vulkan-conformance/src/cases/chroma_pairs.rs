@@ -7,14 +7,23 @@
 //! call. So nothing here is carried: record mode runs both families on Metal and the recordings
 //! hold Metal's own answers, taken on this M3 Max.
 //!
-//! **What the port changes, and it is the whole point of the port.** The lane's copy table was
-//! measured on an Apple M4 and written into assertions; the lane's *texel* table was never
-//! measured against Metal at all. `four_two_two_texels_read_as_metal_s` compares our reads with
-//! `metal2vulkan::bind::ChromaDecode`'s model, and the model's own provenance is the module's
-//! prose: "matched against an Apple M3 Max's reads by its own tests". That is a claim about one
-//! decode model checked by one set of unit tests, not a Metal run — so the lane cannot tell a
-//! wrong model from a wrong implementation, because both sides of its comparison are ours. Record
-//! mode asks Metal.
+//! **What the port changes.** The lane's copy table was measured on an Apple M4 and written into
+//! assertions. Its *texel* table is not a Metal run at all: `four_two_two_texels_read_as_metal_s`
+//! compares our reads with `metal2vulkan::bind::ChromaDecode`'s model, so both sides of its
+//! comparison are ours and nothing in the lane can tell a wrong model from a wrong
+//! implementation.
+//!
+//! The model itself **was** measured, and this port must not imply otherwise: `bind/chroma_decode`
+//! records a probe on an Apple M3 Max under macOS 27.0.1 that found every `float` and `half`
+//! `read()`, nearest, linear and bicubic sample, and gather of both formats bit for bit the one of
+//! an `RGBA8Unorm` texture holding the decoded codes, over 16 x 4 texels of random bytes. So
+//! Metal's `read()` of these formats is a defined operation, not a guess, and the model's rule
+//! stands on a real measurement.
+//!
+//! What that probe does not leave behind is a re-runnable artifact: it was thrown away, it covered
+//! 64 texels rather than the lane's own 256, and nothing mechanical ties the lane's expectation to
+//! it. These cases take Metal's answer over the lane's own pattern and commit it, so a new macOS
+//! is one `conformance record` from saying whether Apple changed it.
 //!
 //! # The three families
 //!
