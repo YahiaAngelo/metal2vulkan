@@ -21,11 +21,14 @@
 //! of each. The comparison then names the sample, the lane and both values, and the digest stays
 //! beside the value as a projection of it.
 //!
+//! Every result compares exactly and the cases carry **no allowance**: on both venues this round
+//! covers, the runtime announces nothing here. A venue that does will read as divergent until
+//! whoever adds it names the notice with a run behind it.
+//!
 //! Nothing here can fault a GPU: two compute passes a case, one texture, three buffers, no loop.
 //! The coordinates do reach outside the texture, which is what the address modes are here for and
 //! what Metal defines.
 
-use crate::allowance::Allowance;
 use crate::case::{
     made, Abort, Bindings, Case, Failure, Handle, Input, MetalSource, SamplerSpec, Side,
     TextureRole, TextureSpec,
@@ -34,7 +37,6 @@ use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
 use crate::transcript::{ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value};
 use metal2vulkan::metal::{PixelFormat, SamplerAddressMode, SamplerMinMagFilter};
-use metal2vulkan_runtime::Degradation;
 
 /// The fixture that fills the texture.
 const FILL_FIXTURE: &str = "xr_two_planes";
@@ -375,17 +377,6 @@ impl Case for TwoPlaneSamples {
 
     fn metal_source(&self) -> MetalSource {
         MetalSource::Run
-    }
-
-    fn allowances(&self) -> Vec<Allowance> {
-        // The fill writes `float` into a storage texture of a format whose image a device encodes
-        // itself; the runtime announces what it had to do at the dispatch. Only the notice set is
-        // loosened: every one of the 4,096 results still compares exactly, so a device that
-        // encodes as Metal reads as announced with nothing differing, and one that does not shows
-        // the sample. The allowance fails the case if the notice stops firing.
-        vec![crate::replay::notice_allowance(
-            Degradation::DeviceNanEncoding.code(),
-        )]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

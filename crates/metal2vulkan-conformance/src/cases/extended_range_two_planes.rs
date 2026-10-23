@@ -35,11 +35,16 @@
 //! than raw values would be, and two are raw. All six are now Metal's measured answer on the chip
 //! the suite names, rather than a digest from a probe on another machine.
 //!
+//! Every output compares exactly, or by its digest where the digest is all that is recorded, and
+//! the case carries **no allowance**: on both venues this round covers, MoltenVK and lavapipe, the
+//! runtime announces nothing at all here. A venue that does announce something will read as
+//! divergent until whoever adds it names the notice with a run behind it, which is the way round
+//! the suite's default should fail.
+//!
 //! Nothing here can fault a GPU: compute passes of one kernel each, one texture and two buffers, no
 //! loop and no sampling. The consumer's grid does reach past the texture, which is what the case is
 //! about and what Metal defines: a write outside is dropped and a read outside answers zero.
 
-use crate::allowance::Allowance;
 use crate::case::{
     made, Abort, Bindings, Case, Failure, Handle, Input, MetalSource, Side, TextureRole,
     TextureSpec,
@@ -48,7 +53,6 @@ use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
 use crate::transcript::{ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value};
 use metal2vulkan::metal::PixelFormat;
-use metal2vulkan_runtime::Degradation;
 
 /// The fixture all four kernels live in.
 const FIXTURE: &str = "xr_two_planes";
@@ -412,22 +416,6 @@ impl Case for ExtendedRangeTwoPlanes {
 
     fn metal_source(&self) -> MetalSource {
         MetalSource::Run
-    }
-
-    fn allowances(&self) -> Vec<Allowance> {
-        // The kernels write `half` and `float` into a storage texture of a format whose image a
-        // device encodes itself, and the runtime announces what it had to do at the dispatch.
-        // Only the notice set is loosened: every byte still compares exactly or by its digest, so
-        // a device that encodes as Metal reads as announced with nothing differing, and one that
-        // does not shows the thread. Each allowance fails the case if its notice stops firing, so
-        // none can outlive the reason for it.
-        [
-            Degradation::DeviceNanEncoding,
-            Degradation::FastMathRewrites,
-        ]
-        .iter()
-        .map(|kind| crate::replay::notice_allowance(kind.code()))
-        .collect()
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

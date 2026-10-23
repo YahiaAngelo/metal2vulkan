@@ -33,10 +33,13 @@
 //! `isRGB10A2GammaSupported` check, which is a device property rather than an observation. The case
 //! vocabulary has no non-mesh render pass yet.
 //!
+//! Every word and every sample compares exactly and the cases carry **no allowance**: on both
+//! venues this round covers, the runtime announces nothing here. A venue that does will read as
+//! divergent until whoever adds it names the notice with a run behind it.
+//!
 //! Nothing here can fault a GPU: one or two compute passes a case, one texture and two buffers, no
 //! loop. The sampled positions do reach outside the texture, which is what clamp to edge is for.
 
-use crate::allowance::Allowance;
 use crate::case::{
     made, Abort, Bindings, Case, Failure, Handle, Input, MetalSource, SamplerSpec, Side,
     TextureRole, TextureSpec,
@@ -47,7 +50,6 @@ use crate::transcript::{
     Aspect, ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value,
 };
 use metal2vulkan::metal::{PixelFormat, SamplerMinMagFilter};
-use metal2vulkan_runtime::Degradation;
 
 /// The format every case is of.
 const FORMAT: PixelFormat = PixelFormat::RGB10A2UnormSRGB;
@@ -513,22 +515,6 @@ impl Case for Rgb10A2Srgb {
 
     fn metal_source(&self) -> MetalSource {
         MetalSource::Run
-    }
-
-    fn allowances(&self) -> Vec<Allowance> {
-        // A device whose own conversion of the padded 10-bit sRGB format is not Metal's announces
-        // it where the runtime has to encode the texel itself, and a device whose compiler rewrites
-        // the fixture's fast-math arithmetic announces that at the pipeline's making. Only the
-        // notice set is loosened: every word and every sample still compares exactly, so a device
-        // that answers as Metal reads as announced with nothing differing. Each allowance fails the
-        // case if its notice stops firing.
-        [
-            Degradation::DeviceNanEncoding,
-            Degradation::FastMathRewrites,
-        ]
-        .iter()
-        .map(|kind| crate::replay::notice_allowance(kind.code()))
-        .collect()
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
