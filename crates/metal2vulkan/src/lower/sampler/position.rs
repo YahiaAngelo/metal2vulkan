@@ -83,6 +83,13 @@
 //! whose tests (`texture::OffsetBase`) the rule reads; a heap element's access reads none, and
 //! records `PrecisionNote::ViewBaseTexelOffset` (the residue there).
 //!
+//! **A subnormal coordinate** ([`subnormal_flush`]). Apple's texture unit reads a subnormal
+//! normalized coordinate as the zero of its sign before the address mode decides (measured on an
+//! Apple M3 Max), so a border axis reads texel 0 just outside the level where a device that keeps
+//! the subnormal reads the border. The border axes of a constexpr sampler flush it before anything
+//! reads it (`emit::plane_coord`), so the emulations and the device's own sampler alike are handed
+//! Metal's coordinate; every other address mode reads the same texel either way.
+//!
 //! **The snapped coordinate** ([`snapped`]). A device gather or nearest sample at a coordinate
 //! near a texel edge reads whichever texel its own arithmetic gives (ANV's gathers read the block
 //! one texel low at odd sizes). Where Metal's texel is known, a snapped axis instead hands the

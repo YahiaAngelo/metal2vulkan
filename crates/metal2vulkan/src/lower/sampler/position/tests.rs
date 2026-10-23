@@ -1453,8 +1453,8 @@ fn flush_kernel(axes: u8) -> BResult<TypedModule> {
     }
     let coord = f.composite_construct(fvec2, &lanes)?;
     let flushed = super::emit_flush(&mut f, coord, 2, axes)?;
-    for lane in 0..2 {
-        let c = f.composite_extract(flushed, &[u32::from(lane)])?;
+    for lane in 0..2u32 {
+        let c = f.composite_extract(flushed, &[lane])?;
         let bits = f.convert(ConvOp::Bitcast, c, u32_)?;
         let at = word(&mut f, output, i, 2, lane)?;
         f.store(at, bits, MemAccess::default())?;
