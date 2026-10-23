@@ -21,10 +21,10 @@
 //! takes the builtin as a vector.
 //!
 //! **Metal's answer is run, not copied.** The lane never ran Metal: it computes its expectation
-//! from a formula in Rust ([`tests::metals_words_are_the_lanes_formula`] keeps that formula, as the
-//! readable model, and checks the recorded words against it). So the words here are the words
-//! Metal's threads wrote on the oracle, and the lane's formula is now evidence rather than a
-//! comment.
+//! from a formula in Rust (this crate's own `tests::metals_words_are_the_lanes_formula` keeps that
+//! formula, as the readable model, and checks the recorded words against it). So the words here are
+//! the words Metal's threads wrote on the oracle, and the lane's formula is now evidence rather
+//! than a comment.
 //!
 //! **The device's limit is pinned by a dispatch, not by a getter.** The lane reads
 //! `maxTotalThreadsPerThreadgroup` off the state and sizes its dispatch from it, which cannot
