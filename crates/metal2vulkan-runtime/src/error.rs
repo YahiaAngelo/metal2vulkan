@@ -1647,7 +1647,9 @@ pub enum CommandBufferError {
     /// The program committed the command buffer as failed, with this `MTLCommandBufferError`
     /// code ([`CommandBuffer::commit_failed`](crate::CommandBuffer::commit_failed)). Of Metal's
     /// codes of a page fault (3) and a hang (2), it counts against its queue as the error it
-    /// stands for does ([`AccessRevoked`](Self::AccessRevoked)); of any other code, not.
+    /// stands for does ([`AccessRevoked`](Self::AccessRevoked)), and its completion is the GPU's
+    /// recovery from it, which ends a predicated loop running on the device (as a victim after a
+    /// fault, with no error after a hang); of any other code, neither.
     Injected(u64),
     /// The command buffer encoded a render pass without attachments whose
     /// `renderTargetWidth` or `renderTargetHeight` is past 16384, which Metal's encoder takes:

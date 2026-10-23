@@ -3054,7 +3054,10 @@ each item named states the rule in full.
   and attribute strides, as Metal's `get*` getters answer them. `IndirectComputeCommand` and
   `IndirectRenderCommand` read one field of their record alone (`command_type`, `has_barrier`,
   `dispatch` or `draw`, one buffer slot, `pipeline_unique_identifier`, and the rest), as
-  `IndirectCommandBuffer::commands` reads it, without decoding the whole command.
+  `IndirectCommandBuffer::commands` reads it, without decoding the whole command. Where Metal's
+  getters answer other than what the command runs, the read-back answers as they do: a render
+  command's `draw` of primitive type 7, 8 or 9 reads as one of points (0), and `command_type` of
+  an indexed draw of type 9 reads as none; `commands` keeps the type the command draws.
 - **Whether the GPU may have written the records** (`IndirectCommandBuffer::gpu_written`, no Metal
   counterpart) turns true at the first call that lets GPU work write them; from then on an
   execution runs the records as they stand once the work before it completed.
@@ -3097,8 +3100,9 @@ each item named states the rule in full.
   loop uses), and nothing encoded before the loop runs again. A loop without bound runs on, as
   Metal's does, after the program let go of its queue and device too, until the process ends or
   the device is lost. A loop running again stops, as Metal's does, at the GPU's recovery from a
-  fault or a hang of another queue's command buffer (primitive type 9; one behind the loop on
-  its own queue waits for it, a known gap in docs/FAST-PATHS.md): a fault's fails its command
+  fault or a hang of another queue's command buffer (primitive type 9, or one a program commits
+  as failed with Metal's code of either, 3 or 2; one behind the loop on its own queue waits for
+  it, a known gap in docs/FAST-PATHS.md): a fault's fails its command
   buffer as a victim (`GpuRecoveryVictim`), a hang's ends it with no error, and nothing after the
   loop runs. Work inside a loop the runtime records apart (an indirect dispatch or
   an indirect command buffer's execution a host step records) is recorded again in each such

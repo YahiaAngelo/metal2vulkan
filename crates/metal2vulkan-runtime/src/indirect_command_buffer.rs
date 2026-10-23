@@ -3058,10 +3058,17 @@ fn stride_at(
 
 /// `getCommandType`'s answer for a record of `action`: the command type of its dispatch or draw,
 /// none for an empty record (on an M4: `0x20` and `0x40` for the dispatches, 1
-/// and 2 for draws and indexed draws, 0 fresh and after a reset).
+/// and 2 for draws and indexed draws, 0 fresh and after a reset), and none for an indexed draw of
+/// primitive type 9 (the M3 Max, macOS 27.0.1: 0 there, 2 for indexed draws of types 0 to 8, and 1
+/// for direct draws of types 0 to 9).
 fn command_type(action: &Action) -> IndirectCommandType {
-    match action {
+    match *action {
         Action::Empty => IndirectCommandType::empty(),
+        Action::DrawIndexedPrimitives { primitive_type, .. }
+            if u64::from(primitive_type) == DrawPrimitiveType::Nine.raw() =>
+        {
+            IndirectCommandType::empty()
+        }
         Action::DispatchThreadgroups { .. } => IndirectCommandType::CONCURRENT_DISPATCH,
         Action::DispatchThreads { .. } => IndirectCommandType::CONCURRENT_DISPATCH_THREADS,
         Action::DrawPrimitives { .. } => IndirectCommandType::DRAW,
@@ -3088,6 +3095,25 @@ fn dispatch_of(action: &Action) -> Option<IndirectDispatch> {
         }),
         _ => None,
     }
+}
+
+/// A record's draw as Metal's private getters answer it (`drawArguments`, `drawIndexedArguments`):
+/// [`draw_of`]'s, a draw of primitive type 7, 8 or 9 read as one of points, 0 (the M3 Max, macOS
+/// 27.0.1: each of the three, set by the CPU, direct or indexed, read back 0; 0 to 6 read back as
+/// set).
+fn answered_draw(action: &Action) -> Option<IndirectDraw> {
+    let mut draw = draw_of(action)?;
+    if let IndirectDraw::Primitives { primitive_type, .. }
+    | IndirectDraw::IndexedPrimitives { primitive_type, .. } = &mut draw
+    {
+        if matches!(
+            primitive_type,
+            DrawPrimitiveType::Quads | DrawPrimitiveType::QuadStrip | DrawPrimitiveType::Nine
+        ) {
+            *primitive_type = PrimitiveType::Point.into();
+        }
+    }
+    Some(draw)
 }
 
 /// A record's draw, of `action`: none for an action that draws nothing, and for a draw of a
@@ -4548,11 +4574,13 @@ impl IndirectRenderCommand {
 
     /// `drawArguments`, `drawIndexedArguments`, `drawPatchesArguments`,
     /// `drawIndexedPatchesArguments` and `getTessellationFactorArguments`, Apple's private
-    /// getters: the command's [`draw`](EncodedRenderCommand::draw), read alone.
+    /// getters: the command's [`draw`](EncodedRenderCommand::draw), read alone, as Metal answers
+    /// it: a draw of primitive type 7, 8 or 9 reads as one of points, Metal's 0 (the M3 Max,
+    /// macOS 27.0.1), though it draws as set.
     pub fn draw(&self) -> Result<Option<IndirectDraw>, Error> {
         self.check_getter("draw")?;
         self.icb
-            .read_record(self.index, |view| draw_of(&view.action()))
+            .read_record(self.index, |view| answered_draw(&view.action()))
     }
 
     /// The vertex buffer set at `index`: the command's
@@ -4627,12 +4655,15 @@ impl IndirectRenderCommand {
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct EncodedRenderCommand {
-    /// The draw it runs; none for a reset or state-only command, which runs nothing.
+    /// The draw it runs; none for a reset or state-only command, which runs nothing. Its
+    /// primitive type is the one set, which Metal's private getters answer as 0 for types 7 to 9
+    /// ([`IndirectRenderCommand::draw`]).
     pub draw: Option<IndirectDraw>,
     /// `getCommandType`, Apple's private getter: the type of the draw the record holds (`DRAW`,
     /// `DRAW_INDEXED`, `DRAW_PATCHES`, `DRAW_INDEXED_PATCHES`, `DRAW_MESH_THREADGROUPS` or
     /// `DRAW_MESH_THREADS`; an indexed patch draw without a control-point index buffer is a
-    /// patch draw), none for a fresh or reset command, as Metal answers.
+    /// patch draw), none for a fresh or reset command and for an indexed draw of primitive type
+    /// 9, as Metal answers (the M3 Max, macOS 27.0.1).
     pub command_type: IndirectCommandType,
     /// `setBarrier`.
     pub barrier: bool,
