@@ -313,6 +313,7 @@ impl PastMetalsLimit {
         sites.leaf("pipeline", answered());
         sites.leaf("buffer", answered());
         sites.leaf("dispatch", answered());
+        sites.leaf("read-back", answered());
         sites.value("output", Value::Nothing(Negative::ChangedNothing));
         sites.notices(NOTICES_SITE, &[] as &[&str]);
         Ok((CARRIED_RUNS, sites.finish()))
@@ -524,32 +525,161 @@ mod tests {
         );
     }
 
-    /// The carried row states exactly the sites its run emits, so the two compare site for site:
-    /// a carried transcript that named one the run does not emit, or missed one it does, would
-    /// compare as a divergence at every replay.
+    /// A side that answers every call the carried row makes and writes nothing, so the row can be
+    /// run without a device: what it is for is checking that the carried transcript states exactly
+    /// the sites a run emits.
+    struct Unwriting {
+        /// The next handle it answers; nothing compares one.
+        next: u32,
+        /// The bytes its one buffer holds, which no dispatch of it changes.
+        held: Vec<u8>,
+    }
+
+    impl Unwriting {
+        fn new() -> Self {
+            Self {
+                next: 0,
+                held: Vec::new(),
+            }
+        }
+
+        fn handle(&mut self) -> crate::case::Handle {
+            self.next += 1;
+            crate::case::Handle(self.next - 1)
+        }
+    }
+
+    impl Side for Unwriting {
+        fn venue(&self) -> crate::case::Venue {
+            crate::case::Venue {
+                device: "unwriting".to_owned(),
+                driver: "none".to_owned(),
+                api: "none".to_owned(),
+                metal_level: "none".to_owned(),
+            }
+        }
+
+        fn library(
+            &mut self,
+            _source: &crate::case::ShaderSource<'_>,
+        ) -> crate::case::Answer<crate::case::Handle> {
+            Ok(self.handle())
+        }
+
+        fn compute_pipeline(
+            &mut self,
+            _library: crate::case::Handle,
+            _entry: &str,
+        ) -> crate::case::Answer<crate::case::Handle> {
+            Ok(self.handle())
+        }
+
+        fn buffer(&mut self, bytes: &[u8]) -> crate::case::Answer<crate::case::Handle> {
+            self.held = bytes.to_vec();
+            Ok(self.handle())
+        }
+
+        fn zeroed_buffer(&mut self, length: usize) -> crate::case::Answer<crate::case::Handle> {
+            self.held = vec![0; length];
+            Ok(self.handle())
+        }
+
+        fn texture_2d(
+            &mut self,
+            _format: metal2vulkan::metal::PixelFormat,
+            _size: [u32; 2],
+            _row_pitch: u32,
+            _bytes: &[u8],
+        ) -> crate::case::Answer<crate::case::Handle> {
+            Err(Failure::unavailable("texture_2d"))
+        }
+
+        fn read_texture(
+            &mut self,
+            _texture: crate::case::Handle,
+            _size: [u32; 2],
+            _row_pitch: u32,
+        ) -> crate::case::Answer<Vec<u8>> {
+            Err(Failure::unavailable("read_texture"))
+        }
+
+        fn dispatch(
+            &mut self,
+            _pipeline: crate::case::Handle,
+            _bindings: &Bindings<'_>,
+            _threadgroups: [u32; 3],
+            _threads: [u32; 3],
+        ) -> crate::case::Answer<crate::case::Handle> {
+            Ok(self.handle())
+        }
+
+        fn wait(&mut self, _command_buffer: crate::case::Handle) -> crate::case::Answer<Value> {
+            Ok(Value::unit_variant("Completed"))
+        }
+
+        fn read_buffer(
+            &mut self,
+            _buffer: crate::case::Handle,
+            offset: u64,
+            length: usize,
+        ) -> crate::case::Answer<Vec<u8>> {
+            let at = offset as usize;
+            Ok(self.held[at..at + length].to_vec())
+        }
+
+        fn announced(&mut self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn compute_pipeline_with_stage_input(
+            &mut self,
+            _library: crate::case::Handle,
+            _entry: &str,
+            _stage_input: &crate::case::StageInput,
+        ) -> crate::case::Answer<crate::case::Handle> {
+            Err(Failure::unavailable("compute_pipeline_with_stage_input"))
+        }
+
+        fn dispatch_threads(
+            &mut self,
+            _pipeline: crate::case::Handle,
+            _bindings: &Bindings<'_>,
+            _stage_in: &[crate::case::StageInRegion],
+            _grid: [u32; 3],
+            _threads: [u32; 3],
+        ) -> crate::case::Answer<crate::case::Handle> {
+            Err(Failure::unavailable("dispatch_threads"))
+        }
+    }
+
+    /// The carried row states exactly the sites its run emits, **checked by running it**: a
+    /// carried transcript that named a site the run does not emit, or missed one it does, compares
+    /// as a divergence at every replay, and reading the two by eye is how that was missed once.
     #[test]
     fn the_carried_rows_sites_are_the_runs_sites() {
         let case = past_metals_limit();
         let (runs, carried) = case.carried().expect("the carried transcript");
         assert_eq!(runs, CARRIED_RUNS);
-        let named: Vec<&str> = carried
-            .root
-            .children
-            .iter()
-            .map(|node| node.name.as_str())
-            .collect();
-        assert_eq!(
-            named,
-            vec![
-                crate::case::INPUTS_SITE,
-                "library",
-                "pipeline",
-                "buffer",
-                "dispatch",
-                "output",
-                NOTICES_SITE,
-            ]
-        );
+        let mut side = Unwriting::new();
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(
+            &case.inputs().expect("the inputs"),
+        ));
+        case.run(&mut side, &mut sites).expect("the run answered");
+        sites.notices(NOTICES_SITE, &[] as &[&str]);
+        let names = |transcript: &Transcript| -> Vec<String> {
+            transcript
+                .root
+                .children
+                .iter()
+                .map(|node| node.name.clone())
+                .collect()
+        };
+        let ran = sites.finish();
+        assert_eq!(names(&ran), names(&carried));
+        // And a side that wrote nothing gives the carried row's own answer, so the two transcripts
+        // are equal and not merely shaped alike.
+        assert_eq!(ran, carried);
     }
 
     /// Record mode must refuse the carried row: it is the one row of this family whose shape the

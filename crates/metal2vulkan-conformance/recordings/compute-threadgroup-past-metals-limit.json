@@ -133,6 +133,17 @@
                   }
                 },
                 {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
                   "name": "output",
                   "observed": {
                     "value": {

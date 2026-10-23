@@ -45,9 +45,11 @@
 //! Nothing here can fault a GPU: every command is a buffer copy or a buffer fill inside its
 //! buffer, there is no shader, no texture and no loop, and every wait is bounded.
 
+use crate::allowance::Allowance;
 use crate::case::{call, Abort, Case, Input, MetalSource, Side};
 use crate::transcript::{ByteLayout, Element, Negative, Node, Observed, Sites, Value};
 use crate::work::{Resource, Step, Work};
+use metal2vulkan_runtime::Degradation;
 
 /// The byte a private destination is filled with before a row's own commands, so every byte the
 /// row compares is a byte something wrote.
@@ -131,6 +133,13 @@ struct Row {
     sites: fn(&crate::work::Done) -> Vec<Node>,
     /// What the row sets that is not a buffer's bytes, as its input fingerprint.
     parameters: fn() -> Vec<u8>,
+    /// The degrade notices this row's commands announce on a device whose copy or fill cannot take
+    /// the form Metal's does. Metal announces none, so the notices site is the only field of these
+    /// rows that may differ at all — every byte compares exactly — and each kind here is what
+    /// justifies that one difference. A row that announced a kind not listed fails until the kind
+    /// is added, which is the model working: an announced difference nobody named is not an
+    /// announced difference.
+    notices: &'static [Degradation],
 }
 
 /// A case of the family: one row.
@@ -145,6 +154,14 @@ impl Case for BufferBlits {
 
     fn metal_source(&self) -> MetalSource {
         MetalSource::Run
+    }
+
+    fn allowances(&self) -> Vec<Allowance> {
+        self.row
+            .notices
+            .iter()
+            .map(|kind| crate::replay::notice_allowance(kind.code()))
+            .collect()
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
@@ -220,6 +237,9 @@ static ANY_RANGE: Row = Row {
         ]
     },
     parameters: || b"fill 1+62 5a; copy 3->21+10; fill 41+2 ee; fill 48+5 11".to_vec(),
+    // Three of the four fills cover bytes that are not whole 4-byte words at multiples of 4,
+    // which is the whole point of the row.
+    notices: &[Degradation::SplitBufferFill],
 };
 
 /// Overlapping ranges of one buffer, forwards and backwards, in shared memory and in private.
@@ -259,6 +279,9 @@ static OVERLAPPING: Row = Row {
         ]
     },
     parameters: || b"copy 1->7+4000; copy 9->2+4000; copy private 5->6+4093".to_vec(),
+    // Every copy of the row is between two overlapping ranges of one buffer, which Vulkan's copy
+    // forbids outright.
+    notices: &[Degradation::OverlappingBufferCopy],
 };
 
 /// A copy of no bytes and a fill of no bytes, inside the buffer and past its end.
@@ -299,6 +322,8 @@ static EMPTY_RANGES: Row = Row {
         ]
     },
     parameters: || b"copy 0->0+0; copy 0->64+0; fill 4+0; fill 64+0".to_vec(),
+    // Nothing is copied and nothing is filled, so nothing takes another form.
+    notices: &[],
 };
 
 /// The 600 KiB [`EVERY_FILL_SIZE`] fills.
@@ -359,6 +384,8 @@ static EVERY_FILL_SIZE: Row = Row {
             })
             .collect()
     },
+    // Four of the five fills start or end inside a word.
+    notices: &[Degradation::SplitBufferFill],
 };
 
 /// The case of one blit encoder's fills and copies of any range.
@@ -442,6 +469,26 @@ mod tests {
             Value::Bytes(bytes) => bytes.clone(),
             other => panic!("{site}: the recording holds {}", other.kind()),
         }
+    }
+
+    /// A row loosens the notices site and nothing else: a byte of these cases is never loosened,
+    /// whatever form a device's copy or fill takes.
+    #[test]
+    fn a_row_loosens_the_notices_site_alone() {
+        for case in all() {
+            for allowance in case.allowances() {
+                assert_eq!(
+                    allowance.path,
+                    format!("case/{}/*", crate::replay::NOTICES_SITE),
+                    "{}",
+                    case.name()
+                );
+            }
+        }
+        assert!(
+            empty_ranges().allowances().is_empty(),
+            "the empty-range row copies and fills nothing, so it loosens nothing"
+        );
     }
 
     /// The cases name distinct rows and distinct sites.
