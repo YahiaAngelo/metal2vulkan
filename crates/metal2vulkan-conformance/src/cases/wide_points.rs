@@ -202,18 +202,17 @@ impl Case for WidePoints {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // Both loosen the notices site alone: every coverage still compares exactly, and the
-        // comparison fails if the notice did not fire, so a device that stops needing one has to
-        // drop its line rather than carry a stale excuse.
+        // It loosens the notices site alone: every coverage still compares exactly, and the
+        // comparison fails if the notice did not fire, so a device that stops needing it has to
+        // drop this line rather than carry a stale excuse.
         //
         // A device whose point size is not Metal's draws the point through the runtime's own
-        // handling and says so, and a device whose colour conversion is not Metal's has the
-        // fragment function round the channel it writes. Measured: lavapipe announces both here
-        // and MoltenVK announces neither.
-        vec![
-            crate::replay::notice_allowance(Degradation::DevicePointSize.code()),
-            crate::replay::notice_allowance(Degradation::ShaderColorConversion.code()),
-        ]
+        // handling and says so. Measured: lavapipe announces it here and MoltenVK does not, so the
+        // case reads `announced` on lavapipe and `exact` on MoltenVK. No other notice fired for
+        // this case on either venue, and a tolerance no run justifies is not carried.
+        vec![crate::replay::notice_allowance(
+            Degradation::DevicePointSize.code(),
+        )]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
