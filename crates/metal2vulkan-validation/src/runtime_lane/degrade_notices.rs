@@ -172,6 +172,7 @@ use super::cross_class_reads::CROSS_CLASS;
 use super::depth_denormals::{DEPTH_DENORMALS, SIGNED_DEPTH_TESTS};
 use super::detach_textures::DETACHED_REACHES;
 use super::extended_range_blends::{EXTENDED_RANGE_BITS, STORED_CODES, UNREACHED_TILES};
+use super::extended_range_resolve::XR_RESOLVE;
 use super::extended_range_two_planes::HEAP_PLANES;
 use super::first_use::FIRST_SPARSE;
 use super::format_copies::MEMMOVES;
@@ -219,6 +220,7 @@ use super::view_reinterpretation::VIEW_SHADOWS;
 use super::viewport_ranges::{NAN_DEPTH, UNCLAMPED_BIAS, VERTEX_CLAMPS};
 use super::visibility::REPEATED_STARTS;
 use super::wide_points::POINT_GUARD_BAND;
+use super::ycbcr_passes::YCBCR_PASSES;
 use super::ycbcr_textures::YCBCR_FILTERS;
 use super::{
     case_making_kinds, creation_heard_checked, made_lane_device, pipeline_state, public_case,
@@ -579,6 +581,8 @@ fn every_kind_has_a_site_a_lane_test_takes() {
         &EXACT_FORMS_OVER_LIMIT,
         &GROUPED,
         &WORD_PAST_BUFFER,
+        &XR_RESOLVE,
+        &YCBCR_PASSES,
     ];
     for kind in lists.into_iter().flatten().copied().chain(stage_kinds) {
         assert!(listed.insert(kind), "{kind:?} is listed twice");
