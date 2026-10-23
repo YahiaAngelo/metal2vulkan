@@ -19,8 +19,8 @@ use crate::recording::ShaderRef;
 use crate::transcript::{Node, NodeName, Observed, Sites, Transcript, Value};
 use crate::verdict::device_gap;
 use metal2vulkan::metal::{
-    AttributeFormat, IndexType, PixelFormat, SamplerAddressMode, SamplerBorderColor,
-    SamplerMinMagFilter, StepFunction,
+    AttributeFormat, BindingAccess, IndexType, PixelFormat, RenderStages, SamplerAddressMode,
+    SamplerBorderColor, SamplerMinMagFilter, StepFunction,
 };
 
 /// A shader as both sides can take it.
@@ -461,10 +461,67 @@ pub trait Side {
     ///
     /// [`Side::texture_2d`] is the read-and-write case of this; a case that samples a texture, or
     /// writes one of a format Metal holds no readable-and-writable texture of, states its role
-    /// here instead.
+    /// here instead. An empty `bytes` makes the texture and writes nothing into it, which is what a
+    /// case that asks what a **fresh** texture reads needs.
     fn texture_2d_in_role(&mut self, spec: &TextureSpec, bytes: &[u8]) -> Answer<Handle> {
         let _ = (spec, bytes);
         Err(Failure::unavailable("texture_2d_in_role"))
+    }
+
+    /// [`Side::read_texture`] into a buffer that already holds `before`, so the bytes the copy does
+    /// **not** write stay visible in the answer.
+    ///
+    /// A case reading a texture at a row pitch wider than its rows asks two questions at once:
+    /// what the rows hold, and whether the copy left the bytes between them alone. A read into
+    /// zeroed memory can only answer the first — zero is indistinguishable from a copy that wrote
+    /// zero — so the case states the bytes that were there and the answer carries them back. The
+    /// bytes outside the rows then compare under [`Gaps::Compared`](crate::transcript::Gaps).
+    ///
+    /// `before` is the whole destination, `row_pitch * size[1]` bytes.
+    fn read_texture_over(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        before: &[u8],
+    ) -> Answer<Vec<u8>> {
+        let _ = (texture, size, row_pitch, before);
+        Err(Failure::unavailable("read_texture_over"))
+    }
+
+    /// `newRenderPipelineStateWithDescriptor:options:reflection:error:` of `library`'s `vertex` and
+    /// `fragment` functions, over one color attachment of `attachment`, asking for binding info.
+    ///
+    /// The reflection is asked for at the creation and kept with the state, because that is the
+    /// only time Metal answers it: `MTLRenderPipelineState`'s own `reflection` property is nil for
+    /// a state an `MTLDevice` made.
+    fn render_pipeline_with_reflection(
+        &mut self,
+        library: Handle,
+        vertex: &str,
+        fragment: &str,
+        attachment: PixelFormat,
+    ) -> Answer<Handle> {
+        let _ = (library, vertex, fragment, attachment);
+        Err(Failure::unavailable("render_pipeline_with_reflection"))
+    }
+
+    /// How the state's function of `stage` accesses the texture at each of `indices`: the access
+    /// where a used texture argument covers the slot, and `None` where none does or where the
+    /// argument that covers it is never referenced.
+    ///
+    /// `stage` is one stage, not a union. Metal states this per stage — the reflection holds a
+    /// binding list a stage — so one bit has a Metal answer and a union has only a composition
+    /// rule of ours, which belongs in a lane rather than in a transcript. A side answers
+    /// [`Failure::unavailable`] for anything but a single stage.
+    fn texture_accesses(
+        &mut self,
+        pipeline: Handle,
+        stage: RenderStages,
+        indices: &[u64],
+    ) -> Answer<Vec<Option<BindingAccess>>> {
+        let _ = (pipeline, stage, indices);
+        Err(Failure::unavailable("texture_accesses"))
     }
 
     /// `replaceRegion:mipmapLevel:withBytes:bytesPerRow:` of a texture's whole level 0, at

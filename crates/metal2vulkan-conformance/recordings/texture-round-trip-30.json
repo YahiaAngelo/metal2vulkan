@@ -1,0 +1,204 @@
+{
+  "format": 1,
+  "case": "texture-round-trip-30",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "format",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4f5e1d312b4d1bb8ccaf069c18cddeca414ae78160fb3c793ffc730eef4e4f17"
+                        }
+                      }
+                    },
+                    {
+                      "name": "extent-and-pitch",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "2b19f5be9613113ad546cb3d475d04e998f038859cbfa4822f498f3129c2d239"
+                        }
+                      }
+                    },
+                    {
+                      "name": "before",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "9fa0311d72ce07220aea97bb4f5c011fb001e441c74459aba12155601c7d6c45"
+                        }
+                      }
+                    },
+                    {
+                      "name": "replace_region:bytes",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b32c1db455bd61d2b6e4eee1babfc607e6e0909105542e49b2134af63d877750"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fresh",
+                  "observed": {
+                    "value": {
+                      "bytes": "AAAAAAAAAAAAAAAAAAAAAO7uAAAAAAAAAAAAAAAAAAAAAO7uAAAAAAAAAAAAAAAAAAAAAO7uAAAAAAAAAAAAAAAAAAAAAO7uAAAAAAAAAAAAAAAAAAAAAO7uAAAAAAAAAAAAAAAAAAAAAO7uAAAAAAAAAAAAAAAAAAAAAO7uAAAAAAAAAAAAAAAAAAAAAO7u"
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              8,
+                              8,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 16,
+                        "row_pitch": 18,
+                        "rows": 8,
+                        "image_pitch": 144,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "replace_region",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "round-trip",
+                  "observed": {
+                    "value": {
+                      "bytes": "Hj1ce5q52PcWNVRzkrHQ7+7uTGuKqcjnBiVEY4KhwN/+He7uepm41/YVNFNykbDP7g0sS+7uqMfmBSRDYoGgv979HDtaee7u1vUUM1JxkK/O7QwrSmmIp+7uBCNCYYCfvt38GzpZeJe21e7uMlFwj67N7AsqSWiHpsXkA+7uYH+evdz7GjlYd5a11PMSMe7u"
+                    },
+                    "shape": {
+                      "bytes": {
+                        "region": {
+                          "texture": {
+                            "level": 0,
+                            "slice": 0,
+                            "aspect": "color",
+                            "sample": 0,
+                            "origin": [
+                              0,
+                              0,
+                              0
+                            ],
+                            "size": [
+                              8,
+                              8,
+                              1
+                            ]
+                          }
+                        },
+                        "element": "u8",
+                        "row_offset": 0,
+                        "row_elements": 16,
+                        "row_pitch": 18,
+                        "rows": 8,
+                        "image_pitch": 144,
+                        "images": 1,
+                        "gaps": "compared"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

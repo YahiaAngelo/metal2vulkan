@@ -74,7 +74,7 @@ use crate::case::{
 };
 use crate::recording::Validated;
 use crate::transcript::Value;
-use metal2vulkan::metal::PixelFormat;
+use metal2vulkan::metal::{BindingAccess, PixelFormat, RenderStages};
 
 /// `MTL_DEBUG_LAYER`: Metal's API validation layer.
 pub const DEBUG_LAYER: (&str, &str) = ("MTL_DEBUG_LAYER", "1");
@@ -458,5 +458,39 @@ impl<S: Side> Side for Announcing<S> {
     ) -> Answer<crate::queue_slots::QueueSlots> {
         self.at("queue_slots");
         self.inner.queue_slots(max, cap)
+    }
+
+    fn read_texture_over(
+        &mut self,
+        texture: Handle,
+        size: [u32; 2],
+        row_pitch: u32,
+        before: &[u8],
+    ) -> Answer<Vec<u8>> {
+        self.at("read_texture_over");
+        self.inner
+            .read_texture_over(texture, size, row_pitch, before)
+    }
+
+    fn render_pipeline_with_reflection(
+        &mut self,
+        library: Handle,
+        vertex: &str,
+        fragment: &str,
+        attachment: PixelFormat,
+    ) -> Answer<Handle> {
+        self.at("render_pipeline_with_reflection");
+        self.inner
+            .render_pipeline_with_reflection(library, vertex, fragment, attachment)
+    }
+
+    fn texture_accesses(
+        &mut self,
+        pipeline: Handle,
+        stage: RenderStages,
+        indices: &[u64],
+    ) -> Answer<Vec<Option<BindingAccess>>> {
+        self.at("texture_accesses");
+        self.inner.texture_accesses(pipeline, stage, indices)
     }
 }

@@ -35,8 +35,10 @@ pub mod rgb10a2_srgb;
 pub mod sample_fills;
 pub mod stage_in_regions;
 pub mod surface_fills;
+pub mod texture_accesses;
 pub mod texture_buffer_fills;
 pub mod texture_fills;
+pub mod textures;
 pub mod tile_threadgroups;
 pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
@@ -108,6 +110,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(command_queues::queue_slots()));
+    for case in texture_accesses::all() {
+        cases.push(Box::new(case));
+    }
+    for case in textures::all() {
+        cases.push(Box::new(case));
+    }
     cases
 }
 
