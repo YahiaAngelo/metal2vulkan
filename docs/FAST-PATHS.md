@@ -278,6 +278,15 @@ recorded here.
 Open differences from Metal that no note announces yet, and runtime costs still above the
 driver's. Each is open work.
 
+- **An extended-range format's sample through a constexpr clamp-to-zero sampler at a subnormal
+  coordinate**: Metal's texture unit reads a subnormal normalized coordinate as the zero of its
+  sign before the address mode decides, so a border axis reads texel 0 just outside the level.
+  A sample of a 32-bit float texture flushes it as Metal does
+  (`lower::sampler::position::subnormal_flush`, measured on an Apple M3 Max); the extended-range
+  strategy (`lower::sampler::extended`), which fetches and addresses its taps itself, keeps the
+  coordinate as given and reads the border there. Expected and unmeasured: the measurement is on
+  `R32Float`, and Metal's flush on an extended-range format is not probed.
+
 - **A two-plane YCbCr texture over plane 1 of a three-plane surface** (`y420`, `v0a8`): Metal
   reads plane 2's pairs as its chroma; the surface's facts (`IoSurfaceYCbCr`) name plane 1 alone,
   so the runtime reads chroma codes 0 there, as over plane 1 of a two-plane surface.

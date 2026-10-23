@@ -1507,6 +1507,22 @@ pub(super) fn sampled_value(
     texel_value(cx, fb, s, image, (texel, TexelOrigin::Image), word)
 }
 
+/// The plane coordinate of `s`, read from the AIR operand with a subnormal lane of a border axis
+/// flushed to the zero of its sign, as Metal's texture unit reads it
+/// (`position::subnormal_flush`). Every path that reads the coordinate of a sampling takes it
+/// here, so the emulations and the device's own sampler alike are handed Metal's coordinate.
+pub(super) fn plane_coord(
+    cx: &mut EmitCx<'_>,
+    fb: &mut FunctionBuilder<'_>,
+    s: &Sampling,
+) -> BResult<SValue> {
+    let coord = cx.operand(fb, s.coord)?;
+    match s.flush_subnormals {
+        0 => Ok(coord),
+        axes => super::position::emit_flush(fb, coord, s.lanes, axes),
+    }
+}
+
 /// The plane coordinate of `s` and its explicit gradients, read from the AIR operands: a cube's
 /// direction with its ties broken as Metal breaks them and its gradients as Metal's footprint on
 /// that face, and a rule-2 sample's the gradients `grads` its switch-at-use hoisted.
@@ -1516,7 +1532,7 @@ pub(super) fn plane_and_gradients(
     s: &Sampling,
     grads: Option<(SValue, SValue)>,
 ) -> BResult<(SValue, Option<(SValue, SValue)>)> {
-    let coord = cx.operand(fb, s.coord)?;
+    let coord = plane_coord(cx, fb, s)?;
     let coord = if s.cube {
         super::face::metal_ties(fb, coord)?
     } else {
@@ -2379,7 +2395,7 @@ fn pixel_fetch(
         };
         fb.module().const_value(c)
     };
-    let coord = cx.operand(fb, s.coord)?;
+    let coord = plane_coord(cx, fb, s)?;
     let floor = fb.glsl(GlslOp::Floor, &[coord])?;
     let mut texel = fb.convert(ConvOp::ConvertFToS, floor, ivec)?;
     match offset {

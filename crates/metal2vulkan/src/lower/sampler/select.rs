@@ -2095,6 +2095,10 @@ fn select_one(
         Some(_) => None,
         None => super::position::plan(cx, &op, stat, (shape, integer))?,
     };
+    // Metal's texture unit reads a subnormal normalized coordinate as the zero of its sign before
+    // the address mode decides: the border axes of a constexpr sampler flush it, so the sample
+    // reads the texel Metal reads there (`position::subnormal_flush`).
+    let flush_subnormals = super::position::subnormal_flush(stat, shape)?;
     // A level or a kernel's bias handed to the device on Metal's grid, a runtime or argument
     // buffer's sampler's by its word.
     let level = super::level::select(cx, &op, stat, (ops.get(TexRole::LodValue), integer))?;
@@ -2653,6 +2657,7 @@ fn select_one(
         footprint,
         linear,
         snap,
+        flush_subnormals,
         level,
         compared,
         fetched,

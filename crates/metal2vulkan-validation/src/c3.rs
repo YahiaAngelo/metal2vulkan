@@ -272,7 +272,15 @@ pub enum AnswerGap {
     /// fragment subgroup as such a simdgroup (`Tier::PartialFragment`), so the device's answer is
     /// a valid Metal answer, but not the reference's where the case counts quads of its draw
     /// that share a simdgroup on Apple's GPU and cannot share a subgroup of one quad. Vulkan has
-    /// no way to widen a fragment subgroup.
+    /// no way to widen a fragment subgroup: a device with the gap states one size for its
+    /// fragment stage (`[minSubgroupSize, maxSubgroupSize]` is `[4, 4]` on arm64 lavapipe, the
+    /// measured one), so no required size reaches 32 lanes, and nothing relates the invocations
+    /// of two subgroups. A function whose answer reads the simdgroup's members records
+    /// `PrecisionNote::FragmentSimdgroupGrouping`, which the runtime announces
+    /// (`metal2vulkan-degrade-fragment-simdgroup-grouping`): a device takes that note unless its
+    /// driver runs the fragment on Metal (`DriverDeviation::MetalFragmentSimdgroups`), and such a
+    /// device runs Metal's own 32-lane simdgroups and lacks the gap, so the gap's answer is
+    /// always announced.
     FragmentSubgroupUnderTwoQuads,
     /// Apple's rasterizer draws a triangle it clips as pieces, and a pixel a shared edge crosses
     /// runs its fragments once per piece, each reading that piece's coverage as `[[sample_mask]]`

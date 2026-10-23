@@ -161,6 +161,22 @@ fn texture(
 /// Each lane's red channel of the runtime sampler's sample, `float` bound with a nearest sampler
 /// of `address` on every axis, at `(u, 0.5)` for each `u` of `us`.
 fn sampled(device: &Device, float: &Texture, address: SamplerAddressMode, us: &[f32]) -> Vec<f32> {
+    reds(device, float, address, us)
+        .into_iter()
+        .map(|lane| lane[2])
+        .collect()
+}
+
+/// Each lane's red channel of all five of the kernel's results, `float` bound with a nearest
+/// sampler of `address` on every axis, at `(u, 0.5)` for each `u` of `us`: the two constexpr
+/// clamp-to-zero samplers' (0 and 1), the runtime sampler's (2), and the integer textures' (3
+/// and 4).
+fn reds(
+    device: &Device,
+    float: &Texture,
+    address: SamplerAddressMode,
+    us: &[f32],
+) -> Vec<[f32; 5]> {
     let state = state(device);
     let queue = device.new_command_queue().unwrap();
     let small = |format| texture(device, format, (4, 4), |_, _| 1u32.to_le_bytes());
@@ -200,7 +216,12 @@ fn sampled(device: &Device, float: &Texture, address: SamplerAddressMode, us: &[
         .as_chunks::<80>()
         .0
         .iter()
-        .map(|lane| f32::from_le_bytes([lane[32], lane[33], lane[34], lane[35]]))
+        .map(|lane| {
+            std::array::from_fn(|result| {
+                let at = 16 * result;
+                f32::from_le_bytes([lane[at], lane[at + 1], lane[at + 2], lane[at + 3]])
+            })
+        })
         .collect()
 }
 
@@ -269,4 +290,62 @@ fn runtime_nearest_samples_read_metal_s_texel_off_the_level() {
         }
         assert!(wrong.is_empty(), "{} lanes differ from Metal", wrong.len());
     });
+}
+
+/// The three lanes one, two and three units in the last place below `+0.0`: the kernel's lane
+/// index of each, and the `f32` bits the lane set gives it.
+const BELOW_ZERO: [(usize, u32); 3] = [(289, 0x8000_0001), (291, 0x8000_0002), (293, 0x8000_0003)];
+
+/// What Metal's two constexpr clamp-to-zero samplers read there, measured on an Apple M3 Max
+/// (macOS 27.0.1) through MoltenVK, which samples through Metal's own texture unit: Metal reads a
+/// subnormal coordinate as the zero of its sign before the address mode decides, so the nearest
+/// sampler reads texel (0, 5) and the linear one averages it with the zero border. A device that
+/// keeps the subnormal would read the border, 0, through both.
+const METAL_BELOW_ZERO: [f32; 2] = [80.0, 40.0];
+
+/// Both constexpr clamp-to-zero samplers read Metal's value one, two and three units in the last
+/// place below `+0.0`, under native device sampling (the default) and under the exact emulation
+/// alike: the module flushes a subnormal coordinate on a border axis as Metal's texture unit
+/// reads it (`lower::sampler::position::subnormal_flush`), so the device's own border test is
+/// handed Metal's coordinate.
+#[test]
+fn clamp_to_zero_samples_just_below_zero_read_metal_s_texels() {
+    use metal2vulkan::device::SamplingPolicy;
+    let us = lanes();
+    for &(lane, bits) in &BELOW_ZERO {
+        assert_eq!(us[lane].to_bits(), bits, "lane {lane}");
+    }
+    for sampling in [SamplingPolicy::NativeDevice, SamplingPolicy::Exact] {
+        super::degrade_notices::on_device_with(
+            |options| options.policy.sampling = sampling,
+            |device, _| {
+                let float = texture(device, PixelFormat::R32Float, (WIDTH, HEIGHT), |x, y| {
+                    ((x + 16 * y) as f32).to_le_bytes()
+                });
+                let read = reds(device, &float, SamplerAddressMode::Repeat, &us);
+                let mut wrong = Vec::new();
+                for &(lane, bits) in &BELOW_ZERO {
+                    for (column, metal) in METAL_BELOW_ZERO.into_iter().enumerate() {
+                        let got = read[lane][column];
+                        println!(
+                            "BELOW-ZERO {} {sampling:?} lane {lane} ({bits:08x}) column \
+                             {column}: read {got}, Metal {metal}",
+                            device.name()
+                        );
+                        if got.to_bits() != metal.to_bits() {
+                            wrong.push(format!(
+                                "lane {lane} ({bits:08x}) column {column}: read {got}, Metal \
+                                 {metal}"
+                            ));
+                        }
+                    }
+                }
+                assert!(
+                    wrong.is_empty(),
+                    "{} under {sampling:?} sampling: {wrong:#?}",
+                    device.name()
+                );
+            },
+        );
+    }
 }
