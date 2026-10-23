@@ -629,6 +629,17 @@ impl Case for PadFills {
         MetalSource::carried_only(MEASURED_IN, NO_PUBLIC_CALL)
     }
 
+    fn allowances(&self) -> Vec<Allowance> {
+        // A fill into a two-plane texture's planes goes through the device's two-plane buffer
+        // blit, which it announces. Metal announces nothing, so the notices site differs and that
+        // notice is what justifies it; every digest still compares exactly. The sibling row blits
+        // name this notice for the same reason, and the order notice besides, which a fill of
+        // whole rows never meets.
+        vec![notice_allowance(
+            metal2vulkan_runtime::Degradation::TwoPlaneBufferBlit.code(),
+        )]
+    }
+
     fn inputs(&self) -> Result<Vec<Input>, String> {
         let mut rows = String::new();
         let mut patterns = Vec::new();
