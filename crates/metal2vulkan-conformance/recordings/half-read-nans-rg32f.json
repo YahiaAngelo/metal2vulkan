@@ -1,0 +1,361 @@
+{
+  "format": 1,
+  "case": "half-read-nans-rg32f",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "format_scout.ll",
+      "entry": "scout_read_f",
+      "source_sha256": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+    },
+    {
+      "fixture": "format_scout.air.ll",
+      "entry": "scout_read_f",
+      "source_sha256": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+    },
+    {
+      "fixture": "format_scout.ll",
+      "entry": "scout_sample_f",
+      "source_sha256": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+    },
+    {
+      "fixture": "format_scout.air.ll",
+      "entry": "scout_sample_f",
+      "source_sha256": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+                        }
+                      }
+                    },
+                    {
+                      "name": "format",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "4a11c2997424cd7a381eca1948dd4c442cb4b2a8086b676ecf67eff032eaacec"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:texels",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "83c5d1db53ea3f0ad27f165a51f8545d7916de453d78ff110c8bf365ed330d1b"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:blank",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "8166470a6833d390ca63c4171241090ea15de8a28fd47551b01af9602d136934"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "640e494dd31edb66b0748239aa90547d77e8ab37843b5bc8352a5f39e5296f06"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/read",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline/nearest-sample",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "nearest-sample/buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "nearest-sample/dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "nearest-sample/status",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "nearest-sample/read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "words",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "read",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 4096
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 256,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "nearest-sample",
+                      "observed": {
+                        "value": {
+                          "bytes": "AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPwAgwH+rqqo+AAAAAAAAgD8AAKB/AADQfwAAAAAAAIA/AACA/wAA8P8AAAAAAACAPwAAAIAAAMB/AAAAAAAAgD///39/AQCAfwAAAAAAAIA/q6qqPv//v38AAAAAAACAPwAA0H8BAMD/AAAAAAAAgD8AAPD/AQCA/wAAAAAAAIA/AADAf////38AAAAAAACAPwEAgH9FI8F/AAAAAAAAgD///79//////wAAAAAAAIA/AQDA/wAAgH8AAAAAAACAPwEAgP8BAAAAAAAAAAAAgD////9/AQAAgAAAAAAAAIA/RSPBfwAAgD8AAAAAAACAP/////8AAOB/AAAAAAAAgD8AAIB/AADA/wAAAAAAAIA/AQAAAAAggH8AAAAAAACAPwEAAIAAAAAAAAAAAAAAgD8AAIA/ACDAfwAAAAAAAIA/AADgfwAAoH8AAAAAAACAPwAAwP8AAID/AAAAAAAAgD8AIIB/AAAAgAAAAAAAAIA/AAAAAP//f38AAAAAAACAPw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 4096
+                              }
+                            },
+                            "element": "u32",
+                            "row_offset": 0,
+                            "row_elements": 4,
+                            "row_pitch": 16,
+                            "rows": 256,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

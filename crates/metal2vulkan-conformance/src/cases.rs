@@ -48,6 +48,7 @@ pub mod extended_swizzles;
 pub mod fetch_ordered;
 pub mod format_copies;
 pub mod fresh_contents;
+pub mod half_read_nans;
 pub mod half_write_nans;
 pub mod handler_waits;
 pub mod heap_metal_sizes;
@@ -173,6 +174,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in half_write_nans::all() {
+        cases.push(Box::new(case));
+    }
+    for case in half_read_nans::all() {
         cases.push(Box::new(case));
     }
     cases.extend(extended_range_targets::all());
