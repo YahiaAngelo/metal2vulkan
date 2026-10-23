@@ -64,7 +64,7 @@
 //!   states to its commands, and the row observes that it did without ever setting one.
 //! - **An inherited pipeline state made without `supportIndirectCommandBuffers`** faults Metal's
 //!   GPU at the executing encoder. Every state a command here holds is made by
-//!   [`Side::compute_pipeline_for_commands`] or by a [`RenderPipelineSpec::for_commands`]
+//!   [`Side::compute_pipeline_for_commands`] or by a [`RenderPipelineSpec::for_indirect_commands`]
 //!   pipeline, both of which set the flag, and no row inherits a state.
 //! - **A draw a buffer's command types do not hold.** An indexed draw on a buffer of
 //!   `MTLIndirectCommandTypeDraw` alone faults plain Metal's GPU, and a draw of primitives on a
@@ -72,7 +72,7 @@
 //!   commands use.
 //!
 //! [`Side::compute_pipeline_for_commands`]: crate::case::Side::compute_pipeline_for_commands
-//! [`RenderPipelineSpec::for_commands`]: crate::render::RenderPipelineSpec::for_commands
+//! [`RenderPipelineSpec::for_indirect_commands`]: crate::render::RenderPipelineSpec::for_indirect_commands
 //!
 //! # What is left, and why
 //!
