@@ -853,6 +853,73 @@ pub trait Side {
         Err(Failure::unavailable("makes_texture"))
     }
 
+    /// `sparseTileSizeWithTextureType:pixelFormat:sampleCount:`, or its `sparsePageSize:` form
+    /// where the query names a page ([`crate::sparse_query`]).
+    ///
+    /// A pure getter, like [`heap_texture_size_and_align`](Side::heap_texture_size_and_align): it
+    /// compiles nothing, allocates nothing, reaches no GPU and asks nothing of the device's sparse
+    /// capabilities, so a case over it is safe on every device and answers on a venue that binds no
+    /// sparse memory at all.
+    fn sparse_tile_size(
+        &mut self,
+        query: &crate::sparse_query::SparseTileQuery,
+    ) -> Answer<crate::sparse_query::TileSize> {
+        let _ = query;
+        Err(Failure::unavailable("sparse_tile_size"))
+    }
+
+    /// `sparseTileSizeInBytes`, or `sparseTileSizeInBytesForSparsePageSize:` where `page` names
+    /// one: the bytes one sparse tile of that page takes.
+    ///
+    /// A pure getter, as [`sparse_tile_size`](Side::sparse_tile_size) is.
+    fn sparse_tile_size_in_bytes(&mut self, page: crate::sparse_query::QueryPage) -> Answer<u64> {
+        let _ = page;
+        Err(Failure::unavailable("sparse_tile_size_in_bytes"))
+    }
+
+    /// `newHeapWithDescriptor:` of a `MTLHeapTypeSparse` heap the case describes
+    /// ([`crate::sparse_query::SparseHeapSpec`]).
+    ///
+    /// The heap holds no memory of its own until a mapping takes a tile, so making one allocates
+    /// nothing a GPU can fault on and encodes nothing. A device that cannot make one refuses typed,
+    /// which is how a case finds out rather than by reading a device name.
+    fn sparse_heap(&mut self, spec: &crate::sparse_query::SparseHeapSpec) -> Answer<Handle> {
+        let _ = spec;
+        Err(Failure::unavailable("sparse_heap"))
+    }
+
+    /// What a heap answers of itself ([`crate::sparse_query::HeapFacts`]).
+    fn heap_facts(&mut self, heap: Handle) -> Answer<crate::sparse_query::HeapFacts> {
+        let _ = heap;
+        Err(Failure::unavailable("heap_facts"))
+    }
+
+    /// `newTextureWithDescriptor:` on a heap, of the texture the case describes
+    /// ([`crate::sparse_query::SparseTextureSpec`]).
+    ///
+    /// The texture joins the same handle space as [`texture_2d`](Side::texture_2d), so a texture
+    /// has one pool however it was made. Nothing is written into it: a case that asks what a
+    /// **fresh** sparse texture answers needs it untouched, and a case that writes one says so with
+    /// a command of its own.
+    fn heap_texture(
+        &mut self,
+        heap: Handle,
+        spec: &crate::sparse_query::SparseTextureSpec,
+    ) -> Answer<Handle> {
+        let _ = (heap, spec);
+        Err(Failure::unavailable("heap_texture"))
+    }
+
+    /// What a sparse texture answers of its tiles
+    /// ([`crate::sparse_query::SparseTextureFacts`]).
+    fn sparse_texture_facts(
+        &mut self,
+        texture: Handle,
+    ) -> Answer<crate::sparse_query::SparseTextureFacts> {
+        let _ = texture;
+        Err(Failure::unavailable("sparse_texture_facts"))
+    }
+
     /// A command queue's limit on uncompleted command buffers, by the probe both sides run
     /// ([`crate::queue_slots`]): the queue is made with `max` as its
     /// `maxCommandBufferCount` (`newCommandQueue` where `max` is `None`), and at most `cap` command

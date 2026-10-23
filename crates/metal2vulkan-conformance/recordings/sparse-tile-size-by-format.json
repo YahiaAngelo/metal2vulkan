@@ -1,0 +1,2110 @@
+{
+  "format": 1,
+  "case": "sparse-tile-size-by-format",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "queries",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ff16e3a8a6e36fd01f1cf2b73accc9a0dc8808e8aa9cc88edd825edeb1e63464"
+                        }
+                      }
+                    },
+                    {
+                      "name": "asks-tile-bytes",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 512
+                            },
+                            "width": {
+                              "uint": 512
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm_sRGB/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm_sRGB/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm_sRGB/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm_sRGB/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 512
+                            },
+                            "width": {
+                              "uint": 512
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Float/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Float/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Float/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR16Float/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 512
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRG8Unorm/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRG8Unorm/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRG8Unorm/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRG8Unorm/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 512
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Unorm/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Unorm/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Unorm/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Unorm/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Unorm_sRGB/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Unorm_sRGB/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Unorm_sRGB/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Unorm_sRGB/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBGR10A2Unorm/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBGR10A2Unorm/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBGR10A2Unorm/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBGR10A2Unorm/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGB9E5Float/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGB9E5Float/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGB9E5Float/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGB9E5Float/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRG32Float/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 32
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRG32Float/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 32
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRG32Float/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRG32Float/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Float/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 32
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Float/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 32
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Float/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Float/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Unorm/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 32
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Unorm/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 32
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Unorm/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA16Unorm/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 32
+                            },
+                            "width": {
+                              "uint": 32
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 32
+                            },
+                            "width": {
+                              "uint": 32
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBC1_RGBA/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBC1_RGBA/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBC1_RGBA/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 512
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBC1_RGBA/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 512
+                            },
+                            "width": {
+                              "uint": 1024
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatETC2_RGB8A1/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatETC2_RGB8A1/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatETC2_RGB8A1/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 512
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatETC2_RGB8A1/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 512
+                            },
+                            "width": {
+                              "uint": 1024
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBC7_RGBAUnorm/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBC7_RGBAUnorm/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBC7_RGBAUnorm/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatBC7_RGBAUnorm/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 512
+                            },
+                            "width": {
+                              "uint": 512
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatEAC_RGBA8/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatEAC_RGBA8/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatEAC_RGBA8/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatEAC_RGBA8/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 512
+                            },
+                            "width": {
+                              "uint": 512
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatASTC_4x4_LDR/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatASTC_4x4_LDR/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatASTC_4x4_LDR/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatASTC_4x4_LDR/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 512
+                            },
+                            "width": {
+                              "uint": 512
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth16Unorm/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth16Unorm/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth16Unorm/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth16Unorm/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 512
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth32Float/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth32Float/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth32Float/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth32Float/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatStencil8/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatStencil8/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatStencil8/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatStencil8/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 512
+                            },
+                            "width": {
+                              "uint": 512
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth32Float_Stencil8/Type2D/samples-1/default-page",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth32Float_Stencil8/Type2D/samples-1/page-16",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 64
+                            },
+                            "width": {
+                              "uint": 64
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth32Float_Stencil8/Type2D/samples-1/page-64",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 128
+                            },
+                            "width": {
+                              "uint": 128
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatDepth32Float_Stencil8/Type2D/samples-1/page-256",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "fields": {
+                            "depth": {
+                              "uint": 1
+                            },
+                            "height": {
+                              "uint": 256
+                            },
+                            "width": {
+                              "uint": 256
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

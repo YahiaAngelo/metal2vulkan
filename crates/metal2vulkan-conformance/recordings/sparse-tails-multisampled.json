@@ -1,0 +1,221 @@
+{
+  "format": 1,
+  "case": "sparse-tails-multisampled",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "heap-and-textures",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a992ee6903d5477e7d81ef4fd61a7235852762837cc1480a2b3a3d7c9382a315"
+                        }
+                      }
+                    },
+                    {
+                      "name": "asks-heap",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "sparse_heap",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Unorm/Type2DMultisample/256x128x1/levels-1/samples-2/slices-1/target",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 1
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 0
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2DMultisample/256x128x1/levels-1/samples-2/slices-1/target",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 1
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 0
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA8Unorm/Type2DMultisample/256x128x1/levels-1/samples-4/slices-1/target",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 1
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 0
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2DMultisample/256x128x1/levels-1/samples-4/slices-1/target",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 1
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 0
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}
