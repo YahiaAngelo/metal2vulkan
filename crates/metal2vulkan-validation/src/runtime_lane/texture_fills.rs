@@ -310,7 +310,8 @@ fn whole_run(raw: u32, name: &str, at: usize, run: &[u8]) {
         .map(|&(_, _, _, bytes)| bytes);
     let metal = metal.unwrap_or_else(|| {
         panic!(
-            "{raw} {name}: a changed run of {} bytes at {at}, past the {SHOWN} the digest holds,              and Metal's bytes there are unmeasured: {}",
+            "{raw} {name}: a changed run of {} bytes at {at}, past the {SHOWN} the digest \
+             holds, and Metal's bytes there are unmeasured: {}",
             run.len(),
             hex(run)
         )
@@ -318,7 +319,8 @@ fn whole_run(raw: u32, name: &str, at: usize, run: &[u8]) {
     assert_eq!(
         hex(run).as_str(),
         metal,
-        "{raw} {name}: the changed run at {at} differs from Metal's past the {SHOWN} bytes the          digest holds"
+        "{raw} {name}: the changed run at {at} differs from Metal's past the {SHOWN} bytes the \
+         digest holds"
     );
 }
 
