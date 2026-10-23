@@ -344,8 +344,8 @@ fn the_sample_coverage_keeps_the_samples_metal_keeps() {
         wrong.len(),
         wrong.join("\n")
     );
-    // One sample is never refused.
-    assert!(drawn > COVERAGES.len(), "{name}: {drawn} draws");
+    // One sample is never refused: its cases are the first, every coverage and three more.
+    assert!(drawn >= COVERAGES.len() + 3, "{name}: {drawn} draws");
     eprintln!(
         "{name}: {drawn} sample-coverage draws keep Metal's samples, {} refused",
         cases.len() - drawn
