@@ -363,11 +363,12 @@ impl Case for EtcTextures {
                 ));
             }
         }
-        // An EAC 11-bit format's compact twin holds
-        // the 16-bit normalized code nearest Metal's value, which the runtime announces as
-        // `decoded-texel-precision` and `docs/FAST-PATHS.md` bounds at half a 16-bit step. The
-        // bound here is the ledger's number for this format's signedness, so a run that exceeds
-        // it is the ledger's claim failing. Under `DecodedTexelsPolicy::Exact` the twin holds
+        // An EAC 11-bit format's compact twin holds the 16-bit normalized code nearest Metal's
+        // value, which the runtime announces as `decoded-texel-precision` and
+        // `docs/FAST-PATHS.md` bounds at half a 16-bit step. The bound here is the ledger's
+        // number for this format's signedness, so a run that exceeds it is the ledger's claim
+        // failing. It is wider than the conversion ulp above and covers it, which is why an
+        // 11-bit format names this one alone. Under `DecodedTexelsPolicy::Exact` the twin holds
         // Metal's values as `float`s, the notice does not fire, the justification does not hold,
         // and every texel is compared exactly.
         if let Some(bound) = self.compact_bound() {
