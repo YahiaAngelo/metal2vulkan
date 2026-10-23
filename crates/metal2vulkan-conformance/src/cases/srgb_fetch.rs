@@ -3,9 +3,9 @@
 //! `fragment_fetch`'s `fetch_ordered` takes `float4 dst [[color(0), raster_order_group(0)]]` and
 //! returns half of it. Over a plain 8-bit unorm target that is a halving of the code; over an sRGB
 //! one it is a halving of the **decoded** value, re-encoded on the way back, so each colour byte
-//! follows [`HALVED`] while alpha, which sRGB leaves linear, follows `(a + 1) / 2`.
+//! follows `HALVED` while alpha, which sRGB leaves linear, follows `(a + 1) / 2`.
 //!
-//! **[`HALVED`] is a measured table and cannot be derived.** It differs from the textbook sRGB
+//! **`HALVED` is a measured table and cannot be derived.** It differs from the textbook sRGB
 //! round trip -- decode `c / 255`, halve, encode, round -- in **15 of its 256 codes, each by
 //! exactly one** (`tests::the_table_is_not_the_textbook_round_trip` pins which codes, so a later
 //! tidying of the table into the formula fails). Metal's own decode and encode are what the
@@ -72,32 +72,6 @@ const DEPTH_STENCIL: PixelFormat = PixelFormat::Depth32FloatStencil8;
 
 /// The depth the row's earlier pass clears to, which `Always` ignores.
 const DEPTH_CLEAR: f64 = 1.0;
-
-/// What Metal stores in an sRGB colour byte holding `c` when a draw returns half of what it
-/// fetched: the code decoded by Metal's sRGB decode, halved, and encoded by Metal's encode.
-///
-/// A measurement, not a formula: see the module's note and
-/// `tests::the_table_is_not_the_textbook_round_trip`.
-const HALVED: [u8; 256] = [
-    0, 1, 1, 2, 2, 2, 3, 4, 4, 5, 5, 6, 6, 6, 7, 8, 9, 10, 10, 11, 12, 13, 13, 14, 15, 15, 16, 17,
-    18, 18, 19, 20, 21, 21, 22, 23, 23, 24, 25, 26, 27, 27, 28, 29, 30, 30, 31, 32, 33, 33, 34, 35,
-    36, 36, 37, 38, 38, 39, 40, 41, 42, 42, 43, 44, 44, 45, 46, 47, 48, 48, 49, 50, 50, 51, 52, 53,
-    53, 54, 55, 56, 57, 57, 58, 59, 59, 60, 61, 62, 62, 63, 64, 65, 65, 66, 67, 68, 68, 69, 70, 71,
-    71, 72, 73, 74, 74, 75, 76, 77, 77, 78, 79, 80, 80, 81, 82, 83, 83, 84, 85, 86, 86, 87, 88, 89,
-    89, 90, 91, 92, 92, 93, 94, 95, 95, 96, 97, 98, 98, 99, 100, 101, 101, 102, 103, 104, 104, 105,
-    106, 107, 107, 108, 109, 110, 110, 111, 112, 113, 113, 114, 115, 116, 116, 117, 118, 119, 119,
-    120, 121, 122, 122, 123, 124, 125, 125, 126, 127, 128, 128, 129, 130, 131, 131, 132, 133, 134,
-    134, 135, 136, 137, 137, 138, 139, 140, 140, 141, 142, 143, 143, 144, 145, 146, 146, 147, 148,
-    149, 149, 150, 151, 152, 152, 153, 154, 155, 155, 156, 157, 158, 158, 159, 160, 161, 161, 162,
-    163, 164, 164, 165, 166, 167, 167, 168, 169, 170, 170, 171, 172, 173, 173, 174, 175, 176, 176,
-    177, 178, 179, 179, 180, 181, 182, 182, 183, 184, 185, 185, 186, 187, 188,
-];
-
-/// What Metal stores in the **alpha** byte, which sRGB leaves linear: `(a + 1) / 2`, the plain
-/// unorm halving rounded to nearest.
-fn halved_alpha(a: u8) -> u8 {
-    ((u16::from(a) + 1) / 2) as u8
-}
 
 /// The memory bytes every target starts at, in memory order.
 fn initial() -> Vec<u8> {
@@ -443,11 +417,39 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
+    /// What Metal stores in an sRGB colour byte holding `c` when a draw returns half of what it
+    /// fetched: the code decoded by Metal's sRGB decode, halved, and encoded by Metal's encode.
+    ///
+    /// A measurement, not a formula: see the module's note and
+    /// `tests::the_table_is_not_the_textbook_round_trip`.
+    const HALVED: [u8; 256] = [
+        0, 1, 1, 2, 2, 2, 3, 4, 4, 5, 5, 6, 6, 6, 7, 8, 9, 10, 10, 11, 12, 13, 13, 14, 15, 15, 16,
+        17, 18, 18, 19, 20, 21, 21, 22, 23, 23, 24, 25, 26, 27, 27, 28, 29, 30, 30, 31, 32, 33, 33,
+        34, 35, 36, 36, 37, 38, 38, 39, 40, 41, 42, 42, 43, 44, 44, 45, 46, 47, 48, 48, 49, 50, 50,
+        51, 52, 53, 53, 54, 55, 56, 57, 57, 58, 59, 59, 60, 61, 62, 62, 63, 64, 65, 65, 66, 67, 68,
+        68, 69, 70, 71, 71, 72, 73, 74, 74, 75, 76, 77, 77, 78, 79, 80, 80, 81, 82, 83, 83, 84, 85,
+        86, 86, 87, 88, 89, 89, 90, 91, 92, 92, 93, 94, 95, 95, 96, 97, 98, 98, 99, 100, 101, 101,
+        102, 103, 104, 104, 105, 106, 107, 107, 108, 109, 110, 110, 111, 112, 113, 113, 114, 115,
+        116, 116, 117, 118, 119, 119, 120, 121, 122, 122, 123, 124, 125, 125, 126, 127, 128, 128,
+        129, 130, 131, 131, 132, 133, 134, 134, 135, 136, 137, 137, 138, 139, 140, 140, 141, 142,
+        143, 143, 144, 145, 146, 146, 147, 148, 149, 149, 150, 151, 152, 152, 153, 154, 155, 155,
+        156, 157, 158, 158, 159, 160, 161, 161, 162, 163, 164, 164, 165, 166, 167, 167, 168, 169,
+        170, 170, 171, 172, 173, 173, 174, 175, 176, 176, 177, 178, 179, 179, 180, 181, 182, 182,
+        183, 184, 185, 185, 186, 187, 188,
+    ];
+
+    /// What Metal stores in the **alpha** byte, which sRGB leaves linear: `(a + 1) / 2`, the plain
+    /// unorm halving rounded to nearest. The recording holds the measured answer; this is the rule
+    /// the tests below hold it to.
+    fn halved_alpha(a: u8) -> u8 {
+        u16::from(a).div_ceil(2) as u8
+    }
+
     /// Which memory byte of a texel of `format` is alpha: the fourth in both orders, since
     /// `BGRA8Unorm_sRGB` reverses only the three colour channels.
     const ALPHA_BYTE: usize = 3;
 
-    /// Metal's bytes after `draws` draws: each colour byte through [`HALVED`] once a draw, alpha
+    /// Metal's bytes after `draws` draws: each colour byte through `HALVED` once a draw, alpha
     /// through the linear rule once a draw.
     fn expected(draws: usize) -> Vec<u8> {
         let mut bytes = initial();
@@ -480,13 +482,13 @@ mod tests {
         (encoded * 255.0).round() as u8
     }
 
-    /// [`HALVED`] is Metal's measurement and **not** the textbook formula: it differs in 15 of the
+    /// `HALVED` is Metal's measurement and **not** the textbook formula: it differs in 15 of the
     /// 256 codes, each by exactly one. Pinning the codes and the size of the disagreement is what
     /// stops someone replacing the table with the formula, which would be wrong in those 15 and
     /// right everywhere a casual check would look.
     ///
     /// The codes are pinned as a set rather than only counted, because the count alone depends on
-    /// how the textbook spelling breaks a tie (see [`textbook`]).
+    /// how the textbook spelling breaks a tie (see `textbook`).
     #[test]
     fn the_table_is_not_the_textbook_round_trip() {
         let differing: Vec<u8> = (0..=255u8)
