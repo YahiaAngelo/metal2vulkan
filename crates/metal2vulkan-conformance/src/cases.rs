@@ -33,6 +33,7 @@ pub mod compressed_decode;
 pub mod compute_threadgroups;
 pub mod depth_texel_reads;
 pub mod discard_hoist;
+pub mod event_orders;
 pub mod extended_range_blends;
 pub mod extended_range_planes;
 pub mod extended_range_targets;
@@ -54,6 +55,7 @@ pub mod pixel_samplers;
 pub mod rate_maps;
 pub mod rgb10a2_srgb;
 pub mod sample_fills;
+pub mod scheduled_handlers;
 pub mod shared_events;
 pub mod simdgroup_lockstep;
 pub mod snorm_tile_store;
@@ -188,6 +190,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(shared_events::rising_value()));
+    cases.extend(
+        event_orders::all()
+            .into_iter()
+            .map(|case| Box::new(case) as Box<dyn Case>),
+    );
+    cases.push(Box::new(scheduled_handlers::handler_order()));
     cases.extend(chroma_pairs::all());
     cases.extend(ycbcr_textures::all());
     for case in ycbcr_minify::all() {

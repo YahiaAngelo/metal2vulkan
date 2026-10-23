@@ -955,6 +955,60 @@ pub trait Side {
         let _ = label;
         Err(Failure::unavailable("shared_event_rises"))
     }
+
+    /// What the cross-queue wait probe observed ([`crate::event_orders::CrossQueueWait`]): one
+    /// queue's command buffer waits for an event the other's signals, and the waiting one is
+    /// committed first.
+    ///
+    /// One call rather than six, because what it observes is an **order**: a status read between
+    /// two commits, and then the bytes both command buffers wrote. A case cannot state "this status
+    /// was read while the other command buffer had not been committed yet" as independent calls.
+    fn event_cross_queue_wait(&mut self) -> Answer<crate::event_orders::CrossQueueWait> {
+        Err(Failure::unavailable("event_cross_queue_wait"))
+    }
+
+    /// `signaledValue` of one shared event two queues' command buffers signalled with `values`, in
+    /// that submission order, once both completed.
+    ///
+    /// One call, because the fact is about the pair: whichever signal executed last, the value a
+    /// lower signal cannot lower is what the event holds.
+    fn event_highest_signal(&mut self, values: [u64; 2]) -> Answer<u64> {
+        let _ = values;
+        Err(Failure::unavailable("event_highest_signal"))
+    }
+
+    /// What the held-command-buffer probe observed
+    /// ([`crate::event_orders::HeldCommandBuffer`]): a command buffer held by a shared event the
+    /// host raises later, one committed behind it on its own queue, and one on another queue.
+    ///
+    /// One call, because every fact is an order — which command buffer went on while another was
+    /// held, and which handler ran before which.
+    fn held_command_buffer(&mut self) -> Answer<crate::event_orders::HeldCommandBuffer> {
+        Err(Failure::unavailable("held_command_buffer"))
+    }
+
+    /// What the signal-before-a-wait probe observed
+    /// ([`crate::event_orders::SignalBeforeWait`]): one command buffer that fills, signals, waits
+    /// for a gate, fills again and signals again.
+    ///
+    /// One call, because the fact is that the first signal landed **while** the wait was still
+    /// pending, which is a relation between two moments of one command buffer's life.
+    fn signal_before_a_wait(&mut self) -> Answer<crate::event_orders::SignalBeforeWait> {
+        Err(Failure::unavailable("signal_before_a_wait"))
+    }
+
+    /// What the scheduled-handler order probe observed
+    /// ([`crate::scheduled_handlers::ScheduledHandlerOrder`]): a command buffer whose scheduled
+    /// handler is held inside itself while the probe reads the status and a wait for the scheduling
+    /// on another thread.
+    ///
+    /// One call, because the fact is a relation between a handler, a status and a wait on a third
+    /// thread, and holding the handler is the only way any of it is observable at all.
+    fn scheduled_handler_order(
+        &mut self,
+    ) -> Answer<crate::scheduled_handlers::ScheduledHandlerOrder> {
+        Err(Failure::unavailable("scheduled_handler_order"))
+    }
 }
 
 /// A tile render pipeline a case makes: `MTLTileRenderPipelineDescriptor`'s facts the cases state.

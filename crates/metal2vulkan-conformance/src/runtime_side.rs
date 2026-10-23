@@ -380,6 +380,80 @@ fn status_value(status: CommandBufferStatus) -> Value {
     Value::unit_variant(format!("{status:?}"))
 }
 
+/// `length` bytes from `offset` of a shared buffer the probe made itself, for an event probe whose
+/// buffers never enter the case's handle pool.
+fn read_shared(buffer: &Buffer, offset: u64, length: usize) -> Result<Vec<u8>, Failure> {
+    let contents = buffer
+        .contents()
+        .ok_or_else(|| Failure::named("NoContents", "a buffer the host does not reach"))?;
+    // SAFETY: the probe made the buffer at least `offset + length` bytes long, the host reaches
+    // them, and the caller waited for the command buffers that wrote them.
+    let bytes =
+        unsafe { std::slice::from_raw_parts(contents.as_ptr().add(offset as usize), length) };
+    Ok(bytes.to_vec())
+}
+
+/// The names a command buffer's handlers logged, in the order they were called, with each name
+/// also sent so the probe can wait for one rather than guess when the log is whole.
+///
+/// The channel is what makes the log readable: the probe waits for the name it cares about to
+/// arrive instead of resting on when a wait of its own returns relative to a handler, which is one
+/// of the very orders a case over this family is there to measure.
+struct HandlerLog {
+    called: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    sender: std::sync::mpsc::Sender<String>,
+    arrived: std::sync::mpsc::Receiver<String>,
+}
+
+impl HandlerLog {
+    /// An empty log.
+    fn new() -> Self {
+        let (sender, arrived) = std::sync::mpsc::channel();
+        Self {
+            called: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            sender,
+            arrived,
+        }
+    }
+
+    /// A handler that logs itself as `name`.
+    fn handler(&self, name: &'static str) -> metal2vulkan_runtime::Handler {
+        let (called, sender) = (std::sync::Arc::clone(&self.called), self.sender.clone());
+        Box::new(move |_: &CommandBuffer| {
+            if let Ok(mut called) = called.lock() {
+                called.push(name.to_owned());
+            }
+            let _ = sender.send(name.to_owned());
+        })
+    }
+
+    /// Wait until the handler named `name` has been called, or `bound` runs out.
+    fn wait_for(&self, name: &str, bound: Duration) {
+        let deadline = std::time::Instant::now() + bound;
+        loop {
+            if self
+                .called
+                .lock()
+                .is_ok_and(|called| called.iter().any(|called| called == name))
+            {
+                return;
+            }
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() || self.arrived.recv_timeout(left).is_err() {
+                return;
+            }
+        }
+    }
+
+    /// The names logged so far, in order.
+    fn names(&self) -> Vec<String> {
+        self.called
+            .lock()
+            .map(|called| called.clone())
+            .unwrap_or_default()
+    }
+}
+
 impl Side for RuntimeSide<'_> {
     fn venue(&self) -> Venue {
         let properties = self.device.properties();
@@ -1872,6 +1946,332 @@ impl Side for RuntimeSide<'_> {
             waits,
             after_max_signal,
             waited_for_max,
+        })
+    }
+
+    fn event_cross_queue_wait(&mut self) -> Answer<crate::event_orders::CrossQueueWait> {
+        use crate::event_orders::{
+            CrossQueueWait, Status, HALF, SCRATCH, SIGNALLING_BYTE, WAITING_BYTE,
+        };
+        let queue = || self.device.new_command_queue().map_err(Failure::from_error);
+        let (waiting_queue, signalling_queue) = (queue()?, queue()?);
+        let event = self.device.new_event().map_err(Failure::from_error)?;
+        let scratch = self
+            .device
+            .new_buffer(SCRATCH, ResourceOptions::shared())
+            .map_err(Failure::from_error)?;
+        let fill = |command_buffer: &CommandBuffer,
+                    range: std::ops::Range<u64>,
+                    byte: u8|
+         -> Result<(), Failure> {
+            let mut blit = command_buffer
+                .blit_command_encoder()
+                .map_err(Failure::from_error)?;
+            blit.fill_buffer(&scratch, range, byte)
+                .map_err(Failure::from_error)?;
+            blit.end_encoding().map_err(Failure::from_error)
+        };
+        let waiting = waiting_queue
+            .command_buffer()
+            .map_err(Failure::from_error)?;
+        waiting
+            .encode_wait_for_event(metal2vulkan_runtime::EventRef::from(&event), 1)
+            .map_err(Failure::from_error)?;
+        fill(&waiting, 0..HALF, WAITING_BYTE)?;
+        let signalling = signalling_queue
+            .command_buffer()
+            .map_err(Failure::from_error)?;
+        fill(&signalling, HALF..SCRATCH, SIGNALLING_BYTE)?;
+        signalling
+            .encode_signal_event(metal2vulkan_runtime::EventRef::from(&event), 1)
+            .map_err(Failure::from_error)?;
+        // The waiting one first, which is the whole point: its signal is not committed yet, so a
+        // runtime that submitted in commit order onto one shared queue would deadlock here.
+        waiting.commit().map_err(Failure::from_error)?;
+        let waiting_after_its_commit = Status::read(format!("{:?}", waiting.status()));
+        signalling.commit().map_err(Failure::from_error)?;
+        let settled = |command_buffer: &CommandBuffer| {
+            if command_buffer
+                .wait_until_completed_for(crate::event_orders::COMPLETION)
+                .is_err()
+            {
+                Status::NeverSettled
+            } else {
+                Status::read(format!("{:?}", command_buffer.status()))
+            }
+        };
+        let signalling_at_the_end = settled(&signalling);
+        let waiting_at_the_end = settled(&waiting);
+        let bytes = read_shared(&scratch, 0, SCRATCH as usize)?;
+        Ok(CrossQueueWait {
+            waiting_after_its_commit,
+            waiting_at_the_end,
+            signalling_at_the_end,
+            bytes,
+        })
+    }
+
+    fn event_highest_signal(&mut self, values: [u64; 2]) -> Answer<u64> {
+        use crate::event_orders::{COMPLETION, SCRATCH};
+        let queue = || self.device.new_command_queue().map_err(Failure::from_error);
+        let queues = [queue()?, queue()?];
+        let event = self
+            .device
+            .new_shared_event()
+            .map_err(Failure::from_error)?;
+        let scratch = self
+            .device
+            .new_buffer(SCRATCH, ResourceOptions::private())
+            .map_err(Failure::from_error)?;
+        let mut committed = Vec::new();
+        for (queue, &value) in queues.iter().zip(&values) {
+            let command_buffer = queue.command_buffer().map_err(Failure::from_error)?;
+            let mut blit = command_buffer
+                .blit_command_encoder()
+                .map_err(Failure::from_error)?;
+            blit.fill_buffer(&scratch, 0..SCRATCH, value as u8)
+                .map_err(Failure::from_error)?;
+            blit.end_encoding().map_err(Failure::from_error)?;
+            command_buffer
+                .encode_signal_event(metal2vulkan_runtime::EventRef::from(&event), value)
+                .map_err(Failure::from_error)?;
+            command_buffer.commit().map_err(Failure::from_error)?;
+            committed.push(command_buffer);
+        }
+        for command_buffer in &committed {
+            if command_buffer.wait_until_completed_for(COMPLETION).is_err() {
+                return Err(Failure::named(
+                    "NeverCompleted",
+                    "a signalling command buffer",
+                ));
+            }
+        }
+        Ok(event.signaled_value())
+    }
+
+    fn held_command_buffer(&mut self) -> Answer<crate::event_orders::HeldCommandBuffer> {
+        use crate::event_orders::{
+            HeldCommandBuffer, Status, COMPLETED, COMPLETION, HELD_FOR, SCHEDULED, SCRATCH,
+        };
+        let queue = || self.device.new_command_queue().map_err(Failure::from_error);
+        let (held_queue, other_queue) = (queue()?, queue()?);
+        let event = self
+            .device
+            .new_shared_event()
+            .map_err(Failure::from_error)?;
+        let scratch = self
+            .device
+            .new_buffer(SCRATCH, ResourceOptions::private())
+            .map_err(Failure::from_error)?;
+        let fill = |command_buffer: &CommandBuffer, byte: u8| -> Result<(), Failure> {
+            let mut blit = command_buffer
+                .blit_command_encoder()
+                .map_err(Failure::from_error)?;
+            blit.fill_buffer(&scratch, 0..SCRATCH, byte)
+                .map_err(Failure::from_error)?;
+            blit.end_encoding().map_err(Failure::from_error)
+        };
+        let log = HandlerLog::new();
+        let held = held_queue.command_buffer().map_err(Failure::from_error)?;
+        held.encode_wait_for_event(metal2vulkan_runtime::EventRef::from(&event), 1)
+            .map_err(Failure::from_error)?;
+        fill(&held, 1)?;
+        held.add_scheduled_handler(log.handler(SCHEDULED))
+            .map_err(Failure::from_error)?;
+        held.add_completed_handler(log.handler(COMPLETED))
+            .map_err(Failure::from_error)?;
+        held.commit().map_err(Failure::from_error)?;
+        let behind = held_queue.command_buffer().map_err(Failure::from_error)?;
+        fill(&behind, 2)?;
+        behind.commit().map_err(Failure::from_error)?;
+        let other = other_queue.command_buffer().map_err(Failure::from_error)?;
+        fill(&other, 3)?;
+        other.commit().map_err(Failure::from_error)?;
+        let other_queue_status = if other.wait_until_completed_for(COMPLETION).is_err() {
+            Status::NeverSettled
+        } else {
+            Status::read(format!("{:?}", other.status()))
+        };
+        // The window the negative facts are false in: a submission that was going to happen has
+        // had its chance by now.
+        std::thread::sleep(HELD_FOR);
+        let held_while_waiting = Status::read(format!("{:?}", held.status()));
+        let behind_while_waiting = Status::read(format!("{:?}", behind.status()));
+        let handlers_while_waiting = log.names();
+        event.set_signaled_value(1);
+        // The held command buffer's own completed handler is the bound: it is the last of its
+        // handlers to run, so once it has, the log is whole and the status is settled.
+        log.wait_for(COMPLETED, COMPLETION);
+        let handlers_at_the_end = log.names();
+        let held_at_the_end = if handlers_at_the_end.iter().any(|name| name == COMPLETED) {
+            Status::read(format!("{:?}", held.status()))
+        } else {
+            Status::NeverSettled
+        };
+        let behind_at_the_end = if behind.wait_until_completed_for(COMPLETION).is_err() {
+            Status::NeverSettled
+        } else {
+            Status::read(format!("{:?}", behind.status()))
+        };
+        Ok(HeldCommandBuffer {
+            other_queue: other_queue_status,
+            held_while_waiting,
+            behind_while_waiting,
+            handlers_while_waiting,
+            handlers_at_the_end,
+            held_at_the_end,
+            behind_at_the_end,
+        })
+    }
+
+    fn signal_before_a_wait(&mut self) -> Answer<crate::event_orders::SignalBeforeWait> {
+        use crate::event_orders::{Status, COMPLETION, HELD_FOR, SCRATCH, SIGNAL_WAIT};
+        let queue = self
+            .device
+            .new_command_queue()
+            .map_err(Failure::from_error)?;
+        let event = || self.device.new_shared_event().map_err(Failure::from_error);
+        let (before, gate, after) = (event()?, event()?, event()?);
+        let scratch = self
+            .device
+            .new_buffer(SCRATCH, ResourceOptions::private())
+            .map_err(Failure::from_error)?;
+        let command_buffer = queue.command_buffer().map_err(Failure::from_error)?;
+        let fill = |byte: u8| -> Result<(), Failure> {
+            let mut blit = command_buffer
+                .blit_command_encoder()
+                .map_err(Failure::from_error)?;
+            blit.fill_buffer(&scratch, 0..SCRATCH, byte)
+                .map_err(Failure::from_error)?;
+            blit.end_encoding().map_err(Failure::from_error)
+        };
+        let signal = |event: &metal2vulkan_runtime::SharedEvent| {
+            command_buffer
+                .encode_signal_event(metal2vulkan_runtime::EventRef::from(event), 1)
+                .map_err(Failure::from_error)
+        };
+        fill(1)?;
+        signal(&before)?;
+        command_buffer
+            .encode_wait_for_event(metal2vulkan_runtime::EventRef::from(&gate), 1)
+            .map_err(Failure::from_error)?;
+        fill(2)?;
+        signal(&after)?;
+        command_buffer.commit().map_err(Failure::from_error)?;
+        let before_landed = before.wait_until_signaled_value(1, SIGNAL_WAIT);
+        // The window the two negative facts are false in: the signal behind the wait has not
+        // landed, and the command buffer is no further along than committed.
+        std::thread::sleep(HELD_FOR);
+        let after_while_pending = after.signaled_value();
+        let status_while_pending = Status::read(format!("{:?}", command_buffer.status()));
+        gate.set_signaled_value(1);
+        let status_at_the_end = if command_buffer.wait_until_completed_for(COMPLETION).is_err() {
+            Status::NeverSettled
+        } else {
+            Status::read(format!("{:?}", command_buffer.status()))
+        };
+        Ok(crate::event_orders::SignalBeforeWait {
+            before_landed,
+            after_while_pending,
+            status_while_pending,
+            after_at_the_end: after.signaled_value(),
+            status_at_the_end,
+        })
+    }
+
+    fn scheduled_handler_order(
+        &mut self,
+    ) -> Answer<crate::scheduled_handlers::ScheduledHandlerOrder> {
+        use crate::event_orders::{Status, COMPLETED, SCHEDULED, SCRATCH};
+        use crate::scheduled_handlers::{
+            Returned, ScheduledHandlerOrder, ARRIVAL, HOLD_LIMIT, WINDOW,
+        };
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{mpsc, Arc, Mutex};
+        let queue = self
+            .device
+            .new_command_queue()
+            .map_err(Failure::from_error)?;
+        let scratch = self
+            .device
+            .new_buffer(SCRATCH, ResourceOptions::private())
+            .map_err(Failure::from_error)?;
+        let command_buffer = queue.command_buffer().map_err(Failure::from_error)?;
+        let mut blit = command_buffer
+            .blit_command_encoder()
+            .map_err(Failure::from_error)?;
+        blit.fill_buffer(&scratch, 0..SCRATCH, 1)
+            .map_err(Failure::from_error)?;
+        blit.end_encoding().map_err(Failure::from_error)?;
+        let order: Arc<Mutex<Vec<String>>> = Arc::default();
+        let (entered, entering) = mpsc::channel();
+        let (release, released) = mpsc::channel::<()>();
+        {
+            let order = Arc::clone(&order);
+            command_buffer
+                .add_scheduled_handler(Box::new(move |own: &CommandBuffer| {
+                    if let Ok(mut order) = order.lock() {
+                        order.push(SCHEDULED.to_owned());
+                    }
+                    let _ = entered.send(format!("{:?}", own.status()));
+                    // Held, so the probe can read the status and the wait while this handler is
+                    // inside itself. Bounded, so the handler leaves whatever the probe does.
+                    let _ = released.recv_timeout(HOLD_LIMIT);
+                }))
+                .map_err(Failure::from_error)?;
+        }
+        let (done, completing) = mpsc::channel();
+        {
+            let order = Arc::clone(&order);
+            command_buffer
+                .add_completed_handler(Box::new(move |own: &CommandBuffer| {
+                    if let Ok(mut order) = order.lock() {
+                        order.push(COMPLETED.to_owned());
+                    }
+                    let _ = done.send(format!("{:?}", own.status()));
+                }))
+                .map_err(Failure::from_error)?;
+        }
+        command_buffer.commit().map_err(Failure::from_error)?;
+        let inside_the_handler = match entering.recv_timeout(ARRIVAL) {
+            Ok(word) => Status::read(word),
+            Err(_) => Status::NeverSettled,
+        };
+        let while_the_handler_ran = Status::read(format!("{:?}", command_buffer.status()));
+        let returned = Arc::new(AtomicBool::new(false));
+        let (answered, answer) = mpsc::channel();
+        {
+            let (waited, returned) = (command_buffer.clone(), Arc::clone(&returned));
+            // The wait runs on a thread of its own because the fact under test is that it does
+            // **not** return; the thread is left to finish rather than joined, so a wait that
+            // never came back leaves that thread and not the suite.
+            std::thread::spawn(move || {
+                let answer = waited.wait_until_scheduled();
+                returned.store(true, Ordering::SeqCst);
+                let _ = answered.send(answer.err().map(|error| Failure::of(&error)));
+            });
+        }
+        // The window the negative fact is false in.
+        std::thread::sleep(WINDOW);
+        let wait_returned_while_the_handler_ran = returned.load(Ordering::SeqCst);
+        let _ = release.send(());
+        let wait_answered = match answer.recv_timeout(ARRIVAL) {
+            Ok(None) => Returned::Ok,
+            Ok(Some(failure)) => Returned::Err(failure.value),
+            Err(_) => Returned::NotWithinTheWindow,
+        };
+        let inside_the_completed_handler = match completing.recv_timeout(ARRIVAL) {
+            Ok(word) => Status::read(word),
+            Err(_) => Status::NeverSettled,
+        };
+        let handler_order = order.lock().map(|order| order.clone()).unwrap_or_default();
+        Ok(ScheduledHandlerOrder {
+            inside_the_handler,
+            while_the_handler_ran,
+            wait_returned_while_the_handler_ran,
+            wait_answered,
+            inside_the_completed_handler,
+            handler_order,
         })
     }
 

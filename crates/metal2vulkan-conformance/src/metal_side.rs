@@ -33,13 +33,7 @@ use objc2_foundation::{NSString, NSURL};
 use objc2_metal::{
     MTLAttributeFormat, MTLBarrierScope, MTLBinding, MTLBindingAccess, MTLBindingType,
     MTLBlendFactor, MTLBlendOperation, MTLBlitCommandEncoder, MTLBuffer, MTLClearColor,
-    MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder,
-    MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder, MTLComputePipelineDescriptor,
-    MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDepthStencilDescriptor,
-    MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction, MTLIndexType, MTLIndirectCommandBuffer,
-    MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand,
-    MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
-    MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
+    MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferHandler, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder, MTLComputePipelineDescriptor, MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction, MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter, MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
     MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
     MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
@@ -1807,6 +1801,418 @@ impl Side for MetalSide {
         })
     }
 
+    fn event_cross_queue_wait(&mut self) -> Answer<crate::event_orders::CrossQueueWait> {
+        use crate::event_orders::{
+            CrossQueueWait, Status, HALF, SCRATCH, SIGNALLING_BYTE, WAITING_BYTE,
+        };
+        // One pool around the whole probe: `commandBuffer`, `newEvent` and `newCommandQueue` each
+        // answer an autoreleased object, and a probe's thread has no pool of its own. Without this
+        // the command buffers would live in the never-drained top-level pool and hold their
+        // queues' slots for good.
+        objc2::rc::autoreleasepool(|_| {
+            let queue = || {
+                self.device
+                    .newCommandQueue()
+                    .ok_or_else(|| Failure::named("NewCommandQueue", "returned nil"))
+            };
+            let (waiting_queue, signalling_queue) = (queue()?, queue()?);
+            let event = self
+                .device
+                .newEvent()
+                .ok_or_else(|| Failure::named("NewEvent", "returned nil"))?;
+            let scratch = self
+                .device
+                .newBufferWithLength_options(
+                    SCRATCH as usize,
+                    MTLResourceOptions::StorageModeShared,
+                )
+                .ok_or_else(|| Failure::named("NewBuffer", "returned nil"))?;
+            let fill = |command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+                        offset: u64,
+                        length: u64,
+                        byte: u8|
+             -> Result<(), Failure> {
+                let encoder = command_buffer
+                    .blitCommandEncoder()
+                    .ok_or_else(|| Failure::named("BlitCommandEncoder", "returned nil"))?;
+                encoder.fillBuffer_range_value(
+                    &scratch,
+                    objc2_foundation::NSRange::new(offset as usize, length as usize),
+                    byte,
+                );
+                encoder.endEncoding();
+                Ok(())
+            };
+            let waiting = waiting_queue
+                .commandBuffer()
+                .ok_or_else(|| Failure::named("CommandBuffer", "returned nil"))?;
+            waiting.encodeWaitForEvent_value(&event, 1);
+            fill(&waiting, 0, HALF, WAITING_BYTE)?;
+            let signalling = signalling_queue
+                .commandBuffer()
+                .ok_or_else(|| Failure::named("CommandBuffer", "returned nil"))?;
+            fill(&signalling, HALF, HALF, SIGNALLING_BYTE)?;
+            signalling.encodeSignalEvent_value(&event, 1);
+            // Bounded completion, rather than `waitUntilCompleted`, which Metal has no bounded
+            // form of: the handler is added before the commit and the probe waits on its channel.
+            let waiting_done = completion_channel(&waiting);
+            let signalling_done = completion_channel(&signalling);
+            // The waiting one first, which is the whole point: its signal is not committed yet.
+            waiting.commit();
+            let waiting_after_its_commit = Status::read(status_word(waiting.status()));
+            signalling.commit();
+            let signalling_at_the_end = settled(&signalling_done, &signalling);
+            let waiting_at_the_end = settled(&waiting_done, &waiting);
+            // SAFETY: `SCRATCH` bytes of the shared buffer, whose writers have both completed.
+            let bytes = unsafe {
+                std::slice::from_raw_parts(
+                    scratch.contents().as_ptr().cast::<u8>(),
+                    SCRATCH as usize,
+                )
+            }
+            .to_vec();
+            Ok(CrossQueueWait {
+                waiting_after_its_commit,
+                waiting_at_the_end,
+                signalling_at_the_end,
+                bytes,
+            })
+        })
+    }
+
+    fn event_highest_signal(&mut self, values: [u64; 2]) -> Answer<u64> {
+        use crate::event_orders::SCRATCH;
+        objc2::rc::autoreleasepool(|_| {
+            let queue = || {
+                self.device
+                    .newCommandQueue()
+                    .ok_or_else(|| Failure::named("NewCommandQueue", "returned nil"))
+            };
+            let queues = [queue()?, queue()?];
+            let event = self
+                .device
+                .newSharedEvent()
+                .ok_or_else(|| Failure::named("NewSharedEvent", "returned nil"))?;
+            let as_event: &ProtocolObject<dyn MTLEvent> = ProtocolObject::from_ref(&*event);
+            let scratch = self
+                .device
+                .newBufferWithLength_options(
+                    SCRATCH as usize,
+                    MTLResourceOptions::StorageModePrivate,
+                )
+                .ok_or_else(|| Failure::named("NewBuffer", "returned nil"))?;
+            let mut done = Vec::new();
+            for (queue, &value) in queues.iter().zip(&values) {
+                let command_buffer = queue
+                    .commandBuffer()
+                    .ok_or_else(|| Failure::named("CommandBuffer", "returned nil"))?;
+                let encoder = command_buffer
+                    .blitCommandEncoder()
+                    .ok_or_else(|| Failure::named("BlitCommandEncoder", "returned nil"))?;
+                encoder.fillBuffer_range_value(
+                    &scratch,
+                    objc2_foundation::NSRange::new(0, SCRATCH as usize),
+                    value as u8,
+                );
+                encoder.endEncoding();
+                command_buffer.encodeSignalEvent_value(as_event, value);
+                let channel = completion_channel(&command_buffer);
+                command_buffer.commit();
+                done.push(channel);
+            }
+            for channel in &done {
+                if channel
+                    .done
+                    .recv_timeout(crate::event_orders::COMPLETION)
+                    .is_err()
+                {
+                    return Err(Failure::named(
+                        "NeverCompleted",
+                        "a signalling command buffer",
+                    ));
+                }
+            }
+            Ok(event.signaledValue())
+        })
+    }
+
+    fn held_command_buffer(&mut self) -> Answer<crate::event_orders::HeldCommandBuffer> {
+        use crate::event_orders::{
+            HeldCommandBuffer, Status, COMPLETED, COMPLETION, HELD_FOR, SCHEDULED, SCRATCH,
+        };
+        objc2::rc::autoreleasepool(|_| {
+            let queue = || {
+                self.device
+                    .newCommandQueue()
+                    .ok_or_else(|| Failure::named("NewCommandQueue", "returned nil"))
+            };
+            let (held_queue, other_queue) = (queue()?, queue()?);
+            let event = self
+                .device
+                .newSharedEvent()
+                .ok_or_else(|| Failure::named("NewSharedEvent", "returned nil"))?;
+            let as_event: &ProtocolObject<dyn MTLEvent> = ProtocolObject::from_ref(&*event);
+            let scratch = self
+                .device
+                .newBufferWithLength_options(
+                    SCRATCH as usize,
+                    MTLResourceOptions::StorageModePrivate,
+                )
+                .ok_or_else(|| Failure::named("NewBuffer", "returned nil"))?;
+            let fill = |command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+                        byte: u8|
+             -> Result<(), Failure> {
+                let encoder = command_buffer
+                    .blitCommandEncoder()
+                    .ok_or_else(|| Failure::named("BlitCommandEncoder", "returned nil"))?;
+                encoder.fillBuffer_range_value(
+                    &scratch,
+                    objc2_foundation::NSRange::new(0, SCRATCH as usize),
+                    byte,
+                );
+                encoder.endEncoding();
+                Ok(())
+            };
+            let mut log = HandlerLog::new();
+            let held = held_queue
+                .commandBuffer()
+                .ok_or_else(|| Failure::named("CommandBuffer", "returned nil"))?;
+            held.encodeWaitForEvent_value(as_event, 1);
+            fill(&held, 1)?;
+            // SAFETY: each block is a valid heap block the log keeps alive for as long as this
+            // probe runs, which outlives every call Metal makes of it.
+            log.add(SCHEDULED, |block| unsafe {
+                held.addScheduledHandler(block)
+            });
+            log.add(COMPLETED, |block| unsafe {
+                held.addCompletedHandler(block)
+            });
+            held.commit();
+            let behind = held_queue
+                .commandBuffer()
+                .ok_or_else(|| Failure::named("CommandBuffer", "returned nil"))?;
+            fill(&behind, 2)?;
+            let behind_done = completion_channel(&behind);
+            behind.commit();
+            let other = other_queue
+                .commandBuffer()
+                .ok_or_else(|| Failure::named("CommandBuffer", "returned nil"))?;
+            fill(&other, 3)?;
+            let other_done = completion_channel(&other);
+            other.commit();
+            let other_queue_status = settled(&other_done, &other);
+            // The window the negative facts are false in: a submission that was going to happen
+            // has had its chance by now.
+            std::thread::sleep(HELD_FOR);
+            let held_while_waiting = Status::read(status_word(held.status()));
+            let behind_while_waiting = Status::read(status_word(behind.status()));
+            let handlers_while_waiting = log.names();
+            event.setSignaledValue(1);
+            // The held command buffer's own completed handler is the bound: it is the last of its
+            // handlers to run, so once it has, the log is whole and the status is settled.
+            log.wait_for(COMPLETED, COMPLETION);
+            let handlers_at_the_end = log.names();
+            let held_at_the_end = if handlers_at_the_end.iter().any(|name| name == COMPLETED) {
+                Status::read(status_word(held.status()))
+            } else {
+                Status::NeverSettled
+            };
+            let behind_at_the_end = settled(&behind_done, &behind);
+            Ok(HeldCommandBuffer {
+                other_queue: other_queue_status,
+                held_while_waiting,
+                behind_while_waiting,
+                handlers_while_waiting,
+                handlers_at_the_end,
+                held_at_the_end,
+                behind_at_the_end,
+            })
+        })
+    }
+
+    fn signal_before_a_wait(&mut self) -> Answer<crate::event_orders::SignalBeforeWait> {
+        use crate::event_orders::{Status, HELD_FOR, SCRATCH, SIGNAL_WAIT};
+        objc2::rc::autoreleasepool(|_| {
+            let queue = self
+                .device
+                .newCommandQueue()
+                .ok_or_else(|| Failure::named("NewCommandQueue", "returned nil"))?;
+            let event = || {
+                self.device
+                    .newSharedEvent()
+                    .ok_or_else(|| Failure::named("NewSharedEvent", "returned nil"))
+            };
+            let (before, gate, after) = (event()?, event()?, event()?);
+            let scratch = self
+                .device
+                .newBufferWithLength_options(
+                    SCRATCH as usize,
+                    MTLResourceOptions::StorageModePrivate,
+                )
+                .ok_or_else(|| Failure::named("NewBuffer", "returned nil"))?;
+            let command_buffer = queue
+                .commandBuffer()
+                .ok_or_else(|| Failure::named("CommandBuffer", "returned nil"))?;
+            let fill = |byte: u8| -> Result<(), Failure> {
+                let encoder = command_buffer
+                    .blitCommandEncoder()
+                    .ok_or_else(|| Failure::named("BlitCommandEncoder", "returned nil"))?;
+                encoder.fillBuffer_range_value(
+                    &scratch,
+                    objc2_foundation::NSRange::new(0, SCRATCH as usize),
+                    byte,
+                );
+                encoder.endEncoding();
+                Ok(())
+            };
+            let before_event: &ProtocolObject<dyn MTLEvent> = ProtocolObject::from_ref(&*before);
+            let gate_event: &ProtocolObject<dyn MTLEvent> = ProtocolObject::from_ref(&*gate);
+            let after_event: &ProtocolObject<dyn MTLEvent> = ProtocolObject::from_ref(&*after);
+            fill(1)?;
+            command_buffer.encodeSignalEvent_value(before_event, 1);
+            command_buffer.encodeWaitForEvent_value(gate_event, 1);
+            fill(2)?;
+            command_buffer.encodeSignalEvent_value(after_event, 1);
+            let done = completion_channel(&command_buffer);
+            command_buffer.commit();
+            let before_landed =
+                before.waitUntilSignaledValue_timeoutMS(1, SIGNAL_WAIT.as_millis() as u64);
+            // The window the two negative facts are false in: the signal behind the wait has not
+            // landed, and the command buffer is no further along than committed.
+            std::thread::sleep(HELD_FOR);
+            let after_while_pending = after.signaledValue();
+            let status_while_pending = Status::read(status_word(command_buffer.status()));
+            gate.setSignaledValue(1);
+            let status_at_the_end = settled(&done, &command_buffer);
+            Ok(crate::event_orders::SignalBeforeWait {
+                before_landed,
+                after_while_pending,
+                status_while_pending,
+                after_at_the_end: after.signaledValue(),
+                status_at_the_end,
+            })
+        })
+    }
+
+    fn scheduled_handler_order(
+        &mut self,
+    ) -> Answer<crate::scheduled_handlers::ScheduledHandlerOrder> {
+        use crate::event_orders::{Status, COMPLETED, SCHEDULED, SCRATCH};
+        use crate::scheduled_handlers::{
+            Returned, ScheduledHandlerOrder, ARRIVAL, HOLD_LIMIT, WINDOW,
+        };
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{mpsc, Arc, Mutex};
+        objc2::rc::autoreleasepool(|_| {
+            let queue = self
+                .device
+                .newCommandQueue()
+                .ok_or_else(|| Failure::named("NewCommandQueue", "returned nil"))?;
+            let scratch = self
+                .device
+                .newBufferWithLength_options(
+                    SCRATCH as usize,
+                    MTLResourceOptions::StorageModePrivate,
+                )
+                .ok_or_else(|| Failure::named("NewBuffer", "returned nil"))?;
+            let command_buffer = queue
+                .commandBuffer()
+                .ok_or_else(|| Failure::named("CommandBuffer", "returned nil"))?;
+            let encoder = command_buffer
+                .blitCommandEncoder()
+                .ok_or_else(|| Failure::named("BlitCommandEncoder", "returned nil"))?;
+            encoder.fillBuffer_range_value(
+                &scratch,
+                objc2_foundation::NSRange::new(0, SCRATCH as usize),
+                1,
+            );
+            encoder.endEncoding();
+            let order: Arc<Mutex<Vec<String>>> = Arc::default();
+            let (entered, entering) = mpsc::channel();
+            let (release, released) = mpsc::channel::<()>();
+            let held = {
+                let order = Arc::clone(&order);
+                block2::RcBlock::new(
+                    move |own: std::ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+                        if let Ok(mut order) = order.lock() {
+                            order.push(SCHEDULED.to_owned());
+                        }
+                        // SAFETY: Metal hands the handler its own command buffer, which is alive
+                        // for the call.
+                        let status = unsafe { own.as_ref() }.status();
+                        let _ = entered.send(status_word(status).to_owned());
+                        // Held, so the probe can read the status and the wait while this handler
+                        // is inside itself. Bounded, so the handler leaves Metal's handler thread
+                        // whatever the probe does.
+                        let _ = released.recv_timeout(HOLD_LIMIT);
+                    },
+                )
+            };
+            let (done, completing) = mpsc::channel();
+            let finished = {
+                let order = Arc::clone(&order);
+                block2::RcBlock::new(
+                    move |own: std::ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+                        if let Ok(mut order) = order.lock() {
+                            order.push(COMPLETED.to_owned());
+                        }
+                        // SAFETY: as above.
+                        let status = unsafe { own.as_ref() }.status();
+                        let _ = done.send(status_word(status).to_owned());
+                    },
+                )
+            };
+            // SAFETY: both blocks are valid heap blocks held in `held` and `finished` for the rest
+            // of this probe, which outlives every call Metal makes of them: the probe does not
+            // return before the completed handler ran or its bound ran out.
+            unsafe {
+                command_buffer.addScheduledHandler(block2::RcBlock::as_ptr(&held));
+                command_buffer.addCompletedHandler(block2::RcBlock::as_ptr(&finished));
+            }
+            command_buffer.commit();
+            let inside_the_handler = match entering.recv_timeout(ARRIVAL) {
+                Ok(word) => Status::read(word),
+                Err(_) => Status::NeverSettled,
+            };
+            let while_the_handler_ran = Status::read(status_word(command_buffer.status()));
+            let returned = Arc::new(AtomicBool::new(false));
+            let (answered, answer) = mpsc::channel();
+            {
+                let (waited, returned) = (Waited(command_buffer.clone()), Arc::clone(&returned));
+                // The wait runs on a thread of its own because the fact under test is that it does
+                // **not** return; the thread is left to finish rather than joined, so a wait that
+                // never came back leaves that thread and not the suite.
+                std::thread::spawn(move || {
+                    waited.wait_until_scheduled();
+                    returned.store(true, Ordering::SeqCst);
+                    let _ = answered.send(());
+                });
+            }
+            // The window the negative fact is false in.
+            std::thread::sleep(WINDOW);
+            let wait_returned_while_the_handler_ran = returned.load(Ordering::SeqCst);
+            let _ = release.send(());
+            // Metal's `waitUntilScheduled` answers nothing, so a return is the whole answer.
+            let wait_answered = match answer.recv_timeout(ARRIVAL) {
+                Ok(()) => Returned::Ok,
+                Err(_) => Returned::NotWithinTheWindow,
+            };
+            let inside_the_completed_handler = match completing.recv_timeout(ARRIVAL) {
+                Ok(word) => Status::read(word),
+                Err(_) => Status::NeverSettled,
+            };
+            let handler_order = order.lock().map(|order| order.clone()).unwrap_or_default();
+            Ok(ScheduledHandlerOrder {
+                inside_the_handler,
+                while_the_handler_ran,
+                wait_returned_while_the_handler_ran,
+                wait_answered,
+                inside_the_completed_handler,
+                handler_order,
+            })
+        })
+    }
+
     fn makes_texture(&mut self, query: &HeapTextureQuery) -> Answer<bool> {
         let descriptor = queried_descriptor(query);
         // The texture, where Metal makes one, is released as this statement ends: the case asks
@@ -2545,6 +2951,154 @@ impl MetalSide {
         }
         encoder.endEncoding();
         Ok(())
+    }
+}
+
+/// A command-buffer handler block the probes keep alive: the owning half of
+/// [`MTLCommandBufferHandler`], which is the raw pointer Metal's setters take.
+type HandlerBlock =
+    block2::RcBlock<dyn Fn(std::ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>)>;
+
+/// A command buffer a probe waits for the scheduling of on a thread of its own.
+///
+/// `objc2` gives `MTLCommandBuffer` no `Send`, because Metal documents a command buffer as unsafe
+/// to **encode into** from more than one thread. The probe encodes into none on that thread: it
+/// calls `waitUntilScheduled`, which Metal documents as a wait any thread may make, and then
+/// releases the reference. Both are sound off the thread that made it, since the retain count is
+/// atomic.
+struct Waited(Retained<ProtocolObject<dyn MTLCommandBuffer>>);
+
+// SAFETY: as the type's documentation states: the probe never encodes into it on the waiting
+// thread, and the only calls that cross threads are `waitUntilScheduled` and the release.
+unsafe impl Send for Waited {}
+
+impl Waited {
+    /// `waitUntilScheduled`.
+    ///
+    /// A method rather than a field read at the call site, and that is load-bearing: a closure
+    /// reaching `waited.0` captures the `Retained` on its own, which is not `Send`, so the whole
+    /// wrapper — the thing this type's `Send` is about — would never be what crossed the thread.
+    fn wait_until_scheduled(&self) {
+        self.0.waitUntilScheduled();
+    }
+}
+
+/// A command buffer's completion, as a bound the probe's own thread can wait on.
+///
+/// Metal has **no bounded wait**: `waitUntilCompleted` either returns or does not. So an event
+/// probe, whose whole subject is a command buffer held back by a value that has not arrived, never
+/// calls it — it adds a completed handler before the commit and waits on this channel with a bound.
+/// A bound that runs out is a recorded fact ([`crate::event_orders::Status::NeverSettled`]), not a
+/// hang.
+struct Completion {
+    done: std::sync::mpsc::Receiver<()>,
+    /// The block Metal calls, kept alive for as long as the probe runs. `addCompletedHandler:`
+    /// takes a pointer, and keeping our own reference means the block's lifetime does not rest on
+    /// what Metal does with it.
+    _block: HandlerBlock,
+}
+
+/// A completed handler on `command_buffer` that signals its channel, added before the commit.
+fn completion_channel(command_buffer: &ProtocolObject<dyn MTLCommandBuffer>) -> Completion {
+    let (sender, done) = std::sync::mpsc::channel();
+    let block = block2::RcBlock::new(
+        move |_: std::ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+            let _ = sender.send(());
+        },
+    );
+    // SAFETY: the block is a valid heap block, kept alive in the `Completion` this answers for as
+    // long as the probe runs, which outlives every call Metal makes of it.
+    unsafe { command_buffer.addCompletedHandler(block2::RcBlock::as_ptr(&block)) };
+    Completion {
+        done,
+        _block: block,
+    }
+}
+
+/// The status `command_buffer` reads once its completion arrived, or that it never did.
+fn settled(
+    completion: &Completion,
+    command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+) -> crate::event_orders::Status {
+    if completion
+        .done
+        .recv_timeout(crate::event_orders::COMPLETION)
+        .is_err()
+    {
+        crate::event_orders::Status::NeverSettled
+    } else {
+        crate::event_orders::Status::read(status_word(command_buffer.status()))
+    }
+}
+
+/// The names a command buffer's handlers logged, in the order Metal called them, with each name
+/// also sent so the probe can wait for one rather than guess when the log is whole.
+///
+/// The channel is what makes the log readable: Metal fixes no order between two handlers of one
+/// command buffer that this probe could rely on, so the probe waits for the name it cares about to
+/// arrive instead of assuming the handler it added first is the one that ran first.
+struct HandlerLog {
+    called: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    sender: std::sync::mpsc::Sender<String>,
+    arrived: std::sync::mpsc::Receiver<String>,
+    /// The blocks Metal calls, kept alive for as long as the probe runs.
+    blocks: Vec<HandlerBlock>,
+}
+
+impl HandlerLog {
+    /// An empty log.
+    fn new() -> Self {
+        let (sender, arrived) = std::sync::mpsc::channel();
+        Self {
+            called: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            sender,
+            arrived,
+            blocks: Vec::new(),
+        }
+    }
+
+    /// Add a handler that logs itself as `name` to `command_buffer`, as the kind `add` names.
+    ///
+    /// `add` is the raw setter so one body serves both `addScheduledHandler:` and
+    /// `addCompletedHandler:`.
+    fn add(&mut self, name: &'static str, add: impl FnOnce(MTLCommandBufferHandler)) {
+        let (called, sender) = (std::sync::Arc::clone(&self.called), self.sender.clone());
+        let block = block2::RcBlock::new(
+            move |_: std::ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+                if let Ok(mut called) = called.lock() {
+                    called.push(name.to_owned());
+                }
+                let _ = sender.send(name.to_owned());
+            },
+        );
+        add(block2::RcBlock::as_ptr(&block));
+        self.blocks.push(block);
+    }
+
+    /// Wait until the handler named `name` has been called, or `bound` runs out.
+    fn wait_for(&self, name: &str, bound: std::time::Duration) {
+        let deadline = std::time::Instant::now() + bound;
+        loop {
+            if self
+                .called
+                .lock()
+                .is_ok_and(|called| called.iter().any(|called| called == name))
+            {
+                return;
+            }
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() || self.arrived.recv_timeout(left).is_err() {
+                return;
+            }
+        }
+    }
+
+    /// The names logged so far, in order.
+    fn names(&self) -> Vec<String> {
+        self.called
+            .lock()
+            .map(|called| called.clone())
+            .unwrap_or_default()
     }
 }
 

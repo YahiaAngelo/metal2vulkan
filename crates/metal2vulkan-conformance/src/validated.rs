@@ -544,4 +544,31 @@ impl<S: Side> Side for Announcing<S> {
         self.at("shared_event_rises");
         self.inner.shared_event_rises(label)
     }
+
+    fn event_cross_queue_wait(&mut self) -> Answer<crate::event_orders::CrossQueueWait> {
+        self.at("event_cross_queue_wait");
+        self.inner.event_cross_queue_wait()
+    }
+
+    fn event_highest_signal(&mut self, values: [u64; 2]) -> Answer<u64> {
+        self.at("event_highest_signal");
+        self.inner.event_highest_signal(values)
+    }
+
+    fn held_command_buffer(&mut self) -> Answer<crate::event_orders::HeldCommandBuffer> {
+        self.at("held_command_buffer");
+        self.inner.held_command_buffer()
+    }
+
+    fn signal_before_a_wait(&mut self) -> Answer<crate::event_orders::SignalBeforeWait> {
+        self.at("signal_before_a_wait");
+        self.inner.signal_before_a_wait()
+    }
+
+    fn scheduled_handler_order(
+        &mut self,
+    ) -> Answer<crate::scheduled_handlers::ScheduledHandlerOrder> {
+        self.at("scheduled_handler_order");
+        self.inner.scheduled_handler_order()
+    }
 }

@@ -25,6 +25,10 @@ serde_json.workspace = true
 sha2.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# The command-buffer handler blocks the event cases add: `addScheduledHandler:` and
+# `addCompletedHandler:` take Objective-C blocks, which is how a probe bounds a wait Metal has no
+# bounded form of. Already objc2-metal's own dependency; named here so the suite can build one.
+block2 = "0.6"
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-metal = "0.3"
