@@ -489,7 +489,8 @@ def write(data) -> str:
         "derivation resolves the **receiver's type** by following what made it — a class's "
         "constructor, a getter whose answer `objc2_metal.tsv` records, a field of the side's own "
         "struct, a parameter's declared type — and then walks that type's supertypes to the "
-        "container the SDK declares the item on."
+        "container the SDK declares the item on. A message to a class, written "
+        "`MTLType::selector(..)`, names its own receiver and needs no typing."
     )
     w("")
     w("Its limits, measured rather than asserted:")
@@ -503,17 +504,23 @@ def write(data) -> str:
     )
     only = sorted({r for _, _, r, _ in leg.unresolved} - {c.rust for c in leg.calls if c.item})
     w(
-        f"- **{len(leg.unresolved)} call sites' receivers did not type.** They cost the count "
-        f"{len(only)} selectors, which the suite calls and which this attributes to no item:"
+        f"- **{len(leg.unresolved)} call sites resolve to no item**: an instance send whose "
+        "receiver this could not type, or a message to a Metal class whose name `objc2-metal` "
+        f"declares on no Metal type. They cost the count {len(only)} selectors, which the suite "
+        "calls and which this attributes to no item:"
     )
     for rust in only:
-        w(
-            f"  - `{api.selector[next((t, n) for t, n in api.selector if n == rust)]}`, bound by "
-            + ", ".join(f"`{ty}`" for ty in sorted(api.receivers(rust)))
-        )
+        owners = sorted(api.receivers(rust))
+        if owners:
+            spelled = api.selector[next((t, n) for t, n in api.selector if n == rust)]
+            w(f"  - `{spelled}`, bound by " + ", ".join(f"`{ty}`" for ty in owners))
+        else:
+            w(f"  - `{rust}`, which `objc2-metal` declares on no Metal type, so it is an item of "
+              "no Metal container")
     w(
-        "  So every per-item count below is a **floor** by exactly these, and by nothing else "
-        "that is unmeasured."
+        "  So every per-item count below is a **floor**, by at least these. That list is what "
+        "this derivation recognises as a call to Metal and cannot attribute; it is not a proof "
+        "that nothing else is unmeasured."
     )
     w(
         "- **0 call sites typed to a receiver that does not bind the selector sent to it.** The "
@@ -772,8 +779,10 @@ def write(data) -> str:
         w("")
         w(
             "The Metal leg sends these selectors to a receiver this typed, and "
-            "`scripts/metal-coverage/coverage.tsv` holds no row for the item. Either the map is "
-            "short of the SDK or the name is spelled differently there; both are worth a look."
+            "`scripts/metal-coverage/coverage.tsv` holds no row for the item. Either the selector "
+            "is `NSObject`'s, which `objc2-metal` generates on every class it binds and no Metal "
+            "header declares, or the map is short of the SDK, or the name is spelled differently "
+            "there; the last two are worth a look."
         )
         w("")
         w("| receiver | selector |")

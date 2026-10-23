@@ -16,7 +16,12 @@ The resolution checks itself: a receiver typed `T` sent a selector that `objc2-m
 on `T` or any of its supertypes is a **typing error**, not a Metal call, and
 [`Leg.mistyped`][Leg] carries it so the caller can fail rather than quietly count the wrong item.
 The honest limit is the other direction: a receiver this cannot type is reported in
-[`Leg.unresolved`][Leg] and attributed to no item.
+[`Leg.unresolved`][Leg] and attributed to no item, and so is a message to a Metal class whose name
+`objc2-metal` declares on no Metal type. Neither is dropped.
+
+A message to a class — `MTLRenderPassDescriptor::renderPassDescriptor()` — needs no typing at all:
+the path names its receiver. It is resolved against that class the same way an instance send is
+resolved against the type its receiver typed to.
 
 A call site also carries where it sits: the function that holds it, and the enclosing `match` arms,
 so a call made only for one step of the case vocabulary is attributed to that step and not to every
@@ -144,12 +149,17 @@ class Api:
     answers: dict[tuple[str, str], str]
     #: A type to the types it inherits from, nearest first.
     supertypes: dict[str, list[str]]
+    #: Every Objective-C type `objc2-metal` binds, to whether it is a `class` or a `protocol`.
+    #: A name outside this is not a Metal type at all, however it is spelled: a Rust struct the
+    #: crate also defines (`MTLSize`), a bitflags set (`MTLBlitOption`) or an enum.
+    kinds: dict[str, str]
 
     @classmethod
     def read(cls, path: Path) -> "Api":
         selector: dict[tuple[str, str], str] = {}
         answers: dict[tuple[str, str], str] = {}
         supertypes: dict[str, list[str]] = {}
+        kinds: dict[str, str] = {}
         section = ""
         for line in path.read_text().splitlines():
             if line.startswith("#"):
@@ -158,12 +168,17 @@ class Api:
             fields = line.split("\t")
             if "supertypes" in section:
                 supertypes[fields[0]] = [f for f in fields[2].split(" ") if f]
+                kinds[fields[0]] = fields[1]
             else:
                 ty, sel, rust, answered = fields
                 selector[(ty, rust)] = sel
                 if answered:
                     answers[(ty, rust)] = answered
-        return cls(selector, answers, supertypes)
+        return cls(selector, answers, supertypes, kinds)
+
+    def declares(self, ty: str) -> bool:
+        """Whether `objc2-metal` binds `ty` as an Objective-C class or protocol."""
+        return ty in self.kinds
 
     def chain(self, ty: str) -> list[str]:
         """`ty` and every type it inherits from, nearest first."""
@@ -218,7 +233,9 @@ class Leg:
     """Every Metal call the leg makes, and what the typing could not reach."""
 
     calls: list[Call] = field(default_factory=list)
-    #: Call sites whose receiver did not type, as `(file, function, rust name, receiver text)`.
+    #: Call sites this attributes to no item, as `(file, function, rust name, receiver text)`:
+    #: an instance send whose receiver did not type, or a message to a Metal class whose name
+    #: `objc2-metal` declares on no Metal type.
     unresolved: list[tuple[str, str, str, str]] = field(default_factory=list)
     #: Call sites whose receiver typed to something that does not bind the selector: a bug in this
     #: typing, never a Metal call.
@@ -697,10 +714,40 @@ def read_leg(api: Api, src: Path, files: list[str], enums: set[str]) -> Leg:
                     leg.calls.append(Call(name, fn.name, here, rust, ty, None))
                     continue
                 leg.calls.append(Call(name, fn.name, here, rust, ty, item))
+            # `MTLType::selector(..)`, which is how `objc2` spells a message to the **class**: a
+            # descriptor's own constructor (`MTLRenderPassDescriptor::renderPassDescriptor()`) and
+            # the `init` an `alloc()` is handed. The receiver is the class the path names, so
+            # nothing has to be typed; the path is resolved against what `objc2-metal` binds on
+            # that class, the same way an instance send is.
+            for match in re.finditer(
+                r"\b((?:[A-Za-z_][A-Za-z0-9_]*::)+)(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+                text[fn.start : fn.end],
+            ):
+                rust = match.group(2)
+                at = fn.start + match.start()
+                ty = [part for part in match.group(1).split("::") if part][-1]
+                if not api.declares(ty):
+                    # Not an Objective-C type of `objc2-metal` at all, so this sends no message:
+                    # a Rust type's associated function (`Vec::new`), an enum's variant, or a
+                    # bitflags constructor whose name only looks like Metal's
+                    # (`MTLBlitOption::empty`). The loop below reads it as the leg's own call.
+                    continue
+                here = tuple(v for lo, hi, v in arms if lo <= at < hi)
+                item = api.binds(ty, rust)
+                if item is None:
+                    # A message to a Metal class that `objc2-metal` declares on no Metal type, so
+                    # it is an item of no Metal container: `alloc`, which is `NSObject`'s. Counted
+                    # as a call site, attributed to no item, and named in `unresolved` rather than
+                    # dropped. Not `mistyped`: nothing was typed wrongly, the SDK simply has no
+                    # item here.
+                    leg.unresolved.append((name, fn.name, rust, ty))
+                    leg.calls.append(Call(name, fn.name, here, rust, "", None))
+                    continue
+                leg.calls.append(Call(name, fn.name, here, rust, ty, item))
             # A call to another function of the leg: an edge of the reachability graph. A path
             # qualifier is kept where it is a module (`crate::metal_work::run`) or `Self`, and
-            # dropped where it is a type, because `MTLTextureDescriptor::new` is a Metal call and
-            # not this source's own `new`.
+            # dropped where it is a type, because `MTLTextureDescriptor::new` is the class message
+            # the loop above resolves and not this source's own `new`.
             for match in re.finditer(
                 r"\b((?:[A-Za-z_][A-Za-z0-9_]*::)*)([A-Za-z_][A-Za-z0-9_]*)\s*\(",
                 text[fn.start : fn.end],
