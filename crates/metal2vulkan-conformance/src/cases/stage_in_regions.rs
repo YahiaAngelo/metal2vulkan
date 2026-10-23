@@ -22,7 +22,7 @@
 
 use crate::allowance::Allowance;
 use crate::case::{
-    call, made, Abort, Case, Failure, Handle, Input, MetalSource, Side, StageInAttribute,
+    call, made, Abort, Bindings, Case, Failure, Handle, Input, MetalSource, Side, StageInAttribute,
     StageInLayout, StageInRegion, StageInput,
 };
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
@@ -595,7 +595,7 @@ impl Case for StageInRegions {
                 &at("dispatch"),
                 side.dispatch_threads(
                     pipeline,
-                    &bound,
+                    &Bindings::buffers(&bound),
                     &row.stage_in(indirect),
                     [row.grid[0], row.grid[1], 1],
                     [row.group[0], row.group[1], 1],

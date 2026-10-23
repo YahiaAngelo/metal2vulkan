@@ -10,7 +10,7 @@
 //! input buffer, each binds one buffer, and none can fault a GPU.
 
 use crate::allowance::{Allowance, Justification, Loosening};
-use crate::case::{call, made, Abort, Case, Failure, Input, MetalSource, Side};
+use crate::case::{call, made, Abort, Bindings, Case, Failure, Input, MetalSource, Side};
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
 use crate::replay::NOTICES_SITE;
@@ -342,7 +342,7 @@ impl Case for PassBytes {
         let command_buffer = made(
             sites,
             "dispatch",
-            side.dispatch(pipeline, &[output], groups, threads),
+            side.dispatch(pipeline, &Bindings::buffers(&[output]), groups, threads),
         )?;
         call(sites, "status", side.wait(command_buffer), Clone::clone)?;
         let bytes = call(

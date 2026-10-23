@@ -20,7 +20,7 @@
 //! Nothing here can fault a GPU: one compute pass a case, two buffers, no texture, no loop, and
 //! each thread reads its own word.
 
-use crate::case::{call, made, Abort, Case, Failure, Input, MetalSource, Side};
+use crate::case::{call, made, Abort, Bindings, Case, Failure, Input, MetalSource, Side};
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
 use crate::transcript::{ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value};
@@ -226,7 +226,7 @@ impl Case for MathRoutines {
             "dispatch",
             side.dispatch_threads(
                 pipeline,
-                &[input, output],
+                &Bindings::buffers(&[input, output]),
                 &[],
                 [threads, 1, 1],
                 [threads, 1, 1],

@@ -4,6 +4,7 @@
 //! increment allows: one compares the bytes a pass wrote, the other a typed answer a getter gives.
 //! Neither can fault a GPU.
 
+pub mod extended_range_planes;
 pub mod indirect_private_types;
 pub mod math_routines;
 pub mod pass_bytes;
@@ -22,6 +23,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(stage_in_regions::stage_in_region_clamps()));
+    for case in extended_range_planes::all() {
+        cases.push(Box::new(case));
+    }
     cases
 }
 

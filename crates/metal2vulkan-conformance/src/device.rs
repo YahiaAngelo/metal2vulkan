@@ -6,7 +6,7 @@
 //! notice is never lost: it is the thing that justifies a loosened field.
 
 use metal2vulkan_runtime::{
-    DebugMessage, Device, DeviceKind, DeviceOptions, MessageSink, ShaderCacheOptions,
+    DebugMessage, Degradation, Device, DeviceKind, DeviceOptions, MessageSink, ShaderCacheOptions,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -105,11 +105,21 @@ fn loader() -> Option<PathBuf> {
     .find(|path| path.is_file())
 }
 
-/// The suite's device options: exact answers, the cache this run owns, and `notices`' sink.
+/// The suite's device options: exact answers, every notice at every occurrence, the cache this
+/// run owns, and `notices`' sink.
+///
+/// `announce_each` over every kind is what makes a case's notices its own. A device announces a
+/// kind once by default, so on a shared device the first case to provoke a notice holds it and
+/// every later case sees nothing: the same case then reads as announced or as exact depending on
+/// which cases ran before it in the same process. That would make the notices site — the suite's
+/// one mechanism for "a difference is a bug unless we announced it" — depend on the selection and
+/// its order. At every occurrence, each case's own work announces its own notices, so a case's
+/// verdict is the case's.
 pub fn options(notices: &Notices, cache: &ScratchCache) -> DeviceOptions {
     let mut options = DeviceOptions::default();
     options.policy = options.policy.exact_answers();
     options.policy.sampling = metal2vulkan::device::SamplingPolicy::Exact;
+    options.announce_each = Degradation::ALL.iter().copied().collect();
     options.shader_cache = ShaderCacheOptions::in_directory(cache.path());
     options.loader = loader();
     options.messages = Some(notices.sink());

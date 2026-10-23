@@ -18,7 +18,7 @@ use crate::allowance::Allowance;
 use crate::recording::ShaderRef;
 use crate::transcript::{Node, Observed, Sites, Transcript, Value};
 use crate::verdict::device_gap;
-use metal2vulkan::metal::{AttributeFormat, IndexType, StepFunction};
+use metal2vulkan::metal::{AttributeFormat, IndexType, PixelFormat, StepFunction};
 
 /// A shader as both sides can take it.
 ///
@@ -41,6 +41,37 @@ pub struct ShaderSource<'a> {
 /// recording holds one, because a Metal object's identity is not observable across hosts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Handle(pub u32);
+
+/// What a dispatch binds: the buffers at 0 up, and the textures at 0 up.
+///
+/// One value rather than one argument per kind, so a case that binds a kind the vocabulary gains
+/// later does not change every call site, and so a reader of a case sees the whole argument table
+/// in one place.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Bindings<'a> {
+    /// The buffers, bound at Metal buffer index 0 up in this order.
+    pub buffers: &'a [Handle],
+    /// The textures, bound at Metal texture index 0 up in this order.
+    pub textures: &'a [Handle],
+}
+
+impl<'a> Bindings<'a> {
+    /// `buffers` at 0 up, and no texture.
+    pub const fn buffers(buffers: &'a [Handle]) -> Self {
+        Self {
+            buffers,
+            textures: &[],
+        }
+    }
+
+    /// `textures` at 0 up, and no buffer.
+    pub const fn textures(textures: &'a [Handle]) -> Self {
+        Self {
+            buffers: &[],
+            textures,
+        }
+    }
+}
 
 /// A kernel's `[[stage_in]]` descriptor, as both sides take it: Metal's
 /// `MTLStageInputOutputDescriptor`.
@@ -232,12 +263,30 @@ pub trait Side {
     /// `newBufferWithLength:options:` of shared storage, zeroed.
     fn zeroed_buffer(&mut self, length: usize) -> Answer<Handle>;
 
-    /// One command buffer with one compute encoder: the pipeline set, `buffers` bound at 0 up, one
-    /// `dispatchThreadgroups:threadsPerThreadgroup:`, and `commit`.
+    /// A 2D texture of `format`, `size` texels, one level, shader-read and shader-write, of shared
+    /// storage, whose level 0 is then `bytes` at `row_pitch` bytes a row
+    /// (`replaceRegion:mipmapLevel:withBytes:bytesPerRow:`).
+    ///
+    /// Every case states its own row pitch, because that pitch is part of what the case means and
+    /// a side that computed its own could disagree with the other silently.
+    fn texture_2d(
+        &mut self,
+        format: PixelFormat,
+        size: [u32; 2],
+        row_pitch: u32,
+        bytes: &[u8],
+    ) -> Answer<Handle>;
+
+    /// `getBytes:bytesPerRow:fromRegion:mipmapLevel:` of a texture's whole level 0, at `row_pitch`
+    /// bytes a row.
+    fn read_texture(&mut self, texture: Handle, size: [u32; 2], row_pitch: u32) -> Answer<Vec<u8>>;
+
+    /// One command buffer with one compute encoder: the pipeline set, `bindings` bound at 0 up per
+    /// kind, one `dispatchThreadgroups:threadsPerThreadgroup:`, and `commit`.
     fn dispatch(
         &mut self,
         pipeline: Handle,
-        buffers: &[Handle],
+        bindings: &Bindings<'_>,
         threadgroups: [u32; 3],
         threads: [u32; 3],
     ) -> Answer<Handle>;
@@ -261,8 +310,8 @@ pub trait Side {
         stage_input: &StageInput,
     ) -> Answer<Handle>;
 
-    /// One command buffer with one compute encoder: the pipeline set, `buffers` bound at 0 up,
-    /// each of `stage_in` set in the order the case lists them, one
+    /// One command buffer with one compute encoder: the pipeline set, `bindings` bound at 0 up per
+    /// kind, each of `stage_in` set in the order the case lists them, one
     /// `dispatchThreads:threadsPerThreadgroup:` of `grid` threads, and `commit`.
     ///
     /// `stage_in` is a list rather than one region because setting it twice is a case of its own:
@@ -270,7 +319,7 @@ pub trait Side {
     fn dispatch_threads(
         &mut self,
         pipeline: Handle,
-        buffers: &[Handle],
+        bindings: &Bindings<'_>,
         stage_in: &[StageInRegion],
         grid: [u32; 3],
         threads: [u32; 3],
