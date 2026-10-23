@@ -22,7 +22,10 @@ use crate::queue_slots::QueueSlots;
 use crate::render::{
     Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
 };
-use crate::sparse_query::{QueryPage, SparseTileQuery, TileSize};
+use crate::sparse_query::{
+    HeapFacts, QueryPage, SparseHeapSpec, SparseTextureFacts, SparseTextureSpec, SparseTileQuery,
+    TileSize,
+};
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::Value;
 use metal2vulkan::metal::state::{DepthStencilDescriptor, StencilDescriptor};
@@ -38,10 +41,10 @@ use objc2_metal::{
     MTLColorWriteMask, MTLCommandBuffer, MTLCommandBufferHandler, MTLCommandBufferStatus,
     MTLCommandEncoder, MTLCommandQueue, MTLCompareFunction, MTLComputeCommandEncoder,
     MTLComputePipelineDescriptor, MTLComputePipelineState, MTLCreateSystemDefaultDevice,
-    MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction,
-    MTLIndexType, MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor,
-    MTLIndirectCommandType, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction,
-    MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
+    MTLDepthStencilDescriptor, MTLDepthStencilState, MTLDevice, MTLEvent, MTLFunction, MTLHeap,
+    MTLHeapDescriptor, MTLHeapType, MTLIndexType, MTLIndirectCommandBuffer,
+    MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType, MTLIndirectRenderCommand,
+    MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
     MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
     MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
@@ -87,6 +90,10 @@ pub struct MetalSide {
     /// The depth and stencil states the case has made. Its own pool: an `MTLDepthStencilState` is
     /// its own Metal object, not another name for one of the pools above.
     depth_stencil_states: Vec<Retained<ProtocolObject<dyn MTLDepthStencilState>>>,
+    /// The heaps the case has made. Its own pool: an `MTLHeap` is its own Metal object, not
+    /// another name for one of the pools above, and not another name for the depth and stencil
+    /// states either.
+    heaps: Vec<Retained<ProtocolObject<dyn MTLHeap>>>,
     /// The scratch directory the metallibs are built in, removed when the side is dropped.
     scratch: Scratch,
 }
@@ -136,6 +143,7 @@ impl MetalSide {
             rate_maps: Vec::new(),
             argument_residents: Vec::new(),
             depth_stencil_states: Vec::new(),
+            heaps: Vec::new(),
             scratch: Scratch::new()?,
         })
     }
@@ -162,6 +170,14 @@ impl MetalSide {
             .get(handle.0 as usize)
             .map(|sampler| &**sampler)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("sampler {}", handle.0)))
+    }
+
+    /// The heap `handle` names.
+    fn held_heap(&self, handle: Handle) -> Answer<&ProtocolObject<dyn MTLHeap>> {
+        self.heaps
+            .get(handle.0 as usize)
+            .map(|heap| &**heap)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("heap {}", handle.0)))
     }
 
     /// The rasterization-rate map `handle` names.
@@ -2314,12 +2330,93 @@ impl Side for MetalSide {
             }
         })
     }
+
+    fn sparse_heap(&mut self, spec: &SparseHeapSpec) -> Answer<Handle> {
+        let descriptor = MTLHeapDescriptor::new();
+        descriptor.setType(MTLHeapType::Sparse);
+        descriptor.setStorageMode(MTLStorageMode::Private);
+        descriptor.setSparsePageSize(metal_page(spec.page));
+        descriptor.setSize(spec.size as usize);
+        let heap = self
+            .device
+            .newHeapWithDescriptor(&descriptor)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewHeapWithDescriptor",
+                    format!("a sparse heap of {} bytes returned nil", spec.size),
+                )
+            })?;
+        self.heaps.push(heap);
+        Ok(Handle(self.heaps.len() as u32 - 1))
+    }
+
+    fn heap_facts(&mut self, heap: Handle) -> Answer<HeapFacts> {
+        let heap = self.held_heap(heap)?;
+        Ok(HeapFacts {
+            heap_type: heap.r#type().0 as u64,
+            size: heap.size() as u64,
+            used_size: heap.usedSize() as u64,
+        })
+    }
+
+    fn heap_texture(&mut self, heap: Handle, spec: &SparseTextureSpec) -> Answer<Handle> {
+        let descriptor = sparse_texture_descriptor(spec);
+        let texture = self
+            .held_heap(heap)?
+            .newTextureWithDescriptor(&descriptor)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewTextureWithDescriptor",
+                    format!("{} on a heap returned nil", spec.site()),
+                )
+            })?;
+        self.textures.push(texture);
+        Ok(Handle(self.textures.len() as u32 - 1))
+    }
+
+    fn sparse_texture_facts(&mut self, texture: Handle) -> Answer<SparseTextureFacts> {
+        let texture = self.held_texture(texture)?;
+        Ok(SparseTextureFacts {
+            is_sparse: texture.isSparse(),
+            first_mipmap_in_tail: texture.firstMipmapInTail() as u64,
+            tail_size_in_bytes: texture.tailSizeInBytes() as u64,
+        })
+    }
 }
 
 /// Metal's `MTLSparsePageSize` for a case's page, by its raw value, so the two spellings cannot
 /// drift apart.
 fn metal_page(page: SparsePageSize) -> MTLSparsePageSize {
     MTLSparsePageSize(page.raw() as isize)
+}
+
+/// Metal's descriptor for a case's sparse texture: every field the case names, by its raw ordinal.
+///
+/// The storage is the heap's (`Private`) and the usage is shader-read, with the render-target bit
+/// where the case asks for it. Metal stops any other storage for a heap's texture even without its
+/// validation layer, so neither is a field a case may set.
+fn sparse_texture_descriptor(spec: &SparseTextureSpec) -> Retained<MTLTextureDescriptor> {
+    let descriptor = MTLTextureDescriptor::new();
+    descriptor.setTextureType(MTLTextureType(spec.texture_type.as_raw() as usize));
+    descriptor.setPixelFormat(MTLPixelFormat(spec.format.as_raw() as usize));
+    // SAFETY: each extent and count is a case's own, and the setters read nothing but the value
+    // they are given.
+    unsafe {
+        descriptor.setWidth(spec.size[0] as usize);
+        descriptor.setHeight(spec.size[1] as usize);
+        descriptor.setDepth(spec.size[2] as usize);
+        descriptor.setMipmapLevelCount(spec.levels as usize);
+        descriptor.setSampleCount(spec.samples as usize);
+        descriptor.setArrayLength(spec.array_length as usize);
+    }
+    let usage = if spec.render_target {
+        MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget
+    } else {
+        MTLTextureUsage::ShaderRead
+    };
+    descriptor.setUsage(usage);
+    descriptor.setStorageMode(MTLStorageMode::Private);
+    descriptor
 }
 
 /// A command buffer the slot probe holds, so the thread that frees a slot need not be the thread

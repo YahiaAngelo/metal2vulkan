@@ -481,6 +481,33 @@ impl<S: Side> Side for Announcing<S> {
         self.inner.sparse_tile_size_in_bytes(page)
     }
 
+    fn sparse_heap(&mut self, spec: &crate::sparse_query::SparseHeapSpec) -> Answer<Handle> {
+        self.at("sparse_heap");
+        self.inner.sparse_heap(spec)
+    }
+
+    fn heap_facts(&mut self, heap: Handle) -> Answer<crate::sparse_query::HeapFacts> {
+        self.at("heap_facts");
+        self.inner.heap_facts(heap)
+    }
+
+    fn heap_texture(
+        &mut self,
+        heap: Handle,
+        spec: &crate::sparse_query::SparseTextureSpec,
+    ) -> Answer<Handle> {
+        self.at("heap_texture");
+        self.inner.heap_texture(heap, spec)
+    }
+
+    fn sparse_texture_facts(
+        &mut self,
+        texture: Handle,
+    ) -> Answer<crate::sparse_query::SparseTextureFacts> {
+        self.at("sparse_texture_facts");
+        self.inner.sparse_texture_facts(texture)
+    }
+
     fn queue_slots(
         &mut self,
         max: Option<u32>,

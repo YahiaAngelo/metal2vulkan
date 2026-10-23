@@ -17,7 +17,10 @@ use crate::queue_slots::QueueSlots;
 use crate::render::{
     ColorState, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
 };
-use crate::sparse_query::{QueryPage, SparseTileQuery, TileSize};
+use crate::sparse_query::{
+    HeapFacts, QueryPage, SparseHeapSpec, SparseTextureFacts, SparseTextureSpec, SparseTileQuery,
+    TileSize,
+};
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::{Negative, Value};
 use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor};
@@ -34,7 +37,8 @@ use metal2vulkan::pipeline::{
 };
 use metal2vulkan_runtime::{
     BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue,
-    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, IndirectCommand,
+    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, Heap, HeapDescriptor,
+    HeapType, IndirectCommand,
     IndirectCommandBuffer, IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane,
     IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption, PipelineOptions,
     RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState, ResourceOptions,
@@ -84,6 +88,10 @@ pub struct RuntimeSide<'a> {
     /// The depth and stencil states the case has made. Its own pool: a `DepthStencilState` is its
     /// own runtime object, not another name for one of the pools above.
     depth_stencil_states: Vec<DepthStencilState>,
+    /// The heaps the case has made. Its own pool: a `Heap` is its own runtime object, not another
+    /// name for one of the pools above, and not another name for the depth and stencil states
+    /// either.
+    heaps: Vec<Heap>,
     /// The degrade-notice codes the device has delivered so far, which `announced` takes away.
     notices: Box<dyn FnMut() -> Vec<String> + 'a>,
 }
@@ -106,6 +114,7 @@ impl<'a> RuntimeSide<'a> {
             render_pipelines: Vec::new(),
             command_buffers_indirect: Vec::new(),
             depth_stencil_states: Vec::new(),
+            heaps: Vec::new(),
             notices: Box::new(notices),
         }
     }
@@ -208,6 +217,13 @@ impl<'a> RuntimeSide<'a> {
         self.textures
             .get(handle.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+    }
+
+    /// The heap `handle` names.
+    fn held_heap(&self, handle: Handle) -> Answer<&Heap> {
+        self.heaps
+            .get(handle.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("heap {}", handle.0)))
     }
 
     /// The sampler state `handle` names.
@@ -2332,6 +2348,70 @@ impl Side for RuntimeSide<'_> {
             Some(page) => self.device.sparse_tile_size_in_bytes_for_page(page),
         })
     }
+
+    fn sparse_heap(&mut self, spec: &SparseHeapSpec) -> Answer<Handle> {
+        let mut descriptor =
+            HeapDescriptor::new(HeapType::Sparse, spec.size, ResourceOptions::private());
+        descriptor.sparse_page_size = spec.page;
+        let heap = self
+            .device
+            .new_heap(&descriptor)
+            .map_err(Failure::from_error)?;
+        self.heaps.push(heap);
+        Ok(Handle(self.heaps.len() as u32 - 1))
+    }
+
+    fn heap_facts(&mut self, heap: Handle) -> Answer<HeapFacts> {
+        let heap = self.held_heap(heap)?;
+        Ok(HeapFacts {
+            heap_type: heap.heap_type().raw(),
+            size: heap.size(),
+            used_size: heap.used_size(),
+        })
+    }
+
+    fn heap_texture(&mut self, heap: Handle, spec: &SparseTextureSpec) -> Answer<Handle> {
+        let descriptor = sparse_texture_descriptor(spec);
+        let texture = self
+            .held_heap(heap)?
+            .new_texture(&descriptor)
+            .map_err(Failure::from_error)?;
+        self.textures.push(texture);
+        Ok(Handle(self.textures.len() as u32 - 1))
+    }
+
+    fn sparse_texture_facts(&mut self, texture: Handle) -> Answer<SparseTextureFacts> {
+        let texture = self.held_texture(texture)?;
+        Ok(SparseTextureFacts {
+            is_sparse: texture.is_sparse(),
+            // Metal answers both getters of every texture; the runtime answers `None` for one
+            // that is not sparse, which is the same fact in the two APIs' spellings, and the
+            // lane's own reading of it. A case asks them only of a sparse texture.
+            first_mipmap_in_tail: texture.first_mipmap_in_tail().unwrap_or(0),
+            tail_size_in_bytes: texture.tail_size_in_bytes().unwrap_or(0),
+        })
+    }
+}
+
+/// The runtime's descriptor for a case's sparse texture: the case's vocabulary is Metal's own, so
+/// every field reaches the descriptor unchanged.
+fn sparse_texture_descriptor(spec: &SparseTextureSpec) -> TextureDescriptor {
+    let mut descriptor = TextureDescriptor::default();
+    descriptor.texture_type = spec.texture_type;
+    descriptor.pixel_format = spec.format;
+    descriptor.width = u64::from(spec.size[0]);
+    descriptor.height = u64::from(spec.size[1]);
+    descriptor.depth = u64::from(spec.size[2]);
+    descriptor.mipmap_level_count = u64::from(spec.levels);
+    descriptor.sample_count = u64::from(spec.samples);
+    descriptor.array_length = u64::from(spec.array_length);
+    descriptor.usage = if spec.render_target {
+        TextureUsage::SHADER_READ | TextureUsage::RENDER_TARGET
+    } else {
+        TextureUsage::SHADER_READ
+    };
+    descriptor.resource_options = ResourceOptions::private();
+    descriptor
 }
 
 /// The runtime's color attachment descriptor for one the case states: every field of

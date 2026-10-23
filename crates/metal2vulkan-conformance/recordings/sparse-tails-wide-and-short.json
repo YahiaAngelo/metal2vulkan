@@ -1,0 +1,1647 @@
+{
+  "format": 1,
+  "case": "sparse-tails-wide-and-short",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "heap-and-textures",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6f4b9827923145ba0232c3ecff060f90e390e0289862122328deb3d00ccc4302"
+                        }
+                      }
+                    },
+                    {
+                      "name": "asks-heap",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "sparse_heap",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/1000x3x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/1000x3x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 32768
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/1000x1x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/1000x1x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/512x2x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/512x2x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/2048x4x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 32768
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/2048x4x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 49152
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/3x1000x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR32Float/Type2D/3x1000x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 32768
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/1000x3x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 65536
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/1000x3x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 98304
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/1000x1x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/1000x1x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 49152
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/512x2x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/512x2x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 32768
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/2048x4x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 131072
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/2048x4x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 196608
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/3x1000x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 65536
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatRGBA32Float/Type2D/3x1000x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 98304
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/1000x3x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/1000x3x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/1000x1x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/1000x1x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/512x2x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/512x2x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/2048x4x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/2048x4x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/3x1000x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatR8Unorm/Type2D/3x1000x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGR10_XR/Type2D/1000x3x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGR10_XR/Type2D/1000x3x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 32768
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGR10_XR/Type2D/1000x1x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGR10_XR/Type2D/1000x1x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGR10_XR/Type2D/512x2x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGR10_XR/Type2D/512x2x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGR10_XR/Type2D/2048x4x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 32768
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGR10_XR/Type2D/2048x4x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 49152
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGR10_XR/Type2D/3x1000x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGR10_XR/Type2D/3x1000x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 32768
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGRA10_XR/Type2D/1000x3x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 32768
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGRA10_XR/Type2D/1000x3x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 49152
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGRA10_XR/Type2D/1000x1x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGRA10_XR/Type2D/1000x1x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 32768
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGRA10_XR/Type2D/512x2x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGRA10_XR/Type2D/512x2x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 16384
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGRA10_XR/Type2D/2048x4x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 65536
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGRA10_XR/Type2D/2048x4x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 98304
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGRA10_XR/Type2D/3x1000x1/levels-1/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 32768
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "MTLPixelFormatBGRA10_XR/Type2D/3x1000x1/levels-4/samples-1/slices-1",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texture",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "fields": {
+                                "first_mipmap_in_tail": {
+                                  "uint": 0
+                                },
+                                "is_sparse": {
+                                  "bool": true
+                                },
+                                "tail_size_in_bytes": {
+                                  "uint": 49152
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}
