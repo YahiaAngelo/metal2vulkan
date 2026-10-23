@@ -555,13 +555,13 @@ MTL4CounterHeap	invalidateCounterRange:	invalidateCounterRange
 MTL4CounterHeap	label	label	
 MTL4CounterHeap	resolveCounterRange:	resolveCounterRange	
 MTL4CounterHeap	setLabel:	setLabel	
-MTL4CounterHeap	type	resolveCounterRange	
+MTL4CounterHeap	type	type	MTL4CounterHeapType
 MTL4CounterHeapDescriptor	count	count	
 MTL4CounterHeapDescriptor	init	init	MTL4CounterHeapDescriptor
 MTL4CounterHeapDescriptor	new	new	MTL4CounterHeapDescriptor
 MTL4CounterHeapDescriptor	setCount:	setCount	
 MTL4CounterHeapDescriptor	setType:	setType	
-MTL4CounterHeapDescriptor	type	setType	
+MTL4CounterHeapDescriptor	type	type	MTL4CounterHeapType
 MTL4FunctionDescriptor	init	init	MTL4FunctionDescriptor
 MTL4FunctionDescriptor	new	new	MTL4FunctionDescriptor
 MTL4IndirectInstanceAccelerationStructureDescriptor	init	init	MTL4IndirectInstanceAccelerationStructureDescriptor
@@ -1141,7 +1141,7 @@ MTLArgument	textureDataType	textureDataType	MTLDataType
 MTLArgument	textureType	textureType	MTLTextureType
 MTLArgument	threadgroupMemoryAlignment	threadgroupMemoryAlignment	
 MTLArgument	threadgroupMemoryDataSize	threadgroupMemoryDataSize	
-MTLArgument	type	access	MTLBindingAccess
+MTLArgument	type	type	MTLArgumentType
 MTLArgumentDescriptor	access	access	MTLBindingAccess
 MTLArgumentDescriptor	argumentDescriptor	argumentDescriptor	MTLArgumentDescriptor
 MTLArgumentDescriptor	arrayLength	arrayLength	
@@ -1235,7 +1235,7 @@ MTLBinding	index	index
 MTLBinding	isArgument	isArgument	
 MTLBinding	isUsed	isUsed	
 MTLBinding	name	name	
-MTLBinding	type	access	MTLBindingAccess
+MTLBinding	type	type	MTLBindingType
 MTLBlitCommandEncoder	copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:	copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin	
 MTLBlitCommandEncoder	copyFromBuffer:sourceOffset:sourceBytesPerRow:sourceBytesPerImage:sourceSize:toTexture:destinationSlice:destinationLevel:destinationOrigin:options:	copyFromBuffer_sourceOffset_sourceBytesPerRow_sourceBytesPerImage_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin_options	
 MTLBlitCommandEncoder	copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:	copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size	
@@ -1759,7 +1759,7 @@ MTLFunctionConstant	init	init	MTLFunctionConstant
 MTLFunctionConstant	name	name	
 MTLFunctionConstant	new	new	MTLFunctionConstant
 MTLFunctionConstant	required	required	
-MTLFunctionConstant	type	index	
+MTLFunctionConstant	type	type	MTLDataType
 MTLFunctionConstantValues	init	init	MTLFunctionConstantValues
 MTLFunctionConstantValues	new	new	MTLFunctionConstantValues
 MTLFunctionConstantValues	reset	reset	
@@ -1786,7 +1786,7 @@ MTLFunctionHandle	name	name
 MTLFunctionLog	debugLocation	debugLocation	MTLFunctionLogDebugLocation
 MTLFunctionLog	encoderLabel	encoderLabel	
 MTLFunctionLog	function	function	MTLFunction
-MTLFunctionLog	type	encoderLabel	
+MTLFunctionLog	type	type	MTLFunctionLogType
 MTLFunctionLogDebugLocation	URL	URL	
 MTLFunctionLogDebugLocation	column	column	
 MTLFunctionLogDebugLocation	functionName	functionName	
@@ -1840,7 +1840,7 @@ MTLHeap	setLabel:	setLabel
 MTLHeap	setPurgeableState:	setPurgeableState	MTLPurgeableState
 MTLHeap	size	size	
 MTLHeap	storageMode	storageMode	MTLStorageMode
-MTLHeap	type	newBufferWithLength_options_offset	MTLBuffer
+MTLHeap	type	type	MTLHeapType
 MTLHeap	usedSize	usedSize	
 MTLHeapDescriptor	cpuCacheMode	cpuCacheMode	MTLCPUCacheMode
 MTLHeapDescriptor	hazardTrackingMode	hazardTrackingMode	MTLHazardTrackingMode
@@ -1859,7 +1859,7 @@ MTLHeapDescriptor	setType:	setType
 MTLHeapDescriptor	size	size	
 MTLHeapDescriptor	sparsePageSize	sparsePageSize	MTLSparsePageSize
 MTLHeapDescriptor	storageMode	storageMode	MTLStorageMode
-MTLHeapDescriptor	type	setType	
+MTLHeapDescriptor	type	type	MTLHeapType
 MTLIOCommandBuffer	addBarrier	addBarrier	
 MTLIOCommandBuffer	addCompletedHandler:	addCompletedHandler	
 MTLIOCommandBuffer	commit	commit	
@@ -1894,7 +1894,7 @@ MTLIOCommandQueueDescriptor	setMaxCommandsInFlight:	setMaxCommandsInFlight
 MTLIOCommandQueueDescriptor	setPriority:	setPriority	
 MTLIOCommandQueueDescriptor	setScratchBufferAllocator:	setScratchBufferAllocator	
 MTLIOCommandQueueDescriptor	setType:	setType	
-MTLIOCommandQueueDescriptor	type	setType	
+MTLIOCommandQueueDescriptor	type	type	MTLIOCommandQueueType
 MTLIOFileHandle	label	label	
 MTLIOFileHandle	setLabel:	setLabel	
 MTLIOScratchBuffer	buffer	buffer	MTLBuffer
@@ -2068,7 +2068,7 @@ MTLLibrary	newIntersectionFunctionWithDescriptor:completionHandler:	newIntersect
 MTLLibrary	newIntersectionFunctionWithDescriptor:error:_	newIntersectionFunctionWithDescriptor_error	MTLFunction
 MTLLibrary	reflectionForFunctionWithName:	reflectionForFunctionWithName	MTLFunctionReflection
 MTLLibrary	setLabel:	setLabel	
-MTLLibrary	type	installName	
+MTLLibrary	type	type	MTLLibraryType
 MTLLinkedFunctions	binaryFunctions	binaryFunctions	MTLFunction
 MTLLinkedFunctions	functions	functions	MTLFunction
 MTLLinkedFunctions	groups	groups	MTLFunction

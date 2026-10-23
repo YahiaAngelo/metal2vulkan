@@ -437,6 +437,8 @@ edits one.
 | `cost` | The cost half: the counts our side moved, their regions, their bounds and the three cost verdicts |
 | `work`, `runtime_work`, `metal_work` | The copy-and-fill vocabulary a case states as data, and the two sides that run it |
 | `measured` | The committed Metal measurements a ported case reads, under the public fixtures |
+| `argument_encoders` | The argument-encoder vocabulary: what a case asks an `MTLArgumentEncoder` to do, and the layout facts it can observe without a host's own addresses in them |
+| `function_bindings` | What a function's reflection says its arguments are: `MTLBinding` and the type tree under it |
 | `known_gaps` | The ledger of open gaps — a refusal or a divergence, per venue — held in both directions; it sets the exit status, never a verdict |
 | `cases` | The case set itself, one module per family |
 
@@ -469,6 +471,8 @@ edits one.
 | `simdgroup_lockstep` | The threadgroup words two loops only a simdgroup's lockstep orders came to | run on Metal |
 | `color_write_masks` | Which channels of a texel a draw changes under a write mask of none, some and all of them | run on Metal |
 | `fresh_contents` | What a new buffer or texture reads before anything writes it, and after memory that was written was released | run on Metal |
+| `argument_encoders` | What an argument encoder says of a layout, which word of an argument buffer each argument landed in, and what the kernel then sampled through it | run on Metal |
+| `function_bindings` | What a kernel's reflection says each argument is: the binding, its subprotocol's fields, and an argument buffer's struct type member by member | run on Metal |
 
 A carried answer is our own measurement of this chip, stated in the shape the case emits, and its
 case forbids re-recording with the reason why. Record mode refuses such a case rather than

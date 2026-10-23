@@ -656,6 +656,118 @@ pub trait Side {
         Err(Failure::unavailable("argument_buffer"))
     }
 
+    /// `newFunctionWithName:` of `entry`, then `newArgumentEncoderWithBufferIndex:` of
+    /// `buffer_index`: the encoder of the argument buffer that function takes at that buffer
+    /// index, as its own AIR lays it out.
+    ///
+    /// The encoder has its own handle space: an `MTLArgumentEncoder` is its own Metal object, not
+    /// another name for a library, a pipeline or a buffer. No argument buffer is set on it yet, so
+    /// a case states that step itself ([`Side::set_argument_buffer`]).
+    fn argument_encoder(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        buffer_index: u32,
+    ) -> Answer<Handle> {
+        let _ = (library, entry, buffer_index);
+        Err(Failure::unavailable("argument_encoder"))
+    }
+
+    /// `newArgumentEncoderWithArguments:` of the descriptors `arguments` states: the encoder of a
+    /// layout a program describes itself rather than taking from a function.
+    ///
+    /// It joins the same handle space as [`Side::argument_encoder`]: one encoder kind, made from
+    /// two descriptions.
+    fn argument_encoder_with_arguments(
+        &mut self,
+        arguments: &[crate::argument_encoders::ArgumentDescriptorSpec],
+    ) -> Answer<Handle> {
+        let _ = arguments;
+        Err(Failure::unavailable("argument_encoder_with_arguments"))
+    }
+
+    /// `newArgumentEncoderForBufferAtIndex:`: the encoder of the argument buffer the buffer
+    /// argument at `index` points to, with no argument buffer set.
+    fn nested_argument_encoder(&mut self, encoder: Handle, index: u32) -> Answer<Handle> {
+        let _ = (encoder, index);
+        Err(Failure::unavailable("nested_argument_encoder"))
+    }
+
+    /// `setLabel:` of `label`, then what the encoder answers of itself
+    /// ([`EncoderFacts`](crate::argument_encoders::EncoderFacts)): `label`, `encodedLength`,
+    /// `alignment` and whether `device` is the case's own.
+    ///
+    /// The label is set in the same call as the getters are read, because what a case means by it
+    /// is a round trip: a label Metal keeps is a label Metal answers.
+    fn argument_encoder_facts(
+        &mut self,
+        encoder: Handle,
+        label: &str,
+    ) -> Answer<crate::argument_encoders::EncoderFacts> {
+        let _ = (encoder, label);
+        Err(Failure::unavailable("argument_encoder_facts"))
+    }
+
+    /// `setArgumentBuffer:offset:` of `buffer` at `offset`, or
+    /// `setArgumentBuffer:startOffset:arrayElement:` where `element` names one, which puts the
+    /// arguments at `offset + element * encodedLength`.
+    ///
+    /// One call for the two selectors, because they are the same step of a case: where in a buffer
+    /// this encoder's arguments go.
+    fn set_argument_buffer(
+        &mut self,
+        encoder: Handle,
+        buffer: Handle,
+        offset: u64,
+        element: Option<u64>,
+    ) -> Answer<()> {
+        let _ = (encoder, buffer, offset, element);
+        Err(Failure::unavailable("set_argument_buffer"))
+    }
+
+    /// One write through an argument encoder
+    /// ([`ArgumentWrite`](crate::argument_encoders::ArgumentWrite)).
+    ///
+    /// A side that binds the encoded buffer for a dispatch makes the textures the write names
+    /// resident (`useResource:usage:`), because Metal requires that of a resource a function
+    /// reaches through an argument buffer rather than through a slot.
+    fn encode_argument(
+        &mut self,
+        encoder: Handle,
+        write: &crate::argument_encoders::ArgumentWrite,
+    ) -> Answer<()> {
+        let _ = (encoder, write);
+        Err(Failure::unavailable("encode_argument"))
+    }
+
+    /// `newComputePipelineStateWithFunction:options:reflection:error:` of the library's `entry`,
+    /// asking for binding information, and every argument the reflection answers
+    /// ([`crate::function_bindings`]).
+    ///
+    /// One call, because what it observes is a **tree**: each binding, the subprotocol its own
+    /// `type` says it conforms to, and for an argument buffer the struct type whose members are the
+    /// layout contract. A case cannot state that as independent calls, because which getter to ask
+    /// of a binding is decided by what an earlier getter answered.
+    fn compute_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        entry: &str,
+    ) -> Answer<Vec<crate::function_bindings::BindingFacts>> {
+        let _ = (library, entry);
+        Err(Failure::unavailable("compute_pipeline_bindings"))
+    }
+
+    /// Where `constantDataAtIndex:` of `index` points, as a byte offset inside the encoder's
+    /// arguments.
+    ///
+    /// The call answers a CPU address, which is the host's own number and belongs in no
+    /// recording. Its offset from the arguments' start is the layout fact the address stands for,
+    /// and it is exactly comparable.
+    fn constant_data_offset(&mut self, encoder: Handle, index: u32) -> Answer<u64> {
+        let _ = (encoder, index);
+        Err(Failure::unavailable("constant_data_offset"))
+    }
+
     /// One command buffer with one compute encoder: the pipeline set, `bindings` bound at 0 up per
     /// kind, one `dispatchThreadgroups:threadsPerThreadgroup:`, and `commit`.
     fn dispatch(

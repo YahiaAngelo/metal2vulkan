@@ -59,7 +59,14 @@ def methods(body: str, owner: str = ""):
     """Every `(selector, rust name, answered type)` the declarations in `body` bind."""
     for match in re.finditer(r"#\[unsafe\(method\(([^)]*)\)\)\]", body):
         rest = body[match.end() :]
-        fn = re.search(r"\n\s*(?:pub\s+)?(?:unsafe\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", rest)
+        # `r#type`, which is how `objc2` spells a binding whose selector is a Rust keyword. Without
+        # the `r#` the search steps over such a method and lands on the **next** one, which keyed
+        # ten selectors to a neighbour's Rust name: `MTLHeap`'s `type` read as
+        # `newBufferWithLength_options_offset`, and `MTLArgument`'s and `MTLBinding`'s as `access`.
+        # So a call to the neighbour was credited to `type`, and the real getter to nothing.
+        fn = re.search(
+            r"\n\s*(?:pub\s+)?(?:unsafe\s+)?fn\s+(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*\(", rest
+        )
         if not fn:
             continue
         # The signature ends at the `;` or `{` that follows its parameter list, so a return type

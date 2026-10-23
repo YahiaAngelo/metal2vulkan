@@ -630,7 +630,13 @@ def read_leg(api: Api, src: Path, files: list[str], enums: set[str]) -> Leg:
                 at = fn.start + match.end()
                 stop = _statement_end(text, at, fn.end)
                 typing.bind(fn.start + match.start(), match.group(1), match.group(2) or "", text[at:stop])
-            for match in re.finditer(r"\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(", text[fn.start : fn.end]):
+            # `r#type`, which is how `objc2` spells a binding whose selector is a Rust keyword.
+            # Without the `r#` such a call site matches nothing at all — the identifier after the
+            # dot is `r`, which is not followed by `(` — so every `MTLBinding`'s and
+            # `MTLArgument`'s `type` the leg reads was invisible here.
+            for match in re.finditer(
+                r"\.\s*(?:r#)?([A-Za-z_][A-Za-z0-9_]*)\s*\(", text[fn.start : fn.end]
+            ):
                 rust = match.group(1)
                 at = fn.start + match.start()
                 here = tuple(v for lo, hi, v in arms if lo <= at < hi)

@@ -10,13 +10,11 @@ The suite reaches Metal through `objc2-metal`, whose Rust name for a binding is 
 
 Its limits, measured rather than asserted:
 
-- **488 of 587 call sites** in the Metal leg resolve to an item of the SDK. 31 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
-- **99 call sites' receivers did not type.** They cost the count 8 selectors, which the suite calls and which this attributes to no item:
-  - `type`, bound by `MTLArgument`, `MTLArgumentDescriptor`, `MTLBinding`, `MTLPointerType`, `MTLTensorReferenceType`, `MTLTextureReferenceType`
+- **572 of 678 call sites** in the Metal leg resolve to an item of the SDK. 32 of those resolve because only one type in `objc2-metal` binds the name at all, so no typing was needed.
+- **106 call sites' receivers did not type.** They cost the count 6 selectors, which the suite calls and which this attributes to no item:
   - `count`, bound by `MTL4CounterHeap`, `MTL4CounterHeapDescriptor`
   - `executeCommandsInBuffer:withRange:`, bound by `MTL4ComputeCommandEncoder`, `MTL4RenderCommandEncoder`, `MTLComputeCommandEncoder`, `MTLRenderCommandEncoder`
   - `imageblockSampleLength`, bound by `MTL4RenderPassDescriptor`, `MTLRenderPassDescriptor`, `MTLRenderPipelineState`
-  - `index`, bound by `MTLArgument`, `MTLArgumentDescriptor`, `MTLBinding`, `MTLFunctionConstant`
   - `maxTotalThreadsPerThreadgroup`, bound by `MTL4ComputePipelineDescriptor`, `MTL4TileRenderPipelineDescriptor`, `MTLCompileOptions`, `MTLComputePipelineDescriptor`, `MTLComputePipelineState`, `MTLRenderPipelineState`, `MTLTileRenderPipelineDescriptor`
   - `resourceOptions`, bound by `MTLHeap`, `MTLHeapDescriptor`, `MTLResource`, `MTLTensorDescriptor`, `MTLTextureDescriptor`
   - `threadgroupSizeMatchesTileSize`, bound by `MTL4TileRenderPipelineDescriptor`, `MTLRenderPipelineState`, `MTLTileRenderPipelineDescriptor`
@@ -30,14 +28,14 @@ Its limits, measured rather than asserted:
 | | |
 |---|---|
 | implemented Metal items | 958 |
-| of those, exercised by the suite's Metal leg | 232 |
-| of those, not exercised | 726 |
+| of those, exercised by the suite's Metal leg | 233 |
+| of those, not exercised | 725 |
 | share exercised | 24% |
-| of those exercised, no case reaching it loosens anything | 115 |
+| of those exercised, no case reaching it loosens anything | 116 |
 | of those exercised, a case reaching it loosens some site | 117 |
-| case modules | 83 |
+| case modules | 85 |
 | committed recordings | 708 |
-| distinct SDK items the Metal leg calls | 245 |
+| distinct SDK items the Metal leg calls | 320 |
 | ledger rows (a case whose gap is recorded) | 21 |
 
 A tolerance names a **site of a transcript**, not an item, so the last two rows are read as written: a case that loosens one site of its own transcript may compare every other field of it exactly, and this derivation cannot tell which of a case's fields came from which Metal call. Where the distinction matters, read the case.
@@ -65,8 +63,8 @@ Every container with an implemented item, by how much of it the suite reaches.
 | `MTLMeshRenderPipelineDescriptor` | 18 | 5 | 13 | `mesh_barriers`, `mesh_commands`, `mesh_draws` |
 | the header's free functions | 12 | 0 | 12 |  |
 | `MTLFunction` | 12 | 0 | 12 |  |
-| `MTLHeap` | 17 | 5 | 12 | `compressed_moves`, `sparse_heaps`, `texture_fills`, `two_plane_copies`… |
 | `MTLIndirectComputeCommand` | 12 | 0 | 12 |  |
+| `MTLHeap` | 17 | 6 | 11 | `compressed_moves`, `sparse_heaps`, `texture_fills`, `two_plane_copies`… |
 | `MTLTileRenderPipelineDescriptor` | 15 | 4 | 11 | `tile_threadgroups` |
 | `MTLLibrary` | 11 | 1 | 10 | `astc_textures`, `border_swizzles`, `buffer_blits`, `buffer_depth_samples`… |
 | `MTLRasterizationRateLayerDescriptor` | 10 | 0 | 10 |  |
@@ -168,7 +166,7 @@ A container is one Objective-C type; the SDK header it sits in is the family of 
 | `MTLRenderPass.h` | 41 | 20 | 21 |
 | `MTLIndirectCommandBuffer.h` | 26 | 6 | 20 |
 | `MTLBlitCommandEncoder.h` | 22 | 5 | 17 |
-| `MTLHeap.h` | 25 | 10 | 15 |
+| `MTLHeap.h` | 25 | 11 | 14 |
 | `MTLSampler.h` | 19 | 8 | 11 |
 | `MTLBinaryArchive.h` | 9 | 0 | 9 |
 | `MTLCommandBuffer.h` | 21 | 12 | 9 |
@@ -253,7 +251,7 @@ An implemented container no case's Metal leg touches. These are the families of 
 
 | | |
 |---|---|
-| case modules | 83 |
+| case modules | 85 |
 | committed recordings | 708 |
 | recorded runs behind a case, median | 3 |
 | recorded runs, least and most | 1 and 30 |
@@ -268,13 +266,13 @@ An implemented container no case's Metal leg touches. These are the families of 
 | loosenings used | `Unchecked`, `Absolute`, `Ulps` |
 | justifications named | `Degradation`, `AcceptedDifference` |
 | modules forbidding a re-record | 8 |
-| `Side` methods (the suite's whole device vocabulary) | 62 |
-| `Side` methods the Metal leg reaches an SDK item through | 48 |
+| `Side` methods (the suite's whole device vocabulary) | 70 |
+| `Side` methods the Metal leg reaches an SDK item through | 56 |
 | SDK items a case's Metal leg reaches, median | 33 |
 | the same, least and most | 0 and 87 |
-| Metal call sites in the leg | 587 |
-| distinct selectors the leg sends | 230 |
-| of those, resolved to an item of the coverage map | 222 |
+| Metal call sites in the leg | 678 |
+| distinct selectors the leg sends | 286 |
+| of those, resolved to an item of the coverage map | 280 |
 | oracles the recordings name | `apple-m3-max` ×708 |
 
 ## By family
@@ -283,6 +281,7 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 
 | family | cases | Metal ran | compared | items reached |
 |---|---|---|---|---|
+| `argument_encoders` | 0 | 0 | every field | 0 |
 | `astc_textures` | 28 | 28 | 1 tolerance(s): `Degradation` | 22 |
 | `border_swizzles` | 8 | 8 | 1 tolerance(s): `Degradation` | 30 |
 | `buffer_blits` | 4 | 4 | every field | 15 |
@@ -313,6 +312,7 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `format_copies` | 16 | 16 | every field | 31 |
 | `frame_chains` | 1 | 1 | every field | 86 |
 | `fresh_contents` | 87 | 87 | every field | 33 |
+| `function_bindings` | 0 | 0 | every field | 0 |
 | `half_output_blends` | 6 | 6 | every field | 69 |
 | `half_read_nans` | 6 | 6 | every field | 19 |
 | `half_storage_writes` | 9 | 9 | every field | 11 |
@@ -347,7 +347,7 @@ Each case module: the cases it holds, the `Side` methods it calls, and how many 
 | `shared_exponent_storage` | 5 | 5 | every field | 22 |
 | `simdgroup_lockstep` | 2 | 2 | every field | 7 |
 | `snorm_tile_store` | 7 | 7 | 1 tolerance(s): `Degradation` | 69 |
-| `sparse_heaps` | 6 | 6 | every field | 21 |
+| `sparse_heaps` | 6 | 6 | every field | 22 |
 | `sparse_tiles` | 4 | 4 | every field | 4 |
 | `srgb_fetch` | 2 | 2 | every field | 81 |
 | `stage_in_regions` | 1 | 1 | every field | 21 |
@@ -922,8 +922,8 @@ One row per implemented item of the SDK, in the coverage map's order. *exercised
 | `newBufferWithLength:options:` | no | — | — |
 | `newTextureWithDescriptor:` | yes | `sparse_heaps` | 6 |
 | `setPurgeableState:` | no | — | — |
-| `type` | yes | `texture_fills`, `two_plane_heap_blits` | 3 |
-| `newBufferWithLength:options:offset:` | no | — | — |
+| `type` | yes | `sparse_heaps` | 6 |
+| `newBufferWithLength:options:offset:` | yes | `texture_fills`, `two_plane_heap_blits` | 3 |
 | `newTextureWithDescriptor:offset:` | yes | `compressed_moves`, `texture_fills`, `two_plane_copies`, `two_plane_heap_blits` | 18 |
 
 ### `MTLHeapDescriptor`
@@ -1830,16 +1830,90 @@ An item the Metal leg calls that no case module was found to reach: either a `Si
 
 | item | status |
 |---|---|
+| `MTLArgumentDescriptor` `access` | implemented |
+| `MTLArgumentDescriptor` `arrayLength` | implemented |
+| `MTLArgumentDescriptor` `constantBlockAlignment` | implemented |
+| `MTLArgumentDescriptor` `dataType` | implemented |
+| `MTLArgumentDescriptor` `index` | implemented |
+| `MTLArgumentDescriptor` `textureType` | implemented |
+| `MTLArgumentEncoder` `alignment` | implemented |
+| `MTLArgumentEncoder` `constantDataAtIndex:` | implemented |
+| `MTLArgumentEncoder` `device` | implemented |
+| `MTLArgumentEncoder` `encodedLength` | implemented |
+| `MTLArgumentEncoder` `label` | implemented |
+| `MTLArgumentEncoder` `newArgumentEncoderForBufferAtIndex:` | implemented |
+| `MTLArgumentEncoder` `setArgumentBuffer:offset:` | implemented |
+| `MTLArgumentEncoder` `setArgumentBuffer:startOffset:arrayElement:` | implemented |
+| `MTLArgumentEncoder` `setBuffer:offset:atIndex:` | implemented |
+| `MTLArgumentEncoder` `setBuffers:offsets:withRange:` | implemented |
+| `MTLArgumentEncoder` `setComputePipelineState:atIndex:` | implemented |
+| `MTLArgumentEncoder` `setComputePipelineStates:withRange:` | implemented |
+| `MTLArgumentEncoder` `setIndirectCommandBuffer:atIndex:` | implemented |
+| `MTLArgumentEncoder` `setIndirectCommandBuffers:withRange:` | implemented |
+| `MTLArgumentEncoder` `setRenderPipelineState:atIndex:` | implemented |
+| `MTLArgumentEncoder` `setRenderPipelineStates:withRange:` | implemented |
+| `MTLArgumentEncoder` `setSamplerState:atIndex:` | implemented |
+| `MTLArgumentEncoder` `setSamplerStates:withRange:` | implemented |
+| `MTLArgumentEncoder` `setTexture:atIndex:` | implemented |
+| `MTLArgumentEncoder` `setTextures:withRange:` | implemented |
+| `MTLArgumentEncoder` `setVisibleFunctionTable:atIndex:` | implemented |
+| `MTLArgumentEncoder` `setVisibleFunctionTables:withRange:` | implemented |
+| `MTLArrayType` `argumentIndexStride` | implemented |
+| `MTLArrayType` `arrayLength` | implemented |
+| `MTLArrayType` `elementArrayType` | implemented |
+| `MTLArrayType` `elementPointerType` | implemented |
+| `MTLArrayType` `elementStructType` | implemented |
+| `MTLArrayType` `elementTextureReferenceType` | implemented |
+| `MTLArrayType` `elementType` | implemented |
+| `MTLArrayType` `stride` | implemented |
+| `MTLBinding` `access` | implemented |
+| `MTLBinding` `argument` | implemented |
+| `MTLBinding` `index` | implemented |
+| `MTLBinding` `name` | implemented |
+| `MTLBinding` `type` | implemented |
+| `MTLBufferBinding` `bufferAlignment` | implemented |
+| `MTLBufferBinding` `bufferDataSize` | implemented |
+| `MTLBufferBinding` `bufferDataType` | implemented |
+| `MTLBufferBinding` `bufferPointerType` | implemented |
+| `MTLBufferBinding` `bufferStructType` | implemented |
 | `MTLComputeCommandEncoder` `setSamplerState:atIndex:` | implemented |
 | `MTLComputeCommandEncoder` `setStageInRegion:` | implemented |
 | `MTLComputeCommandEncoder` `setStageInRegionWithIndirectBuffer:indirectBufferOffset:` | implemented |
 | `MTLComputeCommandEncoder` `useResource:usage:` | implemented |
+| `MTLComputePipelineReflection` `bindings` | implemented |
 | `MTLDevice` `name` | implemented |
+| `MTLDevice` `newArgumentEncoderWithArguments:` | implemented |
+| `MTLDevice` `newComputePipelineStateWithFunction:options:reflection:error:` | implemented |
+| `MTLDevice` `registryID` | implemented |
+| `MTLFunction` `newArgumentEncoderWithBufferIndex:` | implemented |
+| `MTLPointerType` `access` | implemented |
+| `MTLPointerType` `alignment` | implemented |
+| `MTLPointerType` `dataSize` | implemented |
+| `MTLPointerType` `elementArrayType` | implemented |
+| `MTLPointerType` `elementIsArgumentBuffer` | implemented |
+| `MTLPointerType` `elementStructType` | implemented |
+| `MTLPointerType` `elementType` | implemented |
 | `MTLRenderCommandEncoder` `dispatchThreadsPerTile:` | implemented |
 | `MTLRenderCommandEncoder` `drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:` | implemented |
 | `MTLRenderCommandEncoder` `setTileBuffer:offset:atIndex:` | implemented |
 | `MTLRenderCommandEncoder` `setTileBytes:length:atIndex:` | implemented |
 | `MTLRenderCommandEncoder` `setTileTexture:atIndex:` | implemented |
+| `MTLStructMember` `argumentIndex` | implemented |
+| `MTLStructMember` `arrayType` | implemented |
+| `MTLStructMember` `dataType` | implemented |
+| `MTLStructMember` `name` | implemented |
+| `MTLStructMember` `offset` | implemented |
+| `MTLStructMember` `pointerType` | implemented |
+| `MTLStructMember` `structType` | implemented |
+| `MTLStructMember` `textureReferenceType` | implemented |
+| `MTLStructType` `memberByName:` | implemented |
+| `MTLStructType` `members` | implemented |
+| `MTLTextureBinding` `arrayLength` | implemented |
+| `MTLTextureBinding` `depthTexture` | implemented |
+| `MTLTextureBinding` `textureDataType` | implemented |
+| `MTLTextureBinding` `textureType` | implemented |
+| `MTLThreadgroupBinding` `threadgroupMemoryAlignment` | implemented |
+| `MTLThreadgroupBinding` `threadgroupMemoryDataSize` | implemented |
 
 ## The ledger
 

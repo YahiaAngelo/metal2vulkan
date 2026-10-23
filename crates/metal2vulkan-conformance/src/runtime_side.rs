@@ -7,11 +7,16 @@
 //! No wait here can hang: a command buffer is waited for with a bound, and a wait that runs out
 //! answers `NeverReturned` as a recorded fact rather than blocking the suite.
 
+use crate::argument_encoders::{ArgumentDescriptorSpec, ArgumentWrite, EncoderFacts};
 use crate::case::{
     Answer, ArgumentSlot, Bindings, CommandDraw, Failure, Fill, FragmentFill, FragmentFilled,
     Handle, IndirectReadBack, MeshCommand, MeshFunctions, MeshStep, PassOutcome, PlaneTexture,
     RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side, StageInRegion, StageInput,
     TextureRole, TextureSpec, TileFacts, TilePipelineSpec, TileStep, Venue,
+};
+use crate::function_bindings::{
+    ArrayFacts, BindingFacts, BufferFacts, MemberFacts, PointerFacts, ReferenceFacts, StructFacts,
+    TextureFacts, ThreadgroupFacts, TypeFacts, DEPTH,
 };
 use crate::queue_slots::QueueSlots;
 use crate::render::{
@@ -23,7 +28,9 @@ use crate::sparse_query::{
 };
 use crate::texture_query::{HeapTextureQuery, SizeAndAlign, Storage};
 use crate::transcript::{Negative, Value};
-use metal2vulkan::bind::{RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor};
+use metal2vulkan::bind::{
+    ArgumentDescriptor, RateMapDescriptor, RateMapLayerDescriptor, SamplerDescriptor,
+};
 use metal2vulkan::metal::state::DepthStencilDescriptor;
 use metal2vulkan::metal::{
     BarrierScope, BindingAccess, IndexType, IndirectCommandType, PixelFormat, PrimitiveType,
@@ -36,13 +43,13 @@ use metal2vulkan::pipeline::{
     VertexDescriptor,
 };
 use metal2vulkan_runtime::{
-    BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue,
-    ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, Heap, HeapDescriptor,
-    HeapType, IndirectCommand, IndirectCommandBuffer, IndirectCommandBufferDescriptor,
-    IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library, LoadAction, Origin, PipelineOption,
-    PipelineOptions, RasterizationRateMap, Region, RenderPassDescriptor, RenderPipelineState,
-    ResourceOptions, ResourceRef, SamplerState, SamplerStateOptions, Size, StoreAction, Texture,
-    TextureDescriptor, Viewport,
+    ArgumentEncoder, BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus,
+    CommandQueue, ComputePipelineState, DepthStencilState, Device, DrawPrimitiveType, Heap,
+    HeapDescriptor, HeapType, IndirectCommand, IndirectCommandBuffer,
+    IndirectCommandBufferDescriptor, IndirectDraw, IoSurfacePlane, IoSurfaceYCbCr, Library,
+    LoadAction, Origin, PipelineOption, PipelineOptions, RasterizationRateMap, Region,
+    RenderPassDescriptor, RenderPipelineState, ResourceOptions, ResourceRef, SamplerState,
+    SamplerStateOptions, Size, StoreAction, Texture, TextureDescriptor, Viewport,
 };
 use std::time::Duration;
 
@@ -91,6 +98,10 @@ pub struct RuntimeSide<'a> {
     /// name for one of the pools above, and not another name for the depth and stencil states
     /// either.
     heaps: Vec<Heap>,
+    /// The argument encoders the case has made, each with the argument buffer it writes into. Its
+    /// own pool: an `ArgumentEncoder` is its own runtime object, not another name for one of the
+    /// pools above.
+    argument_encoders: Vec<EncoderAt>,
     /// Which buffer stands for the surface behind a texture handle that lies over an IOSurface
     /// plane.
     ///
@@ -123,6 +134,7 @@ impl<'a> RuntimeSide<'a> {
             command_buffers_indirect: Vec::new(),
             depth_stencil_states: Vec::new(),
             heaps: Vec::new(),
+            argument_encoders: Vec::new(),
             planes: Vec::new(),
             notices: Box::new(notices),
         }
@@ -240,6 +252,13 @@ impl<'a> RuntimeSide<'a> {
         self.samplers
             .get(handle.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("sampler {}", handle.0)))
+    }
+
+    /// The argument encoder `handle` names, with the argument buffer it writes into.
+    fn held_encoder(&self, handle: Handle) -> Answer<&EncoderAt> {
+        self.argument_encoders
+            .get(handle.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("argument encoder {}", handle.0)))
     }
 
     /// The rasterization-rate map `handle` names.
@@ -466,6 +485,157 @@ fn new_library_with_air(
 fn keep<T>(kept: &mut Vec<T>, value: T) -> Handle {
     kept.push(value);
     Handle(u32::try_from(kept.len() - 1).expect("fewer than 2^32 objects"))
+}
+
+/// One argument encoder of the case's, with where its arguments go.
+///
+/// The target is kept beside the encoder because `constantDataAtIndex:` answers an **address**,
+/// and the fact a case compares is its offset inside the arguments: to take that offset the side
+/// needs the argument buffer the encoder was given and where in it the arguments start.
+struct EncoderAt {
+    encoder: ArgumentEncoder,
+    /// The argument buffer and the offset of the arguments in it; `None` until one is set.
+    target: Option<(Handle, u64)>,
+}
+
+/// One reflected binding of ours, in the vocabulary both sides answer in.
+///
+/// The kind-specific fields come from the subprotocol the binding conforms to, which the runtime
+/// states as an `Option` per kind — the same decision Metal's side makes from `type`.
+fn our_binding(binding: &metal2vulkan::reflection::Binding) -> BindingFacts {
+    BindingFacts {
+        name: binding.name().to_owned(),
+        binding_type: binding.binding_type(),
+        access: binding.access(),
+        index: binding.index(),
+        used: binding.is_used(),
+        argument: binding.is_argument(),
+        buffer: binding.buffer().map(|buffer| BufferFacts {
+            alignment: buffer.buffer_alignment(),
+            data_size: buffer.buffer_data_size(),
+            data_type: buffer.buffer_data_type(),
+            struct_type: buffer.buffer_struct_type().map(our_struct),
+            pointer_type: buffer
+                .buffer_pointer_type()
+                .map(|pointer| our_pointer(pointer, DEPTH)),
+        }),
+        threadgroup: binding.threadgroup().map(|threadgroup| ThreadgroupFacts {
+            alignment: threadgroup.threadgroup_memory_alignment(),
+            data_size: threadgroup.threadgroup_memory_data_size(),
+        }),
+        texture: binding.texture().map(|texture| TextureFacts {
+            texture_type: texture.texture_type(),
+            data_type: texture.texture_data_type(),
+            depth: texture.is_depth_texture(),
+            array_length: texture.array_length(),
+        }),
+    }
+}
+
+/// A struct type of ours: its members, and whether `member_by_name` finds each of them.
+fn our_struct(held: &metal2vulkan::reflection::StructType) -> StructFacts {
+    our_struct_within(held, DEPTH)
+}
+
+fn our_struct_within(held: &metal2vulkan::reflection::StructType, depth: u32) -> StructFacts {
+    StructFacts {
+        members: held
+            .members()
+            .iter()
+            .map(|member| our_member(member, depth))
+            .collect(),
+        found_by_name: held.members().iter().all(|member| {
+            held.member_by_name(member.name())
+                .is_some_and(|found| found.name() == member.name())
+        }),
+    }
+}
+
+fn our_member(member: &metal2vulkan::reflection::StructMember, depth: u32) -> MemberFacts {
+    MemberFacts {
+        name: member.name().to_owned(),
+        offset: member.offset(),
+        data_type: member.data_type(),
+        argument_index: member.argument_index(),
+        kind: match depth {
+            0 => TypeFacts::Deeper,
+            _ => our_detail(
+                member.struct_type(),
+                member.array_type(),
+                member.texture_reference_type(),
+                member.pointer_type(),
+                depth - 1,
+            ),
+        },
+    }
+}
+
+/// Which of the four type getters answered, in the order Metal declares them.
+fn our_detail(
+    held_struct: Option<&metal2vulkan::reflection::StructType>,
+    held_array: Option<&metal2vulkan::reflection::ArrayType>,
+    held_reference: Option<&metal2vulkan::reflection::TextureReferenceType>,
+    held_pointer: Option<&metal2vulkan::reflection::PointerType>,
+    depth: u32,
+) -> TypeFacts {
+    if let Some(held) = held_struct {
+        return TypeFacts::Struct(our_struct_within(held, depth));
+    }
+    if let Some(held) = held_array {
+        return TypeFacts::Array(Box::new(our_array(held, depth)));
+    }
+    if let Some(held) = held_reference {
+        return TypeFacts::TextureReference(ReferenceFacts {
+            data_type: held.texture_data_type(),
+            texture_type: held.texture_type(),
+            access: held.access(),
+            depth: held.is_depth_texture(),
+        });
+    }
+    if let Some(held) = held_pointer {
+        return TypeFacts::Pointer(Box::new(our_pointer(held, depth)));
+    }
+    TypeFacts::Plain
+}
+
+fn our_array(held: &metal2vulkan::reflection::ArrayType, depth: u32) -> ArrayFacts {
+    ArrayFacts {
+        element_type: held.element_type(),
+        array_length: held.array_length(),
+        stride: held.stride(),
+        argument_index_stride: held.argument_index_stride(),
+        element: match depth {
+            0 => TypeFacts::Deeper,
+            _ => our_detail(
+                held.element_struct_type(),
+                held.element_array_type(),
+                held.element_texture_reference_type(),
+                held.element_pointer_type(),
+                depth - 1,
+            ),
+        },
+    }
+}
+
+fn our_pointer(held: &metal2vulkan::reflection::PointerType, depth: u32) -> PointerFacts {
+    PointerFacts {
+        element_type: held.element_type(),
+        access: held.access(),
+        alignment: held.alignment(),
+        data_size: held.data_size(),
+        element_is_argument_buffer: held.element_is_argument_buffer(),
+        element: match depth {
+            0 => TypeFacts::Deeper,
+            // A pointer answers no texture reference of its own, which is what the nil says.
+            _ => our_detail(
+                held.element_struct_type(),
+                held.element_array_type(),
+                None,
+                None,
+                depth - 1,
+            ),
+        },
+    }
 }
 
 /// The variant a command buffer's status records as.
@@ -799,6 +969,364 @@ impl Side for RuntimeSide<'_> {
         let buffer = self.buffer(&words)?;
         self.argument_residents.push((buffer, named));
         Ok(buffer)
+    }
+
+    fn argument_encoder(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        buffer_index: u32,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .new_function_with_name(entry)
+            .map_err(|error| Failure::of(&error))?;
+        let encoder = function
+            .new_argument_encoder_with_buffer_index(buffer_index)
+            .map_err(|error| Failure::of(&error))?;
+        Ok(keep(
+            &mut self.argument_encoders,
+            EncoderAt {
+                encoder,
+                target: None,
+            },
+        ))
+    }
+
+    fn argument_encoder_with_arguments(
+        &mut self,
+        arguments: &[ArgumentDescriptorSpec],
+    ) -> Answer<Handle> {
+        let descriptors: Vec<ArgumentDescriptor> = arguments
+            .iter()
+            .map(|spec| {
+                let mut descriptor = ArgumentDescriptor::new(spec.data_type, spec.index);
+                descriptor.array_length = spec.array_length;
+                descriptor.access = spec.access;
+                descriptor.texture_type = spec.texture_type;
+                descriptor.constant_block_alignment = spec.constant_block_alignment;
+                descriptor
+            })
+            .collect();
+        let encoder = self
+            .device
+            .new_argument_encoder_with_arguments(&descriptors)
+            .map_err(|error| Failure::of(&error))?;
+        Ok(keep(
+            &mut self.argument_encoders,
+            EncoderAt {
+                encoder,
+                target: None,
+            },
+        ))
+    }
+
+    fn nested_argument_encoder(&mut self, encoder: Handle, index: u32) -> Answer<Handle> {
+        let nested = self
+            .held_encoder(encoder)?
+            .encoder
+            .new_argument_encoder_for_buffer_at_index(index)
+            .map_err(|error| Failure::of(&error))?;
+        Ok(keep(
+            &mut self.argument_encoders,
+            EncoderAt {
+                encoder: nested,
+                target: None,
+            },
+        ))
+    }
+
+    fn argument_encoder_facts(&mut self, encoder: Handle, label: &str) -> Answer<EncoderFacts> {
+        let registry = self.device.registry_id();
+        let held = self
+            .argument_encoders
+            .get_mut(encoder.0 as usize)
+            .ok_or_else(|| {
+                Failure::named("NoSuchHandle", format!("argument encoder {}", encoder.0))
+            })?;
+        held.encoder.set_label(label);
+        Ok(EncoderFacts {
+            encoded_length: held.encoder.encoded_length(),
+            alignment: held.encoder.alignment(),
+            label: held.encoder.label().map(str::to_owned),
+            // The registry ID is each host's own number, so only the **comparison** is portable:
+            // the two sides agree that the encoder came from the case's device, never on the
+            // number that says so.
+            device_is_the_cases: held.encoder.device().registry_id() == registry,
+        })
+    }
+
+    fn set_argument_buffer(
+        &mut self,
+        encoder: Handle,
+        buffer: Handle,
+        offset: u64,
+        element: Option<u64>,
+    ) -> Answer<()> {
+        let held = self.held(buffer)?.clone();
+        let at = self
+            .argument_encoders
+            .get_mut(encoder.0 as usize)
+            .ok_or_else(|| {
+                Failure::named("NoSuchHandle", format!("argument encoder {}", encoder.0))
+            })?;
+        let arguments = offset + element.unwrap_or(0) * at.encoder.encoded_length();
+        match element {
+            None => at.encoder.set_argument_buffer(Some(&held), offset),
+            Some(element) => at.encoder.set_argument_buffer_start_offset_array_element(
+                Some(&held),
+                offset,
+                element,
+            ),
+        }
+        .map_err(|error| Failure::of(&error))?;
+        at.target = Some((buffer, arguments));
+        Ok(())
+    }
+
+    fn encode_argument(&mut self, encoder: Handle, write: &ArgumentWrite) -> Answer<()> {
+        // The encoder is cloned so the resources it writes can be looked up in the same pools
+        // while it is in hand; a clone shares the layout and the argument buffer it was given, so
+        // it writes the same bytes in the same place.
+        let held = self.held_encoder(encoder)?.encoder.clone();
+        let target = self.held_encoder(encoder)?.target.map(|(buffer, _)| buffer);
+        let textures = |handles: &[Option<Handle>]| -> Answer<Vec<Option<Texture>>> {
+            handles
+                .iter()
+                .map(|handle| handle.map(|h| self.held_texture(h).cloned()).transpose())
+                .collect()
+        };
+        let samplers = |handles: &[Option<Handle>]| -> Answer<Vec<Option<SamplerState>>> {
+            handles
+                .iter()
+                .map(|handle| handle.map(|h| self.held_sampler(h).cloned()).transpose())
+                .collect()
+        };
+        let buffers = |handles: &[Option<Handle>]| -> Answer<Vec<Option<Buffer>>> {
+            handles
+                .iter()
+                .map(|handle| handle.map(|h| self.held(h).cloned()).transpose())
+                .collect()
+        };
+        let computes = |handles: &[Option<Handle>]| -> Answer<Vec<Option<ComputePipelineState>>> {
+            handles
+                .iter()
+                .map(|handle| {
+                    handle
+                        .map(|h| {
+                            self.pipelines.get(h.0 as usize).cloned().ok_or_else(|| {
+                                Failure::named("NoSuchHandle", format!("pipeline {}", h.0))
+                            })
+                        })
+                        .transpose()
+                })
+                .collect()
+        };
+        let renders = |handles: &[Option<Handle>]| -> Answer<Vec<Option<RenderPipelineState>>> {
+            handles
+                .iter()
+                .map(|handle| {
+                    handle
+                        .map(|h| {
+                            self.render_pipelines
+                                .get(h.0 as usize)
+                                .cloned()
+                                .ok_or_else(|| {
+                                    Failure::named(
+                                        "NoSuchHandle",
+                                        format!("render pipeline {}", h.0),
+                                    )
+                                })
+                        })
+                        .transpose()
+                })
+                .collect()
+        };
+        let commands = |handles: &[Option<Handle>]| -> Answer<Vec<Option<IndirectCommandBuffer>>> {
+            handles
+                .iter()
+                .map(|handle| {
+                    handle
+                        .map(|h| {
+                            self.command_buffers_indirect
+                                .get(h.0 as usize)
+                                .cloned()
+                                .ok_or_else(|| {
+                                    Failure::named(
+                                        "NoSuchHandle",
+                                        format!("indirect command buffer {}", h.0),
+                                    )
+                                })
+                        })
+                        .transpose()
+                })
+                .collect()
+        };
+        let answer = match write {
+            ArgumentWrite::Texture { texture, index } => {
+                let held_textures = textures(&[*texture])?;
+                held.set_texture(held_textures[0].as_ref(), *index)
+            }
+            ArgumentWrite::Textures {
+                textures: ts,
+                first,
+            } => {
+                let held_textures = textures(ts)?;
+                let borrowed: Vec<Option<&Texture>> =
+                    held_textures.iter().map(Option::as_ref).collect();
+                held.set_textures(&borrowed, *first)
+            }
+            ArgumentWrite::Sampler { sampler, index } => {
+                let held_samplers = samplers(&[*sampler])?;
+                held.set_sampler_state(held_samplers[0].as_ref(), *index)
+            }
+            ArgumentWrite::Samplers {
+                samplers: ss,
+                first,
+            } => {
+                let held_samplers = samplers(ss)?;
+                let borrowed: Vec<Option<&SamplerState>> =
+                    held_samplers.iter().map(Option::as_ref).collect();
+                held.set_sampler_states(&borrowed, *first)
+            }
+            ArgumentWrite::Buffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let held_buffers = buffers(&[*buffer])?;
+                held.set_buffer(held_buffers[0].as_ref(), *offset, *index)
+            }
+            ArgumentWrite::Buffers { buffers: bs, first } => {
+                let handles: Vec<Option<Handle>> = bs.iter().map(|(handle, _)| *handle).collect();
+                let held_buffers = buffers(&handles)?;
+                let borrowed: Vec<Option<&Buffer>> =
+                    held_buffers.iter().map(Option::as_ref).collect();
+                let offsets: Vec<u64> = bs.iter().map(|(_, offset)| *offset).collect();
+                held.set_buffers(&borrowed, &offsets, *first)
+            }
+            ArgumentWrite::ComputePipelineState { state, index } => {
+                let held_states = computes(&[*state])?;
+                held.set_compute_pipeline_state(held_states[0].as_ref(), *index)
+            }
+            ArgumentWrite::ComputePipelineStates { states, first } => {
+                let held_states = computes(states)?;
+                let borrowed: Vec<Option<&ComputePipelineState>> =
+                    held_states.iter().map(Option::as_ref).collect();
+                held.set_compute_pipeline_states(&borrowed, *first)
+            }
+            ArgumentWrite::RenderPipelineState { state, index } => {
+                let held_states = renders(&[*state])?;
+                held.set_render_pipeline_state(held_states[0].as_ref(), *index)
+            }
+            ArgumentWrite::RenderPipelineStates { states, first } => {
+                let held_states = renders(states)?;
+                let borrowed: Vec<Option<&RenderPipelineState>> =
+                    held_states.iter().map(Option::as_ref).collect();
+                held.set_render_pipeline_states(&borrowed, *first)
+            }
+            ArgumentWrite::IndirectCommandBuffer { commands: c, index } => {
+                let held_commands = commands(&[*c])?;
+                held.set_indirect_command_buffer(held_commands[0].as_ref(), *index)
+            }
+            ArgumentWrite::IndirectCommandBuffers { commands: c, first } => {
+                let held_commands = commands(c)?;
+                let borrowed: Vec<Option<&IndirectCommandBuffer>> =
+                    held_commands.iter().map(Option::as_ref).collect();
+                held.set_indirect_command_buffers(&borrowed, *first)
+            }
+            ArgumentWrite::VisibleFunctionTable { table, index } => match table {
+                None => held.set_visible_function_table(None, *index),
+                // No case states one, and neither side holds a pool of them, so both answer the
+                // same "no such call" rather than one of them inventing an object.
+                Some(_) => return Err(Failure::unavailable("visible_function_table_handle")),
+            },
+            ArgumentWrite::VisibleFunctionTables { tables, first } => {
+                if tables.iter().any(Option::is_some) {
+                    return Err(Failure::unavailable("visible_function_table_handle"));
+                }
+                let empty: Vec<Option<&metal2vulkan_runtime::VisibleFunctionTable>> =
+                    tables.iter().map(|_| None).collect();
+                held.set_visible_function_tables(&empty, *first)
+            }
+            ArgumentWrite::Constant { index, bytes } => {
+                let at = held
+                    .constant_data(*index)
+                    .map_err(|error| Failure::of(&error))?;
+                // SAFETY: `constant_data` answers the constant's address inside the argument
+                // buffer's mapping, and the case states a constant no longer than the argument it
+                // names, which its own layout facts compare.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), at.as_ptr(), bytes.len());
+                }
+                Ok(())
+            }
+        };
+        answer.map_err(|error| Failure::of(&error))?;
+        // A texture a function reaches through an argument buffer is resident only where the
+        // encoder was told so, so binding the buffer makes it resident.
+        if let Some(buffer) = target {
+            let named = write.textures();
+            if !named.is_empty() {
+                self.argument_residents.push((buffer, named));
+            }
+        }
+        Ok(())
+    }
+
+    fn compute_pipeline_bindings(
+        &mut self,
+        library: Handle,
+        entry: &str,
+    ) -> Answer<Vec<BindingFacts>> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .new_function_with_name(entry)
+            .map_err(|error| Failure::of(&error))?;
+        let mut options = PipelineOptions::default();
+        options.options = PipelineOption::BINDING_INFO;
+        let (_, reflection) = self
+            .device
+            .new_compute_pipeline_state_with_function_and_reflection(&function, &options)
+            .map_err(|error| Failure::of(&error))?;
+        let reflection = reflection.ok_or_else(|| {
+            Failure::named(
+                "NoReflection",
+                "the creation answered no reflection".to_owned(),
+            )
+        })?;
+        Ok(reflection.bindings().iter().map(our_binding).collect())
+    }
+
+    fn constant_data_offset(&mut self, encoder: Handle, index: u32) -> Answer<u64> {
+        let held = self.held_encoder(encoder)?;
+        let (buffer, arguments) = held.target.ok_or_else(|| {
+            Failure::named("NoArgumentBuffer", "no argument buffer is set".to_owned())
+        })?;
+        let at = held
+            .encoder
+            .constant_data(index)
+            .map_err(|error| Failure::of(&error))?;
+        let contents = self
+            .held(buffer)?
+            .contents()
+            .ok_or_else(|| Failure::named("NoContents", "a buffer the host does not reach"))?;
+        let base = contents.as_ptr() as usize + arguments as usize;
+        (at.as_ptr() as usize)
+            .checked_sub(base)
+            .map(|offset| offset as u64)
+            .ok_or_else(|| {
+                Failure::named(
+                    "ConstantBeforeTheArguments",
+                    "constantDataAtIndex: answered an address below the arguments".to_owned(),
+                )
+            })
     }
 
     fn dispatch(

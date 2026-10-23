@@ -42,6 +42,7 @@
 //! has written it. Until somebody does, those two fields are held by construction alone, by
 //! `tests::the_runtime_side_forwards_every_field_of_a_pipeline_spec`.
 
+pub mod argument_encoders;
 pub mod astc_textures;
 pub mod border_swizzles;
 pub mod buffer_blits;
@@ -72,6 +73,7 @@ pub mod fetch_ordered;
 pub mod format_copies;
 pub mod frame_chains;
 pub mod fresh_contents;
+pub mod function_bindings;
 pub mod half_output_blends;
 pub mod half_read_nans;
 pub mod half_storage_writes;
@@ -146,6 +148,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in astc_textures::all() {
+        cases.push(Box::new(case));
+    }
+    for case in argument_encoders::all() {
+        cases.push(Box::new(case));
+    }
+    for case in function_bindings::all() {
         cases.push(Box::new(case));
     }
     for case in compressed_blits::all() {
