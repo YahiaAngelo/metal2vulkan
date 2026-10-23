@@ -1959,7 +1959,7 @@ pub fn call<T>(
 ///
 /// A sweep over many queries wants one refused query to compare as a refusal at its own site while
 /// the rest stay readable, which an abort would lose. Written by hand that reads
-/// `Err(failure) => failure.value`, and then [`Failure::lacks`] — whether the typed refusal is the
+/// `Err(failure) => failure.recorded()`, and then [`Failure::lacks`] — whether the typed refusal is the
 /// **venue's** honest gap rather than ours — is silently dropped, so a device that simply cannot
 /// run one query of the sweep has that site scored as a refusal of ours. That is the one thing the
 /// `lacks-feature` verdict exists to prevent, and it was happening on lavapipe for every
