@@ -19,10 +19,18 @@
 //! - `<call>_drain_others`: our other threads' CPU time in that drain;
 //! - `<call>_allocs`: the heap allocations a call made on the calling thread;
 //! - `<call>_rt_<count>`: the runtime's own counts of what the calls made, where they moved
-//!   ([`COUNTERS`]); none natively, so these rows have no ratio.
+//!   ([`counted`]); none natively, so these rows have no ratio. Every count the runtime keeps is
+//!   reported where a call moved it, and `_at_call` and `_at_commit` say whether the call paid
+//!   for it or left it for the commit — including the driver's own makings, which the runtime
+//!   counts where it calls them (`churn_counts.rs`), so a creation call's driver share is a count
+//!   and not an inference from the driver floor below the table.
 //!
 //! The wall times are a median over the windows, and the rest the group's totals over its
 //! calls, because the thread and process CPU clocks answer in microseconds.
+//!
+//! The counts are also the table's **gate**: [`HELD`] holds named calls to what they were
+//! measured making, and the run fails where one makes more. A count is deterministic, so it holds
+//! in CI under any load, where none of the times above can.
 
 use crate::gpu::{Format, Gpu};
 use crate::workloads::{emit, host_pages, process_cpu, thread_cpu, Scene, Sizes, TARGET_SIDE};
@@ -31,26 +39,13 @@ use std::time::{Duration, Instant};
 /// The windows a group runs before the measured ones.
 const WARM: usize = 3;
 
-/// The runtime's counts a group reports per call where they moved: what its calls made the
-/// driver, and our own threads, do ([`Gpu::work_counts`]; none natively).
-const COUNTERS: [&str; 16] = [
-    "queue_submissions",
-    "pipeline_barriers",
-    "draws",
-    "dispatches",
-    "render_passes_begun",
-    "requirement_images_made",
-    "images_own_memory",
-    "arena_pools_made",
-    "command_pools_made",
-    "wakes_handler_threads",
-    "scheduler_passes",
-    "variant_pipelines_made",
-    "host_pointer_imports_made",
-    "completed_waits",
-    "device_memory_bytes",
-    "cleared_bytes",
-];
+/// Whether a count of the side's own ([`Gpu::work_counts`]) belongs in the table: every count
+/// of work does, and the accumulators of nanoseconds do not, since a time is not a fact a gate
+/// can hold. Every other count the side keeps is reported where a group's calls moved it, so no
+/// family of work is left out of a call's row by an allowlist nobody revisits.
+fn counted(name: &str) -> bool {
+    !name.ends_with("_nanos")
+}
 
 /// What each group's call is on the runtime's public API, one entry a group: the group's name,
 /// then the methods it calls, `Type::method`. [`group`] fails for a group that is not named here
@@ -188,11 +183,11 @@ pub const TIMED: [(&str, &str); 60] = [
     ("replace_region_256", "Texture::replace_region"),
 ];
 
-/// The counts of [`COUNTERS`] that moved between two readings of the side's own counts, and by
+/// The counts [`counted`] keeps that moved between two readings of the side's own counts, and by
 /// how much: none at all on a side that keeps none.
 fn moved(from: &[(&'static str, f64)], to: &[(&'static str, f64)]) -> Vec<(&'static str, f64)> {
     from.iter()
-        .filter(|(counted, _)| COUNTERS.contains(counted))
+        .filter(|(name, _)| counted(name))
         .filter_map(|(counted, before)| {
             let now = to
                 .iter()
@@ -337,50 +332,172 @@ pub fn group<G: Gpu, S>(
         let drained = g.work_counts();
         (made, moved(&opened, &called), moved(&called, &drained))
     });
-    emit(
-        "percall",
-        &metric("allocs"),
-        "allocs/call",
-        &mut [made as f64 / inner as f64],
-    );
-    for (counted, count) in at_call {
+    // The counts this group measured, under the names the table prints, so [`HELD`]'s rows for it
+    // are checked against the same numbers the report shows.
+    let mut measured: Vec<(String, f64)> = vec![];
+    let mut keep = |what: String, value: f64| {
         emit(
             "percall",
-            &metric(&format!("rt_{counted}_at_call")),
-            "count/call",
-            &mut [count / inner as f64],
+            &metric(&what),
+            if what == "allocs" {
+                "allocs/call"
+            } else {
+                "count/call"
+            },
+            &mut [value],
         );
+        measured.push((what, value));
+    };
+    keep("allocs".to_owned(), made as f64 / inner as f64);
+    for (counted, count) in at_call {
+        keep(format!("rt_{counted}_at_call"), count / inner as f64);
     }
     for (counted, count) in at_drain {
-        emit(
-            "percall",
-            &metric(&format!("rt_{counted}_at_commit")),
-            "count/call",
-            &mut [count / inner as f64],
-        );
+        keep(format!("rt_{counted}_at_commit"), count / inner as f64);
     }
     // What the measured windows' calls made the runtime do, per call.
-    for (counted, from) in &before {
-        if !COUNTERS.contains(counted) {
+    for (which, from) in &before {
+        if !counted(which) {
             continue;
         }
         let now = after
             .iter()
-            .find(|(name, _)| name == counted)
+            .find(|(counted, _)| counted == which)
             .map_or(0.0, |(_, count)| *count);
         assert!(
-            *counted != "variant_pipelines_made" || now <= *from,
+            *which != "variant_pipelines_made" || now <= *from,
             "{name}: {} pipeline states were made inside its timed windows",
             now - from
         );
         if now > *from {
-            emit(
-                "percall",
-                &metric(&format!("rt_{counted}")),
-                "count/call",
-                &mut [(now - from) / calls],
-            );
+            keep(format!("rt_{which}"), (now - from) / calls);
         }
+    }
+    // The side that keeps no counts of its own is Metal's, which has no counterpart for any of
+    // these, so only ours is held to them.
+    if !before.is_empty() {
+        hold(name, &measured);
+    }
+}
+
+/// What a call must have made, per call: the group, the count under the name the table prints
+/// (`allocs`, or `rt_<count>_at_call` and `rt_<count>_at_commit` for the runtime's own counts),
+/// and the most a call of it may make. A count a group never moved is not printed, and reads as
+/// zero here, so a row of `0.0` holds a call to making none of that work at all.
+///
+/// These are the gate on the cost half. A count is the same under any load and on any host, so a
+/// regression reads "this call now makes two allocations where it made none" and fails the run,
+/// where a 12% change in a time would not. Each row is a fact measured on this M3 Max that the
+/// runtime should not quietly lose: an upper bound, so a call that does *less* work passes and the
+/// row is then tightened.
+const HELD: [(&str, &str, f64); 43] = [
+    // A draw records exactly one draw command and makes no driver object: the cost it pays at the
+    // call is planning, which is settled work and nothing a driver charges for.
+    ("draw_strip", "rt_draws_at_commit", 1.0),
+    ("draw_strip", "rt_draws_at_call", 0.0),
+    ("draw_strip", "rt_vk_images_made_at_call", 0.0),
+    ("draw_strip", "rt_vk_buffers_made_at_call", 0.0),
+    ("draw_strip", "rt_vk_memory_allocations_at_call", 0.0),
+    ("draw_triangles", "rt_draws_at_commit", 1.0),
+    (
+        "draw_indexed",
+        "rt_replayed_cmd_draw_indexed_at_commit",
+        1.0,
+    ),
+    // And it allocates about once in twenty draws (0.049 measured), nothing a draw of its own.
+    ("draw_strip", "allocs", 0.2),
+    ("draw_triangles", "allocs", 0.2),
+    ("draw_indexed", "allocs", 0.2),
+    // The draw's settling is three lookups that each find what an earlier draw made: a draw that
+    // starts recording shapes or sets again would show here before it showed in a time.
+    ("draw_strip", "rt_draw_shapes_made_at_call", 0.0),
+    ("draw_strip", "rt_sampler_sets_made_at_call", 0.0),
+    ("draw_strip", "rt_live_tables_uploaded_at_call", 0.0),
+    // The render pass is begun at the commit, never at the call, and ending the encoding makes no
+    // driver object. Its 25 allocations are the largest counted quantity on the path.
+    ("end_render", "rt_render_passes_begun_at_call", 0.0),
+    ("end_render", "rt_vk_images_made_at_call", 0.0),
+    ("end_render", "allocs", 25.0),
+    ("end_compute", "allocs", 7.0),
+    ("end_blit", "allocs", 7.0),
+    ("dispatch", "rt_dispatches_at_commit", 1.0),
+    ("dispatch", "allocs", 19.0),
+    // A heap texture's image takes its storage from the heap: one image and one binding, and no
+    // allocation of memory of its own.
+    ("heap_texture_256", "rt_vk_images_made_at_call", 1.0),
+    ("heap_texture_256", "rt_vk_image_bindings_at_call", 1.0),
+    ("heap_texture_256", "rt_vk_memory_allocations_at_call", 0.0),
+    ("heap_texture_256", "allocs", 19.0),
+    // A Shared texture likewise, and it starts its image on the host once.
+    ("texture_256_shared", "rt_vk_images_made_at_call", 1.0),
+    ("texture_256_shared", "rt_vk_image_bindings_at_call", 1.0),
+    (
+        "texture_256_shared",
+        "rt_vk_memory_allocations_at_call",
+        0.0,
+    ),
+    (
+        "texture_256_shared",
+        "rt_images_started_on_the_host_at_call",
+        1.0,
+    ),
+    ("texture_256_shared", "allocs", 32.0),
+    // A render target of a shape the runtime has seen takes a parked image: it makes no image at
+    // all, which is why it costs what Metal's does. Losing the recycler here would cost 20 us a
+    // call and this row is what would say so.
+    ("texture_1024_target", "rt_vk_images_made_at_call", 0.0),
+    (
+        "texture_1024_target",
+        "rt_vk_memory_allocations_at_call",
+        0.0,
+    ),
+    // A texture over a buffer's bytes takes a parked image too, and makes one view of it.
+    ("buffer_texture_256", "rt_vk_images_made_at_call", 0.0),
+    ("buffer_texture_256", "rt_vk_image_views_made_at_call", 1.0),
+    // A buffer comes out of the runtime's memory pool: no `vkCreateBuffer`, no `vkAllocateMemory`.
+    ("buffer_4k", "rt_vk_buffers_made_at_call", 0.0),
+    ("buffer_4k", "rt_vk_memory_allocations_at_call", 0.0),
+    ("buffer_1m", "rt_vk_buffers_made_at_call", 0.0),
+    ("buffer_1m", "rt_vk_memory_allocations_at_call", 0.0),
+    // A no-copy buffer imports its pages once: one buffer, one import, one binding. A walk of the
+    // memory types that tried several would read as more than one allocation here.
+    ("buffer_no_copy_1m", "rt_vk_buffers_made_at_call", 1.0),
+    ("buffer_no_copy_1m", "rt_vk_memory_allocations_at_call", 1.0),
+    ("buffer_no_copy_1m", "rt_vk_buffer_bindings_at_call", 1.0),
+    // Residency is our own bookkeeping: no driver call, and the allocation a resource the standing
+    // cost of 256 of them.
+    ("use_resources_read_256", "rt_vk_buffers_made_at_call", 0.0),
+    ("use_resources_read_256", "allocs", 277.0),
+    // One Metal command buffer carrying one dispatch is submitted as two of Vulkan's.
+    (
+        "commit_one_dispatch",
+        "rt_vk_command_buffers_submitted",
+        2.0,
+    ),
+];
+
+/// Fail where a group's call made more work than [`HELD`] allows it, naming the call, the count,
+/// what it made and what it is held to.
+///
+/// A count a group never moved is not printed, so a row that names one reads zero and would pass
+/// whatever the call did: a row holding a call to *some* work must therefore name a count the
+/// group moved, or it is a misspelling that holds nothing, and that fails too.
+fn hold(name: &str, measured: &[(String, f64)]) {
+    for (group, what, most) in HELD {
+        if group != name {
+            continue;
+        }
+        let made = measured.iter().find(|(counted, _)| counted == what);
+        assert!(
+            most <= 0.0 || made.is_some(),
+            "{name}: {what} is held to at most {most}, but the group moved no such count, so the \
+             row holds nothing"
+        );
+        let made = made.map_or(0.0, |(_, value)| *value);
+        assert!(
+            made <= most,
+            "{name}: {what} is {made} a call, where it is held to at most {most}"
+        );
     }
 }
 

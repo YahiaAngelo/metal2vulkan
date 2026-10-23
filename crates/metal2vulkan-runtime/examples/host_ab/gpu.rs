@@ -524,8 +524,9 @@ pub trait Gpu {
     /// outlives the call.
     unsafe fn driver_floor(&self, _windows: usize, _pages: *mut u8) {}
 
-    /// The side's own counts of the work its calls made, by name, as they stand: the runtime's
-    /// `WorkCounts` the compositing and burst workloads report; none natively.
+    /// The side's own counts of the work its calls made, by name, as they stand: every scalar
+    /// count of the runtime's `WorkCounts`, which the compositing and burst workloads report a
+    /// few of and the per-call table reports every one a call moved; none natively.
     fn work_counts(&self) -> Vec<(&'static str, f64)> {
         Vec::new()
     }
