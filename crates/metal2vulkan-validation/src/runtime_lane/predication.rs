@@ -115,7 +115,7 @@ const NOT_EQUAL: u64 = 1;
 const LESS: u64 = 4;
 
 /// The state of kernel `name` on `device`, made for indirect command buffers where `indirect`.
-fn kernel(device: &Device, name: &str, indirect: bool) -> ComputePipelineState {
+pub(super) fn kernel(device: &Device, name: &str, indirect: bool) -> ComputePipelineState {
     let library = device
         .new_library_with_air(&llvm_assemble_text(KERNELS).unwrap())
         .unwrap();
