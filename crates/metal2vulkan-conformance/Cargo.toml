@@ -18,6 +18,7 @@ metal2vulkan = { path = "../metal2vulkan", features = ["serde", "ash", "cli"] }
 metal2vulkan-runtime = { path = "../metal2vulkan-runtime" }
 # Fixture paths and `llvm_assemble` only: the suite's shaders are the owned public fixtures.
 metal2vulkan-devtools = { path = "../metal2vulkan-devtools" }
+ash = { workspace = true, features = ["loaded"] }
 base64 = "0.22"
 serde.workspace = true
 serde_json.workspace = true
@@ -27,6 +28,13 @@ sha2.workspace = true
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-metal = "0.3"
+
+# The suite's command. It has no unit tests, so `test = false` keeps `cargo test`, nextest and
+# `clippy --all-targets` from building and linking a test harness of it.
+[[bin]]
+name = "conformance"
+path = "src/bin/conformance.rs"
+test = false
 
 # Device-executing tests are gated on non-default cfgs rather than features, because the ordinary
 # gate builds with `--all-features`: `--cfg m2v_gpu` (a real GPU) and `--cfg m2v_cpu_icd` (a CPU

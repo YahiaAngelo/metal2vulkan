@@ -16,7 +16,7 @@
 use crate::case::{Abort, Case, Input, MetalSource, Side};
 use crate::recording::ShaderRef;
 use crate::replay::NOTICES_SITE;
-use crate::transcript::{Digest, Node, Observed, Sites, Transcript, Value};
+use crate::transcript::{Node, Observed, Sites, Transcript, Value};
 
 /// The case's name.
 pub const PRIVATE_TYPE_GETTERS: &str = "indirect-private-type-getters";
@@ -24,6 +24,9 @@ pub const PRIVATE_TYPE_GETTERS: &str = "indirect-private-type-getters";
 /// Where the carried values were measured.
 const MEASURED_IN: &str =
     "the runtime lane's indirect command buffer table (an Apple M3 Max, macOS 27.0.1)";
+
+/// The runs the carried table stands on: the lane's own probes of the ten types in both forms.
+pub const MEASURED_RUNS: u32 = 1;
 
 /// Why record mode must not run the case on Metal.
 const NO_PUBLIC_CALL: &str =
@@ -113,7 +116,7 @@ fn read_back_node(
 
 impl IndirectPrivateTypes {
     /// The transcript Metal's measured table states.
-    pub fn carried_transcript(&self) -> Result<Transcript, String> {
+    pub fn measured_transcript(&self) -> Result<Transcript, String> {
         let mut sites = Sites::new();
         sites.push(crate::case::inputs_node(&self.inputs()?));
         for primitive_type in TYPES {
@@ -140,6 +143,10 @@ impl Case for IndirectPrivateTypes {
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
         Ok(Vec::new())
+    }
+
+    fn carried_transcript(&self) -> Result<Option<(u32, Transcript)>, String> {
+        Ok(Some((MEASURED_RUNS, self.measured_transcript()?)))
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
@@ -188,12 +195,4 @@ impl Case for IndirectPrivateTypes {
         }
         Ok(())
     }
-}
-
-/// The digest of the carried table, for a reader who wants to see that the recording holds the
-/// measurement and not a fresh probe.
-pub fn carried_digest() -> Result<Digest, String> {
-    let transcript = private_type_getters().carried_transcript()?;
-    let json = serde_json::to_vec(&transcript).map_err(|error| error.to_string())?;
-    Ok(Digest::sha256(&json))
 }

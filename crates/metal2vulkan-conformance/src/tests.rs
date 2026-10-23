@@ -741,7 +741,7 @@ fn every_seed_case_states_its_inputs_and_its_metal_source() {
 #[test]
 fn the_carried_table_of_the_private_type_getters_is_metals_measured_one() {
     let case = crate::cases::indirect_private_types::private_type_getters();
-    let transcript = case.carried_transcript().unwrap();
+    let transcript = case.measured_transcript().unwrap();
     let answers = |raw: u64, form: &str| {
         let node = transcript
             .root

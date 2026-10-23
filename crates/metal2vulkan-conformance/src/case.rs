@@ -16,7 +16,7 @@
 
 use crate::allowance::Allowance;
 use crate::recording::ShaderRef;
-use crate::transcript::{Node, Observed, Sites, Value};
+use crate::transcript::{Node, Observed, Sites, Transcript, Value};
 use crate::verdict::device_gap;
 
 /// A shader as both sides can take it.
@@ -293,6 +293,16 @@ pub trait Case {
     /// what a case should keep: comparison is exact.
     fn allowances(&self) -> Vec<Allowance> {
         Vec::new()
+    }
+
+    /// The transcript the case's carried measurement states, and the runs it stands on, for a case
+    /// whose [`MetalSource`] is [`MetalSource::Carried`]. `None` for a case record mode runs on
+    /// Metal.
+    ///
+    /// A carried answer is the case stating what our own measurement of this chip found, in the
+    /// shape the case emits, so it compares through the same path a recorded run does.
+    fn carried_transcript(&self) -> Result<Option<(u32, Transcript)>, String> {
+        Ok(None)
     }
 }
 
