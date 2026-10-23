@@ -18,7 +18,7 @@
 //! axes. Lanes lie at each texel edge of the 13-texel axis shifted by -3 to 3 periods, and 1 to 3
 //! ulps either side, on the centre row of the 11-texel one.
 
-use super::degrade_notices::on_device;
+use super::degrade_notices::{counts, on_device};
 use super::{buffer_with, read_buffer};
 use crate::air_library::AirLibrary;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -161,6 +161,22 @@ fn texture(
 /// Each lane's red channel of the runtime sampler's sample, `float` bound with a nearest sampler
 /// of `address` on every axis, at `(u, 0.5)` for each `u` of `us`.
 fn sampled(device: &Device, float: &Texture, address: SamplerAddressMode, us: &[f32]) -> Vec<f32> {
+    reds(device, float, address, us)
+        .into_iter()
+        .map(|lane| lane[2])
+        .collect()
+}
+
+/// Each lane's red channel of all five of the kernel's results, `float` bound with a nearest
+/// sampler of `address` on every axis, at `(u, 0.5)` for each `u` of `us`: the two constexpr
+/// clamp-to-zero samplers' (0 and 1), the runtime sampler's (2), and the integer textures' (3
+/// and 4).
+fn reds(
+    device: &Device,
+    float: &Texture,
+    address: SamplerAddressMode,
+    us: &[f32],
+) -> Vec<[f32; 5]> {
     let state = state(device);
     let queue = device.new_command_queue().unwrap();
     let small = |format| texture(device, format, (4, 4), |_, _| 1u32.to_le_bytes());
@@ -200,7 +216,12 @@ fn sampled(device: &Device, float: &Texture, address: SamplerAddressMode, us: &[
         .as_chunks::<80>()
         .0
         .iter()
-        .map(|lane| f32::from_le_bytes([lane[32], lane[33], lane[34], lane[35]]))
+        .map(|lane| {
+            std::array::from_fn(|result| {
+                let at = 16 * result;
+                f32::from_le_bytes([lane[at], lane[at + 1], lane[at + 2], lane[at + 3]])
+            })
+        })
         .collect()
 }
 
@@ -269,4 +290,51 @@ fn runtime_nearest_samples_read_metal_s_texel_off_the_level() {
         }
         assert!(wrong.is_empty(), "{} lanes differ from Metal", wrong.len());
     });
+}
+
+/// The three lanes one, two and three units in the last place below `+0.0`: the kernel's lane
+/// index of each, and the `f32` bits the lane set gives it.
+const BELOW_ZERO: [(usize, u32); 3] = [(289, 0x8000_0001), (291, 0x8000_0002), (293, 0x8000_0003)];
+
+/// What the two constexpr clamp-to-zero samplers read one, two and three units in the last place
+/// below `+0.0`, under native device sampling (the default) and under the exact emulation.
+///
+/// Measured on an Apple M3 Max through MoltenVK, which samples through Metal's own texture unit:
+/// the printed values are Metal's. A device of its own sampler tests the coordinate against the
+/// level and reads the border there, where Metal scales and quantizes first. The test prints both
+/// legs and asserts the lanes are the three coordinates meant; what the columns must read is the
+/// open question the printed numbers answer.
+#[test]
+fn clamp_to_zero_samples_just_below_zero() {
+    use metal2vulkan::device::SamplingPolicy;
+    let us = lanes();
+    for &(lane, bits) in &BELOW_ZERO {
+        assert_eq!(us[lane].to_bits(), bits, "lane {lane}");
+    }
+    for sampling in [SamplingPolicy::NativeDevice, SamplingPolicy::Exact] {
+        super::degrade_notices::on_device_with(
+            |options| options.policy.sampling = sampling,
+            |device, messages| {
+                let float = texture(device, PixelFormat::R32Float, (WIDTH, HEIGHT), |x, y| {
+                    ((x + 16 * y) as f32).to_le_bytes()
+                });
+                let read = reds(device, &float, SamplerAddressMode::Repeat, &us);
+                for &(lane, bits) in &BELOW_ZERO {
+                    println!(
+                        "BELOW-ZERO {} {sampling:?} lane {lane} ({bits:08x}): constexpr \
+                         {:?} and {:?}, runtime {:?}",
+                        device.name(),
+                        read[lane][0],
+                        read[lane][1],
+                        read[lane][2]
+                    );
+                }
+                let announced = counts(&messages.take_notices());
+                println!(
+                    "BELOW-ZERO {} {sampling:?} announced {announced:?}",
+                    device.name()
+                );
+            },
+        );
+    }
 }
