@@ -627,21 +627,27 @@ fn the_kernel_stores_metal_s_codes_of_the_probes_first_rows() {
     }
 }
 
-/// The formats whose passes' stores the reference encodes: the converted ones of unpacked 8- and
-/// 10-bit codes, each of which a pass renders (`metal::format::ycbcr_renders`).
-const RENDERED: [PixelFormat; 6] = [
+/// The formats whose passes' stores the reference encodes: those of unpacked 8- and 10-bit codes
+/// read converted or as codes, each of which a pass renders (`metal::format::ycbcr_renders`).
+const RENDERED: [PixelFormat; 12] = [
     PixelFormat::YCBCR84202P,
     PixelFormat::YCBCR84222P,
     PixelFormat::YCBCR84442P,
     PixelFormat::YCBCR104202P,
     PixelFormat::YCBCR104222P,
     PixelFormat::YCBCR104442P,
+    PixelFormat::RGB84202P,
+    PixelFormat::RGB84222P,
+    PixelFormat::RGB84442P,
+    PixelFormat::RGB104202P,
+    PixelFormat::RGB104222P,
+    PixelFormat::RGB104442P,
 ];
 
-/// The reference encodes a pass's store of the converted unpacked layouts only, of sizes the chroma
-/// blocks tile, and of a texel for every texel of the size.
+/// The reference encodes a pass's store of the unpacked layouts read converted or as codes only,
+/// of sizes the chroma blocks tile, and of a texel for every texel of the size.
 #[test]
-fn the_store_reference_encodes_the_converted_unpacked_layouts_of_tiled_sizes() {
+fn the_store_reference_encodes_the_unpacked_layouts_of_tiled_sizes() {
     let video = (YCbCrRange::Video, YCbCrMatrix::Bt709);
     for pf in PixelFormat::ALL.iter().copied() {
         let Some(codes) = ycbcr_format(pf).and_then(YCbCrCodes::of) else {
@@ -663,8 +669,8 @@ fn the_store_reference_encodes_the_converted_unpacked_layouts_of_tiled_sizes() {
 }
 
 /// The kernel stores the reference's codes of a pass's every texel into both planes, the marks not
-/// read, and keeps every other byte (the rows' padding), for each converted unpacked layout over
-/// each range and matrix, on sizes whose rows end mid-word.
+/// read, and keeps every other byte (the rows' padding), for each unpacked layout read converted
+/// or as codes over each range and matrix, on sizes whose rows end mid-word.
 #[test]
 fn the_kernel_stores_the_reference_s_codes_of_a_pass_s_every_texel() {
     use YCbCrMatrix::{Bt2020, Bt601, Bt709};
@@ -916,6 +922,62 @@ fn the_store_reference_and_kernel_store_metal_s_codes_of_the_probe_s_passes() {
         let mut s = Surface::new(case.format, case.surface, case.size, case.seed);
         s.texels = texels.into_iter().map(|t| (t, false)).collect();
         assert_eq!(s.encoded(true), s.stored(), "{what}");
+    }
+}
+
+/// The values of our probe's draws into the code formats, `[r, g, b, a]` of each of `n` texels:
+/// channel `k = 4 i + c` from `x = k · 2654435761 mod 2^32`, one in 16 a special (a NaN, the
+/// infinities, `-0`, 1, 0, 1/2 or the least subnormal), the rest `((x >> 9) - 2^20) / 2^22`, in
+/// `[-0.25, 1.75)`.
+fn code_pass_values(n: usize) -> Vec<[f32; 4]> {
+    const SPECIALS: [f32; 8] = [
+        f32::NAN,
+        f32::NEG_INFINITY,
+        f32::INFINITY,
+        -0.0,
+        1.0,
+        0.0,
+        0.5,
+        1.0e-45,
+    ];
+    let value = |k: u32| {
+        let x = k.wrapping_mul(2_654_435_761);
+        match x % 16 {
+            0 => SPECIALS[(x >> 4) as usize % 8],
+            _ => ((x >> 9) as i32 - (1 << 20)) as f32 / (1 << 22) as f32,
+        }
+    };
+    (0..n as u32)
+        .map(|i| std::array::from_fn(|c| value(4 * i + c as u32)))
+        .collect()
+}
+
+/// The reference stores Metal's codes of our probe's draws into the code formats (an Apple M3 Max
+/// under macOS 27.0.1): a 64 x 64 texture of each over a CoreVideo surface (`420v`, `422f`,
+/// `444v`, `x420`, `xf22` and `x444`), every texel drawn [`code_pass_values`]; each case's digest
+/// of Metal's luma codes row by row, then of each pair's Cb and Cr codes. The kernel stores the
+/// reference's codes of the first eight rows.
+#[test]
+fn the_store_reference_and_kernel_store_metal_s_codes_of_the_code_formats_passes() {
+    use PixelFormat as P;
+    let surface = (YCbCrRange::Video, YCbCrMatrix::Bt601);
+    let values = code_pass_values(64 * 64);
+    let texels: Vec<[f32; 3]> = values.iter().map(|&[r, g, b, _]| [r, g, b]).collect();
+    for (format, metal) in [
+        (P::RGB84202P, 0x303a_28c9),
+        (P::RGB84222P, 0xd414_7cb3),
+        (P::RGB84442P, 0x8d03_3f71),
+        (P::RGB104202P, 0x9416_b68b),
+        (P::RGB104222P, 0x6d8f_8efa),
+        (P::RGB104442P, 0x7f29_8fea),
+    ] {
+        let codes = codes_of(format);
+        let (luma, chroma) = ycbcr_store(codes, surface, &texels, [64, 64]).expect("stored");
+        let all = luma.iter().copied().chain(chroma.iter().flatten().copied());
+        assert_eq!(digest(all), metal, "{format:?}");
+        let mut s = Surface::new(format, surface, [64, 8], 7);
+        s.texels = texels[..64 * 8].iter().map(|&t| (t, false)).collect();
+        assert_eq!(s.encoded(true), s.stored(), "{format:?}");
     }
 }
 

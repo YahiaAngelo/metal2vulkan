@@ -2547,7 +2547,7 @@ fn only_subsampled_and_packed_ycbcr_formats_drop_writes() {
 }
 
 /// A pass renders exactly the YCbCr formats whose store a rule matches (the 8- and 10-bit
-/// converted unpacked ones) into `R32G32B32A32_SFLOAT`, blended where the device blends it; the
+/// unpacked ones read converted or as codes) into `R32G32B32A32_SFLOAT`, blended where the device blends it; the
 /// packed 10-bit formats held make their pipelines in the same floats, a pass into one refused;
 /// their images stay the converted texels, and every other YCbCr format renders into nothing.
 #[test]
@@ -2567,7 +2567,13 @@ fn a_pass_renders_only_the_ycbcr_formats_whose_store_is_matched() {
             P::YCBCR84442P,
             P::YCBCR104202P,
             P::YCBCR104222P,
-            P::YCBCR104442P
+            P::YCBCR104442P,
+            P::RGB84202P,
+            P::RGB84222P,
+            P::RGB84442P,
+            P::RGB104202P,
+            P::RGB104222P,
+            P::RGB104442P
         ]
     );
     let refused: Vec<PixelFormat> = PixelFormat::ALL

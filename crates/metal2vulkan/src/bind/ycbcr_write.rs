@@ -48,7 +48,13 @@
 //! and a code is `clamp(o + ((Σ t + 2^(T - 1 + k)) >> (T + k)), 0, 2^b - 1)`, `T` 6 at 8 bits and 4
 //! at 10, over the block of `2^k` texels the code covers: a texel's own luma, and each chroma
 //! pair's 2 x 2 texels at 4:2:0, 2 x 1 at 4:2:2, its own at 4:4:4 ([`ycbcr_store`]). A code of one
-//! texel is a function's write's code of the `half`.
+//! texel is a function's write's code of the `half`. A pass into a code format (`RGB8_420_2P` to
+//! `RGB10_444_2P`, 540 to 545; our probes over `420v`, `422f`, `444v`, `x420`, `xf22` and `x444`
+//! surfaces on an Apple M3 Max under macOS 27.0.1, every byte of 64 x 64 draws of values in
+//! `[-0.25, 1.75)`, NaNs, infinities and zeros among them, and of draws over loads) stores each
+//! texel's luma code as a write of its green channel's `half` (so rounded) stores it, and each
+//! chroma pair's Cb and Cr codes the mean of its block's blue and red codes so made, rounded half
+//! up: `(Σ code + 2^(k - 1)) >> k` over the block of `2^k` texels.
 //!
 //! **The module** (one per device). One `GLCompute` entry `main` with local size
 //! ([`YCbCrWriteModule::LOCAL_SIZE`], [`YCbCrWriteModule::LOCAL_SIZE`], 1), no push constants,
@@ -180,22 +186,21 @@ pub(crate) fn write_rows(
     [0, 1, 2].map(|i| (rows[i], offsets[i]))
 }
 
-/// A pass's channel's `x`: `v` rounded to a `half` as Metal's pass holds it, to nearest even, or
-/// `toward_zero`, then [`grid_step`]'s.
-fn half_grid_step(v: f32, toward_zero: bool) -> i64 {
+/// A pass's channel: `v` rounded to a `half` as Metal's pass holds it, to nearest even, or
+/// `toward_zero` (of `v` clamped to `[0, 1]`; a NaN stays one).
+fn pass_half(v: f32, toward_zero: bool) -> f32 {
     if !toward_zero {
-        return grid_step(f16_bits_to_f32(f32_to_f16_bits(v)));
+        return f16_bits_to_f32(f32_to_f16_bits(v));
     }
     if v.is_nan() {
-        return 0;
+        return v;
     }
     // Of `v` in `[0, 1]` of exponent `E` (at least -14, a subnormal half's step), the half's
     // significand `q = floor(v · 2^(10 - E))`, its value `q · 2^(E - 10)`: each product exact.
     let v = v.clamp(0.0, 1.0);
     let exponent = (((v.to_bits() >> 23) & 0xff) as i32 - 127).max(-14);
     let scale = f64::powi(2.0, 10 - exponent);
-    let half = (f64::from(v) * scale).floor() / scale;
-    grid_step(half as f32)
+    ((f64::from(v) * scale).floor() / scale) as f32
 }
 
 /// A channel's `x = rint(clamp(v, 0, 1) · 2048)`, ties to even, a NaN 0.
@@ -250,22 +255,50 @@ pub fn ycbcr_write(
 /// a texture of `size` texels) into the planes of a two-plane YCbCr texture of `codes` over a
 /// surface of `range` and `matrix` (the module docs): each texel's luma code, row by row, and each
 /// chroma pair's Cb and Cr codes of the block of texels it covers, row by row of the chroma
-/// plane. `None` for a layout whose store is not encoded (codes read as codes or through the sRGB
-/// curve, and packed ones), for a size the chroma blocks do not tile, or for `texels` not
-/// `size`'s.
+/// plane. `None` for a layout whose store is not encoded (codes read through the sRGB curve, and
+/// packed ones), for a size the chroma blocks do not tile, or for `texels` not `size`'s.
 pub fn ycbcr_store(
     codes: YCbCrCodes,
     (range, matrix): (YCbCrRange, YCbCrMatrix),
     texels: &[[f32; 3]],
     size: [u32; 2],
 ) -> Option<(Vec<u16>, Vec<[u16; 2]>)> {
-    if codes.packed || codes.output != YCbCrOutput::Converted {
+    if codes.packed || codes.output == YCbCrOutput::Srgb {
         return None;
     }
     let [w, h] = size.map(|n| n as usize);
     let [sx, sy] = codes.subsampling.halved().map(usize::from);
     if texels.len() != w * h || w % (1 << sx) != 0 || h % (1 << sy) != 0 {
         return None;
+    }
+    let toward_zero = pass_rounds_toward_zero(codes);
+    let k = (sx + sy) as u32;
+    // Each chroma pair's block of texels, by their indices.
+    let block = |cx: usize, cy: usize| {
+        (0..1 << sy)
+            .flat_map(move |dy| (0..1 << sx).map(move |dx| ((cy << sy) + dy) * w + (cx << sx) + dx))
+    };
+    if codes.output == YCbCrOutput::Codes {
+        // Each channel's code of its `half`: luma green's, Cb blue's and Cr red's; a pair's the
+        // mean of its block's, rounded half up.
+        let max = (1u32 << codes.bits) - 1;
+        let own: Vec<[u16; 3]> = texels
+            .iter()
+            .map(|&[r, g, b]| [g, b, r].map(|v| code_of(pass_half(v, toward_zero), max)))
+            .collect();
+        let luma = own.iter().map(|&[y, _, _]| y).collect();
+        let mut chroma = Vec::with_capacity((w >> sx) * (h >> sy));
+        for cy in 0..h >> sy {
+            for cx in 0..w >> sx {
+                let mut sums = [0u32; 2];
+                for i in block(cx, cy) {
+                    sums[0] += u32::from(own[i][1]);
+                    sums[1] += u32::from(own[i][2]);
+                }
+                chroma.push(sums.map(|s| ((s + ((1 << k) >> 1)) >> k) as u16));
+            }
+        }
+        return Some((luma, chroma));
     }
     let max = (1i64 << codes.bits) - 1;
     let rows = write_rows(range, matrix, codes.bits);
@@ -281,26 +314,21 @@ pub fn ycbcr_store(
         let code = i64::from(o) + ((sum + (1 << (shift - 1))) >> shift);
         code.clamp(0, max) as u16
     };
-    let toward_zero = pass_rounds_toward_zero(codes);
     let steps: Vec<[i64; 3]> = texels
         .iter()
-        .map(|t| t.map(|v| half_grid_step(v, toward_zero)))
+        .map(|t| t.map(|v| grid_step(pass_half(v, toward_zero))))
         .collect();
     let luma = steps
         .iter()
         .map(|&x| encode(rows[0], term(rows[0], x), 0))
         .collect();
-    let k = (sx + sy) as u32;
     let mut chroma = Vec::with_capacity((w >> sx) * (h >> sy));
     for cy in 0..h >> sy {
         for cx in 0..w >> sx {
             let mut sums = [0i64; 2];
-            for dy in 0..1 << sy {
-                for dx in 0..1 << sx {
-                    let x = steps[((cy << sy) + dy) * w + (cx << sx) + dx];
-                    sums[0] += term(rows[1], x);
-                    sums[1] += term(rows[2], x);
-                }
+            for i in block(cx, cy) {
+                sums[0] += term(rows[1], steps[i]);
+                sums[1] += term(rows[2], steps[i]);
             }
             chroma.push([encode(rows[1], sums[0], k), encode(rows[2], sums[1], k)]);
         }
@@ -521,6 +549,42 @@ impl Cx {
         f.convert(ConvOp::ConvertFToU, x, self.u32_)
     }
 
+    /// A pass's channel `bits` (a `u32`) as its `half`'s `float` bits (a `u32`): the value of
+    /// `[0, 1]` rounded to a `half`, to nearest even, or toward zero where `toward_zero` (a
+    /// `bool`). Of `v` of exponent `E` (at least -14), `q = rint(v · 2^(10 - E))` (or its floor)
+    /// is the half's significand and `q · 2^(E - 10)` its value, each product of a power of two
+    /// exact.
+    fn pass_half(
+        &self,
+        f: &mut FunctionBuilder<'_>,
+        bits: Value,
+        toward_zero: Value,
+    ) -> BResult<Value> {
+        let v = self.unit(f, bits)?;
+        let raw = f.convert(ConvOp::Bitcast, v, self.u32_)?;
+        let twenty_three = self.uint(f, 23)?;
+        let exponent = f.binary(BinOp::ShiftRightLogical, raw, twenty_three)?;
+        let byte = self.uint(f, 0xff)?;
+        let exponent = f.binary(BinOp::BitwiseAnd, exponent, byte)?;
+        let least = self.uint(f, 127 - 14)?;
+        let exponent = f.glsl(GlslOp::UMax, &[exponent, least])?;
+        // `2^(10 - E)` and `2^(E - 10)` as floats: biased exponents `264 - e` and `e - 10`.
+        let top = self.uint(f, 127 + 10 + 127)?;
+        let up = f.binary(BinOp::ISub, top, exponent)?;
+        let up = f.binary(BinOp::ShiftLeftLogical, up, twenty_three)?;
+        let up = f.convert(ConvOp::Bitcast, up, self.f32_)?;
+        let ten = self.uint(f, 10)?;
+        let down = f.binary(BinOp::ISub, exponent, ten)?;
+        let down = f.binary(BinOp::ShiftLeftLogical, down, twenty_three)?;
+        let down = f.convert(ConvOp::Bitcast, down, self.f32_)?;
+        let q = f.binary(BinOp::FMul, v, up)?;
+        let nearest = f.glsl(GlslOp::RoundEven, &[q])?;
+        let below = f.glsl(GlslOp::Floor, &[q])?;
+        let q = f.select(toward_zero, below, nearest)?;
+        let h = f.binary(BinOp::FMul, q, down)?;
+        f.convert(ConvOp::Bitcast, h, self.u32_)
+    }
+
     /// The code of channel `bits` (a `u32`) of `max` (a `u32`, at most 1023):
     /// `round(v · max)` of the exact product, to nearest. Of `v` in `(0, 1)`, `M · 2^-s` with
     /// `M` its significand (its implicit bit included; a subnormal's at `s = 149`) and `s` at
@@ -568,11 +632,12 @@ impl Cx {
     }
 
     /// The code `component` (0 luma, 1 Cb, 2 Cr; a `u32`) of the four reads `texels` (each a
-    /// `uvec4`) of its block: the codes' own of the first; converted, the sum of the reads'
-    /// terms ([`YCbCrWriteModule::READS_BITS`]), each its row `c · x` counted at 2^-T of a code
-    /// and truncated, `(Σ hi · x + (Σ lo · x >> 12)) >> S` for the shape's `term_shift`
-    /// `S = 14 - T`, its `x` a pass's ([`half_grid_step`](Self::half_grid_step), toward zero
-    /// where `toward_zero`, a `bool`) where `pass` (a `bool`).
+    /// `uvec4`) of its block: codes, the mean of the reads' own codes rounded half up,
+    /// `(Σ code + 2) >> 2`, each of a pass's `half` ([`pass_half`](Self::pass_half), toward
+    /// zero where `toward_zero`, a `bool`) where `pass` (a `bool`); converted, the sum of the
+    /// reads' terms ([`YCbCrWriteModule::READS_BITS`]), each its row `c · x` counted at 2^-T of a
+    /// code and truncated, `(Σ hi · x + (Σ lo · x >> 12)) >> S` for the shape's `term_shift`
+    /// `S = 14 - T`, its `x` a pass's ([`half_grid_step`](Self::half_grid_step)) where `pass`.
     fn code_of(
         &self,
         f: &mut FunctionBuilder<'_>,
@@ -581,15 +646,24 @@ impl Cx {
         (max, codes, pass): (Value, Value, Value),
         (term_shift, toward_zero): (Value, Value),
     ) -> BResult<Value> {
-        let channels: Vec<Value> = (0..3)
-            .map(|c| f.composite_extract(texels[0], &[c]))
-            .collect::<BResult<_>>()?;
         // Codes: luma the green channel, Cb the blue, Cr the red.
         let is_luma = f.binary(BinOp::IEqual, component, self.zero)?;
         let is_cb = f.binary(BinOp::IEqual, component, self.one)?;
-        let channel = f.select(is_cb, channels[2], channels[0])?;
-        let channel = f.select(is_luma, channels[1], channel)?;
-        let own = self.code(f, channel, max)?;
+        let mut own = self.zero;
+        for &texel in &texels {
+            let channels: Vec<Value> = (0..3)
+                .map(|c| f.composite_extract(texel, &[c]))
+                .collect::<BResult<_>>()?;
+            let channel = f.select(is_cb, channels[2], channels[0])?;
+            let channel = f.select(is_luma, channels[1], channel)?;
+            let halved = self.pass_half(f, channel, toward_zero)?;
+            let channel = f.select(pass, halved, channel)?;
+            let code = self.code(f, channel, max)?;
+            own = f.binary(BinOp::IAdd, own, code)?;
+        }
+        let two = self.uint(f, 2)?;
+        let own = f.binary(BinOp::IAdd, own, two)?;
+        let own = f.binary(BinOp::ShiftRightLogical, own, two)?;
         // Converted: the row of the code.
         let row_words = self.uint(f, word::ROW_WORDS)?;
         let at = f.binary(BinOp::IMul, component, row_words)?;
