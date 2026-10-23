@@ -36,6 +36,7 @@ The translator's core lives in `crates/metal2vulkan-air/src/` and, in
 | `docs/ARCHITECTURE.md` | The translator's stages and module map |
 | `docs/FAST-PATHS.md` | The ledger of speed-for-accuracy defaults and their exact switches |
 | `docs/VALIDATION.md` | The validation ladder |
+| `docs/CONFORMANCE-COVERAGE.md` | Generated: which Metal items the conformance suite compares against Metal, and which it does not |
 | `CONTRIBUTING.md` | Build, test, golden tables |
 | `crates/metal2vulkan/src/env_vars.rs` | The `METAL2VULKAN_*` variables |
 
@@ -241,7 +242,8 @@ When chasing a hang, read the whole nextest output; do not pipe it through `head
   or journal. The why of a change goes in its commit message; a durable contract goes in the doc
   that owns it.
 - **The honest trade-offs stay current.** `docs/FAST-PATHS.md` (speed-for-accuracy choices, device
-  gaps and known gaps), `docs/REFUSALS.md` (generated), `docs/METAL-COVERAGE.md` (generated) and
+  gaps and known gaps), `docs/REFUSALS.md` (generated), `docs/METAL-COVERAGE.md` (generated),
+  `docs/CONFORMANCE-COVERAGE.md` (generated) and
   `docs/API.md`'s degrade-notice catalogue and accepted differences change in the same commit as
   the behavior they describe. An open gap is recorded where a user reads it: a typed refusal, a
   degrade notice or precision note, or `docs/FAST-PATHS.md`'s known gaps.

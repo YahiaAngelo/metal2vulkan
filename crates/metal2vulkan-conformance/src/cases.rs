@@ -24,6 +24,7 @@
 //!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
+pub mod astc_textures;
 pub mod border_swizzles;
 pub mod buffer_blits;
 pub mod buffer_textures;
@@ -37,6 +38,7 @@ pub mod compressed_views;
 pub mod compute_threadgroups;
 pub mod depth_texel_reads;
 pub mod discard_hoist;
+pub mod etc_textures;
 pub mod event_orders;
 pub mod extended_range_blends;
 pub mod extended_range_planes;
@@ -105,6 +107,12 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.push(Box::new(stage_in_regions::stage_in_region_clamps()));
     for case in compressed_decode::all() {
+        cases.push(Box::new(case));
+    }
+    for case in etc_textures::all() {
+        cases.push(Box::new(case));
+    }
+    for case in astc_textures::all() {
         cases.push(Box::new(case));
     }
     for case in compressed_blits::all() {
