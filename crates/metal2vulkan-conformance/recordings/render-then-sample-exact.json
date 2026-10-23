@@ -1,0 +1,437 @@
+{
+  "format": 1,
+  "case": "render-then-sample-exact",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "tob_renders.ll",
+      "entry": "tob_rect+tob_solid+tob_sample",
+      "source_sha256": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+    },
+    {
+      "fixture": "tob_renders.air.ll",
+      "entry": "tob_rect+tob_solid+tob_sample",
+      "source_sha256": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air:tob_renders",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed:tob_renders",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+                        }
+                      }
+                    },
+                    {
+                      "name": "fill-pipeline",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6c72912a67585242f71c301be6a57b0a3375c0c9042e291aae3524258e6cffcf"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample-pipeline",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "fc3204f466b28cc8c75ab41b85dd8de890e6fa839322513f7a039840e2bc75d0"
+                        }
+                      }
+                    },
+                    {
+                      "name": "source-target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "108572d2d30d50c570d85fde7da970577642f835154da9fd441928c865c69dc7"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "108572d2d30d50c570d85fde7da970577642f835154da9fd441928c865c69dc7"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "640e494dd31edb66b0748239aa90547d77e8ab37843b5bc8352a5f39e5296f06"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:colors",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "43d4c1293c9b3f95d9238691547a970ab492a00b65389bdaddd8cf5c6f85f08f"
+                        }
+                      }
+                    },
+                    {
+                      "name": "rects",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "698c9c52395d89cad88cee871751e2bddbe2ef39e6cd14dd61040ad8157292f7"
+                        }
+                      }
+                    },
+                    {
+                      "name": "clears",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "652ef1aa0caf0213f2e2b5ad5a64ce3d6c77f06e1937106d6b619599c3c311e0"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library:tob_renders",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill-pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "sample-pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "source-target",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "target",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:colors",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pieces",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "fill-pass",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "sample-pass",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "read-source",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "read-target",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "drawn",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texels",
+                      "observed": {
+                        "value": {
+                          "bytes": "ECAwyBAgMMgQIDDIECAwyEBQYNJAUGDSQFBg0kBQYNJwgJDccICQ3HCAkNxwgJDcoLDA5qCwwOagsMDmoLDA5hAgMMgQIDDIECAwyBAgMMhAUGDSQFBg0kBQYNJAUGDScICQ3HCAkNxwgJDccICQ3KCwwOagsMDmoLDA5qCwwOYQIDDIECAwyBAgMMgQIDDIQFBg0kBQYNJAUGDSQFBg0nCAkNxwgJDccICQ3HCAkNygsMDmoLDA5qCwwOagsMDmECAwyBAgMMgQIDDIECAwyEBQYNJAUGDSQFBg0kBQYNJwgJDccICQ3HCAkNxwgJDcoLDA5qCwwOagsMDmoLDA5hAgMMgQIDDIECAwyBAgMMhAUGDSQFBg0kBQYNJAUGDScICQ3HCAkNxwgJDccICQ3KCwwOagsMDmoLDA5qCwwOYQIDDIECAwyBAgMMgQIDDIQFBg0kBQYNJAUGDSQFBg0nCAkNxwgJDccICQ3HCAkNygsMDmoLDA5qCwwOagsMDmECAwyBAgMMgQIDDIECAwyEBQYNJAUGDSQFBg0kBQYNJwgJDccICQ3HCAkNxwgJDcoLDA5qCwwOagsMDmoLDA5hAgMMgQIDDIECAwyBAgMMhAUGDSQFBg0kBQYNJAUGDScICQ3HCAkNxwgJDccICQ3KCwwOagsMDmoLDA5qCwwObQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8A=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 64,
+                            "rows": 16,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "sampled",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texels",
+                      "observed": {
+                        "value": {
+                          "bytes": "ECAwyBAgMMgQIDDIECAwyEBQYNJAUGDSQFBg0kBQYNJwgJDccICQ3HCAkNxwgJDcoLDA5qCwwOagsMDmoLDA5hAgMMgQIDDIECAwyBAgMMhAUGDSQFBg0kBQYNJAUGDScICQ3HCAkNxwgJDccICQ3KCwwOagsMDmoLDA5qCwwOYQIDDIECAwyBAgMMgQIDDIQFBg0kBQYNJAUGDSQFBg0nCAkNxwgJDccICQ3HCAkNygsMDmoLDA5qCwwOagsMDmECAwyBAgMMgQIDDIECAwyEBQYNJAUGDSQFBg0kBQYNJwgJDccICQ3HCAkNxwgJDcoLDA5qCwwOagsMDmoLDA5hAgMMgQIDDIECAwyBAgMMhAUGDSQFBg0kBQYNJAUGDScICQ3HCAkNxwgJDccICQ3KCwwOagsMDmoLDA5qCwwOYQIDDIECAwyBAgMMgQIDDIQFBg0kBQYNJAUGDSQFBg0nCAkNxwgJDccICQ3HCAkNygsMDmoLDA5qCwwOagsMDmECAwyBAgMMgQIDDIECAwyEBQYNJAUGDSQFBg0kBQYNJwgJDccICQ3HCAkNxwgJDcoLDA5qCwwOagsMDmoLDA5hAgMMgQIDDIECAwyBAgMMhAUGDSQFBg0kBQYNJAUGDScICQ3HCAkNxwgJDccICQ3KCwwOagsMDmoLDA5qCwwObQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8NDg8PDQ4PDw0ODw8A=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "u8",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 64,
+                            "rows": 16,
+                            "image_pitch": 1024,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

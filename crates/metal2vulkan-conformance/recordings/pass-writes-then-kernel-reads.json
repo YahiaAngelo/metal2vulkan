@@ -1,0 +1,487 @@
+{
+  "format": 1,
+  "case": "pass-writes-then-kernel-reads",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "tob_renders.ll",
+      "entry": "tob_rect+tob_solid",
+      "source_sha256": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+    },
+    {
+      "fixture": "tob_renders.air.ll",
+      "entry": "tob_rect+tob_solid",
+      "source_sha256": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+    },
+    {
+      "fixture": "format_scout.ll",
+      "entry": "scout_read_f",
+      "source_sha256": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+    },
+    {
+      "fixture": "format_scout.air.ll",
+      "entry": "scout_read_f",
+      "source_sha256": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air:tob_renders",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "41c076b9a59d34aa65706f301ddba9ed60c4ad8f0beae55f2679df50495f8b48"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed:tob_renders",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "62c34fb6d65ce1e8a577788317d44e0dee58bf8b45d4c5bb5e4c2ef1ca9e40bc"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air:format_scout",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3d6a9f693cb8eaa851e08e12bcce2afce2890bf3973e9b47312f5e18f2157cb9"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed:format_scout",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3631bf570501999cd192eacf86330e5c45cc74b914cdda669586ada3838dc110"
+                        }
+                      }
+                    },
+                    {
+                      "name": "render-pipeline",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3f17e0536057ade794ad4f34e42dfeea917b30c2d490c0c41a6e08776d8a9602"
+                        }
+                      }
+                    },
+                    {
+                      "name": "kernel",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6f138a7dacebbf62f307f8ed31e2eeb270a9a7da239deff99c7be8a8ec64886c"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:handed-over",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "aa0250e54ef44b2e08bb4963e1d4c0739a6d8d05dcef5c64196af733b23c8996"
+                        }
+                      }
+                    },
+                    {
+                      "name": "texture:attachment",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "aa0250e54ef44b2e08bb4963e1d4c0739a6d8d05dcef5c64196af733b23c8996"
+                        }
+                      }
+                    },
+                    {
+                      "name": "sampler",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "640e494dd31edb66b0748239aa90547d77e8ab37843b5bc8352a5f39e5296f06"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:colors",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ea8844d6ec5379a18151ccf6497eeda363cc1c7af9ff82abb9959297a566e72e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "rects",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "26757c4f6e12c7a12116bd9ce20d5b48d9e17228e71f4d073f66c1e1b5f402bb"
+                        }
+                      }
+                    },
+                    {
+                      "name": "clear",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "355469d6f1a49ff8102fdfbaadd7eb51d4c52bd69a153bc178ab42c36de698a3"
+                        }
+                      }
+                    },
+                    {
+                      "name": "grid",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "67f6e29b66fbf2707a705a7b0f515af11967d951daf158ee1b8c31c74474508e"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library:tob_renders",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "library:format_scout",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render-pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "compute-pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture:handed-over",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "texture:attachment",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "sampler",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:colors",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:kernel",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:read-back",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": {
+                          "variant": {
+                            "name": "Completed",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pieces",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "pass",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "dispatch",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "read-handed-over",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-handed-over",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "read-other",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "handed-over",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "texels",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "texture": {
+                                "level": 0,
+                                "slice": 0,
+                                "aspect": "color",
+                                "sample": 0,
+                                "origin": [
+                                  0,
+                                  0,
+                                  0
+                                ],
+                                "size": [
+                                  16,
+                                  16,
+                                  1
+                                ]
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 256,
+                            "rows": 16,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "read-by-the-kernel",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "values",
+                      "observed": {
+                        "value": {
+                          "bytes": "AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AACAPgAAAD8AAEA/AACAPwAAgD4AAAA/AABAPwAAgD8AAIA+AAAAPwAAQD8AAIA/AACAPgAAAD8AAEA/AACAPwAAAD4AAMA+AAAgPwAAYD8AAAA+AADAPgAAID8AAGA/AAAAPgAAwD4AACA/AABgPwAAAD4AAMA+AAAgPwAAYD8AACBAAACgvwAAAAAAAMA/AAAgQAAAoL8AAAAAAADAPwAAIEAAAKC/AAAAAAAAwD8AACBAAACgvwAAAAAAAMA/AAAAvwAAcEAAAAA/AAAgPwAAAL8AAHBAAAAAPwAAID8AAAC/AABwQAAAAD8AACA/AAAAvwAAcEAAAAA/AAAgPw=="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 4096
+                              }
+                            },
+                            "element": "f32",
+                            "row_offset": 0,
+                            "row_elements": 64,
+                            "row_pitch": 256,
+                            "rows": 16,
+                            "image_pitch": 4096,
+                            "images": 1,
+                            "gaps": "compared"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

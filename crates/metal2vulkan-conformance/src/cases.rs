@@ -55,10 +55,12 @@ pub mod compressed_blits;
 pub mod compressed_decode;
 pub mod compressed_moves;
 pub mod compressed_views;
+pub mod compute_render_chains;
 pub mod compute_threadgroups;
 pub mod denormal_word_fetches;
 pub mod depth_texel_reads;
 pub mod discard_hoist;
+pub mod draw_state_changes;
 pub mod etc_textures;
 pub mod event_orders;
 pub mod extended_range_blends;
@@ -68,6 +70,7 @@ pub mod extended_range_two_planes;
 pub mod extended_swizzles;
 pub mod fetch_ordered;
 pub mod format_copies;
+pub mod frame_chains;
 pub mod fresh_contents;
 pub mod half_output_blends;
 pub mod half_read_nans;
@@ -91,6 +94,7 @@ pub mod pixel_samplers;
 pub mod pvrtc_cpu_order;
 pub mod pvrtc_rows;
 pub mod rate_maps;
+pub mod render_chains;
 pub mod rgb10a2_srgb;
 pub mod rotated_planes;
 pub mod rotated_targets;
@@ -329,6 +333,10 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.extend(rotated_targets::all());
     cases.extend(rotated_planes::all());
+    cases.extend(render_chains::boxed());
+    cases.extend(compute_render_chains::boxed());
+    cases.extend(draw_state_changes::boxed());
+    cases.extend(frame_chains::boxed());
     cases
 }
 
