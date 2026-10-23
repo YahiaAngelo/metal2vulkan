@@ -444,7 +444,7 @@ fn bytes_work() -> Work {
             // An uncompressed format's rows of bytes are its texel rows, which is the region's
             // height: what this call always meant before a block-compressed family needed the
             // difference named.
-            rows: u64::from(height),
+            rows: height,
             bytes_per_row: pitch,
             bytes_per_image: 0,
         });
