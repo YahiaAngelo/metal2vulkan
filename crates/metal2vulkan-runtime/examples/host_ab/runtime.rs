@@ -1125,7 +1125,7 @@ impl Gpu for Runtime {
     }
 
     fn status(&self, command_buffer: &rt::CommandBuffer) -> u64 {
-        command_buffer.status().raw() as u64
+        command_buffer.status().raw()
     }
 
     fn fence(&self) -> rt::Fence {
@@ -1284,6 +1284,11 @@ impl Gpu for Runtime {
             ("provoking_listed_draws", c.provoking_listed_draws),
             ("gathered_draws", c.gathered_draws),
             ("bounded_run_draws", c.bounded_run_draws),
+            ("variant_pipelines_made", c.variant_pipelines_made),
+            ("host_pointer_imports_made", c.host_pointer_imports_made),
+            ("completed_waits", c.completed_waits),
+            ("device_memory_bytes", c.device_memory_allocated),
+            ("cleared_bytes", c.new_buffer_bytes_cleared),
         ]
         .into_iter()
         .map(|(name, count)| (name, count as f64))

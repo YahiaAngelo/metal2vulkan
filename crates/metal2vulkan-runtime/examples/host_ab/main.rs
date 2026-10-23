@@ -167,6 +167,10 @@
 //!   the kernel's code and so reads the records on the host. On the runtime's side, the commands
 //!   drawn on the GPU alone, the records read on the host, and the draws and pipeline barriers
 //!   recorded per frame (`rt_*`).
+//! - `percall`: the device API's CPU cost per call, Metal against the runtime: one group a call,
+//!   each timed alone, warm, with no making inside a timed window, and attributed three ways (the
+//!   calling thread, our own other threads, and what the caller blocks for). It prints its own
+//!   table after the metric table (`percall.rs`).
 //! - `icb_cpu`: the CPU's encoding of indirect commands, each call's time: of 4096 commands of a
 //!   buffer of dispatches and one of draws, each setter (pipeline state, buffer, dispatch or draw,
 //!   barrier) on every command in turn, then Apple's private getters of a buffer's address and of
@@ -208,6 +212,7 @@ mod allocs;
 mod gpu;
 #[cfg(target_os = "macos")]
 mod native;
+mod percall;
 mod runtime;
 mod workloads;
 
@@ -218,7 +223,7 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 use workloads::Sizes;
 
-const WORKLOADS: [&str; 19] = [
+const WORKLOADS: [&str; 20] = [
     "encode",
     "fixed",
     "calls",
@@ -238,6 +243,7 @@ const WORKLOADS: [&str; 19] = [
     "signals",
     "provoking",
     "icb_cpu",
+    "percall",
 ];
 
 struct Options {
@@ -509,6 +515,7 @@ fn run<G: Gpu>(g: &G, opened: Instant, metallib: &Path, options: &Options) {
             "signals" => workloads::signals(g, &scene, sizes),
             "provoking" => workloads::provoking(g, &library, sizes),
             "icb_cpu" => workloads::icb_cpu(g, &library, sizes),
+            "percall" => percall::percall(g, &scene, &library, sizes),
             _ => unreachable!(),
         }
     }
@@ -690,6 +697,7 @@ fn parent(options: &Options) {
         }
     }
     print_table(&table, options.rounds);
+    print_percall(&table, options.rounds);
     print_compared(&compared);
     if removes {
         let _ = std::fs::remove_dir_all(&scratch);
@@ -730,6 +738,127 @@ fn print_table(table: &Table, rounds: usize) {
         );
     }
     println!("\n{rounds} rounds; each cell is the median of the rounds' medians.");
+}
+
+/// The per-call table of the percall workload: each call's cost on each side, their ratio, where
+/// we are worst, the three attributions, and the runtime's own counts of what each call made
+/// (`percall.rs`). Nothing is printed where the workload did not run.
+fn print_percall(table: &Table, rounds: usize) {
+    let of = |call: &str, what: &str| -> (Option<f64>, Option<f64>) {
+        match table.get(&("percall".to_owned(), format!("{call}_{what}"))) {
+            Some((_, native, runtime)) => (median(native), median(runtime)),
+            None => (None, None),
+        }
+    };
+    let calls: Vec<&str> = table
+        .keys()
+        .filter(|(workload, _)| workload == "percall")
+        .filter_map(|(_, metric)| metric.strip_suffix("_self"))
+        .collect();
+    if calls.is_empty() {
+        return;
+    }
+    let show = |v: Option<f64>| v.map_or("-".to_owned(), |v| format!("{v:.1}"));
+    let ratio = |(n, r): (Option<f64>, Option<f64>)| match (n, r) {
+        (Some(n), Some(r)) if n > 0.0 => Some(r / n),
+        _ => None,
+    };
+    println!("\n### The per-call cost of the device API, Metal against the runtime\n");
+    println!("Each call timed alone, warm, {rounds} rounds; ns a call.\n");
+    println!("| call | Metal | runtime | runtime/Metal | runtime - Metal |");
+    println!("|---|---:|---:|---:|---:|");
+    for call in &calls {
+        let (n, r) = of(call, "self");
+        let added = match (n, r) {
+            (Some(n), Some(r)) => format!("{:+.1}", r - n),
+            _ => "-".to_owned(),
+        };
+        println!(
+            "| {call} | {} | {} | {} | {added} |",
+            show(n),
+            show(r),
+            ratio((n, r)).map_or("-".to_owned(), |v| format!("{v:.2}x"))
+        );
+    }
+    let mut worst: Vec<(&str, f64, f64, f64)> = calls
+        .iter()
+        .filter_map(|call| {
+            let (n, r) = of(call, "self");
+            Some((*call, ratio((n, r))?, r? - n?, n?))
+        })
+        .collect();
+    let top = |rows: &[(&str, f64, f64, f64)], what: &str| {
+        println!("\n{what}\n");
+        println!("| call | Metal ns | runtime ns | runtime/Metal | runtime - Metal |");
+        println!("|---|---:|---:|---:|---:|");
+        for (call, ratio, added, native) in rows.iter().take(12) {
+            println!(
+                "| {call} | {native:.1} | {:.1} | {ratio:.2}x | {added:+.1} |",
+                native + added
+            );
+        }
+    };
+    worst.sort_by(|a, b| b.1.total_cmp(&a.1));
+    top(&worst, "Worst by ratio:");
+    worst.sort_by(|a, b| b.2.total_cmp(&a.2));
+    top(&worst, "Worst by the nanoseconds a call adds:");
+    println!("\n### Where each call's cost falls\n");
+    println!(
+        "`self` is the calling thread's wall time a call, `blocked` how much of it the thread \
+         was off a CPU, `others` our own other threads' CPU time while the calls ran, `drain` \
+         the calling thread's wall time after them (the commit and wait of the command buffer \
+         the calls filled, where the group has one), `drain blocked` how much of that drain the \
+         thread was off a CPU, and `drain others` our other threads' CPU time in it. ns a call, \
+         and allocations a call on the calling thread.\n"
+    );
+    println!(
+        "| call | Metal self | Metal others | Metal blocked | Metal drain | Metal drain \
+         blocked | Metal drain others | Metal allocs | runtime self | runtime others | runtime \
+         blocked | runtime drain | runtime drain blocked | runtime drain others | runtime \
+         allocs |"
+    );
+    println!("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+    for call in &calls {
+        let parts = [
+            "self",
+            "others",
+            "blocked",
+            "drain",
+            "drain_blocked",
+            "drain_others",
+            "allocs",
+        ];
+        let cells: Vec<String> = [0, 1]
+            .into_iter()
+            .flat_map(|side| {
+                parts.map(|what| {
+                    let both = of(call, what);
+                    show([both.0, both.1][side])
+                })
+            })
+            .collect();
+        println!("| {call} | {} |", cells.join(" | "));
+    }
+    let counts: Vec<(&String, &str, Option<f64>)> = table
+        .iter()
+        .filter(|((workload, _), _)| workload == "percall")
+        .filter_map(|((_, metric), (_, _, runtime))| {
+            let (call, counted) = metric.split_once("_rt_")?;
+            let _ = call;
+            Some((metric, counted, median(runtime)))
+        })
+        .collect();
+    if counts.is_empty() {
+        return;
+    }
+    println!("\n### What the runtime's calls made it do, per call\n");
+    println!("Counts, which are the same under any load; none natively.\n");
+    println!("| call and count | per call |");
+    println!("|---|---:|");
+    for (metric, counted, value) in counts {
+        let call = metric.split_once("_rt_").map_or("", |(call, _)| call);
+        println!("| {call} / {counted} | {} |", show(value));
+    }
 }
 
 fn print_compared(compared: &Compared) {
