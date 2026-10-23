@@ -17,28 +17,37 @@
 //! channel the mask writes reads as `0xff`: the four channels are told apart by value, and a mask
 //! applied to the wrong channel fails rather than passing by coincidence.
 //!
-//! `RGBA8Unorm` is the format because its codes survive Metal's tile store unchanged, so every
-//! field of every case here is **exact** on every device and no case carries a tolerance. That is
-//! the point of the format choice: the tile-store family's masked draw can only be compared under
-//! a notice, and a mask is too ordinary a piece of state to be checked only where a notice is in
-//! the way.
+//! `RGBA8Unorm` is the format because its codes survive Metal's tile store unchanged, so **the
+//! texels are exact on every device** and no case loosens them. That is the point of the format
+//! choice: the tile-store family's masked draw can only be compared under a notice, and a mask is
+//! too ordinary a piece of state to be checked only where a notice is in the way.
+//!
+//! The one site that is loosened is the notices site, by `shader-color-conversion`: a device whose
+//! own float-to-normalized conversion is not Metal's has the fragment function round each stored
+//! channel itself (`metal2vulkan::pipeline::color_writes`), which it announces. Which device does
+//! that is the device's answer and not the case's — lavapipe announces it, MoltenVK on an Apple
+//! GPU does not — and it changes no texel here, because white converts to `0xff` either way. The
+//! case of a mask of no channel does not announce it at all: with nothing stored there is no
+//! conversion to round, which is itself a small confirmation that the mask reached the pipeline.
 //!
 //! The mask of every channel is the control. Without it a side that quietly stopped drawing at all
 //! would pass both of the other two, and the family would prove nothing.
 //!
 //! Nothing here can fault a GPU: one 4 by 4 target a case, one triangle, no loop.
 
-use crate::allowance::Allowance;
+use crate::allowance::{Allowance, Justification, Loosening};
 use crate::case::{Abort, Case, Failure, Input, MetalSource, Side};
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
 use crate::render::{
     ColorState, PassColor, RenderPass, RenderPipelineSpec, RenderStep, TargetSpec,
 };
+use crate::replay::NOTICES_SITE;
 use crate::transcript::{
     Aspect, ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value,
 };
 use metal2vulkan::metal::{ColorWriteMask, PixelFormat};
+use metal2vulkan_runtime::Degradation;
 
 /// The owned fixture whose vertex function is Metal's fullscreen triangle at the depth a vertex
 /// buffer holds, and whose fragment function returns white. The tile-store family's fixture.
@@ -153,9 +162,16 @@ impl Case for ColorWriteMaskCase {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // Nothing is loosened: `RGBA8Unorm` codes survive Metal's store, so which channels the
-        // mask kept is an exact answer on every device or it is a bug.
-        Vec::new()
+        // The texels are not loosened: `RGBA8Unorm` codes survive Metal's store, so which channels
+        // the mask kept is an exact answer on every device or it is a bug. The notices site is,
+        // by the one notice a draw that stores a converted channel may announce, because which
+        // device rounds the conversion in the shader is the device's answer and not the case's and
+        // it moves no texel here.
+        vec![Allowance::new(
+            format!("case/{NOTICES_SITE}/*"),
+            Loosening::Unchecked,
+            Justification::notice(Degradation::ShaderColorConversion),
+        )]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
@@ -361,15 +377,31 @@ mod tests {
         assert_eq!(expected(ColorWriteMask::ALL), [0xff; 4]);
     }
 
-    /// No case of the family loosens anything: every field is exact.
+    /// No case of the family loosens a texel: the notices site is the only loosened site, and the
+    /// one notice it names is in the degrade catalogue.
+    ///
+    /// This is the family's whole tolerance story in one assertion. A case that ever loosened the
+    /// texels would fail here, which is the field the family exists to compare.
     #[test]
-    fn no_case_carries_a_tolerance() {
+    fn only_the_notices_site_is_loosened() {
         for case in all() {
-            assert!(
-                case.allowances().is_empty(),
-                "{}: a tolerance where every field is exact",
-                case.name()
-            );
+            for allowance in case.allowances() {
+                assert_eq!(
+                    allowance.path,
+                    format!("case/{NOTICES_SITE}/*"),
+                    "{}: an allowance outside the notices site",
+                    case.name()
+                );
+                match &allowance.justified_by {
+                    Justification::Degradation(code) => assert_eq!(
+                        code,
+                        Degradation::ShaderColorConversion.code(),
+                        "{}: an unexpected notice",
+                        case.name()
+                    ),
+                    other => panic!("{}: an unexpected tolerance: {other:?}", case.name()),
+                }
+            }
             assert_eq!(case.metal_source(), MetalSource::Run);
             case.shaders().unwrap();
             let inputs = case.inputs().unwrap();
