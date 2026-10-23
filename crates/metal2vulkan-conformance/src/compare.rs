@@ -18,7 +18,7 @@
 //! was counted a case could name one indefinitely without anybody noticing.
 
 use crate::allowance::{Allowance, Loosening, Offered, Unjustified};
-use crate::diff::{Divergence, DivergenceKind, Side};
+use crate::diff::{Divergence, DivergenceKind, ElementAt, GapAt, LineAt, Side};
 use crate::transcript::{ByteLayout, Gaps, Node, Observed, Shape, Transcript, Value};
 
 /// A site that differed inside an allowance that holds.
@@ -401,6 +401,13 @@ impl Walk<'_> {
             return;
         }
         let size = layout.element.size() as usize;
+        // The whole region is walked, not just up to the first mismatch, because the row this
+        // feeds names how much moved: of twelve rotated-target divergences measured in this round
+        // every one differs by a single code at its first mismatch and four reach two codes well
+        // past it, so stopping early would have reported a bound that is not one.
+        let mut count = 0usize;
+        let mut largest: Option<f64> = None;
+        let mut first: Option<ElementAt> = None;
         for image in 0..layout.images {
             for row in 0..layout.rows {
                 for index in 0..layout.row_elements {
@@ -422,21 +429,33 @@ impl Walk<'_> {
                     if self.allowed(path, &expected, &actual) {
                         continue;
                     }
-                    self.found.divergences.push(Divergence::new(
-                        path,
-                        DivergenceKind::Element {
-                            element: layout.element,
-                            image,
-                            row,
-                            index,
-                            at,
-                            metal: expected,
-                            ours: actual,
-                        },
-                    ));
-                    return;
+                    count += 1;
+                    largest = match (largest, crate::allowance::difference(&expected, &actual)) {
+                        (Some(held), Some(found)) => Some(held.max(found)),
+                        (held, found) => held.or(found),
+                    };
+                    first = first.or(Some(ElementAt {
+                        image,
+                        row,
+                        index,
+                        at,
+                        metal: expected,
+                        ours: actual,
+                    }));
                 }
             }
+        }
+        if let Some(first) = first {
+            self.found.divergences.push(Divergence::new(
+                path,
+                DivergenceKind::Element {
+                    element: layout.element,
+                    count,
+                    largest,
+                    first,
+                },
+            ));
+            return;
         }
         if layout.gaps == Gaps::Compared {
             self.gaps(path, layout, recorded, read);
@@ -454,18 +473,30 @@ impl Walk<'_> {
                 && row >= first
                 && row < first + layout.row_elements as usize * layout.element.size() as usize
         };
+        let mut count = 0usize;
+        let mut largest: Option<f64> = None;
+        let mut first: Option<GapAt> = None;
         for (at, (expected, actual)) in metal.iter().zip(ours).enumerate() {
             if expected != actual && !covered(at) {
-                self.found.divergences.push(Divergence::new(
-                    path,
-                    DivergenceKind::Gap {
-                        at,
-                        metal: *expected,
-                        ours: *actual,
-                    },
-                ));
-                return;
+                count += 1;
+                let difference = f64::from(expected.abs_diff(*actual));
+                largest = Some(largest.map_or(difference, |held: f64| held.max(difference)));
+                first = first.or(Some(GapAt {
+                    at,
+                    metal: *expected,
+                    ours: *actual,
+                }));
             }
+        }
+        if let Some(first) = first {
+            self.found.divergences.push(Divergence::new(
+                path,
+                DivergenceKind::Gap {
+                    count,
+                    largest,
+                    first,
+                },
+            ));
         }
     }
 
@@ -527,17 +558,21 @@ impl Walk<'_> {
                 ));
             }
             (Value::Lines(recorded), Value::Lines(read)) => {
-                let at = recorded
-                    .iter()
-                    .zip(read)
-                    .position(|(expected, actual)| expected != actual)
-                    .unwrap_or(recorded.len().min(read.len()));
+                // Every differing line is counted, for the same reason the element walk counts
+                // every element: the count is the stable part, and a row says how much moved.
+                let lines = recorded.len().max(read.len());
+                let differ = |at: usize| recorded.get(at) != read.get(at);
+                let count = (0..lines).filter(|at| differ(*at)).count();
+                let at = (0..lines).find(|at| differ(*at)).unwrap_or(lines);
                 self.found.divergences.push(Divergence::new(
                     path,
                     DivergenceKind::Line {
-                        at,
-                        metal: recorded.get(at).cloned(),
-                        ours: read.get(at).cloned(),
+                        count,
+                        first: LineAt {
+                            at,
+                            metal: recorded.get(at).cloned(),
+                            ours: read.get(at).cloned(),
+                        },
                     },
                 ));
             }

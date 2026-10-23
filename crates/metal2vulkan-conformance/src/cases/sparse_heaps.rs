@@ -393,15 +393,22 @@ impl Case for SparseHeapCase {
             // site and the sweep goes on: the other answers stay readable instead of being lost
             // behind an abort.
             let mut node = Node::branch(texture.site(), Vec::new());
-            let answered = match side.heap_texture(heap, texture) {
+            let (answered, lacks) = match side.heap_texture(heap, texture) {
                 Ok(made) => match side.sparse_texture_facts(made) {
-                    Ok(facts) => Value::ok(facts.value()),
-                    Err(failure) => failure.value,
+                    Ok(facts) => (Value::ok(facts.value()), None),
+                    Err(failure) => (failure.value, failure.lacks),
                 },
-                Err(failure) => failure.value,
+                Err(failure) => (failure.value, failure.lacks),
             };
             node = node.with(Node::leaf(site::TEXTURE, Observed::value(answered)));
             sites.push(node);
+            // A venue that honestly cannot make this texture -- lavapipe has no
+            // `sparseResidencyNSamples`, so no multisampled sparse texture at all -- is the
+            // venue's gap at this site, never a refusal of ours. The fact has to be recorded with
+            // the answer, because the sweep carries on and so there is no abort to read it from.
+            if let Some(needs) = lacks {
+                sites.device_gap(&format!("{}/{}", texture.site(), site::TEXTURE), needs);
+            }
         }
         if self.asks_heap {
             emit_heap(side, sites, heap, site::HEAP_AFTER);
@@ -412,11 +419,15 @@ impl Case for SparseHeapCase {
 
 /// Emit the heap's three getters at `at`.
 fn emit_heap(side: &mut dyn Side, sites: &mut Sites, heap: Handle, at: &str) {
-    let answered = match side.heap_facts(heap) {
-        Ok(facts) => Value::ok(facts.value()),
-        Err(failure) => failure.value,
+    let (answered, lacks) = match side.heap_facts(heap) {
+        Ok(facts) => (Value::ok(facts.value()), None),
+        Err(failure) => (failure.value, failure.lacks),
     };
     sites.push(Node::leaf(at, Observed::value(answered)));
+    // As above: a venue that cannot answer these getters at all is its own gap here.
+    if let Some(needs) = lacks {
+        sites.device_gap(at, needs);
+    }
 }
 
 /// The guards this family's safety argument rests on, run on a device.

@@ -450,11 +450,28 @@ fn one_word_moving_names_its_row_and_index() {
     };
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].path, "case/output");
-    let DivergenceKind::Element { row, index, at, .. } = &found[0].kind else {
+    let DivergenceKind::Element {
+        count,
+        largest,
+        first,
+        ..
+    } = &found[0].kind
+    else {
         panic!("not an element: {:?}", found[0].kind);
     };
-    assert_eq!((*row, *index, *at), (1, 0, 8));
-    // The message names the leaf, not two whole regions.
+    assert_eq!((first.row, first.index, first.at), (1, 0, 8));
+    // One element moved, by 6: the summary is the count and how far, which is what a known-gaps
+    // row's answer holds and what makes it stable.
+    assert_eq!(*count, 1);
+    assert_eq!(*largest, Some(6.0));
+    let summary = found[0].kind.to_string();
+    assert!(summary.contains("1 element differs"), "{summary}");
+    assert!(summary.contains("Metal 3"), "{summary}");
+    // The walk position is a line of its own, so it is never part of the row's identity.
+    assert!(!summary.contains("row 1"), "{summary}");
+    let detail = found[0].kind.detail().unwrap();
+    assert!(detail.contains("row 1"), "{detail}");
+    // The message names the leaf, not two whole regions, and the report prints both lines.
     let printed = replayed.verdict.to_string();
     assert!(printed.contains("row 1"), "{printed}");
     assert!(printed.contains("Metal 3"), "{printed}");
@@ -898,9 +915,34 @@ fn an_ordered_list_of_lines_names_the_line_that_moved() {
         Offered::notices(&[]),
     );
     assert_eq!(found.divergences.len(), 1);
-    let printed = found.divergences[0].to_string();
-    assert!(printed.contains("line 1"), "{printed}");
-    assert!(printed.contains("\"TWO\""), "{printed}");
+    // The summary says how many lines moved and, for one, what the two sides hold. The line's
+    // index is a walk position, so it sits in the detail and not in the row's identity.
+    let summary = found.divergences[0].kind.to_string();
+    assert!(summary.contains("1 line differs"), "{summary}");
+    assert!(summary.contains("\"TWO\""), "{summary}");
+    assert!(!summary.contains("line 1"), "{summary}");
+    let detail = found.divergences[0].kind.detail().unwrap();
+    assert!(detail.contains("line 1"), "{detail}");
+
+    // More than one line moving is a count, because the row's job is to say how much: the index
+    // of the first is in the detail either way.
+    let found = compare(
+        &lines(&["one", "two", "three"]),
+        &lines(&["ONE", "TWO", "three"]),
+        &[],
+        Offered::notices(&[]),
+    );
+    let summary = found.divergences[0].kind.to_string();
+    assert_eq!(summary, "2 lines differ");
+    assert!(
+        found.divergences[0]
+            .kind
+            .detail()
+            .unwrap()
+            .contains("line 0"),
+        "{:?}",
+        found.divergences[0].kind
+    );
 }
 
 #[test]
@@ -1050,7 +1092,7 @@ fn an_ulps_allowance_reaches_a_float_inside_a_byte_column() {
             found.divergences[0].kind,
             DivergenceKind::Element {
                 element: Element::F32,
-                index: 0,
+                count: 1,
                 ..
             }
         ),
@@ -1665,11 +1707,69 @@ fn the_known_gaps_ledger_parses_and_names_real_cases() {
     for known in quads {
         assert_eq!(known.expects, crate::known_gaps::Expects::Divergent);
         assert_eq!(known.venue, "llvmpipe");
-        // A divergence row carries both answers, because the leaf fact that moved names them.
-        assert!(known.answer.contains("Metal 1"), "{known:?}");
-        assert!(known.answer.contains("ours 0"), "{known:?}");
+        // A divergence row says how much moved -- how many of the site's leaves differ and how
+        // far -- and never where the walk first noticed, which is a property of the data and not
+        // of the bug. All four texels of the kept quad differ, which the first-mismatch answer
+        // this row used to carry hid entirely: it named one element and read as one difference.
+        assert_eq!(
+            known.answer, "4 elements differ (I32), the largest difference 1",
+            "{known:?}"
+        );
         // And it is honest about what is not established, which is the whole cause.
         assert!(known.waiting_on.contains("NOT established"), "{known:?}");
+    }
+
+    // Every row's site must be one its case's committed recording actually holds. A row for a
+    // site that cannot exist is otherwise committable and silently unheld: one stream in this
+    // round nearly added a row for `case/texels/argb8` of a case whose `argb8` leg refuses at the
+    // pipeline and so produces no texels at all, and it was caught only because a hand count
+    // disagreed with a parser's. This makes that near-miss impossible without a device.
+    for known in &ledger {
+        let recording = crate::recording::read(&known.case)
+            .unwrap_or_else(|why| panic!("{}: {why}", known.case));
+        let held = recording.answers.iter().any(|answer| {
+            answer
+                .outcomes
+                .iter()
+                .any(|outcome| site_exists(&outcome.transcript.root, "case", &known.site))
+        });
+        assert!(
+            held,
+            "{}: no site {} in the committed recording. A row's site is the one the report \
+             prints, and a site the case never produces can never be held in either direction",
+            known.case, known.site
+        );
+    }
+
+    // The divergence rows this round left open over every venue: Metal's `tailSizeInBytes` on
+    // extreme aspect ratios, where our model is short by whole 16384-byte pages. Scoped `*`
+    // because the answer is CPU arithmetic over a descriptor, the same model on every device, and
+    // it was verified identical on both venues.
+    let tails: Vec<&crate::known_gaps::KnownGap> = ledger
+        .iter()
+        .filter(|known| known.case == crate::cases::sparse_heaps::TAILS_WIDE)
+        .collect();
+    assert_eq!(tails.len(), 13, "{ledger:?}");
+    for known in tails {
+        assert_eq!(known.expects, crate::known_gaps::Expects::Divergent);
+        assert_eq!(known.venue, crate::known_gaps::EVERY_VENUE, "{known:?}");
+        assert!(known.site.ends_with("/tail_size_in_bytes"), "{known:?}");
+        // Each row carries its own two numbers, and the shared description carries the one thing
+        // the thirteen of them establish together: the difference is whole pages, not a rounding.
+        // Each side's first decimal number: the answer prints "Metal 32768 (0x8000), ours 16384
+        // (0x4000)", so a naive digit scan would take the hex as the second value.
+        let first_number = |text: &str| -> u64 {
+            text.split_whitespace()
+                .find_map(|word| word.trim_end_matches(',').parse::<u64>().ok())
+                .unwrap_or_else(|| panic!("no number in {text:?}"))
+        };
+        let (metal, ours) = known
+            .answer
+            .split_once(", ours ")
+            .map(|(metal, ours)| (first_number(metal), first_number(ours)))
+            .unwrap_or_else(|| panic!("{known:?}"));
+        assert!(metal > ours, "{known:?}");
+        assert_eq!((metal - ours) % 16384, 0, "{known:?}");
     }
 
     // The zero-screen-width refusal is closed, so no row may name that case: the ledger holds
@@ -1709,6 +1809,44 @@ fn a_ledger_row_missing_a_field_is_refused() {
         .remove(0);
     assert_eq!(row.expects, crate::known_gaps::Expects::Divergent);
     assert_eq!(row.venue, "llvmpipe");
+}
+
+/// Whether `want` is the path of `node` or of anything under it, with `node` sitting at `at`.
+///
+/// The path is built the way the comparison's walk builds it, and for the same reason it has to
+/// descend into the **value** as well as into the children: a node's name may itself carry
+/// slashes, and a site may lie inside a variant (`.../Ok`) or a field (`.../tail_size_in_bytes`),
+/// which is where the sparse tails' sites live. A guard that only walked the nodes would have
+/// rejected thirteen legitimate rows -- it did, which is how this was found.
+fn site_exists(node: &Node, at: &str, want: &str) -> bool {
+    if at == want {
+        return true;
+    }
+    if value_holds(&node.observed.value, at, want) {
+        return true;
+    }
+    node.children
+        .iter()
+        .any(|child| site_exists(child, &format!("{at}/{}", child.name), want))
+}
+
+/// [`site_exists`] through a value: a variant adds its name, a field its key, a list element its
+/// index, exactly as `compare`'s walk does.
+fn value_holds(value: &Value, at: &str, want: &str) -> bool {
+    if at == want {
+        return true;
+    }
+    match value {
+        Value::Variant { name, payload } => value_holds(payload, &format!("{at}/{name}"), want),
+        Value::Fields(fields) => fields
+            .iter()
+            .any(|(name, held)| value_holds(held, &format!("{at}/{name}"), want)),
+        Value::List(values) => values
+            .iter()
+            .enumerate()
+            .any(|(index, held)| value_holds(held, &format!("{at}/{index}"), want)),
+        _ => false,
+    }
 }
 
 /// A venue, for a test that holds a row against one venue and not another.

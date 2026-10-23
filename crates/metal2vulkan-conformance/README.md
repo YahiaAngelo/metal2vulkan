@@ -68,8 +68,24 @@ replaying one case does not read every other row as fixed, and a run on one venu
 another venue's rows as fixed.
 
 A row's identity is its case, the verdict it expects, the site and the answer there, so a gap that
-changed into another gap at the same site is a new gap and not the old one. Where the difference
-**is** a notice — our side announces a degrade code and Metal announces nothing, every other field
+changed into another gap at the same site is a new gap and not the old one.
+
+For a divergence the answer says **how much** moved — how many of the site's leaves differ, and the
+largest difference where the values are numbers — and never where the walk first noticed. Two
+reasons, and the second is the worse one. A bound read off the first mismatch is not a bound: of
+twelve rotated-target divergences measured in this round every one differs by a single code at its
+first mismatch and four reach **two** codes well past it, one of them at row 1, byte 905. And a walk
+position is a property of the data rather than of the bug, so it would rename the row whenever an
+earlier leaf moved, for no change in the gap. The report prints the first differing leaf on the line
+below, where it helps a reader and binds nothing. The shape degrades cleanly across every kind of
+difference, because a count of differing leaves always exists and only the largest difference is
+numbers-only.
+
+`replay` also emits, under one heading, a ready-to-paste row for each unlisted gap, so nobody
+reconstructs a site or an answer by hand or with a parser — the step where one stream in this round
+nearly committed a row for a site that does not exist.
+
+Where the difference **is** a notice — our side announces a degrade code and Metal announces nothing, every other field
 bit-exact — the row's answer names what each side announced, because that is the whole difference
 and a row that did not name it would record a gap without saying what it waits on. Such a site is a
 divergence and not a tolerance: where the product's own degrade note says validation derives no

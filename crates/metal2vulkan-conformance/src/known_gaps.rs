@@ -210,6 +210,36 @@ impl std::fmt::Display for Expectation {
     }
 }
 
+/// The row a reader should add for an unlisted gap, in the ledger's own format, with the one field
+/// only a human can fill left as a marker.
+///
+/// It exists because the report is read by people and by tools, and reconstructing a row's `site`
+/// and `answer` from prose is where transcription goes wrong: one stream in this round nearly
+/// committed a row for a site that does not exist, because its parser attributed later cases'
+/// lines to the last case it had seen. Printing the row removes the reconstruction step entirely.
+/// The marker is not a valid `waiting on` field in spirit and the author must replace it; an empty
+/// one [`parse`] already refuses.
+pub const UNWRITTEN: &str =
+    "WRITE THE GAP HERE: what Metal does, what we do instead, and where the fix belongs";
+
+impl Expectation {
+    /// The ledger row to add, for an expectation that is an unlisted gap.
+    pub fn row(&self) -> Option<String> {
+        match self {
+            Expectation::Unlisted {
+                case,
+                venue,
+                expects,
+                site,
+                answer,
+            } => Some(format!(
+                "{case}\t{venue}\t{expects}\t{site}\t{answer}\t{UNWRITTEN}"
+            )),
+            _ => None,
+        }
+    }
+}
+
 /// The committed ledger's rows.
 pub fn ledger() -> Result<Vec<KnownGap>, String> {
     parse(LEDGER)
