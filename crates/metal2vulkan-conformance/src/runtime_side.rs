@@ -28,7 +28,8 @@ use metal2vulkan::metal::{
 use metal2vulkan::pipeline::{
     ColorAttachmentDescriptor, MeshPipelineDescriptor, RenderPipelineDescriptor,
     StageInputAttributeDescriptor, StageInputDescriptor, StageInputLayoutDescriptor, StageSource,
-    TileRenderPipelineDescriptor,
+    TileRenderPipelineDescriptor, VertexAttributeDescriptor, VertexBufferLayoutDescriptor,
+    VertexDescriptor,
 };
 use metal2vulkan_runtime::{
     BlitOption, Buffer, ClearColor, CommandBuffer, CommandBufferStatus, CommandQueue,
@@ -326,6 +327,25 @@ fn usage_of(role: TextureRole) -> TextureUsage {
 /// Three axes as the runtime's size.
 fn size(axes: [u32; 3]) -> Size {
     Size::new(axes[0].into(), axes[1].into(), axes[2].into())
+}
+
+/// The runtime's vertex descriptor for `layout`: the same attribute indices, buffer indices and
+/// step functions the case states, so both sides fetch the same way.
+fn vertex_descriptor(layout: &crate::render::VertexLayout<'_>) -> VertexDescriptor {
+    let mut descriptor = VertexDescriptor::new();
+    for attribute in layout.attributes {
+        descriptor.attributes.insert(
+            attribute.index,
+            VertexAttributeDescriptor::new(attribute.format, attribute.offset, attribute.buffer),
+        );
+    }
+    for buffer in layout.layouts {
+        let mut held = VertexBufferLayoutDescriptor::new(Some(buffer.stride));
+        held.step_function = buffer.step;
+        held.step_rate = buffer.rate;
+        descriptor.layouts.insert(buffer.index, held);
+    }
+    descriptor
 }
 
 /// The runtime's stage-input descriptor for `stage_input`: the same attribute indices, buffer
@@ -1576,6 +1596,10 @@ impl Side for RuntimeSide<'_> {
         let mut descriptor = RenderPipelineDescriptor::new(stage(&spec.vertex)?);
         descriptor.fragment = spec.fragment.as_ref().map(&stage).transpose()?;
         descriptor.raster_sample_count = spec.samples;
+        descriptor.rasterization_enabled = spec.rasterization;
+        if let Some(layout) = &spec.vertex_layout {
+            descriptor.vertex_descriptor = Some(vertex_descriptor(layout));
+        }
         for (at, color) in spec.colors.iter().enumerate() {
             let Some(color) = color else { continue };
             let attachment = descriptor
@@ -2333,6 +2357,11 @@ fn encode_pass(
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
     };
     let mut descriptor = RenderPassDescriptor::new();
+    if let Some(size) = pass.size {
+        descriptor.render_target_width = u64::from(size[0]);
+        descriptor.render_target_height = u64::from(size[1]);
+        descriptor.default_raster_sample_count = 1;
+    }
     for (at, color) in pass.colors.iter().enumerate() {
         let Some(held) = color.texture else { continue };
         let attachment = descriptor
