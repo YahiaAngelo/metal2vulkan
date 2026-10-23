@@ -461,6 +461,46 @@ fn keep<T>(kept: &mut Vec<T>, value: T) -> Handle {
     Handle(u32::try_from(kept.len() - 1).expect("fewer than 2^32 objects"))
 }
 
+/// Metal's texture descriptor for the one a case states: every field of
+/// [`TextureRequest`](crate::texture::TextureRequest) reaches it.
+///
+/// A function of its own, and not inlined in the call, so that
+/// `both_sides_state_every_field_of_a_texture_request` can hold the two sides' descriptors to the
+/// same request field by field with no device. Making an `MTLTextureDescriptor` asks nothing of a
+/// device, so that guard runs wherever Metal's frameworks are.
+///
+/// [`crate::texture::Over`] is **not** here: it is which object the call is sent to, not a field of
+/// the descriptor.
+pub(crate) fn texture_descriptor(
+    request: &crate::texture::TextureRequest<'_>,
+) -> Retained<MTLTextureDescriptor> {
+    let descriptor = MTLTextureDescriptor::new();
+    descriptor.setPixelFormat(MTLPixelFormat(request.format as usize));
+    descriptor.setTextureType(MTLTextureType(request.texture_type.as_raw() as usize));
+    // SAFETY: the setters take the descriptor's own words; nothing is borrowed.
+    unsafe {
+        descriptor.setWidth(request.size[0] as usize);
+        descriptor.setHeight(request.size[1] as usize);
+        descriptor.setDepth(request.size[2].max(1) as usize);
+        descriptor.setMipmapLevelCount(request.levels.max(1) as usize);
+        descriptor.setArrayLength(request.slices.max(1) as usize);
+    }
+    descriptor.setUsage(MTLTextureUsage(request.usage.as_raw() as usize));
+    descriptor.setStorageMode(if request.private {
+        MTLStorageMode::Private
+    } else {
+        MTLStorageMode::Shared
+    });
+    descriptor.setAllowGPUOptimizedContents(request.gpu_optimized);
+    descriptor.setSwizzle(MTLTextureSwizzleChannels {
+        red: swizzle_of(request.swizzle.red),
+        green: swizzle_of(request.swizzle.green),
+        blue: swizzle_of(request.swizzle.blue),
+        alpha: swizzle_of(request.swizzle.alpha),
+    });
+    descriptor
+}
+
 /// A directory the metallibs are built in.
 struct Scratch(std::path::PathBuf);
 
@@ -732,46 +772,55 @@ impl Side for MetalSide {
     }
 
     fn texture(&mut self, request: &crate::texture::TextureRequest<'_>) -> Answer<Handle> {
-        let descriptor = MTLTextureDescriptor::new();
-        descriptor.setPixelFormat(MTLPixelFormat(request.format as usize));
-        descriptor.setTextureType(MTLTextureType(request.texture_type.as_raw() as usize));
-        // SAFETY: the setters take the descriptor's own words; nothing is borrowed.
-        unsafe {
-            descriptor.setWidth(request.size[0] as usize);
-            descriptor.setHeight(request.size[1] as usize);
-            descriptor.setDepth(request.size[2].max(1) as usize);
-            descriptor.setMipmapLevelCount(request.levels.max(1) as usize);
-            descriptor.setArrayLength(request.slices.max(1) as usize);
-        }
-        descriptor.setUsage(MTLTextureUsage(request.usage.as_raw() as usize));
-        descriptor.setStorageMode(if request.private {
-            MTLStorageMode::Private
-        } else {
-            MTLStorageMode::Shared
-        });
-        descriptor.setAllowGPUOptimizedContents(request.gpu_optimized);
-        descriptor.setSwizzle(MTLTextureSwizzleChannels {
-            red: swizzle_of(request.swizzle.red),
-            green: swizzle_of(request.swizzle.green),
-            blue: swizzle_of(request.swizzle.blue),
-            alpha: swizzle_of(request.swizzle.alpha),
-        });
-        let texture = self
-            .device
-            .newTextureWithDescriptor(&descriptor)
-            .ok_or_else(|| {
-                Failure::named(
-                    "NewTextureWithDescriptor",
-                    format!(
-                        "format {} {:?} {}x{}x{} returned nil",
-                        request.format,
-                        request.texture_type,
-                        request.size[0],
-                        request.size[1],
-                        request.size[2]
-                    ),
+        let descriptor = texture_descriptor(request);
+        let swizzle = descriptor.swizzle();
+        // One of the three Metal calls that answers a texture of this descriptor, as the request
+        // says: the device's own, a buffer's, or a parent texture's view.
+        let made = match request.over {
+            None => self.device.newTextureWithDescriptor(&descriptor),
+            Some(crate::texture::Over::Buffer {
+                buffer,
+                offset,
+                bytes_per_row,
+            }) => {
+                let held: Retained<ProtocolObject<dyn MTLBuffer>> =
+                    Retained::from(self.held(buffer)?);
+                held.newTextureWithDescriptor_offset_bytesPerRow(
+                    &descriptor,
+                    offset as usize,
+                    bytes_per_row as usize,
                 )
-            })?;
+            }
+            Some(crate::texture::Over::View { texture }) => {
+                let held: Retained<ProtocolObject<dyn MTLTexture>> =
+                    Retained::from(self.held_texture(texture)?);
+                // SAFETY: the level and slice ranges lie inside the parent, which the case's own
+                // request for the parent states, and the format and type are a view Metal makes of
+                // it or nil.
+                unsafe {
+                    held.newTextureViewWithPixelFormat_textureType_levels_slices_swizzle(
+                        MTLPixelFormat(request.format as usize),
+                        MTLTextureType(request.texture_type.as_raw() as usize),
+                        objc2_foundation::NSRange::new(0, request.levels.max(1) as usize),
+                        objc2_foundation::NSRange::new(0, request.slices.max(1) as usize),
+                        swizzle,
+                    )
+                }
+            }
+        };
+        let texture = made.ok_or_else(|| {
+            Failure::named(
+                "NewTextureWithDescriptor",
+                format!(
+                    "format {} {:?} {}x{}x{} returned nil",
+                    request.format,
+                    request.texture_type,
+                    request.size[0],
+                    request.size[1],
+                    request.size[2]
+                ),
+            )
+        })?;
         for upload in request.uploads {
             if upload.bytes.len() < upload.needed() {
                 return Err(Failure::named(

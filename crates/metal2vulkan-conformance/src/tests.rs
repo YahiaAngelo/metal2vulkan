@@ -3684,3 +3684,188 @@ fn a_multisampled_sparse_texture_without_the_sample_count_is_the_devices_gap() {
         Needs::DeviceCapability("sparseResidency4Samples")
     ));
 }
+
+/// Every field of a [`crate::texture::TextureRequest`] reaches **both** sides' texture
+/// descriptors, checked field by field with no device, each at a value no other field holds.
+///
+/// It is written for the swizzle families, where a dropped harness field is the easiest way to
+/// measure nothing at all: if one side set the swizzle and the other did not, both legs would be
+/// reading the texture's *unswizzled* texels, every swizzle case would compare equal, and the
+/// suite would report a sweep of the question neither leg was asked. The four channels therefore
+/// take four **different** sources, so a dropped, duplicated or transposed channel cannot pass by
+/// coincidence.
+///
+/// The Metal half runs wherever Metal's frameworks are: making an `MTLTextureDescriptor` asks
+/// nothing of a device.
+#[test]
+fn both_sides_state_every_field_of_a_texture_request() {
+    use crate::texture::TextureRequest;
+    use metal2vulkan::metal::{PixelFormat, TextureSwizzle, TextureSwizzleChannels, TextureType};
+
+    // Four different sources, so no channel can take another's and still compare equal.
+    let swizzle = TextureSwizzleChannels::new(
+        TextureSwizzle::Blue,
+        TextureSwizzle::Alpha,
+        TextureSwizzle::Zero,
+        TextureSwizzle::Red,
+    );
+    let request = TextureRequest::read_2d(PixelFormat::RG16Uint.as_raw(), 7, 5)
+        .levels(3)
+        .used(metal2vulkan::metal::TextureUsage::SHADER_WRITE)
+        .swizzled(swizzle)
+        .private();
+
+    let ours = crate::runtime_side::texture_descriptor(&request, PixelFormat::RG16Uint);
+    assert_eq!(ours.pixel_format, PixelFormat::RG16Uint);
+    assert_eq!(ours.texture_type, TextureType::Type2D);
+    assert_eq!([ours.width, ours.height, ours.depth], [7, 5, 1]);
+    assert_eq!(ours.mipmap_level_count, 3);
+    assert_eq!(ours.array_length, 1);
+    assert_eq!(
+        ours.usage,
+        metal2vulkan::metal::TextureUsage::SHADER_WRITE,
+        "the usage the case stated, and nothing added to it"
+    );
+    assert!(ours.allow_gpu_optimized_contents);
+    assert_eq!(ours.swizzle, swizzle, "every channel's own source");
+
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_metal::{MTLStorageMode, MTLTextureDescriptor, MTLTextureSwizzle};
+        let theirs: objc2::rc::Retained<MTLTextureDescriptor> =
+            crate::metal_side::texture_descriptor(&request);
+        assert_eq!(
+            theirs.pixelFormat().0 as u32,
+            PixelFormat::RG16Uint.as_raw()
+        );
+        assert_eq!(theirs.textureType().0 as u32, TextureType::Type2D.as_raw());
+        assert_eq!([theirs.width(), theirs.height(), theirs.depth()], [7, 5, 1]);
+        assert_eq!(theirs.mipmapLevelCount(), 3);
+        assert_eq!(theirs.arrayLength(), 1);
+        assert_eq!(
+            theirs.usage().0 as u32,
+            metal2vulkan::metal::TextureUsage::SHADER_WRITE.as_raw()
+        );
+        assert_eq!(
+            theirs.storageMode(),
+            MTLStorageMode::Private,
+            "the case asked for private storage"
+        );
+        assert!(theirs.allowGPUOptimizedContents());
+        // The one field the whole family turns on, channel by channel against the case's own.
+        let held = theirs.swizzle();
+        let raw = |source: TextureSwizzle| MTLTextureSwizzle(source.as_raw() as u8);
+        assert_eq!(held.red, raw(swizzle.red), "red");
+        assert_eq!(held.green, raw(swizzle.green), "green");
+        assert_eq!(held.blue, raw(swizzle.blue), "blue");
+        assert_eq!(held.alpha, raw(swizzle.alpha), "alpha");
+        // And the four are really four different sources, so the four assertions above are four
+        // facts rather than one repeated.
+        let sources = [held.red, held.green, held.blue, held.alpha];
+        let distinct: std::collections::BTreeSet<u8> =
+            sources.iter().map(|source| source.0).collect();
+        assert_eq!(distinct.len(), 4, "{sources:?}");
+    }
+}
+
+/// Every case states the inputs its own recording's answers were taken from, and the cases that
+/// no longer do are exactly the ones named here.
+///
+/// A case whose [`crate::case::Case::inputs`] no longer fingerprint to its recording's is
+/// `Unrecorded` at replay. That verdict is this suite's bookkeeping, not Metal's answer, and it
+/// names no cause: the case reads exactly as it reads when no one has recorded it at all. What
+/// moves a fingerprint is a widening of a shared vocabulary -- a field on a texture request, a
+/// step on a work list -- and it moves it for every family that states the widened thing, not
+/// only for the family the widening was made for. Found through a replay, a restaled family is
+/// one whole-set GPU run plus a name-by-name verdict diff away, and it still looks like a family
+/// nobody has recorded.
+///
+/// This is the same fact with no device and no oracle: it reads the committed recordings and
+/// names the case and the input whose fingerprint moved.
+///
+/// Three cases are stale as this is written, and the list is a set rather than a floor so that
+/// re-recording one without striking it from here fails too. All three state an unwritten buffer,
+/// whose fingerprint was widened from the buffer's length alone to its length and its storage
+/// mode after their answers were taken. Their Metal answers did not move; only the key did, so
+/// what each needs is a re-record. The lengths behind the three recorded digests, recovered from
+/// them, are 64, 4099 and 614400 bytes.
+#[test]
+fn every_cases_inputs_are_the_ones_its_recording_was_taken_from() {
+    /// The cases whose committed answers were taken under an older input fingerprint.
+    const STALE: [&str; 3] = [
+        "buffer-blit-any-range",
+        "buffer-blit-overlapping-copies",
+        "buffer-fills-of-every-size",
+    ];
+    let mut moved: std::collections::BTreeMap<&str, Vec<String>> =
+        std::collections::BTreeMap::new();
+    let mut checked = 0usize;
+    let mut unrecorded = Vec::new();
+    for case in crate::cases::all() {
+        let Ok(recording) = crate::recording::read(case.name()) else {
+            // A case nothing has recorded yet is unrecorded for that reason alone.
+            unrecorded.push(case.name());
+            continue;
+        };
+        let inputs = case
+            .inputs()
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        let fed = crate::case::inputs_node(&inputs);
+        for answer in &recording.answers {
+            for outcome in &answer.outcomes {
+                let Some(recorded) = outcome.transcript.root.child(crate::case::INPUTS_SITE) else {
+                    moved
+                        .entry(case.name())
+                        .or_default()
+                        .push("its recording states no input fingerprint".to_owned());
+                    continue;
+                };
+                checked += 1;
+                if *recorded == fed {
+                    continue;
+                }
+                let why = moved.entry(case.name()).or_default();
+                for input in &recorded.children {
+                    match fed.child(&input.name) {
+                        Some(ours) if ours.observed == input.observed => {}
+                        Some(_) => why.push(format!("{} differs", input.name)),
+                        None => why.push(format!("{} is missing", input.name)),
+                    }
+                }
+                for input in &fed.children {
+                    if recorded.child(&input.name).is_none() {
+                        why.push(format!("{} is extra", input.name));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        checked > 0,
+        "the suite holds no recorded answer to check an input fingerprint against"
+    );
+    let found: std::collections::BTreeSet<&str> = moved.keys().copied().collect();
+    let named: std::collections::BTreeSet<&str> = STALE.into_iter().collect();
+    let said = |cases: &std::collections::BTreeSet<&str>| {
+        cases
+            .iter()
+            .map(|case| match moved.get(case) {
+                Some(why) => format!("{case}: {}", why.join(", ")),
+                None => format!("{case}: states its recording's inputs"),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(
+        found,
+        named,
+        "{checked} recorded answers checked. These cases no longer state the inputs their \
+         recordings were taken from, so each is Unrecorded at replay for a reason that is this \
+         suite's and not Metal's:\n{}\nand these are named here as stale but state their \
+         recording's inputs, so their line is spent:\n{}\n(cases with no recording at all, which \
+         this says nothing about: {})",
+        said(&found.difference(&named).copied().collect()),
+        said(&named.difference(&found).copied().collect()),
+        unrecorded.join(", ")
+    );
+}

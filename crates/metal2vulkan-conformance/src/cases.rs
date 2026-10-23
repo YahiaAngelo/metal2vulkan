@@ -41,6 +41,7 @@ pub mod extended_range_blends;
 pub mod extended_range_planes;
 pub mod extended_range_targets;
 pub mod extended_range_two_planes;
+pub mod extended_swizzles;
 pub mod fetch_ordered;
 pub mod format_copies;
 pub mod fresh_contents;
@@ -67,12 +68,15 @@ pub mod sample_positions;
 pub mod scheduled_handlers;
 pub mod shader_stencil;
 pub mod shared_events;
+pub mod shared_exponent_storage;
 pub mod simdgroup_lockstep;
 pub mod snorm_tile_store;
 pub mod sparse_heaps;
 pub mod sparse_tiles;
 pub mod stage_in_regions;
 pub mod surface_fills;
+pub mod swizzled_storage;
+pub mod texel_swizzles;
 pub mod texture_accesses;
 pub mod texture_buffer_fills;
 pub mod texture_fills;
@@ -252,6 +256,17 @@ pub fn all() -> Vec<Box<dyn Case>> {
             .into_iter()
             .map(|case| Box::new(case) as Box<dyn Case>),
     );
+
+    for case in extended_swizzles::all() {
+        cases.push(Box::new(case));
+    }
+    for case in shared_exponent_storage::all() {
+        cases.push(Box::new(case));
+    }
+    cases.extend(texel_swizzles::all());
+    for case in swizzled_storage::all() {
+        cases.push(Box::new(case));
+    }
     cases
 }
 
