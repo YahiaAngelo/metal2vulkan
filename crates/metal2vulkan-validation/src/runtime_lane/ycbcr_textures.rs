@@ -4122,14 +4122,13 @@ fn ycbcr_textures_over_plane_1_read_its_codes_as_luma() {
         }
         // Refused: plane 1 at other bytes than the facts'.
         let surface = buffer_with(device, &vec![0; (2 * ROWQ * H) as usize]).unwrap();
-        for (pf, ostype, plane, at) in [(PixelFormat::YCBCR84442P, "444v", 1, CHROMAQ_AT + ROWQ)] {
-            let made = over_plane_1(&surface, pf, ostype, plane, at, None);
-            let named = format!("{:?}", made.as_ref().err());
-            assert!(
-                matches!(made, Err(Error::Unsupported(_))) && named.contains(pf.name()),
-                "{pf:?} over plane {plane} of {ostype} at {at}: {named}"
-            );
-        }
+        let (pf, ostype, plane, at) = (PixelFormat::YCBCR84442P, "444v", 1, CHROMAQ_AT + ROWQ);
+        let made = over_plane_1(&surface, pf, ostype, plane, at, None);
+        let named = format!("{:?}", made.as_ref().err());
+        assert!(
+            matches!(made, Err(Error::Unsupported(_))) && named.contains(pf.name()),
+            "{pf:?} over plane {plane} of {ostype} at {at}: {named}"
+        );
     });
 }
 
