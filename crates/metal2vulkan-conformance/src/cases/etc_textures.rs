@@ -587,9 +587,14 @@ mod tests {
             if !decode.eleven_bit() {
                 match case.device_converts_codes() {
                     true => {
+                        // The literal 1 is deliberate, not `LEDGERS_TEXEL_CONVERSION_ULPS`:
+                        // asserting against the constant the allowance is built from makes the
+                        // number unfalsifiable here, and widening it would pass. The ledger's
+                        // figure is written out, so moving the constant fails this test as well
+                        // as `the_texel_allowance_holds_one_ulp_only_where_the_notice_fired`.
                         assert_eq!(
                             bounds,
-                            vec![Loosening::Ulps(LEDGERS_TEXEL_CONVERSION_ULPS); ROUNDS.len()],
+                            vec![Loosening::Ulps(1); ROUNDS.len()],
                             "{}",
                             format.name
                         );
