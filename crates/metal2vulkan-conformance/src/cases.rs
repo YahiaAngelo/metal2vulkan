@@ -36,6 +36,7 @@ pub mod extended_range_blends;
 pub mod extended_range_planes;
 pub mod extended_range_targets;
 pub mod extended_range_two_planes;
+pub mod format_copies;
 pub mod half_write_nans;
 pub mod handler_waits;
 pub mod heap_metal_sizes;
@@ -89,6 +90,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in border_swizzles::all() {
+        cases.push(Box::new(case));
+    }
+    for case in format_copies::all() {
         cases.push(Box::new(case));
     }
     for case in extended_range_planes::all() {

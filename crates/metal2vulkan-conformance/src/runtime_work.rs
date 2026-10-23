@@ -109,6 +109,11 @@ fn descriptor(spec: &TextureSpec) -> Answer<TextureDescriptor> {
     if spec.render_target {
         usage |= TextureUsage::RENDER_TARGET | TextureUsage::PIXEL_FORMAT_VIEW;
     }
+    if let Some(stated) = spec.usage {
+        usage = TextureUsage::try_from(stated).map_err(|problem| {
+            Failure::named("NoSuchTextureUsage", format!("{stated}: {problem:?}"))
+        })?;
+    }
     if spec.kind == TextureKind::TextureBuffer {
         let options = if spec.private {
             ResourceOptions::private()

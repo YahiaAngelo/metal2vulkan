@@ -63,6 +63,14 @@ pub struct TextureSpec {
     /// Metal's descriptor has it on, so a spec has it on, and a case that means a plain layout
     /// says so ([`TextureSpec::plain`]).
     pub gpu_optimized: bool,
+    /// `usage`, as the raw `MTLTextureUsage` bits, where the case states it whole. `None` is the
+    /// usage `render_target` implies: shader-read, and a render target that may be viewed in
+    /// another format where it holds.
+    ///
+    /// A case states this where the usage is part of what it means: Metal refuses a depth texture
+    /// of shader-write usage, and a render target that may be viewed is laid out differently from
+    /// one that may not.
+    pub usage: Option<u32>,
 }
 
 impl TextureSpec {
@@ -79,7 +87,15 @@ impl TextureSpec {
             private: true,
             render_target: false,
             gpu_optimized: true,
+            usage: None,
         }
+    }
+
+    /// The same texture in the raw `MTLTextureUsage` bits `usage`.
+    #[must_use]
+    pub const fn used(mut self, usage: u32) -> Self {
+        self.usage = Some(usage);
+        self
     }
 
     /// The same texture without `allowGPUOptimizedContents`.
