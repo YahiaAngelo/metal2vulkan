@@ -18,7 +18,7 @@
 //! axes. Lanes lie at each texel edge of the 13-texel axis shifted by -3 to 3 periods, and 1 to 3
 //! ulps either side, on the centre row of the 11-texel one.
 
-use super::degrade_notices::{counts, on_device};
+use super::degrade_notices::on_device;
 use super::{buffer_with, read_buffer};
 use crate::air_library::AirLibrary;
 use metal2vulkan::bind::SamplerDescriptor;
@@ -296,16 +296,20 @@ fn runtime_nearest_samples_read_metal_s_texel_off_the_level() {
 /// index of each, and the `f32` bits the lane set gives it.
 const BELOW_ZERO: [(usize, u32); 3] = [(289, 0x8000_0001), (291, 0x8000_0002), (293, 0x8000_0003)];
 
-/// What the two constexpr clamp-to-zero samplers read one, two and three units in the last place
-/// below `+0.0`, under native device sampling (the default) and under the exact emulation.
-///
-/// Measured on an Apple M3 Max through MoltenVK, which samples through Metal's own texture unit:
-/// the printed values are Metal's. A device of its own sampler tests the coordinate against the
-/// level and reads the border there, where Metal scales and quantizes first. The test prints both
-/// legs and asserts the lanes are the three coordinates meant; what the columns must read is the
-/// open question the printed numbers answer.
+/// What Metal's two constexpr clamp-to-zero samplers read there, measured on an Apple M3 Max
+/// (macOS 27.0.1) through MoltenVK, which samples through Metal's own texture unit: Metal reads a
+/// subnormal coordinate as the zero of its sign before the address mode decides, so the nearest
+/// sampler reads texel (0, 5) and the linear one averages it with the zero border. A device that
+/// keeps the subnormal would read the border, 0, through both.
+const METAL_BELOW_ZERO: [f32; 2] = [80.0, 40.0];
+
+/// Both constexpr clamp-to-zero samplers read Metal's value one, two and three units in the last
+/// place below `+0.0`, under native device sampling (the default) and under the exact emulation
+/// alike: the module flushes a subnormal coordinate on a border axis as Metal's texture unit
+/// reads it (`lower::sampler::position::subnormal_flush`), so the device's own border test is
+/// handed Metal's coordinate.
 #[test]
-fn clamp_to_zero_samples_just_below_zero() {
+fn clamp_to_zero_samples_just_below_zero_read_metal_s_texels() {
     use metal2vulkan::device::SamplingPolicy;
     let us = lanes();
     for &(lane, bits) in &BELOW_ZERO {
@@ -314,24 +318,31 @@ fn clamp_to_zero_samples_just_below_zero() {
     for sampling in [SamplingPolicy::NativeDevice, SamplingPolicy::Exact] {
         super::degrade_notices::on_device_with(
             |options| options.policy.sampling = sampling,
-            |device, messages| {
+            |device, _| {
                 let float = texture(device, PixelFormat::R32Float, (WIDTH, HEIGHT), |x, y| {
                     ((x + 16 * y) as f32).to_le_bytes()
                 });
                 let read = reds(device, &float, SamplerAddressMode::Repeat, &us);
+                let mut wrong = Vec::new();
                 for &(lane, bits) in &BELOW_ZERO {
-                    println!(
-                        "BELOW-ZERO {} {sampling:?} lane {lane} ({bits:08x}): constexpr \
-                         {:?} and {:?}, runtime {:?}",
-                        device.name(),
-                        read[lane][0],
-                        read[lane][1],
-                        read[lane][2]
-                    );
+                    for (column, metal) in METAL_BELOW_ZERO.into_iter().enumerate() {
+                        let got = read[lane][column];
+                        println!(
+                            "BELOW-ZERO {} {sampling:?} lane {lane} ({bits:08x}) column \
+                             {column}: read {got}, Metal {metal}",
+                            device.name()
+                        );
+                        if got.to_bits() != metal.to_bits() {
+                            wrong.push(format!(
+                                "lane {lane} ({bits:08x}) column {column}: read {got}, Metal \
+                                 {metal}"
+                            ));
+                        }
+                    }
                 }
-                let announced = counts(&messages.take_notices());
-                println!(
-                    "BELOW-ZERO {} {sampling:?} announced {announced:?}",
+                assert!(
+                    wrong.is_empty(),
+                    "{} under {sampling:?} sampling: {wrong:#?}",
                     device.name()
                 );
             },

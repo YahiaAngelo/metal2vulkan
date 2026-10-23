@@ -628,6 +628,10 @@ pub struct Sampling {
     /// A gather or nearest sample whose plane coordinate is snapped onto the texels Metal reads
     /// ([`position`]).
     pub snap: Option<position::Snap>,
+    /// The plane axes whose coordinate the sample flushes a subnormal of to the zero of its sign
+    /// before anything reads it, as Metal's texture unit reads it, a bit per axis
+    /// ([`position::subnormal_flush`]).
+    pub flush_subnormals: u8,
     /// A sample's level or kernel's bias handed to the device on Metal's grid, which makes the
     /// device read Metal's levels with Metal's weights ([`level`]): by a constexpr sampler's state,
     /// or by a runtime or argument buffer's sampler's word.
@@ -1072,7 +1076,8 @@ impl Sampling {
     /// filter, an sRGB texel's raw decode and a linear sample's emulation, a cube gradient's
     /// footprint, an argument buffer's pixel sampler's flagged fetch, a snapped coordinate and the
     /// positions of an observed footprint, a cube direction's broken ties, a runtime pixel
-    /// sampler's texel centre, a level on Metal's grid, and a comparison the shader makes.
+    /// sampler's texel centre, a level on Metal's grid, a comparison the shader makes, and a
+    /// border axis's flush of a subnormal coordinate.
     pub fn words(&self) -> u32 {
         // A swizzled slot's sampling: its swizzle, and a gather's of each component.
         match (self.swizzle, &self.op) {
@@ -1229,7 +1234,11 @@ impl Sampling {
                 .map_or(0, position::Snap::offset_words)
             + self.level.map_or(0, |_| level::LEVEL_WORDS)
             + self.compared.as_ref().map_or(0, |c| c.words(&self.op))
-            + self.fetched.as_ref().map_or(0, |p| p.words(&self.op));
+            + self.fetched.as_ref().map_or(0, |p| p.words(&self.op))
+            + match self.flush_subnormals {
+                0 => 0,
+                _ => position::FLUSH_WORDS,
+            };
         let footprint = self
             .footprint
             .map_or(0, |fp| u32::from(fp.axes) * position::POSITION_WORDS);

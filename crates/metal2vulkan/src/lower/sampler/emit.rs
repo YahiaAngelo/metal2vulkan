@@ -1517,6 +1517,12 @@ pub(super) fn plane_and_gradients(
     grads: Option<(SValue, SValue)>,
 ) -> BResult<(SValue, Option<(SValue, SValue)>)> {
     let coord = cx.operand(fb, s.coord)?;
+    // Metal's texture unit reads a subnormal coordinate as the zero of its sign before anything
+    // else: the border axes flush it first, so every path below reads Metal's coordinate.
+    let coord = match s.flush_subnormals {
+        0 => coord,
+        axes => super::position::emit_flush(fb, coord, s.lanes, axes)?,
+    };
     let coord = if s.cube {
         super::face::metal_ties(fb, coord)?
     } else {
