@@ -10,16 +10,12 @@
         "os_build": "26A434",
         "metal_level": "27.0.1"
       },
-      "provenance": {
-        "carried": {
-          "from": "runtime_lane::two_plane_copies, from the probes bp.m and pad.m (an Apple M3 Max, macOS 27.0.1)"
-        }
-      },
-      "device": "apple-m3-max",
-      "runs": 1,
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
       "outcomes": [
         {
-          "runs": 1,
+          "runs": 3,
           "transcript": {
             "root": {
               "name": "case",
@@ -865,7 +861,7 @@
           }
         }
       ],
-      "validated": "not_run"
+      "validated": "ran"
     }
   ]
 }

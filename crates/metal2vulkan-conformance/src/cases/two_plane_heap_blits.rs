@@ -22,13 +22,22 @@
 //!   Upgrading the site to raw bytes later needs no rewrite: the same site gains a value beside its
 //!   digest.
 //!
-//! Metal's answer is **carried**: the two-plane extended-range formats are Apple's private ones
-//! and Metal fills and places them through private API, so the Metal side has no public call to
-//! record them from. The digests are the probe's, on an Apple M4 under macOS 27.0.1 (each blit
-//! three times on the same bytes and every case twice, alike) and on an Apple M3 Max under macOS
-//! 26.7, the same; the run shape was recovered on this M3 Max under MoltenVK, where every case's
-//! recorded digest held. **The digests were not measured on this chip under this release**, which
-//! the recording's provenance says in words.
+//! **Record mode runs this case on Metal.** It used to carry its answer, on the stated reason that
+//! the two-plane extended-range formats are Apple's private ones and so Metal has no public call
+//! for them. That reason was wrong: the *format* is not private — `MTLTextureDescriptor`'s pixel
+//! format is a raw value — and nothing this case does is Apple SPI. The heap, the placed textures,
+//! the buffer over the heap, the texture-to-texture blit and the read-back are all public
+//! `objc2-metal` calls, which is what the probe used to take the table in the first place
+//! ([`crate::metal_work`]).
+//!
+//! The carried table stays, as a cross-check rather than as the answer
+//! ([`HeapBlits::carried_from_the_m4`]): the digests the probe printed on an Apple M4 under macOS
+//! 27.0.1 (each blit three times on the same bytes and every case twice, alike) and on an Apple M3
+//! Max under macOS 26.7, with the run shape recovered on this M3 Max under MoltenVK. A test holds
+//! the committed recording to it, so "this M3 Max agrees with the M4, run shape and digest, in all
+//! 25 cases" is a checked fact instead of a sentence. Note what the run shape's provenance was:
+//! recovered under MoltenVK, which is *our* answer, not Metal's — so until record mode ran, that
+//! site's expectation was never tied to Metal at all.
 
 use crate::allowance::Allowance;
 use crate::case::{call, Abort, Case, Input, MetalSource, Side};
@@ -37,19 +46,8 @@ use crate::replay::{notice_allowance, NOTICES_SITE};
 use crate::transcript::{Digest, DigestKind, Node, Observed, Sites, Transcript, Value};
 use crate::work::{Resource, Step, TextureSpec, Work};
 
-/// Where the carried values were measured.
-const MEASURED_IN: &str =
-    "runtime_lane::two_plane_heap_blits, from the probe tph: the heap digests on an Apple M4 \
-     under macOS 27.0.1 and an Apple M3 Max under macOS 26.7 alike, and the run shape recovered \
-     on an Apple M3 Max under MoltenVK";
-
-/// Why record mode must not run the case on Metal.
-const NO_PUBLIC_CALL: &str =
-    "the two-plane extended-range formats are Apple's private ones, placed and blitted through \
-     private API, so no public call exists to record them from";
-
-/// The runs the carried table stands on: the probe ran each blit three times on the same bytes and
-/// every case twice, alike.
+/// The runs the carried cross-check table stands on: the probe ran each blit three times on the
+/// same bytes and every case twice, alike.
 const MEASURED_RUNS: u32 = 6;
 
 /// The committed runs of bytes each case's blit changed, as `<offset>+<length>` each, a line a
@@ -364,6 +362,38 @@ pub fn heap_blits() -> HeapBlits {
     HeapBlits { name: HEAP_BLITS }
 }
 
+impl HeapBlits {
+    /// The transcript the probe's own table states: the run shape it printed and the digest of
+    /// each case's heap, over the runs behind them.
+    ///
+    /// This was the case's answer while it was carried, and it is kept as the **cross-check** now
+    /// that record mode runs the case on Metal. A test holds the committed recording to it, so the
+    /// agreement between this M3 Max under macOS 27.0.1 and the probe's Apple M4 is a checked fact
+    /// rather than a claim in a comment — and the day Apple changes one of these blits, the
+    /// re-record and this table disagree where a reader can see it.
+    pub fn carried_from_the_m4(&self) -> Result<(u32, Transcript), String> {
+        let runs = public_fixture(METAL_RUNS)?;
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(&self.inputs()?));
+        for case in &CASES {
+            sites.leaf(format!("work/{}", case.name), crate::case::answered());
+            let shape = metal_runs(&runs, case.name)?;
+            for node in case_nodes(
+                case.name,
+                runs_value(&shape),
+                Digest {
+                    kind: DigestKind::Sha256Prefix16,
+                    hex: case.metal.to_owned(),
+                },
+            ) {
+                sites.push(node);
+            }
+        }
+        sites.notices(NOTICES_SITE, &[] as &[&str]);
+        Ok((MEASURED_RUNS, sites.finish()))
+    }
+}
+
 /// The program one case runs: the heap, its two textures, the seed's bytes written through a
 /// buffer over the whole heap, one blit, and the heap's bytes read back.
 fn case_work(work: &mut Work, case: &Case2P) {
@@ -504,8 +534,7 @@ impl Case for HeapBlits {
     }
 
     fn metal_source(&self) -> MetalSource {
-        MetalSource::carried_only(MEASURED_IN, NO_PUBLIC_CALL)
-            .measured_on(crate::recording::APPLE_M4)
+        MetalSource::Run
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
@@ -541,28 +570,6 @@ impl Case for HeapBlits {
         vec![notice_allowance(
             metal2vulkan_runtime::Degradation::TwoPlaneTextureCopy.code(),
         )]
-    }
-
-    fn carried_transcript(&self) -> Result<Option<(u32, Transcript)>, String> {
-        let runs = public_fixture(METAL_RUNS)?;
-        let mut sites = Sites::new();
-        sites.push(crate::case::inputs_node(&self.inputs()?));
-        for case in &CASES {
-            sites.leaf(format!("work/{}", case.name), crate::case::answered());
-            let shape = metal_runs(&runs, case.name)?;
-            for node in case_nodes(
-                case.name,
-                runs_value(&shape),
-                Digest {
-                    kind: DigestKind::Sha256Prefix16,
-                    hex: case.metal.to_owned(),
-                },
-            ) {
-                sites.push(node);
-            }
-        }
-        sites.notices(NOTICES_SITE, &[] as &[&str]);
-        Ok(Some((MEASURED_RUNS, sites.finish())))
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {

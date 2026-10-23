@@ -61,6 +61,9 @@ pub mod work;
 #[cfg(target_os = "macos")]
 pub mod metal_side;
 
+#[cfg(target_os = "macos")]
+pub mod metal_work;
+
 #[cfg(test)]
 mod tests;
 

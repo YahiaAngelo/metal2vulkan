@@ -1075,23 +1075,19 @@ fn a_carried_answer_taken_on_another_chip_names_it() {
             case.name()
         );
     }
-    // The two families, and no others. A third would mean a table nobody noticed came from another
-    // machine.
+    // One family, and no others. A second would mean a table nobody noticed came from another
+    // machine. `two_plane_heap_blits` used to be the other one and now records on Metal: nothing
+    // it does is Apple SPI, so its answer is this chip's.
     assert!(
         elsewhere
             .iter()
             .any(|name| name.starts_with("texture-fills-")),
         "texture_fills carries the M4's digests: {elsewhere:?}"
     );
-    assert!(
-        elsewhere.contains(&crate::cases::two_plane_heap_blits::HEAP_BLITS),
-        "two_plane_heap_blits carries the M4's digests: {elsewhere:?}"
-    );
     for name in &elsewhere {
         assert!(
-            name.starts_with("texture-fills-")
-                || *name == crate::cases::two_plane_heap_blits::HEAP_BLITS,
-            "{name} carries another chip's values and is not one of the two known families"
+            name.starts_with("texture-fills-"),
+            "{name} carries another chip's values and is not one of the known families"
         );
     }
     // The file says the chip only where it differs: an oracle-taken recording holds no such field.
@@ -1729,4 +1725,67 @@ fn an_allowance_that_fires_is_not_counted_as_unfired() {
     report.add(replayed);
     assert!(report.unfired_everywhere().is_empty());
     assert!(report.render().contains("2 named, 2 fired, 0 never fired"));
+}
+
+#[test]
+fn metal_on_this_chip_answers_the_two_plane_blits_exactly_as_the_probes_printed_them() {
+    // Two rows lost their Metal leg to a reason that named the wrong thing: `NO_PUBLIC_CALL` said
+    // the two-plane extended-range formats are Apple's private ones, so Metal had no public call
+    // for them. The fill is private; the format is not. Both rows now record on Metal, and this
+    // holds the committed recordings to the tables the probes printed — so the conversion is
+    // checked rather than asserted, and a Metal that starts answering differently shows up here
+    // instead of in a quiet re-record.
+    let held = |case: &dyn Case, carried: &Transcript| {
+        let recorded = crate::recording::read(case.name())
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        let answer = recorded
+            .answer(MetalLevel::NEWEST)
+            .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+        assert_eq!(
+            answer.provenance,
+            Provenance::MetalRun,
+            "{}: the case records on Metal now",
+            case.name()
+        );
+        let taken = answer
+            .deterministic()
+            .unwrap_or_else(|| panic!("{}: one outcome", case.name()));
+        // Field by field, through the suite's own comparison: a difference names the site.
+        let found = compare(carried, taken, &[], Offered::notices(&[]));
+        // The first few sites, not the whole comparison: a difference has to read on one screen.
+        assert!(
+            found.is_exact(),
+            "{}: Metal's recorded answer is not the probe's table:\n  {}",
+            case.name(),
+            found
+                .divergences
+                .iter()
+                .take(4)
+                .map(|divergence| divergence.to_string())
+                .collect::<Vec<String>>()
+                .join("\n  ")
+        );
+    };
+
+    let heap_blits = crate::cases::two_plane_heap_blits::heap_blits();
+    let (runs, carried) = heap_blits.carried_from_the_m4().unwrap();
+    assert_eq!(runs, 6, "the probe's runs behind the carried digests");
+    held(&heap_blits, &carried);
+
+    let announced = crate::cases::two_plane_copies::announced_row_blits();
+    let printed = announced.printed_by_the_probe().unwrap();
+    held(&announced, &printed);
+    // And the case that still carries, still carries: its reason is the fill, not the format.
+    let fills = crate::cases::two_plane_copies::row_blits();
+    assert!(
+        matches!(
+            fills.metal_source(),
+            MetalSource::Carried {
+                re_record: ReRecord::Forbidden { reason },
+                ..
+            } if reason.contains("fillTexture:") && !reason.contains("formats are Apple's private")
+        ),
+        "{:?}",
+        fills.metal_source()
+    );
 }

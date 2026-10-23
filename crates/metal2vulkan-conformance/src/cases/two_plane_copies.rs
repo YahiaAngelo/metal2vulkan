@@ -16,9 +16,14 @@
 //!   kept of its printed lines, so the site is **digest-only** and says so: the bytes between the
 //!   rows are inside the digest, and nobody wrote them out.
 //!
-//! Metal's answer is **carried** and re-recording is **forbidden**: the two-plane formats are
-//! Apple's private ones and the fills go through private API, so the Metal side has no public call
-//! to record either from.
+//! **`two-plane-announced-row-blits` records on Metal; the other two carry their answer, and only
+//! because of the fill.** The stated reason used to be that the two-plane formats are Apple's
+//! private ones. That is wrong: the *format* is not private — `MTLTextureDescriptor`'s pixel format
+//! is a raw value, and Metal makes, writes, blits and reads back 550 and 551 through entirely
+//! public `objc2-metal` calls ([`crate::metal_work`]). What is private is `fillTexture:`. So the
+//! announced blits, which fill nothing, run on Metal; `two-plane-row-blits` still carries its
+//! answer because two of its twenty-two blits fill first, and `two-plane-pad-fills` because every
+//! case of it is a fill.
 //!
 //! **Not ported, and why.** The lane's other three families stay the lane's:
 //!
@@ -44,10 +49,14 @@ const MEASURED_IN: &str =
     "runtime_lane::two_plane_copies, from the probes bp.m and pad.m (an Apple M3 Max, \
      macOS 27.0.1)";
 
-/// Why record mode must not run these cases on Metal.
-const NO_PUBLIC_CALL: &str =
-    "the two-plane extended-range formats are Apple's private ones and their fills go through \
-     private API, so no public call exists to record them from";
+/// Why record mode must not run a case that fills on Metal.
+///
+/// The call, not the format: `fillTexture:` and `fillTextureColor:` are Apple SPI, and a case that
+/// runs neither records on Metal whatever pixel format it names.
+const PRIVATE_FILL: &str =
+    "the fill goes through fillTexture:/fillTextureColor:, which are Apple SPI, so no public call \
+     exists to record it from; the two-plane extended-range formats themselves are public, and \
+     the cases here that run no fill do record on Metal";
 
 /// The runs the row-blit table stands on: the probe ran each blit once, and the announced ones
 /// three times alike.
@@ -329,6 +338,27 @@ pub fn announced_row_blits() -> RowBlits {
 }
 
 impl RowBlits {
+    /// The transcript the probe's own printed words state: every word of every blit, as `bp.m`
+    /// printed it.
+    ///
+    /// For `two-plane-row-blits` this is the case's answer, because two of its blits fill. For
+    /// `two-plane-announced-row-blits`, which record mode runs on Metal, it is the cross-check: a
+    /// test holds the committed recording to it, so the probe's words and Metal's live answer must
+    /// agree.
+    pub fn printed_by_the_probe(&self) -> Result<Transcript, String> {
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(&self.inputs()?));
+        for (at, blit) in self.blits().iter().enumerate() {
+            sites.leaf(format!("work/{at}"), answered());
+            sites.push(Node::leaf(
+                row_site(at, blit),
+                Observed::value(words_value(&printed_words(blit.metal)?)),
+            ));
+        }
+        sites.notices(NOTICES_SITE, &[] as &[&str]);
+        Ok(sites.finish())
+    }
+
     /// The case's blits.
     fn blits(&self) -> &'static [RowBlit] {
         if self.announced {
@@ -352,7 +382,12 @@ impl Case for RowBlits {
     }
 
     fn metal_source(&self) -> MetalSource {
-        MetalSource::carried_only(MEASURED_IN, NO_PUBLIC_CALL)
+        // The announced blits fill nothing, so every call they make is public and record mode
+        // takes Metal's own answer. The other twenty-two include two that fill first.
+        if self.announced {
+            return MetalSource::Run;
+        }
+        MetalSource::carried_only(MEASURED_IN, PRIVATE_FILL)
     }
 
     fn inputs(&self) -> Result<Vec<Input>, String> {
@@ -406,17 +441,14 @@ impl Case for RowBlits {
     }
 
     fn carried_transcript(&self) -> Result<Option<(u32, Transcript)>, String> {
-        let mut sites = Sites::new();
-        sites.push(crate::case::inputs_node(&self.inputs()?));
-        for (at, blit) in self.blits().iter().enumerate() {
-            sites.leaf(format!("work/{at}"), answered());
-            sites.push(Node::leaf(
-                row_site(at, blit),
-                Observed::value(words_value(&printed_words(blit.metal)?)),
-            ));
+        if self.announced {
+            // Record mode runs this one on Metal. Its probe's table stays as the cross-check
+            // ([`RowBlits::printed_by_the_probe`]), held against the committed recording by a
+            // test, so the words the probe printed still have to agree with what Metal answers
+            // here.
+            return Ok(None);
         }
-        sites.notices(NOTICES_SITE, &[] as &[&str]);
-        Ok(Some((ROW_BLIT_RUNS, sites.finish())))
+        Ok(Some((ROW_BLIT_RUNS, self.printed_by_the_probe()?)))
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
@@ -626,7 +658,7 @@ impl Case for PadFills {
     }
 
     fn metal_source(&self) -> MetalSource {
-        MetalSource::carried_only(MEASURED_IN, NO_PUBLIC_CALL)
+        MetalSource::carried_only(MEASURED_IN, PRIVATE_FILL)
     }
 
     fn allowances(&self) -> Vec<Allowance> {
