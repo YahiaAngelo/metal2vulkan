@@ -744,6 +744,20 @@ pub fn paired(metal: &Measurement, ours: &Measurement) -> Vec<Paired> {
         .collect()
 }
 
+/// The layers under our runtime on this host, named so the honest-framing line is true wherever
+/// the suite runs.
+///
+/// It was not, once: the line read "MoltenVK and Metal underneath" on every venue, and the first
+/// run in the Linux container printed it over llvmpipe, where neither is present. A caution that
+/// overstates the stack is the same defect as a figure that overstates a result.
+fn chain(venue: &str) -> String {
+    if cfg!(target_os = "macos") {
+        format!("MoltenVK over Metal on {venue}")
+    } else {
+        format!("the venue's own Vulkan implementation, {venue}")
+    }
+}
+
 /// Microseconds, three places, from nanoseconds: the unit a per-call figure reads in.
 fn us(nanos: u64) -> String {
     format!("{:.3}", nanos as f64 / 1_000.0)
@@ -777,12 +791,13 @@ pub fn render(metal: Option<&Measurement>, ours: &Measurement, show: bool) -> St
              one that is zero\n",
         );
     }
-    out.push_str(
-        "\nWHAT A DIFFERENCE HERE IS: our leg is translation, our runtime, MoltenVK and Metal \
-         underneath.\nA ratio is the cost of that whole chain against native Metal and attributes \
-         to no layer of it.\nNothing here licenses a sentence about what MoltenVK or our runtime \
-         costs on its own.\n",
-    );
+    out.push_str(&format!(
+        "\nWHAT A DIFFERENCE HERE IS: our leg is translation, then our runtime, then {}.\nA ratio \
+         is the cost of that whole chain against native Metal and attributes to no layer of \
+         it.\nNothing here licenses a sentence about what any one of those layers costs on its \
+         own.\n",
+        chain(&ours.venue)
+    ));
 
     let Some(metal) = metal else {
         out.push_str("\nno Metal leg on this host, so every row below is ours alone\n\n");
