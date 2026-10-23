@@ -2942,19 +2942,45 @@ fn re_recording_a_metal_answer_keeps_the_cost_record() {
         composed: Default::default(),
         ceilings: Default::default(),
     }];
-    let kept = Recording::new(
-        held.case.clone(),
-        held.shaders.clone(),
-        held.answers.clone(),
-    )
-    .with_costs(costs.clone());
-    assert_eq!(kept.costs, costs);
-    // `record::write` reads what is committed and keeps its cost half, so this is the shape it
-    // writes. The call itself is not made here: it would write over a committed recording.
+    let held = held.with_costs(costs.clone());
+    // A fresh Metal recording of the same case, with different answers, which is what re-recording
+    // produces. `record::write` is not called here: it would write over a committed recording.
+    let fresh = Recording::new(held.case.clone(), Vec::new(), Vec::new());
+    let kept = held.clone().carrying_the_answers_of(fresh);
+    // What Metal measures is replaced...
     assert!(
-        include_str!("record.rs").contains("let costs = recording::read(case.name())"),
-        "record::write no longer keeps the cost half of the recording it replaces"
+        kept.answers.is_empty(),
+        "the fresh answers are the ones kept"
     );
+    assert!(kept.shaders.is_empty());
+    // ...and the cost half survives.
+    assert_eq!(kept.costs, costs);
+    // **And so does every other part of the record, including one this test does not name.** The
+    // check runs over the serialised form rather than over named fields, so a half another leg
+    // adds later is covered by it before anyone thinks to come back here. That is the property the
+    // inverted carry exists for: keeping is the default, and dropping takes an explicit line.
+    //
+    // This assertion replaces one that searched `record.rs` for a line of its own source. A guard
+    // that matches text cannot tell a correct change from a broken one: it failed when this carry
+    // was *improved*, and it would have passed had the carry been replaced by something that
+    // dropped every half while keeping the string.
+    let before = serde_json::to_value(&held).expect("it serialises");
+    let after = serde_json::to_value(&kept).expect("it serialises");
+    let measured = ["shaders", "answers", "format", "suite_version"];
+    let before = before.as_object().expect("a record is an object");
+    let after = after.as_object().expect("a record is an object");
+    for (key, value) in before {
+        if measured.contains(&key.as_str()) {
+            continue;
+        }
+        assert_eq!(after.get(key), Some(value), "{key} was not carried");
+    }
+    for key in after.keys() {
+        assert!(
+            before.contains_key(key) || measured.contains(&key.as_str()),
+            "{key} appeared from nowhere"
+        );
+    }
 }
 
 /// A count that says which thread arrived first is reported and never gated, whatever a
