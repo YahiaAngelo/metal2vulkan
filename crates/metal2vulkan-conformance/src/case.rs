@@ -558,6 +558,19 @@ pub trait Side {
         Err(Failure::unavailable("replace_region"))
     }
 
+    /// `newTextureWithDescriptor:` of the texture the case describes whole
+    /// ([`crate::texture::TextureRequest`]), loaded with the request's `replaceRegion:` calls in
+    /// order.
+    ///
+    /// [`Side::texture_2d_in_role`] is the one-level shared 2D case of this. A case that needs a
+    /// level count, an array's slices, a cube's faces, private storage,
+    /// `allowGPUOptimizedContents`, a swizzle, or a block-compressed format whose rows are blocks,
+    /// states the whole descriptor here instead.
+    fn texture(&mut self, request: &crate::texture::TextureRequest<'_>) -> Answer<Handle> {
+        let _ = request;
+        Err(Failure::unavailable("texture"))
+    }
+
     /// `newSamplerStateWithDescriptor:` of the state the case describes ([`SamplerSpec`]).
     fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
         let _ = spec;

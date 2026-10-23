@@ -27,6 +27,7 @@
 pub mod buffer_blits;
 pub mod chroma_pairs;
 pub mod command_queues;
+pub mod compressed_decode;
 pub mod compute_threadgroups;
 pub mod depth_texel_reads;
 pub mod extended_range_blends;
@@ -75,6 +76,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(stage_in_regions::stage_in_region_clamps()));
+    for case in compressed_decode::all() {
+        cases.push(Box::new(case));
+    }
     for case in extended_range_planes::all() {
         cases.push(Box::new(case));
     }

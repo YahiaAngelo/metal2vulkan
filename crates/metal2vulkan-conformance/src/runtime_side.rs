@@ -500,6 +500,61 @@ impl Side for RuntimeSide<'_> {
             .map_err(Failure::from_error)
     }
 
+    fn texture(&mut self, request: &crate::texture::TextureRequest<'_>) -> Answer<Handle> {
+        let format = PixelFormat::try_from(request.format).map_err(|problem| {
+            Failure::named(
+                "NoSuchPixelFormat",
+                format!("{}: {problem:?}", request.format),
+            )
+        })?;
+        let mut descriptor = TextureDescriptor::texture_2d(
+            format,
+            request.size[0].into(),
+            request.size[1].into(),
+            false,
+        );
+        descriptor.texture_type = request.texture_type;
+        descriptor.depth = request.size[2].max(1).into();
+        descriptor.mipmap_level_count = request.levels.max(1).into();
+        descriptor.array_length = request.slices.max(1).into();
+        descriptor.usage = request.usage;
+        descriptor.resource_options = if request.private {
+            ResourceOptions::private()
+        } else {
+            ResourceOptions::shared()
+        };
+        descriptor.allow_gpu_optimized_contents = request.gpu_optimized;
+        descriptor.swizzle = request.swizzle;
+        let texture = self
+            .device
+            .new_texture(&descriptor)
+            .map_err(|error| Failure::of(&error))?;
+        for upload in request.uploads {
+            texture
+                .replace_region(
+                    Region {
+                        origin: Origin::new(
+                            upload.origin[0].into(),
+                            upload.origin[1].into(),
+                            upload.origin[2].into(),
+                        ),
+                        size: Size::new(
+                            upload.size[0].into(),
+                            upload.size[1].into(),
+                            upload.size[2].max(1).into(),
+                        ),
+                    },
+                    upload.level.into(),
+                    upload.slice.into(),
+                    upload.bytes,
+                    upload.row_pitch.into(),
+                    upload.image_pitch.into(),
+                )
+                .map_err(Failure::from_error)?;
+        }
+        Ok(keep(&mut self.textures, texture))
+    }
+
     fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
         let mut descriptor = SamplerDescriptor::new();
         descriptor.min_filter = spec.min_filter;

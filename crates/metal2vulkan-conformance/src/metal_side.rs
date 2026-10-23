@@ -44,8 +44,8 @@ use objc2_metal::{
     MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplerAddressMode,
     MTLSamplerBorderColor, MTLSamplerDescriptor, MTLSamplerMinMagFilter, MTLSamplerState,
     MTLSharedEvent, MTLSize, MTLStageInputOutputDescriptor, MTLStepFunction, MTLStorageMode,
-    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
-    MTLTileRenderPipelineDescriptor,
+    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureSwizzle, MTLTextureSwizzleChannels,
+    MTLTextureType, MTLTextureUsage, MTLTileRenderPipelineDescriptor,
 };
 
 /// The Metal level this side answers at: the host's own, since Metal answers as the release it runs
@@ -317,6 +317,11 @@ fn stage_input_descriptor(stage_input: &StageInput) -> Retained<MTLStageInputOut
 }
 
 /// `kept` with `value` pushed on, answering its index.
+/// The `MTLTextureSwizzle` a channel's source is, by the raw ordinal both enumerations share.
+fn swizzle_of(source: metal2vulkan::metal::TextureSwizzle) -> MTLTextureSwizzle {
+    MTLTextureSwizzle(source.as_raw() as u8)
+}
+
 fn keep<T>(kept: &mut Vec<T>, value: T) -> Handle {
     kept.push(value);
     Handle(u32::try_from(kept.len() - 1).expect("fewer than 2^32 objects"))
@@ -586,6 +591,87 @@ impl Side for MetalSide {
                     0,
                     std::ptr::NonNull::from(bytes).cast(),
                     spec.row_pitch as usize,
+                );
+            }
+        }
+        Ok(keep(&mut self.textures, texture))
+    }
+
+    fn texture(&mut self, request: &crate::texture::TextureRequest<'_>) -> Answer<Handle> {
+        let descriptor = MTLTextureDescriptor::new();
+        descriptor.setPixelFormat(MTLPixelFormat(request.format as usize));
+        descriptor.setTextureType(MTLTextureType(request.texture_type.as_raw() as usize));
+        // SAFETY: the setters take the descriptor's own words; nothing is borrowed.
+        unsafe {
+            descriptor.setWidth(request.size[0] as usize);
+            descriptor.setHeight(request.size[1] as usize);
+            descriptor.setDepth(request.size[2].max(1) as usize);
+            descriptor.setMipmapLevelCount(request.levels.max(1) as usize);
+            descriptor.setArrayLength(request.slices.max(1) as usize);
+        }
+        descriptor.setUsage(MTLTextureUsage(request.usage.as_raw() as usize));
+        descriptor.setStorageMode(if request.private {
+            MTLStorageMode::Private
+        } else {
+            MTLStorageMode::Shared
+        });
+        descriptor.setAllowGPUOptimizedContents(request.gpu_optimized);
+        descriptor.setSwizzle(MTLTextureSwizzleChannels {
+            red: swizzle_of(request.swizzle.red),
+            green: swizzle_of(request.swizzle.green),
+            blue: swizzle_of(request.swizzle.blue),
+            alpha: swizzle_of(request.swizzle.alpha),
+        });
+        let texture = self
+            .device
+            .newTextureWithDescriptor(&descriptor)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewTextureWithDescriptor",
+                    format!(
+                        "format {} {:?} {}x{}x{} returned nil",
+                        request.format,
+                        request.texture_type,
+                        request.size[0],
+                        request.size[1],
+                        request.size[2]
+                    ),
+                )
+            })?;
+        for upload in request.uploads {
+            if upload.bytes.len() < upload.needed() {
+                return Err(Failure::named(
+                    "TooFewBytes",
+                    format!(
+                        "{} bytes for {} rows of {}",
+                        upload.bytes.len(),
+                        upload.rows,
+                        upload.row_pitch
+                    ),
+                ));
+            }
+            let region = MTLRegion {
+                origin: MTLOrigin {
+                    x: upload.origin[0] as usize,
+                    y: upload.origin[1] as usize,
+                    z: upload.origin[2] as usize,
+                },
+                size: MTLSize {
+                    width: upload.size[0] as usize,
+                    height: upload.size[1] as usize,
+                    depth: upload.size[2].max(1) as usize,
+                },
+            };
+            // SAFETY: `upload.bytes` holds the rows of the pitch the region writes, checked just
+            // above, and the region lies in the level and slice the texture was made with.
+            unsafe {
+                texture.replaceRegion_mipmapLevel_slice_withBytes_bytesPerRow_bytesPerImage(
+                    region,
+                    upload.level as usize,
+                    upload.slice as usize,
+                    std::ptr::NonNull::from(upload.bytes).cast(),
+                    upload.row_pitch as usize,
+                    upload.image_pitch as usize,
                 );
             }
         }
