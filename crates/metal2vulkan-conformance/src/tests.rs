@@ -4530,6 +4530,8 @@ fn the_metal_side_mentions_every_pipeline_field() {
         "rasterization",
         "vertex_layout",
         "colors",
+        "label",
+        "support_indirect_command_buffers",
     ] {
         assert!(
             body.contains(field),
@@ -4597,6 +4599,8 @@ fn the_runtime_side_forwards_every_field_of_a_pipeline_spec() {
         attributes: &attributes,
         layouts: &layouts,
     });
+    spec.label = Some("a-pipeline-spec-label");
+    spec.support_indirect_command_buffers = true;
     assert_ne!(
         spec.depth_format, spec.stencil_format,
         "the two formats must differ, or swapping them would pass"
@@ -4615,6 +4619,15 @@ fn the_runtime_side_forwards_every_field_of_a_pipeline_spec() {
     );
     assert_eq!(made.raster_sample_count, 4, "samples");
     assert!(!made.rasterization_enabled, "rasterization");
+    assert_eq!(
+        made.label.as_deref(),
+        Some("a-pipeline-spec-label"),
+        "label"
+    );
+    assert!(
+        made.support_indirect_command_buffers,
+        "support_indirect_command_buffers"
+    );
 
     let first = made.color_attachments[0].expect("color 0");
     assert_eq!(

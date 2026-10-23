@@ -24,6 +24,7 @@ use crate::function_bindings::{
 use crate::function_facts::{
     AttributeFacts, ConstantAt, ConstantFacts, ConstantValue, FunctionFacts,
 };
+use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
     ColorState, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
@@ -425,6 +426,10 @@ pub(crate) struct PipelineFields {
     pub raster_sample_count: u32,
     pub rasterization_enabled: bool,
     pub vertex_descriptor: Option<VertexDescriptor>,
+    pub support_indirect_command_buffers: bool,
+    /// The label the creation's options carry, which is where the runtime takes
+    /// `MTLRenderPipelineDescriptor.label` from rather than from the descriptor itself.
+    pub label: Option<String>,
 }
 
 /// [`PipelineFields`] of `spec`: `Err` where the spec names a colour attachment past the eight a
@@ -445,6 +450,8 @@ pub(crate) fn pipeline_fields(spec: &RenderPipelineSpec<'_>) -> Answer<PipelineF
         raster_sample_count: spec.samples,
         rasterization_enabled: spec.rasterization,
         vertex_descriptor: spec.vertex_layout.as_ref().map(vertex_descriptor),
+        support_indirect_command_buffers: spec.support_indirect_command_buffers,
+        label: spec.label.map(str::to_owned),
     })
 }
 
@@ -1360,6 +1367,86 @@ impl Side for RuntimeSide<'_> {
             )
         })?;
         Ok(reflection.bindings().iter().map(our_binding).collect())
+    }
+
+    fn compute_pipeline_with_descriptor(
+        &mut self,
+        library: Handle,
+        spec: &ComputeStateSpec<'_>,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .new_function_with_name(spec.entry)
+            .map_err(|error| Failure::of(&error))?;
+        let mut descriptor = metal2vulkan::pipeline::ComputePipelineDescriptor::new(
+            StageSource::Function(function.function_descriptor()),
+        );
+        descriptor.support_indirect_command_buffers = spec.support_indirect_command_buffers;
+        descriptor.required_threads_per_threadgroup = spec.required_threads_per_threadgroup;
+        // The label is the creation's option rather than the descriptor's field, which is where
+        // the runtime takes `MTLComputePipelineDescriptor.label` from.
+        let mut options = PipelineOptions::default();
+        options.label = spec.label.map(str::to_owned);
+        let state = self
+            .device
+            .new_compute_pipeline_state(&descriptor, &options)
+            .map_err(|error| Failure::of(&error))?;
+        Ok(keep(&mut self.pipelines, state))
+    }
+
+    fn compute_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<ComputeStateFacts> {
+        let registry = self.device.registry_id();
+        let state = self
+            .pipelines
+            .get(state.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?;
+        let required = state.required_threads_per_threadgroup();
+        Ok(ComputeStateFacts {
+            label: state.label().map(str::to_owned),
+            // The registry ID is each host's own number, so only the **comparison** is portable.
+            device_is_the_cases: state.device().registry_id() == registry,
+            static_threadgroup_memory_length: u64::from(state.static_threadgroup_memory_length()),
+            support_indirect_command_buffers: state.support_indirect_command_buffers(),
+            imageblock_memory_length: state
+                .imageblock_memory_length_for_dimensions(size(imageblock)),
+            required_threads_per_threadgroup: [required.width, required.height, required.depth],
+        })
+    }
+
+    fn render_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<RenderStateFacts> {
+        let registry = self.device.registry_id();
+        let state = self
+            .render_pipelines
+            .get(state.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?;
+        let required = state.required_threads_per_tile_threadgroup();
+        Ok(RenderStateFacts {
+            label: state.label().map(str::to_owned),
+            device_is_the_cases: state.device().registry_id() == registry,
+            max_total_threads_per_threadgroup: u64::from(state.max_total_threads_per_threadgroup()),
+            threadgroup_size_matches_tile_size: state.threadgroup_size_matches_tile_size(),
+            imageblock_sample_length: state.imageblock_sample_length().ok(),
+            imageblock_memory_length: state
+                .imageblock_memory_length_for_dimensions(size(imageblock))
+                .ok(),
+            support_indirect_command_buffers: state.support_indirect_command_buffers(),
+            required_threads_per_tile_threadgroup: [
+                required.width,
+                required.height,
+                required.depth,
+            ],
+        })
     }
 
     fn function_facts(
@@ -2325,9 +2412,14 @@ impl Side for RuntimeSide<'_> {
         descriptor.raster_sample_count = apart.raster_sample_count;
         descriptor.rasterization_enabled = apart.rasterization_enabled;
         descriptor.vertex_descriptor = apart.vertex_descriptor;
+        descriptor.support_indirect_command_buffers = apart.support_indirect_command_buffers;
+        // The label is the creation's option rather than the descriptor's field, which is where
+        // the runtime takes `MTLRenderPipelineDescriptor.label` from.
+        let mut options = PipelineOptions::default();
+        options.label = apart.label;
         let state = self
             .device
-            .new_render_pipeline_state(&descriptor, &PipelineOptions::default())
+            .new_render_pipeline_state(&descriptor, &options)
             .map_err(Failure::from_error)?;
         Ok(keep(&mut self.render_pipelines, state))
     }

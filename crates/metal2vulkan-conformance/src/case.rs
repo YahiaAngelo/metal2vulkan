@@ -750,6 +750,52 @@ pub trait Side {
         Err(Failure::unavailable("compute_pipeline_bindings"))
     }
 
+    /// `newComputePipelineStateWithDescriptor:options:reflection:error:` of the descriptor
+    /// `spec` describes whole ([`ComputeStateSpec`](crate::pipeline_facts::ComputeStateSpec)).
+    ///
+    /// The state joins the same handle space as [`Side::compute_pipeline`]: one Metal object kind
+    /// made from a function or from a descriptor.
+    fn compute_pipeline_with_descriptor(
+        &mut self,
+        library: Handle,
+        spec: &crate::pipeline_facts::ComputeStateSpec<'_>,
+    ) -> Answer<Handle> {
+        let _ = (library, spec);
+        Err(Failure::unavailable("compute_pipeline_with_descriptor"))
+    }
+
+    /// What a compute pipeline state answers of itself
+    /// ([`ComputeStateFacts`](crate::pipeline_facts::ComputeStateFacts)), with
+    /// `imageblockMemoryLengthForDimensions:` asked for `imageblock`.
+    ///
+    /// The dimensions are the case's own rather than fixed, because the answer is a function of
+    /// them: a case states the extent whose length it means.
+    fn compute_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<crate::pipeline_facts::ComputeStateFacts> {
+        let _ = (state, imageblock);
+        Err(Failure::unavailable("compute_pipeline_facts"))
+    }
+
+    /// What a render pipeline state answers of itself
+    /// ([`RenderStateFacts`](crate::pipeline_facts::RenderStateFacts)), with
+    /// `imageblockMemoryLengthForDimensions:` asked for `imageblock`.
+    ///
+    /// [`Side::tile_facts`] is three of these getters read off a **tile** state, which is the
+    /// other descriptor the same Metal object is made from. This is the drawing state's whole
+    /// portable surface, and the two are kept apart because what each answers is decided by which
+    /// descriptor made it.
+    fn render_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<crate::pipeline_facts::RenderStateFacts> {
+        let _ = (state, imageblock);
+        Err(Failure::unavailable("render_pipeline_facts"))
+    }
+
     /// `newFunctionWithName:` of `entry`, or `newFunctionWithName:constantValues:error:` where
     /// `constants` holds a value, and what the function then answers about **itself**
     /// ([`crate::function_facts::FunctionFacts`]).

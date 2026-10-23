@@ -61,6 +61,7 @@ pub mod function_facts;
 pub mod handler_waits;
 pub mod known_gaps;
 pub mod measured;
+pub mod pipeline_facts;
 pub mod queue_slots;
 pub mod record;
 pub mod recording;

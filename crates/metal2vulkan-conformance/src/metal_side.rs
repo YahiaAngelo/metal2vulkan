@@ -29,6 +29,7 @@ use crate::function_bindings::{
 use crate::function_facts::{
     AttributeFacts, ConstantAt, ConstantFacts, ConstantValue, FunctionFacts,
 };
+use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
     Dispatch, RenderPass, RenderPipelineSpec, RenderStep, RenderWork, StageFunction, TargetSpec,
@@ -1837,6 +1838,109 @@ impl Side for MetalSide {
         Ok(found)
     }
 
+    fn compute_pipeline_with_descriptor(
+        &mut self,
+        library: Handle,
+        spec: &ComputeStateSpec<'_>,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .newFunctionWithName(&NSString::from_str(spec.entry))
+            .ok_or_else(|| Failure::named("NoSuchFunction", spec.entry.to_owned()))?;
+        let descriptor = MTLComputePipelineDescriptor::new();
+        descriptor.setComputeFunction(Some(&function));
+        // Set only where the case states one. `setLabel:nil` on a pipeline descriptor fails an
+        // assertion inside Metal and ends the process ("label must not be nil", measured on this
+        // M3 Max while recording this family), and Metal's own default is already nil, so a case
+        // that means a nil label is a case that makes this call not at all.
+        if let Some(label) = spec.label {
+            descriptor.setLabel(Some(&NSString::from_str(label)));
+        }
+        descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
+        if let Some(threads) = spec.required_threads_per_threadgroup {
+            descriptor.setRequiredThreadsPerThreadgroup(size(threads));
+        }
+        let state = self
+            .device
+            .newComputePipelineStateWithDescriptor_options_reflection_error(
+                &descriptor,
+                MTLPipelineOption::None,
+                None,
+            )
+            .map_err(|error| {
+                Failure::named(
+                    "NewComputePipelineState",
+                    error.localizedDescription().to_string(),
+                )
+            })?;
+        Ok(keep(&mut self.pipelines, state))
+    }
+
+    fn compute_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<ComputeStateFacts> {
+        let registry = self.device.registryID();
+        // Declared, so the coverage derivation types the receiver: the pool's own element type is
+        // this side's `Vec`, which names no Metal type the walk can read off a field.
+        let state: &Retained<ProtocolObject<dyn MTLComputePipelineState>> = self
+            .pipelines
+            .get(state.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?;
+        let required = state.requiredThreadsPerThreadgroup();
+        Ok(ComputeStateFacts {
+            label: state.label().map(|label| label.to_string()),
+            // The registry ID is each host's own number, so only the **comparison** is portable.
+            device_is_the_cases: state.device().registryID() == registry,
+            static_threadgroup_memory_length: state.staticThreadgroupMemoryLength() as u64,
+            support_indirect_command_buffers: state.supportIndirectCommandBuffers(),
+            // SAFETY: the dimensions are the case's own three positive extents, which the call
+            // multiplies by the kernel's imageblock cell size and nothing else.
+            imageblock_memory_length: unsafe {
+                state.imageblockMemoryLengthForDimensions(size(imageblock))
+            } as u64,
+            required_threads_per_threadgroup: [
+                required.width as u64,
+                required.height as u64,
+                required.depth as u64,
+            ],
+        })
+    }
+
+    fn render_pipeline_facts(
+        &mut self,
+        state: Handle,
+        imageblock: [u32; 3],
+    ) -> Answer<RenderStateFacts> {
+        let registry = self.device.registryID();
+        let state: &Retained<ProtocolObject<dyn MTLRenderPipelineState>> = &self
+            .render_pipelines
+            .get(state.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", state.0)))?
+            .state;
+        let required = state.requiredThreadsPerTileThreadgroup();
+        Ok(RenderStateFacts {
+            label: state.label().map(|label| label.to_string()),
+            device_is_the_cases: state.device().registryID() == registry,
+            max_total_threads_per_threadgroup: state.maxTotalThreadsPerThreadgroup() as u64,
+            threadgroup_size_matches_tile_size: state.threadgroupSizeMatchesTileSize(),
+            imageblock_sample_length: Some(state.imageblockSampleLength() as u64),
+            imageblock_memory_length: Some(
+                state.imageblockMemoryLengthForDimensions(size(imageblock)) as u64,
+            ),
+            support_indirect_command_buffers: state.supportIndirectCommandBuffers(),
+            required_threads_per_tile_threadgroup: [
+                required.width as u64,
+                required.height as u64,
+                required.depth as u64,
+            ],
+        })
+    }
+
     fn function_facts(
         &mut self,
         library: Handle,
@@ -2779,6 +2883,12 @@ impl Side for MetalSide {
         if let Some(fragment) = &spec.fragment {
             descriptor.setFragmentFunction(Some(&*function(fragment)?));
         }
+        // Set only where the case states one: `setLabel:nil` ends Metal's process, as the
+        // compute descriptor's does.
+        if let Some(label) = spec.label {
+            descriptor.setLabel(Some(&NSString::from_str(label)));
+        }
+        descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
         descriptor.setRasterSampleCount(spec.samples as usize);
         descriptor.setRasterizationEnabled(spec.rasterization);
         if let Some(layout) = &spec.vertex_layout {
