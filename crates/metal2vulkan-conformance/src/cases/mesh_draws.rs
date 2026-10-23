@@ -495,7 +495,7 @@ impl MeshDraws {
             calls = calls.with(Node::leaf(
                 name,
                 Observed::value(match refused {
-                    Some(failure) => failure.value.clone(),
+                    Some(failure) => failure.recorded(),
                     None => Value::ok(Value::Absent),
                 }),
             ));

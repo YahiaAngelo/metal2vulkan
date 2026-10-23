@@ -121,13 +121,21 @@ const fn part(name: &'static str, format: u32) -> Row {
     }
 }
 
-/// The rows: the stencil aspect at both sample counts and over a region inside the texture.
+/// The rows: the stencil aspect at both sample counts and over a region inside the texture, and
+/// the 16-bit depth aspect at both sample counts.
 ///
-/// # The six rows this family does not yet hold, and what measuring them found
+/// The two `Depth16Unorm` rows are **open gaps of ours**, each with a `known-gaps.tsv` row: Metal
+/// copies the buffer into the 16-bit aspect and back, and we refuse the copy in
+/// (`RuntimeGap::MultisampledBufferCopy`, on a device without `maintenance8` or carrying the
+/// measured copy defect). A refusal of something plain Metal does is a bug of ours by the owner's
+/// standing rule, so the rows stay here and stay red in the ledger's own way: the run prints them
+/// as refusals, counts them as refusals, and fails the day either stops refusing.
 ///
-/// The depth rows were written, recorded on the oracle and replayed, and they are left out because
-/// each needs something the suite cannot yet say. Their measurements are the point of having run
-/// them, so they are written down here:
+/// # The four rows this family does not yet hold, and what measuring them found
+///
+/// The `Depth32Float` rows were written, recorded on the oracle and replayed, and they are left out
+/// because they need something the suite cannot yet say. Their measurements are the point of having
+/// run them, so they are written down here:
 ///
 /// - **`Depth32Float`, four rows** (54 x 54 and 80 x 80 at 4 samples, 54 x 54 at 2, and a region
 ///   inside 8 x 8). Metal returns the buffer **bit for bit**, every edge value included: both
@@ -139,19 +147,12 @@ const fn part(name: &'static str, format: u32) -> Row {
 ///   [`Allowance`](crate::allowance::Allowance) covers a **site**, and loosening a 46,656-byte site
 ///   to tolerate four bytes would throw away the comparison that makes the row worth having. A
 ///   per-element allowance on a bytes site is what these rows are waiting for.
-/// - **`Depth16Unorm`, two rows** (54 x 54 at 4 and at 2 samples). Metal copies the buffer into the
-///   16-bit aspect and back; **we refuse the copy in**, which is the gap the lane names
-///   (`RuntimeGap::MultisampledBufferCopy`, for a device without `maintenance8` or carrying the
-///   measured copy defect). That is a refusal of something plain Metal does, so it needs a
-///   `known-refusals.tsv` row — and it needs one more thing first: a step's refusal inside a
-///   [`crate::work::Work`] program is reported as a **structural divergence** at `case/work`
-///   rather than as [`Verdict::Refused`](crate::verdict::Verdict::Refused), because the
-///   interpreter wraps it in a fields value naming the step. So the ledger cannot cover it and the
-///   refused count does not see it.
-const ROWS: [Row; 3] = [
+const ROWS: [Row; 5] = [
     whole("buffer-depth-samples-s8-54-4", STENCIL8, 4, 54),
     whole("buffer-depth-samples-s8-54-2", STENCIL8, 2, 54),
     part("buffer-depth-samples-s8-part-4", STENCIL8),
+    whole("buffer-depth-samples-d16-54-4", DEPTH16UNORM, 4, 54),
+    whole("buffer-depth-samples-d16-54-2", DEPTH16UNORM, 2, 54),
 ];
 
 impl Row {

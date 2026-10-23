@@ -101,7 +101,7 @@ impl Case for CommandQueueSlots {
                 // A queue the side could not make, or a make that answered an error, is recorded at
                 // the row and the sweep goes on: the other queues' answers stay readable, and a
                 // refusal where Metal answered compares as a refusal at that one row.
-                Err(failure) => sites.push(Node::leaf(at, Observed::value(failure.value))),
+                Err(failure) => sites.push(Node::leaf(at, Observed::value(failure.recorded()))),
             }
         }
         Ok(())

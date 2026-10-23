@@ -438,7 +438,7 @@ fn drive(shape: &Shape, side: &mut dyn Side, sites: &mut Sites) -> Result<Vec<u8
         calls = calls.with(Node::leaf(
             format!("{piece}-{}", work[piece].call()),
             Observed::value(match refused {
-                Some(failure) => failure.value.clone(),
+                Some(failure) => failure.recorded(),
                 None => Value::ok(Value::Absent),
             }),
         ));

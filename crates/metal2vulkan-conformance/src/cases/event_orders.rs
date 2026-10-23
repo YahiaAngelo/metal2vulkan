@@ -184,7 +184,7 @@ impl Case for EventOrder {
                 Ok(order) => sites.push(order.node(AT)),
                 // The row records the failure and the run ends: every fact the case has is in the
                 // one call, so there is nothing after it to read.
-                Err(failure) => sites.push(Node::leaf(AT, Observed::value(failure.value))),
+                Err(failure) => sites.push(Node::leaf(AT, Observed::value(failure.recorded()))),
             },
             Shape::HighestSignal => {
                 for pair in SIGNAL_PAIRS {
@@ -193,17 +193,19 @@ impl Case for EventOrder {
                         Ok(value) => sites.value(at, Value::Uint(value)),
                         // One order's answer is still readable where the other refused, so the
                         // sweep goes on.
-                        Err(failure) => sites.push(Node::leaf(at, Observed::value(failure.value))),
+                        Err(failure) => {
+                            sites.push(Node::leaf(at, Observed::value(failure.recorded())))
+                        }
                     }
                 }
             }
             Shape::Held => match side.held_command_buffer() {
                 Ok(order) => sites.push(order.node(AT)),
-                Err(failure) => sites.push(Node::leaf(AT, Observed::value(failure.value))),
+                Err(failure) => sites.push(Node::leaf(AT, Observed::value(failure.recorded()))),
             },
             Shape::SignalBeforeWait => match side.signal_before_a_wait() {
                 Ok(order) => sites.push(order.node(AT)),
-                Err(failure) => sites.push(Node::leaf(AT, Observed::value(failure.value))),
+                Err(failure) => sites.push(Node::leaf(AT, Observed::value(failure.recorded()))),
             },
         }
         Ok(())

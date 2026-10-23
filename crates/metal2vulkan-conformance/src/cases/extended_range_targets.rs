@@ -515,7 +515,7 @@ pub(super) fn program(
         if let Some(failure) = refused {
             node = node.with(Node::leaf(
                 piece.call(),
-                Observed::value(failure.value.clone()),
+                Observed::value(failure.recorded()),
             ));
         }
     }

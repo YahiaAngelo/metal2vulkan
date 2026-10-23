@@ -181,10 +181,7 @@ impl Case for TextureAccesses {
             let accesses = match side.texture_accesses(pipeline, stage, &SLOTS) {
                 Ok(accesses) => accesses,
                 Err(failure) => {
-                    sites.push(Node::leaf(
-                        at.clone(),
-                        Observed::value(failure.value.clone()),
-                    ));
+                    sites.push(Node::leaf(at.clone(), Observed::value(failure.recorded())));
                     return Err(Abort { at, failure });
                 }
             };

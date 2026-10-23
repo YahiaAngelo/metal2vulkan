@@ -361,7 +361,7 @@ impl Case for IntAttributes {
             // refuses compares against Metal encoding and reads as a refusal rather than a
             // divergence.
             if let Some(Some(failure)) = outcome.refused.get(at) {
-                row = row.with(Node::leaf("pass", Observed::value(failure.value.clone())));
+                row = row.with(Node::leaf("pass", Observed::value(failure.recorded())));
             }
             sites.push(row);
         }

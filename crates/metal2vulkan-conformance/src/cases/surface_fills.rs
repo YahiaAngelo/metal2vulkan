@@ -518,10 +518,10 @@ impl Case for SurfaceFills {
                     // The fill's own answer is the row's first field, so a refusal is emitted
                     // there and stops the run: the bytes after a refused fill are not the row's
                     // subject.
-                    sites.push(Node::branch(at.clone(), Vec::new()).with(Node::leaf(
-                        fill.call(),
-                        Observed::value(failure.value.clone()),
-                    )));
+                    sites.push(
+                        Node::branch(at.clone(), Vec::new())
+                            .with(Node::leaf(fill.call(), Observed::value(failure.recorded()))),
+                    );
                     return Err(Abort {
                         at: format!("{at}/{}", fill.call()),
                         failure,

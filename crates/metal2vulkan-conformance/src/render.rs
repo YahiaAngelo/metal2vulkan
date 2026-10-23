@@ -1616,7 +1616,7 @@ mod tests {
 
     /// The variant name of the guard's refusal, so a test names the shape rather than the words.
     fn refused_as(failure: &Failure) -> String {
-        match &failure.value {
+        match &failure.recorded() {
             crate::transcript::Value::Variant { name, payload } if name == "Err" => {
                 match payload.as_ref() {
                     crate::transcript::Value::Variant { name, .. } => name.clone(),

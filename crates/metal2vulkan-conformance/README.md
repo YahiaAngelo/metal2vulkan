@@ -17,6 +17,16 @@ kind: the difference is justified where any of them holds.
 A site where plain Metal answered a call and we returned a typed error is a **refusal**, and no
 allowance can make it anything else: it counts in its own verdict and is never compliant.
 
+That holds **wherever in a case** the refusal happened and **whatever shape Metal's answer** at the
+site has. Our side's answer has one shape — a typed error, which a `Failure` can only record as an
+`Err` — and Metal's has every other shape there is: a value, a tree of facts whose own value is
+absent, a digest with no value beside it, a fact about what did not happen, or the answer of one
+`Work` program whose many steps are a single call. Only two of Metal's answers are not a refusal of
+ours: its **own** error, where the difference is between the errors, and the one fact that says
+Metal never came back from the call, which is its own verdict. A refusal that arrives as a shape
+mismatch instead is a bug of the suite's rather than a finding about Metal; it went unseen four
+ways in this round, and each way lost both the refused count and the ledger row.
+
 A replay holds the runtime to exact answers. `conformance replay --default-policy` replays under
 the runtime's own defaults instead — the fast form of every speed-for-accuracy choice, which is
 what a consumer runs — so the suite can say whether a difference is the policy's or the

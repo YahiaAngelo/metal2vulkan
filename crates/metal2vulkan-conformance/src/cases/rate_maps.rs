@@ -188,10 +188,7 @@ impl Case for RateMapCase {
                 facts
             }
             Err(failure) => {
-                sites.push(Node::leaf(
-                    site::FACTS,
-                    Observed::value(failure.value.clone()),
-                ));
+                sites.push(Node::leaf(site::FACTS, Observed::value(failure.recorded())));
                 return Err(Abort {
                     at: site::FACTS.to_owned(),
                     failure,
@@ -213,7 +210,7 @@ impl Case for RateMapCase {
             Err(failure) => {
                 sites.push(Node::leaf(
                     site::PARAMETERS,
-                    Observed::value(failure.value.clone()),
+                    Observed::value(failure.recorded()),
                 ));
                 return Err(Abort {
                     at: site::PARAMETERS.to_owned(),

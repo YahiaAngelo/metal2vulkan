@@ -783,7 +783,7 @@ impl Case for TextureFills {
                 Ok(answer) => answers.push(format!("{name} {answer}")),
                 Err(failure) => {
                     let at = format!("work/{}/{name}", self.raw);
-                    sites.push(Node::leaf("work", Observed::value(failure.value.clone())));
+                    sites.push(Node::leaf("work", Observed::value(failure.recorded())));
                     return Err(Abort { at, failure });
                 }
             }

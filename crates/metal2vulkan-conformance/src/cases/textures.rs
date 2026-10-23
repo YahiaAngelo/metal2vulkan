@@ -299,7 +299,7 @@ impl Case for TextureRoundTrip {
             match side.read_texture_over(texture, [SIDE, SIDE], self.pitch(), &self.before()) {
                 Ok(bytes) => Ok(bytes),
                 Err(failure) => {
-                    sites.push(Node::leaf(at, Observed::value(failure.value.clone())));
+                    sites.push(Node::leaf(at, Observed::value(failure.recorded())));
                     Err(Abort {
                         at: at.to_owned(),
                         failure,
@@ -314,7 +314,7 @@ impl Case for TextureRoundTrip {
             Err(failure) => {
                 sites.push(Node::leaf(
                     "replace_region",
-                    Observed::value(failure.value.clone()),
+                    Observed::value(failure.recorded()),
                 ));
                 return Err(Abort {
                     at: "replace_region".to_owned(),

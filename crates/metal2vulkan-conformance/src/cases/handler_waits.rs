@@ -170,7 +170,7 @@ impl Case for OwnHandlerWait {
         // typed error there is the row's pass, and any answer at all is a divergence.
         match side.handler_wait(self.wait) {
             Ok(value) => sites.push(Node::leaf(at, Observed::value(value))),
-            Err(failure) => sites.push(Node::leaf(at, Observed::value(failure.value))),
+            Err(failure) => sites.push(Node::leaf(at, Observed::value(failure.recorded()))),
         }
         Ok(())
     }

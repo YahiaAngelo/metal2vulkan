@@ -280,14 +280,30 @@ pub fn compare_run(
 }
 
 /// Whether the sides' answers at one site are Metal answering a call and us refusing it.
+///
+/// Our side's answer has one shape: a typed error, which a [`crate::case::Failure`] can only record
+/// as an `Err`. Metal's answer has **every other** shape there is, and the rule is written that way
+/// round on purpose: a value, a tree of facts whose own value is
+/// [`Value::Absent`](crate::transcript::Value::Absent), a digest with no value beside it, or a
+/// negative fact ([`crate::transcript::Negative`]) are all Metal answering the call. Only two of
+/// Metal's answers are not: its **own** error, where the two sides agree and the difference is
+/// between the errors; and the one fact that says Metal never came back from the call, which is
+/// [`NeverReturned`] and not a gap of ours at all.
+///
+/// Reading `Ok` against `Err` alone was how a refusal went invisible three ways over. A site whose
+/// answer is a tree — a queue's slots, an event's order, a buffer-backed texture's facts — records
+/// as a branch whose own value is absent, and the comparison **skips** an absent value, so the
+/// typed error was dropped and the report held one "only Metal observed this site" divergence per
+/// child instead. A site whose answer is a bare number did read, but as two sides observing
+/// different kinds of value. Neither reached the refused count, and neither could be written down:
+/// the known-gaps ledger keys a refusal row by its site and its typed answer.
 fn refused(metal: &Value, ours: &Value) -> bool {
-    matches!(
-        (metal, ours),
-        (
-            Value::Variant { name: recorded, .. },
-            Value::Variant { name: read, .. },
-        ) if recorded == "Ok" && read == "Err"
-    )
+    ours.is_error()
+        && !metal.is_error()
+        && !matches!(
+            metal,
+            Value::Nothing(crate::transcript::Negative::NeverReturned)
+        )
 }
 
 /// The comparison's state as it descends.
@@ -314,7 +330,14 @@ impl Walk<'_> {
         } else {
             format!("{parent}/{}", metal.name)
         };
-        self.observed(&path, &metal.observed, &ours.observed);
+        if self.observed(&path, &metal.observed, &ours.observed) {
+            // The site is one we refused, so our side never reached what is under it. The refused
+            // call is the fact: one divergence per site we never got to would bury it, which is
+            // the reasoning [`compare_run`]'s `stopped` rests on, applied at one site rather than
+            // at a whole case. Without this, a site whose answer is a tree reported the refusal
+            // nowhere and its children everywhere.
+            return;
+        }
         for child in &metal.children {
             match ours.child(&child.name) {
                 Some(theirs) => self.node(&path, child, theirs),
@@ -339,8 +362,17 @@ impl Walk<'_> {
         }
     }
 
-    /// Compare what one site observed.
-    fn observed(&mut self, path: &str, metal: &Observed, ours: &Observed) {
+    /// Compare what one site observed, and say whether the site is one **we refused**, whose
+    /// children our side therefore never reached.
+    fn observed(&mut self, path: &str, metal: &Observed, ours: &Observed) -> bool {
+        // A refusal is settled before anything else about the site: before the digests, because a
+        // refusal takes no digest; before the branch's own absent value is skipped over, which is
+        // where a refusal at a site whose answer is a tree used to disappear; and before any
+        // allowance, because no allowance may turn a refusal into a pass.
+        if refused(&metal.value, &ours.value) {
+            self.refusal(path, &ours.value);
+            return true;
+        }
         if let (Some(recorded), Some(taken)) = (&metal.digest, &ours.digest) {
             if recorded != taken {
                 // A site a case loosened compares under its allowance here too. Without this a
@@ -359,16 +391,17 @@ impl Walk<'_> {
                         },
                     ));
                 }
-                return;
+                return false;
             }
         }
         if metal.is_absent() {
             // A recording taken digest-first holds the digest alone: the digests matched above,
-            // and there is no recorded value to compare against.
-            return;
+            // and there is no recorded value to compare against. A branch's own value is absent
+            // too, and its children are compared by the caller.
+            return false;
         }
         if ours.is_absent() && metal.digest.is_some() {
-            return;
+            return false;
         }
         match (&metal.shape, &ours.shape) {
             (Shape::Bytes(layout), _) | (_, Shape::Bytes(layout)) => {
@@ -376,6 +409,7 @@ impl Walk<'_> {
             }
             _ => self.value(path, &metal.value, &ours.value),
         }
+        false
     }
 
     /// Compare a byte region element by element, and its gaps where the layout asks.
@@ -525,8 +559,10 @@ impl Walk<'_> {
             }
             return;
         }
-        // A refusal is settled before any allowance is consulted, because no allowance may turn
-        // one into a pass: Metal answered the call and we did not.
+        // A refusal **nested inside** a site's value: the site's own pair was settled in
+        // [`Walk::observed`], and this is the one under a list's element, a variant's payload or a
+        // field, where a case records one answer per entry. Still before any allowance, because no
+        // allowance may turn a refusal into a pass: Metal answered the call and we did not.
         if refused(metal, ours) {
             self.refusal(path, ours);
             return;

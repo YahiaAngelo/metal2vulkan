@@ -223,7 +223,7 @@ impl Case for MadeOverBuffer {
             // and the other rows stay readable instead of being lost behind an abort.
             let node = match side.buffer_texture(request) {
                 Ok(facts) => facts.node(request.site()),
-                Err(failure) => Node::leaf(request.site(), Observed::value(failure.value)),
+                Err(failure) => Node::leaf(request.site(), Observed::value(failure.recorded())),
             };
             sites.push(node);
         }
@@ -322,7 +322,7 @@ impl Case for StrideBelowTheRow {
         // error there is the row's pass, and any answer at all is a divergence.
         match side.buffer_texture(&BELOW) {
             Ok(facts) => sites.push(facts.node(BELOW_SITE)),
-            Err(failure) => sites.push(Node::leaf(BELOW_SITE, Observed::value(failure.value))),
+            Err(failure) => sites.push(Node::leaf(BELOW_SITE, Observed::value(failure.recorded()))),
         }
         Ok(())
     }
@@ -903,7 +903,7 @@ mod device_tests {
         let mut stopped = Vec::new();
         for request in requests() {
             if let Err(failure) = side.buffer_texture(&request) {
-                let named = variant(&failure.value);
+                let named = variant(&failure.recorded());
                 if named.contains("Invalid") {
                     stopped.push(format!("{}: {named}", request.site()));
                 }

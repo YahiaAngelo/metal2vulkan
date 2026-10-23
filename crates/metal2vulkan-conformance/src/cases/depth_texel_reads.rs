@@ -116,7 +116,7 @@ fn per_page<T>(sites: &mut Sites, at: &str, answer: Answer<T>) -> Result<T, Abor
     match answer {
         Ok(value) => Ok(value),
         Err(failure) => {
-            sites.push(Node::leaf(at, Observed::value(failure.value.clone())));
+            sites.push(Node::leaf(at, Observed::value(failure.recorded())));
             Err(Abort {
                 at: at.to_owned(),
                 failure,
