@@ -408,7 +408,7 @@ impl Case for DrawStateChanges {
             pieces = pieces.with(Node::leaf(
                 *what,
                 Observed::value(match outcome.refused.get(at).and_then(Option::as_ref) {
-                    Some(failure) => failure.value.clone(),
+                    Some(failure) => failure.recorded(),
                     None => Value::ok(Value::Absent),
                 }),
             ));
