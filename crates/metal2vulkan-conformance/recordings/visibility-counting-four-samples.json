@@ -1,0 +1,283 @@
+{
+  "format": 1,
+  "case": "visibility-counting-four-samples",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "rt6_render_state.ll",
+      "entry": "rt6_full+rt6_white",
+      "source_sha256": "e6d3dec276cfc8f50921b0b8ec5e8278336afd80217f85372483a8ccab92a109"
+    },
+    {
+      "fixture": "rt6_render_state.air.ll",
+      "entry": "rt6_full+rt6_white",
+      "source_sha256": "a9ba7ae6952dab0e401cdae73e2714a7c5208fe7261dfdd958fb00fa0efc48cd"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e6d3dec276cfc8f50921b0b8ec5e8278336afd80217f85372483a8ccab92a109"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a9ba7ae6952dab0e401cdae73e2714a7c5208fe7261dfdd958fb00fa0efc48cd"
+                        }
+                      }
+                    },
+                    {
+                      "name": "render-pipeline",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "600215850278f69595a0828fae9bb849b73f549043c6a87378c7cc8e1a27f8d2"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "06a1e650b9a4157f1735ebe48dee299d231f8e05a3cb79b566c4326effcddedc"
+                        }
+                      }
+                    },
+                    {
+                      "name": "visibility",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6893a08c9c4cc97c22799a6aa7af6f8b8bc22d541a5e4253b180bbc974c9d497"
+                        }
+                      }
+                    },
+                    {
+                      "name": "acts",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "15f49b2061383ed64783bda65de0ba6a1bba06e78ad3cfee733aff0a49a528ce"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:0@1056964608",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f8165c9d0cf6c4ea37064066919ab06804e3fc92d92d84a32288f8e61d005b64"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render-pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer:0@1056964608",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "visibility",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pass-0/target",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pass-0",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "calls",
+                      "observed": {
+                        "value": "absent"
+                      },
+                      "children": [
+                        {
+                          "name": "0-render",
+                          "observed": {
+                            "value": {
+                              "variant": {
+                                "name": "Ok",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "status",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "variant": {
+                                "name": "Completed",
+                                "payload": "absent"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "command-buffer-error",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "None",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "words",
+                      "observed": {
+                        "value": {
+                          "bytes": "QAAAAAAAAAA="
+                        },
+                        "shape": {
+                          "bytes": {
+                            "region": {
+                              "buffer": {
+                                "offset": 0,
+                                "length": 8
+                              }
+                            },
+                            "element": "u64",
+                            "row_offset": 0,
+                            "row_elements": 1,
+                            "row_pitch": 8,
+                            "rows": 1,
+                            "image_pitch": 8,
+                            "images": 1,
+                            "gaps": "ignored"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

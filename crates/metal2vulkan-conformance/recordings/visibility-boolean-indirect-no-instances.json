@@ -1,0 +1,203 @@
+{
+  "format": 1,
+  "case": "visibility-boolean-indirect-no-instances",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "rt6_render_state.ll",
+      "entry": "rt6_full+rt6_white",
+      "source_sha256": "e6d3dec276cfc8f50921b0b8ec5e8278336afd80217f85372483a8ccab92a109"
+    },
+    {
+      "fixture": "rt6_render_state.air.ll",
+      "entry": "rt6_full+rt6_white",
+      "source_sha256": "a9ba7ae6952dab0e401cdae73e2714a7c5208fe7261dfdd958fb00fa0efc48cd"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e6d3dec276cfc8f50921b0b8ec5e8278336afd80217f85372483a8ccab92a109"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a9ba7ae6952dab0e401cdae73e2714a7c5208fe7261dfdd958fb00fa0efc48cd"
+                        }
+                      }
+                    },
+                    {
+                      "name": "render-pipeline",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3028c0111e3bd63322f2673fee3792f828958ed1de865d410d930ffe44863d71"
+                        }
+                      }
+                    },
+                    {
+                      "name": "target",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "a9d94d330a444f5a0a33f37a88b7e04262c120680a6c993911d5a664db3fc24f"
+                        }
+                      }
+                    },
+                    {
+                      "name": "visibility",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6893a08c9c4cc97c22799a6aa7af6f8b8bc22d541a5e4253b180bbc974c9d497"
+                        }
+                      }
+                    },
+                    {
+                      "name": "acts",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "c6290fc5e706374e0a4a157ced040d31957aabd560032a6d43b2692dfa44767d"
+                        }
+                      }
+                    },
+                    {
+                      "name": "arguments",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "59d5966c96af7ecad5c9d2918d6582d102b2c67f6b765ea28ac24371ab4f93be"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "render-pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "arguments",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "visibility",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pass-0/target",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

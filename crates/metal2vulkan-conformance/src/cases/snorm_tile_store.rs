@@ -169,6 +169,12 @@ const PASS_NOTICES: &[Degradation] = &[
     Degradation::SnormMinimumKept,
     // The same for an `RGB9E5Float` word Metal's store normalizes.
     Degradation::SharedExponentKept,
+    // The exact tile store, which the suite's replay selects by default: the load pass rewrites
+    // the tiles no fragment reached as Metal's store leaves them, so the texels **are** Metal's
+    // and the notice says the rewrite happened. Measured in the container; the two kinds above are
+    // what the fast default announces instead (`--default-policy`), where the codes stay and the
+    // texels differ.
+    Degradation::UnreachedTilesRewritten,
 ];
 
 /// The bytes of a `SIDE` by `SIDE` target of `texel` bytes a texel whose every channel holds
@@ -292,27 +298,23 @@ impl Case for SnormTileStore {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // The texels a device's own store leaves, and the notice that says so. Nothing else is
-        // loosened: the pass's calls, its status and its command-buffer error are exact.
-        let mut allowances = Vec::new();
-        for path in [
+        // The drawn texels are loosened by the one kind that explains a differing texel: the
+        // notice the fast default announces where the device's store is not Metal's. The notices
+        // site is loosened by every kind a pass of this family may announce, because which one
+        // fires is the device's and the policy's answer rather than the case's. Nothing else is
+        // loosened: the pass's calls, its status, its command-buffer error and the codes a pass of
+        // no draw left are exact.
+        let mut allowances = vec![Allowance::new(
             "case/drawn/texels",
-            format!("case/{NOTICES_SITE}/*").as_str(),
-        ] {
-            allowances.push(Allowance::new(
-                path,
-                Loosening::Unchecked,
-                Justification::notice(self.subject.notice),
-            ));
-        }
+            Loosening::Unchecked,
+            Justification::notice(self.subject.notice),
+        )];
         for kind in PASS_NOTICES {
-            if *kind != self.subject.notice {
-                allowances.push(Allowance::new(
-                    format!("case/{NOTICES_SITE}/*"),
-                    Loosening::Unchecked,
-                    Justification::notice(*kind),
-                ));
-            }
+            allowances.push(Allowance::new(
+                format!("case/{NOTICES_SITE}/*"),
+                Loosening::Unchecked,
+                Justification::notice(*kind),
+            ));
         }
         allowances
     }
