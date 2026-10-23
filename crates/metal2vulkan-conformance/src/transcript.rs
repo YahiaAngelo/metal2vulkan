@@ -277,12 +277,31 @@ impl Digest {
         }
     }
 
-    /// The digest of `value`, where its kind projects it: bytes alone, so far.
-    pub fn of(kind: DigestKind, value: &Value) -> Option<Self> {
-        match (kind, value) {
-            (DigestKind::Sha256, Value::Bytes(bytes)) => Some(Self::sha256(bytes)),
-            _ => None,
+    /// The first sixteen hexadecimal digits of the SHA-256 of `bytes`.
+    ///
+    /// This is the projection the probes printed and the runtime lanes keep, so a case ported
+    /// from such a lane records Metal's own value rather than a digest nobody measured.
+    pub fn sha256_prefix16(bytes: &[u8]) -> Self {
+        let mut hex = crate::sha256_hex(bytes);
+        hex.truncate(16);
+        Self {
+            kind: DigestKind::Sha256Prefix16,
+            hex,
         }
+    }
+
+    /// The digest of `value`, where its kind projects it: bytes, and lines joined by newlines, as
+    /// the probes digested their printed lines.
+    pub fn of(kind: DigestKind, value: &Value) -> Option<Self> {
+        let bytes = match value {
+            Value::Bytes(bytes) => bytes.clone(),
+            Value::Lines(lines) => lines.join("\n").into_bytes(),
+            _ => return None,
+        };
+        Some(match kind {
+            DigestKind::Sha256 => Self::sha256(&bytes),
+            DigestKind::Sha256Prefix16 => Self::sha256_prefix16(&bytes),
+        })
     }
 }
 
@@ -291,6 +310,9 @@ impl Digest {
 #[serde(rename_all = "snake_case")]
 pub enum DigestKind {
     Sha256,
+    /// The SHA-256's first sixteen hexadecimal digits: what our probes printed, and so the widest
+    /// projection a case ported from a lane that kept one can honestly record.
+    Sha256Prefix16,
 }
 
 /// How to read and compare a site's value.

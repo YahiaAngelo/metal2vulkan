@@ -499,6 +499,13 @@ pub fn inputs_node(inputs: &[Input]) -> Node {
     )
 }
 
+/// The site a call that answered an object emits, as a carried measurement states it: the call
+/// answered, and nothing of what it answered. A carried transcript holds the same sites a run
+/// emits, so it states this one too.
+pub fn answered() -> Observed {
+    Observed::value(Value::ok(Value::Absent))
+}
+
 /// Emit a site for `answer` and go on with what it answered, or stop the run.
 ///
 /// `observed` says what the site records of a successful answer: `Value::Absent` for a call that

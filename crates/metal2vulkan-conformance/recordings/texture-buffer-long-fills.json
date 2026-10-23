@@ -1,0 +1,161 @@
+{
+  "format": 1,
+  "case": "texture-buffer-long-fills",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": {
+        "carried": {
+          "from": "runtime_lane::texture_buffer_fills, from the probes tb.m and tblf.m (an Apple M3 Max, macOS 27.0.1)"
+        }
+      },
+      "device": "apple-m3-max",
+      "runs": 1,
+      "outcomes": [
+        {
+          "runs": 1,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "rows",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3841ae3a6d7e3a95c348def383752ae352a8b8096adca9cfbcd67ee43f96684e"
+                        }
+                      }
+                    },
+                    {
+                      "name": "longest-pattern",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "b9f88571970f75c87bc561728251f69c4f906906dadfdda9cf0f58e489e49bd0"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "fill/13-400-32752",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "fb41732d0bf8d61d"
+                    }
+                  }
+                },
+                {
+                  "name": "fill/13-12331-4097",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "270ffc1b247b7363"
+                    }
+                  }
+                },
+                {
+                  "name": "fill/13-49195-16385",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "b9e0af569f1c7db6"
+                    }
+                  }
+                },
+                {
+                  "name": "fill/13-65536-32752",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "4a510282aef3fc37"
+                    }
+                  }
+                },
+                {
+                  "name": "fill/53-16384-30000",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "154908c746d80c08"
+                    }
+                  }
+                },
+                {
+                  "name": "fill/123-4096-5000",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256_prefix16",
+                      "hex": "8d4a10e63b972ade"
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "not_run"
+    }
+  ]
+}
