@@ -287,6 +287,13 @@ fn announced_fields(found: &Comparison) -> Vec<String> {
 ///
 /// What any of the three has **not built** — `Needs::NotImplemented` and the rest — is still ours
 /// to answer for, by the same test.
+///
+/// **Open gap in the vocabulary.** `Error::SamplerLimit` is a device's lack by its own words — the
+/// device's `maxSamplerAllocationCount` samplers are live — and it carries no typed `Unsupported`,
+/// so this reads it as a refusal of ours. No case reaches it, because none exhausts a device's
+/// samplers, and inventing a carrier for one variant would be the special case this function
+/// exists to avoid. It is written down here rather than worked around: a case that ever does
+/// exhaust them needs the vocabulary to say "the device ran out", not a third kind of refusal.
 pub fn device_gap(error: &Error) -> Option<String> {
     match error {
         Error::Unsupported(unsupported) => device_gap_of(unsupported),
