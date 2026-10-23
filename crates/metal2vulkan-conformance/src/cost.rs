@@ -466,7 +466,10 @@ const QUEUE_DEPTH: &str = "how far this `VkQueue`'s work ran behind when the cas
      what the host had seen complete by then: the machine's progress on work submitted before this \
      case, not anything the case asked for";
 
-/// Where `name` is not a property of the case at all ([`SHARED`]).
+/// Where `name` is not a property of the case at all.
+///
+/// The names and the definition that put each one here are in this module's own `SHARED` table,
+/// named in prose rather than linked because this function is public and that table is not.
 pub fn not_the_cases_own(name: &str) -> Option<&'static str> {
     SHARED
         .iter()
