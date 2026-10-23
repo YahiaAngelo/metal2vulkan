@@ -383,7 +383,7 @@ impl CompressedViews {
 
     /// The plans of every shape, seeded as the lane seeds them: the lane's second seed base, the
     /// block size and the shape's place.
-    fn plans(&self) -> Vec<(&'static Shape, Plan)> {
+    pub fn plans(&self) -> Vec<(&'static Shape, Plan)> {
         let format = self.format();
         SHAPES
             .iter()

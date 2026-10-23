@@ -535,7 +535,7 @@ impl PvrtcRows {
     }
 
     /// The case's plan.
-    fn plan(&self) -> Plan {
+    pub fn plan(&self) -> Plan {
         plan(self.format())
     }
 }

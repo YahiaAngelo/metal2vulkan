@@ -49,6 +49,7 @@
 
 use crate::allowance::Allowance;
 use crate::case::{made, Abort, Case, Failure, Input, MetalSource, Side};
+use crate::texture_query::Storage;
 use crate::transcript::{Aspect, ByteLayout, Element, Gaps, Node, Observed, Region, Sites, Value};
 use crate::work::{Plane, Rect, Resource, Step as WorkStep, TextureKind, TextureSpec, Work};
 use metal2vulkan_runtime::Degradation;
@@ -894,7 +895,7 @@ impl CompressedMoves {
 
     /// The plans of every shape, in the lane's order, each seeded as the lane seeds it: the block
     /// size and the shape's place, so the bytes are the bytes the lane measured.
-    fn plans(&self) -> Vec<(&'static Shape, Plan)> {
+    pub fn plans(&self) -> Vec<(&'static Shape, Plan)> {
         let format = self.format();
         SHAPES
             .iter()
@@ -987,9 +988,17 @@ pub fn fingerprint(work: &Work) -> Vec<u8> {
                 word(&mut out, bytes.len() as u64);
                 out.extend(bytes);
             }
-            Resource::PrivateBuffer { length } => {
+            Resource::UnwrittenBuffer { length, storage } => {
                 out.extend(b"newBufferWithLength");
                 word(&mut out, *length);
+                // The storage is emitted only where it is **not** `Private`, which is the single
+                // mode the variant carried when these recordings were taken (it was
+                // `Resource::PrivateBuffer`). So a private one fingerprints exactly as it did, and
+                // a case that asks for another mode says so in its own bytes. No case of these
+                // four families makes one at all, so the arm fires nowhere today.
+                if *storage != Storage::Private {
+                    out.extend(storage.word().as_bytes());
+                }
             }
             Resource::Texture { spec } => {
                 out.extend(b"newTextureWithDescriptor");
@@ -1182,7 +1191,15 @@ fn texture_words(spec: &TextureSpec) -> Vec<u8> {
         spec.levels,
         spec.slices,
         spec.samples,
-        u64::from(spec.private),
+        // `matches!(.., Private)` rather than the mode's own ordinal, deliberately: these
+        // recordings were taken when the field was a `private: bool`, and one byte of 0 or 1 is
+        // what their fingerprints hold. Writing the ordinal instead would make every case with a
+        // private texture `Unrecorded` for a rename that changed no program. None of these
+        // families asks for `Managed`, which
+        // `no_texture_of_these_families_asks_for_managed_storage` holds, so this byte is the byte
+        // that was recorded; the day one does, that guard fires rather than a recording going
+        // quietly stale.
+        u64::from(matches!(spec.storage, Storage::Private)),
         u64::from(spec.gpu_optimized),
         u64::from(spec.usage.unwrap_or(0)),
         u64::from(spec.usage.is_some()),
@@ -1242,6 +1259,55 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// No texture of these four families asks for `Managed` storage.
+    ///
+    /// This is not tidiness, it is what makes [`fingerprint`] honest. The 42 recordings were taken
+    /// when `TextureSpec` carried a `private: bool`, so their fingerprints hold one byte of 0 or 1
+    /// for a texture's storage. `fingerprint` therefore writes
+    /// `matches!(spec.storage, Storage::Private)`, which is byte-identical to that **only while no
+    /// case uses the third mode**. The day one does, this fails and says so, instead of a recording
+    /// going quietly stale or — worse — a `Managed` texture fingerprinting as a `Shared` one.
+    #[test]
+    fn no_texture_of_these_families_asks_for_managed_storage() {
+        let mut specs = 0usize;
+        let mut works: Vec<Work> = Vec::new();
+        for case in all() {
+            works.extend(case.plans().into_iter().map(|(_, plan)| plan.work));
+        }
+        for case in crate::cases::compressed_views::all() {
+            works.extend(case.plans().into_iter().map(|(_, plan)| plan.work));
+        }
+        for case in crate::cases::pvrtc_rows::all() {
+            works.push(case.plan().work);
+        }
+        for case in crate::cases::pvrtc_cpu_order::all() {
+            works.push(case.plan().work);
+        }
+        for work in &works {
+            for resource in &work.resources {
+                if let Resource::Texture { spec }
+                | Resource::HeapForTexture { spec, .. }
+                | Resource::HeapTexture { spec, .. }
+                | Resource::TextureOverBuffer { spec, .. } = resource
+                {
+                    specs += 1;
+                    assert_ne!(
+                        spec.storage,
+                        Storage::Managed,
+                        "a texture of these families asks for Managed storage, so \
+                         `fingerprint`'s one-byte storage is no longer the byte that was recorded"
+                    );
+                }
+                assert!(
+                    !matches!(resource, Resource::UnwrittenBuffer { .. }),
+                    "a case of these families now makes an unwritten buffer; check its \
+                     fingerprint bytes against the recording before trusting this run"
+                );
+            }
+        }
+        assert!(specs >= 150, "only {specs} texture specs reached the guard");
     }
 
     /// Every one of Metal's recorded read-backs is the lane's byte model's, byte for byte, padding
