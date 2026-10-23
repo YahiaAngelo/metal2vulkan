@@ -56,11 +56,8 @@ pub mod compressed_views;
 pub mod compute_threadgroups;
 pub mod denormal_word_fetches;
 pub mod depth_texel_reads;
-<<<<<<< HEAD
 pub mod discard_hoist;
 pub mod etc_textures;
-=======
->>>>>>> 22f8da43ee (Measure on Metal the five orders an event and a handler fix)
 pub mod event_orders;
 pub mod extended_range_blends;
 pub mod extended_range_planes;
@@ -95,13 +92,9 @@ pub mod rgb10a2_srgb;
 pub mod rotated_planes;
 pub mod rotated_targets;
 pub mod sample_fills;
-<<<<<<< HEAD
 pub mod sample_positions;
 pub mod scheduled_handlers;
 pub mod shader_stencil;
-=======
-pub mod scheduled_handlers;
->>>>>>> 22f8da43ee (Measure on Metal the five orders an event and a handler fix)
 pub mod shared_events;
 pub mod shared_exponent_storage;
 pub mod simdgroup_lockstep;
