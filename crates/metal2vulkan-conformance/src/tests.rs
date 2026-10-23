@@ -1087,11 +1087,10 @@ fn a_carried_answer_taken_on_another_chip_names_it() {
     // - `compute-threadgroup-past-metals-limit`: the M4's answer for a threadgroup past Metal's
     //   1024, which stays carried because this round may not hand a GPU an over-limit
     //   threadgroup to ask again.
-    const KNOWN: [&str; 2] = [
     // - `sample-positions-fewer-*`: the M4's coverage for fewer custom sample positions than the
     //   pass's samples, which stays carried because one position **past** the pass's samples is
     //   measured to end Metal's process, so a record run may not walk that family.
-    const KNOWN: [&str; 4] = [
+    const KNOWN: [&str; 3] = [
         "texture-fills-",
         crate::cases::compute_threadgroups::PAST_METALS_LIMIT,
         "sample-positions-fewer-",
