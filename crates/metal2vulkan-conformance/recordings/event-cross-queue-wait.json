@@ -159,7 +159,6 @@
       ],
       "validated": "ran"
     }
-<<<<<<< HEAD
   ],
   "costs": [
     {
@@ -210,7 +209,5 @@
         "pooled_memory_blocks_made": 3
       }
     }
-=======
->>>>>>> 22f8da43ee (Measure on Metal the five orders an event and a handler fix)
   ]
 }
