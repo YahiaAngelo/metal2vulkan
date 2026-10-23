@@ -367,8 +367,8 @@
       "chip": "apple-m3-max",
       "os_build": "26A434",
       "rounds": 8,
-      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
-      "instrument": 244,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 11.38 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 435,
       "times": {
         "case": "two-plane-pad-fills",
         "calls": 0,
@@ -389,18 +389,18 @@
       "chip": "apple-m3-max",
       "os_build": "26A434",
       "rounds": 8,
-      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
-      "instrument": 226,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 11.38 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 283,
       "times": {
         "case": "two-plane-pad-fills",
         "calls": 9,
-        "in_calls": 9863998,
-        "on_cpu": 489250,
-        "blocked": 9393332,
-        "elsewhere": 3560542,
-        "spend": 13548334,
-        "spend_least": 12814084,
-        "spend_most": 14626709,
+        "in_calls": 25547334,
+        "on_cpu": 5154042,
+        "blocked": 20393292,
+        "elsewhere": 11569792,
+        "spend": 37117126,
+        "spend_least": 23543959,
+        "spend_most": 77087459,
         "degraded": [
           "metal2vulkan-degrade-two-plane-buffer-blit"
         ],
@@ -409,14 +409,14 @@
             "call": "work",
             "least_calls": 9,
             "most_calls": 9,
-            "wall": 1075541,
-            "on_cpu": 54375,
-            "blocked": 1008958,
-            "wall_least": 1057375,
-            "wall_most": 1177958,
-            "wall_total": 9863998,
-            "on_cpu_total": 489250,
-            "blocked_total": 9393332
+            "wall": 2253959,
+            "on_cpu": 527250,
+            "blocked": 1637084,
+            "wall_least": 1429959,
+            "wall_most": 5398209,
+            "wall_total": 25547334,
+            "on_cpu_total": 5154042,
+            "blocked_total": 20393292
           }
         ]
       }

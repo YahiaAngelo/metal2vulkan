@@ -187,8 +187,8 @@
       "chip": "apple-m3-max",
       "os_build": "26A434",
       "rounds": 8,
-      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
-      "instrument": 244,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 11.38 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 435,
       "times": {
         "case": "texture-fills-236",
         "calls": 0,
@@ -209,18 +209,18 @@
       "chip": "apple-m3-max",
       "os_build": "26A434",
       "rounds": 8,
-      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians",
-      "instrument": 226,
+      "measured": "8 round(s) of the whole selection, in the case set's own order, each round on a fresh device, our shader cache carried over between the cases of a round; a figure is the median of the rounds' own medians; the host's one-minute load average was 11.38 when the measurement started, and the per-call margin is judged only at 4.0 or under",
+      "instrument": 283,
       "times": {
         "case": "texture-fills-236",
         "calls": 25,
-        "in_calls": 7621536,
-        "on_cpu": 462667,
-        "blocked": 7141453,
-        "elsewhere": 2683541,
-        "spend": 10312078,
-        "spend_least": 9708004,
-        "spend_most": 10963998,
+        "in_calls": 14877666,
+        "on_cpu": 5656917,
+        "blocked": 9220749,
+        "elsewhere": 6368833,
+        "spend": 21246499,
+        "spend_least": 16601458,
+        "spend_most": 73125877,
         "degraded": [
           "metal2vulkan-degrade-unpacked-fill-color"
         ],
@@ -229,14 +229,14 @@
             "call": "work",
             "least_calls": 25,
             "most_calls": 25,
-            "wall": 303750,
-            "on_cpu": 17083,
-            "blocked": 284792,
-            "wall_least": 286417,
-            "wall_most": 317500,
-            "wall_total": 7621536,
-            "on_cpu_total": 462667,
-            "blocked_total": 7141453
+            "wall": 562458,
+            "on_cpu": 207167,
+            "blocked": 359083,
+            "wall_least": 462083,
+            "wall_most": 1483000,
+            "wall_total": 14877666,
+            "on_cpu_total": 5656917,
+            "blocked_total": 9220749
           }
         ]
       }
