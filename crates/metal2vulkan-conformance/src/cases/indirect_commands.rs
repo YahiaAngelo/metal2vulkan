@@ -26,16 +26,19 @@
 //!
 //! # What the rows announce, and on which venue
 //!
-//! Measured on this Apple M3 Max through MoltenVK 1.4.2, replaying each row against its
-//! recording: **one** row announces **one** notice, and five announce nothing at all.
+//! Measured on this Apple M3 Max through MoltenVK 1.4.2 and on lavapipe, replaying each row
+//! against its recording: **one** row announces notices, and five announce nothing at all.
 //!
-//! - [`RENDER_DRAWN`] announces `render-pass-split`, for the barrier its command 1 keeps: the
-//!   runtime draws an indirect render command with a barrier in a render pass instance of its own.
-//!   Every texel of the row still compared exactly, so the notice is the whole difference the row
-//!   has, and the declaration loosens no value.
-//! - The five other rows announced nothing, and **declare nothing**. A declaration no run was
-//!   measured provoking is a declaration nobody checked, so none of them carries one, however
-//!   plausible the note would be for its shape.
+//! - [`RENDER_DRAWN`] announces `render-pass-split` on both venues, for the barrier its command 1
+//!   keeps: the runtime draws an indirect render command with a barrier in a render pass instance
+//!   of its own. On lavapipe (LLVM 21.1.8) it announces `shader-color-conversion` beside it, for
+//!   the normalized store our side rounds in the shader where the device's own conversion is not
+//!   Metal's; the M3 Max announces that one nowhere. Every texel of the row compared exactly on
+//!   both venues, so the notices are the whole difference the row has and each declaration loosens
+//!   no value.
+//! - The five other rows announced nothing on either venue, and **declare nothing**. A declaration
+//!   no run was measured provoking is a declaration nobody checked, so none of them carries one,
+//!   however plausible the note would be for its shape.
 //!
 //! Metal's own API validation is the other axis, and it disagrees with plain Metal twice here —
 //! which is the whole reason the recording keeps it:
@@ -1135,20 +1138,31 @@ fn drawn_layout() -> ByteLayout {
 /// The row whose two render commands rasterize into a target.
 pub struct DrawnCommands;
 
-/// The one notice this family was measured announcing, and the row it was measured on.
+/// The notices this family was measured announcing, and the row each was measured on.
 ///
-/// Measured on this Apple M3 Max through MoltenVK 1.4.2, replaying [`RENDER_DRAWN`]: the runtime
-/// announces `render-pass-split` for the barrier command 1 of that row keeps, because an indirect
-/// render command with a barrier is drawn in a render pass instance of its own
-/// (`metal2vulkan_runtime`'s `render/executions.rs`). Metal announces nothing, and **every texel
-/// of the row still compared exactly** — the notice is the whole difference the row has. So the
-/// declaration names the code and loosens no value.
+/// Both are [`RENDER_DRAWN`]'s, one a venue, and in both cases **every texel of the row still
+/// compared exactly** — the notice is the whole difference the row has, so each declaration names
+/// a code and loosens no value.
 ///
-/// It is declared on this row alone. The other five rows were measured announcing **nothing** at
-/// all on the same venue, and a declaration no run was measured provoking is a declaration nobody
-/// checked, so none of them carries one.
-const PASS_SPLIT: metal2vulkan_runtime::Degradation =
-    metal2vulkan_runtime::Degradation::RenderPassSplit;
+/// - **`render-pass-split`**, announced on **both** venues: the runtime draws the barrier
+///   command 1 of the row keeps in a render pass instance of its own
+///   (`metal2vulkan_runtime`'s `render/executions.rs`).
+/// - **`shader-color-conversion`**, announced on **lavapipe** (LLVM 21.1.8) and not on the M3 Max:
+///   the row's `RGBA8Unorm` attachment is a normalized store our side rounds in the shader where
+///   the device's own conversion is not Metal's.
+///
+/// Each venue's set is read off the report's **allowance tally**, not its per-case line: the line
+/// prints one justification a site, so it names one code where two fired. Measured: the lavapipe
+/// run reads "2 named, 2 fired", the M3 Max run "2 named, 1 fired, 1 never fired" naming
+/// `shader-color-conversion`. An unfired allowance is reported rather than failed, which is what
+/// lets one row carry both venues' codes.
+///
+/// The other five rows were measured announcing **nothing** on either venue, and **declare
+/// nothing**: a declaration no run was measured provoking is a declaration nobody checked.
+const DRAWN_NOTICES: [metal2vulkan_runtime::Degradation; 2] = [
+    metal2vulkan_runtime::Degradation::RenderPassSplit,
+    metal2vulkan_runtime::Degradation::ShaderColorConversion,
+];
 
 impl Case for DrawnCommands {
     fn name(&self) -> &'static str {
@@ -1160,11 +1174,16 @@ impl Case for DrawnCommands {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        vec![Allowance::new(
-            format!("case/{}/*", crate::replay::NOTICES_SITE),
-            Loosening::Unchecked,
-            Justification::notice(PASS_SPLIT),
-        )]
+        DRAWN_NOTICES
+            .iter()
+            .map(|kind| {
+                Allowance::new(
+                    format!("case/{}/*", crate::replay::NOTICES_SITE),
+                    Loosening::Unchecked,
+                    Justification::notice(*kind),
+                )
+            })
+            .collect()
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

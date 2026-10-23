@@ -439,6 +439,7 @@ edits one.
 | `measured` | The committed Metal measurements a ported case reads, under the public fixtures |
 | `argument_encoders` | The argument-encoder vocabulary: what a case asks an `MTLArgumentEncoder` to do, and the layout facts it can observe without a host's own addresses in them |
 | `function_bindings` | What a function's reflection says its arguments are: `MTLBinding` and the type tree under it |
+| `indirect_commands` | The indirect-command-buffer vocabulary: the descriptor a case states whole, and each command as the list of setter calls the host makes on it |
 | `known_gaps` | The ledger of open gaps — a refusal or a divergence, per venue — held in both directions; it sets the exit status, never a verdict |
 | `cases` | The case set itself, one module per family |
 
@@ -473,6 +474,7 @@ edits one.
 | `fresh_contents` | What a new buffer or texture reads before anything writes it, and after memory that was written was released | run on Metal |
 | `argument_encoders` | What an argument encoder says of a layout, which word of an argument buffer each argument landed in, and what the kernel then sampled through it | run on Metal |
 | `function_bindings` | What a kernel's reflection says each argument is: the binding, its subprotocol's fields, and an argument buffer's struct type member by member | run on Metal |
+| `indirect_commands` | What an indirect command buffer's CPU-encoded compute and render commands ran: both dispatch kinds, ordinary and indexed draws, the resets, the barriers, an attribute stride, a stage-in region, and the descriptor properties no execution needs | run on Metal |
 
 A carried answer is our own measurement of this chip, stated in the shape the case emits, and its
 case forbids re-recording with the reason why. Record mode refuses such a case rather than
