@@ -17,27 +17,40 @@
 //! them as 32-bit words, the drawn texel count, the calls of the pass, and the command buffer's
 //! status and error.
 //!
+//! The second case here is [`unordered_draws`], the lane's racy row: two commands with no barrier
+//! between them, whose Metal answer is a **set** of outcomes with the runs behind each.
+//!
 //! ## What of the lane is **not** ported, and why
 //!
-//! This lane is the largest of the nine probe-line files, and most of its rows cannot be cases
-//! this round:
+//! This lane is the largest of the nine probe-line files, and these rows of it are still the
+//! lane's:
 //!
 //! - **Rows that end Metal's process**: the CPU's mesh draw on a buffer of draws of primitives,
 //!   and a pipeline state set on a command of a buffer whose command types hold no draw of its
-//!   kind. The lane's own documentation says so, and this round must run neither leg on Metal.
-//!   They port as recorded-only rows with re-recording forbidden, which needs their measured
-//!   tables carried; that is work this round did not do.
+//!   kind. These are **not** recorded-only material, because there is no answer to carry: Metal
+//!   never returned from the call, so the lane's table holds no line for them and the only Metal
+//!   fact is "the process ended in this call". That is an outcome kind the suite does not have and
+//!   the plan leaves unbuilt on purpose, exactly as `texture_buffer_fills` says of the fill
+//!   pattern one byte past Metal's longest. Its shape, written down and unbuilt: a third
+//!   `MetalSource` whose recording names the call and says Metal did not return, comparing against
+//!   our typed refusal at that site as its own verdict — neither exact (Metal has no value) nor
+//!   divergent (Metal has no behaviour to diverge from). Building it means a new verdict, so it
+//!   waits for the user's word.
 //! - **Rows where Metal's GPU faults**: a kernel's mesh draw on a buffer of draws of primitives,
-//!   which the lane records as `status=5`. Same treatment, same reason.
-//! - **Rows a kernel encodes** (`kernel_own`, `enc_own`, `kernel_<kind>_on_<kind>`, `enc_barrier`):
-//!   these need a compute kernel writing the buffer through its GPU resource ID with an argument
-//!   buffer, which is a vocabulary of its own that no case of batch 1 otherwise needs.
-//! - **The racy row**: a command's draw without a barrier, where the lane accepts either order's
-//!   words. That is a case whose recording holds the **set** of outcomes with frequencies, which
-//!   record mode supports; it needs enough runs to state the frequencies honestly, which one
-//!   recording pass cannot.
-//!
-//! What is ported is the one row whose whole path is public Metal, so its Metal leg is real.
+//!   which the lane records as `status=5` with nothing drawn and no mark written. These *are*
+//!   recorded-only material — Metal's answer is written down — but every one of them is encoded by
+//!   a kernel, so they wait on the vocabulary below rather than on the safety flag, which the
+//!   suite already has.
+//! - **Rows a kernel encodes** (`kernel_own`, `enc_own`, `kernel_<kind>_on_<kind>`, `enc_barrier`,
+//!   `kernel_reset`): a kernel writes the commands through the buffer's and each pipeline state's
+//!   **GPU resource ID**, passed in an argument buffer, with the buffer made resident for writing.
+//!   Three calls the [`Side`] vocabulary does not have — the resource ID of an indirect command
+//!   buffer, the resource ID of a mesh pipeline state, and a dispatch that makes a resource
+//!   resident — each needing an implementation on both sides and a forwarding arm in
+//!   `validated::Announcing`. That reaches into `case.rs`, `metal_side.rs` and `runtime_side.rs`
+//!   at once, which is the shared core three porting streams are editing, so it is named here and
+//!   left. (A resource ID is a device-local 64-bit value and must never enter a transcript; it is
+//!   an input to the kernel and nothing else.)
 
 use crate::allowance::Allowance;
 use crate::case::{
@@ -329,6 +342,319 @@ impl Case for MeshCommands {
         node = node.with(Node::leaf(
             "drawn",
             Observed::value(Value::Uint(drawn(&read))),
+        ));
+        sites.push(node);
+        Ok(())
+    }
+}
+
+/// The lane's racy row: two mesh commands with no barrier between them.
+///
+/// Command 0's mesh function stores the control words `(3, 2, 1, 7)` and its fragment function
+/// covers texel (7, 7) with `0xAAAA`; command 1's object function reads the control words and
+/// launches `x` by `y` mesh threadgroups, each covering its own texel. No barrier stands between
+/// them, so **nothing in Metal orders the write before the read**, and the lane says as much: it
+/// accepts either order's words and prints which it saw.
+///
+/// ## What is compared, and why it is not the reader's texels
+///
+/// Measured here, which is the point of the row: over **30 runs** on this M3 Max (macOS 27.0.1),
+/// plain Metal produced **one** outcome, every run — the reader read the words the host wrote, so
+/// it drew its single threadgroup at (0, 0) with `(0, 0, 1, 0)` and `drawn` was 2. That matches
+/// the lane's M4 table for the row. Our runtime on MoltenVK 1.4.2 produces the **other** order,
+/// also every run: the emulation records the reader's object dispatch after the writer's mesh
+/// dispatch, so the reader reads `(3, 2, 1, 7)`, draws its 3 by 2 threadgroups and `drawn` is 7.
+///
+/// So the reader's texels are **not observed**. A recording can only sample an order Metal's own
+/// contract leaves open, and comparing against one sample would make this chip's scheduling of
+/// the moment into our requirement; the outcome set the plan gives racy rows cannot close that,
+/// because it can hold only the orders Metal happened to produce. What the contract *does*
+/// determine is compared, exactly: the writer's own texel at (7, 7), the control words the pass
+/// leaves behind, the calls of the pass, and the command buffer's status and error.
+///
+/// The difference in the reader's texels is a finding, not an allowance: it is reported with these
+/// numbers, and closing it means either announcing that the emulation orders what Metal leaves
+/// unordered, or writing it down as an accepted difference. Neither is this case's to decide, and
+/// until one of them happens no case may compare that field.
+pub const UNORDERED_DRAWS: &str = "mesh-commands-unordered-draws";
+
+/// The owned fixture the racy row runs: `mesh_barrier`'s writer and object reader, the same
+/// functions `mesh_barriers` uses.
+const BARRIER_FIXTURE: &str = "mesh_barrier";
+
+/// The fragment function both of the row's pipelines write their attachment through.
+const BARRIER_FRAGMENT: &str = "mesh_barrier_fragment";
+
+/// The control words the host writes before the pass, as the lane wrote them: the reader's own
+/// grid if it reads them, `(3, 2, 1, 7)` if it reads the writer's.
+const BARRIER_CONTROL: [u32; 4] = [1, 1, 1, 0];
+
+/// One threadgroup of one thread.
+const ONE: [u32; 3] = [1, 1, 1];
+
+/// Both commands' draw.
+const ONE_DRAW: CommandDraw = CommandDraw::Threadgroups {
+    groups: ONE,
+    object: ONE,
+    mesh: ONE,
+};
+
+/// The row's site name, as the lane named the case.
+const UNORDERED_ROW: &str = "cpu_nobarrier";
+
+/// The texel the writer's fragment function covers, whichever order the two draws run in.
+const COVER: [u32; 2] = [7, 7];
+
+/// The layout the writer's own texel is read under: the one texel at [`COVER`] of level 0 of
+/// slice 0, as four 32-bit words, so a diff names the word inside the texel the writer wrote.
+fn cover_layout() -> ByteLayout {
+    ByteLayout {
+        region: Region::Texture {
+            level: 0,
+            slice: 0,
+            aspect: Aspect::Color,
+            sample: 0,
+            origin: [COVER[0], COVER[1], 0],
+            size: [1, 1, 1],
+        },
+        element: Element::U32,
+        row_offset: 0,
+        row_elements: TARGET_TEXEL / 4,
+        row_pitch: TARGET_TEXEL,
+        rows: 1,
+        image_pitch: TARGET_TEXEL,
+        images: 1,
+        gaps: Gaps::Compared,
+    }
+}
+
+/// The runs the racy row's recording stands on.
+///
+/// Two draws of one pass with no barrier between them are ordered by nothing, so one run says
+/// nothing about what Metal does: the recording has to hold the **set** of orders Metal produced
+/// and how often each. Thirty runs is what this case asks record mode for, and the recording
+/// states the frequencies it actually saw — never a guess at what a longer run would find.
+const UNORDERED_RUNS: u32 = 30;
+
+/// A case that compares what two unordered mesh commands drew with the orders Metal produced.
+pub struct UnorderedDraws {
+    name: &'static str,
+}
+
+/// The case.
+pub fn unordered_draws() -> UnorderedDraws {
+    UnorderedDraws {
+        name: UNORDERED_DRAWS,
+    }
+}
+
+impl UnorderedDraws {
+    /// The fixture both sides read.
+    fn fixture(&self) -> Fixture {
+        Fixture::new(BARRIER_FIXTURE)
+    }
+
+    /// The writer's pipeline functions, and the object reader's.
+    fn functions() -> [MeshFunctions<'static>; 2] {
+        [
+            MeshFunctions {
+                object: None,
+                mesh: "mesh_barrier_writer",
+                fragment: BARRIER_FRAGMENT,
+                attachments: 1,
+            },
+            MeshFunctions {
+                object: Some("mesh_barrier_object"),
+                mesh: "mesh_barrier_mesh",
+                fragment: BARRIER_FRAGMENT,
+                attachments: 1,
+            },
+        ]
+    }
+}
+
+impl Case for UnorderedDraws {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::Run
+    }
+
+    fn record_runs(&self) -> u32 {
+        UNORDERED_RUNS
+    }
+
+    fn allowances(&self) -> Vec<Allowance> {
+        super::mesh_draws::mesh_notice_allowances()
+    }
+
+    fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
+        let fixture = self.fixture();
+        [RUNTIME_TEXT, METAL_TEXT]
+            .into_iter()
+            .map(|extension| {
+                Ok(ShaderRef {
+                    fixture: format!("{BARRIER_FIXTURE}{extension}"),
+                    entry: BARRIER_FRAGMENT.to_owned(),
+                    source_sha256: crate::sha256_hex(fixture.text(extension)?.as_bytes()),
+                })
+            })
+            .collect()
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        let fixture = self.fixture();
+        let control: Vec<u8> = BARRIER_CONTROL
+            .iter()
+            .flat_map(|word| word.to_le_bytes())
+            .collect();
+        let mut commands = Vec::new();
+        for functions in Self::functions() {
+            commands.extend(functions.object.unwrap_or("-").as_bytes());
+            commands.push(b',');
+            commands.extend(functions.mesh.as_bytes());
+            commands.extend(format!(",{ONE_DRAW:?},no-barrier\n").into_bytes());
+        }
+        Ok(vec![
+            Input {
+                name: "air".to_owned(),
+                digest: Digest::sha256(fixture.text(RUNTIME_TEXT)?.as_bytes()),
+            },
+            Input {
+                name: "air-typed".to_owned(),
+                digest: Digest::sha256(fixture.text(METAL_TEXT)?.as_bytes()),
+            },
+            Input::bytes("buffer:0", &control),
+            Input::bytes(
+                "render-targets",
+                format!("1x RGBA32Uint {SIDE}x{SIDE} cleared to zero").as_bytes(),
+            ),
+            Input::bytes("commands", &commands),
+        ])
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        let stop = |at: String, failure: Failure| Abort { at, failure };
+        let loaded = self.fixture().loaded().map_err(|why| Abort {
+            at: "library".to_owned(),
+            failure: Failure::named("FixtureNotRead", why),
+        })?;
+        let library = crate::case::made(sites, "library", side.library(&loaded.source()))?;
+        let [writes, reads] = Self::functions();
+        let writes = crate::case::made(
+            sites,
+            "writer-pipeline",
+            side.mesh_pipeline_for_commands(library, &writes),
+        )?;
+        let reads = crate::case::made(
+            sites,
+            "reader-pipeline",
+            side.mesh_pipeline_for_commands(library, &reads),
+        )?;
+        let words: Vec<u8> = BARRIER_CONTROL
+            .iter()
+            .flat_map(|word| word.to_le_bytes())
+            .collect();
+        let control = crate::case::made(sites, "control", side.buffer(&words))?;
+        // Command 0 stores the control words from its mesh function; command 1 reads them in its
+        // object function and launches that many mesh threadgroups. Nothing orders the two.
+        let commands = crate::case::made(
+            sites,
+            "command-buffer",
+            side.mesh_command_buffer(&[
+                MeshCommand {
+                    pipeline: writes,
+                    object_buffers: Vec::new(),
+                    mesh_buffers: vec![(control, 0)],
+                    draw: ONE_DRAW,
+                },
+                MeshCommand {
+                    pipeline: reads,
+                    object_buffers: vec![(control, 0)],
+                    mesh_buffers: Vec::new(),
+                    draw: ONE_DRAW,
+                },
+            ]),
+        )?;
+        let target = side
+            .render_target(SIDE, SIDE)
+            .map_err(|failure| stop(format!("{UNORDERED_ROW}/render_target"), failure))?;
+
+        let outcome = side
+            .execute_mesh_commands(&[target], commands, &[control])
+            .map_err(|failure| stop(format!("{UNORDERED_ROW}/pass"), failure))?;
+        let mut node = Node::branch(UNORDERED_ROW, Vec::new());
+        let calls: Vec<&str> = ["useResource", "executeCommandsInBuffer", "commit"].to_vec();
+        let mut emitted = Node::branch("calls", Vec::new());
+        for (index, refused) in outcome.refused.iter().enumerate() {
+            let name = calls.get(index).copied().unwrap_or("call");
+            emitted = emitted.with(Node::leaf(
+                format!("{index}-{name}"),
+                Observed::value(match refused {
+                    Some(failure) => failure.value.clone(),
+                    None => Value::ok(Value::Absent),
+                }),
+            ));
+        }
+        node = node.with(emitted);
+        if let Some((index, failure)) = outcome
+            .refused
+            .iter()
+            .enumerate()
+            .find_map(|(index, refused)| refused.as_ref().map(|failure| (index, failure.clone())))
+        {
+            let name = calls.get(index).copied().unwrap_or("call");
+            sites.push(node);
+            return Err(Abort {
+                at: format!("{UNORDERED_ROW}/calls/{index}-{name}"),
+                failure,
+            });
+        }
+        node = node.with(Node::leaf(
+            "status",
+            Observed::value(Value::ok(outcome.status.clone())),
+        ));
+        node = node.with(Node::leaf(
+            "command-buffer-error",
+            Observed::value(match &outcome.error {
+                Some(error) => Value::Variant {
+                    name: "Some".to_owned(),
+                    payload: Box::new(error.clone()),
+                },
+                None => Value::unit_variant("None"),
+            }),
+        ));
+        let texels = side
+            .read_texture(target, [SIDE, SIDE], SIDE * TARGET_TEXEL)
+            .map_err(|failure| stop(format!("{UNORDERED_ROW}/attachment"), failure))?;
+        // Only the writer's own texel is compared, and the reader's are not observed at all: see
+        // the case's documentation. The whole level is read, as the probe read it, and the texel
+        // is named by its origin so a reader of a diff sees which texel this is.
+        let at = (COVER[1] * SIDE + COVER[0]) as usize * TARGET_TEXEL as usize;
+        let cover = texels
+            .get(at..at + TARGET_TEXEL as usize)
+            .ok_or_else(|| {
+                stop(
+                    format!("{UNORDERED_ROW}/cover"),
+                    Failure::named(
+                        "ShortReadBack",
+                        format!("{} bytes hold no texel at {COVER:?}", texels.len()),
+                    ),
+                )
+            })?
+            .to_vec();
+        node = node.with(Node::leaf("cover", Observed::bytes(cover, cover_layout())));
+        let after = side
+            .read_buffer(control, 0, words.len())
+            .map_err(|failure| stop(format!("{UNORDERED_ROW}/control-after"), failure))?;
+        node = node.with(Node::leaf(
+            "control-after",
+            Observed::bytes(
+                after,
+                ByteLayout::buffer(0, words.len() as u64, Element::U32),
+            ),
         ));
         sites.push(node);
         Ok(())

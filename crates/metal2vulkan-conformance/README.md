@@ -129,7 +129,7 @@ edits one.
 | `two_plane_heap_blits`, `two_plane_copies` | What a blit or a copy moved across a two-plane surface | carried; the surface calls are Apple SPI |
 | `mesh_draws` | The texels each mesh threadgroup's primitive drew, and the grids Metal draws nothing for | run on Metal |
 | `mesh_barriers` | Whether a reader draw sees a writer draw's words across a memory barrier | run on Metal |
-| `mesh_commands` | What an indirect command buffer's own-state mesh commands drew | run on Metal |
+| `mesh_commands` | What an indirect command buffer's own-state mesh commands drew, and what two commands with no barrier between them determine | run on Metal |
 | `surface_fills` | Which bytes one private texture fill changed over a surface's plane or a buffer | carried; `fillTexture:` is Apple SPI |
 | `indirect_private_types` | An indirect render command's read-back for each primitive type | carried; the getters are private |
 

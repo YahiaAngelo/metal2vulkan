@@ -904,6 +904,18 @@ pub trait Case {
         Vec::new()
     }
 
+    /// How many runs record mode takes the case's Metal answer over.
+    ///
+    /// The default ([`crate::run::RECORD_RUNS`]) is enough for a case whose behaviour is settled:
+    /// the runs then all fold into one outcome and the recording says so. A case whose work Metal
+    /// orders by nothing must ask for more, because its recording's value is the **set** of
+    /// outcomes with their frequencies, and a set sampled three times states a frequency nobody
+    /// should read. Asking for more runs never invents one: the recording holds the outcomes this
+    /// many runs actually produced.
+    fn record_runs(&self) -> u32 {
+        crate::run::RECORD_RUNS
+    }
+
     /// The transcript the case's carried measurement states, and the runs it stands on, for a case
     /// whose [`MetalSource`] is [`MetalSource::Carried`]. `None` for a case record mode runs on
     /// Metal.
