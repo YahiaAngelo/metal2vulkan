@@ -2187,12 +2187,8 @@ fn a_count_the_measurement_never_saw_is_bounded_at_zero() {
         runs: 2,
         measured: "two runs of the whole selection".to_owned(),
         degraded: Vec::new(),
-        bounds: vec![crate::cost::CostBound {
-            count: "queue_submissions".to_owned(),
-            region: crate::cost::Region::Submission,
-            most: 1,
-            range: None,
-        }],
+        bounds: [("queue_submissions".to_owned(), 1)].into_iter().collect(),
+        moving: Default::default(),
     };
     let judge = |text: &str| {
         crate::cost::judge(
@@ -2234,14 +2230,12 @@ fn a_count_whose_readings_moved_is_reported_and_not_gated() {
         runs: 3,
         measured: "three runs".to_owned(),
         degraded: Vec::new(),
-        bounds: vec![crate::cost::CostBound {
-            count: "scheduler_passes".to_owned(),
-            region: crate::cost::Region::Submission,
-            most: 2,
-            range,
-        }],
+        bounds: [("fences_made".to_owned(), 2)].into_iter().collect(),
+        moving: range
+            .map(|least| [("fences_made".to_owned(), least)].into_iter().collect())
+            .unwrap_or_default(),
     };
-    let found = crate::cost::Counts::read("WorkCounts {\n    scheduler_passes: 9,\n}").unwrap();
+    let found = crate::cost::Counts::read("WorkCounts {\n    fences_made: 9,\n}").unwrap();
     // Deterministic in the measurement: held, and 9 is over 2.
     let gated = bound(None);
     assert_eq!(
@@ -2288,12 +2282,8 @@ fn a_run_with_no_bound_that_stands_is_unmeasured_and_says_why() {
         runs: 2,
         measured: "two runs".to_owned(),
         degraded: vec!["half-nan-quieted".to_owned()],
-        bounds: vec![crate::cost::CostBound {
-            count: "queue_submissions".to_owned(),
-            region: crate::cost::Region::Submission,
-            most: 1,
-            range: None,
-        }],
+        bounds: [("queue_submissions".to_owned(), 1)].into_iter().collect(),
+        moving: Default::default(),
     };
     let found = crate::cost::Counts::read("WorkCounts {\n    queue_submissions: 1,\n}").unwrap();
     let records = std::slice::from_ref(&record);
@@ -2373,12 +2363,8 @@ fn the_cost_record_rides_in_the_recording() {
         runs: 2,
         measured: "two runs of the whole selection".to_owned(),
         degraded: Vec::new(),
-        bounds: vec![crate::cost::CostBound {
-            count: "queue_submissions".to_owned(),
-            region: crate::cost::Region::Submission,
-            most: 1,
-            range: None,
-        }],
+        bounds: [("queue_submissions".to_owned(), 1)].into_iter().collect(),
+        moving: Default::default(),
     }];
     let recording = Recording::new("a case", Vec::new(), vec![answer]).with_costs(costs.clone());
     let text = serde_json::to_string_pretty(&recording).expect("it writes");
@@ -2403,11 +2389,11 @@ fn a_measurement_becomes_bounds_that_name_it() {
     let cost = crate::cost::CaseCost {
         case: "a case".to_owned(),
         counts: crate::cost::Counts::read(
-            "WorkCounts {\n    queue_submissions: 2,\n    scheduler_passes: 5,\n}",
+            "WorkCounts {\n    queue_submissions: 2,\n    fences_made: 5,\n}",
         )
         .unwrap(),
         least: crate::cost::Counts::read(
-            "WorkCounts {\n    queue_submissions: 2,\n    scheduler_passes: 1,\n}",
+            "WorkCounts {\n    queue_submissions: 2,\n    fences_made: 1,\n}",
         )
         .unwrap(),
         runs: 3,
@@ -2423,11 +2409,11 @@ fn a_measurement_becomes_bounds_that_name_it() {
     let submissions = record.bound("queue_submissions").expect("it is bounded");
     assert_eq!((submissions.most, submissions.range), (2, None));
     assert!(submissions.gated());
-    let passes = record.bound("scheduler_passes").expect("it is bounded");
+    let passes = record.bound("fences_made").expect("it is bounded");
     assert_eq!((passes.most, passes.range), (5, Some(1)));
     assert!(!passes.gated());
     assert_eq!(record.gated(), 1);
-    assert_eq!(cost.moved(), vec![("scheduler_passes", 1, 5)]);
+    assert_eq!(cost.moved(), vec![("fences_made", 1, 5)]);
 }
 
 /// Re-taking a case's Metal answer keeps its cost record.
@@ -2444,7 +2430,8 @@ fn re_recording_a_metal_answer_keeps_the_cost_record() {
         runs: 1,
         measured: "one run".to_owned(),
         degraded: Vec::new(),
-        bounds: Vec::new(),
+        bounds: Default::default(),
+        moving: Default::default(),
     }];
     let kept = Recording::new(
         held.case.clone(),
@@ -2458,5 +2445,95 @@ fn re_recording_a_metal_answer_keeps_the_cost_record() {
     assert!(
         include_str!("record.rs").contains("let costs = recording::read(case.name())"),
         "record::write no longer keeps the cost half of the recording it replaces"
+    );
+}
+
+/// A count that says which thread arrived first is reported and never gated, whatever a
+/// measurement saw — and the count that holds its total still is.
+///
+/// Four measurements of the whole case set and three replays of it put every moving reading and
+/// every overrun in these two families, so the rule is theirs and not a measurement's. The test
+/// pins both halves of it: the race is ungated, and the deterministic total beside it is not.
+#[test]
+fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
+    use crate::cost::racy;
+    for count in [
+        "command_buffers_replayed",
+        "command_buffers_replayed_inline",
+        "object_churn.images_evicted",
+        "object_churn.vk_images_destroyed",
+        "object_churn.vk_images_made",
+        "scheduler_passes",
+        "scheduler_wakes_host",
+        "wakes_spared",
+        "wakes_handler_threads",
+    ] {
+        assert!(racy(count).is_some(), "{count}");
+    }
+    // Counts of work items rather than of thread arrivals, which held still over every round of
+    // every measurement: one slot return and one completed wait a command buffer.
+    for count in [
+        "command_buffers_deferred",
+        "command_buffers_submitted",
+        "queue_submissions",
+        "commands_replayed.cmd_draw",
+        "render_passes_made",
+        "slot_returns",
+        "completed_waits",
+    ] {
+        assert!(racy(count).is_none(), "{count}");
+    }
+    // A record that bounds both at 1, with neither seen to move.
+    let record = crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 8,
+        measured: "eight rounds".to_owned(),
+        degraded: Vec::new(),
+        bounds: [
+            ("command_buffers_replayed_inline".to_owned(), 1),
+            ("command_buffers_deferred".to_owned(), 1),
+        ]
+        .into_iter()
+        .collect(),
+        moving: Default::default(),
+    };
+    assert_eq!(record.gated(), 1, "only the total is gated");
+    let judge = |text: &str| {
+        crate::cost::judge(
+            std::slice::from_ref(&record),
+            "a venue",
+            true,
+            &crate::cost::Counts::read(text).expect("the shape reads"),
+            None,
+            &[],
+        )
+    };
+    // The race going over its bound is not a failure.
+    assert_eq!(
+        judge(
+            "WorkCounts {\n    command_buffers_deferred: 1,\n    \
+             command_buffers_replayed_inline: 9,\n}"
+        )
+        .word(),
+        "within"
+    );
+    // The total going over it is.
+    let over = judge(
+        "WorkCounts {\n    command_buffers_deferred: 2,\n    \
+         command_buffers_replayed_inline: 1,\n}",
+    );
+    assert_eq!(over.word(), "over");
+    assert!(
+        over.to_string().contains("command_buffers_deferred"),
+        "{over}"
+    );
+    // And a racy count the record never bounded at all is still not gated, which is the case that
+    // sent this rule out of the measurement and into the code.
+    assert_eq!(
+        judge(
+            "WorkCounts {\n    object_churn: ObjectChurn {\n        images_evicted: 6,\n    },\n}"
+        )
+        .word(),
+        "within"
     );
 }

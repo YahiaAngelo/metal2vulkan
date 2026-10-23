@@ -91,6 +91,53 @@ pub fn excluded(name: &str) -> Option<&'static str> {
     None
 }
 
+/// A count whose value says **which thread arrived first**, with why it is reported and never
+/// gated, whatever a measurement happened to see.
+///
+/// The cost half gates on counts because a count is deterministic. These are not, structurally,
+/// and no number of measurements makes them so: holding them to a bound gives a gate that fires at
+/// random on honest work. Both entries are the runtime's own words about itself, and both were
+/// then measured here.
+///
+/// Measured on this M3 Max over five measurements of the whole case set (3, 5, 6, 8 and 10 rounds
+/// of 126 cases, about 6,300 counts a round): 24, 27, 35, 47 and 68 readings moved, and **every one
+/// of them** was one of these families. Three further replays of the whole set then went over a
+/// bound five times, again every time one of them — which is what sent the rule here instead of
+/// into a longer measurement.
+///
+/// What is **not** here, on the same evidence: `slot_returns` and `completed_waits` count work
+/// items rather than thread arrivals, one a command buffer, and they held still over every round.
+const RACY: [(&str, &str); 4] = [
+    (
+        "scheduler_",
+        "how many times one of our own background threads woke, slept or made a pass, which is \
+         when that thread ran and not what the case asked for",
+    ),
+    (
+        "wakes_",
+        "whether a transition had to wake a thread or found one already running, which is a \
+         question about timing rather than about the case's work",
+    ),
+    (
+        "command_buffers_replayed",
+        "which thread replayed a deferred command buffer: the recorder's, or one that reached it \
+         first. Their total is command_buffers_deferred, which is gated, so nothing is lost",
+    ),
+    (
+        "object_churn.",
+        "the release path, which runs on whichever thread drops the object. A release may land in \
+         a later case's window, and whether a making takes a parked object or makes a new one \
+         depends on whether the release before it has landed",
+    ),
+];
+
+/// Why `name` is reported and never gated, where it is.
+pub fn racy(name: &str) -> Option<&'static str> {
+    RACY.iter()
+        .find(|(pattern, _)| name.starts_with(pattern))
+        .map(|(_, why)| *why)
+}
+
 /// Which region of the work a count belongs to.
 ///
 /// The regions are kept apart in every report, because moving work between them is not a win.
@@ -144,7 +191,7 @@ const TRANSLATION: [&str; 15] = [
 
 /// The name prefixes that put a count in [`Region::Submission`]: the commit path, our own other
 /// threads and the GPU.
-const SUBMISSION: [&str; 39] = [
+const SUBMISSION: [&str; 41] = [
     "commands_replayed.",
     "command_buffers_",
     "command_pools_made",
@@ -184,6 +231,8 @@ const SUBMISSION: [&str; 39] = [
     "finales_",
     "barrier_buffers_kept",
     "stamped_buffers_",
+    "bare_starts",
+    "prefixed_starts",
 ];
 
 /// Which region `name` belongs to.
@@ -367,28 +416,35 @@ impl Counts {
 }
 
 /// One count a case is held to, and the measurement's own reading of it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+///
+/// A view of one entry of a [`CostRecord`], built from it rather than stored: the record keeps the
+/// counts as two maps of name to number, one line a count, because the case set's bounds are about
+/// 6,300 counts and what a reader diffs after a re-measurement should be one line per count that
+/// moved rather than five.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CostBound {
     /// The runtime's name for the count.
     pub count: String,
-    /// Which region of the work it belongs to.
+    /// Which region of the work it belongs to, as [`region_of`] says. Read from the name rather
+    /// than stored, so a file can never disagree with the code's own classification.
     pub region: Region,
     /// The most the measurement saw: the bound. A run over it is [`CostVerdict::Over`].
     pub most: u64,
-    /// The least the measurement saw, written only where the measurement's runs disagreed.
+    /// The least the measurement saw, where the measurement's runs disagreed.
     ///
     /// A count that moved between runs of the same case on the same venue is **not** deterministic,
     /// so it is reported rather than gated: a bound that fails at random is worse than no bound.
-    /// The field is the evidence for not gating it, and it names the range it was seen in.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// This is the evidence for not gating it, and it names the range it was seen in.
     pub range: Option<u64>,
+    /// Why this count is reported and never gated whatever the measurement saw ([`racy`]).
+    pub racy: Option<&'static str>,
 }
 
 impl CostBound {
-    /// Whether this count is gated, which it is where the measurement found it deterministic.
+    /// Whether this count is gated: the measurement found it deterministic, and it is not one of
+    /// the counts that say which thread arrived first.
     pub fn gated(&self) -> bool {
-        self.range.is_none()
+        self.range.is_none() && self.racy.is_none()
     }
 }
 
@@ -419,21 +475,40 @@ pub struct CostRecord {
     /// keeps a device's honest gap out of the pass and the failure counts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub degraded: Vec<String>,
-    /// The counts the runs moved, each with the most it reached. A count absent from this list is
-    /// bounded at zero, so a case that starts doing something it did not do before is `Over`
-    /// rather than unnoticed.
-    pub bounds: Vec<CostBound>,
+    /// The most each count the runs moved reached. A count absent from here is bounded at zero, so
+    /// a case that starts doing something it did not do before is `Over` rather than unnoticed.
+    pub bounds: BTreeMap<String, u64>,
+    /// The least each count reached whose readings **disagreed** between the runs: the other end
+    /// of its range, and the record of the fact that the count is not deterministic here. A count
+    /// named here is reported rather than gated.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub moving: BTreeMap<String, u64>,
 }
 
 impl CostRecord {
     /// The bound for `count`, where the record holds one.
-    pub fn bound(&self, count: &str) -> Option<&CostBound> {
-        self.bounds.iter().find(|bound| bound.count == count)
+    pub fn bound(&self, count: &str) -> Option<CostBound> {
+        let most = *self.bounds.get(count)?;
+        Some(CostBound {
+            count: count.to_owned(),
+            region: region_of(count),
+            most,
+            range: self.moving.get(count).copied(),
+            racy: racy(count),
+        })
+    }
+
+    /// Every bound the record holds, in name order.
+    pub fn held(&self) -> Vec<CostBound> {
+        self.bounds
+            .keys()
+            .filter_map(|count| self.bound(count))
+            .collect()
     }
 
     /// How many of its bounds are gated rather than only reported.
     pub fn gated(&self) -> usize {
-        self.bounds.iter().filter(|bound| bound.gated()).count()
+        self.held().iter().filter(|bound| bound.gated()).count()
     }
 }
 
@@ -563,9 +638,10 @@ pub fn judge(
     for (count, found) in observed.iter() {
         let (bound, gated) = match record.bound(count) {
             Some(bound) => (bound.most, bound.gated()),
-            // A count the measurement never saw move is bounded at zero, and it is gated: a case
-            // that starts doing something it did not do before is exactly what this half is for.
-            None => (0, true),
+            // A count the measurement never saw move is bounded at zero, and it is gated unless
+            // it is one of the thread-race counts: a case that starts doing something it did not
+            // do before is exactly what this half is for.
+            None => (0, racy(count).is_none()),
         };
         if gated && found > bound {
             over.push(Overrun {
@@ -614,15 +690,17 @@ impl CaseCost {
     ///
     /// A count whose runs disagreed carries its range and is reported rather than gated.
     pub fn record(&self, venue: &str, measured: String) -> CostRecord {
-        let mut bounds: Vec<CostBound> = Vec::new();
+        let mut bounds = BTreeMap::new();
+        let mut moving = BTreeMap::new();
         for (count, most) in self.counts.iter() {
+            bounds.insert(count.to_owned(), most);
             let least = self.least.get(count);
-            bounds.push(CostBound {
-                count: count.to_owned(),
-                region: region_of(count),
-                most,
-                range: (least < most).then_some(least),
-            });
+            // A count the rule already names as racy is not written here: the rule ungates it
+            // whatever a measurement saw, so an entry would be redundant. What that leaves is the
+            // useful list — a count written here moved for a reason the rule does not explain.
+            if least < most && racy(count).is_none() {
+                moving.insert(count.to_owned(), least);
+            }
         }
         CostRecord {
             venue: venue.to_owned(),
@@ -630,6 +708,7 @@ impl CaseCost {
             measured,
             degraded: self.degraded.clone(),
             bounds,
+            moving,
         }
     }
 
@@ -639,17 +718,35 @@ impl CaseCost {
             .iter()
             .filter_map(|(count, most)| {
                 let least = self.least.get(count);
-                (least < most).then_some((count, least, most))
+                (least < most && racy(count).is_none()).then_some((count, least, most))
+            })
+            .collect()
+    }
+
+    /// The counts whose readings disagreed for a reason the [`racy`] rule already names: which
+    /// thread arrived first. Reported apart, because they explain themselves.
+    pub fn moved_by_a_race(&self) -> Vec<(&str, u64, u64)> {
+        self.counts
+            .iter()
+            .filter_map(|(count, most)| {
+                let least = self.least.get(count);
+                (least < most && racy(count).is_some()).then_some((count, least, most))
             })
             .collect()
     }
 }
 
-/// The counts of a selection by region, for the cost report's own summary.
-pub fn by_region(counts: &Counts) -> BTreeMap<Region, u64> {
-    let mut sums = BTreeMap::new();
-    for (name, count) in counts.iter() {
-        *sums.entry(region_of(name)).or_default() += count;
+/// How many counts a reading moved in each region, for the cost report's own summary.
+///
+/// How *many*, not their sum. The counts are of different things — command buffers, images,
+/// allocations, texels copied, bytes of device memory — so adding them gives a number with no
+/// unit: one case's reading here summed to 1,073,750,616 in the device-API region, almost all of
+/// it one texel count. The individual counts are what the gate holds; this says where a case's
+/// work falls.
+pub fn by_region(counts: &Counts) -> BTreeMap<Region, usize> {
+    let mut many = BTreeMap::new();
+    for (name, _) in counts.iter() {
+        *many.entry(region_of(name)).or_default() += 1;
     }
-    sums
+    many
 }

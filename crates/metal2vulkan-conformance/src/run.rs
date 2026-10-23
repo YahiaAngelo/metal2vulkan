@@ -161,28 +161,36 @@ fn cost_row(
     }
 }
 
-/// Measure what `cases` cost on the venue `venues` names, over `runs` runs of each.
+/// Measure what `cases` cost on the venue `venues` names, over `runs` rounds.
 ///
 /// This is the cost half's own leg: it runs our side alone, with no recording read and no
-/// comparison, because a count has no Metal counterpart to compare with. The whole selection runs
-/// once, then again, so a count that moves between two runs of the same case on the same venue is
-/// seen to move rather than assumed deterministic.
+/// comparison, because a count has no Metal counterpart to compare with. Each round runs the whole
+/// selection once and a count seen at two values over the rounds is reported rather than gated.
 ///
-/// The runs are of the **whole selection in order**, not of one case repeatedly: the runtime pools
-/// command pools, memory blocks and descriptor sets across cases, so a case's counts depend on
-/// what ran before it, and a measurement must have the shape the gate will have.
+/// Two properties of the measurement's shape are load-bearing, and both were learned by measuring:
+///
+/// - **The whole selection in order**, not one case repeatedly. The runtime pools command pools,
+///   memory blocks and descriptor sets across cases, so a case's counts depend on what ran before
+///   it. A measurement must have the shape the gate will have.
+/// - **A fresh device each round**, because the gate's own run is a fresh one. Reusing a device
+///   would measure a *warm* recycler and a warm memory pool: in a first measurement here, 41 cases
+///   made a `VkImage` on the first round and took a parked one on the second, which read as a
+///   non-deterministic count when it was simply a second round. A bound taken from a warm round
+///   would be below what a replay on a cold device does, and the gate would fire on honest work.
 pub fn cost_on_under(
     venues: Venues,
     policy: Policy,
     cases: &[Box<dyn Case>],
     runs: u32,
 ) -> Result<(String, Vec<CaseCost>), String> {
-    let notices = Notices::default();
-    let cache = ScratchCache::new().map_err(|error| error.to_string())?;
-    let device = device::open_under(venues, policy, &notices, &cache)?;
-    notices.take();
     let mut held: Vec<CaseCost> = Vec::new();
+    let mut venue = String::new();
     for round in 0..runs.max(1) {
+        let notices = Notices::default();
+        let cache = ScratchCache::new().map_err(|error| error.to_string())?;
+        let device = device::open_under(venues, policy, &notices, &cache)?;
+        notices.take();
+        venue = device.name().to_owned();
         for (index, case) in cases.iter().enumerate() {
             let taker = notices.clone();
             let before = read_counts(&device)?;
@@ -243,7 +251,7 @@ pub fn cost_on_under(
             }
         }
     }
-    Ok((device.name().to_owned(), held))
+    Ok((venue, held))
 }
 
 /// Write what `measured` says each case cost on `venue` into the cases' own recordings, answering
@@ -273,13 +281,36 @@ pub fn record_costs(
 
 /// Put one case's cost record in its recording, replacing the venue's own record and keeping every
 /// other venue's.
+///
+/// The bounds are the new measurement's, so a case that now does less work shows it. The set of
+/// counts a measurement saw **move** is the union of the new measurement's and the record's,
+/// because a count once seen to take two values on this venue is not deterministic there, and a
+/// later measurement that happened not to catch it moving has not made it so. Three measurements
+/// of this case set found 24, 38, 47 and 68 moving readings of the same ~6,300, all of them the
+/// rows that say which thread arrived first, so a single measurement's set is a floor rather than
+/// the answer. The union only ever stops a count being gated; it never raises a bound.
 fn record_one_cost(
     venue: &str,
     cost: &CaseCost,
     words: &str,
 ) -> Result<std::path::PathBuf, String> {
     let mut recording = crate::recording::read(&cost.case)?;
-    let record = cost.record(venue, words.to_owned());
+    let mut record = cost.record(venue, words.to_owned());
+    if let Some(held) = recording.costs.iter().find(|held| held.venue == venue) {
+        for (count, least) in &held.moving {
+            if crate::cost::racy(count).is_some() {
+                continue;
+            }
+            // A count the new measurement never saw move at all is the sharpest case: without
+            // this it would be bounded at zero and gated, and the next run that happened to see
+            // the race would read as a regression. It keeps the larger of the two bounds.
+            let most = held.bounds.get(count).copied().unwrap_or(0);
+            let bound = record.bounds.entry(count.clone()).or_insert(most);
+            *bound = (*bound).max(most);
+            let seen = record.moving.entry(count.clone()).or_insert(*least);
+            *seen = (*seen).min(*least);
+        }
+    }
     recording.costs.retain(|held| held.venue != venue);
     recording.costs.push(record);
     recording

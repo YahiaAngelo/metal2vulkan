@@ -4,6 +4,7 @@
 //! ```text
 //! conformance record [case ...]
 //! conformance replay [--cpu] [--default-policy] [case ...]
+//! conformance cost [--cpu] [--default-policy] [--runs N] [--write] [case ...]
 //! conformance cases
 //! ```
 //!
@@ -23,6 +24,14 @@
 //!
 //! The ledger never changes a verdict. A refusal it expects is still printed as `Refused` and
 //! still counted, because its rows are open bugs rather than accepted differences.
+//!
+//! `cost` is the other half ([`metal2vulkan_conformance::cost`]): it runs our side alone and says
+//! what the runtime did to answer each case, by count. `--runs N` runs the whole selection N times,
+//! each round on a fresh device, so a count that is not deterministic is seen to move rather than
+//! assumed; `--write` puts the bounds in the cases' own recordings. `replay` then holds each case
+//! to them and reports the cost verdicts in their own section. Counts are ours and not Metal's, so
+//! they never touch a correctness verdict — but a case going over its bounds does fail the run, on
+//! its own line of the exit status.
 
 use metal2vulkan_conformance::device::{Policy, Venues};
 use metal2vulkan_conformance::run;
@@ -145,6 +154,7 @@ fn cost(
     );
     println!("{words}\n");
     let mut moved = 0;
+    let mut raced = 0;
     let mut stopped = 0;
     for one in &measured {
         let regions = metal2vulkan_conformance::cost::by_region(&one.counts);
@@ -153,7 +163,7 @@ fn cost(
         };
         use metal2vulkan_conformance::cost::Region;
         println!(
-            "{:<44} {:>5} counts  transl {:>6}  api {:>8}  submit {:>8}  {:>8.3} ms",
+            "{:<44} {:>4} counts: transl {:>3}  api {:>4}  submit {:>4}   {:>8.3} ms",
             one.case,
             one.counts.len(),
             region(Region::Translation),
@@ -169,17 +179,19 @@ fn cost(
         if !spread.is_empty() {
             moved += spread.len();
             println!(
-                "    {} count(s) moved between runs, so they are reported and not gated:",
+                "    {} count(s) moved between runs for no reason the race rule names, so they \
+                 are reported and not gated:",
                 spread.len()
             );
             for (count, least, most) in spread {
                 println!("      {count} {least}..{most}");
             }
         }
+        raced += one.moved_by_a_race().len();
     }
     println!(
         "\n{} case(s) measured, {stopped} stopped before finishing, {moved} count reading(s) \
-         moved between runs",
+         moved between runs for a reason the race rule does not name, {raced} for one it does",
         measured.len()
     );
     if !write {

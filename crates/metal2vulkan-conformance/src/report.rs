@@ -391,13 +391,26 @@ impl Report {
         for (word, count) in self.cost_counts() {
             out.push_str(&format!("  {word:<14} {count}\n"));
         }
-        let mut sums: BTreeMap<Region, u64> = BTreeMap::new();
+        // How far the gate reaches, so a green cost half cannot read as more than it is.
+        let held: usize = self
+            .costs
+            .iter()
+            .filter_map(|row| match &row.verdict {
+                CostVerdict::Within { held } => Some(*held),
+                _ => None,
+            })
+            .sum();
+        out.push_str(&format!(
+            "  {:<14} {held} count(s) held over the cases within their bounds\n",
+            "gated"
+        ));
+        let mut sums: BTreeMap<Region, usize> = BTreeMap::new();
         for row in &self.costs {
-            for (region, count) in cost::by_region(&row.counts) {
-                *sums.entry(region).or_default() += count;
+            for (region, many) in cost::by_region(&row.counts) {
+                *sums.entry(region).or_default() += many;
             }
         }
-        out.push_str("\nwhere the work fell, over the selection\n");
+        out.push_str("\nwhere the work fell: count readings a case moved, by region\n");
         for region in Region::ALL {
             out.push_str(&format!(
                 "  {:<14} {}\n",
