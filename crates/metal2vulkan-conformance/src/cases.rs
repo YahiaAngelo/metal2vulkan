@@ -56,6 +56,8 @@ pub mod tile_threadgroups;
 pub mod two_plane_copies;
 pub mod two_plane_heap_blits;
 pub mod two_plane_samples;
+pub mod ycbcr_minify;
+pub mod ycbcr_textures;
 
 use crate::case::Case;
 
@@ -141,6 +143,10 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.push(Box::new(shared_events::rising_value()));
     cases.extend(chroma_pairs::all());
+    cases.extend(ycbcr_textures::all());
+    for case in ycbcr_minify::all() {
+        cases.push(Box::new(case));
+    }
     cases
 }
 
