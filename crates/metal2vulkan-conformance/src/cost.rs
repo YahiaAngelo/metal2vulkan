@@ -1106,6 +1106,32 @@ pub fn drift(held: &CostRecord, fresh: &CostRecord) -> Vec<Drift> {
     drifted
 }
 
+/// How much reach a comparison gives up and how much it takes on, counted apart.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Reach {
+    /// Counts the record gates that this measurement does not. The gate stops gating them, which
+    /// shows up as its coverage falling.
+    pub given_up: usize,
+    /// Counts this measurement gates that the record does not. This is the direction worth
+    /// watching: the bound has no evidence but the measurement that just created it, and it reads
+    /// as the gate's coverage *rising*.
+    pub taken_on: usize,
+}
+
+/// Count the two reach directions in a comparison apart from each other.
+///
+/// They are not equally safe, so one number for both hides the one that matters. Over the
+/// recordings' history 16 of 11,392 classifications flipped and every one gave a gate up; the
+/// same count the other way would be the gate holding bounds nothing measured, and a number
+/// looked at once cannot catch that sign changing.
+pub fn reach(drifted: &[Drift]) -> Reach {
+    let count = |what: Drifted| drifted.iter().filter(|one| one.what == what).count();
+    Reach {
+        given_up: count(Drifted::GateLost),
+        taken_on: count(Drifted::GateGained),
+    }
+}
+
 /// A count a run moved further than its bound.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Overrun {

@@ -379,12 +379,9 @@ fn cost(
     if check {
         let mut drifted = 0;
         let mut fatal = 0;
-        // The two reach directions are counted apart because they are not equally safe. A count
-        // the gate gives up stops gating, which is the failure that shows; a count it takes on
-        // across a growth is a bound nothing measured, and it reads as coverage going up. A
-        // number looked at once cannot catch that sign changing, so both are printed every run.
-        let mut gained = 0;
-        let mut lost = 0;
+        // The two reach directions are counted apart, by `cost::reach`, because they are not
+        // equally safe and because a tally written here could swap them with nothing to catch it.
+        let mut reach = metal2vulkan_conformance::cost::Reach::default();
         // A case landed since the last whole-set measurement has no bound, so this comparison has
         // nothing to compare and passes it over. That is right -- inventing a bound from the run
         // that is checking it would gate on itself -- but passing it over in silence makes the
@@ -413,16 +410,14 @@ fn cost(
                 continue;
             }
             println!("\n{}", one.case);
+            let here = metal2vulkan_conformance::cost::reach(&moved);
+            reach.given_up += here.given_up;
+            reach.taken_on += here.taken_on;
             for one in &moved {
                 println!("  {one}");
                 drifted += 1;
                 if one.what.is_load_bearing() {
                     fatal += 1;
-                }
-                match one.what {
-                    metal2vulkan_conformance::cost::Drifted::GateGained => gained += 1,
-                    metal2vulkan_conformance::cost::Drifted::GateLost => lost += 1,
-                    _ => {}
                 }
             }
         }
@@ -431,9 +426,10 @@ fn cost(
              measurement, {fatal} of them a number the gate reads"
         );
         println!(
-            "reach: {lost} count(s) the gate gives up, {gained} it takes on. A count given up \
-             stops gating; a count taken on is a bound this measurement is the only evidence \
-             for, so {gained} is the number to watch."
+            "reach: {} count(s) the gate gives up, {} it takes on. A count given up stops \
+             gating; a count taken on is a bound this measurement is the only evidence for, so \
+             {} is the number to watch.",
+            reach.given_up, reach.taken_on, reach.taken_on
         );
         if !uncovered.is_empty() {
             println!(
