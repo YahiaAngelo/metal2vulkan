@@ -8,17 +8,20 @@
 //! steps, 17 consecutive `f32` coordinates each — and compares the whole band's results with
 //! plain Metal's.
 //!
-//! # What is carried, and why
+//! # Recorded on the oracle, and what the Apple M4 said
 //!
-//! Metal's answer here is **carried**, and record mode is forbidden from running it, for the same
-//! reason as [`super::ycbcr_textures::TexelReads`]: a texture of a two-plane YCbCr format exists
-//! only over an IOSurface, and the Metal side has no call that makes one. The runtime takes a
-//! buffer standing for the surface, which is what lets the case run where there is no CoreVideo.
+//! Metal's answer here used to be **carried** from an Apple M4 under macOS 27.0.1 — a machine the
+//! project no longer has, which made these two the weakest evidence in the suite: no living host
+//! could re-answer them. It is now recorded on the oracle, because the Metal side lays a texture
+//! over a real IOSurface laid out as this case says its stand-in buffer is (`metal_surface.rs`).
+//! The runtime still takes the buffer, which is what lets the case run where there is no
+//! CoreVideo.
 //!
-//! What is carried is the lane's own measurement, and the recording says plainly what it is worth:
-//! it was taken on an **Apple M4** under macOS 27.0.1, so the answer carries
-//! [`MetalSource::measured_on`] and the report counts it as measured elsewhere. That machine is
-//! gone.
+//! The M4's two digests are kept, in the tests' own `APPLE_M4_BANDS`, and
+//! `the_recorded_bands_are_the_apple_m4s` holds the recording to them. They are the one
+//! cross-chip fact these bands can carry: the band is a sweep of where a linear footprint's
+//! rounding puts a switch, and whether two Apple GPU generations put it in the same place is
+//! worth an executed check rather than a sentence.
 //!
 //! # The kernel is not the probe's, and the digests say it does not matter
 //!
@@ -30,15 +33,15 @@
 //! numbers, so the substitution is sound rather than assumed. A reader who changes the kernel's
 //! output shape breaks both digests at once, which is the right failure.
 //!
-//! # What the port does not fix
+//! # Why the band is a digest and a window, not 34,816 values
 //!
-//! The probe kept each band's answer as **one SHA-256 of the whole output**, so that is what the
-//! case can hold: the comparison is digest against digest, and a difference names the band rather
-//! than the coordinate. This is the honest shape of the evidence, not a choice — there are no
-//! per-sample values anywhere in the tree to record. The upgrade needs a Metal side that can make
-//! a texture over an IOSurface; the moment it exists, this case's `metal_source` becomes
-//! `MetalSource::Run` and the same sites carry all 34,816 results, because the run already
-//! produces them.
+//! A band's 34,816 `float4` results are 544 KiB of values, which is past the suite's 512 KiB
+//! ceiling on one recording — base64 would put each of the two files near 750 KiB. So the whole
+//! band's site holds the **digest alone**, which is what the probe kept and what the band's
+//! question needs, and a second site holds the first and last [`ENDS`] samples whole, with their
+//! layout, so a difference at either end of the sweep names the coordinate rather than the band.
+//! A difference in the middle still names the band; that is the cost of the ceiling, stated here
+//! rather than discovered.
 //!
 //! # Why it cannot fault a GPU
 //!
@@ -47,15 +50,11 @@
 //! 500 MiB ceiling.
 
 use crate::case::{
-    answered, made, Abort, Bindings, Case, Failure, Input, MetalSource, PlaneTexture, SamplerSpec,
-    Side,
+    made, Abort, Bindings, Case, Failure, Input, MetalSource, PlaneTexture, SamplerSpec, Side,
 };
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
-use crate::recording::{ShaderRef, APPLE_M4};
-use crate::replay::NOTICES_SITE;
-use crate::transcript::{
-    ByteLayout, Digest, DigestKind, Element, Gaps, Node, Observed, Region, Sites, Transcript,
-};
+use crate::recording::ShaderRef;
+use crate::transcript::{ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites};
 use metal2vulkan::metal::{PixelFormat, SamplerAddressMode, SamplerMinMagFilter};
 
 /// The surface's extent in texels: 4K, the size the consumer's pass sampled.
@@ -97,30 +96,22 @@ const BLANK: u8 = 0xab;
 const SAMPLE_FIXTURE: &str = "fpv_swizzled_reads";
 const SAMPLE_ENTRY: &str = "fpv_swz_sample";
 
-/// Where the carried answer came from.
-const MEASURED_IN: &str =
-    "the runtime lane's ycbcr_minify table, from our own probe over a real IOSurface (an Apple M4, \
-     macOS 27.0.1); each row is the SHA-256 of a whole band's float4 results in job order";
+/// The samples recorded whole at each end of the band: enough that a difference where the sweep
+/// starts or ends names the coordinate, few enough that the recording stays inside the suite's
+/// 512 KiB ceiling.
+pub const ENDS: usize = 256;
 
-/// Why record mode must not run the case on Metal.
-const NO_PUBLIC_CALL: &str =
-    "a texture of a two-plane YCbCr format exists only over an IOSurface, and the Metal side has \
-     no call that makes one, so there is nothing for record mode to run";
-
-/// The runs the carried table stands on: the probe ran each band in two processes, which answered
-/// alike, and the lane records that as one number per band.
-const MEASURED_RUNS: u32 = 2;
-
-/// The site a band's results sit at.
+/// The site a band's digest sits at.
 const RESULTS_SITE: &str = "samples";
+
+/// The site the window of whole samples sits at.
+const ENDS_SITE: &str = "samples/ends";
 
 /// One case: a band along one axis, and the hash plain Metal answered for it.
 pub struct MinifyBand {
     name: &'static str,
     /// 0 along x, 1 along y.
     axis: usize,
-    /// The SHA-256 the probe printed of this band's results, through the runtime sampler.
-    metal: &'static str,
 }
 
 /// Both bands.
@@ -129,12 +120,10 @@ pub fn all() -> Vec<MinifyBand> {
         MinifyBand {
             name: "ycbcr-minify-band-x",
             axis: 0,
-            metal: "c3c7fb23a2e0967dd506a088d764b8d33cd622f645566008bebfbe1dee7974c4",
         },
         MinifyBand {
             name: "ycbcr-minify-band-y",
             axis: 1,
-            metal: "536bb62bdfb366a18744a10f34682339739b789ee08d08d2d6d601731baf7533",
         },
     ]
 }
@@ -233,13 +222,37 @@ fn layout() -> ByteLayout {
     }
 }
 
+/// The first and last [`ENDS`] samples of `bytes`, in that order: the window the recording holds
+/// whole.
+fn ends(bytes: &[u8]) -> Vec<u8> {
+    let window = ENDS * 16;
+    let mut out = Vec::with_capacity(2 * window);
+    out.extend_from_slice(&bytes[..window]);
+    out.extend_from_slice(&bytes[bytes.len() - window..]);
+    out
+}
+
+/// The layout the window is read under: one row a sample of four lanes, as [`layout`] reads the
+/// whole band, so a diff names the sample inside the window.
+fn ends_layout() -> ByteLayout {
+    let mut layout = layout();
+    let extent = (2 * ENDS * 16) as u64;
+    layout.region = Region::Buffer {
+        offset: 0,
+        length: extent,
+    };
+    layout.rows = (2 * ENDS) as u32;
+    layout.image_pitch = extent as u32;
+    layout
+}
+
 impl Case for MinifyBand {
     fn name(&self) -> &'static str {
         self.name
     }
 
     fn metal_source(&self) -> MetalSource {
-        MetalSource::carried_only(MEASURED_IN, NO_PUBLIC_CALL).measured_on(APPLE_M4)
+        MetalSource::Run
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
@@ -279,36 +292,6 @@ impl Case for MinifyBand {
             Input::bytes("coordinates", &band(self.axis)),
             Input::bytes("buffer:blank", &[BLANK]),
         ])
-    }
-
-    fn carried_transcript(&self) -> Result<Option<(u32, Transcript)>, String> {
-        let mut sites = Sites::new();
-        sites.push(crate::case::inputs_node(&self.inputs()?));
-        for call in [
-            "library",
-            "pipeline",
-            "surface",
-            "texture",
-            "sampler",
-            "coordinates",
-            "output",
-            "dispatch",
-            "status",
-            "read-back",
-        ] {
-            sites.leaf(call, answered());
-        }
-        // The probe kept the digest of the whole band's results and not the results, so the site
-        // holds the digest alone: there is no per-sample value anywhere in the tree to record.
-        sites.push(Node::leaf(
-            RESULTS_SITE,
-            Observed::absent().digested(Digest {
-                kind: DigestKind::Sha256,
-                hex: self.metal.to_owned(),
-            }),
-        ));
-        sites.notices(NOTICES_SITE, &[] as &[&str]);
-        Ok(Some((MEASURED_RUNS, sites.finish())))
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
@@ -379,10 +362,17 @@ impl Case for MinifyBand {
                 ),
             });
         }
-        let digest = Digest::sha256(&bytes);
+        // The whole band is 544 KiB of values, past the suite's 512 KiB ceiling on a recording,
+        // so the band's own site holds its digest and the window below holds whole samples.
         sites.push(Node::leaf(
             RESULTS_SITE,
-            Observed::bytes(bytes, layout()).digested(digest),
+            Observed::absent().digested(Digest::sha256(&bytes)),
+        ));
+        let ends = ends(&bytes);
+        let digest = Digest::sha256(&ends);
+        sites.push(Node::leaf(
+            ENDS_SITE,
+            Observed::bytes(ends, ends_layout()).digested(digest),
         ));
         Ok(())
     }
@@ -392,18 +382,103 @@ impl Case for MinifyBand {
 mod tests {
     use super::*;
 
-    /// Two cases, one an axis, each naming the hash the probe printed for its band. The two hashes
-    /// differ, which is what says the two cases ask different questions.
+    /// The SHA-256 an **Apple M4** answered for each band, in [`all`]'s order, under macOS 27.0.1.
+    ///
+    /// This is what the two cases carried while no Metal side could make a texture over an
+    /// IOSurface, and the M4 is gone. It is kept here, where the one thing that reads it is the
+    /// cross-chip check below, rather than in the case, whose answer is its recording.
+    const APPLE_M4_BANDS: [&str; 2] = [
+        "c3c7fb23a2e0967dd506a088d764b8d33cd622f645566008bebfbe1dee7974c4",
+        "536bb62bdfb366a18744a10f34682339739b789ee08d08d2d6d601731baf7533",
+    ];
+
+    /// Two cases, one an axis. The M4's two hashes differ, which is what says the two cases ask
+    /// different questions.
     #[test]
     fn the_two_bands_are_the_lanes_two_bands() {
         let cases = all();
         assert_eq!(cases.len(), 2);
         assert_eq!(cases[0].axis, 0);
         assert_eq!(cases[1].axis, 1);
-        assert_ne!(cases[0].metal, cases[1].metal);
-        for case in &cases {
-            assert_eq!(case.metal.len(), 64, "{}", case.name);
+        assert_ne!(APPLE_M4_BANDS[0], APPLE_M4_BANDS[1]);
+        for hash in APPLE_M4_BANDS {
+            assert_eq!(hash.len(), 64, "{hash}");
         }
+    }
+
+    /// **The band this oracle recorded is the band the Apple M4 answered.**
+    ///
+    /// The cross-chip check, and the reason the M4's digests were kept rather than deleted when
+    /// the case stopped carrying them: whether two Apple GPU generations put a linear footprint's
+    /// rounding switch in the same place, over 34,816 samples a band, is a fact about Metal and
+    /// not about us. If this ever fails, the recording is the oracle and the M4's number is
+    /// history — but it must fail loudly rather than be dropped.
+    #[test]
+    fn the_recorded_bands_are_the_apple_m4s() {
+        for (case, apple_m4) in all().iter().zip(APPLE_M4_BANDS) {
+            let recording = crate::recording::read(case.name())
+                .unwrap_or_else(|why| panic!("{}: {why}", case.name()));
+            let answer = recording
+                .answers
+                .first()
+                .unwrap_or_else(|| panic!("{}: the recording holds an answer", case.name()));
+            assert!(
+                answer.provenance.measured_elsewhere().is_none(),
+                "{}: the answer is recorded here now, so it names no other chip: {:?}",
+                case.name(),
+                answer.provenance
+            );
+            let outcome = answer
+                .outcomes
+                .first()
+                .unwrap_or_else(|| panic!("{}: the answer holds an outcome", case.name()));
+            assert_eq!(
+                answer.outcomes.len(),
+                1,
+                "{}: the band's samples are deterministic",
+                case.name()
+            );
+            let node = outcome
+                .transcript
+                .root
+                .child(RESULTS_SITE)
+                .unwrap_or_else(|| panic!("{}: no {RESULTS_SITE}", case.name()));
+            let digest = node
+                .observed
+                .digest
+                .as_ref()
+                .unwrap_or_else(|| panic!("{}: {RESULTS_SITE} holds no digest", case.name()));
+            assert_eq!(
+                digest.hex,
+                apple_m4,
+                "{}: this M3 Max's band and the Apple M4's",
+                case.name()
+            );
+        }
+    }
+
+    /// The window is the first and last [`ENDS`] samples, in that order, and its layout names the
+    /// sample inside it: a sweep whose ends drifted says which sample did.
+    #[test]
+    fn the_window_is_both_ends_of_the_band() {
+        let mut bytes = vec![0u8; SAMPLES * 16];
+        for sample in 0..SAMPLES {
+            bytes[sample * 16..sample * 16 + 4].copy_from_slice(&(sample as u32).to_le_bytes());
+        }
+        let window = ends(&bytes);
+        assert_eq!(window.len(), 2 * ENDS * 16);
+        let first =
+            |at: usize| u32::from_le_bytes(window[at * 16..at * 16 + 4].try_into().unwrap());
+        assert_eq!(first(0), 0);
+        assert_eq!(first(ENDS - 1), ENDS as u32 - 1);
+        assert_eq!(first(ENDS), (SAMPLES - ENDS) as u32);
+        assert_eq!(first(2 * ENDS - 1), SAMPLES as u32 - 1);
+        let layout = ends_layout();
+        assert_eq!(layout.extent(), 2 * ENDS * 16);
+        assert_eq!(
+            layout.at(0, (2 * ENDS) as u32 - 1, 3),
+            (2 * ENDS - 1) * 16 + 12
+        );
     }
 
     /// The surface is the one the probe measured: the lane pins its SHA-256 under CoreVideo's own

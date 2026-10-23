@@ -2301,7 +2301,7 @@ impl Side for MetalSide {
     ) -> Answer<Handle> {
         let bytes = {
             let held = self.held(buffer)?;
-            let length = held.length() as usize;
+            let length = held.length();
             // SAFETY: the buffer's own shared storage, whole, and no command uses it yet.
             unsafe {
                 std::slice::from_raw_parts(held.contents().as_ptr().cast::<u8>(), length).to_vec()

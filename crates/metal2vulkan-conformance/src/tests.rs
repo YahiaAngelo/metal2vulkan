@@ -1076,20 +1076,19 @@ fn a_carried_answer_taken_on_another_chip_names_it() {
         );
     }
     // These families, and no others. One the list does not name would mean a table nobody noticed
-    // came from another machine. `two_plane_heap_blits` used to be here and now records on Metal:
-    // nothing it does is Apple SPI, so its answer is this chip's.
+    // came from another machine. Two families have left it, each because its Metal leg became
+    // runnable here: `two_plane_heap_blits`, since nothing it does is Apple SPI, and
+    // `ycbcr-minify-band-*`, since the Metal side now lays a texture over a real IOSurface
+    // (`metal_surface.rs`). Both record on this chip, and the M4's digests the second carried are
+    // kept as its cross-chip check.
     //
     // - `texture-fills-*`: the M4's fill digests, which `fillTexture:` being Apple SPI keeps
     //   carried.
-    // - `ycbcr-minify-band-*`: the M4's per-band digests of a minified two-plane YCbCr texture's
-    //   samples, which stay carried because a texture of such a format exists only over an
-    //   IOSurface and the Metal side has no call that makes one.
     // - `compute-threadgroup-past-metals-limit`: the M4's answer for a threadgroup past Metal's
     //   1024, which stays carried because this round may not hand a GPU an over-limit
     //   threadgroup to ask again.
-    const KNOWN: [&str; 3] = [
+    const KNOWN: [&str; 2] = [
         "texture-fills-",
-        "ycbcr-minify-band-",
         crate::cases::compute_threadgroups::PAST_METALS_LIMIT,
     ];
     for family in KNOWN {

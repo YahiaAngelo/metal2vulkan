@@ -527,29 +527,40 @@ extern "C" {
 mod tests {
     use super::*;
 
-    /// The two surfaces the suite's recorded cases lay a texture over: the OSType, the texture's
-    /// extent, where the planes lie, the buffer's length, and the format the texture is of.
+    /// One shape a recorded case lays a texture over.
+    struct Shape {
+        ostype: [u8; 4],
+        /// The texture's extent in texels.
+        size: [u32; 2],
+        /// Each plane's first byte and row pitch, as the case states them.
+        at: [(u64, u64); 2],
+        /// The stand-in buffer's length.
+        length: usize,
+        format: PixelFormat,
+    }
+
+    /// The two surfaces the suite's recorded cases lay a texture over.
     ///
     /// They are written here rather than read out of the cases because this is the module under
     /// test: a case that changes its surface changes its own input fingerprint and says so, and
     /// this table is what says the geometry these shapes need is the geometry Apple lays out.
-    const SURFACES: &[([u8; 4], [u32; 2], [(u64, u64); 2], usize, PixelFormat)] = &[
+    const SURFACES: &[Shape] = &[
         // `cases::ycbcr_textures::TexelReads`.
-        (
-            *b"420v",
-            [40, 24],
-            [(0, 64), (64 * 24, 64)],
-            4096,
-            PixelFormat::YCBCR84202P,
-        ),
+        Shape {
+            ostype: *b"420v",
+            size: [40, 24],
+            at: [(0, 64), (64 * 24, 64)],
+            length: 4096,
+            format: PixelFormat::YCBCR84202P,
+        },
         // `cases::ycbcr_minify`, both bands.
-        (
-            *b"x420",
-            [3840, 2160],
-            [(0, 7680), (2 * 3840 * 2160, 7680)],
-            24_883_200,
-            PixelFormat::YCBCR104202P,
-        ),
+        Shape {
+            ostype: *b"x420",
+            size: [3840, 2160],
+            at: [(0, 7680), (2 * 3840 * 2160, 7680)],
+            length: 24_883_200,
+            format: PixelFormat::YCBCR104202P,
+        },
     ];
 
     /// The geometry [`planes_of`] derives from a format is the geometry CoreVideo lays out for a
@@ -561,7 +572,14 @@ mod tests {
     /// handing Metal a surface laid one way and a texture that reads it another.
     #[test]
     fn the_derivation_is_core_videos_own_layout() {
-        for &(ostype, size, at, length, format) in SURFACES {
+        for &Shape {
+            ostype,
+            size,
+            at,
+            length,
+            format,
+        } in SURFACES
+        {
             let derived = planes_of(format, size, at).expect("the format's planes");
             planes_hold_their_texels(&derived, length).expect("the planes hold their texels");
             let Some(apple) = core_video_planes(ostype, size) else {
@@ -595,7 +613,14 @@ mod tests {
     /// in other places, and the case would read as a divergence of ours.
     #[test]
     fn a_surface_comes_out_laid_as_the_case_states() {
-        for &(ostype, size, at, length, format) in SURFACES {
+        for &Shape {
+            ostype,
+            size,
+            at,
+            length,
+            format,
+        } in SURFACES
+        {
             let planes = planes_of(format, size, at).expect("the format's planes");
             let surface = Surface::two_plane(ostype, size, &planes, length).expect("the surface");
             surface
