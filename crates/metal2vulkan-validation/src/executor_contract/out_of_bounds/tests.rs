@@ -605,6 +605,7 @@ fn b64(bytes: &[u8]) -> String {
 fn metal_row(case: &AuthoredCase) -> crate::observation::MetalObservation {
     let golden = golden();
     crate::observation::MetalObservation {
+        timing: Some(crate::observation::test_timing()),
         case_id: case.case_id.clone(),
         air_sha256: case.air_sha256.clone(),
         input_sha256: "22".repeat(32),
@@ -626,6 +627,7 @@ fn candidate_row(
     status: crate::observation::CandidateStatus,
 ) -> crate::observation::CandidateObservation {
     crate::observation::CandidateObservation {
+        timing: Some(crate::observation::test_timing()),
         case_id: metal.case_id.clone(),
         air_sha256: metal.air_sha256.clone(),
         input_sha256: metal.input_sha256.clone(),

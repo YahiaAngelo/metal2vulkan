@@ -18,6 +18,82 @@ pub const TRANSLATOR_FINGERPRINT: &str = env!("METAL2VULKAN_PRODUCT_FINGERPRINT"
 /// `tools`.
 pub const PROFILES_LAYER: &std::ffi::CStr = c"VK_LAYER_KHRONOS_profiles";
 
+/// What one row's executions of its case cost in time, as the run that recorded the row measured
+/// them on its own device: every Metal row and every candidate row carries one, so a reader of a
+/// stored row sees the cost without re-running anything.
+///
+/// Each execution is read by one [`crate::budgets::CreationClock`], the crate's clock for a device
+/// call: its wall time less the time the calling thread waited for a CPU. The clock the
+/// pipeline-creation ceiling is checked against is the clock a row records, so the two can never
+/// disagree.
+///
+/// **A timing is not semantics and decides nothing.** No verdict, content hash, `input_sha256`,
+/// translator fingerprint, executor ABI or census key reads it; the same case run twice on one
+/// device records the same bytes and two different figures. So a row is the row it was before it
+/// carried a figure, and two rows that differ only in their figures are one row —
+/// [`CaseTiming`]'s equality says exactly that, because an `Eq` that let a duration separate two
+/// rows would let a re-measurement read as new evidence.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaseTiming {
+    /// How many executions of the case the figures cover: [`crate::metal::QUALIFICATION_RUNS`] for
+    /// a Metal row, one for a candidate row.
+    pub runs: u32,
+    /// What those executions took in all, in microseconds.
+    pub total_micros: u64,
+    /// The least one of them took, in microseconds: the figure the first execution's compiles do
+    /// not reach.
+    pub least_micros: u64,
+}
+
+impl CaseTiming {
+    /// The timing of `runs` executions that each took the time `took` holds, in the order they
+    /// ran. Returns `None` for no executions, which no recorded row has.
+    pub fn of(took: impl IntoIterator<Item = std::time::Duration>) -> Option<CaseTiming> {
+        let micros =
+            |span: std::time::Duration| u64::try_from(span.as_micros()).unwrap_or(u64::MAX);
+        let mut timing: Option<CaseTiming> = None;
+        for span in took {
+            let span = micros(span);
+            timing = Some(match timing {
+                None => CaseTiming {
+                    runs: 1,
+                    total_micros: span,
+                    least_micros: span,
+                },
+                Some(before) => CaseTiming {
+                    runs: before.runs.saturating_add(1),
+                    total_micros: before.total_micros.saturating_add(span),
+                    least_micros: before.least_micros.min(span),
+                },
+            });
+        }
+        timing
+    }
+}
+
+/// Every timing equals every other, including one of another number of runs: a figure is measured
+/// noise, and [`CaseTiming`]'s documentation says why no comparison may read it.
+impl PartialEq for CaseTiming {
+    fn eq(&self, _: &CaseTiming) -> bool {
+        true
+    }
+}
+
+impl Eq for CaseTiming {}
+
+/// The timing a test row carries: a row this build records carries a measurement, and a test that
+/// builds one takes this fixed figure rather than reading a clock, so no test can turn a duration
+/// into evidence. A test of what a row recorded before the figure existed passes `None` itself.
+#[cfg(test)]
+pub(crate) fn test_timing() -> CaseTiming {
+    CaseTiming {
+        runs: 1,
+        total_micros: 1_234,
+        least_micros: 1_234,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MetalObservation {
@@ -29,6 +105,11 @@ pub struct MetalObservation {
     pub environment_id: String,
     pub environment: serde_json::Value,
     pub oracle_abi: String,
+    /// What the row's executions on Metal cost in time ([`CaseTiming`]). Every row this build
+    /// records carries one ([`crate::store::CorpusStore::upsert_metal`] refuses one that does
+    /// not); a row recorded before the figure existed holds none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<CaseTiming>,
     pub status: MetalStatus,
 }
 
@@ -114,6 +195,12 @@ pub struct CandidateObservation {
     /// engine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub census: Option<ExecutedCensus>,
+    /// What the row's execution on its Vulkan device cost in time ([`CaseTiming`]), as the device
+    /// worker that ran it measured. Every row this build records carries one
+    /// ([`crate::store::CorpusStore::upsert_candidate`] refuses one that does not); a row recorded
+    /// before the figure existed holds none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<CaseTiming>,
     pub status: CandidateStatus,
 }
 
@@ -582,6 +669,7 @@ mod tests {
         let case = case();
         let output = [1u8, 0, 0, 0];
         let row = |environment_id: &str, oracle_abi: &str| MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -674,6 +762,7 @@ mod tests {
             message: message.into(),
         };
         let row = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -727,6 +816,7 @@ mod tests {
         let input_sha256 = case.computed_input_sha256().unwrap();
         let output_sha256 = sha256_bytes(&[1, 0, 0, 0]);
         let metal = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: input_sha256.clone(),
@@ -741,6 +831,7 @@ mod tests {
         assert!(!metal.dependency_matches(&case, "oracle-v2"));
 
         let candidate = CandidateObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256,
@@ -833,6 +924,7 @@ mod tests {
         let case = case();
         let output_sha256 = sha256_bytes(&[1, 0, 0, 0]);
         let mut row = CandidateObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -866,6 +958,7 @@ mod tests {
         let output_sha256 = sha256_bytes(&[1, 0, 0, 0]);
         let row =
             |environment: serde_json::Value, restricted_to: Option<&str>| CandidateObservation {
+                timing: Some(crate::observation::test_timing()),
                 case_id: case.case_id.clone(),
                 air_sha256: case.air_sha256.clone(),
                 input_sha256: case.computed_input_sha256().unwrap(),
@@ -948,6 +1041,7 @@ mod tests {
         // A row in `slot`, its environment recording `environment` and its census `leg`.
         let in_slot = |slot: &str, environment: serde_json::Value, leg: Option<Leg>, buffers| {
             CandidateObservation {
+                timing: Some(crate::observation::test_timing()),
                 case_id: case.case_id.clone(),
                 air_sha256: case.air_sha256.clone(),
                 input_sha256: case.computed_input_sha256().unwrap(),
@@ -1047,6 +1141,7 @@ mod tests {
         let case = case();
         let empty_sha256 = sha256_bytes(&[]);
         let metal = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -1061,6 +1156,7 @@ mod tests {
 
         let input_sha256 = case.computed_input_sha256().unwrap();
         let mut candidate = CandidateObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id,
             air_sha256: case.air_sha256,
             input_sha256,
@@ -1112,6 +1208,7 @@ mod tests {
         let near = [0x01, 0x00, 0x01, 0x3c, 0x00, 0x3c, 0x00, 0x3c];
         let far = [0x01, 0x00, 0x02, 0x3c, 0x00, 0x3c, 0x00, 0x3c];
         let metal = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -1145,6 +1242,7 @@ mod tests {
             ComparisonClass::derive([PrecisionNote::F16FmaDoubleRounding], [])
         );
         let row = |output: &[u8], comparison: ComparisonClass, status| CandidateObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: metal.input_sha256.clone(),
@@ -1208,5 +1306,177 @@ mod tests {
         // A mismatch never has equal bytes.
         let equal = row(&golden, ComparisonClass::Exact, CandidateStatus::Mismatch);
         assert!(equal.validate_content().is_err());
+    }
+
+    /// A recorded timing reaches no digest, no fingerprint and no verdict.
+    ///
+    /// This is the guard that protects the corpus. The corpus is never deleted or rewritten and
+    /// re-qualifying it on Metal is expensive, so a figure that changes on every run must not be
+    /// able to make a stored row stale, nor to decide a verdict. Nothing in this crate derives a
+    /// fingerprint *from* a row — a translator fingerprint and an executor ABI are handed to a row
+    /// as strings — so what a timing could reach is a row's own content digests and the comparisons
+    /// that read a row, and both are pinned here: the three rows differ only in their figures (and
+    /// one has none at all), and every answer about them is the same answer.
+    #[test]
+    fn a_timing_reaches_no_digest_no_fingerprint_and_no_verdict() {
+        let case = case();
+        let input_sha256 = case.computed_input_sha256().unwrap();
+        let output = [1u8, 0, 0, 0];
+        let output_sha256 = sha256_bytes(&output);
+        let metal = |timing: Option<CaseTiming>| MetalObservation {
+            case_id: case.case_id.clone(),
+            air_sha256: case.air_sha256.clone(),
+            input_sha256: input_sha256.clone(),
+            metal_output_sha256: output_sha256.clone(),
+            output_b64: "AQAAAA==".into(),
+            environment_id: "metal-env".into(),
+            environment: serde_json::json!({"device": "test"}),
+            oracle_abi: "oracle-v1".into(),
+            timing,
+            status: MetalStatus::Qualified,
+        };
+        let fast = CaseTiming {
+            runs: 3,
+            total_micros: 300,
+            least_micros: 90,
+        };
+        let slow = CaseTiming {
+            runs: 3,
+            total_micros: 9_000_000,
+            least_micros: 2_900_000,
+        };
+        // The figures do differ where they are stored, so nothing below holds vacuously.
+        let member =
+            |row: &MetalObservation| serde_json::to_value(row).unwrap().get("timing").cloned();
+        assert_ne!(member(&metal(Some(fast))), member(&metal(Some(slow))));
+        assert_eq!(member(&metal(None)), None);
+
+        let rows = [metal(None), metal(Some(fast)), metal(Some(slow))];
+        for row in &rows {
+            // The content digest is over the output bytes and nothing else: a row whose digest
+            // took its timing in as well is refused, whatever its figure.
+            assert_eq!(row.validate_content(), Ok(()));
+            assert_eq!(row.metal_output_sha256, output_sha256);
+            assert!(row.dependency_matches(&case, "oracle-v1"));
+            assert!(!row.dependency_matches(&case, "oracle-v2"));
+            assert_eq!(row.observed_output(), Some(&row.output_b64));
+            assert_eq!(row.reference_gap_for(&case, "oracle-v1"), None);
+            assert_eq!(
+                MetalObservation::current([row.clone()], &case, "metal-env", "oracle-v1"),
+                Ok(row.clone())
+            );
+        }
+        let mut folded = metal(Some(fast));
+        folded.metal_output_sha256 = sha256_bytes(&[output.as_slice(), b"300"].concat());
+        assert!(folded
+            .validate_content()
+            .unwrap_err()
+            .contains("output hash mismatch"));
+
+        // Two rows that differ only in their figures are one row: no comparison can separate
+        // them, so a re-measurement is never new evidence.
+        assert_eq!(metal(Some(fast)), metal(Some(slow)));
+        assert_eq!(fast, slow);
+
+        // No load-bearing field moved: a timed row is the untimed row's bytes plus one member.
+        let without_timing = |row: &MetalObservation| {
+            let mut value = serde_json::to_value(row).unwrap();
+            value.as_object_mut().unwrap().remove("timing");
+            value
+        };
+        let untimed = serde_json::to_value(metal(None)).unwrap();
+        assert_eq!(without_timing(&metal(Some(fast))), untimed);
+        assert_eq!(without_timing(&metal(Some(slow))), untimed);
+        // And an untimed row serializes to exactly the bytes it had: a row recorded before the
+        // figure existed is not rewritten by reading and writing it again.
+        assert_eq!(
+            serde_json::to_string(&metal(None)).unwrap(),
+            serde_json::to_string(
+                &serde_json::from_str::<MetalObservation>(
+                    &serde_json::to_string(&metal(None)).unwrap()
+                )
+                .unwrap()
+            )
+            .unwrap()
+        );
+        assert!(!serde_json::to_string(&metal(None))
+            .unwrap()
+            .contains("timing"));
+
+        let candidate = |timing: Option<CaseTiming>| CandidateObservation {
+            case_id: case.case_id.clone(),
+            air_sha256: case.air_sha256.clone(),
+            input_sha256: input_sha256.clone(),
+            golden_output_sha256: output_sha256.clone(),
+            spv_sha256: "33".repeat(32),
+            translator_fingerprint: "55".repeat(32),
+            candidate_output_sha256: output_sha256.clone(),
+            output_b64: "AQAAAA==".into(),
+            backend: Backend::Vulkan,
+            environment_id: "vk-env".into(),
+            environment: serde_json::json!({"driver": "test"}),
+            executor_abi: "executor-v1".into(),
+            comparison: ComparisonClass::Exact,
+            census: None,
+            timing,
+            status: CandidateStatus::Match,
+        };
+        let golden = metal(Some(fast));
+        let dependencies = CandidateDependencies {
+            case: &case,
+            metal: &golden,
+            spv_sha256: &"33".repeat(32),
+            translator_fingerprint: &"55".repeat(32),
+            backend: Backend::Vulkan,
+            environment_id: "vk-env",
+            executor_abi: "executor-v1",
+        };
+        for row in [
+            candidate(None),
+            candidate(Some(fast)),
+            candidate(Some(slow)),
+        ] {
+            assert_eq!(row.validate_content(), Ok(()));
+            assert_eq!(row.candidate_output_sha256, output_sha256);
+            assert_eq!(row.translator_fingerprint, "55".repeat(32));
+            // The verdict a row is held to is the one its bytes decide.
+            assert!(row.class_holds());
+            assert!(row.dependency_matches(&dependencies));
+            let mut mismatched = row.clone();
+            mismatched.status = CandidateStatus::Mismatch;
+            assert!(mismatched.validate_content().is_err());
+        }
+        assert_eq!(candidate(Some(fast)), candidate(Some(slow)));
+        let candidate_without_timing = |row: &CandidateObservation| {
+            let mut value = serde_json::to_value(row).unwrap();
+            value.as_object_mut().unwrap().remove("timing");
+            value
+        };
+        let untimed = serde_json::to_value(candidate(None)).unwrap();
+        assert_eq!(candidate_without_timing(&candidate(Some(fast))), untimed);
+        assert_eq!(candidate_without_timing(&candidate(Some(slow))), untimed);
+    }
+
+    /// Every execution's figure is in the timing a row records, and the least one names the
+    /// cheapest of them: the first execution's compiles do not decide it.
+    #[test]
+    fn a_timing_covers_every_execution_it_was_read_from() {
+        use std::time::Duration;
+        assert_eq!(CaseTiming::of([]), None);
+        let one = CaseTiming::of([Duration::from_micros(700)]).unwrap();
+        assert_eq!(
+            (one.runs, one.total_micros, one.least_micros),
+            (1, 700, 700)
+        );
+        let three = CaseTiming::of([
+            Duration::from_micros(5_000),
+            Duration::from_micros(300),
+            Duration::from_micros(412),
+        ])
+        .unwrap();
+        assert_eq!(
+            (three.runs, three.total_micros, three.least_micros),
+            (3, 5_712, 300)
+        );
     }
 }

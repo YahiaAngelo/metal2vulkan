@@ -7,7 +7,7 @@ use crate::check::loop_free::Classification;
 use crate::check::{CheckedCase, CheckedShader, FuelScope, LoopClass};
 use crate::hash::sha256_bytes;
 use crate::literal::LiteralResources;
-use crate::observation::{MetalObservation, MetalStatus, ReferenceGap};
+use crate::observation::{CaseTiming, MetalObservation, MetalStatus, ReferenceGap};
 use crate::oracle_fuel::{OracleBound, DEFAULT_INVOCATION_FUEL};
 use crate::source::SourceRow;
 use crate::store::CorpusStore;
@@ -116,6 +116,9 @@ impl From<&str> for MetalRunError {
 /// case.
 type RunAnswer = Result<Vec<u8>, ReferenceGap>;
 
+/// What a case's [`QUALIFICATION_RUNS`] executions answered, and what each of them cost in time.
+type Runs = (Vec<RunAnswer>, Vec<std::time::Duration>);
+
 /// Admit `case` for the Metal oracle, then qualify it. A refusal (a case that is not mechanically
 /// loop-free) returns before any device opens.
 pub fn qualify(
@@ -148,10 +151,14 @@ pub fn qualify_case(
     let resources = LiteralResources::prepare(&checked.primary.case)?;
     let initial = resources.selected_initial(&checked.primary.case.output)?;
     // Each execution loads the same libraries: each is built once, for the first.
-    let answers = platform::reusing_tool_results(|| -> Result<Vec<RunAnswer>, String> {
+    let (answers, took) = platform::reusing_tool_results(|| -> Result<Runs, String> {
         let mut answers = Vec::with_capacity(QUALIFICATION_RUNS);
+        // What each execution cost, the gap-answering ones too: a reference gap is a row, and a
+        // row records what its case cost.
+        let mut took = Vec::with_capacity(QUALIFICATION_RUNS);
         for run in 0..QUALIFICATION_RUNS {
-            let output = match platform::execute(
+            let clock = crate::budgets::CreationClock::start();
+            let executed = platform::execute(
                 &checked.primary.case,
                 modules.primary.clone(),
                 &resources,
@@ -159,7 +166,9 @@ pub fn qualify_case(
                 &checked.primary.interface,
                 &checked.primary.linked_functions,
                 &modules.templates,
-            ) {
+            );
+            took.push(clock.read());
+            let output = match executed {
                 Ok(output) => output,
                 Err(MetalRunError::ReferenceGap(gap)) => {
                     answers.push(Err(gap));
@@ -184,7 +193,7 @@ pub fn qualify_case(
                 output,
             )));
         }
-        Ok(answers)
+        Ok((answers, took))
     })?;
     let (output, status) = qualify_answers(&initial, answers)?;
     if matches!(status, MetalStatus::Qualified) {
@@ -201,6 +210,7 @@ pub fn qualify_case(
         environment_id: environment_id.into(),
         environment,
         oracle_abi: ORACLE_ABI.into(),
+        timing: CaseTiming::of(took),
         status,
     };
     CorpusStore::new(root).upsert_metal(observation.clone())?;

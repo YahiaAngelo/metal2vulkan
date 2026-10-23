@@ -387,6 +387,7 @@ impl CorpusStore {
     pub fn upsert_metal(&self, row: MetalObservation) -> Result<(), String> {
         self.recover_transactions()?;
         row.validate_content()?;
+        require_timing("Metal", &row.case_id, &row.environment_id, row.timing)?;
         let index = shard_index_for_hash(&row.air_sha256)?;
         self.validate_observation_case(
             index,
@@ -411,6 +412,7 @@ impl CorpusStore {
     pub fn upsert_candidate(&self, row: CandidateObservation) -> Result<(), String> {
         self.recover_transactions()?;
         row.validate_content()?;
+        require_timing("candidate", &row.case_id, &row.environment_id, row.timing)?;
         let index = shard_index_for_hash(&row.air_sha256)?;
         self.validate_observation_case(
             index,
@@ -1138,6 +1140,29 @@ fn validate_observation_output(case: &AuthoredCase, output_b64: &str) -> Result<
     Ok(())
 }
 
+/// A row this build stores records what its case cost in time, or it is not stored.
+///
+/// The owner's rule is that every suite records timing for every case it runs, not a selection, and
+/// this is where that holds by construction: the two paths that produce a row — a Metal
+/// qualification and a candidate run on a device — each hand their own measurement to the store,
+/// and a path that measured nothing cannot write a row at all. Rows already on disk are kept as
+/// they are: a row recorded before the figure existed carries none, and reading one, or rewriting
+/// its shard around a new row, never goes through here.
+fn require_timing(
+    side: &str,
+    case_id: &str,
+    environment_id: &str,
+    timing: Option<crate::observation::CaseTiming>,
+) -> Result<(), String> {
+    match timing {
+        Some(_) => Ok(()),
+        None => Err(format!(
+            "the {side} row of case {case_id} in {environment_id} records no timing; a run this \
+             build stores measures what its case cost"
+        )),
+    }
+}
+
 fn reject_duplicate_metal_slots<'a>(
     rows: impl IntoIterator<Item = &'a MetalObservation>,
 ) -> Result<(), String> {
@@ -1363,6 +1388,7 @@ mod tests {
         store.put_case(case.clone()).unwrap();
         store.put_case(unrelated.clone()).unwrap();
         let metal = |case: &AuthoredCase, environment_id: &str| MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -1442,6 +1468,7 @@ mod tests {
     ) -> CandidateObservation {
         let output_sha256 = crate::hash::sha256_bytes(&[42, 0, 0, 0]);
         CandidateObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -1458,6 +1485,99 @@ mod tests {
             census: None,
             status: CandidateStatus::Match,
         }
+    }
+
+    /// A row this build stores records what its case cost in time, and the store refuses one that
+    /// does not. This is where the owner's rule — every suite records timing for every case it
+    /// runs, not a selection — holds by construction rather than by review: the two paths that
+    /// produce a row (a Metal qualification and a candidate run on a device) hand the store their
+    /// own measurement, and a path that lost its clock cannot write a row at all.
+    ///
+    /// Rows already on disk are untouched by this. One recorded before the figure existed carries
+    /// none, is read as it always was, and keeps its own bytes when a new row rewrites its shard.
+    #[test]
+    fn a_stored_row_records_what_its_case_cost() {
+        let scratch = ScratchDir::new("stored-row-timing").unwrap();
+        let store = CorpusStore::new(scratch.path());
+        let case = make_case("timed", "KgAAAA==");
+        store.put_case(case.clone()).unwrap();
+        let metal = |timing| MetalObservation {
+            timing,
+            case_id: case.case_id.clone(),
+            air_sha256: case.air_sha256.clone(),
+            input_sha256: case.computed_input_sha256().unwrap(),
+            metal_output_sha256: crate::hash::sha256_bytes(&[42, 0, 0, 0]),
+            output_b64: "KgAAAA==".into(),
+            environment_id: "metal-env".into(),
+            environment: serde_json::json!({}),
+            oracle_abi: "v1".into(),
+            status: MetalStatus::Qualified,
+        };
+        let refused = store.upsert_metal(metal(None)).unwrap_err();
+        assert!(
+            refused.contains("records no timing") && refused.contains(&case.case_id),
+            "{refused}"
+        );
+        assert!(store.read_metal().unwrap().is_empty());
+        store
+            .upsert_metal(metal(Some(crate::observation::test_timing())))
+            .unwrap();
+
+        let mut rows = store.read_metal().unwrap();
+        assert_eq!(rows.len(), 1);
+        let stored = rows.pop().unwrap().timing.expect("a stored Metal timing");
+        assert_eq!(stored.runs, crate::observation::test_timing().runs);
+        assert_eq!(
+            stored.total_micros,
+            crate::observation::test_timing().total_micros
+        );
+        assert_eq!(
+            stored.least_micros,
+            crate::observation::test_timing().least_micros
+        );
+
+        let mut untimed = candidate(&case, Backend::Vulkan, "vk-env");
+        untimed.timing = None;
+        let refused = store.upsert_candidate(untimed).unwrap_err();
+        assert!(
+            refused.contains("records no timing") && refused.contains("vk-env"),
+            "{refused}"
+        );
+        assert!(store.read_candidates(Backend::Vulkan).unwrap().is_empty());
+        store
+            .upsert_candidate(candidate(&case, Backend::Vulkan, "vk-env"))
+            .unwrap();
+        let mut rows = store.read_candidates(Backend::Vulkan).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows.pop().unwrap().timing.is_some());
+
+        // A row a shard already holds without a figure is read as it is, and stays byte for byte
+        // as it is when another row joins its shard.
+        let shard = shard_index_for_hash(&case.air_sha256).unwrap();
+        let path = scratch
+            .path()
+            .join("observations/metal")
+            .join(shard_name(shard));
+        let mut old = metal(None);
+        old.environment_id = "old-env".into();
+        let line = serde_json::to_string(&old).unwrap();
+        assert!(!line.contains("timing"));
+        let mut text = fs::read_to_string(&path).unwrap();
+        text.insert_str(0, &format!("{line}\n"));
+        fs::write(&path, &text).unwrap();
+        let read = store.read_metal().unwrap();
+        assert_eq!(read.len(), 2);
+        assert!(read
+            .iter()
+            .any(|row| row.environment_id == "old-env" && row.timing.is_none()));
+        let mut joined = metal(Some(crate::observation::test_timing()));
+        joined.environment_id = "second-env".into();
+        store.upsert_metal(joined).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(
+            written.lines().any(|written| written == line),
+            "the untimed row was rewritten"
+        );
     }
 
     /// The store's own writes keep every shard in key order with one row per slot, and
@@ -1588,6 +1708,7 @@ mod tests {
         store.upsert_candidate(old).unwrap();
         store
             .upsert_metal(MetalObservation {
+                timing: Some(crate::observation::test_timing()),
                 case_id: case.case_id.clone(),
                 air_sha256: case.air_sha256.clone(),
                 input_sha256: case.computed_input_sha256().unwrap(),
@@ -1677,6 +1798,7 @@ mod tests {
         for case in [&first, &sibling] {
             store
                 .upsert_metal(MetalObservation {
+                    timing: Some(crate::observation::test_timing()),
                     case_id: case.case_id.clone(),
                     air_sha256: case.air_sha256.clone(),
                     input_sha256: case.computed_input_sha256().unwrap(),
@@ -1724,6 +1846,7 @@ mod tests {
         let case = make_case("slot", "AAAAAA==");
         store.put_case(case.clone()).unwrap();
         let mut row = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -1787,6 +1910,7 @@ mod tests {
 
         let empty_sha256 = crate::hash::sha256_bytes(&[]);
         let empty_metal = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: empty_case.case_id.clone(),
             air_sha256: empty_case.air_sha256.clone(),
             input_sha256: empty_case.computed_input_sha256().unwrap(),
@@ -1811,6 +1935,7 @@ mod tests {
         store.put_case(nonempty_case.clone()).unwrap();
         let nonempty_input_sha256 = nonempty_case.computed_input_sha256().unwrap();
         let empty_for_buffer = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: nonempty_case.case_id.clone(),
             air_sha256: nonempty_case.air_sha256,
             input_sha256: nonempty_input_sha256,
@@ -1838,6 +1963,7 @@ mod tests {
         let message =
             "simdgroup_matrix<T,16,16x16> operations are supported by GPUFamily10 and later";
         let gap = MetalObservation {
+            timing: Some(crate::observation::test_timing()),
             case_id: case.case_id.clone(),
             air_sha256: case.air_sha256.clone(),
             input_sha256: case.computed_input_sha256().unwrap(),
@@ -2347,6 +2473,7 @@ mod tests {
         observation_store.put_case(case.clone()).unwrap();
         observation_store
             .upsert_metal(MetalObservation {
+                timing: Some(crate::observation::test_timing()),
                 case_id: case.case_id.clone(),
                 air_sha256: case.air_sha256.clone(),
                 input_sha256: case.computed_input_sha256().unwrap(),

@@ -200,6 +200,7 @@ fn metal_in(
     output: &[u8],
 ) -> MetalObservation {
     MetalObservation {
+        timing: Some(crate::observation::test_timing()),
         case_id: case.case_id.clone(),
         air_sha256: case.air_sha256.clone(),
         input_sha256: case.computed_input_sha256().unwrap(),
@@ -240,6 +241,7 @@ fn row(
     golden: &[u8],
 ) -> CandidateObservation {
     CandidateObservation {
+        timing: Some(crate::observation::test_timing()),
         case_id: case.case_id.clone(),
         air_sha256: case.air_sha256.clone(),
         input_sha256: case.computed_input_sha256().unwrap(),

@@ -73,6 +73,7 @@ fn run() -> DeviceRun {
 
 fn run_restricted_to(restricted_to: Option<String>) -> DeviceRun {
     DeviceRun {
+        timing: crate::observation::test_timing(),
         output: vec![0, 1, 2, 0xff],
         spv_sha256: "ab".repeat(32),
         translator_fingerprint: "cd".repeat(32),
@@ -89,6 +90,34 @@ fn run_restricted_to(restricted_to: Option<String>) -> DeviceRun {
             artifact: None,
         },
     }
+}
+
+/// A run the worker reports carries what it cost in time, and the parent cannot read one that does
+/// not. [`DeviceRun::timing`] is not optional, so a figure is required of every reported run by
+/// type: the Vulkan side records a cost for every case it runs rather than for a selection, and a
+/// run whose report lost its figure is a decode failure rather than a row with a hole in it.
+///
+/// The figure itself is measured noise and nothing compares it: two reports that differ only here
+/// are the same run.
+#[test]
+fn a_reported_run_carries_what_it_cost() {
+    let reported = serde_json::to_value(run()).unwrap();
+    assert!(reported.get("timing").is_some());
+    let mut without = reported.clone();
+    without.as_object_mut().unwrap().remove("timing");
+    let refused = serde_json::from_value::<DeviceRun>(without).unwrap_err();
+    assert!(refused.to_string().contains("timing"), "{refused}");
+    assert_eq!(
+        serde_json::from_value::<DeviceRun>(reported).unwrap(),
+        run()
+    );
+    let mut slower = run();
+    slower.timing = crate::observation::CaseTiming {
+        runs: 1,
+        total_micros: 9_000_000,
+        least_micros: 9_000_000,
+    };
+    assert_eq!(slower, run());
 }
 
 /// What this build's worker reports for `result`.
