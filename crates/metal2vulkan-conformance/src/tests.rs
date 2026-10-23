@@ -18,8 +18,7 @@ use crate::recording::{
 use crate::replay::{replay_against, NOTICES_SITE};
 use crate::report::Report;
 use crate::transcript::{
-    ByteLayout, Digest, DigestKind, Element, Gaps, Negative, Node, Observed, Region, Sites,
-    Transcript, Value,
+    ByteLayout, Digest, Element, Gaps, Negative, Node, Observed, Region, Sites, Transcript, Value,
 };
 use crate::verdict::Verdict;
 use metal2vulkan_runtime::{Degradation, MetalLevel};
