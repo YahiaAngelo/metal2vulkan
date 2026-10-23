@@ -272,46 +272,66 @@ fn our_patch_type(raw: usize) -> Answer<PatchType> {
         .map_err(|_| Failure::named("UnknownPatchType", format!("MTLPatchType({raw})")))
 }
 
-/// The six facts an attribute states, read off either of the two classes that state them.
+/// One `MTLVertexAttribute`'s six facts, in the vocabulary both sides answer in.
 ///
-/// `MTLVertexAttribute` and `MTLAttribute` are two Objective-C classes with the same six getters
-/// and no common protocol, so there is nothing to be generic over: the macro is what keeps the two
-/// readings from drifting apart, which a second hand-written copy would not.
-macro_rules! attribute_facts {
-    ($list:expr) => {{
-        let mut found = Vec::new();
-        for attribute in $list {
-            found.push(crate::function_facts::AttributeFacts {
-                name: attribute.name().to_string(),
-                attribute_index: attribute.attributeIndex() as u32,
-                attribute_type: our_data_type(attribute.attributeType().0)?,
-                active: attribute.isActive(),
-                patch_data: attribute.isPatchData(),
-                patch_control_point_data: attribute.isPatchControlPointData(),
-            });
-        }
-        found
-    }};
+/// # Why this and [`stage_input_attribute_facts`] are two functions, each taking its own class
+///
+/// `MTLVertexAttribute` and `MTLAttribute` are two Objective-C classes that state the same six
+/// facts and share no protocol, so there is nothing to be generic over, and one `macro_rules!` over
+/// the six getters would read better than two near-identical bodies. It would also hide them: the
+/// coverage derivation reads the leg's calls out of `fn` bodies, and a call written inside a macro
+/// sits in no function at all, so both classes would be exercised by a case and credited to
+/// nothing.
+///
+/// And the attribute arrives as a **parameter** rather than as a `for` loop's variable, which is
+/// the shape [`metal_binding`] already uses for the same reason: the derivation types a receiver
+/// from a `let`, a parameter or a closure's parameter, and a loop variable types as nothing, so
+/// six getters read straight off one would resolve to no item either.
+fn vertex_attribute_facts(attribute: &MTLVertexAttribute) -> Answer<AttributeFacts> {
+    Ok(AttributeFacts {
+        name: attribute.name().to_string(),
+        attribute_index: attribute.attributeIndex() as u32,
+        attribute_type: our_data_type(attribute.attributeType().0)?,
+        active: attribute.isActive(),
+        patch_data: attribute.isPatchData(),
+        patch_control_point_data: attribute.isPatchControlPointData(),
+    })
+}
+
+/// One `MTLAttribute`'s six facts. [`vertex_attribute_facts`] says why the two are not one.
+fn stage_input_attribute_facts(attribute: &MTLAttribute) -> Answer<AttributeFacts> {
+    Ok(AttributeFacts {
+        name: attribute.name().to_string(),
+        attribute_index: attribute.attributeIndex() as u32,
+        attribute_type: our_data_type(attribute.attributeType().0)?,
+        active: attribute.isActive(),
+        patch_data: attribute.isPatchData(),
+        patch_control_point_data: attribute.isPatchControlPointData(),
+    })
 }
 
 /// `vertexAttributes`' list in the vocabulary both sides answer in; `None` is Metal's nil.
 fn our_vertex_attributes(
     list: Option<&NSArray<MTLVertexAttribute>>,
 ) -> Answer<Option<Vec<AttributeFacts>>> {
-    match list {
-        None => Ok(None),
-        Some(list) => Ok(Some(attribute_facts!(list))),
+    let Some(list) = list else { return Ok(None) };
+    let mut found = Vec::new();
+    for attribute in list {
+        found.push(vertex_attribute_facts(&attribute)?);
     }
+    Ok(Some(found))
 }
 
 /// `stageInputAttributes`' list in the vocabulary both sides answer in; `None` is Metal's nil.
 fn our_stage_input_attributes(
     list: Option<&NSArray<MTLAttribute>>,
 ) -> Answer<Option<Vec<AttributeFacts>>> {
-    match list {
-        None => Ok(None),
-        Some(list) => Ok(Some(attribute_facts!(list))),
+    let Some(list) = list else { return Ok(None) };
+    let mut found = Vec::new();
+    for attribute in list {
+        found.push(stage_input_attribute_facts(&attribute)?);
     }
+    Ok(Some(found))
 }
 
 /// The `MTLFunctionConstantValues` the case's values build, each through the setter its
@@ -2729,7 +2749,10 @@ impl Side for MetalSide {
     }
 
     fn tile_facts(&mut self, state: Handle) -> Answer<TileFacts> {
-        let state = &self
+        // Declared, so the coverage derivation types the receiver: the pool's element is this
+        // side's own struct, which names no Metal type the walk can read off a field, and these
+        // three getters were therefore attributed to no item while being compared exactly.
+        let state: &Retained<ProtocolObject<dyn MTLRenderPipelineState>> = &self
             .render_pipelines
             .get(state.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("tile pipeline {}", state.0)))?

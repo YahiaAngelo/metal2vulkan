@@ -245,6 +245,39 @@ class Function:
     end: int
 
 
+def body_brace(text: str, after: int) -> int:
+    """Where the body of the `fn` whose name ends at `after` opens, or `-1` for a declaration.
+
+    The signature is skipped by **bracket depth**, not by looking for the first `{` and treating a
+    `;` before it as the end of a declaration. A parameter of an array type carries a `;` inside
+    its brackets — `imageblock: [u32; 3]` — and reading that `;` as the end of a declaration drops
+    the whole function, with every Metal call it makes. Measured when this was written: it dropped
+    fourteen functions of the Metal side, `texture_2d`, `read_texture`, `replace_region`,
+    `dispatch`, `dispatch_threads` and `tile_pass` among them, so their calls were attributed to no
+    item at all and were missing from the unresolved count too.
+
+    `->` is skipped as a unit, because its `>` is not a closing bracket.
+    """
+    depth = 0
+    i = after
+    while i < len(text):
+        two = text[i : i + 2]
+        if two == "->":
+            i += 2
+            continue
+        char = text[i]
+        if char in "([<":
+            depth += 1
+        elif char in ")]>":
+            depth = max(0, depth - 1)
+        elif depth == 0 and char == "{":
+            return i
+        elif depth == 0 and char == ";":
+            return -1
+        i += 1
+    return -1
+
+
 def functions(text: str, file: str) -> list[Function]:
     """Every function the (blanked) source declares, with its body's span."""
     out: list[Function] = []
@@ -255,9 +288,8 @@ def functions(text: str, file: str) -> list[Function]:
         impls.append((header, span[1]))
         impls[-1] = (header, span[1])
     for match in re.finditer(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)", text):
-        open_at = text.find("{", match.end())
-        semi = text.find(";", match.end())
-        if open_at < 0 or (0 <= semi < open_at and "=>" not in text[match.end() : semi]):
+        open_at = body_brace(text, match.end())
+        if open_at < 0:
             # A declaration with no body (a trait's required method).
             continue
         start, end = block(text, match.end())
