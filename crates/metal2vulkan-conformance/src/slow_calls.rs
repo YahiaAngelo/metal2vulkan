@@ -99,22 +99,40 @@ pub const WHY_COLD_IS_NOT_JUDGED: &str =
      cost from the cost of\nfirst use on a new device -- measured, `target` is 0.9x warm and \
      14.3x cold without compiling anything.\nRun it without --cold-shaders for the gate.";
 
-/// **The host has to be quiet for the gate to mean anything**, and this is the bound.
+/// **The ceiling on host load, measured.**
 ///
-/// It is deliberately well under the load at which the inflation was measured (see
-/// [`crate::clocks::host_load`]: load average about 11 on this 16-core M3 Max moved our
-/// CPU-bound totals 4.5x while Metal's moved 1.6x). The threshold where it stops mattering was
-/// never localised, so the bound is conservative on purpose: a run on a busy host reports and is
-/// not judged, which is a missing verdict rather than a false red.
-pub const QUIET_ENOUGH: f64 = 4.0;
+/// This was 4.0, set conservatively and labelled at the time as stated rather than localised.
+/// It has since been measured, and the measurement says absolute load is very nearly the wrong
+/// variable: over twenty passes of one twelve-case selection on this M3 Max, spanning a load
+/// average of 8.59 to 26.45 (3.08x), `render_pipeline` stayed between 51.6x and 56.6x -- a spread
+/// of **1.10x** -- and `compute_pipeline` between 29.3x and 33.1x, a spread of 1.13x. There is no
+/// knee and no drift worth a gate: against a 10x margin a 1.1x wobble is nothing.
+///
+/// One confound is declared rather than hidden: load fell monotonically across those passes, so
+/// load and pass order are collinear and the small residual correlation (+0.64 with load, -0.59
+/// with order) cannot be attributed to either. It does not matter for the bound, because the
+/// *effect size* is about 10% whichever variable owns it.
+///
+/// So the bound is the top of the range that was actually measured, and nothing above it is
+/// claimed. What does corrupt a ratio is [`LOAD_MAY_MOVE`]: the legs run one after the other, so
+/// load moving *between* them compares two machines.
+pub const QUIET_ENOUGH: f64 = 26.0;
 
 /// **How far the load may move across one measurement before its two halves are not one
 /// condition.** A factor, applied to the larger reading over the smaller.
 ///
-/// This number is stated and not localised, exactly as [`QUIET_ENOUGH`] was: what is measured is
-/// that load inflates our leg and not Metal's, not the rate at which it does so. A doubling is
-/// where the two halves of a run stop being comparable by any reasonable reading, and naming it
-/// as one constant means a later measurement can replace it instead of arguing with it.
+/// **This is the guard that the evidence actually supports**, and the mechanism is the leg order:
+/// `times` measures Metal's leg to completion and then ours, deliberately, because interleaving
+/// would put each leg's threads in the other's off-thread CPU reading. So the two legs occupy two
+/// different windows -- about six seconds apart in a twelve-case pass, but minutes apart in a
+/// whole-set pass -- and load moving between those windows divides one machine's Metal figure by
+/// another machine's figure of ours. That, rather than the absolute level, is what produced the
+/// 4.5x-against-1.6x contrast between two whole-set runs, and it is why a twelve-case pass is
+/// flat across a 3x load range while an eleven-minute one is not.
+///
+/// The factor itself is still stated rather than localised. A better instrument is to bracket
+/// *each leg* and compare the two legs' own loads, which measures the drift directly instead of
+/// through the whole run's endpoints; that is the next change, not this one.
 pub const LOAD_MAY_MOVE: f64 = 2.0;
 
 /// Whether the gate judges a measurement taken under `shaders` on a host whose one-minute load
