@@ -42,6 +42,18 @@
 //!
 //! Nothing else here is unsafe for the GPU that the probes these cases came from were not: the same
 //! shapes, through the same calls, are what produced the tables in the first place.
+//!
+//! # The clearing pass and the per-sample read-back
+//!
+//! Both are public Metal and both are built, because a case needs them without a fill: a buffer
+//! copied into every sample of a multisample depth or stencil texture clears by a pass that draws
+//! nothing, copies in, reads every sample by a dispatch and copies back out, with no private call
+//! anywhere, so it can be recorded on Metal rather than carrying a rule. They mirror
+//! [`crate::runtime_work`]'s own two call for call -- the same attachment, load and store actions,
+//! the same two bound buffers, the same shape words, the same grid of one thread a sample and one
+//! thread a threadgroup, and the same narrowing of the kernel's words -- because a difference in
+//! any of those would make the two sides' kernels read different things, which is the shape of
+//! harness error that reads exactly like a product bug.
 
 use crate::case::{Answer, Failure};
 use crate::work::{Done, Plane, Rect, Resource, Step, Storage, TextureKind, TextureSpec, Work};
@@ -49,11 +61,39 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::sel;
 use objc2_metal::{
-    MTLBlitCommandEncoder, MTLBlitOption, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder,
-    MTLCommandQueue, MTLDevice, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLOrigin, MTLPixelFormat,
-    MTLRegion, MTLResourceOptions, MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor,
-    MTLTextureType, MTLTextureUsage,
+    MTLBlitCommandEncoder, MTLBlitOption, MTLBuffer, MTLClearColor, MTLCommandBuffer,
+    MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder, MTLComputePipelineState,
+    MTLDevice, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLLoadAction, MTLOrigin, MTLPixelFormat,
+    MTLRegion, MTLRenderPassDescriptor, MTLResourceOptions, MTLSize, MTLStorageMode,
+    MTLStoreAction, MTLTexture, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
 };
+
+/// A per-sample read-back's compute pipeline state, by the kernel it runs.
+///
+/// The states are made **before** the interpreter starts, by the side that owns the scratch
+/// directory and the library pool ([`crate::metal_side::MetalSide`]'s `work`): building a library
+/// needs `xcrun metal-as` and `xcrun metallib`, which is that side's business and not this one's.
+pub type Kernels<'a> = &'a [Kernel];
+
+/// One kernel a per-sample read-back runs: its entry point, and the state that runs it.
+pub type Kernel = (
+    &'static str,
+    Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+);
+
+/// A read whose bytes are only there once the command buffer completed: the buffer a per-sample
+/// read-back's dispatch wrote, and how its words narrow.
+///
+/// It mirrors [`crate::runtime_work`]'s own pending read, field for field, because the two sides
+/// must narrow the kernel's words the same way or the read means two different things.
+struct Pending {
+    /// The read's place among the program's reads.
+    slot: usize,
+    buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
+    length: usize,
+    /// The bytes of one sample the read keeps, and the words the kernel wrote.
+    samples: (usize, usize),
+}
 
 /// `fillTexture:level:slice:region:bytes:length:` (Apple SPI), the pattern fill. Named as a
 /// function because `sel!` interns on first use.
@@ -105,6 +145,7 @@ pub fn run(
     device: &ProtocolObject<dyn MTLDevice>,
     queue: &ProtocolObject<dyn MTLCommandQueue>,
     work: &Work,
+    kernels: Kernels<'_>,
 ) -> Answer<Done> {
     let mut made: Vec<Made> = Vec::with_capacity(work.resources.len());
     for (at, resource) in work.resources.iter().enumerate() {
@@ -116,8 +157,10 @@ pub fn run(
         queue,
         made,
         resources: &work.resources,
+        kernels,
         command_buffer: None,
         encoder: None,
+        pending: Vec::new(),
         reads: vec![None; work.reads()],
         next_read: 0,
         statuses: Vec::new(),
@@ -438,8 +481,12 @@ struct Run<'a> {
     made: Vec<Made>,
     /// The program's declarations, which a [`Step::Make`] reads to make a released resource again.
     resources: &'a [Resource],
+    /// The pipeline states a per-sample read-back runs, made before the program started.
+    kernels: Kernels<'a>,
     command_buffer: Option<Retained<ProtocolObject<dyn MTLCommandBuffer>>>,
     encoder: Option<Retained<ProtocolObject<dyn MTLBlitCommandEncoder>>>,
+    /// The reads whose bytes only exist once the command buffer completed.
+    pending: Vec<Pending>,
     reads: Vec<Option<Vec<u8>>>,
     next_read: usize,
     statuses: Vec<String>,
@@ -648,18 +695,33 @@ impl Run<'_> {
                 );
                 Ok(())
             }
-            // A render pass that clears one slice, and a per-sample read-back by a dispatch, are
-            // both public Metal. Neither is built here, because every case that needs one also
-            // needs a private fill and so carries its answer anyway; a case that needs one without
-            // a fill is where to build it.
             Step::Release { resource } => self.release(*resource),
             Step::Make { resource } => self.make_again(*resource),
-            Step::ClearPass { .. } => Err(Failure::unavailable(
-                "a clearing render pass on the Metal side of a Work program (not built)",
-            )),
-            Step::ReadSamples { .. } => Err(Failure::unavailable(
-                "a per-sample read-back on the Metal side of a Work program (not built)",
-            )),
+            Step::ClearPass {
+                texture,
+                slice,
+                clear,
+            } => self.clear_pass(*texture, *slice, *clear),
+            Step::ReadSamples {
+                texture,
+                kernel,
+                width,
+                height,
+                samples,
+                texel_bytes,
+                words,
+            } => {
+                let slot = self.slot();
+                self.read_samples(
+                    slot,
+                    *texture,
+                    kernel,
+                    [*width, *height],
+                    *samples,
+                    *texel_bytes,
+                    *words,
+                )
+            }
             Step::ReplaceRegion {
                 texture,
                 level,
@@ -860,6 +922,173 @@ impl Run<'_> {
         command_buffer.waitUntilCompleted();
         self.statuses
             .push(crate::metal_side::status_word(command_buffer.status()).to_owned());
+        let pending = std::mem::take(&mut self.pending);
+        for read in pending {
+            let bytes = read_buffer(&read.buffer, 0, read.length)?;
+            let (texel_bytes, stride) = read.samples;
+            // The kernel writes whole words a sample; the read keeps the format's own bytes of
+            // each. Narrowed exactly as `crate::runtime_work` narrows it, because the two sides
+            // must answer the same bytes for the same dispatch.
+            self.reads[read.slot] = Some(
+                bytes
+                    .chunks(stride)
+                    .flat_map(|chunk| chunk.iter().take(texel_bytes))
+                    .copied()
+                    .collect(),
+            );
+        }
+        Ok(())
+    }
+
+    /// Open a render pass that clears one slice of `texture` and draws nothing, and end it: how a
+    /// program writes a known value into a multisample texture, which no CPU copy reaches.
+    fn clear_pass(&mut self, texture: usize, slice: u64, clear: crate::work::Clear) -> Answer<()> {
+        // A pass must not open while the blit encoder is: Metal takes one encoder at a time.
+        self.end_encoding();
+        let texture = self.texture(texture)?;
+        let command_buffer = self.command_buffer()?;
+        let pass = MTLRenderPassDescriptor::renderPassDescriptor();
+        // SAFETY: each setter takes the value it is given; the texture is the program's own and
+        // the slice is inside it, as the case states.
+        unsafe {
+            match clear {
+                crate::work::Clear::Color([r, g, b, a]) => {
+                    let attachment = pass.colorAttachments().objectAtIndexedSubscript(0);
+                    attachment.setTexture(Some(&texture));
+                    attachment.setSlice(slice as usize);
+                    attachment.setLoadAction(MTLLoadAction::Clear);
+                    attachment.setClearColor(MTLClearColor {
+                        red: r,
+                        green: g,
+                        blue: b,
+                        alpha: a,
+                    });
+                    attachment.setStoreAction(MTLStoreAction::Store);
+                }
+                crate::work::Clear::Depth(depth) => {
+                    let attachment = pass.depthAttachment();
+                    attachment.setTexture(Some(&texture));
+                    attachment.setSlice(slice as usize);
+                    attachment.setLoadAction(MTLLoadAction::Clear);
+                    attachment.setClearDepth(depth);
+                    attachment.setStoreAction(MTLStoreAction::Store);
+                }
+                crate::work::Clear::Stencil(stencil) => {
+                    let attachment = pass.stencilAttachment();
+                    attachment.setTexture(Some(&texture));
+                    attachment.setSlice(slice as usize);
+                    attachment.setLoadAction(MTLLoadAction::Clear);
+                    attachment.setClearStencil(stencil);
+                    attachment.setStoreAction(MTLStoreAction::Store);
+                }
+                crate::work::Clear::DepthStencil(depth, stencil) => {
+                    let attachment = pass.depthAttachment();
+                    attachment.setTexture(Some(&texture));
+                    attachment.setSlice(slice as usize);
+                    attachment.setLoadAction(MTLLoadAction::Clear);
+                    attachment.setClearDepth(depth);
+                    attachment.setStoreAction(MTLStoreAction::Store);
+                    let attachment = pass.stencilAttachment();
+                    attachment.setTexture(Some(&texture));
+                    attachment.setSlice(slice as usize);
+                    attachment.setLoadAction(MTLLoadAction::Clear);
+                    attachment.setClearStencil(stencil);
+                    attachment.setStoreAction(MTLStoreAction::Store);
+                }
+            }
+        }
+        let encoder = command_buffer
+            .renderCommandEncoderWithDescriptor(&pass)
+            .ok_or_else(|| Failure::named("RenderCommandEncoder", "returned nil".to_owned()))?;
+        encoder.endEncoding();
+        Ok(())
+    }
+
+    /// Encode a per-sample read-back of `texture` by the program's fixture's `kernel`.
+    ///
+    /// Mirrors [`crate::runtime_work`] call for call: the same two bound buffers, the same shape
+    /// words, the same grid of one thread a sample and one thread a threadgroup. A difference in
+    /// any of those would make the two sides' kernels read different things, which is the shape of
+    /// harness error that looks exactly like a product bug.
+    #[allow(clippy::too_many_arguments)]
+    fn read_samples(
+        &mut self,
+        slot: usize,
+        texture: usize,
+        kernel: &str,
+        [width, height]: [u32; 2],
+        samples: u32,
+        texel_bytes: usize,
+        words: usize,
+    ) -> Answer<()> {
+        self.end_encoding();
+        let source = self.texture(texture)?;
+        let pipeline = self
+            .kernels
+            .iter()
+            .find(|(name, _)| *name == kernel)
+            .map(|(_, state)| state.clone())
+            .ok_or_else(|| {
+                Failure::named(
+                    "NoSuchKernel",
+                    format!("{kernel}: no pipeline state was made for it"),
+                )
+            })?;
+        let length = width as usize * height as usize * samples as usize * words * 4;
+        let out = self
+            .device
+            .newBufferWithLength_options(length.max(1), MTLResourceOptions::StorageModeShared)
+            .ok_or_else(|| {
+                Failure::named(
+                    "NewBufferWithLength",
+                    format!("{length} bytes returned nil"),
+                )
+            })?;
+        // The shape the fixture's kernels read at buffer 1: the extent's width and each pixel's
+        // samples, two 32-bit words.
+        let mut shape_bytes = width.to_le_bytes().to_vec();
+        shape_bytes.extend_from_slice(&samples.to_le_bytes());
+        // SAFETY: the pointer and length are the vector's own, and Metal copies the bytes.
+        let shape = unsafe {
+            self.device.newBufferWithBytes_length_options(
+                std::ptr::NonNull::from(shape_bytes.as_slice()).cast(),
+                shape_bytes.len(),
+                MTLResourceOptions::StorageModeShared,
+            )
+        }
+        .ok_or_else(|| Failure::named("NewBufferWithBytes", "the shape buffer returned nil"))?;
+        let command_buffer = self.command_buffer()?;
+        let encoder = command_buffer
+            .computeCommandEncoder()
+            .ok_or_else(|| Failure::named("ComputeCommandEncoder", "returned nil".to_owned()))?;
+        encoder.setComputePipelineState(&pipeline);
+        // SAFETY: each setter takes the object and the index it is given, and the indices are the
+        // fixture's kernels' own declarations.
+        unsafe {
+            encoder.setTexture_atIndex(Some(&source), 0);
+            encoder.setBuffer_offset_atIndex(Some(&out), 0, 0);
+            encoder.setBuffer_offset_atIndex(Some(&shape), 0, 1);
+        }
+        // One thread a sample, one thread a threadgroup: no grid edge to guard.
+        encoder.dispatchThreadgroups_threadsPerThreadgroup(
+            MTLSize {
+                width: width as usize,
+                height: height as usize,
+                depth: samples as usize,
+            },
+            MTLSize {
+                width: 1,
+                height: 1,
+                depth: 1,
+            },
+        );
+        encoder.endEncoding();
+        self.pending.push(Pending {
+            slot,
+            buffer: out,
+            length,
+            samples: (texel_bytes, words * 4),
+        });
         Ok(())
     }
 }

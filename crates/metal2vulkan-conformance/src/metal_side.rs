@@ -572,6 +572,47 @@ fn xcrun(tool: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
     ))
 }
 
+impl MetalSide {
+    /// The pipeline state each distinct kernel a program's per-sample read-backs name, in the
+    /// order they are first named.
+    ///
+    /// Empty for a program with no such read-back, so a program of copies alone compiles nothing.
+    fn read_back_pipelines(
+        &mut self,
+        work: &crate::work::Work,
+    ) -> Answer<Vec<crate::metal_work::Kernel>> {
+        let mut wanted: Vec<&'static str> = Vec::new();
+        for step in &work.steps {
+            if let crate::work::Step::ReadSamples { kernel, .. } = step {
+                if !wanted.contains(kernel) {
+                    wanted.push(kernel);
+                }
+            }
+        }
+        if wanted.is_empty() {
+            return Ok(Vec::new());
+        }
+        let fixture = work.kernels.ok_or_else(|| {
+            Failure::named("NoKernels", "the program states no fixture for its kernels")
+        })?;
+        let loaded = crate::fixture::Fixture::new(fixture)
+            .loaded()
+            .map_err(|why| Failure::named("NoFixture", why))?;
+        let library = self.library(&loaded.source())?;
+        let mut made = Vec::with_capacity(wanted.len());
+        for kernel in wanted {
+            let handle = self.compute_pipeline(library, kernel)?;
+            let state = self
+                .pipelines
+                .get(handle.0 as usize)
+                .cloned()
+                .ok_or_else(|| Failure::named("NoSuchHandle", format!("pipeline {}", handle.0)))?;
+            made.push((kernel, state));
+        }
+        Ok(made)
+    }
+}
+
 impl Side for MetalSide {
     fn venue(&self) -> Venue {
         Venue {
@@ -1067,13 +1108,18 @@ impl Side for MetalSide {
 
     /// A copy-and-fill program, through public Metal alone ([`crate::metal_work`]).
     ///
-    /// The fills (`fillTexture:` and `fillTextureColor:`) are Apple SPI and the interpreter refuses
-    /// those two steps, so a case built on a fill still carries its Metal answer. Everything else a
-    /// program states -- heaps, placed textures, textures over a buffer, views, every blit,
-    /// `replaceRegion:` and `getBytes:` -- is public Metal whatever pixel format the case names,
-    /// including Apple's two-plane extended-range 550 and 551.
+    /// The colour fill (`fillTextureColor:`) is Apple SPI with no arm here, so a case built on one
+    /// still carries its Metal answer. Everything else a program states -- heaps, placed textures,
+    /// textures over a buffer, views, every blit, `replaceRegion:`, `getBytes:`, a clearing render
+    /// pass and a per-sample read-back -- is public Metal whatever pixel format the case names,
+    /// including Apple's two-plane extended-range 550 and 551; the pattern fill is reached by
+    /// selector after `respondsToSelector:`.
     fn work(&mut self, work: &crate::work::Work) -> Answer<crate::work::Done> {
-        crate::metal_work::run(&self.device, &self.queue, work)
+        // A per-sample read-back's pipeline states are made here and handed to the interpreter,
+        // because making one needs the scratch directory, `xcrun metal-as`, `xcrun metallib` and
+        // the library pool this side owns, none of which the interpreter sees.
+        let kernels = self.read_back_pipelines(work)?;
+        crate::metal_work::run(&self.device, &self.queue, work, &kernels)
     }
 
     fn announced(&mut self) -> Vec<String> {
