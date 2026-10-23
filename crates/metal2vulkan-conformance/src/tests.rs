@@ -1487,7 +1487,7 @@ fn the_known_refusals_ledger_parses_and_names_real_cases() {
     }
     // The rows this round left open, and what they are waiting on: `drawMeshThreads` whose
     // threads leave a partial object threadgroup, which Metal runs with the threads left over.
-    let partial: Vec<&KnownRefusal> = ledger
+    let partial: Vec<&crate::known_refusals::KnownRefusal> = ledger
         .iter()
         .filter(|known| {
             known

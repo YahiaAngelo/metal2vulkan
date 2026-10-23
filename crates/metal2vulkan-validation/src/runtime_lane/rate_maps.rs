@@ -169,12 +169,49 @@ fn a_rate_map_is_refused_where_metal_or_the_compile_stops_it() {
     on_device(|device, _| {
         let make = |d: &RateMapDescriptor| device.new_rasterization_rate_map(d).map(|_| ());
         let half = [(0.5, 0.5)];
-        for (width, height) in [(0, 64), (64, 0), (0, 0), (32769, 64), (64, 40000)] {
+        for (width, height) in [(32769, 64), (64, 40000), (0, 32769)] {
             assert_eq!(
                 make(&descriptor(width, height, &half)),
                 Err(refused(RateMapProblem::ScreenSize { width, height })),
                 "{width}x{height}"
             );
+        }
+        // A screen side of 0, which Metal's validation stops and plain Metal compiles, is a map
+        // of no physical extent on that axis, whose screen-to-physical map ends Metal's process.
+        for (screen, physical) in [([0, 64], [0, 33]), ([64, 0], [33, 0]), ([0, 0], [0, 0])] {
+            let map = device
+                .new_rasterization_rate_map(&descriptor(screen[0], screen[1], &half))
+                .unwrap_or_else(|e| panic!("{screen:?}: {e}"));
+            assert_eq!(
+                map.screen_size(),
+                Size::new(u64::from(screen[0]), u64::from(screen[1]), 1),
+                "{screen:?}"
+            );
+            assert_eq!(
+                map.physical_size_for_layer(0),
+                Size::new(u64::from(physical[0]), u64::from(physical[1]), 1),
+                "{screen:?}"
+            );
+            let at = Coordinate2D::new(1.0, 1.0);
+            assert_eq!(
+                map.map_screen_to_physical_coordinates(at, 0),
+                Err(Error::Invalid(Invalid::new(
+                    "map_screen_to_physical_coordinates",
+                    Problem::RateMap(RateMapProblem::EmptyScreen {
+                        width: screen[0],
+                        height: screen[1],
+                    }),
+                ))),
+                "{screen:?}"
+            );
+            // The physical-to-screen map answers, as Metal's does (`p · 2^24` on the empty axis).
+            let screen_at = map.map_physical_to_screen_coordinates(at, 0).unwrap();
+            let empty = [screen[0] == 0, screen[1] == 0];
+            for (axis, value) in [screen_at.x, screen_at.y].into_iter().enumerate() {
+                if empty[axis] {
+                    assert_eq!(value, 16_777_216.0, "{screen:?} axis {axis}");
+                }
+            }
         }
         assert_eq!(
             make(&descriptor(64, 64, &[(0.5, 0.5); 3])),
