@@ -31,7 +31,7 @@
 //!
 //! A detach refuses only while submitted work **holds** the buffer, and only a submission that
 //! named it holds it. So the command buffer blit-fills the buffer
-//! ([`FILL_BYTES`](crate::host_detach::FILL_BYTES) bytes) before its handler detaches: without
+//! ([`crate::host_detach::FILL_BYTES`] bytes) before its handler detaches: without
 //! that, the case would be asking about a buffer nothing had taken, which is a different question
 //! with the same answer.
 //!
