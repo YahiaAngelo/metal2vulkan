@@ -322,11 +322,11 @@ impl Case for ComputeRenderChain {
         inputs.push(Input::bytes("render-pipeline", &subject.pipeline().words()));
         inputs.push(Input::bytes("kernel", subject.functions().1.as_bytes()));
         inputs.push(Input::bytes(
-            "handed-over",
+            "texture:handed-over",
             &texture_spec(subject.crossing).words(),
         ));
         inputs.push(Input::bytes(
-            "attachment",
+            "texture:attachment",
             &TargetSpec::read(FORMAT, [SIDE; 2]).words(),
         ));
         inputs.push(Input::bytes("sampler", &sampler().words()));
@@ -376,12 +376,12 @@ impl Case for ComputeRenderChain {
         // whether or not the row is about it.
         let handed = made(
             sites,
-            "handed-over",
+            "texture:handed-over",
             side.target(&texture_spec(subject.crossing)),
         )?;
         let attachment = made(
             sites,
-            "attachment",
+            "texture:attachment",
             side.target(&TargetSpec::read(FORMAT, [SIDE; 2])),
         )?;
         let sampled = made(sites, "sampler", side.sampler(&sampler()))?;
@@ -636,6 +636,42 @@ mod tests {
         }
     }
 
+    /// No node of any of the family's recorded transcripts holds two children of one name.
+    ///
+    /// Written because it happened: the texture the two kinds of work hand over was made at the
+    /// site `handed-over` and its texels were emitted under a branch of the same name, so a walk
+    /// down `handed-over/texels` found the **call** site, which has no children, and the three
+    /// cross-checks below read as "no such site" rather than as an answer. The make sites are
+    /// `texture:`-prefixed now.
+    ///
+    /// It is over this family's own recordings rather than over the whole case set because a case
+    /// module is the wrong place to hold a rule about every case; the whole-set form belongs in
+    /// the suite's own tests.
+    #[test]
+    fn no_recorded_node_holds_two_children_of_one_name() {
+        fn walk(node: &crate::transcript::Node, path: &str, found: &mut Vec<String>) {
+            let mut seen = BTreeSet::new();
+            for child in &node.children {
+                if !seen.insert(child.name.clone()) {
+                    found.push(format!("{path}/{}", child.name));
+                }
+                walk(child, &format!("{path}/{}", child.name), found);
+            }
+        }
+        let mut checked = 0usize;
+        for subject in SUBJECTS {
+            let Some(recorded) = only_outcome(subject.name) else {
+                println!("{}: no recording in the tree yet", subject.name);
+                continue;
+            };
+            let mut found = Vec::new();
+            walk(&recorded.root, "case", &mut found);
+            assert!(found.is_empty(), "{}: {found:?}", subject.name);
+            checked += 1;
+        }
+        println!("no_recorded_node_holds_two_children_of_one_name: {checked} rows checked");
+    }
+
     /// The sampling row's sampled target is the texture the kernel wrote, texel for texel, and
     /// that texture is not one value repeated -- so the check is not one a blank texture passes.
     #[test]
@@ -738,7 +774,7 @@ mod tests {
             assert_eq!(case.metal_source(), MetalSource::Run);
             case.shaders().unwrap();
             let inputs = case.inputs().unwrap();
-            for wanted in ["render-pipeline", "kernel", "handed-over", "grid"] {
+            for wanted in ["render-pipeline", "kernel", "texture:handed-over", "grid"] {
                 assert!(
                     inputs.iter().any(|input| input.name == wanted),
                     "{}: no {wanted} in its inputs",
