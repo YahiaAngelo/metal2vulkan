@@ -597,20 +597,26 @@ fn times(
         calls,
         shaders,
     } = asked;
-    // Read on both sides of the measurement, so the pair brackets the host the measurement
-    // actually ran on. One reading before it can only describe the host it started on, and a run
-    // that starts on an empty queue and finishes against five other builds is the case that
-    // matters: both halves have to be quiet for the figures to be of one machine.
-    let load_before = metal2vulkan_conformance::clocks::host_load();
+    // Each leg is bracketed by its own pair of load readings. The legs run one after the other,
+    // so what corrupts a ratio is the host moving between their two windows -- and bracketing the
+    // whole run cannot see that, because the run's endpoints average over exactly the interval
+    // where the damage happens. These two brackets measure it.
+    use metal2vulkan_conformance::clocks::host_load;
+    use metal2vulkan_conformance::slow_calls::LegLoad;
+    let mut metal_load = LegLoad::default();
+    let mut our_load = LegLoad::default();
+    metal_load.before = host_load();
     let metal = match legs {
         Legs::Both | Legs::Metal => metal_times(cases, runs)?,
         Legs::Ours => None,
     };
+    metal_load.after = host_load();
+    our_load.before = host_load();
     let ours = match legs {
         Legs::Both | Legs::Ours => Some(run::times_on_under(venues, policy, cases, runs, shaders)?),
         Legs::Metal => None,
     };
-    let load_after = metal2vulkan_conformance::clocks::host_load();
+    our_load.after = host_load();
     // The host's load belongs in the words a record carries, because our leg is CPU-bound where
     // Metal's largest calls are GPU-blocked: a figure taken on a busy host is not the figure a
     // quiet one gives, and a reader of the recording cannot otherwise tell which they have.
@@ -622,12 +628,13 @@ fn times(
             run::Shaders::Warm => "carried over between the cases of a round",
             run::Shaders::Cold => "fresh for every case",
         },
-        match (load_before, load_after) {
-            (Some(before), Some(after)) => format!(
-                "the host's one-minute load average was {before:.2} when the measurement started \
-                 and {after:.2} when it finished, and the per-call margin is judged only when both \
-                 are {:.1} or under",
-                metal2vulkan_conformance::slow_calls::QUIET_ENOUGH
+        match (metal_load.typical(), our_load.typical()) {
+            (Some(metal_at), Some(ours_at)) => format!(
+                "Metal's leg ran at a one-minute load average of {metal_at:.2} and ours at \
+                 {ours_at:.2}; the legs run one after the other, so the per-call margin is judged \
+                 only when both are {:.1} or under and within {:.1}x of each other",
+                metal2vulkan_conformance::slow_calls::QUIET_ENOUGH,
+                metal2vulkan_conformance::slow_calls::LOAD_MAY_MOVE
             ),
             _ => "this host answers no load average".to_owned(),
         }
@@ -660,8 +667,7 @@ fn times(
     // It also needs a measurement whose readings localise: a warm one rather than a cold one, and
     // one taken on a quiet host rather than a busy one -- see `slow_calls::judges`.
     let mut green = true;
-    if let Err(why) = metal2vulkan_conformance::slow_calls::judges(shaders, load_before, load_after)
-    {
+    if let Err(why) = metal2vulkan_conformance::slow_calls::judges(shaders, metal_load, our_load) {
         println!("\n{why}");
     } else if let (Some(metal), Some(ours)) = (&metal, &ours) {
         let ledger = metal2vulkan_conformance::slow_calls::ledger()?;
