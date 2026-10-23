@@ -329,10 +329,24 @@ impl Case for RotatedPlane {
         // reads and renders a rotated texture through shadows (`ShadowedTexture`). Metal announces
         // nothing, because Metal has no notices at all, so the notice set is loosened for the
         // family -- and only the notice set, so every plane byte still compares exactly.
-        let mut allowances = vec![crate::replay::notice_allowance(
-            Degradation::ShadowedTexture.code(),
-        )];
+        // A device whose own conversion of a float written to the plane's normalized attachment
+        // is not Metal's converts it in the shader and announces `shader-color-conversion`
+        // (lavapipe). Declared for the family: every plane byte still compares exactly.
+        let mut allowances = vec![
+            crate::replay::notice_allowance(Degradation::ShadowedTexture.code()),
+            crate::replay::notice_allowance(Degradation::ShaderColorConversion.code()),
+        ];
         if self.ask == Ask::Load && self.rotation == 4 {
+            // The notice is announced wherever rotation 4 loads, whatever the frame, so its code
+            // is **declared** here for every such frame: Metal announces none, and a notice our
+            // side announces that the case names nowhere is a difference with nothing accounting
+            // for it. The declaration loosens no byte. It is not the tolerance below, which stays
+            // held to the bands where the difference can appear -- and that is why a 32x32 frame
+            // needs this line: it has no unreached band to loosen, and announced the notice all
+            // the same.
+            allowances.push(crate::replay::notice_allowance(
+                Degradation::RotatedLoadTiles.code(),
+            ));
             // The one place the runtime is known to differ from Metal, and the allowance is held to
             // exactly where it differs.
             //

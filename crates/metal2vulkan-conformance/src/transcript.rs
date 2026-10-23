@@ -557,16 +557,48 @@ impl Transcript {
     /// vocabulary across every lane, which has no Metal counterpart to compare against.
     pub fn announced_notices(&self) -> BTreeMap<String, u64> {
         let mut found = BTreeMap::new();
-        collect_notices(&self.root, &mut found);
+        for announced in self.announced_at() {
+            *found.entry(announced.code).or_default() += announced.times;
+        }
         found
     }
+
+    /// Every degrade notice the transcript records, with the **site** that announced it
+    /// ([`AnnouncedAt`]).
+    ///
+    /// The site is what the comparison needs, because a notice our side announced and no
+    /// declaration of the case names is a difference with nothing justifying it, and the row has
+    /// to say where it was announced. [`Transcript::announced_notices`] is this, totalled, so
+    /// there is one walk of the tree and not two readings of one rule.
+    pub fn announced_at(&self) -> Vec<AnnouncedAt> {
+        let mut found = Vec::new();
+        collect_notices("", &self.root, &mut found);
+        found
+    }
+}
+
+/// A degrade notice one site of a [`Transcript`] announced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnnouncedAt {
+    /// The site that announced it, as node names from the root: what a notice declaration's
+    /// allowance path covers.
+    pub path: String,
+    /// The notice's code (`Degradation::code`).
+    pub code: String,
+    /// How many times that site announced it.
+    pub times: u64,
 }
 
 /// The name [`Sites::notices`] gives the child that holds a code's count.
 const NOTICE_COUNTS: &str = "counts";
 
-/// Add every notice count under `node` to `found`.
-fn collect_notices(node: &Node, found: &mut BTreeMap<String, u64>) {
+/// Add every notice `node` and its children announced to `found`, under `parent`'s path.
+fn collect_notices(parent: &str, node: &Node, found: &mut Vec<AnnouncedAt>) {
+    let path = if parent.is_empty() {
+        node.name.to_string()
+    } else {
+        format!("{parent}/{}", node.name)
+    };
     if let Some(Node {
         observed: Observed {
             value: Value::Fields(counts),
@@ -577,12 +609,16 @@ fn collect_notices(node: &Node, found: &mut BTreeMap<String, u64>) {
     {
         for (code, count) in counts {
             if let Value::Uint(times) = count {
-                *found.entry(code.clone()).or_default() += times;
+                found.push(AnnouncedAt {
+                    path: path.clone(),
+                    code: code.clone(),
+                    times: *times,
+                });
             }
         }
     }
     for child in &node.children {
-        collect_notices(child, found);
+        collect_notices(&path, child, found);
     }
 }
 

@@ -193,9 +193,20 @@ impl Case for DiscardHoist {
                     crate::allowance::Justification::notice(Degradation::QuadsCountedBeforeDiscard),
                 )
             })
-            .chain(std::iter::once(crate::replay::notice_allowance(
-                Degradation::QuadsCountedBeforeDiscard.code(),
-            )))
+            // Two more kinds our side announces on lavapipe, declared so the notices site stays
+            // readable there: it splits a fragment quad at a clipped edge where Metal keeps it
+            // whole (`quads-split-by-clipping`) and groups a fragment simdgroup its own way
+            // (`fragment-simdgroup-grouping`). Declarations only -- `discard-quad-sum-placement`
+            // stays divergent on the sums it measures, which is the finding.
+            .chain(
+                [
+                    Degradation::QuadsCountedBeforeDiscard,
+                    Degradation::QuadsSplitByClipping,
+                    Degradation::FragmentSimdgroupGrouping,
+                ]
+                .into_iter()
+                .map(|kind| crate::replay::notice_allowance(kind.code())),
+            )
             .collect()
     }
 

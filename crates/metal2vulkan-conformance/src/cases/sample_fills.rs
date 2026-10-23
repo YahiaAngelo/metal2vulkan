@@ -463,6 +463,11 @@ impl Case for SampleFills {
             D::DepthDenormals,
             D::SharedInSystemMemory,
             D::ShadowedTextureView,
+            // A `Depth32Float` target a write may give a negative value or a NaN, whose test and
+            // store the device does not take as Metal's: the runtime renders it over a magnitude
+            // stand-in and announces the corners. Announced on lavapipe for the four-sample d32
+            // rows. Declared only; every depth word still compares exactly.
+            D::SignedDepthTest,
         ] {
             allowances.push(notice_allowance(kind.code()));
         }

@@ -14,6 +14,14 @@ Comparison is exact by default. A loosened field names either a degrade notice's
 notice did not fire. A site may name several, because a notice is announced once per device per
 kind: the difference is justified where any of them holds.
 
+**Every degrade notice our side announces must be one the case names**, or the case is divergent.
+Metal announces none, so a notice of ours is always a difference, and the only thing that can
+account for it is the case naming its code. The codes a case names are a set and the notices its run
+announced must be a subset of it: declaring one code never excuses another's. A code the case names
+whose notice this run did not announce is the other direction, and is reported as an unfired
+allowance rather than failed — a notice is announced once per device per kind, so which of a case's
+notices its own run provokes depends on what ran before it in the same process.
+
 A site where plain Metal answered a call and we returned a typed error is a **refusal**, and no
 allowance can make it anything else: it counts in its own verdict and is never compliant.
 

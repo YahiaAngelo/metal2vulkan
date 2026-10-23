@@ -589,12 +589,20 @@ impl Case for CompressedBlits {
         // Metal's: the only site loosened is the set of notices, which Metal holds empty, and the
         // allowance fails the case if the notice did not fire.
         //
-        // The shadowed-texture notice is deliberately not named too. These rows' texture over a
-        // buffer could in principle reach its bytes through a shadow image, but no venue of this
-        // suite announces it for them -- measured on MoltenVK and on lavapipe, under the exact
-        // and the default policy alike -- so naming it would be a tolerance nothing justifies.
-        // A venue that does announce it will read as a divergence here, which is the point: it
-        // is then a difference a human has not seen yet.
+        // The shadowed-texture notice is deliberately not named, and four of these rows are
+        // **divergent** on both venues because of it: `bgra10xr`, `bgra10xr-srgb`, `rg11b10f` and
+        // `rgb9e5f` announce `shadowed-texture` on MoltenVK and on lavapipe alike, so their texture
+        // over a buffer does reach its bytes through a shadow image. The earlier reading that no
+        // venue announced it was
+        // taken through a comparison that could not see it -- one notice declaration unchecked the
+        // whole notices site, so the `staged-texture-copy` declaration above hid every other code
+        // the run announced. Every byte of all four still compares exactly with Metal.
+        //
+        // The rows stay divergent on purpose, which is what this comment always said should
+        // happen: it is a difference nobody has looked at, and naming the code here would turn an
+        // unexamined mechanism into a permanent excuse. Whoever takes it decides whether a shadow
+        // image is the right answer for these formats' texture-over-buffer, and declares the code
+        // or changes the runtime.
         vec![crate::replay::notice_allowance(
             Degradation::StagedTextureCopy.code(),
         )]

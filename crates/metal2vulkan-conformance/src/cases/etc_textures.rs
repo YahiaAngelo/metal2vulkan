@@ -339,9 +339,15 @@ impl Case for EtcTextures {
         // the notice has to be declared by its code or the comparison cannot be made at all. The
         // declaration loosens no value: the only site it covers is the set of notices, which Metal
         // holds empty, and it fails the case if the notice did not fire.
-        let mut all = vec![crate::replay::notice_allowance(
-            Degradation::CarriedDecodedTwin.code(),
-        )];
+        // A CPU copy that fills such a texture (`replaceRegion`) is decoded on the CPU into that
+        // twin and copied in, announced as `cpu-block-decode`: the host-copy arm of the very
+        // mechanism the line above names, measured on lavapipe for every format of this family. It
+        // is a declaration and not a tolerance -- every texel the case reads still compares
+        // exactly with Metal.
+        let mut all = vec![
+            crate::replay::notice_allowance(Degradation::CarriedDecodedTwin.code()),
+            crate::replay::notice_allowance(Degradation::CpuBlockDecode.code()),
+        ];
         // An 8-bit format's twin holds Metal's own codes, but under the default
         // `TexelConversionPolicy::Device` the `float` the function answers is the **device's**
         // conversion of a code, not Metal's `c / 255` correctly rounded: lavapipe multiplies by

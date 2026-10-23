@@ -161,6 +161,15 @@ pub enum DivergenceKind {
     Unjustified { why: String },
     /// The site's fields differ in which fields they hold.
     Field { name: String, held_by: Side },
+    /// Our side announced a degrade notice the case declares nowhere.
+    ///
+    /// Metal announces none, so every notice of ours is a difference, and the one thing that may
+    /// account for it is the case naming its code
+    /// ([`crate::replay::notice_allowance`]). A notice the case names nowhere is therefore a
+    /// difference reaching a consumer with nothing said about it, which is the suite's own
+    /// definition of a bug — and it is **not** loosenable, because a declaration of one code must
+    /// not excuse another's.
+    UndeclaredNotice { code: String },
     /// Metal did not return from the call, and we answered it.
     ///
     /// The case's recording says Metal never came back from this call: the probe that found that
@@ -341,6 +350,10 @@ impl std::fmt::Display for DivergenceKind {
             DivergenceKind::Field { name, held_by } => {
                 write!(out, "only {held_by} holds the field {name}")
             }
+            DivergenceKind::UndeclaredNotice { code } => write!(
+                out,
+                "we announced the degrade notice {code}, which the case declares nowhere"
+            ),
             DivergenceKind::AnsweredWhereMetalDidNotReturn { ours } => write!(
                 out,
                 "Metal did not return from this call, and we answered it: {ours}"

@@ -210,9 +210,17 @@ impl Case for WidePoints {
         // handling and says so. Measured: lavapipe announces it here and MoltenVK does not, so the
         // case reads `announced` on lavapipe and `exact` on MoltenVK. No other notice fired for
         // this case on either venue, and a tolerance no run justifies is not carried.
-        vec![crate::replay::notice_allowance(
-            Degradation::DevicePointSize.code(),
-        )]
+        //
+        // The same device also converts the float the fragment writes to the normalized colour
+        // attachment in the shader (`shader-color-conversion`, lavapipe). Declared, not loosened:
+        // every coverage still compares exactly.
+        [
+            Degradation::DevicePointSize,
+            Degradation::ShaderColorConversion,
+        ]
+        .into_iter()
+        .map(|kind| crate::replay::notice_allowance(kind.code()))
+        .collect()
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

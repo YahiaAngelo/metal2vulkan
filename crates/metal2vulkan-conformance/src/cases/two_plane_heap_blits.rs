@@ -578,9 +578,18 @@ impl Case for HeapBlits {
         // bytes, and in `end255` past the heap's end, is what Metal's blit writes and what the
         // device announces. Metal announces nothing, so the notices site differs and that notice
         // is what justifies it.
-        vec![notice_allowance(
-            metal2vulkan_runtime::Degradation::TwoPlaneTextureCopy.code(),
-        )]
+        //
+        // These textures are also shadowed, and the notice's own definition names this exact
+        // shape: a heap's 2D texture of one level of `RGB10A8_2P_XR10` or its sRGB twin has an
+        // image that is a shadow of its two planes in the heap's bytes, where Metal lays them out.
+        // Declaring it loosens no byte -- every heap byte the case reads compares exactly.
+        [
+            metal2vulkan_runtime::Degradation::TwoPlaneTextureCopy,
+            metal2vulkan_runtime::Degradation::ShadowedTexture,
+        ]
+        .into_iter()
+        .map(|kind| notice_allowance(kind.code()))
+        .collect()
     }
 
     fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {

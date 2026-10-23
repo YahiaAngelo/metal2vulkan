@@ -104,6 +104,10 @@ pub const TILE_PASS_NOTICES: &[Degradation] = &[
     // A render target of a format whose NaN encoding the device copies its own way: the blur's
     // `RGBA16Float` attachment.
     Degradation::DeviceNanEncoding,
+    // A device that splits a fragment quad at a clipped edge where Metal keeps it whole. Announced
+    // on lavapipe. Nothing of these cases reads a quad's grouping -- the tile order is the answer,
+    // and it compares exactly -- so the kind is declared and no value is loosened.
+    Degradation::QuadsSplitByClipping,
 ];
 
 /// The allowances a case of this family keeps: one over its notices site per kind of

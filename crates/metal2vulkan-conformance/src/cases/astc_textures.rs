@@ -377,9 +377,15 @@ impl Case for AstcTextures {
         // the notice has to be declared by its code or the comparison cannot be made at all. The
         // declaration loosens no value: the only site it covers is the set of notices, which Metal
         // holds empty, and it fails the case if the notice did not fire.
-        let mut all = vec![crate::replay::notice_allowance(
-            Degradation::CarriedDecodedTwin.code(),
-        )];
+        // A CPU copy that fills such a texture (`replaceRegion`) is decoded on the CPU into that
+        // twin and copied in, announced as `cpu-block-decode`: the host-copy arm of the very
+        // mechanism the line above names, measured on lavapipe for every format of this family. It
+        // is a declaration and not a tolerance -- every texel the case reads still compares
+        // exactly with Metal.
+        let mut all = vec![
+            crate::replay::notice_allowance(Degradation::CarriedDecodedTwin.code()),
+            crate::replay::notice_allowance(Degradation::CpuBlockDecode.code()),
+        ];
         // An sRGB form's twin holds Metal's own 8-bit codes, which its slots decode through Metal's
         // table, so its texels compare exactly under either policy and it names nothing further. A
         // linear format's compact twin holds the 8-bit code nearest Metal's 12-bit value, which the

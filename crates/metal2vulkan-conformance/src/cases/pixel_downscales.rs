@@ -417,9 +417,17 @@ impl Case for PixelDownscales {
         // Metal announces nothing, so a notice of ours is a difference at the notices site.
         // These are the two kinds a run of this round provoked (see `pixel_samplers`); a venue
         // that announces another reads as divergent there until someone names it with a run.
+        //
+        // Two more are named from the run that shows them, which is what the paragraph above asks
+        // for: on lavapipe the device's texel decode keeps a denormal where Metal flushes it
+        // (`device-texel-denormals`) and decodes an sRGB code its own way (`srgb-texel-decode`).
+        // Both are declarations and loosen nothing: every texel of these cases compares exactly
+        // with Metal on both venues.
         [
             Degradation::ArgumentPixelSamplerScaling,
             Degradation::FloatSampleFilter,
+            Degradation::DeviceTexelDenormals,
+            Degradation::SrgbTexelDecode,
         ]
         .iter()
         .map(|kind| notice_allowance(kind.code()))

@@ -16,6 +16,16 @@
 //! The walk also counts the allowances it **did not** use ([`Unfired`]). A tolerance no site needed
 //! is not a failure — it may be venue-specific — but it is a claim no run has checked, and until it
 //! was counted a case could name one indefinitely without anybody noticing.
+//!
+//! One rule is checked beside the walk rather than in it: **every degrade notice our side announced
+//! must be one the case names**, reported as a
+//! [`DivergenceKind::UndeclaredNotice`]. The notices
+//! site holds the whole announced set as one value, and a declaration unchecks that site, so the
+//! walk alone let one declaration excuse every other notice. The subset check is what makes the
+//! suite's central sentence — a difference is a bug unless we announced it — able to fail where it
+//! is stated. The same check also marks a declaration **used** where its own code was announced,
+//! because the walk marked only the first covering allowance and a case's second declaration could
+//! therefore never fire.
 
 use crate::allowance::{Allowance, Loosening, Offered, Unjustified};
 use crate::diff::{Divergence, DivergenceKind, ElementAt, GapAt, LineAt, Side};
@@ -248,6 +258,13 @@ pub fn compare_run(
         }
     }
     let mut fired = vec![false; allowances.len()];
+    // The complement of the walk at the notices site, and the suite's central claim rests on it:
+    // every notice our side announced must be one the case names, and a declaration fires on its
+    // own code. Without it a case that declared any single notice could not fail at that site at
+    // all, and its second declaration could never fire (see [`notice_declarations`]).
+    for undeclared in notice_declarations(ours, allowances, &mut fired) {
+        found.divergences.push(undeclared);
+    }
     let mut walk = Walk {
         allowances,
         offered,
@@ -275,6 +292,75 @@ pub fn compare_run(
                 .unjustified(&offered)
                 .map(|why| why.to_string()),
         });
+    }
+    found
+}
+
+/// Hold the case's notice declarations to the notices our run announced, two ways: a divergence for
+/// every code we announced that the case names nowhere, and `fired` set for every declaration whose
+/// own code was announced.
+///
+/// **Why this is a check of its own, and not something the walk does.** A notice declaration is an
+/// allowance at `case/notices/*` loosened [`Loosening::Unchecked`]
+/// ([`crate::replay::notice_allowance`]), and the notices site holds the whole announced **set** as
+/// one value. So the moment one declaration's justification holds, [`Walk::allowed`] passes that
+/// site whatever is in the set, and marks only *that* allowance fired. Both halves were defects:
+///
+/// - **One declaration excused every other notice.** Measured at `f2fc351534`: a case declaring
+///   `carried-decoded-twin` while the run announced it *plus* `device-texel-conversion` *plus*
+///   `native-division` compared with **zero** divergences. The honest rule is a subset — what we
+///   announce is covered by what the case names — and no allowance can reach it, because a
+///   declaration of one code must not excuse another's.
+/// - **A case's second declaration could never fire.** A case naming two notices, both announced,
+///   read "3 named, 2 fired, 1 never fired", because the walk stops at the first covering
+///   allowance that holds. So the obvious way to state two notices separately produced a
+///   permanently dead allowance, and the only thing that said so was the unfired counter. A
+///   declaration now fires on **its own** code being announced, which is what it claims.
+///
+/// `fired` is only set for an allowance that **covers the site that announced the code**: a
+/// tolerance at a value site justified by a notice is a claim about a value, and whether it fired
+/// is the walk's question, not this one. So a notice-level allowance whose code no run announces
+/// still reads as never fired ([`Unfired`]).
+///
+/// A **declaration**, for the subset rule, is any allowance justified by a
+/// [`crate::allowance::Justification::Degradation`], whatever its path: a case that loosens a value
+/// by a notice's code has named that code and had it checked against the catalogue, and making it
+/// write a second allowance would be bookkeeping rather than evidence. What is **not** required is
+/// that a declared notice fired — a notice is announced once per device per kind.
+fn notice_declarations(
+    ours: &Transcript,
+    allowances: &[Allowance],
+    fired: &mut [bool],
+) -> Vec<Divergence> {
+    let code_of = |allowance: &Allowance| match &allowance.justified_by {
+        crate::allowance::Justification::Degradation(code) => Some(code.clone()),
+        _ => None,
+    };
+    let declared: Vec<String> = allowances.iter().filter_map(code_of).collect();
+    let mut found: Vec<Divergence> = Vec::new();
+    for announced in ours.announced_at() {
+        for (at, allowance) in allowances.iter().enumerate() {
+            if code_of(allowance).as_deref() == Some(announced.code.as_str())
+                && allowance.covers(&announced.path)
+            {
+                fired[at] = true;
+            }
+        }
+        if declared.contains(&announced.code) {
+            continue;
+        }
+        // One row per code, however many sites announced it: the code is the fact, and a row per
+        // site would report one undeclared notice as several.
+        let held = |divergence: &Divergence| matches!(&divergence.kind, DivergenceKind::UndeclaredNotice { code } if *code == announced.code);
+        if found.iter().any(held) {
+            continue;
+        }
+        found.push(Divergence::new(
+            &announced.path,
+            DivergenceKind::UndeclaredNotice {
+                code: announced.code,
+            },
+        ));
     }
     found
 }

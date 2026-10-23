@@ -872,6 +872,234 @@ fn a_notice_we_announce_and_metal_does_not_is_divergent_until_it_is_named() {
     );
 }
 
+/// The suite's central claim, at the one site it is stated: a difference is a bug unless we
+/// announced it. A notice declaration is an allowance at `case/notices/*` loosened `Unchecked`,
+/// and the notices site holds the whole announced set as one value, so until the subset check
+/// beside the walk existed **one declaration unchecked every other notice**. Measured at
+/// `f2fc351534`: this case read `announced` with zero divergences while announcing two codes it
+/// names nowhere, one of them unrelated to the one it declares.
+#[test]
+fn a_declared_notice_does_not_excuse_an_undeclared_one() {
+    let declared = Degradation::CarriedDecodedTwin;
+    let undeclared = [
+        Degradation::DeviceTexelConversion,
+        Degradation::NativeDivision,
+    ];
+    let bytes = words(&[1, 2]);
+    let case = WordsCase {
+        allowances: vec![crate::replay::notice_allowance(declared.code())],
+        ..WordsCase::new("words", 2)
+    };
+    let recording = recording_of(&case, case.transcript(bytes.clone(), "Completed", &[]), 3);
+    let mut side =
+        StubSide::new(bytes.clone()).announcing(&[declared, undeclared[0], undeclared[1]]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    let Verdict::Divergent { found, .. } = &replayed.verdict else {
+        panic!("not divergent: {}", replayed.verdict);
+    };
+    // One row per undeclared code, naming the code, and none for the declared one.
+    let named: Vec<&str> = found
+        .iter()
+        .filter_map(|divergence| match &divergence.kind {
+            DivergenceKind::UndeclaredNotice { code } => Some(code.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        named,
+        vec![undeclared[0].code(), undeclared[1].code()],
+        "{found:?}"
+    );
+    // The row says where it was announced and which notice it was, so a reader needs nothing else.
+    let printed = replayed.verdict.to_string();
+    assert!(printed.contains("case/notices"), "{printed}");
+    assert!(
+        printed.contains(undeclared[0].code()) && printed.contains(undeclared[1].code()),
+        "{printed}"
+    );
+
+    // Declaring all three, the same run is announced: the check fires on what is undeclared and
+    // on nothing else.
+    let whole = WordsCase {
+        allowances: [declared, undeclared[0], undeclared[1]]
+            .iter()
+            .map(|kind| crate::replay::notice_allowance(kind.code()))
+            .collect(),
+        ..WordsCase::new("words", 2)
+    };
+    let mut side = StubSide::new(bytes).announcing(&[declared, undeclared[0], undeclared[1]]);
+    let replayed = replay_against(&whole, &mut side, &recording).unwrap();
+    assert!(
+        matches!(replayed.verdict, Verdict::Announced { .. }),
+        "{}",
+        replayed.verdict
+    );
+}
+
+/// A case that names two notices separately must see **both** fire. Before the subset check the
+/// walk stopped at the first covering allowance that held, so a case declaring two announced
+/// notices read "3 named, 2 fired, 1 never fired" and its second declaration was permanently dead
+/// -- which a stream met in live use while porting a buffer-backed texture lane. A declaration now
+/// fires on its own code being announced.
+#[test]
+fn two_notice_declarations_both_fire_when_both_notices_are_announced() {
+    let first = Degradation::ALL[0];
+    let second = Degradation::ALL[1];
+    let bytes = words(&[1, 2]);
+    let case = WordsCase {
+        allowances: vec![
+            crate::replay::notice_allowance(first.code()),
+            crate::replay::notice_allowance(second.code()),
+        ],
+        ..WordsCase::new("words", 2)
+    };
+    let recording = recording_of(&case, case.transcript(bytes.clone(), "Completed", &[]), 3);
+    let mut side = StubSide::new(bytes).announcing(&[first, second]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert!(
+        matches!(replayed.verdict, Verdict::Announced { .. }),
+        "{}",
+        replayed.verdict
+    );
+    assert_eq!(replayed.allowances.named, 2);
+    assert_eq!(
+        replayed.allowances.unfired,
+        Vec::new(),
+        "both declarations are the case's own claims and both notices were announced"
+    );
+    assert_eq!(replayed.allowances.fired(), 2);
+}
+
+/// The other half of keeping that counter load-bearing: a **tolerance** justified by a notice fires
+/// only where a value needed it, whatever the notices site did. Announcing the code must not mark a
+/// value tolerance used, or a tolerance nothing checked would read as checked.
+#[test]
+fn a_value_tolerance_does_not_fire_just_because_its_notice_was_announced() {
+    let kind = Degradation::ALL[0];
+    let bytes = words(&[1, 2]);
+    let case = WordsCase {
+        allowances: vec![
+            crate::replay::notice_allowance(kind.code()),
+            Allowance::new(
+                "case/output",
+                Loosening::Unchecked,
+                Justification::notice(kind),
+            ),
+        ],
+        ..WordsCase::new("words", 2)
+    };
+    let recording = recording_of(&case, case.transcript(bytes.clone(), "Completed", &[]), 3);
+    // The notice is announced, and every byte matches, so nothing needed the value tolerance.
+    let mut side = StubSide::new(bytes).announcing(&[kind]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    let unfired: Vec<&str> = replayed
+        .allowances
+        .unfired
+        .iter()
+        .map(|unfired| unfired.path.as_str())
+        .collect();
+    assert_eq!(unfired, vec!["case/output"], "{unfired:?}");
+}
+
+/// And the counter the defect was caught by stays load-bearing: a notice-level allowance whose code
+/// no run announces still reads as never fired.
+#[test]
+fn a_notice_declaration_whose_notice_is_quiet_still_reads_as_never_fired() {
+    let fired = Degradation::ALL[0];
+    let quiet = Degradation::ALL[1];
+    let bytes = words(&[1, 2]);
+    let case = WordsCase {
+        allowances: vec![
+            crate::replay::notice_allowance(fired.code()),
+            crate::replay::notice_allowance(quiet.code()),
+        ],
+        ..WordsCase::new("words", 2)
+    };
+    let recording = recording_of(&case, case.transcript(bytes.clone(), "Completed", &[]), 3);
+    let mut side = StubSide::new(bytes).announcing(&[fired]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert_eq!(replayed.allowances.fired(), 1);
+    let unfired = &replayed.allowances.unfired;
+    assert_eq!(unfired.len(), 1, "{unfired:?}");
+    assert!(
+        unfired[0].justified_by.contains(quiet.code()),
+        "{unfired:?}"
+    );
+}
+
+/// `announced_notices` is `announced_at` totalled, so the rule is read in one place: the comparison
+/// needs each notice's **site** to say where an undeclared one was announced, and the notice census
+/// needs the totals. Worth its own test because blinding that walk fails nothing else in the crate's
+/// no-device tests but the undeclared-notice case.
+#[test]
+fn the_notice_walk_names_its_site_and_totals_its_codes() {
+    let mut sites = Sites::new();
+    sites.notices(NOTICES_SITE, &["b-code", "a-code", "b-code"]);
+    let transcript = sites.finish();
+    let announced = transcript.announced_at();
+    let seen: Vec<(&str, &str, u64)> = announced
+        .iter()
+        .map(|at| (at.path.as_str(), at.code.as_str(), at.times))
+        .collect();
+    assert_eq!(
+        seen,
+        vec![("case/notices", "a-code", 1), ("case/notices", "b-code", 2)],
+        "{announced:?}"
+    );
+    assert_eq!(
+        transcript.announced_notices(),
+        [("a-code".to_owned(), 1), ("b-code".to_owned(), 2)]
+            .into_iter()
+            .collect()
+    );
+}
+
+/// Two shapes the subset check must not fail, because both are honest. A case may name a code its
+/// own run never announced -- a notice is announced once per device per kind -- and that is an
+/// unfired declaration, not an undeclared notice. And a case that loosens a *value* by a notice's
+/// code has named that code, with the same catalogue and announcement checks applied, so it needs
+/// no second allowance saying so again.
+#[test]
+fn a_notice_named_anywhere_in_the_case_is_declared() {
+    let at_the_site = Degradation::ALL[0];
+    let at_a_value = Degradation::ALL[1];
+    let quiet = Degradation::ALL[2];
+    let case = WordsCase {
+        allowances: vec![
+            crate::replay::notice_allowance(at_the_site.code()),
+            // Named by a tolerance at a value site, and nowhere else.
+            Allowance::new(
+                "case/output",
+                Loosening::Unchecked,
+                Justification::notice(at_a_value),
+            ),
+            // Named, and not announced by this run: unfired, never a divergence.
+            crate::replay::notice_allowance(quiet.code()),
+        ],
+        ..WordsCase::new("words", 2)
+    };
+    let recording = recording_of(&case, case.transcript(words(&[1, 2]), "Completed", &[]), 3);
+    let mut side = StubSide::new(words(&[1, 7])).announcing(&[at_the_site, at_a_value]);
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert!(
+        matches!(replayed.verdict, Verdict::Announced { .. }),
+        "{}",
+        replayed.verdict
+    );
+    // And the declaration nothing needed is reported as unfired rather than silently kept.
+    let unfired: Vec<&str> = replayed
+        .allowances
+        .unfired
+        .iter()
+        .map(|unfired| unfired.path.as_str())
+        .collect();
+    assert_eq!(
+        unfired,
+        vec![format!("case/{NOTICES_SITE}/*")],
+        "{unfired:?}"
+    );
+}
+
 #[test]
 fn an_allowance_whose_notice_did_not_fire_fails_the_case() {
     let kind = Degradation::ALL[0];
