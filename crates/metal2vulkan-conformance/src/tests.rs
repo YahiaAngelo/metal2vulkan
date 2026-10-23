@@ -610,6 +610,165 @@ fn every_failure_records_as_an_error_however_it_is_named() {
     }
 }
 
+/// A case whose two sites are the two shapes a refusal used to vanish in: one whose Metal answer
+/// is a **tree of facts**, whose own value is therefore absent, and one whose Metal answer is a
+/// bare number.
+///
+/// Written in the shape the real cases are — a queue's slots, an event's order, a buffer-backed
+/// texture's facts and a sparse heap's all record a tree under the site and a typed error at it —
+/// so the test holds the pattern those cases use rather than one of its own.
+struct FactsCase {
+    name: &'static str,
+}
+
+impl FactsCase {
+    fn new(name: &'static str) -> Self {
+        Self { name }
+    }
+
+    /// The transcript a side that answered emits: Metal's answer for this case.
+    fn metal(&self) -> Transcript {
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(&self.inputs().unwrap()));
+        sites.push(Self::tree());
+        sites.value(COUNT, Value::Uint(7));
+        sites.notices(NOTICES_SITE, &[] as &[&str]);
+        sites.finish()
+    }
+
+    /// The site whose answer is a tree, with each fact at a distinct value so one taking
+    /// another's cannot pass by coincidence. One builder, so neither leg can hold a tree the
+    /// other does not.
+    fn tree() -> Node {
+        Node::branch(FACTS, Vec::new())
+            .with(Node::leaf("width", Observed::value(Value::Uint(3))))
+            .with(Node::leaf("height", Observed::value(Value::Uint(5))))
+    }
+}
+
+/// The site whose answer is a tree.
+const FACTS: &str = "facts";
+
+/// The site whose answer is a bare number.
+const COUNT: &str = "count";
+
+impl Case for FactsCase {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::Run
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        Ok(vec![Input::bytes("facts", b"one tree and one number")])
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        match side.texture_2d(
+            metal2vulkan::metal::PixelFormat::RGBA8Unorm,
+            [1, 1],
+            4,
+            &[0u8; 4],
+        ) {
+            Ok(_) => {
+                sites.push(Self::tree());
+                sites.value(COUNT, Value::Uint(7));
+            }
+            Err(failure) => {
+                // The hand-written shape the real cases use: the site carries our typed error, and
+                // the run carries on rather than aborting.
+                sites.push(Node::leaf(FACTS, Observed::value(failure.recorded())));
+                sites.push(Node::leaf(COUNT, Observed::value(failure.recorded())));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A refusal is [`Verdict::Refused`] at a site whose Metal answer is a **tree of facts** and at one
+/// whose answer is a bare number, and the ledger holds a row for each in both directions.
+///
+/// Two more shapes the same class of bug reached, found by auditing every path into a verdict after
+/// the `Work` program's was fixed, and both are worse than the one that was reported:
+///
+/// - A **tree**'s own value is [`Value::Absent`](crate::transcript::Value::Absent), and the
+///   comparison skips an absent value, so the typed error was dropped outright and the report held
+///   one "only Metal observed this site" divergence per child instead. The refusal appeared nowhere
+///   at all.
+/// - A **bare number** read as two sides observing different kinds of value: a divergence whose
+///   answer names neither the typed error nor anything a reader could act on.
+///
+/// Neither reached the refused count and neither could be written down, which is the same
+/// consequence the program step's refusal had.
+#[test]
+fn a_refusal_where_metals_answer_is_a_tree_or_a_number_is_refused() {
+    use crate::known_gaps::{against, Expectation, Expects, KnownGap, EVERY_VENUE};
+    let case = FactsCase::new("facts-refusal");
+    let recording = recording_of(&case, case.metal(), 3);
+    let mut side = StubSide::new(Vec::new()).refusing(
+        "texture",
+        Failure::named("Error::Unsupported", "this venue makes no such texture"),
+    );
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    assert_eq!(replayed.verdict.word(), "refused", "{}", replayed.verdict);
+    let Verdict::Refused { at, .. } = &replayed.verdict else {
+        panic!("{}", replayed.verdict);
+    };
+    // Both sites, and **only** the two sites: the tree's children are sites our side never
+    // reached, so one divergence each would have buried the refusal that is the fact.
+    let sites: Vec<&str> = at
+        .iter()
+        .map(|printed| printed.split_once(": ").expect("a site").0)
+        .collect();
+    assert_eq!(sites, vec!["case/facts", "case/count"], "{at:?}");
+    let printed = replayed.verdict.to_string();
+    assert!(!printed.contains("only Metal observed"), "{printed}");
+    assert!(printed.contains("Error::Unsupported"), "{printed}");
+
+    // Direction one: two gaps nothing has written down fail the run.
+    let rows = vec![replayed];
+    let found = against(&rows, &[]);
+    assert_eq!(found.len(), 2, "{found:?}");
+    let listed: Vec<KnownGap> = found
+        .iter()
+        .map(|why| {
+            let Expectation::Unlisted {
+                case,
+                expects,
+                site,
+                answer,
+                ..
+            } = why
+            else {
+                panic!("{why:?}");
+            };
+            assert_eq!(*expects, Expects::Refused);
+            KnownGap {
+                case: case.clone(),
+                venue: EVERY_VENUE.to_owned(),
+                expects: *expects,
+                site: site.clone(),
+                answer: answer.clone(),
+                waiting_on: "the stub makes no texture, which is the point of the stub".to_owned(),
+            }
+        })
+        .collect();
+    assert_eq!(against(&rows, &listed), Vec::new());
+
+    // Direction two: against a run that made the texture, both rows read as gaps that look fixed.
+    let mut made = StubSide::new(Vec::new());
+    let passed = replay_against(&case, &mut made, &recording).unwrap();
+    assert_eq!(passed.verdict.word(), "exact", "{}", passed.verdict);
+    let found = against(std::slice::from_ref(&passed), &listed);
+    assert_eq!(found.len(), 2, "{found:?}");
+    for why in &found {
+        assert!(matches!(why, Expectation::NoLongerHeld { .. }), "{found:?}");
+        assert!(why.to_string().contains("drop the row"), "{why}");
+    }
+}
+
 /// The words `values` are, as little-endian bytes.
 fn words(values: &[u32]) -> Vec<u8> {
     values.iter().flat_map(|word| word.to_le_bytes()).collect()
