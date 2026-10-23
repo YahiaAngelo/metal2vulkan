@@ -5,9 +5,9 @@
 //!
 //! Everything here is **portable**, and deliberately: a case states its plane, a recording holds
 //! those words, and a Metal-less venue replays it. The surface itself, its CoreFoundation and
-//! IOSurface entry points and the handle that owns one all live in [`crate::metal_surface`], which
-//! is the only module in the suite that makes an `IOSurfaceRef` — see its header for why the
-//! YCbCr plane textures and the rotated targets share one mechanism there.
+//! IOSurface entry points and the handle that owns one all live in `crate::metal_surface` (private
+//! to the suite, so not linked here), which is the only module that makes an `IOSurfaceRef` — see
+//! its header for why the YCbCr plane textures and the rotated targets share one mechanism there.
 //!
 //! The runtime models a rotated texture over a **buffer standing for** an IOSurface plane
 //! (`Buffer::new_texture_with_iosurface_plane`), because a Metal-less host has no IOSurface. Metal
