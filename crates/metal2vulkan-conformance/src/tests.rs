@@ -2333,9 +2333,11 @@ fn a_count_the_measurement_never_saw_is_bounded_at_zero() {
         venue: "a venue".to_owned(),
         runs: 2,
         measured: "two runs of the whole selection".to_owned(),
+        contrasted: None,
         degraded: Vec::new(),
         bounds: [("queue_submissions".to_owned(), 1)].into_iter().collect(),
         moving: Default::default(),
+        composed: Default::default(),
     };
     let judge = |text: &str| {
         crate::cost::judge(
@@ -2376,6 +2378,7 @@ fn a_count_whose_readings_moved_is_reported_and_not_gated() {
         venue: "a venue".to_owned(),
         runs: 3,
         measured: "three runs".to_owned(),
+        contrasted: None,
         degraded: Vec::new(),
         bounds: [("render_passes_made".to_owned(), 2)].into_iter().collect(),
         moving: range
@@ -2385,6 +2388,7 @@ fn a_count_whose_readings_moved_is_reported_and_not_gated() {
                     .collect()
             })
             .unwrap_or_default(),
+        composed: Default::default(),
     };
     let found = crate::cost::Counts::read("WorkCounts {\n    render_passes_made: 9,\n}").unwrap();
     // Deterministic in the measurement: held, and 9 is over 2.
@@ -2432,9 +2436,11 @@ fn a_run_with_no_bound_that_stands_is_unmeasured_and_says_why() {
         venue: "the measured venue".to_owned(),
         runs: 2,
         measured: "two runs".to_owned(),
+        contrasted: None,
         degraded: vec!["half-nan-quieted".to_owned()],
         bounds: [("queue_submissions".to_owned(), 1)].into_iter().collect(),
         moving: Default::default(),
+        composed: Default::default(),
     };
     let found = crate::cost::Counts::read("WorkCounts {\n    queue_submissions: 1,\n}").unwrap();
     let records = std::slice::from_ref(&record);
@@ -2513,9 +2519,11 @@ fn the_cost_record_rides_in_the_recording() {
         venue: "a venue".to_owned(),
         runs: 2,
         measured: "two runs of the whole selection".to_owned(),
+        contrasted: None,
         degraded: Vec::new(),
         bounds: [("queue_submissions".to_owned(), 1)].into_iter().collect(),
         moving: Default::default(),
+        composed: Default::default(),
     }];
     let recording = Recording::new("a case", Vec::new(), vec![answer]).with_costs(costs.clone());
     let text = serde_json::to_string_pretty(&recording).expect("it writes");
@@ -2580,9 +2588,11 @@ fn re_recording_a_metal_answer_keeps_the_cost_record() {
         venue: "a venue".to_owned(),
         runs: 1,
         measured: "one run".to_owned(),
+        contrasted: None,
         degraded: Vec::new(),
         bounds: Default::default(),
         moving: Default::default(),
+        composed: Default::default(),
     }];
     let kept = Recording::new(
         held.case.clone(),
@@ -2630,7 +2640,10 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
     ] {
         assert!(racy(count).is_some(), "{count}");
     }
-    // Counts a case's own calls produce, which held still alone and in both case sets.
+    // Counts the rule does not name, so the measurement decides them case by case. The rule is
+    // about what a counter counts; whether a particular case's reading of one depends on the
+    // selection is a question only the contrast run answers, and
+    // `a_count_the_selection_decides_is_reported_and_not_gated` holds that half.
     for count in [
         "command_buffers_deferred",
         "command_buffers_submitted",
@@ -2645,11 +2658,20 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
     ] {
         assert!(racy(count).is_none(), "{count}");
     }
+    // The two the contrast run caught over the 393-case set, each for a reason the runtime's own
+    // doc comment gives: the pool's state at an instant, and what a completion thread began ahead
+    // for a pool an earlier case gave back.
+    for count in ["pipeline_pool_busy", "encoder_primaries_begun_ahead"] {
+        assert!(racy(count).is_some(), "{count}");
+    }
+    // And the total the second of those splits stays gated, so no work escapes by it.
+    assert!(racy("encoder_command_buffers_begun").is_none());
     // A record that bounds both at 1, with neither seen to move.
     let record = crate::cost::CostRecord {
         venue: "a venue".to_owned(),
         runs: 8,
         measured: "eight rounds".to_owned(),
+        contrasted: None,
         degraded: Vec::new(),
         bounds: [
             ("command_buffers_replayed_inline".to_owned(), 1),
@@ -2658,6 +2680,7 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
         .into_iter()
         .collect(),
         moving: Default::default(),
+        composed: Default::default(),
     };
     assert_eq!(record.gated(), 1, "only the total is gated");
     let judge = |text: &str| {
@@ -2752,4 +2775,156 @@ fn the_runtime_side_forwards_every_field_of_a_color_state() {
     assert_eq!(made.source_alpha_blend_factor, blend.source_alpha);
     assert_eq!(made.destination_alpha_blend_factor, blend.destination_alpha);
     assert_eq!(made.alpha_blend_operation, blend.alpha);
+}
+
+/// A count that reads one number inside the case set and another with the case alone is the
+/// selection's and not the case's: it is reported, its bound is the larger of the two readings, and
+/// the gate does not hold it.
+///
+/// This is the rule that stops a bound going stale on the next landing. A reading a landing can
+/// change is a reading that depends on what ran before the case, and measuring the case alone is
+/// how the record sees that.
+#[test]
+fn a_count_the_selection_decides_is_reported_and_not_gated() {
+    // What the gate's own shape wrote: one pipeline layout made, four command buffers begun, two
+    // submissions.
+    let held = crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 8,
+        measured: "eight runs of the whole selection".to_owned(),
+        contrasted: None,
+        degraded: Vec::new(),
+        bounds: [
+            ("pipeline_layouts_made".to_owned(), 1),
+            ("command_buffers_begun".to_owned(), 4),
+            ("queue_submissions".to_owned(), 2),
+        ]
+        .into_iter()
+        .collect(),
+        moving: Default::default(),
+        composed: Default::default(),
+    };
+    // What the case does alone: two layouts, because nothing made one before it, and three command
+    // buffers, because the work it batches with in company is not there. The two counts move in
+    // opposite directions, which is why neither shape bounds the other.
+    let apart = crate::cost::CaseCost {
+        case: "a case".to_owned(),
+        counts: crate::cost::Counts::read(
+            "WorkCounts {\n    pipeline_layouts_made: 2,\n    command_buffers_begun: 3,\n    \
+             queue_submissions: 2,\n}",
+        )
+        .unwrap(),
+        least: crate::cost::Counts::read(
+            "WorkCounts {\n    pipeline_layouts_made: 2,\n    command_buffers_begun: 3,\n    \
+             queue_submissions: 2,\n}",
+        )
+        .unwrap(),
+        runs: 8,
+        stopped: None,
+        degraded: Vec::new(),
+        nanos: 1_000,
+    };
+    assert_eq!(
+        apart.apart_from(&held),
+        vec![
+            ("command_buffers_begun", 4, 3),
+            ("pipeline_layouts_made", 1, 2)
+        ],
+        "both disagreements are reported, with the reading from each shape"
+    );
+    let record = apart.fold_alone_into(&held, "eight runs of each case alone".to_owned());
+    // The gate's own measurement is kept, and the contrast is named beside it.
+    assert_eq!(record.measured, held.measured);
+    assert_eq!(
+        record.contrasted.as_deref(),
+        Some("eight runs of each case alone")
+    );
+    // The bound is the larger of the two readings, in both directions.
+    assert_eq!(record.bounds.get("pipeline_layouts_made"), Some(&2));
+    assert_eq!(record.bounds.get("command_buffers_begun"), Some(&4));
+    // And each carries the other shape's reading as the evidence for not gating it.
+    assert_eq!(record.composed.get("pipeline_layouts_made"), Some(&2));
+    assert_eq!(record.composed.get("command_buffers_begun"), Some(&3));
+    // The count the two shapes agreed on is the only one the gate holds.
+    assert_eq!(record.gated(), 1);
+    let gated: Vec<String> = record
+        .held()
+        .into_iter()
+        .filter(|bound| bound.gated())
+        .map(|bound| bound.count)
+        .collect();
+    assert_eq!(gated, vec!["queue_submissions".to_owned()]);
+    // A run that does more of a reported count than either shape saw is still `Within`: no bound
+    // of this case's own can hold a number the selection decides.
+    let verdict = crate::cost::judge(
+        std::slice::from_ref(&record),
+        "a venue",
+        true,
+        &crate::cost::Counts::read(
+            "WorkCounts {\n    pipeline_layouts_made: 9,\n    command_buffers_begun: 9,\n    \
+             queue_submissions: 2,\n}",
+        )
+        .unwrap(),
+        None,
+        &[],
+    );
+    assert!(verdict.is_within(), "{verdict}");
+    // While the count both shapes agreed on still bites.
+    let verdict = crate::cost::judge(
+        std::slice::from_ref(&record),
+        "a venue",
+        true,
+        &crate::cost::Counts::read("WorkCounts {\n    queue_submissions: 3,\n}").unwrap(),
+        None,
+        &[],
+    );
+    assert!(!verdict.is_within(), "{verdict}");
+}
+
+/// A count the cases-alone measurement never moved, which the gate's own shape did, is reported
+/// too: a reading of zero is a reading, and the two shapes still disagree.
+///
+/// Without this the contrast would only ever catch a count that grew alone, and every count the
+/// company does the work for would stay gated on a number the selection decides.
+#[test]
+fn a_count_only_one_shape_moved_is_reported_as_well() {
+    let held = crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 8,
+        measured: "eight runs of the whole selection".to_owned(),
+        contrasted: None,
+        degraded: Vec::new(),
+        bounds: [("commands_replayed.cmd_dispatch".to_owned(), 4)]
+            .into_iter()
+            .collect(),
+        moving: Default::default(),
+        composed: Default::default(),
+    };
+    let apart = crate::cost::CaseCost {
+        case: "a case".to_owned(),
+        // Alone the case moved a count the whole-set run never did, and did not move the one it
+        // did: both directions of "only one shape saw it".
+        counts: crate::cost::Counts::read("WorkCounts {\n    arena_pools_made: 1,\n}").unwrap(),
+        least: crate::cost::Counts::read("WorkCounts {\n    arena_pools_made: 1,\n}").unwrap(),
+        runs: 8,
+        stopped: None,
+        degraded: Vec::new(),
+        nanos: 1_000,
+    };
+    assert_eq!(
+        apart.apart_from(&held),
+        vec![
+            ("arena_pools_made", 0, 1),
+            ("commands_replayed.cmd_dispatch", 4, 0)
+        ]
+    );
+    let record = apart.fold_alone_into(&held, "eight runs of each case alone".to_owned());
+    assert_eq!(record.gated(), 0, "neither count is the case's own");
+    // The count only the lone run moved still gets a bound, or a selection where this case is the
+    // first to run would be held to zero.
+    assert_eq!(record.bounds.get("arena_pools_made"), Some(&1));
+    assert_eq!(
+        record.bounds.get("commands_replayed.cmd_dispatch"),
+        Some(&4)
+    );
 }

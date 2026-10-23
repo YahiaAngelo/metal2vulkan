@@ -124,11 +124,14 @@
       "venue": "Apple M3 Max",
       "runs": 8,
       "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-carried-decoded-twin",
         "metal2vulkan-degrade-unpacked-fill-color"
       ],
       "bounds": {
+        "addressable_buffers_made": 2,
+        "arena_pools_made": 2,
         "bare_starts": 22,
         "batches_with_none_pending": 22,
         "block_decode_passes": 44,
@@ -150,6 +153,7 @@
         "commits_handed_off": 22,
         "completed_waits": 25,
         "completed_where_seen": 22,
+        "device_memory_allocated": 201326592,
         "encoder_command_buffers_begun": 22,
         "finales_folded": 22,
         "new_buffer_bytes_cleared": 4288,
@@ -168,6 +172,7 @@
         "object_churn.vk_images_destroyed": 4,
         "object_churn.vk_images_made": 4,
         "owned_descriptor_pools": 44,
+        "pooled_memory_blocks_made": 3,
         "queue_submissions": 22,
         "scheduled_where_submitted": 22,
         "scheduler_passes": 22,
@@ -178,6 +183,12 @@
         "submit_infos": 22,
         "wakes_completion_waiters": 22,
         "wakes_spared": 132
+      },
+      "composed": {
+        "addressable_buffers_made": 2,
+        "arena_pools_made": 2,
+        "device_memory_allocated": 201326592,
+        "pooled_memory_blocks_made": 3
       }
     }
   ]

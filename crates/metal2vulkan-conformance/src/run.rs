@@ -128,6 +128,7 @@ fn cost_row(
                 },
                 counts: Counts::default(),
                 nanos,
+                reported: [0; 3],
             }
         }
     };
@@ -153,11 +154,30 @@ fn cost_row(
         stopped.as_deref(),
         degraded,
     );
+    let reported = records
+        .iter()
+        .find(|record| record.venue == venue)
+        .map(|record| {
+            let held = record.held();
+            [
+                held.iter().filter(|one| one.racy.is_some()).count(),
+                held.iter()
+                    .filter(|one| one.racy.is_none() && one.range.is_some())
+                    .count(),
+                held.iter()
+                    .filter(|one| {
+                        one.racy.is_none() && one.range.is_none() && one.composed.is_some()
+                    })
+                    .count(),
+            ]
+        })
+        .unwrap_or([0; 3]);
     CostRow {
         case: case.name().to_owned(),
         verdict,
         counts,
         nanos,
+        reported,
     }
 }
 
@@ -254,12 +274,44 @@ pub fn cost_on_under(
     Ok((venue, held))
 }
 
+/// Measure each of `cases` on its own: a selection of one, on a device no other case has touched,
+/// over `runs` rounds.
+///
+/// This is the other shape a cost measurement can have, and it answers a different question.
+/// [`cost_on_under`] measures a case where the gate will run it, after everything before it in the
+/// set; this measures the case with nothing before it at all. The difference matters for every
+/// count the runtime pools, because a case that runs alone makes what a case in company finds
+/// already made: alone is where a `*_made` count is at its largest and a `*_shared` count at its
+/// smallest.
+///
+/// A bound taken alone is therefore an upper bound that no composition can exceed — and so it does
+/// not go stale when a case lands beside it, which a bound taken over one particular set does. It
+/// buys that with looseness: for a count that pooling lowers a lot, a bound measured alone sits
+/// well above what the case does in company, and a gate holding it will not notice a smaller
+/// regression.
+pub fn cost_alone_on_under(
+    venues: Venues,
+    policy: Policy,
+    cases: &[Box<dyn Case>],
+    runs: u32,
+) -> Result<(String, Vec<CaseCost>), String> {
+    let mut venue = String::new();
+    let mut held = Vec::with_capacity(cases.len());
+    for case in cases {
+        let (name, measured) = cost_on_under(venues, policy, std::slice::from_ref(case), runs)?;
+        venue = name;
+        held.extend(measured);
+    }
+    Ok((venue, held))
+}
+
 /// Write what `measured` says each case cost on `venue` into the cases' own recordings, answering
 /// where each went or why it could not be written.
 ///
 /// A case whose run stopped is **not** recorded: its counts are of a part of the case.
 pub fn record_costs(
     venue: &str,
+    shape: crate::cost::Shape,
     measured: &[CaseCost],
     words: &str,
 ) -> Vec<(String, Result<std::path::PathBuf, String>)> {
@@ -272,7 +324,7 @@ pub fn record_costs(
                      part of the case"
                 ))
             } else {
-                record_one_cost(venue, cost, words)
+                record_one_cost(venue, shape, cost, words)
             };
             (cost.case.clone(), written)
         })
@@ -291,12 +343,38 @@ pub fn record_costs(
 /// the answer. The union only ever stops a count being gated; it never raises a bound.
 fn record_one_cost(
     venue: &str,
+    shape: crate::cost::Shape,
     cost: &CaseCost,
     words: &str,
 ) -> Result<std::path::PathBuf, String> {
     let mut recording = crate::recording::read(&cost.case)?;
+    // A measurement of the cases alone does not replace the gate's own shape: it folds into it,
+    // and what the two read differently becomes the counts the selection decides.
+    if shape == crate::cost::Shape::Alone {
+        let held = recording
+            .costs
+            .iter()
+            .find(|held| held.venue == venue)
+            .ok_or_else(|| {
+                format!(
+                    "no cost record for {venue} to contrast with: measure the whole case set \
+                     first, then the cases alone"
+                )
+            })?;
+        let folded = cost.fold_alone_into(held, words.to_owned());
+        recording.costs.retain(|held| held.venue != venue);
+        recording.costs.push(folded);
+        recording
+            .costs
+            .sort_by(|one, two| one.venue.cmp(&two.venue));
+        return crate::recording::write(&recording);
+    }
     let mut record = cost.record(venue, words.to_owned());
     if let Some(held) = recording.costs.iter().find(|held| held.venue == venue) {
+        // The contrast an earlier command took is kept: re-measuring the gate's own shape says
+        // nothing new about the other one, and dropping it would silently re-gate every count the
+        // selection decides.
+        record.contrasted = held.contrasted.clone();
         for (count, least) in &held.moving {
             if crate::cost::racy(count).is_some() {
                 continue;
@@ -309,6 +387,18 @@ fn record_one_cost(
             *bound = (*bound).max(most);
             let seen = record.moving.entry(count.clone()).or_insert(*least);
             *seen = (*seen).min(*least);
+        }
+        // The same for a count an earlier measurement found the selection decides. A measurement
+        // that took only one shape has nothing to say about the contrast, so what an earlier one
+        // established is kept rather than silently dropped and the count re-gated.
+        for (count, apart) in &held.composed {
+            if crate::cost::racy(count).is_some() {
+                continue;
+            }
+            let most = held.bounds.get(count).copied().unwrap_or(0);
+            let bound = record.bounds.entry(count.clone()).or_insert(most);
+            *bound = (*bound).max(most).max(*apart);
+            record.composed.entry(count.clone()).or_insert(*apart);
         }
     }
     recording.costs.retain(|held| held.venue != venue);

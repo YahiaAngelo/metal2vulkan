@@ -129,12 +129,19 @@ const RELEASED: &str = "what a release got round to destroying, which runs on wh
 /// family measured to go **up** with more cases around it, from 0 to 4, which is the direction an
 /// upper bound cannot survive.
 ///
-/// Every other count that moved between the two readings moved the safe way, higher when the case
-/// ran alone: `addressable_buffers_made`, `pooled_memory_blocks_made`, `arena_pools_made`,
+/// The `_made` partners stay gated, and a measurement over all 393 cases in both shapes says they
+/// can: `addressable_buffers_made`, `pooled_memory_blocks_made`, `arena_pools_made`,
 /// `device_memory_allocated`, `creation_pipelines_made`, `variant_pipelines_made`,
-/// `shader_modules_made`, `pipeline_layouts_made`, `command_buffers_begun` and
-/// `command_buffers_submitted` are all first-case-pays counts, so the whole-set bound sits at or
-/// under what a lone run would do and more cases can only lower them. They stay gated.
+/// `shader_modules_made` and `pipeline_layouts_made` read at or above their in-set reading in every
+/// case that ran alone, so company only lowers them.
+///
+/// That is a fact about those eight counts and not a law about `_made` counts, and the contrast the
+/// measurement now takes is what tells one from the other. Two counts an earlier version of this
+/// doc claimed alongside them — `command_buffers_begun` and `command_buffers_submitted` — move
+/// **both** ways: alone above their in-set reading in 104 cases and below it in 6, because
+/// `xr-clears-bgr10xr` and its siblings begin a command buffer in 64 segments inside the set and in
+/// 1 alone. A count like that is bounded from neither shape, which is why [`CaseCost::composed`]
+/// reports it instead of either shape gating it.
 const FOUND: &str = "an object found already made rather than made, which depends on what every \
      case before it in the same process made. Its `_made` partner stays gated, and loses nothing: \
      finding one only lowers that count, and the gate is an upper bound";
@@ -152,6 +159,34 @@ const BORROWED: &str = "waits a case is charged for that belong to whatever ran 
      completion waiter is a thread of ours, so a wait lands in whichever case's window it reaches. \
      Measured: 25, 225 and 5 waits when three cases run alone against 30, 230 and 10 inside the \
      whole set";
+
+/// Why `pipeline_pool_busy` is reported and never gated, which the runtime's own doc comment says
+/// before any measurement does: it is "not a count of events, but the pool's state then".
+///
+/// It is the `*_live` family wearing a name the suffix does not catch. Subtracting two readings of
+/// how many pieces the device's pipeline pool holds gives neither a count of work nor a difference
+/// in state: the pool's threads are ours, and whether one is still running when the counts are
+/// read is a question about this instant. Measured: it reached 1 where the measurement's most was
+/// 0 on `xr-blend-bgra10xr-one-zero` in one whole-set replay and read 0 in the next.
+const POOL_STATE: &str = "a reading of how many pieces the device's pipeline pool holds at the \
+     instant the counts are read, which the runtime documents as the pool's state and not a count \
+     of events";
+
+/// Why `encoder_primaries_begun_ahead` is reported and never gated.
+///
+/// The runtime documents it as a `VkCommandBuffer` begun "by the thread that completed the command
+/// buffer that gave it back where no thread waited for that one", so whether this case's first
+/// encoder finds a primary already begun depends on whether a completion thread got round to
+/// beginning it, for a pool an earlier case gave back. It is also a *split* of
+/// `encoder_command_buffers_begun`, which stays gated, so no work escapes the gate by it.
+///
+/// Measured: `chroma-pair-copies-gbgr422` and `chroma-pair-texel-samples-gbgr422` read 2 and 1
+/// inside the 393-case set where the measurement's most was 0, and **0** when each runs alone --
+/// the opposite direction to a pooled making, and the reason a bound measured alone would fail
+/// them for ever.
+const AHEAD: &str = "whether this case's first encoder found a primary command buffer already \
+     begun, which the thread that completed an earlier command buffer does ahead when nothing \
+     waits for it. Its total, encoder_command_buffers_begun, stays gated, so nothing is lost";
 
 /// Why a count of an object made because no spare was free is reported and never gated.
 const POOLED: &str = "an object made because no spare was free, where a spare comes back on \
@@ -186,7 +221,7 @@ const POOLED: &str = "an object made because no spare was free, where a spare co
 /// replays of a larger case set — which reads like a regression and is not one. See [`BORROWED`].
 /// `slot_returns` beside it stays gated: it counts work items, one a command buffer, and has held
 /// still alone and in both case sets.
-const RACY: [(&str, &str); 25] = [
+const RACY: [(&str, &str); 27] = [
     ("fences_made", POOLED),
     // What is alive, parked or waiting at the instant the counts were read.
     ("memory_blocks_live", INSTANTANEOUS),
@@ -210,6 +245,8 @@ const RACY: [(&str, &str); 25] = [
     ("sampler_sets_shared", FOUND),
     ("variants_taken_back", FOUND),
     ("completed_waits", BORROWED),
+    ("pipeline_pool_busy", POOL_STATE),
+    ("encoder_primaries_begun_ahead", AHEAD),
     ("command_pools_made", POOLED),
     ("spare_command_pools_", POOLED),
     ("live_tables_uploaded", POOLED),
@@ -541,15 +578,24 @@ pub struct CostBound {
     /// so it is reported rather than gated: a bound that fails at random is worse than no bound.
     /// This is the evidence for not gating it, and it names the range it was seen in.
     pub range: Option<u64>,
+    /// What the same count read when the case ran **alone**, where the two shapes of the
+    /// measurement disagreed.
+    ///
+    /// A count that reads one number inside the case set and another with nothing before it is not
+    /// a property of the case at all: it is a property of the selection, and the next case to land
+    /// beside this one changes it. Such a count is reported rather than gated, and this is the
+    /// reading that says so.
+    pub composed: Option<u64>,
     /// Why this count is reported and never gated whatever the measurement saw ([`racy`]).
     pub racy: Option<&'static str>,
 }
 
 impl CostBound {
-    /// Whether this count is gated: the measurement found it deterministic, and it is not one of
-    /// the counts that say which thread arrived first.
+    /// Whether this count is gated: the measurement found it deterministic between runs **and**
+    /// between the two shapes it was run in, and it is not one of the counts that say which thread
+    /// arrived first.
     pub fn gated(&self) -> bool {
-        self.range.is_none() && self.racy.is_none()
+        self.range.is_none() && self.composed.is_none() && self.racy.is_none()
     }
 }
 
@@ -570,6 +616,11 @@ pub struct CostRecord {
     /// bounds were taken from it. The suite's rule is that a bound names its measurement, and this
     /// is where a reader finds it.
     pub measured: String,
+    /// The measurement of the same cases **alone**, in words, where one was taken: the contrast
+    /// that decided which counts the gate holds. `None` means no contrast has been taken for this
+    /// venue, and then nothing in the record is claimed to be independent of the selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contrasted: Option<String>,
     /// The degrade-notice codes the measurement's runs announced, sorted.
     ///
     /// **This is what keeps a device's gap from reading as a cost win.** A count that is lower
@@ -588,6 +639,17 @@ pub struct CostRecord {
     /// named here is reported rather than gated.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub moving: BTreeMap<String, u64>,
+    /// What each count read when the case ran **alone** on a device nothing else had touched,
+    /// where that disagreed with its reading inside the case set. A count named here is reported
+    /// rather than gated.
+    ///
+    /// This is the contrast run, taken by the measurement rather than by hand. It is the one test
+    /// that tells a count of the case's own work from a count of the selection's, and it is the
+    /// reason a bound stops going stale when a case lands beside this one: a reading a landing can
+    /// change is exactly a reading that depends on what ran before it, which is what this
+    /// disagreement is.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub composed: BTreeMap<String, u64>,
 }
 
 impl CostRecord {
@@ -599,6 +661,7 @@ impl CostRecord {
             region: region_of(count),
             most,
             range: self.moving.get(count).copied(),
+            composed: self.composed.get(count).copied(),
             racy: racy(count),
         })
     }
@@ -695,7 +758,9 @@ impl std::fmt::Display for CostVerdict {
 /// command pools, memory blocks and descriptor sets across cases. A selection of a few cases does
 /// *more* fresh work than the same cases inside a whole-set run, so its counts are not the ones
 /// the bounds were measured over, and holding them to those bounds would fail honestly-identical
-/// work. Such a run is `Unmeasured`.
+/// work. Such a run is `Unmeasured`. The contrast ([`CostRecord::composed`]) does not lift that:
+/// the two shapes it compares are the two extremes of composition, and agreeing at both ends is no
+/// evidence about a selection in between.
 pub fn judge(
     records: &[CostRecord],
     venue: &str,
@@ -766,6 +831,25 @@ pub fn judge(
     }
 }
 
+/// Which shape a cost measurement was taken in.
+///
+/// Neither bounds the other, and that is the whole reason both are taken. A pooled making is
+/// largest with the case **alone**, because a case with nothing before it makes what a case in
+/// company finds already made, so a bound taken in company goes stale the moment a case lands
+/// beside this one and makes the shared thing first. A count one of our own background threads
+/// moves is often largest **in company**, because the work it does ahead and the waits it borrows
+/// come from whatever ran before, so a bound taken alone would fail such a count for ever.
+///
+/// So the gate holds only the counts the two shapes agree on, and each shape is measured by its
+/// own command into the same record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// The whole selection in the case set's own order: the shape the gate itself runs in.
+    InSet,
+    /// Each case on a device nothing else has touched.
+    Alone,
+}
+
 /// What one case's cost run came to: the counts it moved, and how long it took.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CaseCost {
@@ -811,10 +895,74 @@ impl CaseCost {
             venue: venue.to_owned(),
             runs: self.runs,
             measured,
+            contrasted: None,
             degraded: self.degraded.clone(),
             bounds,
             moving,
+            composed: BTreeMap::new(),
         }
+    }
+
+    /// Fold this measurement of the cases **alone** into `held`, the record the gate's own shape
+    /// wrote: every count the two shapes read differently becomes one the selection decides.
+    ///
+    /// The two shapes are two commands and not two legs of one, because one process cannot measure
+    /// both cleanly. Measured: `bc1-rgba` run on its own reads `commands_replayed.cmd_dispatch` 4
+    /// and `command_buffers_deferred` 6 in three invocations out of three, and **0** for both when
+    /// the same leg runs after a whole-set leg in the same process — the deferred replay is a
+    /// thread of ours, and whether it lands inside a case's window is not the same question after
+    /// 393 cases have run. So each shape is measured in a process of its own and the record
+    /// accumulates, which is also what lets either shape be re-measured by itself.
+    pub fn fold_alone_into(&self, held: &CostRecord, measured: String) -> CostRecord {
+        let mut folded = held.clone();
+        folded.contrasted = Some(measured);
+        let names: std::collections::BTreeSet<&str> = self
+            .counts
+            .iter()
+            .map(|(count, _)| count)
+            .chain(held.bounds.keys().map(String::as_str))
+            .collect();
+        for count in names {
+            // The rule already ungates these whatever either shape read, so an entry would be
+            // redundant and the bound is the gate's own shape's.
+            if racy(count).is_some() {
+                continue;
+            }
+            let apart = self.counts.get(count);
+            let inside = held.bounds.get(count).copied().unwrap_or(0);
+            if apart != inside {
+                folded.composed.insert(count.to_owned(), apart);
+            }
+            // The bound stays the largest either shape saw, so the record's own number is honest
+            // about what was observed. For a gated count the two agree, so only the bounds of
+            // counts that are reported anyway widen.
+            let bound = folded.bounds.entry(count.to_owned()).or_insert(apart);
+            *bound = (*bound).max(apart);
+        }
+        folded
+    }
+
+    /// The counts this measurement reads differently from `held`: the ones the selection decides.
+    ///
+    /// Each is `(count, the other shape's reading, this one's)`. Counts the [`racy`] rule already
+    /// names are left out, because the rule ungates them whatever either shape read.
+    pub fn apart_from<'a>(&'a self, held: &'a CostRecord) -> Vec<(&'a str, u64, u64)> {
+        let names: std::collections::BTreeSet<&str> = self
+            .counts
+            .iter()
+            .map(|(count, _)| count)
+            .chain(held.bounds.keys().map(String::as_str))
+            .collect();
+        names
+            .into_iter()
+            .filter_map(|count| {
+                let (inside, apart) = (
+                    held.bounds.get(count).copied().unwrap_or(0),
+                    self.counts.get(count),
+                );
+                (inside != apart && racy(count).is_none()).then_some((count, inside, apart))
+            })
+            .collect()
     }
 
     /// The counts whose readings disagreed between runs: the ones no bound gates.

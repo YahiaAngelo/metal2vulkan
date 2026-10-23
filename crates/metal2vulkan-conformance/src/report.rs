@@ -21,6 +21,11 @@ pub struct CostRow {
     /// How long the case's run took, in nanoseconds. **Advisory**: this half gates on counts, and
     /// a time is reported so a reader can see where the counts are large.
     pub nanos: u64,
+    /// How many of the case's bounds are reported rather than gated, and why, in three groups: the
+    /// race rule's, the ones whose readings moved between runs, and the ones the selection decides
+    /// ([`cost::CostRecord::composed`]). The gate's own honesty number: it says how much of the
+    /// counted surface no bound holds.
+    pub reported: [usize; 3],
 }
 
 /// A report over a selection of cases and venues.
@@ -404,6 +409,25 @@ impl Report {
             "  {:<14} {held} count(s) held over the cases within their bounds\n",
             "gated"
         ));
+        // And how much of the counted surface no bound holds, in its three groups, so a green
+        // cost half is read for what it is rather than for the whole of what the runtime counts.
+        let mut reported = [0usize; 3];
+        for row in &self.costs {
+            for (group, many) in row.reported.iter().enumerate() {
+                reported[group] += many;
+            }
+        }
+        if reported.iter().any(|many| *many > 0) {
+            out.push_str(&format!(
+                "  {:<14} {} more no bound holds: {} the race rule names, {} the runs disagreed \
+                 on, {} the selection decides\n",
+                "reported",
+                reported.iter().sum::<usize>(),
+                reported[0],
+                reported[1],
+                reported[2],
+            ));
+        }
         let mut sums: BTreeMap<Region, usize> = BTreeMap::new();
         for row in &self.costs {
             for (region, many) in cost::by_region(&row.counts) {

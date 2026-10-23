@@ -108,5 +108,63 @@
       ],
       "validated": "ran"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
+      "bounds": {
+        "addressable_buffers_made": 2,
+        "bare_starts": 4,
+        "batches_with_none_pending": 4,
+        "command_buffers_begun": 7,
+        "command_buffers_begun_batch_barriers": 1,
+        "command_buffers_begun_batch_work": 2,
+        "command_buffers_begun_encoders": 4,
+        "command_buffers_deferred": 4,
+        "command_buffers_replayed_inline": 4,
+        "command_buffers_submitted": 7,
+        "commands_replayed.begin_command_buffer": 4,
+        "commands_replayed.cmd_fill_buffer": 4,
+        "commands_replayed.cmd_pipeline_barrier": 4,
+        "commands_replayed.end_command_buffer": 4,
+        "commits_handed_off": 4,
+        "completed_waits": 16,
+        "completed_where_seen": 4,
+        "device_memory_allocated": 201326592,
+        "encoder_command_buffers_begun": 4,
+        "fills_recorded": 4,
+        "finales_apart": 1,
+        "finales_folded": 3,
+        "memory_blocks_live": 1,
+        "object_churn.buffers_parked": 2,
+        "object_churn.buffers_recycled": 1,
+        "object_churn.vk_buffer_bindings": 1,
+        "object_churn.vk_buffers_made": 1,
+        "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 1,
+        "queue_submissions": 4,
+        "scheduled_where_submitted": 4,
+        "scheduler_passes": 4,
+        "scheduler_sleeps": 3,
+        "scheduler_wakes_commit": 4,
+        "slot_returns": 4,
+        "spare_command_pools_taken": 8,
+        "submit_infos": 5,
+        "wakes_completion_waiters": 4,
+        "wakes_spared": 27
+      },
+      "moving": {
+        "primaries_begun_ahead": 0
+      },
+      "composed": {
+        "addressable_buffers_made": 2,
+        "device_memory_allocated": 201326592,
+        "pooled_memory_blocks_made": 3,
+        "primaries_begun_ahead": 0
+      }
+    }
   ]
 }

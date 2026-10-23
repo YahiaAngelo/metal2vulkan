@@ -3414,11 +3414,13 @@
       "venue": "Apple M3 Max",
       "runs": 8,
       "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
       "degraded": [
         "metal2vulkan-degrade-host-read-dispatch-arguments"
       ],
       "bounds": {
-        "arena_pools_made": 1,
+        "addressable_buffers_made": 2,
+        "arena_pools_made": 2,
         "argument_objects_retained": 112,
         "argument_tables_retained": 28,
         "bare_starts": 29,
@@ -3430,7 +3432,7 @@
         "command_buffers_begun_segments": 13,
         "command_buffers_deferred": 54,
         "command_buffers_replayed": 37,
-        "command_buffers_replayed_inline": 18,
+        "command_buffers_replayed_inline": 29,
         "command_buffers_submitted": 68,
         "commands_replayed.begin_command_buffer": 54,
         "commands_replayed.cmd_bind_descriptor_sets": 28,
@@ -3444,6 +3446,7 @@
         "completed_waits": 32,
         "completed_where_seen": 28,
         "creation_pipelines_made": 1,
+        "device_memory_allocated": 201326592,
         "dispatch_pipelines_pooled": 12,
         "encoder_command_buffers_begun": 54,
         "finales_apart": 14,
@@ -3456,8 +3459,9 @@
         "object_churn.vk_buffer_bindings": 60,
         "object_churn.vk_buffers_destroyed": 4,
         "object_churn.vk_buffers_made": 60,
-        "pipeline_layouts_made": 2,
+        "pipeline_layouts_made": 3,
         "pipeline_layouts_shared": 7,
+        "pooled_memory_blocks_made": 3,
         "queue_submissions": 29,
         "scheduled_where_submitted": 28,
         "scheduler_passes": 54,
@@ -3472,6 +3476,13 @@
         "variant_pipelines_made": 13,
         "wakes_completion_waiters": 29,
         "wakes_spared": 170
+      },
+      "composed": {
+        "addressable_buffers_made": 2,
+        "arena_pools_made": 2,
+        "device_memory_allocated": 201326592,
+        "pipeline_layouts_made": 3,
+        "pooled_memory_blocks_made": 3
       }
     }
   ]

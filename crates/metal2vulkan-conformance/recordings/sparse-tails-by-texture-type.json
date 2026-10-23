@@ -1023,5 +1023,42 @@
       ],
       "validated": "ran"
     }
+  ],
+  "costs": [
+    {
+      "venue": "Apple M3 Max",
+      "runs": 8,
+      "measured": "8 run(s) of the whole selection on Apple M3 Max, in the case set's own order, the largest each count reached",
+      "contrasted": "8 run(s) of each case on its own on Apple M3 Max, nothing before it on the device, the largest each count reached",
+      "degraded": [
+        "metal2vulkan-degrade-emulated-sparse-texture"
+      ],
+      "bounds": {
+        "addressable_buffers_made": 2,
+        "device_memory_allocated": 335544320,
+        "empty_memory_blocks_live": 2,
+        "new_buffer_bytes_cleared": 6272,
+        "object_churn.buffers_evicted": 6,
+        "object_churn.buffers_parked": 19,
+        "object_churn.buffers_recycled": 13,
+        "object_churn.images_other": 30,
+        "object_churn.textures_in_heaps": 30,
+        "object_churn.vk_buffer_bindings": 24,
+        "object_churn.vk_buffers_destroyed": 6,
+        "object_churn.vk_buffers_made": 24,
+        "object_churn.vk_image_bindings": 30,
+        "object_churn.vk_images_destroyed": 30,
+        "object_churn.vk_images_made": 30,
+        "object_churn.vk_memory_allocations": 2,
+        "pooled_memory_blocks_freed": 1,
+        "pooled_memory_blocks_made": 5
+      },
+      "composed": {
+        "addressable_buffers_made": 2,
+        "device_memory_allocated": 335544320,
+        "pooled_memory_blocks_freed": 1,
+        "pooled_memory_blocks_made": 5
+      }
+    }
   ]
 }
