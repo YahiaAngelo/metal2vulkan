@@ -68,6 +68,7 @@ pub mod sample_positions;
 pub mod scheduled_handlers;
 pub mod shader_stencil;
 pub mod shared_events;
+pub mod shared_exponent_storage;
 pub mod simdgroup_lockstep;
 pub mod snorm_tile_store;
 pub mod sparse_heaps;
@@ -257,6 +258,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     );
 
     for case in extended_swizzles::all() {
+        cases.push(Box::new(case));
+    }
+    for case in shared_exponent_storage::all() {
         cases.push(Box::new(case));
     }
     cases.extend(texel_swizzles::all());
