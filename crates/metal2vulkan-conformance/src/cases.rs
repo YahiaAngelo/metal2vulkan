@@ -16,6 +16,7 @@
 //!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
+pub mod depth_texel_reads;
 pub mod extended_range_planes;
 pub mod indirect_private_types;
 pub mod math_routines;
@@ -46,6 +47,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
     }
     cases.push(Box::new(stage_in_regions::stage_in_region_clamps()));
     for case in extended_range_planes::all() {
+        cases.push(Box::new(case));
+    }
+    for case in depth_texel_reads::all() {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(texture_buffer_fills::streams()));

@@ -69,8 +69,8 @@
 
 use crate::case::{
     Answer, Bindings, Fill, Handle, IndirectReadBack, MeshCommand, MeshFunctions, MeshStep,
-    PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, ShaderSource, Side, StageInRegion,
-    StageInput, Venue,
+    PassOutcome, PlaneTexture, RateMapFacts, RateMapRequest, SamplerSpec, ShaderSource, Side,
+    StageInRegion, StageInput, TextureSpec, Venue,
 };
 use crate::recording::Validated;
 use crate::transcript::Value;
@@ -273,6 +273,16 @@ impl<S: Side> Side for Announcing<S> {
     fn read_texture(&mut self, texture: Handle, size: [u32; 2], row_pitch: u32) -> Answer<Vec<u8>> {
         self.at("read_texture");
         self.inner.read_texture(texture, size, row_pitch)
+    }
+
+    fn texture_2d_in_role(&mut self, spec: &TextureSpec, bytes: &[u8]) -> Answer<Handle> {
+        self.at("texture_2d_in_role");
+        self.inner.texture_2d_in_role(spec, bytes)
+    }
+
+    fn sampler(&mut self, spec: &SamplerSpec) -> Answer<Handle> {
+        self.at("sampler");
+        self.inner.sampler(spec)
     }
 
     fn dispatch(
