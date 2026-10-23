@@ -334,6 +334,9 @@ impl CompressedBlits {
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
             length: whole,
+            // The read starts from zero, as this case's reads always did: it asks
+            // nothing about the padding between its rows.
+            before: 0,
         });
         reads.push(Read {
             at: "cpu-in-cpu-out",
@@ -393,6 +396,9 @@ impl CompressedBlits {
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
             length: whole,
+            // The read starts from zero, as this case's reads always did: it asks
+            // nothing about the padding between its rows.
+            before: 0,
         });
         reads.push(Read {
             at: "blit-in-cpu-out",
@@ -443,6 +449,9 @@ impl CompressedBlits {
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
             length: whole,
+            // The read starts from zero, as this case's reads always did: it asks
+            // nothing about the padding between its rows.
+            before: 0,
         });
         reads.push(Read {
             at: "out-of-compressed",
@@ -476,6 +485,9 @@ impl CompressedBlits {
             bytes_per_row: SIDE * per,
             bytes_per_image: 0,
             length: whole,
+            // The read starts from zero, as this case's reads always did: it asks
+            // nothing about the padding between its rows.
+            before: 0,
         });
         reads.push(Read {
             at: "into-compressed",

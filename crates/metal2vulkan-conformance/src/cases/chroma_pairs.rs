@@ -488,6 +488,9 @@ impl ChromaCopies {
             // passes; a 2D region has one image, so there is nothing for it to say.
             bytes_per_image: 0,
             length,
+            // The read starts from zero, as this case's reads always did: it asks
+            // nothing about the padding between its rows.
+            before: 0,
         });
         ReadSite {
             name: format!("{}/{site}", self.word),

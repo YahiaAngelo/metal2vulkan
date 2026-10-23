@@ -535,9 +535,10 @@ impl Run<'_> {
                 bytes_per_row,
                 bytes_per_image,
                 length,
+                before,
             } => {
                 let texture = self.texture(*texture)?;
-                let mut bytes = vec![0u8; *length];
+                let mut bytes = vec![*before; *length];
                 texture
                     .get_bytes(
                         &mut bytes,

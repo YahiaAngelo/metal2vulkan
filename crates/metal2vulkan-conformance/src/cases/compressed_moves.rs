@@ -388,12 +388,14 @@ pub struct Plan {
 /// The layout a read-back of `(l, s)` of `shape` is compared under: `across` blocks of `block`
 /// bytes in a row, rows `row` apart, `down` rows an image, images `image` apart, every byte
 /// compared including the padding past each row.
+///
+/// The region it names is the **texels** the call read, which is not the blocks rounded up: a level
+/// 13 texels wide is four blocks across, and a diff should name the level's own texels.
 fn texture_layout(
-    shape: &Shape,
     (l, s): (u64, u64),
-    at: [u64; 3],
     [across, down, deep]: [u64; 3],
     (block, row, image): (u64, u64, u64),
+    (origin, size): ([u64; 3], [u64; 3]),
 ) -> ByteLayout {
     ByteLayout {
         region: Region::Texture {
@@ -401,8 +403,8 @@ fn texture_layout(
             slice: s as u32,
             aspect: Aspect::Color,
             sample: 0,
-            origin: [at[0] as u32 * 4, at[1] as u32 * 4, at[2] as u32],
-            size: [across as u32 * 4, down as u32 * 4, shape.level(l)[2] as u32],
+            origin: [origin[0] as u32, origin[1] as u32, origin[2] as u32],
+            size: [size[0] as u32, size[1] as u32, size[2] as u32],
         },
         element: Element::U8,
         row_offset: 0,
@@ -502,7 +504,12 @@ fn plan(format: u32, block: u64, shape: &Shape, seed: u64) -> Plan {
             step: Step::Put.site(),
             leaf: format!("{l}-{s}"),
             bytes: want,
-            layout: texture_layout(shape, (l, s), [0; 3], [bx, by, bz], (block, row, image)),
+            layout: texture_layout(
+                (l, s),
+                [bx, by, bz],
+                (block, row, image),
+                ([0, 0, 0], [w, h, d]),
+            ),
         });
         work.step(WorkStep::GetBytes {
             texture: first,
@@ -512,6 +519,10 @@ fn plan(format: u32, block: u64, shape: &Shape, seed: u64) -> Plan {
             bytes_per_row: row,
             bytes_per_image: image,
             length: total as usize,
+            // The lane reads into bytes of 0xcd, so the bytes past each row's blocks are recorded
+            // as a value Metal would never write: that is what makes "the padding stayed as it
+            // was" a question with an answer.
+            before: BEFORE,
         });
     }
 
@@ -539,11 +550,10 @@ fn plan(format: u32, block: u64, shape: &Shape, seed: u64) -> Plan {
             leaf: format!("{l}-{s}"),
             bytes: want,
             layout: texture_layout(
-                shape,
                 (l, s),
-                [1, 0, 0],
                 [across, by, bz],
                 (block, row, image),
+                ([4, 0, 0], [w - 4, h, d]),
             ),
         });
         work.step(WorkStep::GetBytes {
@@ -554,6 +564,10 @@ fn plan(format: u32, block: u64, shape: &Shape, seed: u64) -> Plan {
             bytes_per_row: row,
             bytes_per_image: image,
             length: total as usize,
+            // The lane reads into bytes of 0xcd, so the bytes past each row's blocks are recorded
+            // as a value Metal would never write: that is what makes "the padding stayed as it
+            // was" a question with an answer.
+            before: BEFORE,
         });
     }
 

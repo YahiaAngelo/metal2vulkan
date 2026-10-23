@@ -57,6 +57,7 @@ pub mod nearest_positions;
 pub mod pass_bytes;
 pub mod pixel_downscales;
 pub mod pixel_samplers;
+pub mod pvrtc_cpu_order;
 pub mod pvrtc_rows;
 pub mod rate_maps;
 pub mod rgb10a2_srgb;
@@ -109,6 +110,9 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     for case in pvrtc_rows::all() {
+        cases.push(Box::new(case));
+    }
+    for case in pvrtc_cpu_order::all() {
         cases.push(Box::new(case));
     }
     for case in level_sizes::all() {

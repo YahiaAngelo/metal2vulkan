@@ -706,9 +706,10 @@ impl Run<'_> {
                 bytes_per_row,
                 bytes_per_image,
                 length,
+                before,
             } => {
                 let texture = self.texture(*texture)?;
-                let mut bytes = vec![0u8; *length];
+                let mut bytes = vec![*before; *length];
                 // SAFETY: `bytes` is `length` bytes, which the case sized for the region's rows
                 // and images at these pitches, and the caller waited for the command buffer that
                 // wrote the texture.

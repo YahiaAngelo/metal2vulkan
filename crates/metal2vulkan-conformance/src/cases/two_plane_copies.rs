@@ -311,6 +311,9 @@ fn row_blit_work(blit: &RowBlit) -> Work {
         bytes_per_row: 4 * w,
         bytes_per_image: 4 * w * h,
         length: (4 * w * h) as usize,
+        // The read starts from zero, as this case's reads always did: it asks
+        // nothing about the padding between its rows.
+        before: 0,
     });
     work
 }

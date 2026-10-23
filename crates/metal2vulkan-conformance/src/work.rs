@@ -410,6 +410,13 @@ pub enum Step {
         bytes_per_row: u64,
         bytes_per_image: u64,
         length: usize,
+        /// The byte every one of those `length` bytes holds before the call.
+        ///
+        /// A case that reads at a pitch wider than its rows asks two questions at once — the bytes
+        /// the call wrote, and whether it left the padding between the rows alone — and the second
+        /// needs a fill the call would never write. Zero is a poor one, because a call that wrote
+        /// zeros would pass; a case that means the question states a distinctive byte.
+        before: u8,
     },
     /// A read of a buffer's bytes, which answers a read.
     ReadBuffer {
