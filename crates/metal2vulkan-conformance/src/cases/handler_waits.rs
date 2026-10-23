@@ -15,7 +15,7 @@
 //! # Nothing of this runs on Metal, ever
 //!
 //! [`crate::metal_side::MetalSide`] does not implement
-//! [`Side::handler_wait`](crate::case::Side::handler_wait) and must not: the call it would make is
+//! [`Side::handler_wait`] and must not: the call it would make is
 //! the call that takes Metal's process with it. Record mode refuses these three rows before
 //! anything is encoded ([`crate::case::MetalSource::forbidden`]), and their recordings are written
 //! by hand from the probe that died, through [`crate::record::never_returned`] — the only way such
