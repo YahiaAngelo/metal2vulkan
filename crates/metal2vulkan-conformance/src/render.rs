@@ -1098,6 +1098,22 @@ pub enum RenderStep {
         arguments: Handle,
         offset: u64,
     },
+    /// `useResource:usage:stages:` of a buffer, which is how a resource an **indirect** command's
+    /// functions reach is made resident: a command's buffer bindings are addresses, so Metal
+    /// tracks nothing for them and the pass must say what they are.
+    UseBuffer {
+        buffer: Handle,
+        /// `MTLResourceUsageWrite` beside `MTLResourceUsageRead`.
+        write: bool,
+        /// The raw `MTLRenderStages` bits ([`crate::case::STAGE_VERTEX`] and the rest).
+        stages: u64,
+    },
+    /// `executeCommandsInBuffer:withRange:` of `count` commands from `first`.
+    ExecuteCommands {
+        commands: Handle,
+        first: u64,
+        count: u64,
+    },
 }
 
 impl RenderStep {
@@ -1158,6 +1174,8 @@ impl RenderStep {
             RenderStep::Draw { .. } => "drawPrimitives",
             RenderStep::DrawIndexed { .. } => "drawIndexedPrimitives",
             RenderStep::DrawIndirect { .. } => "drawPrimitivesWithIndirectBuffer",
+            RenderStep::UseBuffer { .. } => "useResource",
+            RenderStep::ExecuteCommands { .. } => "executeCommandsInBuffer",
         }
     }
 
@@ -1227,6 +1245,16 @@ impl RenderStep {
             } => {
                 bytes.extend(primitive.as_raw().to_le_bytes());
                 bytes.extend(offset.to_le_bytes());
+            }
+            RenderStep::UseBuffer { write, stages, .. } => {
+                bytes.push(u8::from(*write));
+                bytes.extend(stages.to_le_bytes());
+            }
+            // The commands a range executes are fingerprinted by the case through the buffer's
+            // own descriptor and every command's steps, so only the range is the call's own.
+            RenderStep::ExecuteCommands { first, count, .. } => {
+                bytes.extend(first.to_le_bytes());
+                bytes.extend(count.to_le_bytes());
             }
         }
         bytes
@@ -1474,6 +1502,21 @@ pub enum RenderWork {
         into_offset: u64,
         length: u64,
     },
+    /// One compute encoder that makes every buffer of `used` resident (`useResource:usage:`) and
+    /// then runs `count` of an indirect command buffer's commands from `first`
+    /// (`executeCommandsInBuffer:withRange:`).
+    ///
+    /// The render half of the same question is two steps of a pass ([`RenderStep::UseBuffer`] and
+    /// [`RenderStep::ExecuteCommands`]), because a render pass has attachments and a load action
+    /// to state and a compute encoder has nothing. Each buffer says whether the commands write
+    /// it.
+    ComputeCommands {
+        commands: Handle,
+        first: u64,
+        count: u64,
+        /// The buffers the commands' functions reach, and whether they are written.
+        used: Vec<(Handle, bool)>,
+    },
 }
 
 impl RenderWork {
@@ -1484,6 +1527,7 @@ impl RenderWork {
             RenderWork::ReadTexture { .. } => "copyFromTextureToBuffer",
             RenderWork::Dispatch(_) => "dispatchThreads",
             RenderWork::CopyBuffer { .. } => "copyFromBufferToBuffer",
+            RenderWork::ComputeCommands { .. } => "executeCommandsInBuffer",
         }
     }
 }
@@ -1581,6 +1625,12 @@ mod tests {
                 into: handle(),
                 into_offset: 0,
                 length: 16,
+            },
+            RenderWork::ComputeCommands {
+                commands: handle(),
+                first: 0,
+                count: 1,
+                used: Vec::new(),
             },
         ];
         let named: BTreeSet<&str> = pieces.iter().map(RenderWork::call).collect();

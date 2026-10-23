@@ -1014,6 +1014,59 @@ pub trait Side {
         Err(Failure::unavailable("mesh_command_buffer"))
     }
 
+    /// `newComputePipelineStateWithDescriptor:options:reflection:error:` of the library's `entry`
+    /// with `supportIndirectCommandBuffers` set, so an indirect compute command may set the
+    /// state, under the stage-input descriptor `stage_input` where the case names one.
+    ///
+    /// It is a call of its own rather than a flag on
+    /// [`compute_pipeline`](Side::compute_pipeline), because the flag is a property of the state
+    /// Metal checks at the setter rather than at the dispatch: a state made without it refuses to
+    /// be set on a command, and a case that executes commands means the state it names to be one
+    /// a command may hold.
+    fn compute_pipeline_for_commands(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        stage_input: Option<&StageInput>,
+    ) -> Answer<Handle> {
+        let _ = (library, entry, stage_input);
+        Err(Failure::unavailable("compute_pipeline_for_commands"))
+    }
+
+    /// `newIndirectCommandBufferWithDescriptor:maxCommandCount:options:` of the descriptor the
+    /// case states whole ([`IcbDescriptor`]), of shared storage and of as many commands as
+    /// `commands` holds, and then every command of `commands` encoded by the host in order
+    /// ([`EncodedCommand`]).
+    ///
+    /// Every step of every command is encoded, whatever an earlier one answered, as the pass
+    /// vocabularies do: a refused setter leaves the rest of the encoding as it was, and the answer
+    /// names which step refused ([`CommandsMade::refused`]).
+    ///
+    /// [`IcbDescriptor`]: crate::indirect_commands::IcbDescriptor
+    /// [`EncodedCommand`]: crate::indirect_commands::EncodedCommand
+    /// [`CommandsMade::refused`]: crate::indirect_commands::CommandsMade::refused
+    fn indirect_command_buffer(
+        &mut self,
+        descriptor: &crate::indirect_commands::IcbDescriptor,
+        commands: &[crate::indirect_commands::EncodedCommand],
+    ) -> Answer<crate::indirect_commands::CommandsMade> {
+        let _ = (descriptor, commands);
+        Err(Failure::unavailable("indirect_command_buffer"))
+    }
+
+    /// `size` of an indirect command buffer: the commands it holds.
+    fn indirect_commands_size(&mut self, commands: Handle) -> Answer<u64> {
+        let _ = commands;
+        Err(Failure::unavailable("indirect_commands_size"))
+    }
+
+    /// `resetWithRange:` of `count` commands from `first`, which puts them back as a fresh
+    /// buffer's are.
+    fn reset_indirect_commands(&mut self, commands: Handle, first: u64, count: u64) -> Answer<()> {
+        let _ = (commands, first, count);
+        Err(Failure::unavailable("reset_indirect_commands"))
+    }
+
     /// One command buffer with one render pass over `targets`, each cleared to zero and stored,
     /// which makes `used` resident for the object, mesh and fragment stages, executes every
     /// command of `commands`, then `endEncoding`, `commit` and a bounded wait.

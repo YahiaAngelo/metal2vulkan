@@ -1,0 +1,501 @@
+{
+  "format": 1,
+  "case": "indirect-command-buffer-descriptor-properties",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "descriptor:inherit-depth-stencil-state",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "3c31d3ef63a6e1005a0267771863a9f3c8aba47671c37af48ecd9ba0007c4199"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor:inherit-depth-bias",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "c6cae609159861657c35cb62e249c43562b33ee353f646e3c4238bb44c48acd5"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor:inherit-depth-clip-mode",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "6e0e7e1a66583702ada15eca1a30e7510d93145e1e6f1b99ff4dc810340369ff"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor:inherit-cull-mode",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "8bb8cd142c0d80f1f4e95263c17483d5bd944c0eb4e81b9349415b21895fd2bd"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor:inherit-front-facing-winding",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "d6c1b910bb8b375533551c13e427eacc173addfe60d1bf92a125fc31fd539538"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor:inherit-triangle-fill-mode",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "8abfe7be6212b5d88585ba8f09d93de809e8211f4e1b483a475c84bfb47c97ab"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor:support-color-attachment-mapping",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "aa23b6061d6eee524b672aa90c8d326bd05c0da0545c2b5a0aebbad2ab9ce330"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor:max-object-threadgroup-memory-bind-count",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "f179e7d4290844339ff16afc07f6ab0beb642a1924c1446ac041fffd70c1eba7"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor:max-kernel-threadgroup-memory-bind-count",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e2eb2afdd61c8f9c3ff26d5818152ca5ebf57785a82cf36deb228d70dd797acb"
+                        }
+                      }
+                    },
+                    {
+                      "name": "descriptor:inherit-pipeline-state-and-buffers",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "ed6dae87ddb84aca9f7264b4d6e316fd5d47ce938c9c5f1b5a5975bc420167f8"
+                        }
+                      }
+                    },
+                    {
+                      "name": "commands",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "0f8bb73e2ebc2314f2d70802c6d306fdc28d5e360c5a34434b3fe00f86deebfd"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "inherit-depth-stencil-state",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "made",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "size",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "inherit-depth-bias",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "made",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "size",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "inherit-depth-clip-mode",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "made",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "size",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "inherit-cull-mode",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "made",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "size",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "inherit-front-facing-winding",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "made",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "size",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "inherit-triangle-fill-mode",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "made",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "size",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "support-color-attachment-mapping",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "made",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "size",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "max-object-threadgroup-memory-bind-count",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "made",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "size",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "max-kernel-threadgroup-memory-bind-count",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "made",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "size",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "inherit-pipeline-state-and-buffers",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "made",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": "absent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "size",
+                      "observed": {
+                        "value": {
+                          "variant": {
+                            "name": "Ok",
+                            "payload": {
+                              "uint": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": {
+        "stopped": {
+          "call": "indirect_command_buffer",
+          "message": "Indirect Command Buffer Validation\ninheritDepthStencilState is set to NO, but depth stencil state must be inherited on this device"
+        }
+      }
+    }
+  ]
+}

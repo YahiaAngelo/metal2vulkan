@@ -29,6 +29,9 @@ use crate::function_bindings::{
 use crate::function_facts::{
     AttributeFacts, ConstantAt, ConstantFacts, ConstantValue, FunctionFacts,
 };
+use crate::indirect_commands::{
+    CommandsMade, ComputeCommandStep, EncodedCommand, IcbDescriptor, RenderCommandStep,
+};
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
@@ -60,10 +63,10 @@ use objc2_metal::{
     MTLDevice, MTLDispatchType, MTLEvent, MTLFunction, MTLFunctionConstant,
     MTLFunctionConstantValues, MTLHeap, MTLHeapDescriptor, MTLHeapType, MTLIndexType,
     MTLIndirectCommandBuffer, MTLIndirectCommandBufferDescriptor, MTLIndirectCommandType,
-    MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction, MTLMeshRenderPipelineDescriptor,
-    MTLMultisampleDepthResolveFilter, MTLMultisampleStencilResolveFilter, MTLOrigin,
-    MTLPipelineOption, MTLPixelFormat, MTLPointerType, MTLPrimitiveType,
-    MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
+    MTLIndirectComputeCommand, MTLIndirectRenderCommand, MTLLibrary, MTLLoadAction,
+    MTLMeshRenderPipelineDescriptor, MTLMultisampleDepthResolveFilter,
+    MTLMultisampleStencilResolveFilter, MTLOrigin, MTLPipelineOption, MTLPixelFormat,
+    MTLPointerType, MTLPrimitiveType, MTLRasterizationRateLayerDescriptor, MTLRasterizationRateMap,
     MTLRasterizationRateMapDescriptor, MTLRegion, MTLRenderCommandEncoder, MTLRenderPassDescriptor,
     MTLRenderPipelineDescriptor, MTLRenderPipelineReflection, MTLRenderPipelineState,
     MTLRenderStages, MTLResource, MTLResourceOptions, MTLResourceUsage, MTLSamplePosition,
@@ -2256,7 +2259,12 @@ impl Side for MetalSide {
         })?;
         for (at, command) in commands.iter().enumerate() {
             // SAFETY: `at` is below the buffer's command count, just set to `commands.len()`.
-            let encoded = unsafe { made.indirectRenderCommandAtIndex(at) };
+            // The type is written out so the receiver of the setters below is a typed name: the
+            // coverage derivation types a local from what made it, and the chain that makes this
+            // one passes through an `MTLResourceOptions` constant it cannot read past, so without
+            // the annotation every setter here is attributed to no item at all.
+            let encoded: Retained<ProtocolObject<dyn MTLIndirectRenderCommand>> =
+                unsafe { made.indirectRenderCommandAtIndex(at) };
             let state = &self
                 .render_pipelines
                 .get(command.pipeline.0 as usize)
@@ -2307,6 +2315,130 @@ impl Side for MetalSide {
             }
         }
         Ok(keep(&mut self.command_buffers_indirect, made))
+    }
+
+    fn compute_pipeline_for_commands(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        stage_input: Option<&StageInput>,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .newFunctionWithName(&NSString::from_str(entry))
+            .ok_or_else(|| Failure::named("NoSuchFunction", entry.to_owned()))?;
+        let descriptor = MTLComputePipelineDescriptor::new();
+        descriptor.setComputeFunction(Some(&function));
+        descriptor.setSupportIndirectCommandBuffers(true);
+        if let Some(stage_input) = stage_input {
+            descriptor.setStageInputDescriptor(Some(&stage_input_descriptor(stage_input)));
+        }
+        let pipeline = self
+            .device
+            .newComputePipelineStateWithDescriptor_options_reflection_error(
+                &descriptor,
+                MTLPipelineOption::None,
+                None,
+            )
+            .map_err(|error| Failure::named("NewComputePipelineState", error.to_string()))?;
+        Ok(keep(&mut self.pipelines, pipeline))
+    }
+
+    fn indirect_command_buffer(
+        &mut self,
+        spec: &IcbDescriptor,
+        commands: &[EncodedCommand],
+    ) -> Answer<CommandsMade> {
+        let descriptor = MTLIndirectCommandBufferDescriptor::new();
+        descriptor.setCommandTypes(MTLIndirectCommandType::from_bits_retain(
+            spec.command_types.as_raw() as usize,
+        ));
+        descriptor.setInheritPipelineState(spec.inherit_pipeline_state);
+        descriptor.setInheritBuffers(spec.inherit_buffers);
+        descriptor.setMaxVertexBufferBindCount(spec.max_vertex_buffer_bind_count as usize);
+        descriptor.setMaxFragmentBufferBindCount(spec.max_fragment_buffer_bind_count as usize);
+        descriptor.setMaxKernelBufferBindCount(spec.max_kernel_buffer_bind_count as usize);
+        descriptor.setSupportDynamicAttributeStride(spec.support_dynamic_attribute_stride);
+        descriptor.setSupportColorAttachmentMapping(spec.support_color_attachment_mapping);
+        descriptor.setInheritDepthStencilState(spec.inherit_depth_stencil_state);
+        descriptor.setInheritDepthBias(spec.inherit_depth_bias);
+        descriptor.setInheritDepthClipMode(spec.inherit_depth_clip_mode);
+        descriptor.setInheritCullMode(spec.inherit_cull_mode);
+        descriptor.setInheritFrontFacingWinding(spec.inherit_front_facing_winding);
+        descriptor.setInheritTriangleFillMode(spec.inherit_triangle_fill_mode);
+        // SAFETY: each count is the bindings the case's own commands set, at or below Metal's 31,
+        // and a count of 0 is Metal's own default for the three object and mesh properties.
+        unsafe {
+            descriptor.setMaxKernelThreadgroupMemoryBindCount(
+                spec.max_kernel_threadgroup_memory_bind_count as usize,
+            );
+            descriptor.setMaxObjectBufferBindCount(spec.max_object_buffer_bind_count as usize);
+            descriptor.setMaxMeshBufferBindCount(spec.max_mesh_buffer_bind_count as usize);
+            descriptor.setMaxObjectThreadgroupMemoryBindCount(
+                spec.max_object_threadgroup_memory_bind_count as usize,
+            );
+        }
+        let count = commands.len().max(1);
+        // SAFETY: the count is the commands the case encodes, and every command below is inside
+        // it.
+        let made = unsafe {
+            self.device
+                .newIndirectCommandBufferWithDescriptor_maxCommandCount_options(
+                    &descriptor,
+                    count,
+                    MTLResourceOptions::StorageModeShared,
+                )
+        }
+        .ok_or_else(|| {
+            Failure::named(
+                "NewIndirectCommandBuffer",
+                format!("{count} commands returned nil"),
+            )
+        })?;
+        let mut refused = Vec::with_capacity(commands.len());
+        for (at, command) in commands.iter().enumerate() {
+            match command {
+                EncodedCommand::Compute(steps) => {
+                    // SAFETY: `at` is below the buffer's command count, just set to `count`.
+                    let encoded: Retained<ProtocolObject<dyn MTLIndirectComputeCommand>> =
+                        unsafe { made.indirectComputeCommandAtIndex(at) };
+                    for step in steps {
+                        self.encode_compute_command(&encoded, step)?;
+                    }
+                }
+                EncodedCommand::Render(steps) => {
+                    // SAFETY: as the compute command's.
+                    let encoded: Retained<ProtocolObject<dyn MTLIndirectRenderCommand>> =
+                        unsafe { made.indirectRenderCommandAtIndex(at) };
+                    for step in steps {
+                        self.encode_render_command(&encoded, step)?;
+                    }
+                }
+            }
+            // Metal's setters answer nothing, so no step of this side can refuse.
+            refused.push(vec![None; command.steps()]);
+        }
+        Ok(CommandsMade {
+            commands: keep(&mut self.command_buffers_indirect, made),
+            refused,
+        })
+    }
+
+    fn indirect_commands_size(&mut self, commands: Handle) -> Answer<u64> {
+        let icb = self.held_commands(commands)?;
+        Ok(icb.size() as u64)
+    }
+
+    fn reset_indirect_commands(&mut self, commands: Handle, first: u64, count: u64) -> Answer<()> {
+        let icb = self.held_commands(commands)?;
+        let range = NSRange::new(first as usize, count as usize);
+        // SAFETY: the range is inside the buffer's own command count, which the case states and
+        // `indirect_commands_size` reads back beside it.
+        unsafe { icb.resetWithRange(range) };
+        Ok(())
     }
 
     fn execute_mesh_commands(
@@ -2961,6 +3093,7 @@ impl Side for MetalSide {
         descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
         descriptor.setRasterSampleCount(spec.samples as usize);
         descriptor.setRasterizationEnabled(spec.rasterization);
+        descriptor.setSupportIndirectCommandBuffers(spec.support_indirect_command_buffers);
         if let Some(layout) = &spec.vertex_layout {
             descriptor.setVertexDescriptor(Some(&vertex_descriptor(layout)));
         }
@@ -3104,6 +3237,14 @@ impl Side for MetalSide {
                         );
                     }
                     blit.endEncoding();
+                }
+                RenderWork::ComputeCommands {
+                    commands,
+                    first,
+                    count,
+                    used,
+                } => {
+                    self.encode_compute_commands(&command_buffer, *commands, *first, *count, used)?;
                 }
             }
         }
@@ -4871,6 +5012,315 @@ impl MetalSide {
                     );
                 }
             }
+            RenderStep::UseBuffer {
+                buffer,
+                write,
+                stages,
+            } => {
+                let held = self.held(*buffer)?;
+                let resource: &ProtocolObject<dyn MTLResource> = ProtocolObject::from_ref(held);
+                encoder.useResource_usage_stages(
+                    resource,
+                    commands_usage(*write),
+                    MTLRenderStages::from_bits_retain(*stages as usize),
+                );
+            }
+            RenderStep::ExecuteCommands {
+                commands,
+                first,
+                count,
+            } => {
+                let icb = self.held_commands(*commands)?;
+                let range = NSRange::new(*first as usize, *count as usize);
+                // SAFETY: the range is inside the buffer's own command count, which the case
+                // states and reads back beside it, and every buffer the commands' functions reach
+                // was made resident by a step before this one.
+                unsafe { encoder.executeCommandsInBuffer_withRange(&icb, range) };
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The usage an indirect command buffer's residency declaration states: `MTLResourceUsageRead`,
+/// and `MTLResourceUsageWrite` beside it where `write`.
+fn commands_usage(write: bool) -> MTLResourceUsage {
+    if write {
+        MTLResourceUsage::Read | MTLResourceUsage::Write
+    } else {
+        MTLResourceUsage::Read
+    }
+}
+
+/// The indirect-command-buffer vocabulary ([`crate::indirect_commands`]) on native Metal.
+///
+/// Each command is handed to its own function so the command object arrives as a **typed
+/// parameter**: that is what the setters are attributed to, and it keeps the two kinds' calls
+/// apart in one place each.
+impl MetalSide {
+    /// The indirect command buffer `handle` names.
+    fn held_commands(
+        &self,
+        handle: Handle,
+    ) -> Answer<Retained<ProtocolObject<dyn MTLIndirectCommandBuffer>>> {
+        self.command_buffers_indirect
+            .get(handle.0 as usize)
+            .cloned()
+            .ok_or_else(|| {
+                Failure::named("NoSuchHandle", format!("indirect commands {}", handle.0))
+            })
+    }
+
+    /// Encode one step onto an indirect compute command.
+    fn encode_compute_command(
+        &self,
+        encoder: &ProtocolObject<dyn MTLIndirectComputeCommand>,
+        step: &ComputeCommandStep,
+    ) -> Answer<()> {
+        match step {
+            ComputeCommandStep::Pipeline(state) => {
+                let state = self
+                    .pipelines
+                    .get(state.0 as usize)
+                    .ok_or_else(|| {
+                        Failure::named("NoSuchHandle", format!("compute pipeline {}", state.0))
+                    })?
+                    .clone();
+                encoder.setComputePipelineState(&state);
+            }
+            ComputeCommandStep::KernelBuffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: the buffer is at least as long as the kernel's binding from that
+                // offset, which the case states as one of its inputs, and the index is below the
+                // descriptor's own kernel buffer count.
+                unsafe {
+                    encoder.setKernelBuffer_offset_atIndex(held, *offset as usize, *index as usize);
+                }
+            }
+            ComputeCommandStep::KernelBufferWithStride {
+                buffer,
+                offset,
+                stride,
+                index,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: as the plain binding's, and the buffer's descriptor supports a dynamic
+                // attribute stride, which the case states.
+                unsafe {
+                    encoder.setKernelBuffer_offset_attributeStride_atIndex(
+                        held,
+                        *offset as usize,
+                        *stride as usize,
+                        *index as usize,
+                    );
+                }
+            }
+            ComputeCommandStep::ThreadgroupMemoryLength { length, index } => {
+                // SAFETY: the index is below the descriptor's own threadgroup length count and
+                // the length is the case's own, inside the device's threadgroup memory.
+                unsafe {
+                    encoder.setThreadgroupMemoryLength_atIndex(*length as usize, *index as usize);
+                }
+            }
+            ComputeCommandStep::StageInRegion { origin, size } => {
+                encoder.setStageInRegion(MTLRegion {
+                    origin: MTLOrigin {
+                        x: origin[0] as usize,
+                        y: origin[1] as usize,
+                        z: origin[2] as usize,
+                    },
+                    size: MTLSize {
+                        width: size[0] as usize,
+                        height: size[1] as usize,
+                        depth: size[2] as usize,
+                    },
+                });
+            }
+            ComputeCommandStep::ImageblockSize { width, height } => {
+                encoder.setImageblockWidth_height(*width as usize, *height as usize);
+            }
+            ComputeCommandStep::DispatchThreadgroups { groups, threads } => {
+                encoder.concurrentDispatchThreadgroups_threadsPerThreadgroup(
+                    size(*groups),
+                    size(*threads),
+                );
+            }
+            ComputeCommandStep::DispatchThreads { threads, per_group } => {
+                encoder.concurrentDispatchThreads_threadsPerThreadgroup(
+                    size(*threads),
+                    size(*per_group),
+                );
+            }
+            ComputeCommandStep::Barrier => encoder.setBarrier(),
+            ComputeCommandStep::ClearBarrier => encoder.clearBarrier(),
+            ComputeCommandStep::Reset => encoder.reset(),
+        }
+        Ok(())
+    }
+
+    /// Encode one step onto an indirect render command.
+    fn encode_render_command(
+        &self,
+        encoder: &ProtocolObject<dyn MTLIndirectRenderCommand>,
+        step: &RenderCommandStep,
+    ) -> Answer<()> {
+        let primitive =
+            |kind: metal2vulkan::metal::PrimitiveType| MTLPrimitiveType(kind.as_raw() as usize);
+        match step {
+            RenderCommandStep::Pipeline(state) => {
+                let state = self.held_render_state(*state)?;
+                encoder.setRenderPipelineState(&state);
+            }
+            RenderCommandStep::VertexBuffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: the buffer is at least as long as the function's binding from that
+                // offset, and the index is below the descriptor's own vertex buffer count.
+                unsafe {
+                    encoder.setVertexBuffer_offset_atIndex(held, *offset as usize, *index as usize);
+                }
+            }
+            RenderCommandStep::VertexBufferWithStride {
+                buffer,
+                offset,
+                stride,
+                index,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: as the plain binding's, and the buffer's descriptor supports a dynamic
+                // attribute stride.
+                unsafe {
+                    encoder.setVertexBuffer_offset_attributeStride_atIndex(
+                        held,
+                        *offset as usize,
+                        *stride as usize,
+                        *index as usize,
+                    );
+                }
+            }
+            RenderCommandStep::FragmentBuffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: as the vertex binding's, below the descriptor's fragment buffer count.
+                unsafe {
+                    encoder.setFragmentBuffer_offset_atIndex(
+                        held,
+                        *offset as usize,
+                        *index as usize,
+                    );
+                }
+            }
+            RenderCommandStep::ObjectBuffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: as the vertex binding's, below the descriptor's object buffer count.
+                unsafe {
+                    encoder.setObjectBuffer_offset_atIndex(held, *offset as usize, *index as usize);
+                }
+            }
+            RenderCommandStep::MeshBuffer {
+                buffer,
+                offset,
+                index,
+            } => {
+                let held = self.held(*buffer)?;
+                // SAFETY: as the vertex binding's, below the descriptor's mesh buffer count.
+                unsafe {
+                    encoder.setMeshBuffer_offset_atIndex(held, *offset as usize, *index as usize);
+                }
+            }
+            RenderCommandStep::ObjectThreadgroupMemoryLength { length, index } => {
+                // SAFETY: the length is the case's own, inside the device's threadgroup memory.
+                unsafe {
+                    encoder.setObjectThreadgroupMemoryLength_atIndex(
+                        *length as usize,
+                        *index as usize,
+                    );
+                }
+            }
+            RenderCommandStep::Draw {
+                primitive: kind,
+                first,
+                count,
+                instances,
+                base_instance,
+            } => {
+                // SAFETY: the draw names a vertex range of the case's own geometry, and every
+                // buffer the vertex function reads was bound by a step before it.
+                unsafe {
+                    encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
+                        primitive(*kind),
+                        *first as usize,
+                        *count as usize,
+                        *instances as usize,
+                        *base_instance as usize,
+                    );
+                }
+            }
+            RenderCommandStep::DrawIndexed {
+                primitive: kind,
+                count,
+                index_type,
+                indices,
+                offset,
+                instances,
+                base_vertex,
+                base_instance,
+            } => {
+                let buffer = self.held(*indices)?;
+                // SAFETY: the index buffer holds the case's own indices from that offset, which
+                // the case states as one of its inputs, and the counts are its own.
+                unsafe {
+                    encoder.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount_baseVertex_baseInstance(
+                        primitive(*kind),
+                        *count as usize,
+                        MTLIndexType(index_type.as_raw() as usize),
+                        buffer,
+                        *offset as usize,
+                        *instances as usize,
+                        *base_vertex as isize,
+                        *base_instance as usize,
+                    );
+                }
+            }
+            RenderCommandStep::DrawMeshThreadgroups {
+                groups,
+                object,
+                mesh,
+            } => {
+                encoder.drawMeshThreadgroups_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
+                    size(*groups),
+                    size(*object),
+                    size(*mesh),
+                );
+            }
+            RenderCommandStep::DrawMeshThreads {
+                threads,
+                object,
+                mesh,
+            } => {
+                encoder.drawMeshThreads_threadsPerObjectThreadgroup_threadsPerMeshThreadgroup(
+                    size(*threads),
+                    size(*object),
+                    size(*mesh),
+                );
+            }
+            RenderCommandStep::Barrier => encoder.setBarrier(),
+            RenderCommandStep::ClearBarrier => encoder.clearBarrier(),
+            RenderCommandStep::Reset => encoder.reset(),
         }
         Ok(())
     }
@@ -5162,6 +5612,34 @@ impl MetalSide {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Encode one compute encoder that makes `used` resident and runs a range of an indirect
+    /// command buffer's commands into `command_buffer`.
+    fn encode_compute_commands(
+        &self,
+        command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+        commands: Handle,
+        first: u64,
+        count: u64,
+        used: &[(Handle, bool)],
+    ) -> Answer<()> {
+        let icb = self.held_commands(commands)?;
+        let encoder = command_buffer
+            .computeCommandEncoder()
+            .ok_or_else(|| Failure::named("ComputeCommandEncoder", "returned nil".to_owned()))?;
+        for (buffer, write) in used {
+            let held = self.held(*buffer)?;
+            let resource: &ProtocolObject<dyn MTLResource> = ProtocolObject::from_ref(held);
+            encoder.useResource_usage(resource, commands_usage(*write));
+        }
+        let range = NSRange::new(first as usize, count as usize);
+        // SAFETY: the range is inside the buffer's own command count, which the case states and
+        // reads back beside it, and every buffer the commands' kernels reach was just made
+        // resident.
+        unsafe { encoder.executeCommandsInBuffer_withRange(&icb, range) };
+        encoder.endEncoding();
         Ok(())
     }
 

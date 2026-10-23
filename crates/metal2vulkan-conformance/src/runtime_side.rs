@@ -24,6 +24,9 @@ use crate::function_bindings::{
 use crate::function_facts::{
     AttributeFacts, ConstantAt, ConstantFacts, ConstantValue, FunctionFacts,
 };
+use crate::indirect_commands::{
+    CommandsMade, ComputeCommandStep, EncodedCommand, IcbDescriptor, RenderCommandStep,
+};
 use crate::pipeline_facts::{ComputeStateFacts, ComputeStateSpec, RenderStateFacts};
 use crate::queue_slots::QueueSlots;
 use crate::render::{
@@ -275,6 +278,164 @@ impl<'a> RuntimeSide<'a> {
         self.textures
             .get(handle.0 as usize)
             .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+    }
+
+    /// The indirect command buffer `handle` names.
+    fn held_commands(&self, handle: Handle) -> Answer<&IndirectCommandBuffer> {
+        self.command_buffers_indirect
+            .get(handle.0 as usize)
+            .ok_or_else(|| {
+                Failure::named("NoSuchHandle", format!("indirect commands {}", handle.0))
+            })
+    }
+
+    /// Encode one step onto an indirect compute command: `Ok(None)` where the setter answered,
+    /// `Ok(Some(failure))` where it refused, and `Err` where the case named no such object.
+    fn encode_compute_command(
+        &self,
+        encoder: &metal2vulkan_runtime::IndirectComputeCommand,
+        step: &ComputeCommandStep,
+    ) -> Answer<Option<Failure>> {
+        let answered = match step {
+            ComputeCommandStep::Pipeline(state) => {
+                let state = self.pipelines.get(state.0 as usize).ok_or_else(|| {
+                    Failure::named("NoSuchHandle", format!("compute pipeline {}", state.0))
+                })?;
+                encoder.set_compute_pipeline_state(state)
+            }
+            ComputeCommandStep::KernelBuffer {
+                buffer,
+                offset,
+                index,
+            } => encoder.set_kernel_buffer(Some(self.held(*buffer)?), *offset, *index),
+            ComputeCommandStep::KernelBufferWithStride {
+                buffer,
+                offset,
+                stride,
+                index,
+            } => encoder.set_kernel_buffer_with_stride(
+                Some(self.held(*buffer)?),
+                *offset,
+                *stride,
+                *index,
+            ),
+            ComputeCommandStep::ThreadgroupMemoryLength { length, index } => {
+                encoder.set_threadgroup_memory_length(*length, *index)
+            }
+            ComputeCommandStep::StageInRegion { origin, size } => {
+                encoder.set_stage_in_region(region_of(*origin, *size))
+            }
+            ComputeCommandStep::ImageblockSize { width, height } => {
+                encoder.set_imageblock_size(u64::from(*width), u64::from(*height))
+            }
+            ComputeCommandStep::DispatchThreadgroups { groups, threads } => {
+                encoder.concurrent_dispatch_threadgroups(size(*groups), size(*threads))
+            }
+            ComputeCommandStep::DispatchThreads { threads, per_group } => {
+                encoder.concurrent_dispatch_threads(size(*threads), size(*per_group))
+            }
+            ComputeCommandStep::Barrier => encoder.set_barrier(),
+            ComputeCommandStep::ClearBarrier => encoder.clear_barrier(),
+            ComputeCommandStep::Reset => encoder.reset(),
+        };
+        Ok(answered.err().map(|error| Failure::of(&error)))
+    }
+
+    /// Encode one step onto an indirect render command, as
+    /// [`encode_compute_command`](Self::encode_compute_command) encodes a dispatch's.
+    fn encode_render_command(
+        &self,
+        encoder: &metal2vulkan_runtime::IndirectRenderCommand,
+        step: &RenderCommandStep,
+    ) -> Answer<Option<Failure>> {
+        let answered = match step {
+            RenderCommandStep::Pipeline(state) => {
+                let state = self.render_pipelines.get(state.0 as usize).ok_or_else(|| {
+                    Failure::named("NoSuchHandle", format!("render pipeline {}", state.0))
+                })?;
+                encoder.set_render_pipeline_state(state)
+            }
+            RenderCommandStep::VertexBuffer {
+                buffer,
+                offset,
+                index,
+            } => encoder.set_vertex_buffer(Some(self.held(*buffer)?), *offset, *index),
+            RenderCommandStep::VertexBufferWithStride {
+                buffer,
+                offset,
+                stride,
+                index,
+            } => encoder.set_vertex_buffer_with_stride(
+                Some(self.held(*buffer)?),
+                *offset,
+                *stride,
+                *index,
+            ),
+            RenderCommandStep::FragmentBuffer {
+                buffer,
+                offset,
+                index,
+            } => encoder.set_fragment_buffer(Some(self.held(*buffer)?), *offset, *index),
+            RenderCommandStep::ObjectBuffer {
+                buffer,
+                offset,
+                index,
+            } => encoder.set_object_buffer(Some(self.held(*buffer)?), *offset, *index),
+            RenderCommandStep::MeshBuffer {
+                buffer,
+                offset,
+                index,
+            } => encoder.set_mesh_buffer(Some(self.held(*buffer)?), *offset, *index),
+            RenderCommandStep::ObjectThreadgroupMemoryLength { length, index } => {
+                encoder.set_object_threadgroup_memory_length(*length, *index)
+            }
+            RenderCommandStep::Draw {
+                primitive,
+                first,
+                count,
+                instances,
+                base_instance,
+            } => encoder.draw_primitives(
+                *primitive,
+                u64::from(*first),
+                u64::from(*count),
+                u64::from(*instances),
+                u64::from(*base_instance),
+            ),
+            RenderCommandStep::DrawIndexed {
+                primitive,
+                count,
+                index_type,
+                indices,
+                offset,
+                instances,
+                base_vertex,
+                base_instance,
+            } => encoder.draw_indexed_primitives(
+                *primitive,
+                u64::from(*count),
+                *index_type,
+                self.held(*indices)?,
+                *offset,
+                u64::from(*instances),
+                i64::from(*base_vertex),
+                u64::from(*base_instance),
+            ),
+            RenderCommandStep::DrawMeshThreadgroups {
+                groups,
+                object,
+                mesh,
+            } => encoder.draw_mesh_threadgroups(size(*groups), size(*object), size(*mesh)),
+            RenderCommandStep::DrawMeshThreads {
+                threads,
+                object,
+                mesh,
+            } => encoder.draw_mesh_threads(size(*threads), size(*object), size(*mesh)),
+            RenderCommandStep::Barrier => encoder.set_barrier(),
+            RenderCommandStep::ClearBarrier => encoder.clear_barrier(),
+            RenderCommandStep::Reset => encoder.reset(),
+        };
+        Ok(answered.err().map(|error| Failure::of(&error)))
     }
 
     /// The heap `handle` names.
@@ -2047,6 +2208,102 @@ impl Side for RuntimeSide<'_> {
         Ok(keep(&mut self.command_buffers_indirect, made))
     }
 
+    fn compute_pipeline_for_commands(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        stage_input: Option<&StageInput>,
+    ) -> Answer<Handle> {
+        let library = self
+            .libraries
+            .get(library.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("library {}", library.0)))?;
+        let function = library
+            .new_function_with_name(entry)
+            .map_err(|error| Failure::of(&error))?;
+        let mut descriptor = metal2vulkan::pipeline::ComputePipelineDescriptor::new(
+            metal2vulkan::pipeline::StageSource::Function(function.function_descriptor()),
+        );
+        descriptor.support_indirect_command_buffers = true;
+        descriptor.stage_input = stage_input.map(stage_input_descriptor);
+        let pipeline = self
+            .device
+            .new_compute_pipeline_state(&descriptor, &PipelineOptions::default())
+            .map_err(|error| Failure::of(&error))?;
+        Ok(keep(&mut self.pipelines, pipeline))
+    }
+
+    fn indirect_command_buffer(
+        &mut self,
+        spec: &IcbDescriptor,
+        commands: &[EncodedCommand],
+    ) -> Answer<CommandsMade> {
+        let mut descriptor = IndirectCommandBufferDescriptor::new();
+        descriptor.command_types = spec.command_types;
+        descriptor.inherit_pipeline_state = spec.inherit_pipeline_state;
+        descriptor.inherit_buffers = spec.inherit_buffers;
+        descriptor.max_vertex_buffer_bind_count = spec.max_vertex_buffer_bind_count;
+        descriptor.max_fragment_buffer_bind_count = spec.max_fragment_buffer_bind_count;
+        descriptor.max_kernel_buffer_bind_count = spec.max_kernel_buffer_bind_count;
+        descriptor.max_kernel_threadgroup_memory_bind_count =
+            spec.max_kernel_threadgroup_memory_bind_count;
+        descriptor.max_object_buffer_bind_count = spec.max_object_buffer_bind_count;
+        descriptor.max_mesh_buffer_bind_count = spec.max_mesh_buffer_bind_count;
+        descriptor.max_object_threadgroup_memory_bind_count =
+            spec.max_object_threadgroup_memory_bind_count;
+        descriptor.support_dynamic_attribute_stride = spec.support_dynamic_attribute_stride;
+        descriptor.support_color_attachment_mapping = spec.support_color_attachment_mapping;
+        descriptor.inherit_depth_stencil_state = spec.inherit_depth_stencil_state;
+        descriptor.inherit_depth_bias = spec.inherit_depth_bias;
+        descriptor.inherit_depth_clip_mode = spec.inherit_depth_clip_mode;
+        descriptor.inherit_cull_mode = spec.inherit_cull_mode;
+        descriptor.inherit_front_facing_winding = spec.inherit_front_facing_winding;
+        descriptor.inherit_triangle_fill_mode = spec.inherit_triangle_fill_mode;
+        let count = commands.len().max(1) as u64;
+        let made = self
+            .device
+            .new_indirect_command_buffer(&descriptor, count, ResourceOptions::shared())
+            .map_err(Failure::from_error)?;
+        let mut refused = Vec::with_capacity(commands.len());
+        for (at, command) in commands.iter().enumerate() {
+            let at = at as u64;
+            refused.push(match command {
+                EncodedCommand::Compute(steps) => {
+                    let encoded = made
+                        .indirect_compute_command_at(at)
+                        .map_err(Failure::from_error)?;
+                    steps
+                        .iter()
+                        .map(|step| self.encode_compute_command(&encoded, step))
+                        .collect::<Answer<Vec<Option<Failure>>>>()?
+                }
+                EncodedCommand::Render(steps) => {
+                    let encoded = made
+                        .indirect_render_command_at(at)
+                        .map_err(Failure::from_error)?;
+                    steps
+                        .iter()
+                        .map(|step| self.encode_render_command(&encoded, step))
+                        .collect::<Answer<Vec<Option<Failure>>>>()?
+                }
+            });
+        }
+        Ok(CommandsMade {
+            commands: keep(&mut self.command_buffers_indirect, made),
+            refused,
+        })
+    }
+
+    fn indirect_commands_size(&mut self, commands: Handle) -> Answer<u64> {
+        Ok(self.held_commands(commands)?.size())
+    }
+
+    fn reset_indirect_commands(&mut self, commands: Handle, first: u64, count: u64) -> Answer<()> {
+        let icb = self.held_commands(commands)?;
+        icb.reset_with_range(first..first + count)
+            .map_err(Failure::from_error)
+    }
+
     fn execute_mesh_commands(
         &mut self,
         targets: &[Handle],
@@ -2819,22 +3076,17 @@ impl Side for RuntimeSide<'_> {
     fn render(&mut self, work: &[RenderWork]) -> Answer<PassOutcome> {
         // The pools are cloned once, so each piece of the program can reach the case's objects
         // while the command buffer is borrowed.
-        let textures: Vec<Texture> = self.textures.clone();
-        let buffers: Vec<Buffer> = self.buffers.clone();
-        let states: Vec<RenderPipelineState> = self.render_pipelines.clone();
-        let depth_stencil: Vec<DepthStencilState> = self.depth_stencil_states.clone();
-        let samplers: Vec<SamplerState> = self.samplers.clone();
-        let computes: Vec<ComputePipelineState> = self.pipelines.clone();
-        let texture = |handle: Handle| -> Answer<&Texture> {
-            textures
-                .get(handle.0 as usize)
-                .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+        let pools = Pools {
+            textures: self.textures.clone(),
+            buffers: self.buffers.clone(),
+            states: self.render_pipelines.clone(),
+            depth_stencil: self.depth_stencil_states.clone(),
+            samplers: self.samplers.clone(),
+            computes: self.pipelines.clone(),
+            indirect: self.command_buffers_indirect.clone(),
         };
-        let buffer = |handle: Handle| -> Answer<&Buffer> {
-            buffers
-                .get(handle.0 as usize)
-                .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
-        };
+        let texture = |handle: Handle| pools.texture(handle);
+        let buffer = |handle: Handle| pools.buffer(handle);
         let command_buffer = self
             .queue()?
             .command_buffer()
@@ -2842,15 +3094,7 @@ impl Side for RuntimeSide<'_> {
         let mut refused = Vec::with_capacity(work.len());
         for piece in work {
             let answered = match piece {
-                RenderWork::Pass(pass) => encode_pass(
-                    &command_buffer,
-                    pass,
-                    &textures,
-                    &buffers,
-                    &states,
-                    &depth_stencil,
-                    &samplers,
-                ),
+                RenderWork::Pass(pass) => encode_pass(&command_buffer, pass, &pools),
                 RenderWork::ReadTexture {
                     texture: from,
                     into,
@@ -2898,7 +3142,8 @@ impl Side for RuntimeSide<'_> {
                     .map_err(Failure::from_error)?;
                     blit.end_encoding().map_err(Failure::from_error)
                 }),
-                RenderWork::Dispatch(dispatch) => computes
+                RenderWork::Dispatch(dispatch) => pools
+                    .computes
                     .get(dispatch.pipeline.0 as usize)
                     .ok_or_else(|| {
                         Failure::named(
@@ -2928,6 +3173,28 @@ impl Side for RuntimeSide<'_> {
                             .map_err(Failure::from_error)?;
                         encoder.end_encoding().map_err(Failure::from_error)
                     }),
+                RenderWork::ComputeCommands {
+                    commands,
+                    first,
+                    count,
+                    used,
+                } => pools.indirect(*commands).and_then(|icb| {
+                    let mut encoder = command_buffer
+                        .compute_command_encoder()
+                        .map_err(Failure::from_error)?;
+                    for (held, write) in used {
+                        encoder
+                            .use_resource(
+                                ResourceRef::Buffer(buffer(*held)?),
+                                commands_usage(*write),
+                            )
+                            .map_err(Failure::from_error)?;
+                    }
+                    encoder
+                        .execute_commands_in_buffer(icb, *first..*first + *count)
+                        .map_err(Failure::from_error)?;
+                    encoder.end_encoding().map_err(Failure::from_error)
+                }),
             };
             refused.push(answered.err());
         }
@@ -3756,15 +4023,54 @@ impl RuntimeSide<'_> {
     }
 }
 
-fn encode_pass(
-    command_buffer: &CommandBuffer,
-    pass: &RenderPass,
-    textures: &[Texture],
-    buffers: &[Buffer],
-    states: &[RenderPipelineState],
-    depth_stencil: &[DepthStencilState],
-    samplers: &[SamplerState],
-) -> Answer<()> {
+/// The objects a render program's pieces reach, cloned out of the side's pools once so each piece
+/// can find the case's objects while the command buffer is borrowed.
+///
+/// One value rather than one slice per pool: a program's pieces each need a different handful of
+/// them, and a pool the vocabulary gains later would otherwise widen every signature on the way.
+struct Pools {
+    textures: Vec<Texture>,
+    buffers: Vec<Buffer>,
+    states: Vec<RenderPipelineState>,
+    depth_stencil: Vec<DepthStencilState>,
+    samplers: Vec<SamplerState>,
+    computes: Vec<ComputePipelineState>,
+    indirect: Vec<IndirectCommandBuffer>,
+}
+
+impl Pools {
+    /// The texture `handle` names.
+    fn texture(&self, handle: Handle) -> Answer<&Texture> {
+        self.textures
+            .get(handle.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("texture {}", handle.0)))
+    }
+
+    /// The buffer `handle` names.
+    fn buffer(&self, handle: Handle) -> Answer<&Buffer> {
+        self.buffers
+            .get(handle.0 as usize)
+            .ok_or_else(|| Failure::named("NoSuchHandle", format!("buffer {}", handle.0)))
+    }
+
+    /// The indirect command buffer `handle` names.
+    fn indirect(&self, handle: Handle) -> Answer<&IndirectCommandBuffer> {
+        self.indirect.get(handle.0 as usize).ok_or_else(|| {
+            Failure::named("NoSuchHandle", format!("indirect commands {}", handle.0))
+        })
+    }
+}
+
+fn encode_pass(command_buffer: &CommandBuffer, pass: &RenderPass, pools: &Pools) -> Answer<()> {
+    let Pools {
+        textures,
+        buffers,
+        states,
+        depth_stencil,
+        samplers,
+        indirect,
+        ..
+    } = pools;
     let sampler = |handle: Handle| -> Answer<&SamplerState> {
         samplers
             .get(handle.0 as usize)
@@ -3941,13 +4247,62 @@ fn encode_pass(
             } => encoder
                 .draw_primitives_indirect(*primitive, buffer(*arguments)?, *offset)
                 .map_err(Failure::from_error)?,
+            RenderStep::UseBuffer {
+                buffer: held,
+                write,
+                stages: bits,
+            } => encoder
+                .use_resource(
+                    ResourceRef::Buffer(buffer(*held)?),
+                    commands_usage(*write),
+                    stages(*bits)?,
+                )
+                .map_err(Failure::from_error)?,
+            RenderStep::ExecuteCommands {
+                commands,
+                first,
+                count,
+            } => {
+                let icb = indirect.get(commands.0 as usize).ok_or_else(|| {
+                    Failure::named("NoSuchHandle", format!("indirect commands {}", commands.0))
+                })?;
+                encoder
+                    .execute_commands_in_buffer(icb, *first..*first + *count)
+                    .map_err(Failure::from_error)?;
+            }
         }
     }
     encoder.end_encoding().map_err(Failure::from_error)
 }
 
+/// The usage an indirect command buffer's residency declaration states: `MTLResourceUsageRead`,
+/// and `MTLResourceUsageWrite` beside it where `write`.
+///
+/// Distinct from [`resource_usage`], which takes the raw bits a residency *command* of a pass
+/// states and can refuse them: the choice a command-buffer step offers is only whether the
+/// commands' functions write what they are handed, so there are no unknown bits to answer for.
+fn commands_usage(write: bool) -> ResourceUsage {
+    if write {
+        ResourceUsage::READ.union(ResourceUsage::WRITE)
+    } else {
+        ResourceUsage::READ
+    }
+}
+
 /// The pixel format [`crate::case::TARGET_FORMAT`] names, as the runtime spells it.
 const TARGET_PIXEL_FORMAT: PixelFormat = PixelFormat::RGBA32Uint;
+
+/// The region `origin` and `size` name, as the runtime takes one.
+fn region_of(origin: [u32; 3], size: [u32; 3]) -> Region {
+    Region::new_3d(
+        u64::from(origin[0]),
+        u64::from(origin[1]),
+        u64::from(origin[2]),
+        u64::from(size[0]),
+        u64::from(size[1]),
+        u64::from(size[2]),
+    )
+}
 
 /// The raw `MTLRenderStages` bits as the runtime takes them.
 fn stages(bits: u64) -> Answer<RenderStages> {
