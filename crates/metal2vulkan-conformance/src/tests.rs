@@ -3680,7 +3680,7 @@ fn both_sides_state_every_field_of_a_texture_request() {
 /// This is the same fact with no device and no oracle: it reads the committed recordings and
 /// names the case and the input whose fingerprint moved.
 ///
-/// Three cases are stale as this is written, and the list is a set rather than a floor so that
+/// The cases that have moved are held as a **set**, through [`STALE`] and [`stale_set_diff`]: a
 /// re-recording one without striking it from here fails too. All three state an unwritten buffer,
 /// whose fingerprint was widened from the buffer's length alone to its length and its storage
 /// mode after their answers were taken. Their Metal answers did not move; only the key did, so
@@ -3743,30 +3743,95 @@ fn every_cases_inputs_are_the_ones_its_recording_was_taken_from() {
         checked > 0,
         "the suite holds no recorded answer to check an input fingerprint against"
     );
-    let found: std::collections::BTreeSet<&str> = moved.keys().copied().collect();
-    let named: std::collections::BTreeSet<&str> = STALE.into_iter().collect();
-    let said = |cases: &std::collections::BTreeSet<&str>| {
-        cases
-            .iter()
-            .map(|case| match moved.get(case) {
-                Some(why) => format!("{case}: {}", why.join(", ")),
-                None => format!("{case}: states its recording's inputs"),
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
     assert_eq!(
-        found,
-        named,
-        "{checked} recorded answers checked. These cases no longer state the inputs their \
-         recordings were taken from, so each is Unrecorded at replay for a reason that is this \
-         suite's and not Metal's:\n{}\nand these are named here as stale but state their \
-         recording's inputs, so their line is spent:\n{}\n(cases with no recording at all, which \
-         this says nothing about: {})",
-        said(&found.difference(&named).copied().collect()),
-        said(&named.difference(&found).copied().collect()),
+        stale_set_diff(&moved, &STALE),
+        None,
+        "{checked} recorded answers checked (cases with no recording at all, which this says \
+         nothing about: {})",
         unrecorded.join(", ")
     );
+}
+
+/// Why the cases whose input fingerprints have moved are not the ones named as stale, if they are
+/// not: what [`every_cases_inputs_are_the_ones_its_recording_was_taken_from`] fails with, or
+/// `None` when the two sets are the same.
+///
+/// `moved` holds each case that no longer states its recording's inputs, with what moved for it;
+/// `named` is the set the test states. Comparing them as sets rather than asserting a floor of
+/// zero is what makes both halves hold: a case that moved and is named nowhere fails, and a name
+/// whose case states its recording's inputs again fails too.
+///
+/// It is a helper rather than an assertion inside the test so that
+/// [`a_moved_fingerprint_and_a_name_that_outlived_its_case_both_fail`] can exercise both halves
+/// over fabricated sets. With `STALE` empty, the second half is unreachable from the test itself
+/// however it is worded, because nothing reaches that path until a name exists -- and an
+/// unreachable direction is not a direction the suite holds.
+fn stale_set_diff(
+    moved: &std::collections::BTreeMap<&str, Vec<String>>,
+    named: &[&str],
+) -> Option<String> {
+    let found: std::collections::BTreeSet<&str> = moved.keys().copied().collect();
+    let named: std::collections::BTreeSet<&str> = named.iter().copied().collect();
+    if found == named {
+        return None;
+    }
+    let mut said = Vec::new();
+    let unexpected: Vec<&str> = found.difference(&named).copied().collect();
+    if !unexpected.is_empty() {
+        said.push(format!(
+            "these cases no longer state the inputs their recordings were taken from, so each is \
+             Unrecorded at replay for a reason that is this suite's and not Metal's:\n{}",
+            unexpected
+                .iter()
+                .map(|case| format!("{case}: {}", moved[case].join(", ")))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
+    let spent: Vec<&str> = named.difference(&found).copied().collect();
+    if !spent.is_empty() {
+        said.push(format!(
+            "these cases are named as stale but state the inputs their recordings were taken \
+             from, so each name stands behind nothing and must go: {spent:?}"
+        ));
+    }
+    Some(said.join("\n"))
+}
+
+/// Both directions of the stale set hold, over fabricated sets: a case whose fingerprint moved
+/// and that nothing names fails, and a name whose case states its recording's inputs again fails.
+///
+/// The second direction is the one that cannot be reached through
+/// [`every_cases_inputs_are_the_ones_its_recording_was_taken_from`] while `STALE` is empty, which
+/// is exactly why it is checked here instead of being read off a passing run.
+#[test]
+fn a_moved_fingerprint_and_a_name_that_outlived_its_case_both_fail() {
+    let none = std::collections::BTreeMap::new();
+    assert_eq!(stale_set_diff(&none, &[]), None);
+    let mut moved = std::collections::BTreeMap::new();
+    moved.insert(
+        "buffer-fills-of-every-size",
+        vec!["private-buffer:0 differs".to_owned()],
+    );
+    let said = stale_set_diff(&moved, &[]).expect("a moved fingerprint nothing names");
+    assert!(said.contains("buffer-fills-of-every-size"), "{said}");
+    assert!(said.contains("private-buffer:0 differs"), "{said}");
+    assert!(said.contains("not Metal's"), "{said}");
+    // Naming it is what parks it, and it parks that case alone.
+    assert_eq!(
+        stale_set_diff(&moved, &["buffer-fills-of-every-size"]),
+        None
+    );
+    let said = stale_set_diff(&moved, &["buffer-blit-any-range"])
+        .expect("a moved case parked under another case's name");
+    assert!(said.contains("buffer-fills-of-every-size"), "{said}");
+    assert!(said.contains("buffer-blit-any-range"), "{said}");
+    // And the name has to go when the case comes back, whether by a re-record or, as the three
+    // buffer-blit cases did, by the fingerprint keeping the bytes it always had.
+    let said = stale_set_diff(&none, &["buffer-fills-of-every-size"])
+        .expect("a name that outlived its case");
+    assert!(said.contains("buffer-fills-of-every-size"), "{said}");
+    assert!(said.contains("stands behind nothing"), "{said}");
 }
 
 /// A count whose reading with the case alone is its ceiling keeps its gate there rather than being
