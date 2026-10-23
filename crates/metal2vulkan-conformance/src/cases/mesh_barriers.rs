@@ -25,18 +25,16 @@
 //!
 //! Nothing here can fault a GPU: every grid is one or two threadgroups.
 
-use crate::allowance::{Allowance, Justification, Loosening};
+use crate::allowance::Allowance;
 use crate::case::{
     Abort, Case, Failure, Handle, Input, MeshFunctions, MeshStep, MetalSource, Side, SCOPE_BUFFERS,
     STAGE_FRAGMENT, STAGE_MESH, STAGE_OBJECT, TARGET_TEXEL,
 };
 use crate::fixture::{Fixture, METAL_TEXT, RUNTIME_TEXT};
 use crate::recording::ShaderRef;
-use crate::replay::NOTICES_SITE;
 use crate::transcript::{
     Aspect, ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value,
 };
-use metal2vulkan_runtime::Degradation;
 
 /// The owned fixture every row runs.
 const FIXTURE: &str = "mesh_barrier";
@@ -437,14 +435,7 @@ impl Case for MeshBarriers {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // A device without `VK_EXT_mesh_shader` draws through the emulation and announces it once;
-        // Metal announces nothing. That notice is the one field that may differ, and only where it
-        // fired.
-        vec![Allowance::new(
-            format!("case/{NOTICES_SITE}/*"),
-            Loosening::Unchecked,
-            Justification::notice(Degradation::EmulatedMeshDraws),
-        )]
+        super::mesh_draws::mesh_notice_allowances()
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {

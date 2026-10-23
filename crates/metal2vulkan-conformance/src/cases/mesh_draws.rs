@@ -352,6 +352,45 @@ pub fn all() -> Vec<MeshDraws> {
 /// The fragment function every case's pipeline writes its attachments through.
 const FRAGMENT: &str = "mesh_draws_fragment";
 
+/// The degrade notices a mesh render pass may announce, each of which a mesh case loosens its
+/// notices site by, because Metal announces none and a notice our side announced is the one field
+/// that may then differ.
+///
+/// It is a list and not a device query, because a case never branches on the device: a case asks
+/// by running and reads what came back. The list holds exactly the kinds measured on the two
+/// venues of this round -- MoltenVK 1.4.2 on this M3 Max, which emulates mesh draws, and lavapipe
+/// (LLVM 21.1.8), which has `VK_EXT_mesh_shader` and announces its own compiler's rewrites and the
+/// notes its barrier path makes. A third venue that announces a kind not here fails the case until
+/// its kind is added, which is the model working: an announced difference nobody named is not an
+/// announced difference.
+pub const MESH_PASS_NOTICES: &[Degradation] = &[
+    // The pass drew through the mesh-draw emulation, on a device without `VK_EXT_mesh_shader`.
+    Degradation::EmulatedMeshDraws,
+    // A stage's compiler rewrote its fast-math arithmetic as it made the pipeline.
+    Degradation::FastMathRewrites,
+    // The notes the barrier and draw path makes: a fragment stage ordered before a later draw's
+    // earlier stages, a pass split at a barrier, and the bytes of draws the pass does not order.
+    Degradation::FragmentsBeforeGeometry,
+    Degradation::RenderPassSplit,
+    Degradation::UnorderedDrawBytes,
+];
+
+/// The allowances a mesh case keeps: one over its notices site per kind of
+/// [`MESH_PASS_NOTICES`], so a device that announced one may hold it in its set and a device that
+/// announced none compares the set exactly against Metal's empty one.
+pub fn mesh_notice_allowances() -> Vec<Allowance> {
+    MESH_PASS_NOTICES
+        .iter()
+        .map(|kind| {
+            Allowance::new(
+                format!("case/{NOTICES_SITE}/*"),
+                Loosening::Unchecked,
+                Justification::notice(*kind),
+            )
+        })
+        .collect()
+}
+
 impl MeshDraws {
     /// The fixture both sides read.
     fn fixture(&self) -> Fixture {
@@ -571,14 +610,7 @@ impl Case for MeshDraws {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // A device without `VK_EXT_mesh_shader` draws every row through the emulation and
-        // announces it once. Metal announces nothing, so the notices site is the one field that
-        // may differ, and only where that notice actually fired.
-        vec![Allowance::new(
-            format!("case/{NOTICES_SITE}/*"),
-            Loosening::Unchecked,
-            Justification::notice(Degradation::EmulatedMeshDraws),
-        )]
+        mesh_notice_allowances()
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
