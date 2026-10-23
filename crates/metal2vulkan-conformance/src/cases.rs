@@ -68,6 +68,7 @@ pub fn all() -> Vec<Box<dyn Case>> {
         cases.push(Box::new(case));
     }
     cases.push(Box::new(mesh_commands::own_state_commands()));
+    cases.push(Box::new(mesh_commands::unordered_draws()));
     cases.push(Box::new(surface_fills::over_planes_and_buffers()));
     for case in rate_maps::all() {
         cases.push(Box::new(case));

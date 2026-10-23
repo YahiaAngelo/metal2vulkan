@@ -8,8 +8,11 @@ use crate::replay::replay_known;
 use crate::report::Report;
 use crate::runtime_side::RuntimeSide;
 
-/// The runs record mode takes a case's answer over, so a case whose behaviour varies records its
-/// outcomes with their frequencies rather than whichever run came last.
+/// The runs record mode takes a case's answer over by default, so a case whose behaviour varies
+/// records its outcomes with their frequencies rather than whichever run came last.
+///
+/// A case whose work nothing orders asks for more through
+/// [`Case::record_runs`](crate::case::Case::record_runs).
 pub const RECORD_RUNS: u32 = 3;
 
 /// The cases `names` selects, or every case where `names` is empty.
@@ -97,7 +100,7 @@ fn record_one(case: &dyn Case) -> Result<std::path::PathBuf, String> {
         crate::case::MetalSource::Run => {
             let validated = crate::validated::take(case).map_err(|error| error.to_string())?;
             let mut side = crate::metal_side::MetalSide::new()?;
-            crate::record::record(case, &mut side, RECORD_RUNS, level, validated)
+            crate::record::record(case, &mut side, case.record_runs(), level, validated)
                 .map_err(|error| error.to_string())?
         }
         crate::case::MetalSource::Carried { from, .. } => {
