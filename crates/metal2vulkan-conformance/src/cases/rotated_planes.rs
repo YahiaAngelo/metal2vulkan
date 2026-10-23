@@ -48,10 +48,10 @@
 //!
 //! Two questions a rotation, over two frames:
 //!
-//! - **store** ([`stores`]): a pass that clears the frame and draws every texel of a source texture
+//! - **store**: a pass that clears the frame and draws every texel of a source texture
 //!   whose texels name themselves, so each plane byte names the pass texel Metal stored there. That
 //!   is `stored_at` measured directly.
-//! - **load** ([`loads`]): the plane's texels each named with their own stored position, then a pass
+//! - **load**: the plane's texels each named with their own stored position, then a pass
 //!   that loads and draws only the top-left 8x4 pass texels. What the undrawn texels keep is the
 //!   answer, and at rotation 4 it is the one place our runtime is known to differ from Metal.
 //!
@@ -346,15 +346,18 @@ impl Case for RotatedPlane {
             // compares byte for byte, which is where the mirror itself is checked, and a frame of
             // one band (32x32) has nothing to loosen at all -- naming an allowance there would be a
             // claim with no evidence.
-            allowances.extend(self.bands().iter().filter_map(|&(first, rows)| {
-                (!self.band_is_reached(first, rows)).then(|| {
-                    crate::allowance::Allowance::new(
-                        format!("case/plane/rows-{first}"),
-                        crate::allowance::Loosening::Unchecked,
-                        crate::allowance::Justification::notice(Degradation::RotatedLoadTiles),
-                    )
-                })
-            }));
+            allowances.extend(
+                self.bands()
+                    .iter()
+                    .filter(|&&(first, rows)| !self.band_is_reached(first, rows))
+                    .map(|&(first, _)| {
+                        crate::allowance::Allowance::new(
+                            format!("case/plane/rows-{first}"),
+                            crate::allowance::Loosening::Unchecked,
+                            crate::allowance::Justification::notice(Degradation::RotatedLoadTiles),
+                        )
+                    }),
+            );
         }
         allowances
     }
@@ -478,7 +481,7 @@ impl Case for RotatedPlane {
                 ),
             })?;
             node = node.with(Node::leaf(
-                &format!("rows-{first}"),
+                format!("rows-{first}"),
                 Observed::bytes(held.to_vec(), self.band_layout(first, rows)),
             ));
         }

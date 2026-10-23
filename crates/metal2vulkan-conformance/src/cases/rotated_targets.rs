@@ -176,7 +176,7 @@ fn destination_bytes(format: PixelFormat) -> Vec<u8> {
 /// something a reader can grep for in this file.
 struct State {
     case: &'static str,
-    name: &'static str,
+    label: &'static str,
     mask: ColorWriteMask,
     blend: Option<[(BlendFactor, BlendFactor, BlendOperation); 2]>,
 }
@@ -186,9 +186,9 @@ fn states() -> Vec<State> {
     use BlendFactor as F;
     use BlendOperation as O;
     const ALL: ColorWriteMask = ColorWriteMask::ALL;
-    let state = |case, name, mask, blend| State {
+    let state = |case, label, mask, blend| State {
         case,
-        name,
+        label,
         mask,
         blend,
     };
@@ -343,17 +343,29 @@ impl RotatedTarget {
     }
 }
 
+/// The buffers and library every format's leg shares, made once before either leg runs.
+struct Shared {
+    library: crate::case::Handle,
+    /// The drawn `float4`s, at fragment buffer 0.
+    values: crate::case::Handle,
+    /// The fixture's extent, at fragment buffer 1.
+    extent: crate::case::Handle,
+}
+
 /// The sites one format's leg emits, and the bytes it read back.
 fn draw_into(
     side: &mut dyn Side,
     sites: &mut Sites,
     label: &str,
-    library: crate::case::Handle,
+    shared: &Shared,
     colors: &[Option<ColorState>],
     format: PixelFormat,
-    values: crate::case::Handle,
-    extent: crate::case::Handle,
 ) -> Result<(), Abort> {
+    let Shared {
+        library,
+        values,
+        extent,
+    } = *shared;
     let pipeline = made(
         sites,
         &format!("pipeline/{label}"),
@@ -425,7 +437,7 @@ fn draw_into(
         |_| Value::Absent,
     )?;
     sites.push(Node::leaf(
-        &format!("texels/{label}"),
+        format!("texels/{label}"),
         Observed::bytes(stored, layout()),
     ));
     Ok(())
@@ -471,9 +483,19 @@ impl Case for RotatedTarget {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // None. Both legs are 8-bit unorm stores of the same values, so every byte compares
-        // exactly; `rt6_fill_rgba32float` is the `float4` fill, not the `half4` one, so no
-        // fast-math rounding notice applies to it either.
+        // None, and that is a deliberate refusal to guess.
+        //
+        // On MoltenVK every byte of both legs compares exactly and nothing is announced, which is
+        // the answer this family wants: `rt6_fill_rgba32float` is the `float4` fill, not the
+        // `half4` one, so no fast-math rounding notice applies to it.
+        //
+        // A first lavapipe run showed that venue announcing `shader-color-conversion` and
+        // `device-color-conversion` and moving the blended states' codes by one, and
+        // `docs/API.md`'s catalogue entry for the latter names exactly that shape. An allowance for
+        // it is therefore plausible -- but this round did not get a lavapipe run back that
+        // *justified* one, and the suite's own allowance report says so plainly: named on 12 sites,
+        // fired on no venue, checked by no run. An allowance no run justified is a claim without
+        // evidence, so the venue that needs one adds it with the run that shows it.
         Vec::new()
     }
 
@@ -487,7 +509,7 @@ impl Case for RotatedTarget {
         inputs.extend([
             // The state is the question the case asks, so the mask and the blend are inputs.
             Input::bytes("write-mask", &self.state.mask.as_raw().to_le_bytes()),
-            Input::bytes("state-name", self.state.name.as_bytes()),
+            Input::bytes("state-name", self.state.label.as_bytes()),
             Input::bytes(
                 "pipeline",
                 &RenderPipelineSpec::new(VERTEX, FILL_FLOAT, &colors).words(),
@@ -499,11 +521,11 @@ impl Case for RotatedTarget {
         for (label, format) in FORMATS {
             inputs.extend([
                 Input::bytes(
-                    &format!("target:{label}"),
+                    format!("target:{label}"),
                     &RotatedTarget::target(format).words(),
                 ),
                 // The destination the blend and the mask read, which is the point of the family.
-                Input::bytes(&format!("destination:{label}"), &destination_bytes(format)),
+                Input::bytes(format!("destination:{label}"), &destination_bytes(format)),
             ]);
         }
         Ok(inputs)
@@ -516,9 +538,14 @@ impl Case for RotatedTarget {
         let library = made(sites, "library/fills", side.library(&fills.source()))?;
         let values = made(sites, "buffer/values", side.buffer(&float_bytes()))?;
         let extent = made(sites, "buffer/shape", side.buffer(&shape(WIDTH, 1)))?;
+        let shared = Shared {
+            library,
+            values,
+            extent,
+        };
         for (label, format) in FORMATS {
             let colors = self.colors(format);
-            draw_into(side, sites, label, library, &colors, format, values, extent)?;
+            draw_into(side, sites, label, &shared, &colors, format)?;
         }
         Ok(())
     }
@@ -542,7 +569,7 @@ pub fn destination_alpha() -> RotatedTarget {
     RotatedTarget {
         state: State {
             case: "argb8-targets-destination-alpha",
-            name: "destination-alpha",
+            label: "destination-alpha",
             mask: ColorWriteMask::ALL,
             blend: Some([
                 (
