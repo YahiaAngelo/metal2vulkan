@@ -3294,6 +3294,55 @@ impl Side for RuntimeSide<'_> {
         }
     }
 
+    fn detach_in_a_completed_handler(
+        &mut self,
+        buffer: Handle,
+        after: Duration,
+    ) -> Answer<crate::host_detach::DetachedInHandler> {
+        use crate::event_orders::Status;
+        use crate::host_detach::{DetachedInHandler, FILL_BYTE, FILL_BYTES};
+        use std::sync::mpsc;
+        let detaching = self.held(buffer)?.clone();
+        let length = detaching.length().min(FILL_BYTES);
+        let queue = self
+            .device
+            .new_command_queue()
+            .map_err(Failure::from_error)?;
+        let command_buffer = queue.command_buffer().map_err(Failure::from_error)?;
+        let mut blit = command_buffer
+            .blit_command_encoder()
+            .map_err(Failure::from_error)?;
+        // The command buffer has to *use* the buffer: a submission that named it is the only thing
+        // that can hold it, and a detach asked about a buffer nothing took is a different
+        // question.
+        blit.fill_buffer(&detaching, 0..length, FILL_BYTE)
+            .map_err(Failure::from_error)?;
+        blit.end_encoding().map_err(Failure::from_error)?;
+        let (sender, answered) = mpsc::channel();
+        let handler: metal2vulkan_runtime::Handler = Box::new(move |_: &CommandBuffer| {
+            // Past the race between the completion's own release and this handler's start: the
+            // region where Metal's answer is deterministic (`crate::host_detach`).
+            std::thread::sleep(after);
+            let _ = sender.send(detaching.detach_backing());
+        });
+        command_buffer
+            .add_completed_handler(handler)
+            .map_err(Failure::from_error)?;
+        command_buffer.commit().map_err(Failure::from_error)?;
+        // The handler's own channel, with a bound: an answer that did not arrive is the negative
+        // fact, and this thread never waits for the command buffer itself, which is the one wait
+        // Metal has no bounded form of (`crate::host_detach`).
+        let (detached, status) = match answered.recv_timeout(crate::host_detach::WAIT) {
+            Ok(Ok(detached)) => (
+                Some(detached),
+                Status::read(format!("{:?}", command_buffer.status())),
+            ),
+            Ok(Err(error)) => return Err(Failure::of(&error)),
+            Err(_) => (None, Status::NeverSettled),
+        };
+        Ok(DetachedInHandler { detached, status })
+    }
+
     fn shared_event_rises(&mut self, label: &str) -> Answer<crate::shared_events::EventRise> {
         use crate::shared_events::{EventRise, WAIT_MS};
         let bound = Duration::from_millis(WAIT_MS);

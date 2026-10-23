@@ -214,8 +214,9 @@ pub(crate) struct Submitted {
     /// The events it signals, with their signal indices.
     pub(crate) signals: Vec<(Arc<EventShared>, u64)>,
     /// The holds of what its event group's commands took that its completion lets go
-    /// (`State::holds_until`): at once, or, where it ends its command buffer, once the command
-    /// buffer's completed handlers ran.
+    /// (`State::holds_until`): at once, or, where it ends its command buffer, as that command
+    /// buffer's completion is processed, before its completed handlers run
+    /// (`State::keep_holds`, `CommandBufferShared::complete`).
     pub(crate) holds: Vec<SubmittedHolds>,
 }
 

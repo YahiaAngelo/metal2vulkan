@@ -101,8 +101,8 @@ pub(super) struct Rebinds {
     buffers: Mutex<KeyMap<ResourceKey, Entry>>,
     /// How many of them are detached (`detach.rs`): else no command names a detached one.
     detached: AtomicUsize,
-    /// Signaled as the work of a submitted batch that took one of them completes, and as its hold
-    /// goes (`SubmittedHolds`): a buffer's detach waits for no such work to run.
+    /// Signaled as the hold of a submitted batch that took one of them goes, its work having
+    /// completed (`SubmittedHolds`): a buffer's detach waits for no such hold to be left.
     completed: Condvar,
     /// The device's stand-in a detached buffer's commands take (`buffer::Detached`), while one
     /// is detached: made again once every one let go of it.
@@ -183,11 +183,10 @@ struct Entry {
     /// The holds of encoders and of command buffers not yet committed on it ([`Holds`]).
     pending: u32,
     /// The holds of submitted work that took it (`SubmittedHolds`), each from the submission of
-    /// its batches until their work completed, or, for a command buffer's last batches, until its
-    /// completed handlers ran: a detach refuses while one is.
+    /// its batches until their work completed, and, for a command buffer's last batches, until
+    /// its completion is processed, before its completed handlers run: a detach refuses while one
+    /// is, and a buffer's waits for the work.
     submitted: u32,
-    /// Those of them whose work has not yet completed: a buffer's detach waits for none.
-    running: u32,
     /// It is detached (`detach.rs`), as its cell says.
     detached: bool,
     /// A submitted command buffer took the pages it lies in now and found them its own: Metal
@@ -215,7 +214,6 @@ impl Rebinds {
             cell: Arc::downgrade(cell),
             pending: 0,
             submitted: 0,
-            running: 0,
             detached: false,
             resident: false,
         };
@@ -367,13 +365,13 @@ impl Rebinds {
         Some((cell.replace(Lying::Detached(detached)), resident))
     }
 
-    /// Wait until no submitted work that holds the buffer of `key` still runs
-    /// (`SubmittedHolds::ran`), with no other lock of the runtime's held: the completion path
-    /// notes each without this one's caller. Settles on a lost device (`Err(DeviceLost)`), whose
-    /// command buffers may never complete.
+    /// Wait until no submitted work holds the buffer of `key` any longer (`SubmittedHolds`), with
+    /// no other lock of the runtime's held: the completion path lets each hold go without this
+    /// one's caller. Settles on a lost device (`Err(DeviceLost)`), whose command buffers may never
+    /// complete.
     pub(super) fn wait_ran(&self, device: &Device, key: ResourceKey) -> Result<(), Error> {
         let mut buffers = lock(&self.buffers);
-        while buffers.get(&key).is_some_and(|entry| entry.running > 0) {
+        while buffers.get(&key).is_some_and(|entry| entry.submitted > 0) {
             if device.is_lost() {
                 return Err(Error::DeviceLost);
             }
@@ -400,29 +398,13 @@ impl Rebinds {
         }
     }
 
-    /// The holds of submitted work on `keys` go, the work having completed unless `ran` noted it
-    /// already: a detach may go on.
-    fn let_go(&self, keys: &[ResourceKey], ran: bool) {
+    /// The holds of submitted work on `keys` go, its work having completed: a detach may go on,
+    /// and one waiting for that work answers.
+    fn let_go(&self, keys: &[ResourceKey]) {
         let mut buffers = lock(&self.buffers);
         for key in keys {
             if let Some(entry) = buffers.get_mut(key) {
                 entry.submitted = entry.submitted.saturating_sub(1);
-                if !ran {
-                    entry.running = entry.running.saturating_sub(1);
-                }
-            }
-        }
-        drop(buffers);
-        self.completed.notify_all();
-    }
-
-    /// The submitted work holding `keys` completed, its holds staying: a buffer's detach waiting
-    /// for it answers.
-    fn ran(&self, keys: &[ResourceKey]) {
-        let mut buffers = lock(&self.buffers);
-        for key in keys {
-            if let Some(entry) = buffers.get_mut(key) {
-                entry.running = entry.running.saturating_sub(1);
             }
         }
         drop(buffers);
@@ -595,7 +577,6 @@ impl Submitting<'_> {
                 // Pages the command buffer finds its own, Metal makes resident.
                 entry.resident |= !moved && !detached;
                 entry.submitted += 1;
-                entry.running += 1;
                 holds.keys.push(key);
                 retained.push(Box::new(pages));
             }
@@ -617,14 +598,13 @@ impl Submitting<'_> {
 /// The holds the commands of a command buffer's submitted batches took on buffers over host
 /// pages (`Submitting::submit`), counted per buffer, as Metal holds what a submission uses
 /// (`command_buffer/first_submission.rs`): from the submission of the batches' event group until
-/// their work completed, where a buffer's detach waiting for them answers (`ran`), and, for the
-/// command buffer's last group, until its completed handlers ran, where it is dropped. Until
-/// then a detach answers `false`.
+/// their work completed, where they are dropped. For the command buffer's last group that is as
+/// its completion is processed, before its completed handlers run
+/// (`CommandBufferShared::complete`), so a detach made from one of them detaches. Until they are
+/// dropped a detach answers `false`, and a buffer's waits for the work first.
 pub(super) struct SubmittedHolds {
     device: Device,
     keys: Vec<ResourceKey>,
-    /// Their work completed, noted already ([`SubmittedHolds::ran`]).
-    ran: bool,
 }
 
 impl SubmittedHolds {
@@ -633,7 +613,6 @@ impl SubmittedHolds {
         SubmittedHolds {
             device: device.clone(),
             keys: Vec::new(),
-            ran: false,
         }
     }
 
@@ -641,24 +620,12 @@ impl SubmittedHolds {
     pub(super) fn is_empty(&self) -> bool {
         self.keys.is_empty()
     }
-
-    /// The work holding them completed, the holds staying until they are dropped: a buffer's
-    /// detach waiting for that work answers `false`. Once.
-    pub(super) fn ran(&mut self) {
-        if self.ran {
-            return;
-        }
-        self.ran = true;
-        if !self.keys.is_empty() {
-            self.device.shared().rebinds.ran(&self.keys);
-        }
-    }
 }
 
 impl Drop for SubmittedHolds {
     fn drop(&mut self) {
         if !self.keys.is_empty() {
-            self.device.shared().rebinds.let_go(&self.keys, self.ran);
+            self.device.shared().rebinds.let_go(&self.keys);
         }
     }
 }

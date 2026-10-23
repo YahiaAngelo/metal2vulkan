@@ -12,13 +12,17 @@
 //!   reaches the buffer unnamed alone (case 4) reads 0 there and completes. No degradation is
 //!   announced: the failure is Metal's.
 //! - **Submitted work** (table 3, and the M3 Max under macOS 27.0.1). Metal holds what a
-//!   submission uses from its submission until its work completed, and the last submission's
-//!   until the command buffer's completed handlers ran: a buffer's detach meanwhile blocks until
-//!   that work completed, then answers `false` and detaches nothing; a heap's answers `false` at
-//!   once; a detach in a completed handler answers `false`, and one once `wait_until_completed`
-//!   returned detaches. A command buffer's later submission behind an event wait holds nothing
-//!   until it is submitted: a detach while it waits detaches at once, though the command buffer's
-//!   earlier work ran or still runs, and that submission then fails with code 8.
+//!   submission uses from its submission until its work completed, which for the last submission
+//!   is as the command buffer's completion is processed, before its completed handlers run: a
+//!   buffer's detach meanwhile blocks until that work completed, then answers `false` and detaches
+//!   nothing; a heap's answers `false` at once; a detach in a completed handler detaches, as does
+//!   one once `wait_until_completed` returned. Metal's answer to a detach made at the very start of
+//!   a completed handler is a race of its own release against the handler and is nothing to pin
+//!   (`detach.rs`'s module docs hold the measurement); its answer once the use has retired is
+//!   always `true`, which is what this lane holds. A command buffer's later submission behind an
+//!   event wait holds nothing until it is submitted: a detach while it waits detaches at once,
+//!   though the command buffer's earlier work ran or still runs, and that submission then fails
+//!   with code 8.
 //! - **The deallocator** of the pages a detach lets go of runs at the buffer's next rebind,
 //!   inside the call, on its thread, or at its release, never at the detach (the M3 Max under
 //!   macOS 27.0.1, a `newBufferWithBytesNoCopy:` buffer and one of `newBufferWithDescriptor:`,
@@ -832,55 +836,82 @@ fn a_detach_between_submissions_detaches_at_once_and_fails_only_the_later_submis
 /// A detach a completed handler calls: a buffer's or a heap's.
 type Detaching = Arc<dyn Fn() -> Result<bool, Error> + Send + Sync>;
 
-/// A detach in a completed handler of the command buffer that used the buffer answers `false`, as
-/// Metal's does (37 of 40 on the M3 Max, macOS 27.0.1; the consumer measured 197 of 200 and 39 of
-/// 40), and one once its `wait_until_completed` returned detaches (36 of 40 there; always 2 ms
-/// later). Buffer and heap forms.
+/// How long a completed handler waits before its detach, so the use it is asked about has retired
+/// however the completion was scheduled: far past the 20 us past which Metal detached 684 of 684
+/// times on the M3 Max under macOS 27.0.1.
+const RETIRED: Duration = Duration::from_millis(20);
+
+/// A detach in a completed handler of the command buffer that used the buffer detaches, as Metal's
+/// does once the use has retired, and so does one once its `wait_until_completed` returned.
+///
+/// The handler waits [`RETIRED`] before it detaches, which is the region where Metal's answer is
+/// deterministic. A detach made at the very start of a handler races Metal's own release of what
+/// the command buffer used, both answers measured within microseconds of each other
+/// (`detach.rs`'s module docs), so that leg is held only to answering at all: either answer is
+/// Metal's and nothing may rest on which. Buffer and heap forms.
 #[test]
-fn a_detach_in_a_completed_handler_answers_false() {
+fn a_detach_in_a_completed_handler_detaches() {
     on_device(|device| {
         let queue = device.new_command_queue().unwrap();
-        let Some((member, _)) = member_over(device, A) else {
-            return;
-        };
-        let Some((heap, placed)) = heap_member(device) else {
-            return;
-        };
-        let (buffer_answer, heap_answer) = (member.clone(), heap.clone());
-        let forms: [(&str, &Buffer, Detaching); 2] = [
-            (
-                "buffer",
-                &member,
-                Arc::new(move || buffer_answer.detach_backing()),
-            ),
-            (
-                "heap",
-                &placed,
-                Arc::new(move || heap_answer.detach_backing()),
-            ),
-        ];
-        for (form, used, detach) in forms {
-            let answered = Arc::new(std::sync::Mutex::new(None));
-            let command_buffer = queue.command_buffer().unwrap();
-            let (in_handler, seen) = (Arc::clone(&detach), Arc::clone(&answered));
-            command_buffer
-                .add_completed_handler(Box::new(move |_| {
-                    *seen.lock().unwrap() = Some(in_handler());
-                }))
-                .unwrap();
-            fill(&command_buffer, used, 0x5a);
-            command_buffer.commit().unwrap();
-            command_buffer.wait_until_completed_for(WAIT).unwrap();
-            assert_eq!(command_buffer.error(), None, "{form}");
-            assert_eq!(
-                *answered.lock().unwrap(),
-                Some(Ok(false)),
-                "{form}: in its completed handler"
-            );
-            assert_eq!(detach(), Ok(true), "{form}: once the wait returned");
+        for retired in [false, true] {
+            let Some((member, _)) = member_over(device, A) else {
+                return;
+            };
+            let Some((heap, placed)) = heap_member(device) else {
+                return;
+            };
+            let (buffer_answer, heap_answer) = (member.clone(), heap.clone());
+            let forms: [(&str, &Buffer, Detaching); 2] = [
+                (
+                    "buffer",
+                    &member,
+                    Arc::new(move || buffer_answer.detach_backing()),
+                ),
+                (
+                    "heap",
+                    &placed,
+                    Arc::new(move || heap_answer.detach_backing()),
+                ),
+            ];
+            for (form, used, detach) in forms {
+                let answered = Arc::new(std::sync::Mutex::new(None));
+                let command_buffer = queue.command_buffer().unwrap();
+                let (in_handler, seen) = (Arc::clone(&detach), Arc::clone(&answered));
+                command_buffer
+                    .add_completed_handler(Box::new(move |_| {
+                        if retired {
+                            std::thread::sleep(RETIRED);
+                        }
+                        *seen.lock().unwrap() = Some(in_handler());
+                    }))
+                    .unwrap();
+                fill(&command_buffer, used, 0x5a);
+                command_buffer.commit().unwrap();
+                command_buffer.wait_until_completed_for(WAIT).unwrap();
+                assert_eq!(command_buffer.error(), None, "{form}");
+                let answer = answered.lock().unwrap().clone();
+                if retired {
+                    assert_eq!(
+                        answer,
+                        Some(Ok(true)),
+                        "{form}: in its completed handler, {RETIRED:?} in"
+                    );
+                } else {
+                    // Metal's answer here is a race of its own release against the handler: it is
+                    // held to answering, never to an answer.
+                    assert!(
+                        matches!(answer, Some(Ok(_))),
+                        "{form}: at once in its completed handler: {answer:?}"
+                    );
+                }
+                assert_eq!(detach(), Ok(true), "{form}: once the wait returned");
+            }
+            drop(heap);
         }
-        drop(heap);
-        eprintln!("DETACH handler: false in the completed handler, true once the wait returned");
+        eprintln!(
+            "DETACH handler: a detach in a completed handler past the retire detaches, and so \
+             does one once the wait returned"
+        );
     });
 }
 

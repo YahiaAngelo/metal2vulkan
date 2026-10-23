@@ -10,18 +10,28 @@
 //! - **The call.** It detaches at once, and answers `true`, unless submitted work holds the
 //!   buffer or heap: a submission whose command named it (one of a heap's buffers included), or
 //!   whose encoder made it resident (`use_resource`, `use_heap`), holds it from its submission
-//!   until its work completed, and the command buffer's last submissions hold it until its
-//!   completed handlers ran (`rebind::SubmittedHolds`; an event wait or signal splits the
-//!   submissions, `State::event_group`). Then a buffer's call blocks until the work of each such
-//!   submission completed and answers `false`, detaching nothing; a heap's answers `false` at
-//!   once. So a detach in a completed handler of the command buffer that used the buffer answers
-//!   `false` (Metal's: 37 of 40 such detaches, the other 3 a race of its kernel's retire), and one
-//!   once its `wait_until_completed` returned detaches (36 of 40 on Metal, always 2 ms later). A
-//!   later submission of a command buffer, behind an event wait, holds nothing until it is
-//!   submitted: a detach while it waits detaches at once, whatever the command buffer's earlier
-//!   submissions held, which keep their pages until they complete. A lost device ends the wait
-//!   (`Err(DeviceLost)`). The wait holds no lock of the runtime's: a completion turn notes each
-//!   submission's work complete without one.
+//!   until its work completed, which for the command buffer's last submissions is as its
+//!   completion is processed, before its completed handlers run (`rebind::SubmittedHolds`,
+//!   `CommandBufferShared::complete`; an event wait or signal splits the submissions,
+//!   `State::event_group`). Then a buffer's call blocks until the work of each such submission
+//!   completed and answers `false`, detaching nothing; a heap's answers `false` at once. A later
+//!   submission of a command buffer, behind an event wait, holds nothing until it is submitted: a
+//!   detach while it waits detaches at once, whatever the command buffer's earlier submissions
+//!   held, which keep their pages until they complete. A lost device ends the wait
+//!   (`Err(DeviceLost)`). The wait holds no lock of the runtime's: a completion turn lets each
+//!   submission's hold go without one.
+//! - **A detach in a completed handler is a race on Metal, whose deterministic side is `true`.**
+//!   Metal releases what a command buffer used as it processes the completion, and that release
+//!   races the start of the completed handlers: a detach that lands before it answers `false`, one
+//!   after it `true`. Measured on the M3 Max under macOS 27.0.1 over 2672 runs, a detach made *at
+//!   once* in a handler answered `false` between 1 and 43 times in 50 as unrelated host load
+//!   changed, and timed from `GPUEndTime` the two answers overlap between 50 and 99 us: neither is
+//!   Metal's answer there. Every `false` was transient — all 467 detached on a retry 2 us later.
+//!   Once the use has retired Metal always detaches: 684 of 684 at 20 us or more into the handler,
+//!   152 of 152 at 100 us or more with 32 command buffers queued, the first `true` within 117 us
+//!   of a handler's start. So the runtime lets a submission's hold go as the completion is
+//!   processed, which answers a detach in a completed handler `true`, Metal's answer wherever
+//!   Metal's is deterministic; nothing here or in a test rests on either side of the race.
 //! - **Pending work.** A submission that comes after the detach, the command buffer's first or a
 //!   later one, whose commands named the buffer or made it resident (a render pass whose
 //!   attachment lies in the bytes names them from its open), encoded before the detach or after
@@ -76,9 +86,13 @@ impl Buffer {
     /// the rule): let the no-copy buffer lie in no host pages until
     /// [`rebind_bytes_no_copy`](Buffer::rebind_bytes_no_copy) gives it some. `true` once it is
     /// detached (at once, or it was already). Where submitted work holds the buffer (a submission
-    /// that named it or made it resident, from its submission until its work completed, and the
-    /// command buffer's last submissions until its completed handlers ran), the call blocks until
-    /// that work completed and answers `false`, detaching nothing, as Metal's does. The old
+    /// that named it or made it resident, from its submission until its work completed, which for
+    /// the command buffer's last submissions is as its completion is processed, before its
+    /// completed handlers run), the call blocks until
+    /// that work completed and answers `false`, detaching nothing, as Metal's does. So a detach
+    /// made in a completed handler detaches, as Metal's does once the use has retired; Metal's
+    /// answer to one made at the very start of a handler is a race of its own release against the
+    /// handler, and this one is the side of it Metal settles on (the module docs). The old
     /// memory's import goes once nothing holds it; its deallocator runs at the buffer's next
     /// rebind, inside the call, or at its release, never at the detach, as Metal's. The buffer, its
     /// `gpu_address` and its options stay; `contents` answers `None` while it is detached, where
