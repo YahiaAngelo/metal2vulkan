@@ -1137,7 +1137,7 @@ codec_enum! {
     TextureWriteRoundingMode { TowardZero, NearestEven }
     CompareFunction { Never, Less, Equal, LessEqual, Greater, NotEqual, GreaterEqual, Always }
     CoverageLoopRefusal {
-        Outputs, EarlyFragmentTests, Discard, QuadOperations, Attachments, InterpolationFunctions,
+        EarlyFragmentTests, Discard, QuadOperations, Attachments, InterpolationFunctions,
     }
     IoNumeric { Float, Uint, Sint }
     StageBuiltin {
@@ -1398,6 +1398,7 @@ codec_enum! {
         DeviceAnisotropicFilter,
         DevicePointSize,
         ClippedCoverageSplit,
+        LoopedSampleOutputs,
         DeviceUnorm8LinearFilter,
         HalfOutputFastMathBlend,
         DeviceSampling,

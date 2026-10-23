@@ -320,6 +320,8 @@ mod coverage_alpha_rounding;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod coverage_loop;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
+mod coverage_outputs;
+#[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod creation_times;
 #[cfg(all(test, any(m2v_gpu, m2v_cpu_icd)))]
 mod cross_class_reads;

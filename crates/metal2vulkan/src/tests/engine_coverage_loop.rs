@@ -1,5 +1,6 @@
 //! The loop over the covered samples over the owned fixtures `engine/rt6_attachmentless`,
-//! `engine/sample_rate` and `engine/coverage_loop`:
+//! `engine/sample_rate`, `engine/coverage_loop`, `engine/coverage_natural` and
+//! `engine/coverage_outputs`:
 //!
 //! - `rt6_mark_coverage` reads `[[sample_mask]]` and writes memory, so Metal runs it once per
 //!   covered sample, each run reading the pixel's coverage. Compiled for a multisampled pipeline it
@@ -8,9 +9,12 @@
 //!   bits (`FindILsb`). Its interface says so (`CoverageLoop::Looped`); compiled on its own it says
 //!   `Unlooped`, and link asks for `multisampled` (`NeedsInput(Multisampled)`) at four samples
 //!   and takes it at one.
-//! - `sample_rate_mask_in` returns a color beside `[[sample_mask]]` and `[[sample_id]]`: one
-//!   pixel-rate invocation cannot write each sample's color, so its interface records
-//!   `Refused(Outputs)` and link refuses it as not representable at four samples, as before.
+//! - `sample_rate_mask_in` returns a color beside `[[sample_mask]]` and `[[sample_id]]`: it loops
+//!   as the memory writer does, its color the last pass's (`PrecisionNote::LoopedSampleOutputs`).
+//! - `coverage_outputs`' memory writers return a color, one also a sample mask: they loop
+//!   wherever the device makes them, recording the note, the masked one storing the union of the
+//!   samples its passes keep after the loop; on MoltenVK on Apple's GPU each runs as written,
+//!   exactly, without the note.
 //! - `rt6_mark_sample` runs per sample without reading the coverage: no loop.
 //! - `coverage_loop`'s memory writers loop at four samples wherever the device makes them; each of
 //!   its functions holding one thing the loop does not fit (early fragment tests, a discard, a
@@ -36,6 +40,7 @@ use crate::device::{Device, DeviceDescription, DevicePolicy, DriverWorkaround};
 use crate::error::{Error, Feature, Needs, RuntimeInput, Unsupported};
 use crate::library::Library;
 use crate::metal::PixelFormat;
+use crate::pipeline::artifact::PrecisionNote;
 use crate::pipeline::descriptor::{
     ColorAttachmentDescriptor, FunctionDescriptor, RenderPipelineDescriptor, StageSource,
 };
@@ -318,7 +323,6 @@ fn a_coverage_reading_memory_writer_loops_over_its_covered_samples() {
 /// Metal; at one sample, where the coverage is the one sample's, it records nothing anywhere.
 #[test]
 fn a_multisampled_coverage_reader_off_apples_rasterizer_announces_the_split() {
-    use crate::pipeline::artifact::PrecisionNote;
     let Some(lib) = library("rt6_attachmentless") else {
         return;
     };
@@ -356,8 +360,8 @@ fn a_multisampled_coverage_reader_off_apples_rasterizer_announces_the_split() {
 /// The interface states the loop: `Looped` under `multisampled`, `Unlooped` without, and link asks
 /// a function compiled without it for `multisampled` at four samples and takes it at one; a
 /// function that runs per sample without reading the coverage has no loop; one with a color output
-/// records why it has none, and link refuses it at four samples as before; on MoltenVK on Apple's
-/// GPU the coverage reader runs as written (`DriverRunsPerSample`).
+/// loops as well, recording `PrecisionNote::LoopedSampleOutputs`; on MoltenVK on Apple's GPU the
+/// coverage reader runs as written (`DriverRunsPerSample`).
 #[test]
 fn the_interface_states_the_coverage_loop() {
     let (Some(attachmentless), Some(sample_rate)) =
@@ -397,8 +401,8 @@ fn the_interface_states_the_coverage_loop() {
         (
             &sample_rate,
             MASK_IN,
-            CoverageLoop::Refused(CoverageLoopRefusal::Outputs),
-            CoverageLoop::Refused(CoverageLoopRefusal::Outputs),
+            CoverageLoop::Unlooped,
+            CoverageLoop::Looped,
         ),
     ] {
         assert_eq!(state(lib, name, &none), alone, "{name} alone");
@@ -418,21 +422,27 @@ fn the_interface_states_the_coverage_loop() {
     );
     dev.compile_render_pipeline(&render(&attachmentless, alone, 1, false), &budget)
         .expect("one sample");
-    // A color output beside the coverage at sample rate stays not representable.
-    let refused = dev
+    // A color output beside the coverage at sample rate loops too, its color the last pass's.
+    let alone = StageSource::Compiled(compile(&sample_rate, MASK_IN, &none));
+    assert_eq!(
+        dev.compile_render_pipeline(&render(&attachmentless, alone, 4, true), &budget)
+            .map(|_| ()),
+        Err(Error::NeedsInput(RuntimeInput::Multisampled))
+    );
+    let p = dev
         .compile_render_pipeline(
             &render(&attachmentless, function(&sample_rate, MASK_IN), 4, true),
             &budget,
         )
-        .map(|_| ());
+        .expect("the looping color writer");
+    assert!(!p.graphics.sample_shading);
+    let s = shape(fragment_words(&p));
+    assert!(s.loops && s.find_lsb && !s.sample_id, "{s:?}");
+    assert!(p.stages.iter().any(|m| m
+        .precision_notes
+        .contains(&PrecisionNote::LoopedSampleOutputs)));
     assert_eq!(
-        refused,
-        Err(Error::Unsupported(Unsupported::not_representable(
-            Feature::PixelCoverageAtSampleRate
-        )))
-    );
-    assert_eq!(
-        CoverageLoopRefusal::Outputs.error(),
+        CoverageLoopRefusal::EarlyFragmentTests.error(),
         Error::Unsupported(Unsupported::not_representable(
             Feature::PixelCoverageAtSampleRate
         ))
@@ -708,5 +718,92 @@ fn where_interpolation_needs_the_whole_quad_the_varyings_are_read_before_the_loo
     assert!(
         inside >= 6 * 4,
         "{inside} pipelines read it inside the loop"
+    );
+}
+
+/// How many `BuiltIn SampleMask` decorations `words` holds: the input's, and the output's where
+/// the module writes one.
+fn sample_mask_decorations(words: &[u32]) -> usize {
+    let mut n = 0;
+    let mut i = 5;
+    while let Some(&w) = words.get(i) {
+        let (len, op) = ((w >> 16) as usize, w & 0xFFFF);
+        let at = |k: usize| words.get(i + k).copied().unwrap_or(u32::MAX);
+        n += usize::from(
+            op == OP_DECORATE && at(2) == DECORATION_BUILTIN && at(3) == BUILTIN_SAMPLE_MASK,
+        );
+        if len == 0 {
+            break;
+        }
+        i += len;
+    }
+    n
+}
+
+/// `coverage_outputs`' memory writers return a color beside `[[sample_mask]]`, one also a sample
+/// mask, which Metal writes per covered sample, each from that sample's run (our probe `co`). At
+/// two and four samples on every committed profile each loops, without sample shading, recording
+/// `PrecisionNote::LoopedSampleOutputs`, or is refused for what the device lacks, never as the
+/// coverage at sample rate; the masked one declares the `SampleMask` output beside the input. On
+/// a driver that runs a memory writer once per covered sample (MoltenVK on Apple's GPU) each runs
+/// as written, which is Metal's, without the loop or the note.
+#[test]
+fn coverage_reading_color_writers_loop_or_run_as_written() {
+    let Some(lib) = library("coverage_outputs") else {
+        return;
+    };
+    let (mut looped, mut natural) = (0, 0);
+    for stem in stems() {
+        let dev = device(&stem);
+        let driver_runs = per_sample_defect(&dev).is_some();
+        for (name, masks) in [("cvo_color", 1), ("cvo_masked", 2)] {
+            for samples in [2, 4] {
+                let what = format!("{name} on {stem} at {samples}");
+                let mut d = RenderPipelineDescriptor::new(function(&lib, "cvo_vertex"));
+                d.fragment = Some(function(&lib, name));
+                d.color_attachments[0] =
+                    Some(ColorAttachmentDescriptor::new(PixelFormat::RGBA8Uint));
+                d.raster_sample_count = samples;
+                match dev.compile_render_pipeline(&d, &Budget::standard()) {
+                    Ok(p) => {
+                        assert!(!p.graphics.sample_shading, "{what}");
+                        let words = fragment_words(&p);
+                        let s = shape(words);
+                        assert_eq!(
+                            (s.loops, s.find_lsb, s.sample_id),
+                            (!driver_runs, !driver_runs, false),
+                            "{what}"
+                        );
+                        assert_eq!(sample_mask_decorations(words), masks, "{what}");
+                        let noted = p.stages.iter().any(|m| {
+                            m.precision_notes
+                                .contains(&PrecisionNote::LoopedSampleOutputs)
+                        });
+                        assert_eq!(noted, !driver_runs, "{what}");
+                        for m in &p.stages {
+                            check_words_valid(&m.spirv, &p.requirements, dev.profile())
+                                .unwrap_or_else(|e| panic!("{what} {:?}: L3: {e}", m.stage));
+                        }
+                        *if driver_runs {
+                            &mut natural
+                        } else {
+                            &mut looped
+                        } += 1;
+                    }
+                    Err(Error::Unsupported(u)) => {
+                        assert_ne!(
+                            u.feature,
+                            Feature::PixelCoverageAtSampleRate,
+                            "{what}: {u:?}"
+                        );
+                    }
+                    Err(e) => panic!("{what}: {e}"),
+                }
+            }
+        }
+    }
+    assert!(
+        looped >= 12 && natural >= 4,
+        "{looped} looped, {natural} as written"
     );
 }

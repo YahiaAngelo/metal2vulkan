@@ -83,16 +83,16 @@
 //!   (`StageInterface::writes_memory`) runs under the pipeline's sample shading at a minimum of 1.0
 //!   (`GraphicsState::sample_shading`, needing `sampleRateShading`), as one that reads
 //!   `[[sample_id]]` does: once per covered sample, where a Vulkan stage without sample shading
-//!   runs at least once per pixel. Link refuses a function that runs per sample (one of those, or
-//!   one that reads a sample-qualified varying) beside `[[sample_mask]]` on every device, as
-//!   `Unsupported{PixelCoverageAtSampleRate, NotRepresentable}`: Vulkan gives an invocation under
-//!   sample shading only the bits of the samples it shades, a quad holds one sample index, and no
-//!   subgroup is promised to hold a pixel's other sample invocations, so no form gathers the
-//!   pixel's coverage. Except where its side effects are its memory writes: compiled for the
-//!   pipeline, such a function runs once per pixel, without sample shading, and its body once per
-//!   covered sample from a loop over the coverage (`StageIo::coverage_loop`); compiled without
-//!   `multisampled` it is `NeedsInput(Multisampled)`, and one the loop does not fit is refused for
-//!   the reason its interface records (`CoverageLoopRefusal`). On a driver that runs a
+//!   runs at least once per pixel. A function that runs per sample (one of those, or one that
+//!   reads a sample-qualified varying) beside `[[sample_mask]]` cannot run under sample shading:
+//!   Vulkan gives an invocation under sample shading only the bits of the samples it shades, a quad
+//!   holds one sample index, and no subgroup is promised to hold a pixel's other sample
+//!   invocations, so no form gathers the pixel's coverage. Compiled for the pipeline, such a
+//!   function runs once per pixel instead, without sample shading, and its body once per covered
+//!   sample from a loop over the coverage (`StageIo::coverage_loop`), its outputs the last pass's
+//!   (`PrecisionNote::LoopedSampleOutputs`); compiled without `multisampled` it is
+//!   `NeedsInput(Multisampled)`, and one the loop does not fit is refused for the reason its
+//!   interface records (`CoverageLoopRefusal`). On a driver that runs a
 //!   memory-writing function once per covered sample itself (`CoverageLoop::DriverRunsPerSample`,
 //!   MoltenVK on Apple's GPU) the function runs as written, without sample shading, and its other
 //!   reads are checked as below. A per-sample function reads the pixel values Vulkan has no pixel
@@ -850,9 +850,9 @@ fn sample_invocations(
     // Metal hands each of the pixel's sample invocations the pixel's coverage. A Vulkan
     // invocation under sample shading sees only its own samples' bits, and nothing gathers a
     // pixel's sample invocations: a quad holds one sample index, and no subgroup is promised to
-    // hold the rest. A function whose side effects are its memory writes runs once per pixel
-    // instead, compiled for the pipeline, and its body once per covered sample, without sample
-    // shading; any other is refused for the reason its interface records. A driver that runs a
+    // hold the rest. The function runs once per pixel instead, compiled for the pipeline, and its
+    // body once per covered sample, without sample shading; one the loop does not fit is refused
+    // for the reason its interface records. A driver that runs a
     // memory-writing function once per covered sample whatever the pipeline's sample shading hands
     // each run the pixel's coverage itself, as Metal does: the function's other reads are checked
     // as any per-sample function's, and the pipeline enables no sample shading, under which that

@@ -2815,6 +2815,14 @@ fast forms record, and each `PrecisionNote`'s rustdoc states its bound.
   triangle that extends past the viewport as pieces whose shared edges cross pixels, and such a
   pixel's fragments can run once per piece, each reading that piece's coverage, where the device
   hands the pixel's fragment its coverage by the whole primitive (lavapipe by its own pieces).
+- `metal2vulkan-degrade-looped-sample-outputs` (precision). `PrecisionNote::LoopedSampleOutputs`: A
+  fragment function that reads `[[sample_mask]]`, runs once per covered sample on Metal and writes
+  an output runs once per pixel in a multisampled pipeline, its body once per covered sample, on a
+  device that does not run it per sample itself (MoltenVK on Apple's GPU runs a memory writer per
+  sample itself, as written). The samples Metal writes are written, but each with the last
+  pass's outputs, where Metal writes each sample's from that sample's run: equal where every pass
+  computes the same outputs. Vulkan hands an invocation under sample shading only its own sample's
+  bit of the coverage.
 - `metal2vulkan-degrade-device-unorm8-linear-filter` (precision).
   `PrecisionNote::DeviceUnorm8LinearFilter`: The module hands an 8-bit unsigned normalized texture's
   linear sample to the device's filter, at the coordinate of Metal's footprint step

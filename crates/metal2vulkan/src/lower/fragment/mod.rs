@@ -543,6 +543,21 @@ pub(crate) fn sample_mask_input(plan: &Plan) -> Option<usize> {
     })
 }
 
+/// The index of the stage's `SampleMask` output object, where it has one: the function's sample
+/// mask output, or the one the pipeline's private masks write.
+pub(super) fn sample_mask_output(plan: &Plan) -> Option<usize> {
+    plan.families.stage_io.objects.iter().position(|o| {
+        matches!(
+            o,
+            stage_io::IoObject::Builtin {
+                builtin: crate::spv::BuiltIn::SampleMask,
+                dir: IoDir::Output,
+                ..
+            }
+        )
+    })
+}
+
 /// `SampleMask[0]`, the invocation's coverage word, loaded from the input variable in the open
 /// block of the entry `fb` builds, and stored in the body's copy where it has one.
 pub(super) fn load_coverage(
