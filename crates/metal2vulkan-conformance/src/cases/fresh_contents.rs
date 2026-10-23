@@ -96,7 +96,7 @@
 use crate::allowance::Allowance;
 use crate::case::{call, Abort, Case, Input, MetalSource, Side};
 use crate::transcript::{Node, Observed, Sites, Value};
-use crate::work::{Done, Resource, Step, Storage, TextureSpec, Work};
+use crate::work::{Done, Plane, Resource, Step, Storage, TextureKind, TextureSpec, Work};
 use metal2vulkan_runtime::Degradation;
 
 /// The byte a resource is filled with before it is released, so the memory the row's second
@@ -247,7 +247,7 @@ impl Case for FreshBuffers {
             inputs.extend(program_inputs(
                 &format!("bytes-{length}"),
                 &buffer_program(length, self.storage),
-            ));
+            )?);
         }
         Ok(inputs)
     }
@@ -270,31 +270,336 @@ impl Case for FreshBuffers {
     }
 }
 
-/// The inputs one program feeds its run: every byte of every resource it is made with, and the
+/// The inputs one program feeds its run: one input a resource it is made with, and one for the
 /// **steps it encodes, in order**.
 ///
-/// The steps are in the fingerprint and not only the bytes, and that was found by breaking
-/// something rather than reasoned out: reordering one row's release on purpose — so the release
-/// came while a command buffer was open and the interpreter refused it — left the fingerprint
-/// unchanged, so the run compared against a recording taken from a *different* program and read as
-/// our side diverging. A case must prove its inputs, and a program's order is one of them.
-fn program_inputs(what: &str, work: &Work) -> Vec<Input> {
+/// The steps are in the fingerprint and not only the resources' bytes, and that was found by
+/// breaking something rather than reasoned out: reordering one row's release on purpose — so the
+/// release came while a command buffer was open and the interpreter refused it — left the
+/// fingerprint unchanged, so the run compared against a recording taken from a *different* program
+/// and read as our side diverging. A case must prove its inputs, and a program's order is one of
+/// them.
+///
+/// # Keyed by the Metal call, never by `Debug`
+///
+/// Every byte here is **the name of the Metal call the program makes, and the values it hands that
+/// call**. It was `format!("{:?}")` of the resources and of the steps, which worked and was a
+/// trap: that text moves whenever anyone adds a field to a shared type in [`crate::work`], so two
+/// new step fields and one texture field restaled all 87 of this family's recordings without
+/// changing a single Metal call any of these cases makes.
+///
+/// Three properties keep that from happening again, and each is a rule for whoever widens
+/// [`crate::work`] next:
+///
+/// - **A call's name leads its bytes**, so a new [`Resource`] or [`Step`] variant renumbers
+///   nothing: there is no positional discriminant in here for one to shift.
+/// - **Every variant this family uses is destructured field by field, with no `..`**, so a field
+///   added to one of them is a *compile error* here rather than a silent restale, and its arm
+///   decides whether the field is part of what the call is asked to do.
+/// - **A value Metal's own call leaves at a default is written only where it is not that
+///   default**, each behind its own tag. A field whose default every case of this family takes
+///   therefore writes nothing at all, and no recording moves.
+///
+/// A resource's index *is* in here, deliberately: it is the program's own name for a resource it
+/// declared itself ([`Work::resources`]), not a side's object identity, and two of this family's
+/// steps differ by nothing else. [`buffer_program`] copies its subject into one prefilled buffer
+/// before the release and into another after it; drop the indices and those two copies — and the
+/// two reads that follow them — key identically, so a program that read the wrong one would match
+/// a recording taken from the right one
+/// (`a_program_that_reads_the_wrong_buffer_keys_differently`).
+fn program_inputs(what: &str, work: &Work) -> Result<Vec<Input>, String> {
     let mut inputs = Vec::new();
     for (at, resource) in work.resources.iter().enumerate() {
-        inputs.push(match resource {
-            // A buffer is made with its bytes, so the bytes are the input.
-            Resource::Buffer { bytes } => Input::bytes(format!("{what}/buffer:{at}"), bytes),
-            other => Input::bytes(
-                format!("{what}/resource:{at}"),
-                format!("{other:?}").as_bytes(),
-            ),
-        });
+        // The `buffer:`/`resource:` names are the ones the recordings already hold and the index
+        // is what tells one resource of a program from the next. The call's own name is in the
+        // bytes, which is where the fingerprint is.
+        let named = match resource {
+            Resource::Buffer { .. } => "buffer",
+            _ => "resource",
+        };
+        inputs.push(Input::bytes(
+            format!("{what}/{named}:{at}"),
+            &resource_words(resource)?,
+        ));
     }
-    inputs.push(Input::bytes(
-        format!("{what}/steps"),
-        format!("{:?}", work.steps).as_bytes(),
-    ));
-    inputs
+    let mut steps = Vec::new();
+    for step in &work.steps {
+        steps.extend(step_words(step)?);
+    }
+    inputs.push(Input::bytes(format!("{what}/steps"), &steps));
+    Ok(inputs)
+}
+
+/// One parameter of a call, little-endian.
+fn word(out: &mut Vec<u8>, value: u64) {
+    out.extend(value.to_le_bytes());
+}
+
+/// A parameter named by its own tag, so a value can never be read as another field's and a field
+/// that writes nothing shifts nothing after it.
+fn tagged(out: &mut Vec<u8>, tag: &[u8], value: u64) {
+    out.extend(tag);
+    word(out, value);
+}
+
+/// The call that makes `resource`, and the values it hands that call.
+///
+/// A resource none of this family's programs declares is an error rather than a key: inventing one
+/// would be inventing a fingerprint for bytes no recording was taken against. Every program here
+/// is built in this module, so no case reaches it; a case that wants such a resource adds its arm
+/// (`a_resource_this_family_does_not_declare_is_refused`).
+fn resource_words(resource: &Resource) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    match resource {
+        Resource::Buffer { bytes } => {
+            out.extend(b"newBufferWithBytes");
+            word(&mut out, bytes.len() as u64);
+            out.extend(bytes);
+        }
+        Resource::UnwrittenBuffer { length, storage } => {
+            out.extend(b"newBufferWithLength");
+            word(&mut out, *length);
+            // `MTLResourceOptions`' own default storage mode is shared, so a shared buffer states
+            // nothing and each mode that is not the default says which it is.
+            if *storage != Storage::Shared {
+                out.extend(b"storageMode");
+                out.extend(storage.word().as_bytes());
+            }
+        }
+        Resource::Texture { spec } => {
+            out.extend(b"newTextureWithDescriptor");
+            out.extend(descriptor_words(spec));
+        }
+        Resource::TextureOverBuffer {
+            buffer,
+            spec,
+            offset,
+            bytes_per_row,
+        } => {
+            out.extend(b"newTextureWithDescriptorOffsetBytesPerRow");
+            word(&mut out, *buffer as u64);
+            word(&mut out, *offset);
+            word(&mut out, *bytes_per_row);
+            out.extend(descriptor_words(spec));
+        }
+        // The `Debug` here is an error message and not a key: it says which resource has no call
+        // name, and nothing is fingerprinted by it.
+        other => return Err(format!("this family keys no resource {other:?}")),
+    }
+    Ok(out)
+}
+
+/// The `MTLTextureDescriptor` a texture is made from: the fields every row of this family states
+/// for itself, then each field Metal gives a default, only where the row does not take it.
+///
+/// Destructured whole on purpose. A field added to [`TextureSpec`] stops this compiling, which is
+/// the point: its arm then decides whether the field is part of what the descriptor asks for, and
+/// writing it only where it is not the default leaves every recording where it is.
+fn descriptor_words(spec: &TextureSpec) -> Vec<u8> {
+    let TextureSpec {
+        format,
+        kind,
+        width,
+        height,
+        depth,
+        levels,
+        slices,
+        samples,
+        storage,
+        render_target,
+        gpu_optimized,
+        usage,
+    } = spec;
+    let mut out = Vec::new();
+    // The three a row of this family always states.
+    tagged(&mut out, b"pixelFormat", u64::from(*format));
+    tagged(&mut out, b"width", *width);
+    tagged(&mut out, b"height", *height);
+    // And every other field only where it is not the descriptor's own default.
+    if *kind != TextureKind::Type2D {
+        out.extend(b"textureType");
+        out.extend(texture_type(*kind).as_bytes());
+    }
+    if *depth != 1 {
+        tagged(&mut out, b"depth", *depth);
+    }
+    if *levels != 1 {
+        tagged(&mut out, b"mipmapLevelCount", *levels);
+    }
+    if *slices != 1 {
+        tagged(&mut out, b"arrayLength", *slices);
+    }
+    if *samples != 1 {
+        tagged(&mut out, b"sampleCount", *samples);
+    }
+    if *storage != Storage::Shared {
+        out.extend(b"storageMode");
+        out.extend(storage.word().as_bytes());
+    }
+    if *render_target {
+        out.extend(b"renderTarget");
+    }
+    if !*gpu_optimized {
+        out.extend(b"noGPUOptimizedContents");
+    }
+    if let Some(usage) = usage {
+        tagged(&mut out, b"usage", u64::from(*usage));
+    }
+    out
+}
+
+/// The `MTLTextureType` a kind names.
+///
+/// Exhaustive on purpose: a kind added to [`TextureKind`] names itself here rather than falling
+/// into a catch-all whose bytes nobody chose.
+fn texture_type(kind: TextureKind) -> &'static str {
+    match kind {
+        TextureKind::Type2D => "MTLTextureType2D",
+        TextureKind::Type2DArray => "MTLTextureType2DArray",
+        TextureKind::Cube => "MTLTextureTypeCube",
+        TextureKind::Type3D => "MTLTextureType3D",
+        TextureKind::Type2DMultisample => "MTLTextureType2DMultisample",
+        TextureKind::Type2DMultisampleArray => "MTLTextureType2DMultisampleArray",
+        TextureKind::TextureBuffer => "MTLTextureTypeTextureBuffer",
+    }
+}
+
+/// The call one step runs, and the values it takes.
+///
+/// A step none of this family's programs encodes is an error rather than a key, for the reason
+/// [`resource_words`] gives (`a_step_this_family_does_not_encode_is_refused`).
+fn step_words(step: &Step) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    match step {
+        Step::FillBuffer {
+            buffer,
+            offset,
+            length,
+            value,
+        } => {
+            out.extend(b"fillBuffer");
+            word(&mut out, *buffer as u64);
+            word(&mut out, *offset);
+            word(&mut out, *length);
+            out.push(*value);
+        }
+        Step::CopyBufferToBuffer {
+            from,
+            from_offset,
+            to,
+            to_offset,
+            length,
+        } => {
+            out.extend(b"copyFromBufferToBuffer");
+            for value in [*from as u64, *from_offset, *to as u64, *to_offset, *length] {
+                word(&mut out, value);
+            }
+        }
+        Step::CopyBufferToTexture {
+            buffer,
+            offset,
+            bytes_per_row,
+            bytes_per_image,
+            size,
+            texture,
+            slice,
+            level,
+            origin,
+            plane,
+        } => {
+            out.extend(b"copyFromBufferToTexture");
+            for value in [
+                *buffer as u64,
+                *offset,
+                *bytes_per_row,
+                *bytes_per_image,
+                *texture as u64,
+                *slice,
+                *level,
+            ] {
+                word(&mut out, value);
+            }
+            out.extend(extent_words(origin, size));
+            out.extend(option_words(*plane));
+        }
+        Step::CopyTextureToBuffer {
+            texture,
+            slice,
+            level,
+            origin,
+            size,
+            buffer,
+            offset,
+            bytes_per_row,
+            bytes_per_image,
+            plane,
+        } => {
+            out.extend(b"copyFromTextureToBuffer");
+            for value in [
+                *texture as u64,
+                *slice,
+                *level,
+                *buffer as u64,
+                *offset,
+                *bytes_per_row,
+                *bytes_per_image,
+            ] {
+                word(&mut out, value);
+            }
+            out.extend(extent_words(origin, size));
+            out.extend(option_words(*plane));
+        }
+        Step::ReadBuffer {
+            buffer,
+            offset,
+            length,
+        } => {
+            out.extend(b"contents");
+            for value in [*buffer as u64, *offset, *length as u64] {
+                word(&mut out, value);
+            }
+        }
+        // These two are the program's own steps and not Metal selectors: the side drops its
+        // reference to the resource, and makes it again from its own declaration. They are named
+        // for what they do, which is what a step's key is for.
+        Step::Release { resource } => {
+            out.extend(b"release");
+            word(&mut out, *resource as u64);
+        }
+        Step::Make { resource } => {
+            out.extend(b"makeAgain");
+            word(&mut out, *resource as u64);
+        }
+        Step::Commit => out.extend(b"commit"),
+        // As in [`resource_words`], the `Debug` is the message and never the key.
+        other => return Err(format!("this family keys no step {other:?}")),
+    }
+    Ok(out)
+}
+
+/// A copy's origin and size, in texels.
+fn extent_words(origin: &[u64; 3], size: &[u64; 3]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for axis in origin.iter().chain(size) {
+        out.extend(axis.to_le_bytes());
+    }
+    out
+}
+
+/// The `MTLBlitOption` a copy takes, where it takes one.
+///
+/// [`Plane::Whole`] is `MTLBlitOptionNone`, the default every copy of this family makes, so it
+/// writes nothing; exhaustive, so a plane added to [`Plane`] names itself here.
+fn option_words(plane: Plane) -> Vec<u8> {
+    let named = match plane {
+        Plane::Whole => return Vec::new(),
+        Plane::Depth => "MTLBlitOptionDepthFromDepthStencil",
+        Plane::Stencil => "MTLBlitOptionStencilFromDepthStencil",
+        Plane::RowLinearPvrtc => "MTLBlitOptionRowLinearPVRTC",
+    };
+    let mut out = b"options".to_vec();
+    out.extend(named.as_bytes());
+    out
 }
 
 /// Read `index` of a program's reads, or nothing where the program answered fewer. A short answer
@@ -788,7 +1093,7 @@ impl Case for FreshTexture {
         inputs.extend(program_inputs(
             "work",
             &texture_program(&self.row.shape, self.row.storage),
-        ));
+        )?);
         Ok(inputs)
     }
 
@@ -1043,7 +1348,7 @@ impl Case for FreshPattern {
         let mut words = self.row.shape().words();
         words.push(BEFORE);
         let mut inputs = vec![Input::bytes("shape-and-bytes", &words)];
-        inputs.extend(program_inputs("work", &self.row.program()));
+        inputs.extend(program_inputs("work", &self.row.program())?);
         Ok(inputs)
     }
 
@@ -1144,7 +1449,7 @@ impl Case for FreshOverBuffer {
         words.extend(OVER_BUFFER.1.to_le_bytes());
         words.extend([OLD, BEFORE]);
         let mut inputs = vec![Input::bytes("shape-and-bytes", &words)];
-        inputs.extend(program_inputs("work", &self.program()));
+        inputs.extend(program_inputs("work", &self.program())?);
         Ok(inputs)
     }
 
@@ -1265,6 +1570,252 @@ mod tests {
                 _ => panic!("a run is fields"),
             };
             assert_ne!(texel(&pair[0]), texel(&pair[1]));
+        }
+    }
+
+    /// Every program of the family, with the case that runs it.
+    fn programs() -> Vec<(&'static str, Work)> {
+        let mut programs: Vec<(&'static str, Work)> = Vec::new();
+        for (case, storage) in BUFFERS {
+            for length in LENGTHS {
+                programs.push((case, buffer_program(length, storage)));
+            }
+        }
+        for row in TEXTURES {
+            programs.push((row.case, texture_program(&row.shape, row.storage)));
+        }
+        for row in PATTERNS {
+            programs.push((row.case, row.program()));
+        }
+        for (case, storage) in OVER_BUFFERS {
+            programs.push((case, FreshOverBuffer { case, storage }.program()));
+        }
+        programs
+    }
+
+    /// The call names this family's programs key by: every resource's and every step's.
+    const RESOURCE_CALLS: [&[u8]; 4] = [
+        b"newBufferWithBytes",
+        b"newBufferWithLength",
+        b"newTextureWithDescriptor",
+        b"newTextureWithDescriptorOffsetBytesPerRow",
+    ];
+    const STEP_CALLS: [&[u8]; 8] = [
+        b"fillBuffer",
+        b"copyFromBufferToBuffer",
+        b"copyFromBufferToTexture",
+        b"copyFromTextureToBuffer",
+        b"contents",
+        b"release",
+        b"makeAgain",
+        b"commit",
+    ];
+
+    /// **Every byte of the key is a Metal call's name and the values it takes.** Each resource's
+    /// bytes open with the call that makes it and each step's with the call it runs, so no variant
+    /// of [`Resource`] or [`Step`] is keyed by its position, and nothing in here is `Debug` text —
+    /// which is the trap this family fell into once and the reason all 87 of its recordings moved.
+    #[test]
+    fn the_key_names_the_metal_call_and_holds_no_debug_text() {
+        let mut keyed = 0;
+        for (case, work) in programs() {
+            for resource in &work.resources {
+                let words = resource_words(resource).unwrap_or_else(|why| panic!("{case}: {why}"));
+                assert!(
+                    RESOURCE_CALLS.iter().any(|call| words.starts_with(call)),
+                    "{case}: a resource keyed as {:?}",
+                    String::from_utf8_lossy(&words[..words.len().min(32)])
+                );
+                keyed += 1;
+            }
+            for step in &work.steps {
+                let words = step_words(step).unwrap_or_else(|why| panic!("{case}: {why}"));
+                assert!(
+                    STEP_CALLS.iter().any(|call| words.starts_with(call)),
+                    "{case}: a step keyed as {:?}",
+                    String::from_utf8_lossy(&words[..words.len().min(32)])
+                );
+                keyed += 1;
+            }
+            // And the shape a derived `Debug` would leave behind is in none of it. A key written
+            // from `format!("{:?}")` holds a field name, a brace and `Some(`; this one holds the
+            // call's own name and numbers.
+            let mut steps = Vec::new();
+            for step in &work.steps {
+                steps.extend(step_words(step).unwrap());
+            }
+            for print in [&b" { "[..], b"Some(", b"bytes_per_row"] {
+                assert!(
+                    !steps.windows(print.len()).any(|window| window == print),
+                    "{case}: the steps key holds {:?}",
+                    String::from_utf8_lossy(print)
+                );
+            }
+        }
+        assert!(keyed > 0);
+    }
+
+    /// **A descriptor states a field only where it is not Metal's default for it.** This is the
+    /// property that keeps a widened [`TextureSpec`] from moving a recording: a field every row of
+    /// this family leaves at its default writes nothing, so adding one writes nothing.
+    ///
+    /// The all-default descriptor's bytes are pinned exactly, so a field that started writing
+    /// itself unconditionally would be caught here rather than by 87 stale recordings.
+    #[test]
+    fn a_descriptor_states_a_field_only_where_it_is_not_the_default() {
+        let mut expected = Vec::new();
+        expected.extend(b"pixelFormat");
+        expected.extend(u64::from(RGBA8).to_le_bytes());
+        expected.extend(b"width");
+        expected.extend(64u64.to_le_bytes());
+        expected.extend(b"height");
+        expected.extend(64u64.to_le_bytes());
+        let plain = TextureSpec::texture_2d(RGBA8, 64, 64).shared();
+        assert_eq!(descriptor_words(&plain), expected);
+        // Every field set away from its default adds its own tag, and no two of them collide.
+        let mut volume = plain;
+        volume.depth = 4;
+        let mut sampled = plain;
+        sampled.samples = 4;
+        let varied: [(&str, TextureSpec); 7] = [
+            ("storage", plain.stored(Storage::Private)),
+            ("levels", plain.levels(7)),
+            ("array", plain.array(3)),
+            ("plain", plain.plain()),
+            ("usage", plain.used(READ)),
+            ("depth", volume),
+            ("samples", sampled),
+        ];
+        let mut keys: Vec<(&str, Vec<u8>)> = vec![("default", expected.clone())];
+        for (named, spec) in varied {
+            let words = descriptor_words(&spec);
+            assert!(
+                words.starts_with(&expected) && words.len() > expected.len(),
+                "{named}: states nothing of its own"
+            );
+            keys.push((named, words));
+        }
+        for (at, (named, words)) in keys.iter().enumerate() {
+            for (other, theirs) in &keys[at + 1..] {
+                assert_ne!(words, theirs, "{named} keys as {other}");
+            }
+        }
+        // And a field put back at its default writes nothing again.
+        let mut back = volume;
+        back.depth = 1;
+        assert_eq!(descriptor_words(&back), expected);
+    }
+
+    /// **The storage modes a row sweeps still key apart.** The default-elision writes a shared
+    /// buffer's mode nowhere, so this is the check that it has not made the three buffer rows'
+    /// inputs one key.
+    #[test]
+    fn the_three_storage_modes_key_apart() {
+        let keys: Vec<Vec<u8>> = [Storage::Shared, Storage::Managed, Storage::Private]
+            .into_iter()
+            .map(|storage| {
+                resource_words(&Resource::UnwrittenBuffer {
+                    length: 16,
+                    storage,
+                })
+                .unwrap()
+            })
+            .collect();
+        assert_ne!(keys[0], keys[1]);
+        assert_ne!(keys[0], keys[2]);
+        assert_ne!(keys[1], keys[2]);
+        // The same for a texture, whose rows sweep the modes too.
+        let shape = RGBA8_2D;
+        let specs: Vec<Vec<u8>> = [Storage::Shared, Storage::Managed, Storage::Private]
+            .into_iter()
+            .map(|storage| descriptor_words(&shape.spec(storage)))
+            .collect();
+        assert_ne!(specs[0], specs[1]);
+        assert_ne!(specs[0], specs[2]);
+        assert_ne!(specs[1], specs[2]);
+    }
+
+    /// **A program that read the wrong buffer keys differently.** This is why a resource's index is
+    /// in the key: [`buffer_program`]'s two copies and two reads differ by nothing else, so a key
+    /// without the indices would let a program that read its *written* buffer twice match a
+    /// recording taken from the program that reads the fresh one.
+    #[test]
+    fn a_program_that_reads_the_wrong_buffer_keys_differently() {
+        let right = buffer_program(16, Storage::Shared);
+        let keyed = |work: &Work| {
+            let mut out = Vec::new();
+            for step in &work.steps {
+                out.extend(step_words(step).unwrap());
+            }
+            out
+        };
+        // The last copy and the last read are redirected at the buffer the first pair used.
+        let mut wrong = right.clone();
+        for step in &mut wrong.steps {
+            match step {
+                Step::CopyBufferToBuffer { to, .. } if *to == 2 => *to = 1,
+                Step::ReadBuffer { buffer, .. } if *buffer == 2 => *buffer = 1,
+                _ => {}
+            }
+        }
+        assert_ne!(right, wrong, "the mutation changed the program");
+        assert_ne!(
+            keyed(&right),
+            keyed(&wrong),
+            "two programs reading different buffers key alike"
+        );
+    }
+
+    /// **The order of the steps is in the key.** The reason the steps were fingerprinted at all:
+    /// a release moved to where a command buffer is still open is a different program, which must
+    /// not match this one's recording.
+    #[test]
+    fn reordering_a_release_moves_the_key() {
+        let right = buffer_program(16, Storage::Shared);
+        let keyed = |work: &Work| {
+            let mut out = Vec::new();
+            for step in &work.steps {
+                out.extend(step_words(step).unwrap());
+            }
+            out
+        };
+        let at = right
+            .steps
+            .iter()
+            .position(|step| matches!(step, Step::Release { .. }))
+            .expect("the program releases its subject");
+        let mut moved = right.clone();
+        moved.steps.swap(at, at - 1);
+        assert_ne!(keyed(&right), keyed(&moved));
+    }
+
+    /// A resource or a step this family does not state has **no key**, rather than a `Debug` one
+    /// whose bytes no recording was taken against. No case reaches it — every program here is
+    /// built in this module — and a case that wants one adds its arm.
+    #[test]
+    fn a_resource_or_step_this_family_does_not_state_is_refused() {
+        assert!(resource_words(&Resource::Heap {
+            size: 4096,
+            storage: Storage::Private,
+        })
+        .is_err());
+        assert!(step_words(&Step::FillTexture {
+            texture: 0,
+            level: 0,
+            slice: 0,
+            region: crate::work::Rect::new(0, 0, 4, 4),
+            pattern: vec![0xff],
+        })
+        .is_err());
+        // And every program of the family does have one, so the refusal is reachable only from
+        // outside what these cases state.
+        for (case, work) in programs() {
+            for resource in &work.resources {
+                assert!(resource_words(resource).is_ok(), "{case}");
+            }
+            for step in &work.steps {
+                assert!(step_words(step).is_ok(), "{case}");
+            }
         }
     }
 
