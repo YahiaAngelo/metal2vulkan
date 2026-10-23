@@ -509,7 +509,7 @@ pub enum Problem {
     /// committed command buffer", and a new encoder's `_status <
     /// MTLCommandBufferStatusCommitted`).
     AlreadyCommitted,
-    /// A scheduled signal encoded once the command buffer completed
+    /// A scheduled signal encoded once the command buffer completed, or failed (status `Error`)
     /// (`CommandBuffer::encode_signal_event_scheduled`): Metal's process ends there (a
     /// segmentation fault, as the consumer measured; in 10 of 15 runs on an M3 Max under macOS
     /// 27.0.1, the others setting nothing). Encoded after the commit and before the completion,

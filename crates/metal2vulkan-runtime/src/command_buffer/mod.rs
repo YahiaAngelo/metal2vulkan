@@ -2105,8 +2105,8 @@ impl CommandBuffer {
     ///
     /// Called once the command buffer is committed and before it completed, it does nothing, as
     /// Metal's (measured before and after the command buffer was scheduled). Refused once it
-    /// completed (`Invalid`, `Problem::ScheduledSignalAfterCompletion`), where Metal's process
-    /// ends; while an encoder is open (Metal asserts), after an abandoned encoder, and for another
+    /// completed or failed (`Invalid`, `Problem::ScheduledSignalAfterCompletion`), where Metal's
+    /// process ends; while an encoder is open (Metal asserts), after an abandoned encoder, and for another
     /// device's event, as [`encode_signal_event`](Self::encode_signal_event) is. Metal ends the
     /// process for an `MTLEvent`, which this call does not take.
     pub fn encode_signal_event_scheduled(
@@ -2124,7 +2124,12 @@ impl CommandBuffer {
         let mut state = self.state();
         match state.refusal() {
             None => state.scheduled_signals.push((Arc::clone(event), value)),
-            Some(Problem::AlreadyCommitted) if state.status == CommandBufferStatus::Completed => {
+            Some(Problem::AlreadyCommitted)
+                if matches!(
+                    state.status,
+                    CommandBufferStatus::Completed | CommandBufferStatus::Error
+                ) =>
+            {
                 return Err(invalid(CALL, Problem::ScheduledSignalAfterCompletion))
             }
             Some(Problem::AlreadyCommitted) => {}
