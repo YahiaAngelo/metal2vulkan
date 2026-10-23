@@ -80,7 +80,26 @@ impl Report {
             .collect()
     }
 
-    /// The report: the counts, the matrix of case against venue, and then each failure in full.
+    /// Every row that differed inside an allowance, or that the venue could not run.
+    ///
+    /// These are compliant, and they are still the report's most important lines: the claim under
+    /// test is that a difference from Metal is a bug *unless we announced it*, so a run whose
+    /// counts are all green while something was loosened has to say what. A reader who cannot see
+    /// which field was allowed to differ cannot check that the allowance was the right one.
+    pub fn noted(&self) -> Vec<&Replayed> {
+        self.rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.verdict,
+                    Verdict::Announced { .. } | Verdict::LacksFeature { .. }
+                )
+            })
+            .collect()
+    }
+
+    /// The report: the counts, the matrix of case against venue, then everything that was
+    /// loosened or could not be run, and then each failure in full.
     pub fn render(&self) -> String {
         let mut out = String::new();
         out.push_str("verdicts\n");
@@ -101,6 +120,12 @@ impl Report {
         out.push_str(&self.matrix());
         for error in &self.errors {
             out.push_str(&format!("\nerror: {error}\n"));
+        }
+        for row in self.noted() {
+            out.push_str(&format!(
+                "\n{} on {}: {}\n",
+                row.case, row.venue, row.verdict
+            ));
         }
         for row in self.failures() {
             out.push_str(&format!(

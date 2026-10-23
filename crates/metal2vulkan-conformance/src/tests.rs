@@ -115,6 +115,32 @@ impl Side for StubSide {
         }
     }
 
+    fn compute_pipeline_with_stage_input(
+        &mut self,
+        _library: Handle,
+        _entry: &str,
+        _stage_input: &crate::case::StageInput,
+    ) -> Answer<Handle> {
+        match self.refusal("pipeline") {
+            Some(failure) => Err(failure),
+            None => Ok(self.handle()),
+        }
+    }
+
+    fn dispatch_threads(
+        &mut self,
+        _pipeline: Handle,
+        _buffers: &[Handle],
+        _stage_in: &[crate::case::StageInRegion],
+        _grid: [u32; 3],
+        _threads: [u32; 3],
+    ) -> Answer<Handle> {
+        match self.refusal("dispatch") {
+            Some(failure) => Err(failure),
+            None => Ok(self.handle()),
+        }
+    }
+
     fn wait(&mut self, _command_buffer: Handle) -> Answer<Value> {
         Ok(Value::unit_variant(self.status))
     }

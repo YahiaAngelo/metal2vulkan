@@ -18,6 +18,7 @@ use crate::allowance::Allowance;
 use crate::recording::ShaderRef;
 use crate::transcript::{Node, Observed, Sites, Transcript, Value};
 use crate::verdict::device_gap;
+use metal2vulkan::metal::{AttributeFormat, IndexType, StepFunction};
 
 /// A shader as both sides can take it.
 ///
@@ -40,6 +41,78 @@ pub struct ShaderSource<'a> {
 /// recording holds one, because a Metal object's identity is not observable across hosts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Handle(pub u32);
+
+/// A kernel's `[[stage_in]]` descriptor, as both sides take it: Metal's
+/// `MTLStageInputOutputDescriptor`.
+///
+/// The vocabulary is Metal's own enumerations, as the translator's public API names them, so a
+/// value a case writes reaches `MTLAttributeFormat`, `MTLStepFunction` and `MTLIndexType` by their
+/// raw ordinals and reaches the runtime's descriptor unchanged. There is no second spelling to
+/// keep in step.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StageInput {
+    /// The attributes a kernel reads, by their Metal attribute index.
+    pub attributes: Vec<StageInAttribute>,
+    /// The buffer layouts the attributes read, by their Metal buffer index.
+    pub layouts: Vec<StageInLayout>,
+    /// The index type an indexed step reads.
+    pub index_type: IndexType,
+    /// The Metal buffer index an indexed step reads its indices from.
+    pub index_buffer_index: u32,
+}
+
+impl StageInput {
+    /// A descriptor of `attributes` and `layouts`, whose indices are 32-bit words at
+    /// `index_buffer_index`.
+    pub fn new(
+        attributes: Vec<StageInAttribute>,
+        layouts: Vec<StageInLayout>,
+        index_buffer_index: u32,
+    ) -> Self {
+        Self {
+            attributes,
+            layouts,
+            index_type: IndexType::UInt32,
+            index_buffer_index,
+        }
+    }
+}
+
+/// One `[[stage_in]]` attribute: Metal's `MTLAttributeDescriptor` at an attribute index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StageInAttribute {
+    /// The Metal attribute index, as the shader declares it.
+    pub index: u32,
+    pub format: AttributeFormat,
+    /// The attribute's byte offset inside an element.
+    pub offset: u32,
+    /// The Metal buffer index of the layout it reads.
+    pub buffer_index: u32,
+}
+
+/// One `[[stage_in]]` buffer layout: Metal's `MTLBufferLayoutDescriptor` at a buffer index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StageInLayout {
+    /// The Metal buffer index the layout is of.
+    pub buffer_index: u32,
+    /// Bytes between elements; `None` is `MTLBufferLayoutStrideDynamic`, the stride the encoder
+    /// binds the buffer with.
+    pub stride: Option<u32>,
+    pub step_function: StepFunction,
+    /// The step rate; Metal requires 0 of a constant step.
+    pub step_rate: u32,
+}
+
+/// The stage-in region a dispatch fetches its `[[stage_in]]` attributes from: the two calls Metal
+/// sets it with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StageInRegion {
+    /// `setStageInRegion:`.
+    Direct { origin: [u32; 3], size: [u32; 3] },
+    /// `setStageInRegionWithIndirectBuffer:indirectBufferOffset:`, whose buffer holds the origin's
+    /// three words and then the size's.
+    Indirect { buffer: Handle, offset: u64 },
+}
 
 /// What a side answered a call with.
 pub type Answer<T> = Result<T, Failure>;
@@ -178,6 +251,30 @@ pub trait Side {
     /// The degrade notices the side has announced so far, by code, and taken away. Metal announces
     /// none, so its side answers an empty list.
     fn announced(&mut self) -> Vec<String>;
+
+    /// `newComputePipelineStateWithDescriptor:options:reflection:error:` of the library's `entry`,
+    /// under the stage-input descriptor `stage_input` ([`StageInput`]).
+    fn compute_pipeline_with_stage_input(
+        &mut self,
+        library: Handle,
+        entry: &str,
+        stage_input: &StageInput,
+    ) -> Answer<Handle>;
+
+    /// One command buffer with one compute encoder: the pipeline set, `buffers` bound at 0 up,
+    /// each of `stage_in` set in the order the case lists them, one
+    /// `dispatchThreads:threadsPerThreadgroup:` of `grid` threads, and `commit`.
+    ///
+    /// `stage_in` is a list rather than one region because setting it twice is a case of its own:
+    /// Metal's later call replaces the earlier, and a case states that by listing both.
+    fn dispatch_threads(
+        &mut self,
+        pipeline: Handle,
+        buffers: &[Handle],
+        stage_in: &[StageInRegion],
+        grid: [u32; 3],
+        threads: [u32; 3],
+    ) -> Answer<Handle>;
 
     /// The read-back of an indirect render command the CPU encoded, as the side's getters answer
     /// it: `getCommandType` and the draw. Metal exposes these privately only, so the Metal side
