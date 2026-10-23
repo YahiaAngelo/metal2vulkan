@@ -33,6 +33,11 @@ fn undefined_bits_are_kept() {
 /// `_with_reflection` creation for its reflection, an undefined bit alone and
 /// `FAIL_ON_BINARY_ARCHIVE_MISS` alone included (measured on an M3 Max under macOS 27.0.1 by the
 /// conformance suite's `pipeline_options` family, on a compute and a render creation).
+///
+/// The row that first moved this is `FAIL_ON_BINARY_ARCHIVE_MISS` on its own: Apple's
+/// documentation says nothing about reflection for that bit, and reading only the two information
+/// bits answered no reflection where Metal answers one -- a reflection a consumer asked for and
+/// did not get.
 #[test]
 fn every_option_word_but_none_asks_for_a_reflection() {
     assert!(!PipelineOptions::default().options.reflects());
@@ -89,34 +94,4 @@ fn a_deadline_only_shortens_the_standard_budget() {
         budget.cancel.expect("the token").is_cancelled(),
         "the budget shares it"
     );
-}
-
-/// **Every non-zero `MTLPipelineOption` value asks for reflection, `FailOnBinaryArchiveMiss`
-/// alone included.**
-///
-/// Measured on an M3 Max under macOS 27.0.1, over all eight combinations of the three bits Apple's
-/// header names: `newComputePipelineStateWithFunction:options:reflection:error:` filled its
-/// `reflection` out-parameter for all seven non-zero values and left it nil only for
-/// `MTLPipelineOptionNone`. The conformance suite's `pipeline_options` family is the recording.
-///
-/// The row that matters is `FAIL_ON_BINARY_ARCHIVE_MISS` on its own: Apple's documentation says
-/// nothing about reflection for that bit, and reading only the two information bits answered no
-/// reflection where Metal answers one, which is a reflection a consumer asked for and did not get.
-#[test]
-fn every_named_bit_asks_for_reflection_and_none_alone_does_not() {
-    assert!(!PipelineOption::NONE.reflects(), "none reflects nothing");
-    assert!(PipelineOption::BINDING_INFO.reflects());
-    assert!(PipelineOption::BUFFER_TYPE_INFO.reflects());
-    assert!(
-        PipelineOption::FAIL_ON_BINARY_ARCHIVE_MISS.reflects(),
-        "the archive-miss bit alone: Metal fills the reflection here (measured)"
-    );
-    for raw in 1..8u64 {
-        assert!(
-            PipelineOption::from_raw(raw).reflects(),
-            "{raw:#b} is a non-zero value of the three named bits"
-        );
-    }
-    // An undefined bit on its own is not measured, so it asks for nothing.
-    assert!(!PipelineOption::from_raw(1 << 40).reflects());
 }

@@ -88,7 +88,6 @@ use metal2vulkan::metal::{
 use metal2vulkan_runtime::{PurgeableState, SparsePageSize};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::AnyThread;
 use objc2::{AnyThread, ClassType};
 use objc2_foundation::{
     NSArray, NSDictionary, NSError, NSObjectProtocol, NSRange, NSString, NSUInteger, NSURL,
