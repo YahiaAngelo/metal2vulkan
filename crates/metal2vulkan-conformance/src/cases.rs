@@ -24,8 +24,10 @@
 //!
 //! No case here can fault a GPU, hang it, trip its watchdog or end Metal's process.
 
+pub mod buffer_blits;
 pub mod chroma_pairs;
 pub mod command_queues;
+pub mod compute_threadgroups;
 pub mod depth_texel_reads;
 pub mod extended_range_blends;
 pub mod extended_range_planes;
@@ -147,6 +149,8 @@ pub fn all() -> Vec<Box<dyn Case>> {
     for case in ycbcr_minify::all() {
         cases.push(Box::new(case));
     }
+    cases.extend(compute_threadgroups::all());
+    cases.extend(buffer_blits::all());
     cases
 }
 

@@ -432,6 +432,23 @@ pub trait Side {
     /// `newComputePipelineStateWithFunction:error:` of the library's `entry`.
     fn compute_pipeline(&mut self, library: Handle, entry: &str) -> Answer<Handle>;
 
+    /// `staticThreadgroupMemoryLength` of a compute pipeline state: the bytes the kernel's own
+    /// `threadgroup` arrays take.
+    ///
+    /// This getter and not its two neighbours. `maxTotalThreadsPerThreadgroup` and
+    /// `threadExecutionWidth` answer the **device's** limits for the kernel — Metal's 1024 and 32
+    /// on Apple's GPUs, lower where a device's shared memory or its emulated simdgroups leave room
+    /// for fewer — so a venue that answers less is not diverging from Metal, it is a venue with a
+    /// smaller device, and the suite has no way to say that of a number (only a refused call
+    /// carries what the venue lacks). A case pins the device's limit by **dispatching at Metal's
+    /// own threadgroup size** instead, which such a venue refuses typed. The static threadgroup
+    /// length is a fact about the shader, so it is the same wherever the shader is compiled, and
+    /// comparing it is exact.
+    fn static_threadgroup_memory_length(&mut self, pipeline: Handle) -> Answer<u64> {
+        let _ = pipeline;
+        Err(Failure::unavailable("static_threadgroup_memory_length"))
+    }
+
     /// `newBufferWithBytes:length:options:` of shared storage.
     fn buffer(&mut self, bytes: &[u8]) -> Answer<Handle>;
 

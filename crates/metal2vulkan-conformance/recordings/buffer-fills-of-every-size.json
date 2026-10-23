@@ -1,0 +1,241 @@
+{
+  "format": 1,
+  "case": "buffer-fills-of-every-size",
+  "suite_version": 1,
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": "metal_run",
+      "device": "Apple M3 Max",
+      "runs": 3,
+      "outcomes": [
+        {
+          "runs": 3,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "private-buffer:0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "bbadd77c95b38064f39beb9d061e0132eef71c79b737812d25cb335aead02eef"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:1",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "34c69899504b36f13e8b22120cf0fd894e61fcd6b046fb8535b79cc491fa3b3f"
+                        }
+                      }
+                    },
+                    {
+                      "name": "steps",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "12b64b27e11f87c2399850269b85b32474a8cc48e44c6f9b03ba42f189cf297b"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "work",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "runs",
+                  "observed": {
+                    "value": {
+                      "list": [
+                        {
+                          "fields": {
+                            "at": {
+                              "uint": 0
+                            },
+                            "byte": {
+                              "uint": 17
+                            },
+                            "length": {
+                              "uint": 3
+                            }
+                          }
+                        },
+                        {
+                          "fields": {
+                            "at": {
+                              "uint": 3
+                            },
+                            "byte": {
+                              "uint": 34
+                            },
+                            "length": {
+                              "uint": 65537
+                            }
+                          }
+                        },
+                        {
+                          "fields": {
+                            "at": {
+                              "uint": 65540
+                            },
+                            "byte": {
+                              "uint": 17
+                            },
+                            "length": {
+                              "uint": 4461
+                            }
+                          }
+                        },
+                        {
+                          "fields": {
+                            "at": {
+                              "uint": 70001
+                            },
+                            "byte": {
+                              "uint": 51
+                            },
+                            "length": {
+                              "uint": 196614
+                            }
+                          }
+                        },
+                        {
+                          "fields": {
+                            "at": {
+                              "uint": 266615
+                            },
+                            "byte": {
+                              "uint": 17
+                            },
+                            "length": {
+                              "uint": 33385
+                            }
+                          }
+                        },
+                        {
+                          "fields": {
+                            "at": {
+                              "uint": 300000
+                            },
+                            "byte": {
+                              "uint": 68
+                            },
+                            "length": {
+                              "uint": 262148
+                            }
+                          }
+                        },
+                        {
+                          "fields": {
+                            "at": {
+                              "uint": 562148
+                            },
+                            "byte": {
+                              "uint": 17
+                            },
+                            "length": {
+                              "uint": 52243
+                            }
+                          }
+                        },
+                        {
+                          "fields": {
+                            "at": {
+                              "uint": 614391
+                            },
+                            "byte": {
+                              "uint": 85
+                            },
+                            "length": {
+                              "uint": 9
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "bytes",
+                  "observed": {
+                    "value": "absent",
+                    "digest": {
+                      "kind": "sha256",
+                      "hex": "2ffd6a92d2291063e3c4ddabd9614a37ce4f635edaa1d36518135511c01b4334"
+                    }
+                  }
+                },
+                {
+                  "name": "statuses",
+                  "observed": {
+                    "value": {
+                      "lines": [
+                        "Completed",
+                        "Completed"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "ran"
+    }
+  ]
+}

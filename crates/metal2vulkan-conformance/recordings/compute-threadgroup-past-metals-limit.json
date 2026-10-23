@@ -1,0 +1,175 @@
+{
+  "format": 1,
+  "case": "compute-threadgroup-past-metals-limit",
+  "suite_version": 1,
+  "shaders": [
+    {
+      "fixture": "ttg_compute_simd_scratch.ll",
+      "entry": "ttg_compute_simd_scratch",
+      "source_sha256": "0c41549b3cec32f5ad4eed6c865110fd90e73d79f7698c234739225b42671693"
+    },
+    {
+      "fixture": "ttg_compute_simd_scratch.air.ll",
+      "entry": "ttg_compute_simd_scratch",
+      "source_sha256": "800f701fc6e14235174fada3193b0bab3c8b1da04e3b7227de82542c315c3997"
+    }
+  ],
+  "answers": [
+    {
+      "key": {
+        "chip": "apple-m3-max",
+        "os_version": "27.0.1",
+        "os_build": "26A434",
+        "metal_level": "27.0.1"
+      },
+      "provenance": {
+        "carried": {
+          "from": "metal2vulkan_runtime::compute::ComputeCommandEncoder::threadgroup, whose Apple M4 measurement under macOS 27.0.1 found that plain Metal runs nothing for a threadgroup past its limit for the state",
+          "measured_on": "apple-m4"
+        }
+      },
+      "device": "apple-m3-max",
+      "runs": 1,
+      "outcomes": [
+        {
+          "runs": 1,
+          "transcript": {
+            "root": {
+              "name": "case",
+              "observed": {
+                "value": "absent"
+              },
+              "children": [
+                {
+                  "name": "inputs",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "air",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "0c41549b3cec32f5ad4eed6c865110fd90e73d79f7698c234739225b42671693"
+                        }
+                      }
+                    },
+                    {
+                      "name": "air-typed",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "800f701fc6e14235174fada3193b0bab3c8b1da04e3b7227de82542c315c3997"
+                        }
+                      }
+                    },
+                    {
+                      "name": "threads",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "cbfd218787df784c39fbc4f4fad92a8f28e2a880430c210b6d0d8dc133c07e66"
+                        }
+                      }
+                    },
+                    {
+                      "name": "buffer:0",
+                      "observed": {
+                        "value": "absent",
+                        "digest": {
+                          "kind": "sha256",
+                          "hex": "e9b2c6125ce5b25110e04cd276eec9d202a464f11a373a868e345cac9b24413b"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "name": "library",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "pipeline",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "buffer",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "dispatch",
+                  "observed": {
+                    "value": {
+                      "variant": {
+                        "name": "Ok",
+                        "payload": "absent"
+                      }
+                    }
+                  }
+                },
+                {
+                  "name": "output",
+                  "observed": {
+                    "value": {
+                      "nothing": "changed_nothing"
+                    }
+                  }
+                },
+                {
+                  "name": "notices",
+                  "observed": {
+                    "value": "absent"
+                  },
+                  "children": [
+                    {
+                      "name": "set",
+                      "observed": {
+                        "value": {
+                          "nothing": "announced_nothing"
+                        }
+                      }
+                    },
+                    {
+                      "name": "counts",
+                      "observed": {
+                        "value": {
+                          "fields": {}
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "validated": "not_run"
+    }
+  ]
+}
