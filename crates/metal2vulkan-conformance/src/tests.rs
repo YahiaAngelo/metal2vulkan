@@ -2928,3 +2928,170 @@ fn a_count_only_one_shape_moved_is_reported_as_well() {
         Some(&4)
     );
 }
+
+/// The **Metal** side states every stage-independent field of a case's own
+/// [`RenderPipelineSpec`](crate::render::RenderPipelineSpec).
+///
+/// The runtime side has a value-level guard for these
+/// (`the_runtime_side_forwards_every_field_of_a_pipeline_spec`), because the stage-independent
+/// fields are mapped into a value the test can build. The Metal side has no such intermediate:
+/// `MTLRenderPipelineDescriptor` is an Objective-C object and making one needs a Metal device, so
+/// on a host without Metal there is nothing to hold to its fields.
+///
+/// So for that one side this reads the source and asks whether each field is mentioned at all. A
+/// mention is not a correct use, so this is deliberately the weaker kind of guard — but it is
+/// mechanical, it needs no device, and a field the Metal side never names is a field it runs
+/// Metal's default for while a case states a value.
+#[test]
+fn the_metal_side_mentions_every_pipeline_field() {
+    let source = include_str!("metal_side.rs");
+    let from = source
+        .find("fn render_pipeline(")
+        .expect("no render_pipeline in metal_side.rs");
+    let rest = &source[from..];
+    // The method ends at the first `}` at one level of indentation, which closes it.
+    let to = rest.find("\n    }\n").expect("no end of render_pipeline");
+    let body = &rest[..to];
+    for field in [
+        "depth_format",
+        "stencil_format",
+        "samples",
+        "rasterization",
+        "vertex_layout",
+        "colors",
+    ] {
+        assert!(
+            body.contains(field),
+            "metal_side.rs's render_pipeline never mentions `{field}`, so it runs Metal's default \
+             where the case states a value"
+        );
+    }
+}
+
+/// Every field of a case's [`RenderPipelineSpec`](crate::render::RenderPipelineSpec) except its two
+/// stages reaches the pipeline descriptor the runtime side builds
+/// (`runtime_side::pipeline_fields`), checked field by field with no device.
+///
+/// This is `the_runtime_side_forwards_every_field_of_a_color_state` one level up, and it is here
+/// because the omission happened a second time: after the write mask was found never to be
+/// assigned, `depth_format` and `stencil_format` turned out never to be assigned either, so our
+/// side built every pipeline declaring no depth and no stencil attachment while the Metal side
+/// declared the case's.
+///
+/// A whole `RenderPipelineDescriptor` cannot be built without a device — its `new` takes a
+/// `StageSource`, and neither a `Function` nor a `CompiledFunction` can be made without one — so
+/// the assertions are on the stage-independent value the real path maps the spec into, which is
+/// not a mock.
+///
+/// Every field is given a value distinct from Metal's default **and** from the other fields', so a
+/// field wired to its neighbour's fails here rather than passing by coincidence. The depth and
+/// stencil formats especially: they are two different formats, so swapping them fails.
+#[test]
+fn the_runtime_side_forwards_every_field_of_a_pipeline_spec() {
+    use crate::render::{
+        ColorState, RenderPipelineSpec, StageFunction, VertexAttribute, VertexBufferLayout,
+        VertexLayout,
+    };
+    use metal2vulkan::metal::{ColorWriteMask, PixelFormat, VertexFormat, VertexStepFunction};
+
+    // Two attachments of different formats under different masks, with an unattached gap between
+    // them, so an attachment written to the wrong index fails too.
+    let colors = [
+        Some(ColorState::new(PixelFormat::RGBA8Unorm).masked(ColorWriteMask::RED)),
+        None,
+        Some(ColorState::new(PixelFormat::R16Snorm).masked(ColorWriteMask::GREEN)),
+    ];
+    let attributes = [VertexAttribute {
+        index: 3,
+        format: VertexFormat::Float2,
+        offset: 8,
+        buffer: 5,
+    }];
+    let layouts = [VertexBufferLayout {
+        index: 5,
+        stride: 16,
+        step: VertexStepFunction::PerInstance,
+        rate: 2,
+    }];
+    let mut spec = RenderPipelineSpec::of(
+        StageFunction::named("v"),
+        Some(StageFunction::named("f")),
+        &colors,
+    );
+    spec.depth_format = Some(PixelFormat::Depth32Float);
+    spec.stencil_format = Some(PixelFormat::Stencil8);
+    spec.samples = 4;
+    spec.rasterization = false;
+    spec.vertex_layout = Some(VertexLayout {
+        attributes: &attributes,
+        layouts: &layouts,
+    });
+    assert_ne!(
+        spec.depth_format, spec.stencil_format,
+        "the two formats must differ, or swapping them would pass"
+    );
+
+    let made = crate::runtime_side::pipeline_fields(&spec).expect("three attachments of eight");
+    assert_eq!(
+        made.depth_format,
+        Some(PixelFormat::Depth32Float),
+        "depth_format"
+    );
+    assert_eq!(
+        made.stencil_format,
+        Some(PixelFormat::Stencil8),
+        "stencil_format"
+    );
+    assert_eq!(made.raster_sample_count, 4, "samples");
+    assert!(!made.rasterization_enabled, "rasterization");
+
+    let first = made.color_attachments[0].expect("color 0");
+    assert_eq!(
+        first.pixel_format,
+        PixelFormat::RGBA8Unorm,
+        "color 0 format"
+    );
+    assert_eq!(first.write_mask, ColorWriteMask::RED, "color 0 mask");
+    assert!(
+        made.color_attachments[1].is_none(),
+        "color 1 was not attached"
+    );
+    let third = made.color_attachments[2].expect("color 2");
+    assert_eq!(third.pixel_format, PixelFormat::R16Snorm, "color 2 format");
+    assert_eq!(third.write_mask, ColorWriteMask::GREEN, "color 2 mask");
+    for at in 3..8 {
+        assert!(made.color_attachments[at].is_none(), "color {at}");
+    }
+
+    let vertex = made.vertex_descriptor.expect("vertex_descriptor");
+    let attribute = vertex.attributes.get(&3).expect("attribute 3");
+    assert_eq!(attribute.format, VertexFormat::Float2, "attribute format");
+    assert_eq!(attribute.offset, 8, "attribute offset");
+    assert_eq!(attribute.buffer_index, 5, "attribute buffer");
+    let bound = vertex.layouts.get(&5).expect("layout 5");
+    assert_eq!(bound.stride, Some(16), "layout stride");
+    assert_eq!(
+        bound.step_function,
+        VertexStepFunction::PerInstance,
+        "layout step"
+    );
+    assert_eq!(bound.step_rate, 2, "layout rate");
+
+    // A spec naming a ninth colour attachment is refused rather than silently dropped.
+    let past_the_eight = [
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(ColorState::new(PixelFormat::RGBA8Unorm)),
+    ];
+    let past = RenderPipelineSpec::of(StageFunction::named("v"), None, &past_the_eight);
+    assert!(
+        crate::runtime_side::pipeline_fields(&past).is_err(),
+        "a ninth colour attachment"
+    );
+}
