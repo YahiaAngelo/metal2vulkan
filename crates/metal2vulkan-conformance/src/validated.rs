@@ -65,7 +65,12 @@
 //! not seen is still attributed and still recorded.
 //!
 //! The message a recording keeps is stripped of `NSLog`'s timestamp and process prefix, because a
-//! recording holds nothing host-specific: the prefix carries this run's process id.
+//! recording holds nothing host-specific: the prefix carries this run's process id. The same rule
+//! takes out the **addresses** Metal prints — a complaint names the object it is about by its
+//! pointer (`<AGXG15XFamilyBuffer: 0x7b81438e00>`), which is this run's heap and moves under ASLR
+//! on every run, so it is host-specific in the strongest sense. A recording holding one could
+//! never be re-recorded byte for byte, and a re-record that changes nothing is how a fingerprint
+//! refresh is told from a re-measurement.
 
 use crate::recording::Validated;
 
@@ -161,7 +166,7 @@ pub fn read(said: &str) -> Option<Validated> {
         if text.is_empty() || text.starts_with(BANNER) {
             continue;
         }
-        complaint.push(text.to_owned());
+        complaint.push(strip_addresses(text));
     }
     (!complaint.is_empty()).then(|| Validated::Stopped {
         call: if call.is_empty() {
@@ -188,6 +193,51 @@ fn strip_prefix(line: &str) -> &str {
         return rest.trim_end();
     }
     line.trim_end()
+}
+
+/// What a recording keeps in place of an address Metal printed.
+///
+/// Normalised and **not** removed, so the complaint still reads as the sentence Apple wrote and a
+/// reader can see that a pointer was there.
+const ADDRESS: &str = "0xADDR";
+
+/// The hexadecimal digits that make a `0x` number an address rather than a constant Metal quoted.
+///
+/// Six, which is the threshold the suite-wide guard `no_recorded_message_holds_an_address` holds
+/// the committed recordings to, so the two cannot drift. An arm64 pointer prints ten or eleven digits;
+/// a shorter `0x` number in a complaint is left as the number it is.
+const ADDRESS_DIGITS: usize = 6;
+
+/// `text` with every address Metal printed replaced by [`ADDRESS`].
+///
+/// The reason is the module's: an address is this run's heap, so it must not reach a recording, for
+/// the same reason `NSLog`'s process prefix must not.
+fn strip_addresses(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        // `0x` or `0X` and then enough hexadecimal digits. Only ASCII is stepped over here, so
+        // `at` stays on a character boundary for the branch below.
+        if bytes[at] == b'0' && at + 1 < bytes.len() && bytes[at + 1] | 0x20 == b'x' {
+            let digits = bytes[at + 2..]
+                .iter()
+                .take_while(|byte| byte.is_ascii_hexdigit())
+                .count();
+            if digits >= ADDRESS_DIGITS {
+                out.push_str(ADDRESS);
+                at += 2 + digits;
+                continue;
+            }
+        }
+        let next = text[at..]
+            .chars()
+            .next()
+            .expect("at is a character boundary");
+        out.push(next);
+        at += next.len_utf8();
+    }
+    out
 }
 
 /// A side that announces each call it is about to make, so the parent can attribute Metal's own
