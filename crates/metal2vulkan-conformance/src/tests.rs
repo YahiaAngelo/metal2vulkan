@@ -2676,6 +2676,7 @@ fn a_count_the_measurement_never_saw_is_bounded_at_zero() {
         bounds: [("queue_submissions".to_owned(), 1)].into_iter().collect(),
         moving: Default::default(),
         composed: Default::default(),
+        ceilings: Default::default(),
     };
     let judge = |text: &str| {
         crate::cost::judge(
@@ -2727,6 +2728,7 @@ fn a_count_whose_readings_moved_is_reported_and_not_gated() {
             })
             .unwrap_or_default(),
         composed: Default::default(),
+        ceilings: Default::default(),
     };
     let found = crate::cost::Counts::read("WorkCounts {\n    render_passes_made: 9,\n}").unwrap();
     // Deterministic in the measurement: held, and 9 is over 2.
@@ -2779,6 +2781,7 @@ fn a_run_with_no_bound_that_stands_is_unmeasured_and_says_why() {
         bounds: [("queue_submissions".to_owned(), 1)].into_iter().collect(),
         moving: Default::default(),
         composed: Default::default(),
+        ceilings: Default::default(),
     };
     let found = crate::cost::Counts::read("WorkCounts {\n    queue_submissions: 1,\n}").unwrap();
     let records = std::slice::from_ref(&record);
@@ -2862,6 +2865,7 @@ fn the_cost_record_rides_in_the_recording() {
         bounds: [("queue_submissions".to_owned(), 1)].into_iter().collect(),
         moving: Default::default(),
         composed: Default::default(),
+        ceilings: Default::default(),
     }];
     let recording = Recording::new("a case", Vec::new(), vec![answer]).with_costs(costs.clone());
     let text = serde_json::to_string_pretty(&recording).expect("it writes");
@@ -2931,6 +2935,7 @@ fn re_recording_a_metal_answer_keeps_the_cost_record() {
         bounds: Default::default(),
         moving: Default::default(),
         composed: Default::default(),
+        ceilings: Default::default(),
     }];
     let kept = Recording::new(
         held.case.clone(),
@@ -3033,6 +3038,7 @@ fn a_count_that_says_which_thread_arrived_first_is_never_gated() {
         .collect(),
         moving: Default::default(),
         composed: Default::default(),
+        ceilings: Default::default(),
     };
     assert_eq!(record.gated(), 1, "only the total is gated");
     let judge = |text: &str| {
@@ -3155,6 +3161,7 @@ fn a_count_the_selection_decides_is_reported_and_not_gated() {
         .collect(),
         moving: Default::default(),
         composed: Default::default(),
+        ceilings: Default::default(),
     };
     // What the case does alone: two submissions where company needed one, and three command
     // buffers where company began four, because the work it batches with is not there. The two
@@ -3252,6 +3259,7 @@ fn a_count_only_one_shape_moved_is_reported_as_well() {
             .collect(),
         moving: Default::default(),
         composed: Default::default(),
+        ceilings: Default::default(),
     };
     let apart = crate::cost::CaseCost {
         case: "a case".to_owned(),
@@ -3796,6 +3804,7 @@ fn a_count_whose_ceiling_is_the_lone_run_is_gated_there() {
         bounds: [(count.to_owned(), bound)].into_iter().collect(),
         moving: Default::default(),
         composed: Default::default(),
+        ceilings: Default::default(),
     };
     let alone = |text: &str| crate::cost::CaseCost {
         case: "a case".to_owned(),
@@ -3886,4 +3895,154 @@ fn a_count_whose_ceiling_is_the_lone_run_is_gated_there() {
         Some(&268_435_456)
     );
     assert_eq!(record.gated(), 0);
+}
+
+/// Re-measuring the gate's own shape over an unchanged tree changes **nothing**.
+///
+/// This is the check that would have caught the defect it was written for, so it belongs in the
+/// suite rather than in someone's memory. A measurement of the whole case set says nothing new
+/// about what each case does alone, so every piece of evidence the lone run established has to
+/// survive the re-measure — and it survives only because it is written in the record rather than
+/// left implicit in a number this path recomputes.
+///
+/// The sharp case is a ceiling. Those counts are **gated**, and the gate's own shape reads a
+/// *lower* number for every one of them by construction: that is what makes the lone run's reading
+/// the ceiling. Before `CostRecord::ceilings` existed, a ceiling lived only as a silently-raised
+/// entry in `bounds`, this path rebuilt `bounds` from the new measurement, and 389 ceiling bounds
+/// vanished across 149 cases with nothing in any output saying so. The gate kept passing. It was
+/// simply weaker, on exactly the family the ceiling exception exists to protect.
+#[test]
+fn a_second_measurement_of_the_same_shape_changes_nothing() {
+    // A record that has had its contrast folded in: one ceiling count, one the selection decides,
+    // one whose runs disagreed, and one plain gated count.
+    let held = crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 8,
+        measured: "eight runs of the whole selection".to_owned(),
+        contrasted: Some("eight runs of each case alone".to_owned()),
+        degraded: Vec::new(),
+        bounds: [
+            ("pipeline_layouts_made".to_owned(), 2),
+            ("command_buffers_begun".to_owned(), 4),
+            ("render_passes_made".to_owned(), 5),
+            ("queue_submissions".to_owned(), 1),
+        ]
+        .into_iter()
+        .collect(),
+        moving: [("render_passes_made".to_owned(), 1)].into_iter().collect(),
+        composed: [("command_buffers_begun".to_owned(), 3)]
+            .into_iter()
+            .collect(),
+        ceilings: [("pipeline_layouts_made".to_owned(), 2)]
+            .into_iter()
+            .collect(),
+    };
+    // The whole set measured again, reading exactly what it read before. For the ceiling count
+    // that is the *lower* number, which is the whole point: 1 in company against 2 alone.
+    let again = crate::cost::CaseCost {
+        case: "a case".to_owned(),
+        counts: crate::cost::Counts::read(
+            "WorkCounts {\n    pipeline_layouts_made: 1,\n    command_buffers_begun: 4,\n    \
+             render_passes_made: 5,\n    queue_submissions: 1,\n}",
+        )
+        .unwrap(),
+        least: crate::cost::Counts::read(
+            "WorkCounts {\n    pipeline_layouts_made: 1,\n    command_buffers_begun: 4,\n    \
+             render_passes_made: 1,\n    queue_submissions: 1,\n}",
+        )
+        .unwrap(),
+        runs: 8,
+        stopped: None,
+        degraded: Vec::new(),
+        nanos: 1_000,
+    };
+    let fresh = again
+        .record("a venue", "eight runs of the whole selection".to_owned())
+        .carrying_the_contrast_of(&held);
+    assert_eq!(
+        fresh, held,
+        "a re-measure of the same shape moved the record"
+    );
+    // And again, because an operation that is not idempotent drifts a little on every re-measure
+    // rather than all at once.
+    let twice = again
+        .record("a venue", "eight runs of the whole selection".to_owned())
+        .carrying_the_contrast_of(&fresh);
+    assert_eq!(twice, held);
+    // The ceiling is what makes this test bite: without it carried, the bound would fall to the
+    // number this composition happened to share, and the gate would quietly stop holding 2.
+    assert_eq!(fresh.bounds.get("pipeline_layouts_made"), Some(&2));
+    assert_eq!(fresh.ceilings.get("pipeline_layouts_made"), Some(&2));
+    assert!(
+        fresh
+            .bound("pipeline_layouts_made")
+            .expect("it is bounded")
+            .gated(),
+        "a ceiling count is gated, which is why losing its bound is a silent weakening"
+    );
+    // A bound never rises just because it was higher last time: that would ratchet upward for ever
+    // and hide a genuine reduction, and a gate that can only loosen passes everything in the end.
+    let lower = crate::cost::CostRecord {
+        bounds: [("queue_submissions".to_owned(), 9)].into_iter().collect(),
+        ..held.clone()
+    };
+    let fresh = again
+        .record("a venue", "eight runs of the whole selection".to_owned())
+        .carrying_the_contrast_of(&lower);
+    assert_eq!(
+        fresh.bounds.get("queue_submissions"),
+        Some(&1),
+        "a plain gated count takes the new measurement's reading, not the old bound"
+    );
+}
+
+/// A ceiling is written into the record as a fact, not left to be inferred from a raised bound.
+#[test]
+fn a_ceiling_is_recorded_as_the_evidence_for_its_bound() {
+    let held = crate::cost::CostRecord {
+        venue: "a venue".to_owned(),
+        runs: 8,
+        measured: "whole set".to_owned(),
+        contrasted: None,
+        degraded: Vec::new(),
+        bounds: [("queue_submissions".to_owned(), 1)].into_iter().collect(),
+        moving: Default::default(),
+        composed: Default::default(),
+        ceilings: Default::default(),
+    };
+    // A monotone count the lone run moved and the whole-set run never did at all: the case that
+    // produced 389 vanishing bounds, because nothing wrote down where the bound came from.
+    let apart = crate::cost::CaseCost {
+        case: "a case".to_owned(),
+        counts: crate::cost::Counts::read(
+            "WorkCounts {\n    addressable_buffers_made: 2,\n    queue_submissions: 1,\n}",
+        )
+        .unwrap(),
+        least: crate::cost::Counts::read(
+            "WorkCounts {\n    addressable_buffers_made: 2,\n    queue_submissions: 1,\n}",
+        )
+        .unwrap(),
+        runs: 8,
+        stopped: None,
+        degraded: Vec::new(),
+        nanos: 1,
+    };
+    let folded = apart.fold_alone_into(&held, "alone".to_owned());
+    assert_eq!(folded.bounds.get("addressable_buffers_made"), Some(&2));
+    assert_eq!(folded.ceilings.get("addressable_buffers_made"), Some(&2));
+    assert!(
+        folded.composed.is_empty(),
+        "a ceiling is not a disagreement"
+    );
+    assert_eq!(folded.gated(), 2, "both counts are held");
+    // A count the table does not name gets no ceiling, whichever way it differs, so the map is
+    // exactly the exception and never a second place the rule is decided.
+    let apart = crate::cost::CaseCost {
+        counts: crate::cost::Counts::read("WorkCounts {\n    inline_passes: 2,\n}").unwrap(),
+        least: crate::cost::Counts::read("WorkCounts {\n    inline_passes: 2,\n}").unwrap(),
+        ..apart
+    };
+    let folded = apart.fold_alone_into(&held, "alone".to_owned());
+    assert!(folded.ceilings.is_empty());
+    assert_eq!(folded.composed.get("inline_passes"), Some(&2));
 }

@@ -756,6 +756,18 @@ pub struct CostRecord {
     /// disagreement is.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub composed: BTreeMap<String, u64>,
+    /// What each count read with the case **alone**, where that reading is the count's ceiling and
+    /// so its bound: the lone run made the object itself where company finds it already made, and
+    /// nothing in the `MONOTONE` table's direction can exceed that.
+    ///
+    /// Such a count is **gated**, unlike one in `composed`, so this map is not a list of
+    /// exemptions — it is where the bound came from. It has to be written down rather than left
+    /// implicit in `bounds`, because a later measurement of the gate's own shape reads a *lower*
+    /// number for exactly these counts: without this map, re-measuring the whole set alone would
+    /// drop every ceiling bound and quietly weaken the gate on the one family the contrast gives
+    /// back.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ceilings: BTreeMap<String, u64>,
 }
 
 impl CostRecord {
@@ -778,6 +790,64 @@ impl CostRecord {
             .keys()
             .filter_map(|count| self.bound(count))
             .collect()
+    }
+
+    /// This record, a fresh measurement of the gate's own shape, carrying everything `held`'s
+    /// contrast established.
+    ///
+    /// **Every piece of evidence a bound rests on is written in the record rather than derivable
+    /// from it**, and this is the method that depends on that. Re-measuring the whole case set says
+    /// nothing new about what each case does alone, so what the lone run established has to survive
+    /// the re-measure — and it can only survive if it was written down. Three kinds of evidence are
+    /// carried:
+    ///
+    /// - `moving`, so a count the new runs happened not to see move is not re-gated at zero;
+    /// - `ceilings`, the sharp one: those counts are **gated**, and the gate's own shape reads a
+    ///   *lower* number for every one of them by construction, so dropping them replaces a real
+    ///   ceiling with whatever this composition happened to share. Measured, by re-measuring in
+    ///   this order before `ceilings` existed: 389 such bounds vanished across 149 cases, almost
+    ///   all `addressable_buffers_made` and `pooled_memory_blocks_made`, with nothing in any output
+    ///   saying so;
+    /// - `composed`, so a count the selection decides is not re-gated on this composition's
+    ///   reading.
+    ///
+    /// A bound only ever rises here from a *named* piece of the contrast, never because it was
+    /// higher last time. Keeping `max(new, held)` for every count would ratchet bounds upward for
+    /// ever and hide a genuine reduction, and a gate that can only loosen eventually passes
+    /// everything.
+    ///
+    /// It is idempotent, and `a_second_measurement_of_the_same_shape_changes_nothing` holds it to
+    /// that: applying it to a record that already carries a contrast changes no byte.
+    pub fn carrying_the_contrast_of(mut self, held: &CostRecord) -> CostRecord {
+        self.contrasted = held.contrasted.clone();
+        for (count, least) in &held.moving {
+            if racy(count).is_some() {
+                continue;
+            }
+            let most = held.bounds.get(count).copied().unwrap_or(0);
+            let bound = self.bounds.entry(count.clone()).or_insert(most);
+            *bound = (*bound).max(most);
+            let seen = self.moving.entry(count.clone()).or_insert(*least);
+            *seen = (*seen).min(*least);
+        }
+        for (count, apart) in &held.ceilings {
+            if racy(count).is_some() {
+                continue;
+            }
+            self.ceilings.insert(count.clone(), *apart);
+            let bound = self.bounds.entry(count.clone()).or_insert(*apart);
+            *bound = (*bound).max(*apart);
+        }
+        for (count, apart) in &held.composed {
+            if racy(count).is_some() {
+                continue;
+            }
+            let most = held.bounds.get(count).copied().unwrap_or(0);
+            let bound = self.bounds.entry(count.clone()).or_insert(most);
+            *bound = (*bound).max(most).max(*apart);
+            self.composed.entry(count.clone()).or_insert(*apart);
+        }
+        self
     }
 
     /// How many of its bounds are gated rather than only reported.
@@ -1017,6 +1087,7 @@ impl CaseCost {
             bounds,
             moving,
             composed: BTreeMap::new(),
+            ceilings: BTreeMap::new(),
         }
     }
 
@@ -1039,6 +1110,15 @@ impl CaseCost {
         // ceiling the lone run is — lives there alone.
         for (count, _, apart) in self.apart_from(held) {
             folded.composed.insert(count.to_owned(), apart);
+        }
+        // And the counts this run read *above* the gate's own shape for the one reason that is a
+        // ceiling rather than a disagreement. They stay gated, at this reading, and it is written
+        // down so a later measurement of the gate's own shape cannot drop it.
+        for (count, apart) in self.counts.iter() {
+            let inside = held.bounds.get(count).copied().unwrap_or(0);
+            if monotone(count).is_some() && apart > inside {
+                folded.ceilings.insert(count.to_owned(), apart);
+            }
         }
         // The bound stays the largest either shape saw, so the record's own number is honest about
         // what was observed. For a gated count the two shapes agree, so only the bounds of counts
