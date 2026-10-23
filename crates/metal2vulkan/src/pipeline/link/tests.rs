@@ -155,6 +155,7 @@ pub(super) fn artifact(
         profile: [0; 32],
         kernel: Default::default(),
         reflection: None,
+        slot_writes: Vec::new(),
         specialized: Vec::new(),
     }
 }

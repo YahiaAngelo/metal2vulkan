@@ -80,11 +80,16 @@ pub(crate) use linked::dropped_fragment_inputs;
 pub use linked::{DirectArgumentUse, LinkedUseAnswers, LinkedUseGap, UnwrittenFragmentInputs};
 mod live;
 mod types;
+mod writes;
+pub(crate) use writes::entry_slot_writes;
+pub use writes::{SlotWritability, SlotWrite, SlotWriteGap, SlotWrites};
 
 #[cfg(test)]
 mod linked_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod writes_tests;
 
 pub(crate) use derive::{
     bindings, needs_resolution, read_attributes, specialization_decides_reads, specialized_reads,
@@ -252,6 +257,21 @@ fn stage(source: &StageSource, depth: u32, m: &mut Meter) -> Result<StageReflect
     }
 }
 
+/// What stage `source`, its calls nesting `depth` deep, may store through each slot its arguments
+/// bind ([`SlotWrite`]): from the entry its constants specialize where they decide a slot, else
+/// from the decoded entry. A stage the compile layer already compiled answers what its compile
+/// kept of the entry it compiled (`FunctionArtifact::slot_writes`, which every compile keeps),
+/// decoding nothing.
+///
+/// It derives no type description, so no argument's unmeasured type refuses it: a stage that
+/// compiles answers.
+fn stage_writes(source: &StageSource, depth: u32, m: &mut Meter) -> Result<Vec<SlotWrite>, Error> {
+    match source {
+        StageSource::Function(fd) => crate::pipeline::compile::stage_slot_writes(fd, depth, m),
+        StageSource::Compiled(c) => Ok(c.artifact().slot_writes.clone()),
+    }
+}
+
 /// Whether stage `source`, its calls nesting `depth` deep, uses a direct texture or sampler
 /// argument that its reflection lists as used: decided from the arguments' roles and use alone
 /// (`compile::stage_uses_direct_arguments`), so an argument whose reflection Metal's answer has
@@ -371,6 +391,27 @@ impl ComputePipelineDescriptor {
         let mut m = Meter::new(budget);
         stage_direct(&self.kernel, self.max_call_stack_depth, &mut m)
     }
+
+    /// What the kernel may store through each slot its arguments bind
+    /// ([`writes`](crate::reflection::SlotWrite), whose rules are
+    /// [`reflection`](crate::reflection)'s), of the entry its constants specialize where they
+    /// decide a slot: the answers in [`SlotWrites::kernel_slots`]. The stage input descriptor's
+    /// buffers are not among them, since they bind no argument of the kernel. It decodes the
+    /// kernel's AIR under `budget`; a kernel the compile layer already compiled answers what its
+    /// compile kept, decoding nothing.
+    ///
+    /// Unlike [`reflection`](Self::reflection) it derives no type description, so an argument
+    /// whose *type* Metal's answer has not been measured for does not refuse it: a kernel that
+    /// compiles answers, and an argument whose own slot or access is undetermined is one
+    /// [`SlotWritability::Unknown`] answer among determined ones. Refused only by the decode's
+    /// and specialization's own errors.
+    pub fn slot_writes(&self, budget: &crate::Budget) -> Result<SlotWrites, Error> {
+        let mut m = Meter::new(budget);
+        Ok(SlotWrites {
+            kernel: stage_writes(&self.kernel, self.max_call_stack_depth, &mut m)?,
+            ..SlotWrites::default()
+        })
+    }
 }
 
 impl RenderPipelineDescriptor {
@@ -409,6 +450,29 @@ impl RenderPipelineDescriptor {
             ..RenderPipelineReflection::default()
         })
     }
+
+    /// What each stage of the drawing pipeline this descriptor describes may store through each
+    /// slot its arguments bind ([`ComputePipelineDescriptor::slot_writes`]'s answer per stage):
+    /// [`SlotWrites::vertex_slots`] and [`SlotWrites::fragment_slots`]. The vertex descriptor's
+    /// buffers are not among the vertex answers, since they bind no argument of the function.
+    ///
+    /// This is the question [`reflection`](Self::reflection) also answers, in
+    /// [`Binding::access`], without the type description that makes a reflection refuse a
+    /// function whose argument types Metal's answer has not been measured for. A state that
+    /// compiles answers here. Refused only by the decode's and specialization's own errors.
+    pub fn slot_writes(&self, budget: &crate::Budget) -> Result<SlotWrites, Error> {
+        let mut m = Meter::new(budget);
+        let vertex = stage_writes(&self.vertex, self.max_vertex_call_stack_depth, &mut m)?;
+        let fragment = match &self.fragment {
+            Some(f) => stage_writes(f, self.max_fragment_call_stack_depth, &mut m)?,
+            None => Vec::new(),
+        };
+        Ok(SlotWrites {
+            vertex,
+            fragment,
+            ..SlotWrites::default()
+        })
+    }
 }
 
 impl MeshPipelineDescriptor {
@@ -438,6 +502,31 @@ impl MeshPipelineDescriptor {
             ..RenderPipelineReflection::default()
         })
     }
+
+    /// What each stage of the mesh pipeline this descriptor describes may store through each slot
+    /// its arguments bind ([`ComputePipelineDescriptor::slot_writes`]'s answer per stage):
+    /// [`SlotWrites::object_slots`], [`SlotWrites::mesh_slots`] and
+    /// [`SlotWrites::fragment_slots`], an object or mesh function's payload among them. Each
+    /// stage's calls nest Metal's default depth of 1, as `Device::compile_mesh_pipeline` compiles
+    /// it. Refused only by the decode's and specialization's own errors.
+    pub fn slot_writes(&self, budget: &crate::Budget) -> Result<SlotWrites, Error> {
+        let mut m = Meter::new(budget);
+        let object = match &self.object {
+            Some(o) => stage_writes(o, 1, &mut m)?,
+            None => Vec::new(),
+        };
+        let mesh = stage_writes(&self.mesh, 1, &mut m)?;
+        let fragment = match &self.fragment {
+            Some(f) => stage_writes(f, 1, &mut m)?,
+            None => Vec::new(),
+        };
+        Ok(SlotWrites {
+            fragment,
+            object,
+            mesh,
+            ..SlotWrites::default()
+        })
+    }
 }
 
 impl TileRenderPipelineDescriptor {
@@ -452,6 +541,18 @@ impl TileRenderPipelineDescriptor {
         Ok(RenderPipelineReflection {
             tile,
             ..RenderPipelineReflection::default()
+        })
+    }
+
+    /// What the tile function of the pipeline this descriptor describes may store through each
+    /// slot its arguments bind ([`ComputePipelineDescriptor::slot_writes`]'s answer for the tile
+    /// stage): [`SlotWrites::tile_slots`], a tile function's implicit imageblock among them.
+    /// Refused only by the decode's and specialization's own errors.
+    pub fn slot_writes(&self, budget: &crate::Budget) -> Result<SlotWrites, Error> {
+        let mut m = Meter::new(budget);
+        Ok(SlotWrites {
+            tile: stage_writes(&self.tile, self.max_call_stack_depth, &mut m)?,
+            ..SlotWrites::default()
         })
     }
 }

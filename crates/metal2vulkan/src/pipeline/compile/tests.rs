@@ -324,6 +324,50 @@ fn a_compute_pipeline_compiles_from_a_function() {
     }
 }
 
+/// A `Compiled` stage answers what it may store through each of its slots from what its compile
+/// kept, with no decode, and its answer is the `Function` path's: the two read the same entry's
+/// roles, declared accesses and slots. It is the answer a consumer needs for a state it already
+/// made, and a compile keeps it whatever a reflection of the same entry could describe.
+#[test]
+fn a_compiled_stage_answers_its_slot_writes_without_decoding() {
+    let Some(bc) = fixture("store_const") else {
+        return;
+    };
+    let dev = device("moltenvk-m3");
+    let f = Library::from_air(&bc)
+        .expect("library")
+        .function("store_const")
+        .expect("function");
+    let fd = FunctionDescriptor::new(f.clone());
+    let inp = LoweringInputs::new();
+    let compiled = dev
+        .compile_function(&fd, &inp, &Budget::standard())
+        .expect("compile");
+
+    let from_function = ComputePipelineDescriptor::new(StageSource::Function(fd))
+        .slot_writes(&Budget::default())
+        .expect("the function path answers");
+    let from_compiled = ComputePipelineDescriptor::new(StageSource::Compiled(compiled))
+        .slot_writes(&Budget::default())
+        .expect("the compiled path answers");
+    assert_eq!(from_compiled, from_function);
+
+    // `device uint *out [[buffer(0)]]`: read-write, as Metal answers a device buffer.
+    let slots = from_compiled.kernel_slots();
+    assert_eq!(slots.len(), 1);
+    assert_eq!(slots[0].name, "out");
+    assert_eq!(slots[0].index, Some(0));
+    assert_eq!(
+        crate::reflection::SlotWrite::may_write(slots, metal::BindingType::Buffer, 0),
+        crate::reflection::SlotWritability::Maybe
+    );
+    // No argument binds buffer 1, so nothing stores through it.
+    assert_eq!(
+        crate::reflection::SlotWrite::may_write(slots, metal::BindingType::Buffer, 1),
+        crate::reflection::SlotWritability::Never
+    );
+}
+
 /// A `Compiled` stage is link and relocate only. The pipeline meter does no work (no decode, no
 /// lowering), and the result equals the `Function` path's.
 #[test]

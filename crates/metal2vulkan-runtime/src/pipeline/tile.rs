@@ -146,11 +146,15 @@ impl TileState {
         &self.0.descriptor
     }
 
-    /// The tile function's texture slots and their accesses, from the pipeline's reflection
-    /// (`ComputePipelineState::tile_reflection`, what its compile kept) the first time.
+    /// The tile function's texture slots and their accesses, from the pipeline's slot writes the
+    /// first time. They read the tile function's roles, declared accesses and slots, so an
+    /// argument whose type a reflection cannot describe does not refuse them
+    /// (`pipeline::texture_access`).
     pub(crate) fn texture_accesses(&self) -> Result<&TextureAccesses, Error> {
         TextureAccesses::remembered(&self.0.texture_accesses, |budget| {
-            self.kernel().tile_reflection(budget)
+            self.descriptor()
+                .slot_writes(budget)
+                .map_err(crate::device::device_error)
         })
     }
 
