@@ -41,8 +41,10 @@ pub mod replay;
 pub mod report;
 pub mod run;
 pub mod runtime_side;
+pub mod runtime_work;
 pub mod transcript;
 pub mod verdict;
+pub mod work;
 
 #[cfg(target_os = "macos")]
 pub mod metal_side;

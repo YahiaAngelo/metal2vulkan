@@ -339,6 +339,16 @@ pub trait Side {
         let _ = (primitive_type, indexed);
         Err(Failure::unavailable("indirect_draw_read_back"))
     }
+
+    /// Run a copy-and-fill program ([`crate::work`]) and answer what it read.
+    ///
+    /// Metal fills a texture through private API and its two-plane extended-range formats are
+    /// private too, so the Metal side has no public call for this and answers
+    /// [`Failure::unavailable`]; a case built on it carries its Metal answer.
+    fn work(&mut self, work: &crate::work::Work) -> Answer<crate::work::Done> {
+        let _ = work;
+        Err(Failure::unavailable("work"))
+    }
 }
 
 /// What an indirect render command's getters answered, beside what the whole record holds.
