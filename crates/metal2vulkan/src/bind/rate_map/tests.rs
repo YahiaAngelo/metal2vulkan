@@ -658,11 +658,11 @@ fn malformed_maps_are_refused() {
         RasterizationRateMap::from_layers([16, 16], Vec::new()),
         Err(RateMapError::NoLayers)
     );
-    let mut d = RateMapDescriptor::new([0, 16]);
+    let mut d = RateMapDescriptor::new([70000, 16]);
     d.layers.push(layer(&[1.0], &[1.0]));
     assert_eq!(
         RasterizationRateMap::new(&d),
-        Err(RateMapError::ScreenExtent { extent: 0 })
+        Err(RateMapError::ScreenExtent { extent: 70000 })
     );
     let mut d = RateMapDescriptor::new([16, 16]);
     d.layers.push(layer(&[1.0], &[]));
@@ -877,4 +877,67 @@ fn a_reset_writes_its_tables_over_the_maps() {
         assert_eq!(reset.layer_count(), 0);
         assert_eq!(reset.vertical(), fresh.vertical());
     }
+}
+
+/// An axis of no screen pixels has one tile of no screen and no physical pixels, whatever its
+/// quality samples, so the layer's physical extent on it is 0 and the map compiles (Metal's API
+/// validation stops the descriptor; plain Metal compiles it, and `apple_tests` holds its bytes).
+/// Its physical-to-screen line is the least step the fixed point holds.
+#[test]
+fn an_axis_of_no_screen_pixels_has_one_empty_tile() {
+    for samples in [
+        &[0.5][..],
+        &[1.0],
+        &[0.01],
+        &[0.0],
+        &[0.5, 1.0],
+        &[0.25, 0.75, 0.25],
+        &[f32::NAN],
+        &[-3.0, 7.0],
+    ] {
+        let m = map([0, 64], &[layer(samples, &[0.5])]);
+        assert_eq!(m.physical_size(0), Some([0, 33]), "{samples:?}");
+        let axes = m.layer(0).expect("layer");
+        assert_eq!(axes[0].tiles(), [(0, 0)], "{samples:?}");
+        assert_eq!(axes[0].screen_extent(), 0, "{samples:?}");
+        assert_eq!(axes[0].physical_extent(), 0, "{samples:?}");
+        // Every sample set gives the one degenerate axis, so the bytes are the same.
+        assert_eq!(
+            m.to_bytes(),
+            map([0, 64], &[layer(&[0.5], &[0.5])]).to_bytes(),
+            "{samples:?}"
+        );
+    }
+    // The least step: scale 2^-24, its reciprocal 2^24, offset 0, in two entries of each table.
+    let m = map([0, 64], &[layer(&[0.5], &[0.5])]);
+    let words = m.words();
+    let to_screen = format::HORIZONTAL_TO_SCREEN as usize;
+    let to_physical = format::HORIZONTAL_TO_PHYSICAL as usize;
+    for entry in 0..2 {
+        assert_eq!(
+            words[to_screen + 2 * entry..to_screen + 2 * entry + 2],
+            [(16_777_216.0f32).to_bits(), 0],
+            "physical to screen {entry}"
+        );
+        assert_eq!(
+            words[to_physical + 2 * entry..to_physical + 2 * entry + 2],
+            [(1.0f32 / 16_777_216.0).to_bits(), format::NO_BOUNDARY],
+            "screen to physical {entry}"
+        );
+    }
+    assert!(
+        words[to_screen + 4..to_screen + format::TABLE_WORDS as usize]
+            .iter()
+            .all(|&w| w == 0),
+        "no entry past the axis's two"
+    );
+    // Both axes alike, and a map of no screen pixels at all.
+    assert_eq!(
+        map([64, 0], &[layer(&[0.5], &[0.5])]).physical_size(0),
+        Some([33, 0])
+    );
+    assert_eq!(
+        map([0, 0], &[layer(&[0.5], &[0.5])]).physical_size(0),
+        Some([0, 0])
+    );
 }
