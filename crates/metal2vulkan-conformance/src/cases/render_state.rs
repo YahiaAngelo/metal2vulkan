@@ -57,6 +57,7 @@ use crate::transcript::{
 use metal2vulkan::metal::{
     CullMode, PixelFormat, PrimitiveType, SamplerAddressMode, TriangleFillMode, Winding,
 };
+use metal2vulkan_runtime::Degradation;
 
 /// The format every target here carries: a `float` stored as it is, so the whole expectation is
 /// arithmetic rather than a rounding rule.
@@ -729,8 +730,27 @@ impl Case for Facing {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // Nothing loosened and no notice declared, for the reason `render-state-boxes` states.
-        Vec::new()
+        // No value is loosened, for the reason `render-state-boxes` states: every texel this case
+        // reads compared exactly. What is declared is one notice, and this case's own shape is
+        // what provokes it.
+        //
+        // **Metal's triangle fill mode is encoder state and Vulkan's polygon mode is pipeline
+        // state**, so the draw after `setTriangleFillMode:MTLTriangleFillModeLines` needs a
+        // pipeline the pass had not made, and a draw whose pipeline is being made cannot record
+        // into an instance that recorded inline: it records into a new render pass instance after
+        // it (`metal2vulkan_runtime`'s `render/inline_first.rs`, counted as that crate's
+        // `work_counts::Split::PendingPipeline`). A mid-pass fill-mode change therefore splits the
+        // Vulkan render pass, which is work Metal does not do, and the runtime announces it.
+        //
+        // Measured on an Apple M3 Max (macOS 27.0.1, build 26A434), under the exact policy and
+        // under the runtime's own defaults alike: our leg announces
+        // `metal2vulkan-degrade-render-pass-split` once, its notice naming a pass of one color
+        // attachment in two instances, while every texel this case reads and every other field of
+        // its transcript compared exactly. The declaration loosens no value -- it says the
+        // announcement is this case's -- so the case still fails on any byte that moves.
+        vec![crate::replay::notice_allowance(
+            Degradation::RenderPassSplit.code(),
+        )]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
@@ -977,6 +997,7 @@ impl Case for UnreadSlots {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::allowance::Justification;
     use crate::transcript::Transcript;
     use std::collections::BTreeSet;
 
@@ -1356,7 +1377,19 @@ mod tests {
         for case in all() {
             assert_eq!(case.record_runs(), RUNS);
             assert!(matches!(case.metal_source(), MetalSource::Run));
-            assert!(case.allowances().is_empty());
+            // Exactly one case of the family declares anything, and what it declares is the one
+            // notice measured on it: no value of any case is loosened.
+            let declared = case.allowances();
+            if case.name() == "render-state-facing" {
+                assert_eq!(declared.len(), 1, "the facing case declares one notice");
+                assert_eq!(
+                    declared[0].justified_by,
+                    Justification::Degradation(Degradation::RenderPassSplit.code().to_owned()),
+                );
+                assert!(declared[0].path.starts_with("case/notices"));
+            } else {
+                assert!(declared.is_empty(), "{} declares nothing", case.name());
+            }
         }
     }
 }

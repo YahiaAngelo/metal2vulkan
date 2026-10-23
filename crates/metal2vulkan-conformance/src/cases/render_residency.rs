@@ -61,6 +61,7 @@ use crate::transcript::{
     Aspect, ByteLayout, Digest, Element, Gaps, Node, Observed, Region, Sites, Value,
 };
 use metal2vulkan::metal::{BarrierScope, PixelFormat, PrimitiveType, RenderStages, ResourceUsage};
+use metal2vulkan_runtime::Degradation;
 
 /// The format both targets and the scratch texture carry: a `float` stored as it is, so the whole
 /// expectation is arithmetic.
@@ -443,12 +444,26 @@ impl Case for RenderBarriers {
     }
 
     fn allowances(&self) -> Vec<Allowance> {
-        // Nothing is loosened and no notice is declared. A `RGBA32Float` texel is the `float4` the
-        // fragment function returned, the fixture's arithmetic is a multiplication by an eighth of
-        // an integer, and a texel read at integer coordinates takes no device's float bounds. A
-        // notice our side announced here would be undeclared and the case divergent, which is the
-        // honest reading: a declaration stands only on a venue measured announcing it.
-        Vec::new()
+        // No value is loosened. A `RGBA32Float` texel is the `float4` the fragment function
+        // returned, the fixture's arithmetic is a multiplication by an eighth of an integer, and a
+        // texel read at integer coordinates takes no device's float bounds, so every texel here is
+        // an exact answer or a bug.
+        //
+        // One notice is declared, and it is what the barrier calls themselves cost. **A Metal
+        // memory barrier between draws of one pass orders the draws after it behind the draws
+        // before it, which Vulkan gives across render pass instances**, so the runtime ends the
+        // instance at the barrier and begins another (`metal2vulkan_runtime`'s `fence.rs`, counted
+        // as that crate's `work_counts::Split::Barrier`). Metal does not split its pass, so the
+        // runtime announces the difference in work.
+        //
+        // Measured on an Apple M3 Max (macOS 27.0.1, build 26A434), under the exact policy and
+        // under the runtime's own defaults alike: our leg announces
+        // `metal2vulkan-degrade-render-pass-split` once, its notice reading "memory barriers
+        // between its draws end 1 of its Vulkan render pass instances", while every texel of both
+        // halves of the target and every other field of the transcript compared exactly.
+        vec![crate::replay::notice_allowance(
+            Degradation::RenderPassSplit.code(),
+        )]
     }
 
     fn shaders(&self) -> Result<Vec<ShaderRef>, String> {
@@ -629,6 +644,7 @@ impl Case for HeapResidency {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::allowance::Justification;
     use crate::transcript::Transcript;
     use std::collections::BTreeSet;
 
@@ -798,7 +814,19 @@ mod tests {
         for case in all() {
             assert_eq!(case.record_runs(), RUNS);
             assert!(matches!(case.metal_source(), MetalSource::Run));
-            assert!(case.allowances().is_empty());
+            // The barrier case declares the one notice measured on it and the heap case declares
+            // nothing: no value of either is loosened.
+            let declared = case.allowances();
+            if case.name() == "render-state-render-barriers" {
+                assert_eq!(declared.len(), 1, "the barrier case declares one notice");
+                assert_eq!(
+                    declared[0].justified_by,
+                    Justification::Degradation(Degradation::RenderPassSplit.code().to_owned()),
+                );
+                assert!(declared[0].path.starts_with("case/notices"));
+            } else {
+                assert!(declared.is_empty(), "{} declares nothing", case.name());
+            }
         }
         // The barriers name the stage whose writes the next draw reads, on both sides of each.
         assert_eq!(FRAGMENT, RenderStages::FRAGMENT);
