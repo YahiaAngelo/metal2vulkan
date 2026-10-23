@@ -55,6 +55,24 @@ pub struct Refusal {
     pub documented_by: Option<String>,
 }
 
+/// A site where Metal did not return from the call and we gave a typed error.
+///
+/// Its own outcome, because it is neither of the two it would otherwise be squeezed into. It is not
+/// exact: there is no value on Metal's side to match. It is not divergent: there is no behaviour of
+/// Metal's to differ from — the call ended Metal's process. And it is not a refusal, which is
+/// reserved for a call plain Metal **answered**.
+///
+/// **No allowance is consulted here**, in either direction. A case cannot loosen its way into this
+/// outcome, and it cannot loosen its way out of the divergence it becomes when we answer where
+/// Metal did not ([`crate::diff::DivergenceKind::AnsweredWhereMetalDidNotReturn`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NeverReturned {
+    /// The site, as node names from the root.
+    pub path: String,
+    /// Our typed error, as the report prints it.
+    pub ours: String,
+}
+
 /// An allowance that does not hold: the case names it, and why it cannot be used.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BadAllowance {
@@ -108,6 +126,8 @@ pub struct Comparison {
     pub announced: Vec<Announced>,
     pub divergences: Vec<Divergence>,
     pub refusals: Vec<Refusal>,
+    /// Sites where Metal did not return from the call and we gave a typed error.
+    pub never_returned: Vec<NeverReturned>,
     /// Allowances whose justification is gone. Each of these fails the case on its own: a
     /// difference nobody is accounting for.
     pub bad_allowances: Vec<BadAllowance>,
@@ -142,6 +162,7 @@ impl Comparison {
         self.announced.is_empty()
             && self.divergences.is_empty()
             && self.refusals.is_empty()
+            && self.never_returned.is_empty()
             && self.bad_allowances.is_empty()
     }
 }
@@ -411,6 +432,26 @@ impl Walk<'_> {
     /// Compare two values by their kind.
     fn value(&mut self, path: &str, metal: &Value, ours: &Value) {
         if metal == ours {
+            return;
+        }
+        // Metal not coming back from the call is settled first, and without consulting an
+        // allowance at all. There is no value here to be within a tolerance of, and the one fact
+        // the row holds -- that we refuse where Metal went away -- must not be loosenable.
+        if let Value::Nothing(crate::transcript::Negative::NeverReturned) = metal {
+            match ours {
+                Value::Variant { name, .. } if name == "Err" => {
+                    self.found.never_returned.push(NeverReturned {
+                        path: path.to_owned(),
+                        ours: crate::diff::print(ours),
+                    });
+                }
+                _ => self.found.divergences.push(Divergence::new(
+                    path,
+                    DivergenceKind::AnsweredWhereMetalDidNotReturn {
+                        ours: crate::diff::print(ours),
+                    },
+                )),
+            }
             return;
         }
         // A refusal is settled before any allowance is consulted, because no allowance may turn

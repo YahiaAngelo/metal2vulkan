@@ -1007,6 +1007,26 @@ pub enum MetalSource {
         /// says otherwise ([`MetalSource::measured_on`]).
         measured_on: &'static str,
     },
+    /// **Metal did not return from the call.** There is nothing to carry and nothing to run.
+    ///
+    /// A row of this shape has no value and no behaviour on Metal's side: the probe that found it
+    /// out ended Metal's process, so the lane it came from holds no line for it either — it is not
+    /// recorded-only material, it simply has no answer. What the case pins is the one fact there
+    /// is, that Metal never came back from the call, against our typed refusal at that site
+    /// ([`Verdict::MetalNeverReturned`](crate::verdict::Verdict::MetalNeverReturned)).
+    ///
+    /// **It is never produced by running the shape.** The transcript is stated by the case
+    /// ([`Case::carried_transcript`]) from a probe that already died, and record mode refuses the
+    /// row outright rather than taking an answer from it: this is the one source whose Metal leg
+    /// would end the process, and the suite's standing rule is that no case may do that.
+    DidNotReturn {
+        /// Where the probe that died is written down.
+        from: &'static str,
+        /// The call Metal did not return from, as the case names the site.
+        call: &'static str,
+        /// What happened, in the probe's own words: how Metal went away.
+        says: &'static str,
+    },
 }
 
 impl MetalSource {
@@ -1045,7 +1065,18 @@ impl MetalSource {
                 measured_on: chip,
             },
             Self::Run => Self::Run,
+            source @ Self::DidNotReturn { .. } => source,
         }
+    }
+
+    /// A row whose Metal leg does not come back: `call` is the call, `says` is how Metal went
+    /// away, and `from` is where the probe that found that out is written down.
+    pub const fn did_not_return(
+        from: &'static str,
+        call: &'static str,
+        says: &'static str,
+    ) -> Self {
+        Self::DidNotReturn { from, call, says }
     }
 
     /// Why record mode must not run the case on Metal, where it must not.
@@ -1055,6 +1086,9 @@ impl MetalSource {
                 re_record: ReRecord::Forbidden { reason },
                 ..
             } => Some(reason),
+            // Record mode must never run this one: the call it would make is the call Metal does
+            // not come back from. The case's own words are the reason a refusal prints.
+            MetalSource::DidNotReturn { says, .. } => Some(says),
             MetalSource::Run | MetalSource::Carried { .. } => None,
         }
     }

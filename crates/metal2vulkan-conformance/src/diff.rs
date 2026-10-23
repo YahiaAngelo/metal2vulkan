@@ -89,6 +89,14 @@ pub enum DivergenceKind {
     Unjustified { why: String },
     /// The site's fields differ in which fields they hold.
     Field { name: String, held_by: Side },
+    /// Metal did not return from the call, and we answered it.
+    ///
+    /// The case's recording says Metal never came back from this call: the probe that found that
+    /// out ended Metal's process, so there is no value and no behaviour to compare. What the case
+    /// pins is that *we* refuse there. Answering instead is a divergence from the one fact the row
+    /// holds, and it is the shape that keeps
+    /// [`Verdict::MetalNeverReturned`](crate::verdict::Verdict::MetalNeverReturned) able to fail.
+    AnsweredWhereMetalDidNotReturn { ours: String },
 }
 
 /// Which side holds something the other does not.
@@ -182,6 +190,10 @@ impl std::fmt::Display for DivergenceKind {
             DivergenceKind::Field { name, held_by } => {
                 write!(out, "only {held_by} holds the field {name}")
             }
+            DivergenceKind::AnsweredWhereMetalDidNotReturn { ours } => write!(
+                out,
+                "Metal did not return from this call, and we answered it: {ours}"
+            ),
         }
     }
 }

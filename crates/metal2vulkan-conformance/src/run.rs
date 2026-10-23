@@ -103,6 +103,17 @@ fn record_one(case: &dyn Case) -> Result<std::path::PathBuf, String> {
             crate::record::record(case, &mut side, case.record_runs(), level, validated)
                 .map_err(|error| error.to_string())?
         }
+        // Never run, and never written from here either: the call this row names is the call
+        // Metal does not come back from, so there is nothing for record mode to take. Its
+        // recording is written by hand from the probe that died
+        // ([`crate::record::never_returned`]).
+        crate::case::MetalSource::DidNotReturn { call, says, .. } => {
+            return Err(format!(
+                "{}: record mode must not run {call}: {says}. Its recording is written by hand \
+                 from the probe that died, never by running the shape",
+                case.name()
+            ))
+        }
         crate::case::MetalSource::Carried {
             from, measured_on, ..
         } => {

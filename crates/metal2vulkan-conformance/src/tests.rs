@@ -1053,7 +1053,7 @@ fn a_carried_answer_taken_on_another_chip_names_it() {
     for case in crate::cases::all() {
         let claimed = match case.metal_source() {
             MetalSource::Carried { measured_on, .. } => measured_on,
-            MetalSource::Run => continue,
+            MetalSource::Run | MetalSource::DidNotReturn { .. } => continue,
         };
         let recorded = crate::recording::read(case.name())
             .unwrap_or_else(|why| panic!("{}: {why}", case.name()))
@@ -1788,4 +1788,194 @@ fn metal_on_this_chip_answers_the_two_plane_blits_exactly_as_the_probes_printed_
         "{:?}",
         fills.metal_source()
     );
+}
+
+/// A case whose Metal leg does not come back: the shape there was no verdict for.
+///
+/// `pass`'s call answers on our side, which is what the row pins; `answers` makes it answer
+/// instead, which is the break the verdict has to survive.
+struct DiedOnMetal {
+    /// Whether our side answers the call rather than refusing it.
+    answers: bool,
+}
+
+/// The call the probe died in, as the case names its site.
+const DIED_AT: &str = "the-call";
+
+/// What the probe saw, in its own words.
+const DIED_SAYS: &str = "Metal's process went away inside the call and never came back";
+
+impl DiedOnMetal {
+    /// The transcript the case states by hand: the inputs, and the call Metal never returned
+    /// from.
+    fn stated(&self) -> Transcript {
+        let mut sites = Sites::new();
+        sites.push(crate::case::inputs_node(&self.inputs().unwrap()));
+        sites.value(DIED_AT, Value::Nothing(Negative::NeverReturned));
+        sites.notices(NOTICES_SITE, &[] as &[&str]);
+        sites.finish()
+    }
+}
+
+impl Case for DiedOnMetal {
+    fn name(&self) -> &'static str {
+        "died-on-metal"
+    }
+
+    fn metal_source(&self) -> MetalSource {
+        MetalSource::did_not_return("the suite's own tests", DIED_AT, DIED_SAYS)
+    }
+
+    fn inputs(&self) -> Result<Vec<Input>, String> {
+        Ok(vec![Input::bytes("buffer:0", &[0u8; 4])])
+    }
+
+    fn carried_transcript(&self) -> Result<Option<(u32, Transcript)>, String> {
+        Ok(Some((1, self.stated())))
+    }
+
+    fn run(&self, side: &mut dyn Side, sites: &mut Sites) -> Result<(), Abort> {
+        if self.answers {
+            // We came back from the call Metal did not: the divergence the row exists to catch.
+            let _ = made(sites, DIED_AT, side.zeroed_buffer(4))?;
+            return Ok(());
+        }
+        sites.push(Node::leaf(
+            DIED_AT,
+            Observed::value(Failure::named("Unsupported", "this call is not built").value),
+        ));
+        Ok(())
+    }
+}
+
+#[test]
+fn a_call_metal_did_not_return_from_is_its_own_verdict() {
+    // The hole this closes: a row that ends Metal's process has nothing to carry -- the lane holds
+    // no line for it -- so it was not recorded-only material, it had no verdict at all. `Exact`
+    // would claim a value matched where Metal produced none; `Divergent` would claim a behaviour
+    // of Metal's to differ from; `Refused` is for a call plain Metal answered, and counting it
+    // there would bury a real gap of ours among rows that are not one.
+    let case = DiedOnMetal { answers: false };
+    let (runs, stated) = case.carried_transcript().unwrap().unwrap();
+    let recording = Recording::new(
+        case.name(),
+        Vec::new(),
+        vec![crate::record::never_returned(
+            MetalLevel::NEWEST,
+            "the suite's own tests",
+            DIED_AT,
+            "the probe's device",
+            runs,
+            stated,
+        )],
+    );
+    let mut side = StubSide::new(Vec::new());
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    let Verdict::MetalNeverReturned { at, justified } = &replayed.verdict else {
+        panic!("{}", replayed.verdict);
+    };
+    assert_eq!(at.len(), 1, "{at:?}");
+    assert!(at[0].starts_with(&format!("case/{DIED_AT}: ")), "{at:?}");
+    assert!(justified.is_empty(), "{justified:?}");
+
+    // Counted like the others, and it does not loosen compliance: it is a distinct word in the
+    // report, not a quiet pass hidden inside "exact".
+    let mut report = Report::new();
+    report.add(replayed);
+    assert_eq!(report.counts().get("never-returned"), Some(&1));
+    assert_eq!(report.counts().get("exact"), None);
+    assert!(report.is_compliant());
+    let rendered = report.render();
+    assert!(rendered.contains("never-returned"), "{rendered}");
+    assert!(
+        rendered.contains("Metal did not return from the call, and we refused it"),
+        "{rendered}"
+    );
+
+    // No allowance can reach it: a case that loosens the site whole still gets this verdict and
+    // not `announced`, so the row cannot be dressed up as a justified difference.
+    let unchecked = vec![Allowance::new(
+        format!("case/{DIED_AT}"),
+        Loosening::Unchecked,
+        Justification::accepted(accepted_differences()[0].clone()),
+    )];
+    let found = compare(
+        &case.stated(),
+        &{
+            let mut side = StubSide::new(Vec::new());
+            replay_against(&case, &mut side, &recording).unwrap().ours
+        },
+        &unchecked,
+        Offered::notices(&[]),
+    );
+    assert_eq!(found.never_returned.len(), 1, "{found:?}");
+    assert!(found.announced.is_empty(), "{found:?}");
+}
+
+#[test]
+fn answering_where_metal_did_not_return_is_divergent() {
+    // The other half, and the reason the verdict is a mechanism and not a label: the one fact the
+    // row holds is that *we* refuse where Metal went away. Answering instead has to fail.
+    let case = DiedOnMetal { answers: true };
+    let (runs, stated) = DiedOnMetal { answers: false }
+        .carried_transcript()
+        .unwrap()
+        .unwrap();
+    let recording = Recording::new(
+        case.name(),
+        Vec::new(),
+        vec![crate::record::never_returned(
+            MetalLevel::NEWEST,
+            "the suite's own tests",
+            DIED_AT,
+            "the probe's device",
+            runs,
+            stated,
+        )],
+    );
+    let mut side = StubSide::new(Vec::new());
+    let replayed = replay_against(&case, &mut side, &recording).unwrap();
+    let Verdict::Divergent { found } = &replayed.verdict else {
+        panic!("{}", replayed.verdict);
+    };
+    assert!(
+        found.iter().any(|divergence| matches!(
+            divergence.kind,
+            DivergenceKind::AnsweredWhereMetalDidNotReturn { .. }
+        )),
+        "{found:?}"
+    );
+    assert!(!replayed.verdict.is_compliant());
+}
+
+#[test]
+fn record_mode_refuses_a_row_metal_does_not_return_from() {
+    // It may never be produced by running the shape: making the call is what ends Metal's
+    // process. `forbidden` carries the probe's own words, so `record` refuses before anything is
+    // encoded, on a host with no Metal as on this one.
+    let case = DiedOnMetal { answers: false };
+    assert_eq!(case.metal_source().forbidden(), Some(DIED_SAYS));
+    let mut side = StubSide::new(Vec::new());
+    let refused = record(&case, &mut side, 1, MetalLevel::NEWEST, Validated::NotRun);
+    assert_eq!(
+        refused,
+        Err(RecordError::Forbidden {
+            case: case.name().to_owned(),
+            reason: DIED_SAYS.to_owned(),
+        }),
+        "{refused:?}"
+    );
+    // And the answer that is written instead says so in the file: the provenance names the call,
+    // and Metal's API validation was never asked either.
+    let answer = crate::record::never_returned(
+        MetalLevel::NEWEST,
+        "the suite's own tests",
+        DIED_AT,
+        "the probe's device",
+        1,
+        case.stated(),
+    );
+    assert_eq!(answer.provenance.never_returned_from(), Some(DIED_AT));
+    assert_eq!(answer.provenance.measured_elsewhere(), None);
+    assert_eq!(answer.validated, Validated::NotRun);
 }

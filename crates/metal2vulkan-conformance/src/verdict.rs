@@ -39,6 +39,26 @@ pub enum Verdict {
         /// changes is what a reader should do about it.
         metal_validation: String,
     },
+    /// **Metal did not return from the call, and we gave a typed error there.**
+    ///
+    /// Its own verdict, because neither of the others fits and squeezing it into one would say
+    /// something false. `Exact` would claim a value matched where Metal produced none. `Divergent`
+    /// would claim a behaviour of Metal's to differ from where the call ended Metal's process.
+    /// `Refused` is for a call plain Metal **answered**, which is the gap the owner's rule is
+    /// about, and counting this there would bury a real gap among rows that are not one.
+    ///
+    /// It is **compliant**, and it loosens nothing: no allowance can reach it
+    /// ([`crate::compare::NeverReturned`]), the recording is written by hand from a probe that died
+    /// rather than by running the shape, and record mode refuses the row. Answering where Metal
+    /// did not return is a `Divergent` row, not this one, so the verdict can still fail.
+    MetalNeverReturned {
+        /// The sites, as their paths and our errors.
+        at: Vec<String>,
+        /// What the row still loosened, where it loosened anything: a difference inside a
+        /// justified allowance at another site is reported here rather than lost, because a row
+        /// does not stop being a row about tolerances just because one of its calls killed Metal.
+        justified: Vec<String>,
+    },
     /// No Metal answer stands for this run: none was recorded for the venue's Metal level, or the
     /// inputs the run fed are not the ones the recording's answer was taken from. Counted, never
     /// skipped and never a pass.
@@ -80,24 +100,24 @@ impl Verdict {
                 metal_validation: validated.describe(),
             };
         }
+        // After the refusals, because a refusal of something plain Metal answered is a gap of
+        // ours and must not be hidden behind a call Metal died on; before the announced and exact
+        // verdicts, because a row where Metal went away is not a row where everything matched.
+        if !found.never_returned.is_empty() {
+            return Verdict::MetalNeverReturned {
+                at: found
+                    .never_returned
+                    .iter()
+                    .map(|site| format!("{}: {}", site.path, site.ours))
+                    .collect(),
+                justified: announced_fields(found),
+            };
+        }
         if found.announced.is_empty() {
             return Verdict::Exact;
         }
         Verdict::Announced {
-            fields: found
-                .announced
-                .iter()
-                .map(|announced| {
-                    let largest = match announced.largest {
-                        Some(largest) => format!(", the largest difference {largest}"),
-                        None => String::new(),
-                    };
-                    format!(
-                        "{} x{} ({}{largest})",
-                        announced.path, announced.count, announced.justified_by
-                    )
-                })
-                .collect(),
+            fields: announced_fields(found),
         }
     }
 
@@ -108,6 +128,7 @@ impl Verdict {
             Verdict::Announced { .. } => "announced",
             Verdict::Divergent { .. } => "divergent",
             Verdict::Refused { .. } => "refused",
+            Verdict::MetalNeverReturned { .. } => "never-returned",
             Verdict::Unrecorded { .. } => "unrecorded",
             Verdict::LacksFeature { .. } => "lacks-feature",
         }
@@ -119,7 +140,10 @@ impl Verdict {
     pub fn is_compliant(&self) -> bool {
         matches!(
             self,
-            Verdict::Exact | Verdict::Announced { .. } | Verdict::LacksFeature { .. }
+            Verdict::Exact
+                | Verdict::Announced { .. }
+                | Verdict::MetalNeverReturned { .. }
+                | Verdict::LacksFeature { .. }
         )
     }
 }
@@ -149,10 +173,38 @@ impl std::fmt::Display for Verdict {
                 write!(out, "\n  plain Metal answered the call")?;
                 write!(out, "\n  Metal's API validation: {metal_validation}")
             }
+            Verdict::MetalNeverReturned { at, justified } => {
+                out.write_str("Metal did not return from the call, and we refused it")?;
+                for site in at {
+                    write!(out, "\n  {site}")?;
+                }
+                for field in justified {
+                    write!(out, "\n  and differed, justified: {field}")?;
+                }
+                Ok(())
+            }
             Verdict::Unrecorded { why } => write!(out, "unrecorded: {why}"),
             Verdict::LacksFeature { needs } => write!(out, "lacks the device feature: {needs}"),
         }
     }
+}
+
+/// How the report prints each difference a run made inside a justified allowance.
+fn announced_fields(found: &Comparison) -> Vec<String> {
+    found
+        .announced
+        .iter()
+        .map(|announced| {
+            let largest = match announced.largest {
+                Some(largest) => format!(", the largest difference {largest}"),
+                None => String::new(),
+            };
+            format!(
+                "{} x{} ({}{largest})",
+                announced.path, announced.count, announced.justified_by
+            )
+        })
+        .collect()
 }
 
 /// Whether `error` is a device's honest gap rather than ours: the typed refusal names capabilities

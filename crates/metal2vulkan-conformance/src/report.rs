@@ -253,7 +253,9 @@ impl Report {
             .filter(|row| {
                 matches!(
                     row.verdict,
-                    Verdict::Announced { .. } | Verdict::LacksFeature { .. }
+                    Verdict::Announced { .. }
+                        | Verdict::MetalNeverReturned { .. }
+                        | Verdict::LacksFeature { .. }
                 )
             })
             .collect()
@@ -400,7 +402,7 @@ impl Report {
             .max(4);
         let widths: Vec<usize> = venues
             .iter()
-            .map(|venue| venue.len().max("lacks-feature".len()))
+            .map(|venue| venue.len().max("never-returned".len()))
             .collect();
         let mut out = String::from("\nmatrix\n");
         out.push_str(&format!("  {:<case_width$}", "case"));

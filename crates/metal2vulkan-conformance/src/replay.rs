@@ -215,7 +215,7 @@ fn verdict_over(
     let allowances = case.allowances();
     let carried = match case.metal_source() {
         MetalSource::Carried { from, .. } => Some(from),
-        MetalSource::Run => None,
+        MetalSource::Run | MetalSource::DidNotReturn { .. } => None,
     };
     let mut best: Option<(Verdict, Allowances)> = None;
     for outcome in &answer.outcomes {
@@ -302,10 +302,11 @@ fn rank(verdict: &Verdict) -> u8 {
     match verdict {
         Verdict::Exact => 0,
         Verdict::Announced { .. } => 1,
-        Verdict::LacksFeature { .. } => 2,
-        Verdict::Refused { .. } => 3,
-        Verdict::Divergent { .. } => 4,
-        Verdict::Unrecorded { .. } => 5,
+        Verdict::MetalNeverReturned { .. } => 2,
+        Verdict::LacksFeature { .. } => 3,
+        Verdict::Refused { .. } => 4,
+        Verdict::Divergent { .. } => 5,
+        Verdict::Unrecorded { .. } => 6,
     }
 }
 
